@@ -1,0 +1,20 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ZlibStream — an opaque `zlib:zstream()` handle.
+///
+/// Erlang's `zlib:open/0` answers a zstream and every other `zlib` call takes
+/// one back. The checker types FFI results with this class so a zstream stays
+/// a named type (rather than `Dynamic`) and can only be handed back to `zlib`.
+///
+/// A ZlibStream has no protocol of its own: its contents are not inspectable,
+/// and sending it any message other than the `Object` protocol (identity and
+/// equality such as `=:=`) is a type error.
+///
+/// This is an opaque-handle class in the "Object" kind of the three-kind
+/// model (ADR 0067): no `state:`/`field:` slots and not instantiable from
+/// Beamtalk. It is declared only so FFI specs have a type to name.
+///
+/// The class is static only: at run time the value is a Reference, so `x class` answers
+/// that and `x isKindOf:` against this class is always false.
+sealed typed Object subclass: ZlibStream

@@ -660,6 +660,27 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// BT-4769: `call 'persistent_term':'get'({'beamtalk_default_method',
+    /// 'overridden', '<Selector>'}, 'false')`: the node-wide override flag of a
+    /// watched selector (`beamtalk_default_method:overridden_anywhere/1`) read
+    /// in line, so a call site pays one `persistent_term` read and no
+    /// `lists:member/2` scan. The selector is a compile-time constant at the
+    /// call site, the flag is read on every execution (never cached: a later
+    /// override must take effect, ADR 0142 §2). The key shape is pinned to
+    /// `beamtalk_default_method:override_flag_key/1` by the shared fixture
+    /// `override_flag_key_conformance.json`.
+    pub(in crate::core_erlang) fn override_flag_read_doc(selector: &str) -> Document<'static> {
+        docvec![
+            "call 'persistent_term':'get'({",
+            leaf::atom("beamtalk_default_method".to_string()),
+            ", ",
+            leaf::atom("overridden".to_string()),
+            ", ",
+            leaf::atom(selector.to_string()),
+            "}, 'false')",
+        ]
+    }
+
     /// BT-4295: a class literal used only for its name, such as an `on:do:`
     /// filter (`beamtalk_exception_handler:matches_class/2` takes the class
     /// name atom as well as the class object, and reads only the name):

@@ -448,8 +448,5 @@ sealed Object subclass: VbBench
   class ffiOk: n :: Integer -> Object =>
     last := nil
     n
-      timesRepeat: [
-        @expect unresolved_ffi
-        last := Erlang vs_bench ffi_ok
-      ]
+      timesRepeat: [last := Erlang vs_ffi ffi_ok]
     last

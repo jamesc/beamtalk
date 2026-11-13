@@ -43,6 +43,7 @@
             #{name => 'ErlangModule', module => 'bt@stdlib@erlang_module', parent => 'ProtoObject', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Error', module => 'bt@stdlib@error', parent => 'Exception', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Ets', module => 'bt@stdlib@ets', parent => 'Object', package => 'stdlib', kind => object, type_params => ['K', 'V']},
+            #{name => 'EtsTid', module => 'bt@stdlib@ets_tid', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Exception', module => 'bt@stdlib@exception', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'ExitError', module => 'bt@stdlib@exit_error', parent => 'BEAMError', package => 'stdlib', kind => object, type_params => []},
             #{name => 'False', module => 'bt@stdlib@false', parent => 'Boolean', package => 'stdlib', kind => object, type_params => []},
@@ -55,6 +56,7 @@
             #{name => 'InstantiationError', module => 'bt@stdlib@instantiation_error', parent => 'Error', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Integer', module => 'bt@stdlib@integer', parent => 'Number', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Interval', module => 'bt@stdlib@interval', parent => 'Collection', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'IoDevice', module => 'bt@stdlib@io_device', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Json', module => 'bt@stdlib@json', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'List', module => 'bt@stdlib@list', parent => 'Collection', package => 'stdlib', kind => object, type_params => ['E']},
             #{name => 'Logger', module => 'bt@stdlib@logger', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
@@ -123,7 +125,8 @@
             #{name => 'UndefinedObject', module => 'bt@stdlib@undefined_object', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Uuid', module => 'bt@stdlib@uuid', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'Value', module => 'bt@stdlib@value', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
-            #{name => 'Workspace', module => 'bt@stdlib@workspace', parent => 'Object', package => 'stdlib', kind => object, type_params => []}
+            #{name => 'Workspace', module => 'bt@stdlib@workspace', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'ZlibStream', module => 'bt@stdlib@zlib_stream', parent => 'Object', package => 'stdlib', kind => object, type_params => []}
         ]},
         {protocol_modules, ['bt@stdlib@comparable', 'bt@stdlib@enumerable', 'bt@stdlib@json_representable', 'bt@stdlib@printable']},
         {type_aliases, [#{name => 'EtsTableType', expansion => "#set | #orderedSet | #bag | #duplicateBag", doc => "The ETS table type — see the \"Table Types\" section on `Ets` for the\nsemantics of each member.", source_file => "stdlib/src/ets.bt", internal => false},

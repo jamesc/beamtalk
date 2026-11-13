@@ -166,11 +166,15 @@ Note: `Elem :: T` with no constraint maps to `Dynamic` — correct but imprecise
 | `term()` / `any()` | `Dynamic` | No useful type info |
 | `non_neg_integer()` | `Integer` | Beamtalk has no subrange types (yet) |
 | `iodata()` / `iolist()` | `Dynamic` | Recursive type, no Beamtalk equivalent |
-| `-opaque` types | `Dynamic` | Opaque by design — don't expose internals |
+| `-opaque` types | `Dynamic`, except the well-known handles below | Opaque by design — don't expose internals |
+| `reference()` | `Reference` | BT-4717: a plain reference is the stdlib `Reference` class |
+| `zlib:zstream()`, `file:io_device()`, `ets:tid()` | `ZlibStream`, `IoDevice`, `EtsTid` | BT-4717: named opaque handles (see note below) |
 | Multiple `-spec` clauses | Union of return types | Common for overloaded Erlang functions |
 | `no_return()` | `Dynamic` | Functions that never return (throw/exit) |
 | `map()` (untyped) | `Dictionary` | Beamtalk equivalent |
 | `#{key := Type}` | `Dictionary` | Typed map keys not yet supported in Beamtalk |
+
+**Named opaque handles (BT-4717).** A spec that returns `zlib:zstream()`, `file:io_device()` or `ets:tid()` used to infer `Dynamic`, and every send to the result was then a "dynamic receiver". `beamtalk_spec_reader:well_known_opaque_class/3` now maps those three `{Module, Type, Arity}` keys (matched for both remote references and a module's own local references) to the stdlib classes `ZlibStream`, `IoDevice` and `EtsTid`. Each is a `sealed typed Object subclass:` with no slots and no protocol of its own, i.e. the "Object" kind of ADR 0067's three-kind model, as `Reference` already is. The checker therefore knows the value is *a zstream* without knowing what is inside it: it can be passed back to `zlib`, compared with `=:=`, and used as a plain `Object`, while any other message is a static type warning naming the class (at run time the send is still dynamic and goes to the value's real class). They are raw terms at run time (a reference, or a pid/fd for `io_device()`), so the routing table lists them as `dynamic_only`: sends stay dynamic, and `x class` answers the runtime class (`Reference` for a zstream or tid, `Pid` or `Tuple` for an io_device), not the static one; consequently `x isKindOf: ZlibStream` is always false at run time and a value annotated `:: Reference` is rejected by a `zlib` param. `io_device()` maps to `IoDevice | Pid` because an `io_server()` is a plain pid; a `Reference` passed where `zstream()` (an alias of `reference()`) is expected is rejected. Any other `-opaque` type stays `Dynamic`; add a row to `well_known_opaque_class/3` and a stdlib class to name another one. Note that a union-typed FFI parameter (e.g. `ets:delete/1`, `atom() | tid()`) is not argument-checked, so only a plain handle parameter rejects the wrong handle.
 
 **`{ok, T} | {error, E}` → `Result(T, E)` conversion (future ADR):**
 

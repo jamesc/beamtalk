@@ -2360,7 +2360,12 @@ r :: Result(Integer, Error) := computeSomething
 
 Supported type forms: simple (`Integer`), parametric (`Result(T, E)`), and union (`String | nil`).
 
-**Type checking:** The compiler warns when the RHS type is unrelated to the declared type (e.g., `x :: Integer := "hello"`). Narrowing assertions — where the declared type is more specific than the inferred type — are accepted silently, since the annotation communicates that the runtime type is known to be more specific (BT-2015). `Dynamic` and `Never` RHS types are always accepted.
+**Type checking:** The compiler warns when the RHS type is unrelated to the declared type (e.g., `x :: Integer := "hello"`). Narrowing assertions — where the declared type is more specific than the inferred type, or the right-hand side is `Dynamic` or `Object` — are accepted (BT-2015), but nothing checks them at runtime: `n :: Integer := opts at: #max` is an **unchecked cast**, and if the claim is wrong the failure shows up later and somewhere else. They are visible in two places (BT-4719):
+
+- `beamtalk type-coverage` reports them as their own category: a narrowing-cast count per class and in total, and each one listed under `--detail`. They are not subtracted from the coverage percentage.
+- An opt-in `narrowing-cast` lint flags each one. It is **off by default**, so no package gains a warning until it opts in: set `narrowing-cast = "lint"` (or `"hint"`, `"warn"`, `"error"`) under `[diagnostics]` in `beamtalk.toml`. No `@expect` category suppresses it; `@expect all` does.
+
+Redundant annotations (`ex :: Exchange := self exchange`, the "Redundant type annotation" lint) and widening annotations (`status :: Integer | Nil := nil`) are not narrowing casts and behave as before. `Dynamic` and `Never` RHS types are always accepted. Checked casts are a separate design question (BT-4772).
 
 ### Dynamic Type Visibility (ADR 0077)
 

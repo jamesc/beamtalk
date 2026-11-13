@@ -82,9 +82,9 @@ pub(crate) mod well_known;
 
 pub use inference::cascade_drops_update;
 pub use native_type_registry::{
-    FFI_ARG_BINARY_GUARD, FFI_ARG_RUNTIME_GUARDS, FunctionSignature, NativeTypeRegistry, ParamType,
-    ffi_annotation_type, ffi_arg_may_be_binary, ffi_arg_passes_unchanged,
-    ffi_result_passes_unchanged,
+    FFI_ARG_BINARY_GUARD, FFI_ARG_MAP_GUARD, FFI_ARG_RUNTIME_GUARDS, FfiArgKinds,
+    FunctionSignature, NativeTypeRegistry, ParamType, ffi_annotation_type, ffi_arg_kinds,
+    ffi_arg_passes_unchanged, ffi_result_passes_unchanged,
 };
 pub use native_types::{
     is_specs_line, is_specs_result_error, is_specs_result_ok, load_native_declarations,
@@ -161,6 +161,9 @@ pub struct ClassCoverage {
     pub total: usize,
     /// Expressions with non-Dynamic inferred type.
     pub typed: usize,
+    /// Narrowing local annotations (unchecked casts, BT-4719) in the class.
+    /// Reported on their own: `typed` is unchanged by them.
+    pub narrowing_casts: usize,
 }
 
 impl ClassCoverage {
@@ -192,13 +195,29 @@ pub struct DynamicEntry {
     pub reason: DynamicReason,
 }
 
+/// A narrowing local annotation (unchecked cast) for `--detail` output
+/// (BT-4719).
+#[derive(Debug, Clone)]
+pub struct NarrowingEntry {
+    /// Source file path.
+    pub file: String,
+    /// Class this annotation belongs to.
+    pub class_name: EcoString,
+    /// Span of the `:: T` annotation.
+    pub span: Span,
+    /// The declared type, as displayed in diagnostics.
+    pub declared: EcoString,
+    /// The right-hand side's inferred type: `Dynamic`, or a class name.
+    pub rhs: EcoString,
+}
+
 /// Coverage report across an entire project.
 ///
 /// Classifies `TypeMap` entries as typed (`Known`/`Union`) or untyped (`Dynamic`)
 /// and produces per-class and aggregate statistics.
 ///
 /// **References:** ADR 0077 Section 3
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CoverageReport {
     /// Per-class coverage statistics.
     pub classes: Vec<ClassCoverage>,
@@ -208,6 +227,11 @@ pub struct CoverageReport {
     pub total_expressions: usize,
     /// Typed expressions across all classes.
     pub typed_expressions: usize,
+    /// Narrowing local annotations across all classes (BT-4719): their own
+    /// category, not subtracted from `typed_expressions`.
+    pub narrowing_casts: usize,
+    /// Each narrowing cast (populated only when detail mode is requested).
+    pub narrowing_entries: Vec<NarrowingEntry>,
 }
 
 impl CoverageReport {
@@ -232,9 +256,16 @@ impl CoverageReport {
     /// scripts) are excluded from the report.
     ///
     /// When `detail` is true, all Dynamic entries are collected into
-    /// `dynamic_entries`.
+    /// `dynamic_entries` and every narrowing cast into `narrowing_entries`.
+    /// Narrowing casts (BT-4719) are counted per class either way.
     #[must_use]
-    pub fn from_module(module: &Module, type_map: &TypeMap, file: &str, detail: bool) -> Self {
+    pub fn from_module(
+        module: &Module,
+        type_map: &TypeMap,
+        hierarchy: &ClassHierarchy,
+        file: &str,
+        detail: bool,
+    ) -> Self {
         // Build (class_name, class_span) pairs for span containment.
         let class_spans: Vec<(EcoString, Span)> = module
             .classes
@@ -280,6 +311,29 @@ impl CoverageReport {
             }
         }
 
+        let mut narrowing_entries = Vec::new();
+        let mut narrowing_counts: HashMap<EcoString, usize> = HashMap::new();
+        for cast in
+            crate::semantic_analysis::validators::find_narrowing_casts(module, type_map, hierarchy)
+        {
+            let Some((class_name, _)) = class_spans
+                .iter()
+                .find(|(_, cs)| cs.start() <= cast.span.start() && cast.span.end() <= cs.end())
+            else {
+                continue; // top-level, like the expression counts
+            };
+            *narrowing_counts.entry(class_name.clone()).or_default() += 1;
+            if detail {
+                narrowing_entries.push(NarrowingEntry {
+                    file: file.to_string(),
+                    class_name: class_name.clone(),
+                    span: cast.annotation_span,
+                    declared: cast.declared,
+                    rhs: cast.rhs,
+                });
+            }
+        }
+
         let mut classes: Vec<ClassCoverage> = class_spans
             .iter()
             .filter_map(|(name, _)| {
@@ -289,6 +343,7 @@ impl CoverageReport {
                     file: file.to_string(),
                     total: *total,
                     typed: *typed,
+                    narrowing_casts: narrowing_counts.get(name).copied().unwrap_or(0),
                 })
             })
             .collect();
@@ -297,11 +352,15 @@ impl CoverageReport {
         let total_expressions: usize = classes.iter().map(|c| c.total).sum();
         let typed_expressions: usize = classes.iter().map(|c| c.typed).sum();
 
+        let narrowing_casts: usize = classes.iter().map(|c| c.narrowing_casts).sum();
+
         Self {
             classes,
             dynamic_entries,
             total_expressions,
             typed_expressions,
+            narrowing_casts,
+            narrowing_entries,
         }
     }
 
@@ -311,6 +370,8 @@ impl CoverageReport {
         self.dynamic_entries.extend(other.dynamic_entries);
         self.total_expressions += other.total_expressions;
         self.typed_expressions += other.typed_expressions;
+        self.narrowing_casts += other.narrowing_casts;
+        self.narrowing_entries.extend(other.narrowing_entries);
     }
 }
 

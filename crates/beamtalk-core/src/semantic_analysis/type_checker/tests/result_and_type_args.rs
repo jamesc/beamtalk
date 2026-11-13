@@ -749,7 +749,7 @@ Object subclass: Counter
     let hierarchy = ClassHierarchy::with_builtins();
     let type_map = infer_types(&module, &hierarchy, None);
 
-    let report = CoverageReport::from_module(&module, &type_map, "test.bt", false);
+    let report = CoverageReport::from_module(&module, &type_map, &hierarchy, "test.bt", false);
 
     assert_eq!(report.classes.len(), 1, "should have one class");
     assert_eq!(report.classes[0].name.as_str(), "Counter");
@@ -776,7 +776,7 @@ Object subclass: Greeter
     let hierarchy = ClassHierarchy::with_builtins();
     let type_map = infer_types(&module, &hierarchy, None);
 
-    let report = CoverageReport::from_module(&module, &type_map, "greeter.bt", true);
+    let report = CoverageReport::from_module(&module, &type_map, &hierarchy, "greeter.bt", true);
 
     assert_eq!(report.classes.len(), 1);
     // With detail mode, any Dynamic entries should be collected
@@ -795,7 +795,7 @@ fn coverage_report_empty_module() {
     let hierarchy = ClassHierarchy::with_builtins();
     let type_map = infer_types(&module, &hierarchy, None);
 
-    let report = CoverageReport::from_module(&module, &type_map, "empty.bt", false);
+    let report = CoverageReport::from_module(&module, &type_map, &hierarchy, "empty.bt", false);
 
     assert!(report.classes.is_empty());
     assert_eq!(report.total_expressions, 0);
@@ -812,10 +812,12 @@ fn coverage_report_merge() {
             file: "a.bt".to_string(),
             total: 10,
             typed: 8,
+            narrowing_casts: 0,
         }],
         dynamic_entries: vec![],
         total_expressions: 10,
         typed_expressions: 8,
+        ..CoverageReport::default()
     };
     let report_b = CoverageReport {
         classes: vec![ClassCoverage {
@@ -823,10 +825,12 @@ fn coverage_report_merge() {
             file: "b.bt".to_string(),
             total: 5,
             typed: 5,
+            narrowing_casts: 0,
         }],
         dynamic_entries: vec![],
         total_expressions: 5,
         typed_expressions: 5,
+        ..CoverageReport::default()
     };
 
     report_a.merge(report_b);
@@ -843,6 +847,7 @@ fn coverage_percent_calculation() {
         file: "test.bt".to_string(),
         total: 100,
         typed: 75,
+        narrowing_casts: 0,
     };
     assert!((coverage.coverage_percent() - 75.0).abs() < f64::EPSILON);
 
@@ -851,6 +856,73 @@ fn coverage_percent_calculation() {
         file: "empty.bt".to_string(),
         total: 0,
         typed: 0,
+        narrowing_casts: 0,
     };
     assert!((empty.coverage_percent() - 100.0).abs() < f64::EPSILON);
+}
+
+// ── Narrowing-cast coverage category (BT-4719) ───────────
+
+fn narrowing_report(source: &str, detail: bool) -> CoverageReport {
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let (hierarchy, _) = ClassHierarchy::build(&module);
+    let hierarchy = hierarchy.expect("hierarchy build failed");
+    let type_map = infer_types(&module, &hierarchy, None);
+    CoverageReport::from_module(&module, &type_map, &hierarchy, "n.bt", detail)
+}
+
+#[test]
+fn coverage_counts_narrowing_casts_per_class_and_total() {
+    let source = r"
+Object subclass: Reader
+  read: opts :: Dictionary =>
+    n :: Integer := opts at: #max
+    n
+
+Object subclass: Other
+  plain => 1
+";
+    let report = narrowing_report(source, true);
+    let by_name = |n: &str| {
+        report
+            .classes
+            .iter()
+            .find(|c| c.name.as_str() == n)
+            .unwrap()
+    };
+    assert_eq!(by_name("Reader").narrowing_casts, 1);
+    assert_eq!(by_name("Other").narrowing_casts, 0);
+    assert_eq!(report.narrowing_casts, 1);
+    assert_eq!(report.narrowing_entries.len(), 1);
+    assert_eq!(report.narrowing_entries[0].declared.as_str(), "Integer");
+    assert_eq!(report.narrowing_entries[0].rhs.as_str(), "Dynamic");
+}
+
+#[test]
+fn coverage_narrowing_entries_only_in_detail_mode() {
+    let source = r"
+Object subclass: Reader
+  read: opts :: Dictionary =>
+    n :: Integer := opts at: #max
+    n
+";
+    let report = narrowing_report(source, false);
+    assert_eq!(report.narrowing_casts, 1, "counted without detail");
+    assert!(report.narrowing_entries.is_empty());
+}
+
+#[test]
+fn coverage_does_not_count_redundant_or_widening_annotations() {
+    let source = r"
+Object subclass: Thing
+  redundant =>
+    c :: Thing := Thing new
+    c
+  widening =>
+    status :: Integer | Nil := nil
+    status
+";
+    let report = narrowing_report(source, true);
+    assert_eq!(report.narrowing_casts, 0, "{:?}", report.narrowing_entries);
 }

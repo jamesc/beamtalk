@@ -470,10 +470,19 @@ const FFI_RESULT_EXTRA_CLASSES: &[&str] = &["Dictionary", "Block", "String", "Bi
 /// *or* the tagged `{beamtalk_string, Bin}`, and the proxy's stock-mode unwrap
 /// changes the tagged form, so a tagged String fails the guard and takes the
 /// proxy. A raw binary needs no unwrapping and carries no code.
-const FFI_ARG_EXTRA_CLASSES: &[&str] = &["Symbol", "String", "Binary"];
+///
+/// `Dictionary` (BT-4770) is proved only together with the runtime `is_map`
+/// guard ([`FFI_ARG_MAP_GUARD`]): the stock-mode unwrap is shallow and touches
+/// only a top-level tagged `String` (a 2-tuple), so a map reaches the callee
+/// unchanged. The `badarg` retry still deep-unwraps a map, so a map-typed
+/// argument is a retry-capable one, like a binary.
+const FFI_ARG_EXTRA_CLASSES: &[&str] = &["Symbol", "String", "Binary", "Dictionary"];
 
 /// The members of [`FFI_ARG_EXTRA_CLASSES`] that are binary-valued.
 const FFI_ARG_BINARY_CLASSES: &[&str] = &["String", "Binary"];
+
+/// The members of [`FFI_ARG_EXTRA_CLASSES`] that are map-valued.
+const FFI_ARG_MAP_CLASSES: &[&str] = &["Dictionary"];
 
 /// The runtime check that backs [`ffi_arg_passes_unchanged`]: a value that
 /// passes one of these `erlang` guard BIFs is a number, atom, pid or binary, so
@@ -490,21 +499,54 @@ pub const FFI_ARG_RUNTIME_GUARDS: &[&str] = &["is_number", "is_atom", "is_pid"];
 /// arguments are all scalars is emitted exactly as before.
 pub const FFI_ARG_BINARY_GUARD: &str = "is_binary";
 
-/// `ty` (or a union member) may be a `String` or `Binary`, so a value of it can
-/// be a raw binary: the call site then also takes a class-variable snapshot for
-/// the `badarg` charlist retry (a scalar argument never retries).
+/// The extra runtime check for an argument whose static type may be a
+/// `Dictionary` ([`ffi_arg_kinds`], BT-4770): a map passes, and nothing a
+/// scalar or binary guard accepts is a map. Only such an argument gets it.
+pub const FFI_ARG_MAP_GUARD: &str = "is_map";
+
+/// Which of the extra runtime guards an argument of a given static type needs
+/// on top of [`FFI_ARG_RUNTIME_GUARDS`] (see [`ffi_arg_kinds`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FfiArgKinds {
+    /// The type may be a `String`/`Binary`: add [`FFI_ARG_BINARY_GUARD`].
+    pub binary: bool,
+    /// The type may be a `Dictionary`: add [`FFI_ARG_MAP_GUARD`].
+    pub map: bool,
+}
+
+impl FfiArgKinds {
+    /// The extra guard BIFs this argument is also checked with.
+    pub fn extra_guards(self) -> impl Iterator<Item = &'static str> {
+        self.binary
+            .then_some(FFI_ARG_BINARY_GUARD)
+            .into_iter()
+            .chain(self.map.then_some(FFI_ARG_MAP_GUARD))
+    }
+
+    /// The `badarg` charlist retry can change this argument (a binary becomes a
+    /// charlist, a map has nested tagged Strings unwrapped), so a call site with
+    /// one keeps the pre-call class-variable snapshot for it. A scalar never
+    /// retries.
+    #[must_use]
+    pub fn may_retry(self) -> bool {
+        self.binary || self.map
+    }
+}
+
+/// The extra guards `ty` (or a union member) needs: see [`FfiArgKinds`].
 #[must_use]
-pub fn ffi_arg_may_be_binary(ty: &InferredType) -> bool {
-    fn any(ty: &InferredType) -> bool {
+pub fn ffi_arg_kinds(ty: &InferredType) -> FfiArgKinds {
+    fn any(ty: &InferredType, classes: &[&str]) -> bool {
         match ty {
-            InferredType::Known { class_name, .. } => {
-                FFI_ARG_BINARY_CLASSES.contains(&&**class_name)
-            }
-            InferredType::Union { members, .. } => members.iter().any(any),
+            InferredType::Known { class_name, .. } => classes.contains(&&**class_name),
+            InferredType::Union { members, .. } => members.iter().any(|m| any(m, classes)),
             _ => false,
         }
     }
-    any(ty)
+    FfiArgKinds {
+        binary: any(ty, FFI_ARG_BINARY_CLASSES),
+        map: any(ty, FFI_ARG_MAP_CLASSES),
+    }
 }
 
 /// Every member of `ty` (a single type or a union) satisfies `member_ok`.
@@ -532,9 +574,19 @@ pub fn ffi_result_passes_unchanged(ty: &InferredType) -> bool {
 }
 
 /// `ty` is the `Result(V, _)` the spec reader emits for a function returning
-/// `{ok, V}` / `ok` (with `{error, R}` and/or `error`), and `V` passes
-/// through `coerce_ffi_result/3` unchanged ([`ffi_result_passes_unchanged`],
-/// BT-4762): so the inline call can build the `Result` without the proxy.
+/// `{ok, V}` / `ok` (with `{error, R}` and/or `error`), and `V` is either
+/// proved to pass through `coerce_ffi_result/3` unchanged
+/// ([`ffi_result_passes_unchanged`], BT-4762) or `Dynamic` (BT-4770): so the
+/// inline call can build the `Result` without the proxy.
+///
+/// The only coercion stock mode applies to the payload of an `{ok, _}` /
+/// `{error, _}` is the charlist-to-`String` conversion of a *list*. The inline
+/// shape tests the payload with `not is_list` at run time and hands a list to
+/// the proxy, so it is correct for a payload of any type; the static proof is
+/// then only an optimisation hint, and a spec that leaves `V` open (`maps:find/2`
+/// is `{ok, Value} | error`, `Value` a type variable, which the spec reader
+/// maps to `Dynamic`) needs none. The fixture's `inline_result_samples` pin that
+/// shape against the proxy, lists included.
 #[must_use]
 pub fn ffi_inline_result_value(ty: &InferredType) -> bool {
     match ty {
@@ -545,7 +597,8 @@ pub fn ffi_inline_result_value(ty: &InferredType) -> bool {
         } => {
             &**class_name == "Result"
                 && type_args.len() == 2
-                && ffi_result_passes_unchanged(&type_args[0])
+                && (ffi_result_passes_unchanged(&type_args[0])
+                    || matches!(type_args[0], InferredType::Dynamic(_)))
         }
         _ => false,
     }
@@ -606,6 +659,8 @@ mod tests {
         assert!(!ffi_arg_passes_unchanged(&InferredType::known(
             "#{#a => Integer}"
         )));
+        // BT-4770: a plain `Dictionary` argument is proved, a map *shape* is not.
+        assert!(ffi_arg_passes_unchanged(&InferredType::known("Dictionary")));
     }
 
     /// BT-4485: the FFI pass-through rule matches the shared fixture the
@@ -669,6 +724,12 @@ mod tests {
                 "inline result V {name}"
             );
         }
+        // BT-4770: an open `V` (a spec type variable, `Dynamic`) is accepted:
+        // the inline shape checks the payload at run time, so every sample in
+        // `inline_result_samples` (lists included) matches the proxy.
+        assert!(ffi_inline_result_value(&wrap_in_result(
+            InferredType::Dynamic(DynamicReason::DynamicSpec)
+        )));
         assert!(!ffi_inline_result_value(&ty("Integer")));
         assert!(!ffi_inline_result_value(&InferredType::simple_union(&[
             "Result", "Integer"
@@ -688,7 +749,12 @@ mod tests {
             Some(FFI_ARG_BINARY_GUARD),
             "binary guard matches the fixture"
         );
-        for class in FFI_ARG_BINARY_CLASSES {
+        assert_eq!(
+            fixture["arg_map_guard"].as_str(),
+            Some(FFI_ARG_MAP_GUARD),
+            "map guard matches the fixture"
+        );
+        for class in FFI_ARG_BINARY_CLASSES.iter().chain(FFI_ARG_MAP_CLASSES) {
             assert!(FFI_ARG_EXTRA_CLASSES.contains(class), "{class}");
         }
         // Every class the rule names has runtime samples in the fixture.
@@ -704,6 +770,35 @@ mod tests {
                 "no arg samples for {class}"
             );
         }
+    }
+
+    /// BT-4770: which extra runtime guards an argument type needs.
+    #[test]
+    fn ffi_arg_kinds_name_the_extra_guards() {
+        let ty = |name: &str| InferredType::known(name);
+        assert_eq!(
+            ffi_arg_kinds(&ty("Dictionary")),
+            FfiArgKinds {
+                binary: false,
+                map: true
+            }
+        );
+        assert_eq!(
+            ffi_arg_kinds(&InferredType::simple_union(&["String", "Dictionary"])),
+            FfiArgKinds {
+                binary: true,
+                map: true
+            }
+        );
+        assert_eq!(ffi_arg_kinds(&ty("Integer")), FfiArgKinds::default());
+        assert_eq!(
+            ffi_arg_kinds(&InferredType::simple_union(&["String", "Dictionary"]))
+                .extra_guards()
+                .collect::<Vec<_>>(),
+            [FFI_ARG_BINARY_GUARD, FFI_ARG_MAP_GUARD]
+        );
+        assert!(!FfiArgKinds::default().may_retry());
+        assert!(ffi_arg_kinds(&ty("Dictionary")).may_retry());
     }
 
     #[test]
@@ -739,10 +834,15 @@ mod tests {
         assert!(ffi_arg_passes_unchanged(&binary));
         assert!(ffi_arg_passes_unchanged(&InferredType::known("Binary")));
         assert!(!ffi_arg_passes_unchanged(&charlist));
-        assert!(ffi_arg_may_be_binary(&binary));
-        assert!(!ffi_arg_may_be_binary(&InferredType::known("Integer")));
-        assert!(ffi_arg_may_be_binary(&InferredType::simple_union(&[
-            "Integer", "String"
+        assert!(ffi_arg_kinds(&binary).binary);
+        assert!(!ffi_arg_kinds(&InferredType::known("Integer")).binary);
+        assert!(ffi_arg_kinds(&InferredType::simple_union(&["Integer", "String"])).binary);
+        // BT-4770: a `Dictionary` is proved behind the `is_map` guard, and a
+        // list or tuple (which could hold a tagged String the unwrap sees) is not.
+        assert!(ffi_arg_passes_unchanged(&InferredType::known("Dictionary")));
+        assert!(!ffi_arg_passes_unchanged(&InferredType::simple_union(&[
+            "Dictionary",
+            "List"
         ])));
     }
 

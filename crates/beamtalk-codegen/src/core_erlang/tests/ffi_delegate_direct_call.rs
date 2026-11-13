@@ -38,6 +38,25 @@ fn sig(name: &str, params: &[&str], ret: &str) -> FunctionSignature {
     }
 }
 
+fn sig_result(name: &str, params: &[&str], value: &str) -> FunctionSignature {
+    let mut s = sig(name, params, "Dynamic");
+    s.return_type = InferredType::Known {
+        class_name: ecow::EcoString::from("Result"),
+        type_args: vec![
+            // The spec reader maps an open type (a type variable, `any()`) to
+            // the real `Dynamic`, not a class named "Dynamic".
+            if value == "Dynamic" {
+                InferredType::Dynamic(beamtalk_core::semantic_analysis::DynamicReason::DynamicSpec)
+            } else {
+                extracted(value)
+            },
+            extracted("Exception"),
+        ],
+        provenance: TypeProvenance::Extracted,
+    };
+    s
+}
+
 fn registry() -> NativeTypeRegistry {
     let mut registry = NativeTypeRegistry::new();
     registry.register_module(
@@ -60,6 +79,17 @@ fn registry() -> NativeTypeRegistry {
             sig("blocky", &["Block"], "Integer"),
             sig("untyped", &["Dynamic"], "Integer"),
             sig("sym", &[], "Symbol"),
+        ],
+    );
+    // A stock-mode backing module (no `beamtalk_` prefix): its specs may
+    // prove an inline `Result` (BT-4770).
+    registry.register_module(
+        "probe_native",
+        vec![
+            sig_result("found", &["Integer"], "Integer"),
+            sig_result("lookup", &["Dictionary"], "Dynamic"),
+            sig_result("listy", &["Integer"], "List"),
+            sig("size", &["Dictionary"], "Integer"),
         ],
     );
     registry.trust_all_modules();
@@ -246,4 +276,80 @@ fn untrusted_or_unspecced_backing_keeps_native_call_only() {
     assert!(!function_body(&code, "class_count").contains("try call"));
     let code = compile(src, NativeTypeRegistry::new());
     assert!(!function_body(&code, "class_count").contains("try call"));
+}
+
+fn native_class(methods: &str) -> String {
+    compile(
+        &format!("sealed typed Object subclass: Probe native: probe_native\n{methods}"),
+        registry(),
+    )
+}
+
+/// BT-4770: a stock-mode delegate whose spec states an `{ok, V}` return builds
+/// the `Result` at the call site, inside the `try`, exactly as an inline
+/// `Erlang module fn:` send does, and still carries `{Class, Selector}`.
+#[test]
+fn ok_result_delegate_is_built_inline() {
+    let code = native_class("  class found: n :: Integer -> Result => self delegate\n");
+    let body = function_body(&code, "class_found:");
+    assert!(
+        body.contains("let _FfiRaw") && body.contains("= call 'probe_native':'found'("),
+        "the raw result is bound inside the try:\n{body}"
+    );
+    assert!(
+        body.contains("call 'beamtalk_result':'from_tagged_tuple'(_FfiRaw"),
+        "{body}"
+    );
+    assert!(
+        body.contains("call 'beamtalk_erlang_proxy':'coerce_ffi_result'('probe_native', _FfiOther"),
+        "everything else is coerced by the proxy on the value already returned:\n{body}"
+    );
+    assert!(body.contains("{'Probe', 'found:'}"), "{body}");
+    assert!(
+        body.contains("<> when 'true' -> call 'beamtalk_erlang_proxy':'native_call'("),
+        "the fallback is still native_call/5:\n{body}"
+    );
+}
+
+/// A `Dictionary` parameter of a delegate is proved and guarded by `is_map`,
+/// with the snapshot for the retry (`ffi_call_raised/10` takes it).
+#[test]
+fn dictionary_param_delegate_is_guarded_by_is_map() {
+    let code = native_class("  class size: d :: Dictionary -> Integer => self delegate\n");
+    let body = function_body(&code, "class_size:");
+    assert!(body.contains("try call 'probe_native':'size'("), "{body}");
+    assert!(body.contains("call 'erlang':'is_map'(_"), "{body}");
+    assert!(
+        body.contains("= call 'beamtalk_class_vars':'snapshot'() in try call"),
+        "{body}"
+    );
+    assert!(body.contains("{'Probe', 'size:'}"), "{body}");
+    assert!(!body.contains("'is_binary'"), "{body}");
+    // `Dynamic`-valued `Result` through the same map parameter.
+    let code = native_class("  class lookup: d :: Dictionary -> Result => self delegate\n");
+    let body = function_body(&code, "class_lookup:");
+    assert!(body.contains("'from_tagged_tuple'(_FfiRaw"), "{body}");
+}
+
+/// A `List`-valued `Result` and a `beamtalk_*` (Beamtalk-mode) backing module
+/// keep `native_call/5` alone.
+#[test]
+fn list_valued_and_beamtalk_mode_results_keep_native_call_only() {
+    let code = native_class("  class listy: n :: Integer -> Result => self delegate\n");
+    let body = function_body(&code, "class_listy:");
+    assert!(body.contains("'native_call'("), "{body}");
+    assert!(!body.contains("try "), "{body}");
+    let mut reg = registry();
+    reg.register_module(
+        "beamtalk_probe",
+        vec![sig_result("found", &["Integer"], "Integer")],
+    );
+    reg.trust_all_modules();
+    let code = compile(
+        "sealed typed Object subclass: Probe native: beamtalk_probe\n  \
+         class found: n :: Integer -> Result => self delegate\n",
+        reg,
+    );
+    let body = function_body(&code, "class_found:");
+    assert!(!body.contains("try "), "{body}");
 }

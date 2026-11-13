@@ -64,12 +64,7 @@ pub fn run(
     .registry
     .map(std::sync::Arc::new);
 
-    let mut report = CoverageReport {
-        classes: Vec::new(),
-        dynamic_entries: Vec::new(),
-        total_expressions: 0,
-        typed_expressions: 0,
-    };
+    let mut report = CoverageReport::default();
     // The pipeline reports package files by their canonical path; report
     // them as the caller spelled them, as before.
     let spelled: std::collections::HashMap<std::path::PathBuf, &Utf8PathBuf> = source_files
@@ -88,6 +83,7 @@ pub fn run(
             report.merge(CoverageReport::from_module(
                 file.module,
                 file.type_map,
+                file.class_hierarchy,
                 path.as_str(),
                 detail,
             ));
@@ -111,6 +107,10 @@ pub fn run(
         // Recompute totals from filtered classes.
         report.total_expressions = report.classes.iter().map(|c| c.total).sum();
         report.typed_expressions = report.classes.iter().map(|c| c.typed).sum();
+        report.narrowing_casts = report.classes.iter().map(|c| c.narrowing_casts).sum();
+        report
+            .narrowing_entries
+            .retain(|e| e.class_name.as_str() == class_name);
     }
 
     // Sort classes by file then name for stable output.
@@ -152,8 +152,8 @@ fn print_text_report(
     for class in &report.classes {
         let pct = class.coverage_percent();
         println!(
-            "{:<30} {:<20} {:.1}%  ({}/{} expressions)",
-            class.file, class.name, pct, class.typed, class.total
+            "{:<30} {:<20} {:.1}%  ({}/{} expressions, {} narrowing)",
+            class.file, class.name, pct, class.typed, class.total, class.narrowing_casts
         );
     }
 
@@ -161,32 +161,55 @@ fn print_text_report(
     println!("{separator}");
     let pct = report.coverage_percent();
     println!(
-        "{:<30} {:<20} {:.1}%  ({}/{} expressions)",
-        "Total", "", pct, report.typed_expressions, report.total_expressions
+        "{:<30} {:<20} {:.1}%  ({}/{} expressions, {} narrowing)",
+        "Total",
+        "",
+        pct,
+        report.typed_expressions,
+        report.total_expressions,
+        report.narrowing_casts
     );
+    if report.narrowing_casts > 0 {
+        println!(
+            "Narrowing casts: {} (local annotations narrower than their right-hand side; \
+             unchecked at runtime, not subtracted from coverage)",
+            report.narrowing_casts
+        );
+    }
+
+    // Build a source map for offset-to-line conversion.
+    let source_map: std::collections::HashMap<&str, &str> = file_sources
+        .iter()
+        .map(|(path, source)| (path.as_str(), source.as_str()))
+        .collect();
+    let locate = |file: &str, span: beamtalk_core::source_analysis::Span| -> String {
+        if let Some(source) = source_map.get(file)
+            && let Some(pos) = Position::from_byte_offset(source, ByteOffset::new(span.start()))
+        {
+            // Display as 1-based line:col.
+            return format!("{file}:{}:{}", pos.line + 1, pos.column + 1);
+        }
+        format!("{file}:?:?")
+    };
+
+    if detail && !report.narrowing_entries.is_empty() {
+        println!();
+        println!("Narrowing casts:");
+        for entry in &report.narrowing_entries {
+            let location = locate(&entry.file, entry.span);
+            println!(
+                "  {location:<40} (:: {} from {})",
+                entry.declared, entry.rhs
+            );
+        }
+    }
 
     if detail && !report.dynamic_entries.is_empty() {
         println!();
         println!("Dynamic expressions:");
 
-        // Build a source map for offset-to-line conversion.
-        let source_map: std::collections::HashMap<&str, &str> = file_sources
-            .iter()
-            .map(|(path, source)| (path.as_str(), source.as_str()))
-            .collect();
-
         for entry in &report.dynamic_entries {
-            let location = if let Some(source) = source_map.get(entry.file.as_str()) {
-                let byte_offset = ByteOffset::new(entry.span.start());
-                if let Some(pos) = Position::from_byte_offset(source, byte_offset) {
-                    // Display as 1-based line:col.
-                    format!("{}:{}:{}", entry.file, pos.line + 1, pos.column + 1)
-                } else {
-                    format!("{}:?:?", entry.file)
-                }
-            } else {
-                format!("{}:?:?", entry.file)
-            };
+            let location = locate(&entry.file, entry.span);
             let reason = entry.reason.description().unwrap_or("unknown");
             println!("  {location:<40} ({reason})");
         }
@@ -211,6 +234,7 @@ fn print_json_report(
                 "file": c.file,
                 "total": c.total,
                 "typed": c.typed,
+                "narrowing_casts": c.narrowing_casts,
                 "coverage_percent": class_pct
             })
         })
@@ -220,8 +244,26 @@ fn print_json_report(
         "total_expressions": report.total_expressions,
         "typed_expressions": report.typed_expressions,
         "coverage_percent": pct,
+        "narrowing_casts": report.narrowing_casts,
         "classes": classes
     });
+
+    if !report.narrowing_entries.is_empty() {
+        // Populated only under `--detail`.
+        json["narrowing_entries"] = report
+            .narrowing_entries
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "file": e.file,
+                    "class": e.class_name.as_str(),
+                    "start": e.span.start(),
+                    "declared": e.declared.as_str(),
+                    "rhs": e.rhs.as_str(),
+                })
+            })
+            .collect();
+    }
 
     if let Some(threshold) = at_least {
         let unrounded = report.coverage_percent();
@@ -288,12 +330,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn empty_report() -> CoverageReport {
-        CoverageReport {
-            classes: Vec::new(),
-            dynamic_entries: Vec::new(),
-            total_expressions: 0,
-            typed_expressions: 0,
-        }
+        CoverageReport::default()
     }
 
     // --- OutputFormat::from_str ---
@@ -641,6 +678,63 @@ mod tests {
         assert!(
             result.is_ok(),
             "Caller must be fully typed through src/'s Widget: {result:?}"
+        );
+    }
+
+    /// BT-4717: FFI calls whose OTP spec returns an opaque handle
+    /// (`zlib:open/0` zstream, `erlang:monitor/2` reference) keep their named
+    /// type, so a `zstream` handed back to `zlib` and compared with `=:=` is
+    /// fully typed. Before, every such call was "FFI spec is Dynamic" and the
+    /// uses of its result were "dynamic receiver" — this fixture sat at 42.9%.
+    /// Needs the built Erlang runtime for live spec extraction, like the other
+    /// OTP-spec tests; the fixture is `tests/otp-opaque-handles`, which
+    /// beamtalk-buccaneer/-catalina mirror (check there with
+    /// `beamtalk type-coverage --detail src | grep 'FFI spec is Dynamic'`).
+    #[test]
+    fn run_types_otp_opaque_handles_bt_4717() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("beamtalk.toml"),
+            "[package]\nname = \"otp_opaque_handles\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("handles.bt"),
+            include_str!("../../../../tests/otp-opaque-handles/src/handles.bt"),
+        )
+        .unwrap();
+        let root = Utf8PathBuf::from_path_buf(src).unwrap();
+        // Live extraction needs OTP `.beam` files on disk; skip rather than
+        // false-fail where they are not discoverable (e.g. a sandbox).
+        let pkg_root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let probe = beamtalk_cli::ffi_type_registry::lint_type_registry(
+            Some(&pkg_root),
+            &[root.join("handles.bt")],
+            &[],
+        )
+        .registry;
+        let Some(probe) = probe else {
+            eprintln!(
+                "skipping run_types_otp_opaque_handles_bt_4717: no OTP .beam files discovered"
+            );
+            return;
+        };
+        assert!(
+            probe.lookup("zlib", "open", 0).is_some(),
+            "live extraction found OTP but not zlib:open/0"
+        );
+        let result = run(
+            root.as_str(),
+            false,
+            OutputFormat::Text,
+            Some(100.0),
+            Some("Handles"),
+        );
+        assert!(
+            result.is_ok(),
+            "OTP opaque handles must stay typed (no FFI-spec Dynamic): {result:?}"
         );
     }
 
