@@ -342,6 +342,16 @@ fn is_kind_of_builtin_fast_path_builds_no_class_reference_and_sends_nothing() {
             before_check.contains(&format!("'whereis'('beamtalk_class_{class}')")),
             "{class}: liveness probe missing. Got:\n{code}"
         );
+        // A dead class process (probe fails) takes the cold path, whose class
+        // literal raises `class_not_found` before the send, as it always did.
+        let cold = &code[code
+            .find("<'false'> when 'true' -> let _KindOfClass")
+            .unwrap()..];
+        let raise = cold.find("'class_not_found'").expect("cold path raises");
+        assert!(
+            raise < cold.find("'send'(").unwrap(),
+            "{class}: class_not_found must precede the send. Got:\n{cold}"
+        );
         // The override is honoured with the plain send.
         assert!(
             code.contains("<'false'> when 'true' -> let _KindOfClass")
