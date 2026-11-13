@@ -815,7 +815,7 @@ impl CoreErlangGenerator {
         // dispatch's argument holds (`generate_runtime_dispatch`), and the
         // same test-build log checks it. A `no_user_code` send to a receiver
         // of statically known class reaches this guarded send, not that one.
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test"))]
         self.note_dispatch_nlr_literals(receiver, selector, arguments);
         let (preamble, mut docs) = self.thread_subexprs(&all_exprs, "TTagged")?;
         let mut docs_iter = docs.drain(..);

@@ -424,14 +424,16 @@ impl Scan<'_> {
                     // class's static call map and, on a miss, asks
                     // `beamtalk_class_shadow_flags:class_ref/1`; it is the same
                     // operand, recognised by that call among its clauses.
-                    let start = self.at;
                     let mut class_lookup = self.at_call_to("erlang", "whereis");
                     let map_read = self.at_call_to("persistent_term", "get");
                     let scrutinee = self.expr();
                     self.eat_word("of");
+                    // The miss clause (not the scrutinee, not the whole
+                    // `case`) is where `class_ref/1` is called.
+                    let clauses_start = self.at;
                     let clauses = self.clauses("end");
                     if map_read {
-                        class_lookup = self.tokens[start..self.at].windows(4).any(|w| {
+                        class_lookup = self.tokens[clauses_start..self.at].windows(4).any(|w| {
                             matches!(w, [Tok::Atom(m), Tok::Punct(":"), Tok::Atom(f), Tok::Punct("(")]
                                 if m == "beamtalk_class_shadow_flags" && f == "class_ref")
                         });

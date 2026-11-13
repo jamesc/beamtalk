@@ -659,3 +659,24 @@ Base subclass: Child
     );
     assert_eq!(errors.len(), 1, "{errors:?}");
 }
+
+#[test]
+fn test_bt_4783_unresolved_parent_native_class_still_rejects_new() {
+    // `Base` lives in another file, so the class kind is unknowable, but the
+    // `native:` opacity check does not depend on the kind.
+    let errors = uninstantiable_new_errors(
+        "
+Base subclass: Stopwatch native: beamtalk_stopwatch
+  elapsed -> Integer => self delegate
+
+Value subclass: Caller
+  test => Stopwatch new
+",
+    );
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(
+        errors[0].message.contains("`native:` class `Stopwatch`"),
+        "{}",
+        errors[0].message
+    );
+}

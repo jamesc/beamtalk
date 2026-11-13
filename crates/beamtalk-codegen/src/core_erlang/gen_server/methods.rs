@@ -31,9 +31,10 @@ use ecow::EcoString;
 /// - `"bt@my_counter@counter"` → `Some("my_counter")`
 /// - `"bt@stdlib@integer"` → `Some("stdlib")`
 /// - `"beamtalk_integer"` → `None`
+/// - `"bt@@x"` → `None` (empty package segment, as Erlang `package_of`)
 pub(crate) fn extract_package_from_module_name(module_name: &str) -> Option<String> {
     let parts: Vec<&str> = module_name.splitn(3, '@').collect();
-    if parts.len() >= 3 && parts[0] == "bt" {
+    if parts.len() >= 3 && parts[0] == "bt" && !parts[1].is_empty() {
         Some(parts[1].to_string())
     } else {
         None

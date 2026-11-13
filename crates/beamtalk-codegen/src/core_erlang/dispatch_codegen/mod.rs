@@ -468,7 +468,7 @@ impl CoreErlangGenerator {
         // fails on any logged send that may run an operand. In any build,
         // such a send would leave its `^` block an `UnbracketedNlrClosure`
         // finding.
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test"))]
         self.note_dispatch_nlr_literals(receiver, selector, arguments);
         let mut seq = self.sequence_call(&all_exprs, "Disp")?;
         let actual_receiver = seq.next();

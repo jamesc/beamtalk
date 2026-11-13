@@ -328,6 +328,15 @@ mod registry {
         1u64 << (fault as u32)
     }
 
+    // Compile-time guard for the `u64` mask. It is anchored on the last
+    // variant, so a new fault must go before `OperandsInPlace` (or this
+    // anchor must move to the new last variant); the assert cannot see a
+    // variant added after it.
+    const _: () = assert!(
+        (Fault::OperandsInPlace as u32) < u64::BITS,
+        "Fault has more than 64 variants; widen the ACTIVE mask"
+    );
+
     /// Whether `fault` is switched on on this thread. Read through the
     /// `fault!` macro, not directly.
     pub fn is_active(fault: Fault) -> bool {
