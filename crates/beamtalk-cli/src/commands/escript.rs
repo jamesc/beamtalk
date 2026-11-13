@@ -81,15 +81,14 @@ pub fn build_escript(
     // `{undef, …}`, so warn loudly rather than ship a silently-broken artifact.
     if let Ok(beam_env) =
         super::beam_environment::BeamEnvironment::from_layout(&build_layout, project_root)
+        && !beam_env.otp_apps.is_empty()
     {
-        if !beam_env.otp_apps.is_empty() {
-            eprintln!(
-                "warning: this project declares hex/native dependencies ({}) which are \
+        eprintln!(
+            "warning: this project declares hex/native dependencies ({}) which are \
                  NOT yet bundled into the escript. If the program calls into them it will \
                  fail at runtime with `{{undef, …}}`. (escript hex-dep bundling is a follow-up.)",
-                beam_env.otp_apps.join(", ")
-            );
-        }
+            beam_env.otp_apps.join(", ")
+        );
     }
 
     // Collect the project's compiled class modules (`bt@*.beam`).
@@ -237,21 +236,21 @@ fn collect_project_modules(project_ebin: &Utf8Path) -> Result<Vec<String>> {
         let entry = entry.into_diagnostic()?;
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if let Some(module) = name.strip_suffix(".beam") {
-            if module.starts_with("bt@") {
-                // Real compiler output is always a valid atom, but a stray/
-                // malformed `.beam` would otherwise be embedded verbatim into the
-                // generated boot module and surface as a cryptic `erlc` error.
-                // Bail with a readable diagnostic instead.
-                if !crate::beam_compiler::is_valid_module_name(module) {
-                    miette::bail!(
-                        "Project ebin '{project_ebin}' contains a `.beam` file with an \
+        if let Some(module) = name.strip_suffix(".beam")
+            && module.starts_with("bt@")
+        {
+            // Real compiler output is always a valid atom, but a stray/
+            // malformed `.beam` would otherwise be embedded verbatim into the
+            // generated boot module and surface as a cryptic `erlc` error.
+            // Bail with a readable diagnostic instead.
+            if !crate::beam_compiler::is_valid_module_name(module) {
+                miette::bail!(
+                    "Project ebin '{project_ebin}' contains a `.beam` file with an \
                          invalid module name '{module}'. Expected an Erlang atom \
                          (letters, digits, `_`, `@`). Clean the build directory and rebuild."
-                    );
-                }
-                modules.push(module.to_string());
+                );
             }
+            modules.push(module.to_string());
         }
     }
     modules.sort();

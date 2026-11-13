@@ -296,40 +296,40 @@ fn compute_erlang_completions(
     let trimmed = text_before.trim_end();
     // Check for "Erlang <module>" context (cursor after module name)
     // Pattern: text ends with "Erlang <word>" where <word> is a known module
-    if let Some(erlang_module) = detect_erlang_module_context(trimmed) {
-        if let Some(module_info) = erlang_modules::find_module(erlang_module) {
-            let mut completions = Vec::new();
-            let mut seen = HashSet::new();
-            for &(name, arity) in module_info.exports {
-                let selector = erlang_modules::export_to_selector(name, arity);
-                if seen.insert(selector.clone()) {
-                    // ADR 0075: Use native type registry for typed detail when available
-                    let (detail, doc) = if let Some(sig) =
-                        native_types.and_then(|r| r.lookup(erlang_module, name, arity))
-                    {
-                        let typed_detail = sig.display_signature();
-                        let doc = format!(
-                            "Erlang function `{module_name}:{name}/{arity}`\n\n`{typed_detail}`",
-                            module_name = module_info.name,
-                        );
-                        (typed_detail, doc)
-                    } else {
-                        let detail = erlang_modules::export_detail(module_info.name, name, arity);
-                        let doc = format!(
-                            "Erlang function `{module_name}:{name}/{arity}`",
-                            module_name = module_info.name
-                        );
-                        (detail, doc)
-                    };
-                    completions.push(
-                        Completion::new(selector.as_str(), CompletionKind::Function)
-                            .with_detail(detail)
-                            .with_documentation(doc),
+    if let Some(erlang_module) = detect_erlang_module_context(trimmed)
+        && let Some(module_info) = erlang_modules::find_module(erlang_module)
+    {
+        let mut completions = Vec::new();
+        let mut seen = HashSet::new();
+        for &(name, arity) in module_info.exports {
+            let selector = erlang_modules::export_to_selector(name, arity);
+            if seen.insert(selector.clone()) {
+                // ADR 0075: Use native type registry for typed detail when available
+                let (detail, doc) = if let Some(sig) =
+                    native_types.and_then(|r| r.lookup(erlang_module, name, arity))
+                {
+                    let typed_detail = sig.display_signature();
+                    let doc = format!(
+                        "Erlang function `{module_name}:{name}/{arity}`\n\n`{typed_detail}`",
+                        module_name = module_info.name,
                     );
-                }
+                    (typed_detail, doc)
+                } else {
+                    let detail = erlang_modules::export_detail(module_info.name, name, arity);
+                    let doc = format!(
+                        "Erlang function `{module_name}:{name}/{arity}`",
+                        module_name = module_info.name
+                    );
+                    (detail, doc)
+                };
+                completions.push(
+                    Completion::new(selector.as_str(), CompletionKind::Function)
+                        .with_detail(detail)
+                        .with_documentation(doc),
+                );
             }
-            return Some(completions);
         }
+        return Some(completions);
     }
     // Check for "Erlang" context (cursor right after "Erlang")
     // Also check by walking the AST for a ClassReference("Erlang") near cursor
@@ -385,10 +385,10 @@ fn detect_erlang_class_context(module: &Module, trimmed: &str, offset: u32) -> b
         }
     }
     // Cheap textual hint before AST fallback — only scan when "Erlang" is near cursor
-    if let Some(idx) = trimmed.rfind("Erlang") {
-        if trimmed.len().saturating_sub(idx) <= 32 {
-            return find_erlang_class_ref(module, offset);
-        }
+    if let Some(idx) = trimmed.rfind("Erlang")
+        && trimmed.len().saturating_sub(idx) <= 32
+    {
+        return find_erlang_class_ref(module, offset);
     }
     false
 }

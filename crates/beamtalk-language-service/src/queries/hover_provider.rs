@@ -233,28 +233,30 @@ fn find_hover_in_declarations(
         // ADR 0123 §4 (BT-3539): hover on the `shapeVersion: N` clause
         // itself shows the same chain, anchored at the integer literal's
         // span so it fires independently of hovering the class name.
-        if let Some(shape_version) = &class.shape_version {
-            if offset >= shape_version.span.start() && offset < shape_version.span.end() {
-                let migrations = declared_shape_migrations(class);
-                let chain = shape_chain_line(class.effective_shape_version(), &migrations);
-                return Some(HoverInfo::new(
-                    format!(
-                        "Declared shape version: `{}`\n\n{chain}",
-                        shape_version.version
-                    ),
-                    shape_version.span,
-                ));
-            }
+        if let Some(shape_version) = &class.shape_version
+            && offset >= shape_version.span.start()
+            && offset < shape_version.span.end()
+        {
+            let migrations = declared_shape_migrations(class);
+            let chain = shape_chain_line(class.effective_shape_version(), &migrations);
+            return Some(HoverInfo::new(
+                format!(
+                    "Declared shape version: `{}`\n\n{chain}",
+                    shape_version.version
+                ),
+                shape_version.span,
+            ));
         }
-        if let Some(superclass) = &class.superclass {
-            if offset >= superclass.span.start() && offset < superclass.span.end() {
-                return Some(class_reference_hover_info(
-                    &superclass.name,
-                    class.superclass_package.as_ref().map(|p| &p.name),
-                    superclass.span,
-                    hierarchy,
-                ));
-            }
+        if let Some(superclass) = &class.superclass
+            && offset >= superclass.span.start()
+            && offset < superclass.span.end()
+        {
+            return Some(class_reference_hover_info(
+                &superclass.name,
+                class.superclass_package.as_ref().map(|p| &p.name),
+                superclass.span,
+                hierarchy,
+            ));
         }
         for state in &class.state {
             if offset >= state.name.span.start() && offset < state.name.span.end() {
@@ -924,12 +926,12 @@ fn find_hover_in_expr(
                 (arguments.first(), type_of_parsed(type_map, receiver))
             {
                 let key_span = key_arg.span();
-                if offset >= key_span.start() && offset < key_span.end() {
-                    if let Some(text) =
+                if offset >= key_span.start()
+                    && offset < key_span.end()
+                    && let Some(text) =
                         shape_keys::keyed_send_hover_text(&selector.name(), key_arg, receiver_ty)
-                    {
-                        return Some(HoverInfo::new(text, key_span));
-                    }
+                {
+                    return Some(HoverInfo::new(text, key_span));
                 }
             }
             if let Some(hover) = arguments.iter().find_map(|arg| {
@@ -1209,12 +1211,11 @@ fn find_hover_in_expr(
                     let key_span = pair.key.span();
                     if let (Expression::Literal(Literal::Symbol(key), _), Some(literal_ty)) =
                         (&pair.key, type_of_parsed(type_map, expr))
+                        && offset >= key_span.start()
+                        && offset < key_span.end()
+                        && let Some(text) = shape_keys::key_hover_text(key, literal_ty, false)
                     {
-                        if offset >= key_span.start() && offset < key_span.end() {
-                            if let Some(text) = shape_keys::key_hover_text(key, literal_ty, false) {
-                                return Some(HoverInfo::new(text, key_span));
-                            }
-                        }
+                        return Some(HoverInfo::new(text, key_span));
                     }
                     if let Some(hover) = find_hover_in_expr(
                         &pair.key,
@@ -1267,8 +1268,8 @@ fn find_hover_in_expr(
                         return Some(hover);
                     }
                 }
-                if let Some(t) = tail {
-                    if let Some(hover) = find_hover_in_expr(
+                if let Some(t) = tail
+                    && let Some(hover) = find_hover_in_expr(
                         t,
                         offset,
                         context,
@@ -1276,9 +1277,9 @@ fn find_hover_in_expr(
                         type_map,
                         native_types,
                         alias_registry,
-                    ) {
-                        return Some(hover);
-                    }
+                    )
+                {
+                    return Some(hover);
                 }
                 Some(HoverInfo::new(
                     format!("List literal with {} elements", elements.len()),
@@ -1362,8 +1363,8 @@ fn find_hover_in_expr(
             if offset >= span.start() && offset < span.end() {
                 // Check interpolated expressions for hover targets
                 for segment in segments {
-                    if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment {
-                        if let Some(info) = find_hover_in_expr(
+                    if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment
+                        && let Some(info) = find_hover_in_expr(
                             expr,
                             offset,
                             context,
@@ -1371,9 +1372,9 @@ fn find_hover_in_expr(
                             type_map,
                             native_types,
                             alias_registry,
-                        ) {
-                            return Some(info);
-                        }
+                        )
+                    {
+                        return Some(info);
                     }
                 }
                 Some(HoverInfo::new("Interpolated string".to_string(), *span))
@@ -1551,10 +1552,10 @@ fn ffi_selector_hover_info(
 /// reference (for direct `Erlang lists reverse:` patterns).
 fn extract_erlang_module_name(receiver: &Expression, type_map: &TypeMap) -> Option<String> {
     // First try the type map
-    if let Some(InferredType::Known { type_args, .. }) = type_of_parsed(type_map, receiver) {
-        if let Some(InferredType::Known { class_name, .. }) = type_args.first() {
-            return Some(class_name.to_string());
-        }
+    if let Some(InferredType::Known { type_args, .. }) = type_of_parsed(type_map, receiver)
+        && let Some(InferredType::Known { class_name, .. }) = type_args.first()
+    {
+        return Some(class_name.to_string());
     }
 
     // Fall back to AST inspection for `Erlang <module>` pattern:
@@ -1566,12 +1567,10 @@ fn extract_erlang_module_name(receiver: &Expression, type_map: &TypeMap) -> Opti
         selector: MessageSelector::Unary(module_name),
         ..
     } = receiver
+        && let Expression::ClassReference { name, .. } = inner_receiver.as_ref()
+        && name.name == "Erlang"
     {
-        if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
-            if name.name == "Erlang" {
-                return Some(module_name.to_string());
-            }
-        }
+        return Some(module_name.to_string());
     }
 
     None
@@ -1710,10 +1709,10 @@ fn class_reference_hover_info(
     let mut info = format!("Class: `{class_name}`");
 
     // Show visibility annotation for internal classes (ADR 0071)
-    if let Some(class_info) = hierarchy.get_class(class_name.as_str()) {
-        if class_info.is_internal {
-            let _ = write!(info, " (internal)");
-        }
+    if let Some(class_info) = hierarchy.get_class(class_name.as_str())
+        && class_info.is_internal
+    {
+        let _ = write!(info, " (internal)");
     }
 
     // Show package provenance for dependency classes (ADR 0070 Phase 5)

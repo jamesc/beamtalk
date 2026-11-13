@@ -100,10 +100,10 @@ fn analysis_accepts_no_writing_block_at_an_erlang_call_site() {
                 continue;
             }
             accepted += 1;
-            if let Err(e) = generate_module(&module, CodegenOptions::new("agree")) {
-                if is_the_internal_error(&e) {
-                    failures.push(format!("module: {e}\n{src}"));
-                }
+            if let Err(e) = generate_module(&module, CodegenOptions::new("agree"))
+                && is_the_internal_error(&e)
+            {
+                failures.push(format!("module: {e}\n{src}"));
             }
         }
 
@@ -123,10 +123,10 @@ fn analysis_accepts_no_writing_block_at_an_erlang_call_site() {
             .iter()
             .map(|s| s.expression.clone())
             .collect();
-        if let Err(e) = generate_repl_expressions(&expressions, "agree") {
-            if is_the_internal_error(&e) {
-                failures.push(format!("repl: {e}\n{src}"));
-            }
+        if let Err(e) = generate_repl_expressions(&expressions, "agree")
+            && is_the_internal_error(&e)
+        {
+            failures.push(format!("repl: {e}\n{src}"));
         }
     }
 

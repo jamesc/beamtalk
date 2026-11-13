@@ -49,15 +49,15 @@ pub fn run_erlfmt(
     let ebin_dir = tool_dir.join(ERLFMT_EBIN_REL);
 
     // Ensure erlfmt beams are available.
-    if !ebin_dir.is_dir() {
-        if let Err(e) = build_erlfmt(&tool_dir) {
-            warn!("could not build erlfmt: {e}");
-            eprintln!(
-                "warning: erlfmt not available; skipping .erl formatting \
+    if !ebin_dir.is_dir()
+        && let Err(e) = build_erlfmt(&tool_dir)
+    {
+        warn!("could not build erlfmt: {e}");
+        eprintln!(
+            "warning: erlfmt not available; skipping .erl formatting \
                  (install rebar3 to enable)"
-            );
-            return Ok(ErlfmtResult::default());
-        }
+        );
+        return Ok(ErlfmtResult::default());
     }
 
     invoke_erlfmt(&ebin_dir, files, check_only)

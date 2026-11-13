@@ -68,12 +68,12 @@ pub(crate) fn compute_relative_module(
     file: &Utf8Path,
     source_root: Option<&Utf8Path>,
 ) -> Result<String> {
-    if let Some(root) = source_root {
-        if let Ok(relative) = file.strip_prefix(root) {
-            let segments = beamtalk_core::semantic_analysis::relative_module_segments(relative)
-                .into_diagnostic()?;
-            return Ok(segments.join("@"));
-        }
+    if let Some(root) = source_root
+        && let Ok(relative) = file.strip_prefix(root)
+    {
+        let segments = beamtalk_core::semantic_analysis::relative_module_segments(relative)
+            .into_diagnostic()?;
+        return Ok(segments.join("@"));
     }
     // Fallback: use file stem
     let stem = file.file_stem().unwrap_or("unknown");

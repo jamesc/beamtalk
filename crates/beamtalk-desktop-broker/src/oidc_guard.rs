@@ -90,10 +90,10 @@ const OIDC_ENV_VARS: &[&str] = &[
 /// (mirrors `BtAttach.IdeConfig.default_path/0`).
 #[must_use]
 pub fn default_ide_config_path() -> PathBuf {
-    if let Ok(path) = std::env::var("BT_IDE_CONFIG") {
-        if !path.is_empty() {
-            return PathBuf::from(path);
-        }
+    if let Ok(path) = std::env::var("BT_IDE_CONFIG")
+        && !path.is_empty()
+    {
+        return PathBuf::from(path);
     }
     beamtalk_workspace::beamtalk_root_dir()
         .unwrap_or_else(|_| PathBuf::from(".beamtalk"))

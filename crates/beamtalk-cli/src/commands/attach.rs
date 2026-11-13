@@ -107,18 +107,15 @@ fn connect_and_run(host: &str, port: u16, cookie: &str) -> Result<()> {
     // Show available actors
     match client.list_actors() {
         Ok(response) => {
-            if let Some(actors) = response.actors {
-                if !actors.is_empty() {
-                    println!("\nAvailable actors:");
-                    for actor in &actors {
-                        println!(
-                            "  - {}",
-                            beamtalk_repl_protocol::format::format_actor_summary(
-                                actor,
-                                output_mode(),
-                            )
-                        );
-                    }
+            if let Some(actors) = response.actors
+                && !actors.is_empty()
+            {
+                println!("\nAvailable actors:");
+                for actor in &actors {
+                    println!(
+                        "  - {}",
+                        beamtalk_repl_protocol::format::format_actor_summary(actor, output_mode(),)
+                    );
                 }
             }
         }

@@ -371,12 +371,12 @@ pub(super) fn clean_ebin_dir(ebin_dir: &Utf8Path) -> Result<()> {
     {
         let entry = entry.into_diagnostic()?;
         let path = entry.path();
-        if let Some(ext) = path.extension() {
-            if ext == "beam" || ext == "app" {
-                fs::remove_file(&path)
-                    .into_diagnostic()
-                    .wrap_err_with(|| format!("Failed to remove '{}'", path.display()))?;
-            }
+        if let Some(ext) = path.extension()
+            && (ext == "beam" || ext == "app")
+        {
+            fs::remove_file(&path)
+                .into_diagnostic()
+                .wrap_err_with(|| format!("Failed to remove '{}'", path.display()))?;
         }
     }
     Ok(())
@@ -461,10 +461,10 @@ pub(super) fn stdlib_erlang_modules(src_dir: &Utf8Path) -> Result<Vec<String>> {
         .wrap_err_with(|| format!("Failed to read '{src_dir}'"))?
     {
         let path = entry.into_diagnostic()?.path();
-        if path.extension().is_some_and(|ext| ext == "erl") {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                modules.push(stem.to_string());
-            }
+        if path.extension().is_some_and(|ext| ext == "erl")
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+        {
+            modules.push(stem.to_string());
         }
     }
     Ok(modules)
@@ -623,14 +623,14 @@ pub(super) fn oldest_mtime_in_dir(dir: &Utf8Path, ext: &str) -> Option<SystemTim
     let mut oldest: Option<SystemTime> = None;
     let entries = fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
-        if entry.path().extension().is_some_and(|e| e == ext) {
-            if let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) {
-                oldest = Some(match oldest {
-                    Some(prev) if mtime < prev => mtime,
-                    Some(prev) => prev,
-                    None => mtime,
-                });
-            }
+        if entry.path().extension().is_some_and(|e| e == ext)
+            && let Ok(mtime) = entry.metadata().and_then(|m| m.modified())
+        {
+            oldest = Some(match oldest {
+                Some(prev) if mtime < prev => mtime,
+                Some(prev) => prev,
+                None => mtime,
+            });
         }
     }
     oldest

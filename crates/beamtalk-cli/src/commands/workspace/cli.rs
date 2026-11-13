@@ -586,25 +586,23 @@ fn run_create_background(
     // startup-only flags. This avoids spurious errors when the user just
     // wants to check that a workspace is running.
     let workspace_id = super::workspace_id_for_project(&project_root, Some(name))?;
-    if let Ok(true) = super::storage::workspace_exists(&workspace_id) {
-        if let Ok(Some(info)) = super::storage::get_node_info(&workspace_id) {
-            if super::is_node_running(&info, Some(&workspace_id)) {
-                println!("Workspace '{workspace_id}' already running");
-                let has_startup_flags =
-                    bind.is_some() || port != 0 || persistent || idle_timeout.is_some();
-                if has_startup_flags {
-                    eprintln!(
-                        "  ⚠️  Startup flags (--port, --bind, --persistent, \
+    if let Ok(true) = super::storage::workspace_exists(&workspace_id)
+        && let Ok(Some(info)) = super::storage::get_node_info(&workspace_id)
+        && super::is_node_running(&info, Some(&workspace_id))
+    {
+        println!("Workspace '{workspace_id}' already running");
+        let has_startup_flags = bind.is_some() || port != 0 || persistent || idle_timeout.is_some();
+        if has_startup_flags {
+            eprintln!(
+                "  ⚠️  Startup flags (--port, --bind, --persistent, \
                          --idle-timeout) have no effect on an already-running workspace.\n  \
                          Stop it first with `beamtalk workspace stop {name}` to restart with new settings."
-                    );
-                }
-                println!("Node:      {}", info.node_name);
-                println!("Port:      {}", info.port);
-                println!("\nAttach a REPL: beamtalk repl --workspace {workspace_id}");
-                return Ok(());
-            }
+            );
         }
+        println!("Node:      {}", info.node_name);
+        println!("Port:      {}", info.port);
+        println!("\nAttach a REPL: beamtalk repl --workspace {workspace_id}");
+        return Ok(());
     }
 
     // Validate startup-only flags (only reached when we're actually starting a new node)
@@ -851,15 +849,15 @@ mod tests {
 
         // A sibling directory that merely shares a string prefix with
         // $HOME (`/Users/james2/…` vs `/Users/james`) must NOT abbreviate.
-        if let Some(home) = dirs::home_dir() {
-            if let Some(home_str) = home.to_str() {
-                let sibling = PathBuf::from(format!("{home_str}2/some-project"));
-                assert!(
-                    !display_project_path(&sibling, 60).starts_with('~'),
-                    "sibling prefix must not abbreviate, got: {}",
-                    display_project_path(&sibling, 60)
-                );
-            }
+        if let Some(home) = dirs::home_dir()
+            && let Some(home_str) = home.to_str()
+        {
+            let sibling = PathBuf::from(format!("{home_str}2/some-project"));
+            assert!(
+                !display_project_path(&sibling, 60).starts_with('~'),
+                "sibling prefix must not abbreviate, got: {}",
+                display_project_path(&sibling, 60)
+            );
         }
 
         // Non-home paths are never `~`-prefixed, but still tail-truncated.

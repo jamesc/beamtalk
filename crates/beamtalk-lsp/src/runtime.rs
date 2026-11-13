@@ -324,15 +324,15 @@ impl Drop for RuntimeInner {
         // down when the last `RuntimeClient` handle is dropped. By the time
         // `Drop` runs the inner `Arc` has reached refcount zero, so
         // `try_lock` cannot contend with any other holder of these mutexes.
-        if let Ok(mut g) = self.writer.try_lock() {
-            if let Some(h) = g.take() {
-                h.abort();
-            }
+        if let Ok(mut g) = self.writer.try_lock()
+            && let Some(h) = g.take()
+        {
+            h.abort();
         }
-        if let Ok(mut g) = self.listener.try_lock() {
-            if let Some(h) = g.take() {
-                h.abort();
-            }
+        if let Ok(mut g) = self.listener.try_lock()
+            && let Some(h) = g.take()
+        {
+            h.abort();
         }
     }
 }

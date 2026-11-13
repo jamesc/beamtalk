@@ -534,10 +534,11 @@ pub fn discover_native_modules(project_root: &Utf8Path) -> Result<Vec<String>> {
     for entry in entries {
         let entry = entry.into_diagnostic()?;
         let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                module_names.push(stem.to_string());
-            }
+        if path.is_file()
+            && path.extension().is_some_and(|ext| ext == "erl")
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+        {
+            module_names.push(stem.to_string());
         }
     }
 

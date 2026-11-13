@@ -131,10 +131,10 @@ fn collect_class_definition_refs(
     if class.name.name == name {
         results.push(Location::new(file_path.clone(), class.name.span));
     }
-    if let Some(ref superclass) = class.superclass {
-        if superclass.name == name {
-            results.push(Location::new(file_path.clone(), superclass.span));
-        }
+    if let Some(ref superclass) = class.superclass
+        && superclass.name == name
+    {
+        results.push(Location::new(file_path.clone(), superclass.span));
     }
     collect_type_param_bound_refs(&class.type_params, name, file_path, results);
 
@@ -161,10 +161,10 @@ fn collect_protocol_definition_refs(
     if protocol.name.name == name {
         results.push(Location::new(file_path.clone(), protocol.name.span));
     }
-    if let Some(ref extending) = protocol.extending {
-        if extending.name == name {
-            results.push(Location::new(file_path.clone(), extending.span));
-        }
+    if let Some(ref extending) = protocol.extending
+        && extending.name == name
+    {
+        results.push(Location::new(file_path.clone(), extending.span));
     }
     collect_type_param_bound_refs(&protocol.type_params, name, file_path, results);
 
@@ -206,10 +206,10 @@ fn collect_type_param_bound_refs(
     results: &mut Vec<Location>,
 ) {
     for param in type_params {
-        if let Some(bound) = &param.bound {
-            if bound.name == name {
-                results.push(Location::new(file_path.clone(), bound.span));
-            }
+        if let Some(bound) = &param.bound
+            && bound.name == name
+        {
+            results.push(Location::new(file_path.clone(), bound.span));
         }
     }
 }

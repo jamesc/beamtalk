@@ -469,14 +469,13 @@ impl SimpleLanguageService {
             crate::queries::definition_provider::check_ffi_call(&file_data.module, offset.get())?;
 
         // Enrich with line number from the native type registry if available.
-        if !info.function_name.is_empty() {
-            if let Some(sig) = self
+        if !info.function_name.is_empty()
+            && let Some(sig) = self
                 .native_types
                 .as_deref()
                 .and_then(|reg| reg.lookup(&info.module_name, &info.function_name, info.arity))
-            {
-                info.line = sig.line;
-            }
+        {
+            info.line = sig.line;
         }
 
         Some(info)
@@ -1268,25 +1267,25 @@ impl SimpleLanguageService {
                 IdentifierContext::TypeReference,
             ));
         }
-        if let Some(ref superclass) = class.superclass {
-            if offset_val >= superclass.span.start() && offset_val < superclass.span.end() {
-                return Some((
-                    superclass.clone(),
-                    superclass.span,
-                    IdentifierContext::TypeReference,
-                ));
-            }
+        if let Some(ref superclass) = class.superclass
+            && offset_val >= superclass.span.start()
+            && offset_val < superclass.span.end()
+        {
+            return Some((
+                superclass.clone(),
+                superclass.span,
+                IdentifierContext::TypeReference,
+            ));
         }
         if let Some(ident) = Self::find_identifier_in_type_params(&class.type_params, offset_val) {
             return Some(ident);
         }
         for state in class.state.iter().chain(class.class_variables.iter()) {
-            if let Some(type_annotation) = &state.type_annotation {
-                if let Some(ident) =
+            if let Some(type_annotation) = &state.type_annotation
+                && let Some(ident) =
                     Self::find_identifier_in_type_annotation(type_annotation, offset_val)
-                {
-                    return Some(ident);
-                }
+            {
+                return Some(ident);
             }
         }
         for method in class.methods.iter().chain(class.class_methods.iter()) {
@@ -1318,14 +1317,15 @@ impl SimpleLanguageService {
                 IdentifierContext::TypeReference,
             ));
         }
-        if let Some(ref extending) = protocol.extending {
-            if offset_val >= extending.span.start() && offset_val < extending.span.end() {
-                return Some((
-                    extending.clone(),
-                    extending.span,
-                    IdentifierContext::TypeReference,
-                ));
-            }
+        if let Some(ref extending) = protocol.extending
+            && offset_val >= extending.span.start()
+            && offset_val < extending.span.end()
+        {
+            return Some((
+                extending.clone(),
+                extending.span,
+                IdentifierContext::TypeReference,
+            ));
         }
         if let Some(ident) = Self::find_identifier_in_type_params(&protocol.type_params, offset_val)
         {
@@ -1337,20 +1337,18 @@ impl SimpleLanguageService {
             .chain(protocol.class_method_signatures.iter())
         {
             for parameter in &sig.parameters {
-                if let Some(type_annotation) = &parameter.type_annotation {
-                    if let Some(ident) =
+                if let Some(type_annotation) = &parameter.type_annotation
+                    && let Some(ident) =
                         Self::find_identifier_in_type_annotation(type_annotation, offset_val)
-                    {
-                        return Some(ident);
-                    }
-                }
-            }
-            if let Some(return_type) = &sig.return_type {
-                if let Some(ident) =
-                    Self::find_identifier_in_type_annotation(return_type, offset_val)
                 {
                     return Some(ident);
                 }
+            }
+            if let Some(return_type) = &sig.return_type
+                && let Some(ident) =
+                    Self::find_identifier_in_type_annotation(return_type, offset_val)
+            {
+                return Some(ident);
             }
         }
         None
@@ -1388,18 +1386,17 @@ impl SimpleLanguageService {
         offset_val: u32,
     ) -> Option<(Identifier, Span, IdentifierContext)> {
         for parameter in parameters {
-            if let Some(type_annotation) = &parameter.type_annotation {
-                if let Some(ident) =
+            if let Some(type_annotation) = &parameter.type_annotation
+                && let Some(ident) =
                     Self::find_identifier_in_type_annotation(type_annotation, offset_val)
-                {
-                    return Some(ident);
-                }
-            }
-        }
-        if let Some(return_type) = return_type {
-            if let Some(ident) = Self::find_identifier_in_type_annotation(return_type, offset_val) {
+            {
                 return Some(ident);
             }
+        }
+        if let Some(return_type) = return_type
+            && let Some(ident) = Self::find_identifier_in_type_annotation(return_type, offset_val)
+        {
+            return Some(ident);
         }
         for stmt in body {
             if let Some(ident) = Self::find_identifier_in_expr(&stmt.expression, offset) {
@@ -1421,10 +1418,11 @@ impl SimpleLanguageService {
         offset_val: u32,
     ) -> Option<(Identifier, Span, IdentifierContext)> {
         for param in type_params {
-            if let Some(bound) = &param.bound {
-                if offset_val >= bound.span.start() && offset_val < bound.span.end() {
-                    return Some((bound.clone(), bound.span, IdentifierContext::TypeReference));
-                }
+            if let Some(bound) = &param.bound
+                && offset_val >= bound.span.start()
+                && offset_val < bound.span.end()
+            {
+                return Some((bound.clone(), bound.span, IdentifierContext::TypeReference));
             }
         }
         None

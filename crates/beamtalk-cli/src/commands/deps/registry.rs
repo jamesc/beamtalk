@@ -695,10 +695,10 @@ pub fn resolve_release(
 ) -> Result<RegistryRelease> {
     // First attempt: whatever index is already on disk.
     let index_root = ensure_index(location, project_root, false)?;
-    if let Some(entry) = read_entry(&index_root, name)? {
-        if let Some(release) = entry.find_version(version) {
-            return Ok(release.clone());
-        }
+    if let Some(entry) = read_entry(&index_root, name)?
+        && let Some(release) = entry.find_version(version)
+    {
+        return Ok(release.clone());
     }
 
     // Miss — refresh the index once and retry before failing.
@@ -761,10 +761,10 @@ pub fn resolve_latest_release(
     name: &str,
 ) -> Result<RegistryRelease> {
     let index_root = ensure_index(location, project_root, false)?;
-    if let Some(entry) = read_entry(&index_root, name)? {
-        if let Some(release) = entry.latest_version() {
-            return Ok(release.clone());
-        }
+    if let Some(entry) = read_entry(&index_root, name)?
+        && let Some(release) = entry.latest_version()
+    {
+        return Ok(release.clone());
     }
 
     // Miss — refresh the index once and retry before failing.
@@ -813,10 +813,10 @@ pub fn list_all_entries(index_root: &Utf8Path) -> Result<Vec<RegistryEntry>> {
             format!("Failed to read an entry in registry packages directory '{packages_dir}'")
         })?;
         let path = entry.path();
-        if path.extension().is_some_and(|e| e == "toml") {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                names.push(stem.to_string());
-            }
+        if path.extension().is_some_and(|e| e == "toml")
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+        {
+            names.push(stem.to_string());
         }
     }
     names.sort();
@@ -845,14 +845,14 @@ fn describe_available_packages(index_root: &Utf8Path) -> String {
     if let Ok(entries) = std::fs::read_dir(index_root.join("packages")) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "toml") {
-                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                    if names.len() == MAX_LISTED {
-                        more = true;
-                        break;
-                    }
-                    names.push(stem.to_string());
+            if path.extension().is_some_and(|e| e == "toml")
+                && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            {
+                if names.len() == MAX_LISTED {
+                    more = true;
+                    break;
                 }
+                names.push(stem.to_string());
             }
         }
     }

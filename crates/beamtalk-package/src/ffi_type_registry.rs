@@ -301,11 +301,11 @@ pub fn load_dependency_stub_registries(
     let mut merged = StubLayer::empty();
     let mut found_any = false;
 
-    if let Some(dist_dir) = distribution_stubs_dir {
-        if let Some(dist_layer) = load_stub_registry_from_dir(dist_dir, auto_extract) {
-            merged.absorb(dist_layer);
-            found_any = true;
-        }
+    if let Some(dist_dir) = distribution_stubs_dir
+        && let Some(dist_layer) = load_stub_registry_from_dir(dist_dir, auto_extract)
+    {
+        merged.absorb(dist_layer);
+        found_any = true;
     }
 
     // Tracks which dependency first declared each (module, function, arity)

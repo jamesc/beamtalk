@@ -138,12 +138,12 @@ pub fn resolve_sibling_binary(name: &str) -> std::result::Result<PathBuf, String
     let suffix = std::env::consts::EXE_SUFFIX;
     let file = format!("{name}{suffix}");
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(profile_dir) = exe.ancestors().nth(2) {
-            let candidate = profile_dir.join(&file);
-            if candidate.exists() {
-                return Ok(candidate);
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(profile_dir) = exe.ancestors().nth(2)
+    {
+        let candidate = profile_dir.join(&file);
+        if candidate.exists() {
+            return Ok(candidate);
         }
     }
 
@@ -573,11 +573,11 @@ mod tests {
         let invalid_name = OsStr::from_bytes(&invalid_bytes);
         let non_utf8_path = tmp.join(invalid_name);
 
-        if let Err(e) = std::fs::create_dir(&non_utf8_path) {
-            if e.kind() != std::io::ErrorKind::AlreadyExists {
-                eprintln!("skipping test: failed to create non-UTF8 dir {non_utf8_path:?}: {e}");
-                return;
-            }
+        if let Err(e) = std::fs::create_dir(&non_utf8_path)
+            && e.kind() != std::io::ErrorKind::AlreadyExists
+        {
+            eprintln!("skipping test: failed to create non-UTF8 dir {non_utf8_path:?}: {e}");
+            return;
         }
 
         let result = generate_workspace_id(&non_utf8_path);

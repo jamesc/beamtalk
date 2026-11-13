@@ -29,10 +29,10 @@ use std::path::PathBuf;
 /// Callers that need a `Result` (e.g. `beamtalk-workspace`) should wrap the
 /// `None` case with their preferred error type.
 pub fn beamtalk_root_dir() -> Option<PathBuf> {
-    if let Ok(override_dir) = std::env::var("BEAMTALK_HOME") {
-        if !override_dir.is_empty() {
-            return Some(PathBuf::from(override_dir));
-        }
+    if let Ok(override_dir) = std::env::var("BEAMTALK_HOME")
+        && !override_dir.is_empty()
+    {
+        return Some(PathBuf::from(override_dir));
     }
     dirs::home_dir().map(|h| h.join(".beamtalk"))
 }

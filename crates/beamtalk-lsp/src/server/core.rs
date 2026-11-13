@@ -437,13 +437,13 @@ impl Backend {
             .lock()
             .expect("otp_lib_dir lock poisoned")
             .clone();
-        if let Some(lib_dir) = otp_dir {
-            if let Ok(entries) = std::fs::read_dir(&lib_dir) {
-                for entry in entries.flatten() {
-                    let candidate = entry.path().join("src").join(&filename);
-                    if candidate.is_file() {
-                        return Some(candidate);
-                    }
+        if let Some(lib_dir) = otp_dir
+            && let Ok(entries) = std::fs::read_dir(&lib_dir)
+        {
+            for entry in entries.flatten() {
+                let candidate = entry.path().join("src").join(&filename);
+                if candidate.is_file() {
+                    return Some(candidate);
                 }
             }
         }
@@ -704,18 +704,18 @@ impl Backend {
                 // Parse errors are logged inside load_diagnostics_table_for_root.
                 let root_table = beamtalk_core::compilation::load_diagnostics_table_for_root(root);
                 for (category, severity) in root_table {
-                    if let Some(previous) = merged.get(&category) {
-                        if *previous != severity {
-                            tracing::warn!(
-                                root = %root.display(),
-                                category = ?category,
-                                previous = ?previous,
-                                new = ?severity,
-                                "[diagnostics] category set differently by multiple \
-                                 workspace roots; this root's value wins for the \
-                                 whole session"
-                            );
-                        }
+                    if let Some(previous) = merged.get(&category)
+                        && *previous != severity
+                    {
+                        tracing::warn!(
+                            root = %root.display(),
+                            category = ?category,
+                            previous = ?previous,
+                            new = ?severity,
+                            "[diagnostics] category set differently by multiple \
+                             workspace roots; this root's value wins for the \
+                             whole session"
+                        );
                     }
                     merged.insert(category, severity);
                 }

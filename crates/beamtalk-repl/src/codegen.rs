@@ -831,29 +831,29 @@ impl<'a> ReplAssembler<'a> {
             return Ok((binding_docs, var(rhs_var), trace_return));
         }
 
-        if let Expression::Assignment { target, value, .. } = expr {
-            if let Expression::Identifier(id) = target.as_ref() {
-                let var_name = id.name.to_string();
-                let (prelude, current_state, val_doc) = self.repl_assignment_value(expr, value)?;
-                let new_state = self.generator.next_state_var();
-                let mut all_steps = prev_steps;
-                all_steps.push((source_text.to_string(), Document::Str("Result")));
-                let steps_doc = Self::build_steps_list_doc(all_steps);
-                let trace_return = docvec![
-                    "let ",
-                    leaf::var(new_state.clone()),
-                    " = call 'maps':'put'(",
-                    leaf::atom(var_name),
-                    ", Result, ",
-                    leaf::var(current_state),
-                    ") in {",
-                    steps_doc,
-                    ", ",
-                    leaf::var(new_state),
-                    "}",
-                ];
-                return Ok((vec![prelude], val_doc, trace_return));
-            }
+        if let Expression::Assignment { target, value, .. } = expr
+            && let Expression::Identifier(id) = target.as_ref()
+        {
+            let var_name = id.name.to_string();
+            let (prelude, current_state, val_doc) = self.repl_assignment_value(expr, value)?;
+            let new_state = self.generator.next_state_var();
+            let mut all_steps = prev_steps;
+            all_steps.push((source_text.to_string(), Document::Str("Result")));
+            let steps_doc = Self::build_steps_list_doc(all_steps);
+            let trace_return = docvec![
+                "let ",
+                leaf::var(new_state.clone()),
+                " = call 'maps':'put'(",
+                leaf::atom(var_name),
+                ", Result, ",
+                leaf::var(current_state),
+                ") in {",
+                steps_doc,
+                ", ",
+                leaf::var(new_state),
+                "}",
+            ];
+            return Ok((vec![prelude], val_doc, trace_return));
         }
 
         let (prelude, val_doc, repl_mutated) = self.repl_expression_doc(expr, expr)?;
@@ -1079,31 +1079,31 @@ impl<'a> ReplAssembler<'a> {
             return Ok((Document::Vec(result), false));
         }
 
-        if let Expression::Assignment { target, value, .. } = expr {
-            if let Expression::Identifier(id) = target.as_ref() {
-                let var_name = id.name.to_string();
-                let (prelude, current_state, val_doc) = self.repl_assignment_value(expr, value)?;
-                let new_state = self.generator.next_state_var();
-                return Ok((
-                    docvec![
-                        prelude,
-                        "    let ",
-                        leaf::var(result_var.to_string()),
-                        " = ",
-                        val_doc,
-                        " in let ",
-                        leaf::var(new_state),
-                        " = call 'maps':'put'(",
-                        leaf::atom(var_name),
-                        ", ",
-                        leaf::var(result_var.to_string()),
-                        ", ",
-                        leaf::var(current_state),
-                        ") in\n",
-                    ],
-                    false,
-                ));
-            }
+        if let Expression::Assignment { target, value, .. } = expr
+            && let Expression::Identifier(id) = target.as_ref()
+        {
+            let var_name = id.name.to_string();
+            let (prelude, current_state, val_doc) = self.repl_assignment_value(expr, value)?;
+            let new_state = self.generator.next_state_var();
+            return Ok((
+                docvec![
+                    prelude,
+                    "    let ",
+                    leaf::var(result_var.to_string()),
+                    " = ",
+                    val_doc,
+                    " in let ",
+                    leaf::var(new_state),
+                    " = call 'maps':'put'(",
+                    leaf::atom(var_name),
+                    ", ",
+                    leaf::var(result_var.to_string()),
+                    ", ",
+                    leaf::var(current_state),
+                    ") in\n",
+                ],
+                false,
+            ));
         }
         // Non-assignment: evaluate for side effects, discard value.
         let (prelude, expr_doc, repl_mutated) = self.repl_expression_doc(expr, expr)?;
@@ -1156,24 +1156,24 @@ impl<'a> ReplAssembler<'a> {
             return Ok((binding_docs, var(rhs_var), return_tuple));
         }
 
-        if let Expression::Assignment { target, value, .. } = expr {
-            if let Expression::Identifier(id) = target.as_ref() {
-                let var_name = id.name.to_string();
-                let (prelude, current_state, val_doc) = self.repl_assignment_value(expr, value)?;
-                let new_state = self.generator.next_state_var();
-                let return_tuple = docvec![
-                    "let ",
-                    leaf::var(new_state.clone()),
-                    " = call 'maps':'put'(",
-                    leaf::atom(var_name),
-                    ", Result, ",
-                    leaf::var(current_state),
-                    ") in {Result, ",
-                    leaf::var(new_state),
-                    "}",
-                ];
-                return Ok((vec![prelude], val_doc, return_tuple));
-            }
+        if let Expression::Assignment { target, value, .. } = expr
+            && let Expression::Identifier(id) = target.as_ref()
+        {
+            let var_name = id.name.to_string();
+            let (prelude, current_state, val_doc) = self.repl_assignment_value(expr, value)?;
+            let new_state = self.generator.next_state_var();
+            let return_tuple = docvec![
+                "let ",
+                leaf::var(new_state.clone()),
+                " = call 'maps':'put'(",
+                leaf::atom(var_name),
+                ", Result, ",
+                leaf::var(current_state),
+                ") in {Result, ",
+                leaf::var(new_state),
+                "}",
+            ];
+            return Ok((vec![prelude], val_doc, return_tuple));
         }
         // Non-assignment: same logic as single-expression path
         let (prelude, val_doc, repl_mutated) = self.repl_expression_doc(expr, expr)?;

@@ -103,10 +103,10 @@ pub(crate) fn response_status(term: &Term) -> Option<String> {
 
 /// Extract the diagnostics list from a response Term.
 pub(crate) fn response_diagnostics(term: &Term) -> Option<&List> {
-    if let Term::Map(map) = term {
-        if let Some(Term::List(list)) = map_get(map, "diagnostics") {
-            return Some(list);
-        }
+    if let Term::Map(map) = term
+        && let Some(Term::List(list)) = map_get(map, "diagnostics")
+    {
+        return Some(list);
     }
     None
 }
@@ -122,10 +122,10 @@ pub(crate) fn response_field_str(term: &Term, key: &str) -> Option<String> {
 
 /// Extract a list-of-binary-valued field from a response Term (e.g. `param_types`).
 pub(crate) fn response_field_str_list(term: &Term, key: &str) -> Option<Vec<String>> {
-    if let Term::Map(map) = term {
-        if let Some(Term::List(list)) = map_get(map, key) {
-            return Some(list.elements.iter().filter_map(term_to_string).collect());
-        }
+    if let Term::Map(map) = term
+        && let Some(Term::List(list)) = map_get(map, key)
+    {
+        return Some(list.elements.iter().filter_map(term_to_string).collect());
     }
     None
 }

@@ -317,14 +317,13 @@ pub(crate) fn rebar3_path() -> Result<PathBuf> {
         if let Ok(output) = std::process::Command::new(candidate)
             .arg("version")
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                info!(
-                    rebar3 = candidate,
-                    "Using system rebar3 (bundled copy not found)"
-                );
-                return Ok(PathBuf::from(candidate));
-            }
+            info!(
+                rebar3 = candidate,
+                "Using system rebar3 (bundled copy not found)"
+            );
+            return Ok(PathBuf::from(candidate));
         }
     }
 
@@ -643,10 +642,9 @@ fn record_manifest_reference(pkg: &mut NativePackageLock, native_deps: &NativeDe
     ) = (
         &mut pkg.source,
         native_deps.get(&pkg.name).map(|dep| &dep.source),
-    ) {
-        if url == manifest_url {
-            *reference = Some(manifest_reference.clone());
-        }
+    ) && url == manifest_url
+    {
+        *reference = Some(manifest_reference.clone());
     }
 }
 
@@ -730,16 +728,16 @@ pub(crate) fn generate_rebar_config(
     } else {
         None
     };
-    if let Some(url) = test_repo_url {
-        if !url.is_empty() {
-            use crate::beam_compiler::escape_erlang_string;
-            let _ = writeln!(
-                config,
-                "{{hex, [{{repos, [#{{name => <<\"hexpm\">>, repo_url => <<\"{}\">>, \
+    if let Some(url) = test_repo_url
+        && !url.is_empty()
+    {
+        use crate::beam_compiler::escape_erlang_string;
+        let _ = writeln!(
+            config,
+            "{{hex, [{{repos, [#{{name => <<\"hexpm\">>, repo_url => <<\"{}\">>, \
                  repo_verify => false, repo_verify_origin => false}}]}}]}}.",
-                escape_erlang_string(&url)
-            );
-        }
+            escape_erlang_string(&url)
+        );
     }
 
     debug!(path = %config_path, "Writing rebar.config");
@@ -1030,11 +1028,12 @@ pub(crate) fn collect_rebar3_ebin_paths(layout: &BuildLayout) -> Vec<Utf8PathBuf
             continue;
         }
         let ebin = path.join("ebin");
-        if ebin.exists() && ebin.is_dir() {
-            if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
-                debug!(ebin = %utf8, "Found rebar3 ebin directory");
-                paths.push(utf8);
-            }
+        if ebin.exists()
+            && ebin.is_dir()
+            && let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin)
+        {
+            debug!(ebin = %utf8, "Found rebar3 ebin directory");
+            paths.push(utf8);
         }
     }
 

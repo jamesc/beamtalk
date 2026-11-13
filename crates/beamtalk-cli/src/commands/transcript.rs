@@ -132,10 +132,10 @@ fn print_entry(entry: &str) -> bool {
     // Entries may contain newline characters; print as-is for faithful output
     print!("{entry}");
     // Flush to ensure output appears immediately; exit on broken pipe
-    if let Err(e) = std::io::stdout().flush() {
-        if e.kind() == ErrorKind::BrokenPipe {
-            return false;
-        }
+    if let Err(e) = std::io::stdout().flush()
+        && e.kind() == ErrorKind::BrokenPipe
+    {
+        return false;
     }
     true
 }

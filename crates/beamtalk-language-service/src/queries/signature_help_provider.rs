@@ -168,30 +168,31 @@ fn find_signature_in_expr(
             }
 
             // Only provide signature help for keyword messages
-            if let MessageSelector::Keyword(parts) = selector {
-                if offset >= span.start() && offset <= span.end() {
-                    // Determine which parameter is active based on cursor position
-                    let active_param = determine_active_parameter(parts, arguments, offset);
-                    let selector_name = selector.name();
+            if let MessageSelector::Keyword(parts) = selector
+                && offset >= span.start()
+                && offset <= span.end()
+            {
+                // Determine which parameter is active based on cursor position
+                let active_param = determine_active_parameter(parts, arguments, offset);
+                let selector_name = selector.name();
 
-                    // ADR 0075 Phase 4: FFI signature help for ErlangModule receivers
-                    if let Some(help) = resolve_ffi_signature_help(
-                        receiver,
-                        &selector_name,
-                        selector,
-                        active_param,
-                        lookup.type_map,
-                        lookup.native_types,
-                    ) {
-                        return Some(help);
-                    }
+                // ADR 0075 Phase 4: FFI signature help for ErlangModule receivers
+                if let Some(help) = resolve_ffi_signature_help(
+                    receiver,
+                    &selector_name,
+                    selector,
+                    active_param,
+                    lookup.type_map,
+                    lookup.native_types,
+                ) {
+                    return Some(help);
+                }
 
-                    // Resolve receiver type and look up method
-                    if let Some(help) =
-                        resolve_signature(receiver, &selector_name, context, lookup, active_param)
-                    {
-                        return Some(help);
-                    }
+                // Resolve receiver type and look up method
+                if let Some(help) =
+                    resolve_signature(receiver, &selector_name, context, lookup, active_param)
+                {
+                    return Some(help);
                 }
             }
             None
@@ -220,22 +221,22 @@ fn find_signature_in_expr(
                         return Some(help);
                     }
                 }
-                if let MessageSelector::Keyword(parts) = &msg.selector {
-                    if offset >= msg.span.start() && offset <= msg.span.end() {
-                        let active_param =
-                            determine_active_parameter(parts, &msg.arguments, offset);
-                        let selector_name = msg.selector.name();
-                        // Later cascade messages go to the first send's
-                        // receiver, not to its result.
-                        if let Some(help) = resolve_signature(
-                            cascade_shared_receiver(receiver),
-                            &selector_name,
-                            context,
-                            lookup,
-                            active_param,
-                        ) {
-                            return Some(help);
-                        }
+                if let MessageSelector::Keyword(parts) = &msg.selector
+                    && offset >= msg.span.start()
+                    && offset <= msg.span.end()
+                {
+                    let active_param = determine_active_parameter(parts, &msg.arguments, offset);
+                    let selector_name = msg.selector.name();
+                    // Later cascade messages go to the first send's
+                    // receiver, not to its result.
+                    if let Some(help) = resolve_signature(
+                        cascade_shared_receiver(receiver),
+                        &selector_name,
+                        context,
+                        lookup,
+                        active_param,
+                    ) {
+                        return Some(help);
                     }
                 }
             }
@@ -425,15 +426,15 @@ fn determine_active_parameter(
         }
     }
     // If cursor is past the last keyword's colon, ensure we're on the last param
-    if let Some(last_arg) = arguments.last() {
-        if offset > last_arg.span().end() {
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "keyword messages won't have more than u32::MAX parts"
-            )]
-            {
-                active = parts.len().saturating_sub(1) as u32;
-            }
+    if let Some(last_arg) = arguments.last()
+        && offset > last_arg.span().end()
+    {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "keyword messages won't have more than u32::MAX parts"
+        )]
+        {
+            active = parts.len().saturating_sub(1) as u32;
         }
     }
     active

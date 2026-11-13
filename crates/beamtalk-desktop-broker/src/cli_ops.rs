@@ -137,10 +137,10 @@ fn resolve_cli_path_with(
     home: Option<&Path>,
     system_dirs: &[PathBuf],
 ) -> Result<PathBuf> {
-    if let Some(override_path) = override_path {
-        if !override_path.is_empty() {
-            return Ok(PathBuf::from(override_path));
-        }
+    if let Some(override_path) = override_path
+        && !override_path.is_empty()
+    {
+        return Ok(PathBuf::from(override_path));
     }
 
     if let Some(path_var) = path_var {

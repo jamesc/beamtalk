@@ -159,8 +159,8 @@ proptest! {
             handle_compile(&compile_request(&input)),
             handle_compile_expression(&compile_expression_request(&input)),
         ] {
-            if response_status(&response).as_deref() == Some("error") {
-                if let Some(diags) = response_diagnostics(&response) {
+            if response_status(&response).as_deref() == Some("error")
+                && let Some(diags) = response_diagnostics(&response) {
                     for (i, diag_term) in diags.elements.iter().enumerate() {
                         let Term::Map(diag_map) = diag_term else {
                             prop_assert!(
@@ -202,7 +202,6 @@ proptest! {
                         }
                     }
                 }
-            }
         }
     }
 }

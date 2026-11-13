@@ -104,10 +104,10 @@ pub(in crate::server) fn workspace_roots(params: &InitializeParams) -> Vec<PathB
         }
     }
 
-    if let Some(root_uri) = &params.root_uri {
-        if let Ok(path) = root_uri.to_file_path() {
-            roots.push(path);
-        }
+    if let Some(root_uri) = &params.root_uri
+        && let Ok(path) = root_uri.to_file_path()
+    {
+        roots.push(path);
     }
 
     roots = roots
@@ -366,15 +366,14 @@ pub(in crate::server) fn collect_preload_files_within(
                 break;
             }
             let dir = root.join(subdir);
-            if dir.is_dir() {
-                if let Ok(found) = preload_walker
+            if dir.is_dir()
+                && let Ok(found) = preload_walker
                     .clone()
                     .max_files(remaining_budget)
                     .walk_pathbuf(&dir)
-                {
-                    remaining_budget = remaining_budget.saturating_sub(found.len());
-                    user_paths.extend(found);
-                }
+            {
+                remaining_budget = remaining_budget.saturating_sub(found.len());
+                user_paths.extend(found);
             }
         }
     }

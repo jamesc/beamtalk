@@ -315,36 +315,33 @@ impl ProtocolClient {
         }
         if self.print_transcript
             && parsed.get("push").and_then(|v| v.as_str()) == Some("transcript")
+            && let Some(text) = parsed.get("text").and_then(|v| v.as_str())
         {
-            if let Some(text) = parsed.get("text").and_then(|v| v.as_str()) {
-                use std::io::Write;
-                let formatted = format_transcript_chunk(text, &mut self.transcript_bol);
-                let mut out = std::io::stdout().lock();
-                if let Err(err) = out
-                    .write_all(formatted.as_bytes())
-                    .and_then(|()| out.flush())
-                {
-                    eprintln!("warning: failed to write transcript output: {err}");
-                }
+            use std::io::Write;
+            let formatted = format_transcript_chunk(text, &mut self.transcript_bol);
+            let mut out = std::io::stdout().lock();
+            if let Err(err) = out
+                .write_all(formatted.as_bytes())
+                .and_then(|()| out.flush())
+            {
+                eprintln!("warning: failed to write transcript output: {err}");
             }
         }
         if self.print_transcript
             && parsed.get("channel").and_then(|v| v.as_str()) == Some("reload_check")
             && parsed.get("event").and_then(|v| v.as_str()) == Some("completed")
+            && let Some(data) = parsed.get("data")
+            && let Some(notice) = format_reload_check_notice(data)
         {
-            if let Some(data) = parsed.get("data") {
-                if let Some(notice) = format_reload_check_notice(data) {
-                    use std::io::Write;
-                    let mut out = std::io::stdout().lock();
-                    if let Err(err) = writeln!(out, "{notice}").and_then(|()| out.flush()) {
-                        eprintln!("warning: failed to write reload check notice: {err}");
-                    }
-                    // A fresh notice always starts at its own line start; the
-                    // next transcript chunk (if any) should get the gutter
-                    // prefix rather than gluing onto this notice's last line.
-                    self.transcript_bol = true;
-                }
+            use std::io::Write;
+            let mut out = std::io::stdout().lock();
+            if let Err(err) = writeln!(out, "{notice}").and_then(|()| out.flush()) {
+                eprintln!("warning: failed to write reload check notice: {err}");
             }
+            // A fresh notice always starts at its own line start; the
+            // next transcript chunk (if any) should get the gutter
+            // prefix rather than gluing onto this notice's last line.
+            self.transcript_bol = true;
         }
         true
     }
@@ -383,10 +380,10 @@ impl ProtocolClient {
         loop {
             match self.ws.read() {
                 Ok(Message::Text(text)) => {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if self.handle_push(&parsed) {
-                            continue;
-                        }
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text)
+                        && self.handle_push(&parsed)
+                    {
+                        continue;
                     }
                     return Ok(text.to_string());
                 }
@@ -447,10 +444,10 @@ impl ProtocolClient {
             loop {
                 match self.ws.read() {
                     Ok(Message::Text(text)) => {
-                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                            if self.handle_push(&parsed) {
-                                continue;
-                            }
+                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text)
+                            && self.handle_push(&parsed)
+                        {
+                            continue;
                         }
                         return serde_json::from_str(&text)
                             .map_err(|e| miette!("Failed to parse response: {e}\nRaw: {text}"));
@@ -655,10 +652,10 @@ mod tests {
                 // Answer the connect-time `describe` version check (BT-4327)
                 // so `connect` succeeds; the test then points the client at
                 // a closed port for the actual reconnect assertion.
-                if let Some(versions) = fake_node_handshake(&mut ws) {
-                    if let Some(req) = read_json(&mut ws) {
-                        answer_describe(&mut ws, &req, Some(&versions));
-                    }
+                if let Some(versions) = fake_node_handshake(&mut ws)
+                    && let Some(req) = read_json(&mut ws)
+                {
+                    answer_describe(&mut ws, &req, Some(&versions));
                 }
             });
             let mut client = ProtocolClient::connect("127.0.0.1", handshake_port, "cookie", None)

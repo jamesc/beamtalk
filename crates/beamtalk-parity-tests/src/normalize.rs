@@ -43,12 +43,12 @@ fn replace_pids(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'<' {
-            if let Some(end) = find_pid_end(&bytes[i..]) {
-                out.push_str("<pid>");
-                i += end;
-                continue;
-            }
+        if bytes[i] == b'<'
+            && let Some(end) = find_pid_end(&bytes[i..])
+        {
+            out.push_str("<pid>");
+            i += end;
+            continue;
         }
         // Push UTF-8 char starting at i.
         let ch = s[i..].chars().next().expect("valid utf-8");

@@ -455,10 +455,10 @@ fn spawn_debug_signal_watcher(
         let mut debug_enabled = signal_path.exists();
         if debug_enabled {
             // Signal file already present at startup — activate debug immediately
-            if let Ok(new_filter) = EnvFilter::try_new("beamtalk_mcp=debug") {
-                if reload_handle.reload(new_filter).is_ok() {
-                    tracing::info!("MCP debug enabled via signal file at startup");
-                }
+            if let Ok(new_filter) = EnvFilter::try_new("beamtalk_mcp=debug")
+                && reload_handle.reload(new_filter).is_ok()
+            {
+                tracing::info!("MCP debug enabled via signal file at startup");
             }
         }
 

@@ -926,10 +926,10 @@ fn report(
         );
         // Full sources only for the first few; the rest are reproducible from
         // the printed (seed, size) pair.
-        if i < MAX_SOURCES_PRINTED {
-            if let Some(c) = all.iter().find(|c| c.index == f.index) {
-                write_source(&mut s, c);
-            }
+        if i < MAX_SOURCES_PRINTED
+            && let Some(c) = all.iter().find(|c| c.index == f.index)
+        {
+            write_source(&mut s, c);
         }
     }
     s

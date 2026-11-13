@@ -94,10 +94,10 @@ pub fn query_epmd_names() -> Result<Vec<String>> {
     for line in body.lines() {
         // Token-level parsing avoids false positives (e.g. "foo" matching "foobar").
         let mut parts = line.split_whitespace();
-        if matches!(parts.next(), Some("name")) {
-            if let Some(short_name) = parts.next() {
-                names.push(short_name.to_string());
-            }
+        if matches!(parts.next(), Some("name"))
+            && let Some(short_name) = parts.next()
+        {
+            names.push(short_name.to_string());
         }
     }
 

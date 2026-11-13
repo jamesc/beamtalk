@@ -78,19 +78,19 @@ pub fn run(modules: &[String], native_dir: Option<&str>, output: &str) -> Result
                 .into_diagnostic()
                 .wrap_err_with(|| format!("I/O error reading entry in '{dir}'"))?;
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "beam") {
-                if let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) {
-                    let module_name = utf8_path.file_stem().unwrap_or("unknown").to_string();
-                    if !beamtalk_core::source_analysis::is_valid_erlang_module_name(&module_name) {
-                        eprintln!(
-                            "warning: Skipping '{module_name}.beam' — \
+            if path.extension().is_some_and(|e| e == "beam")
+                && let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path)
+            {
+                let module_name = utf8_path.file_stem().unwrap_or("unknown").to_string();
+                if !beamtalk_core::source_analysis::is_valid_erlang_module_name(&module_name) {
+                    eprintln!(
+                        "warning: Skipping '{module_name}.beam' — \
                              not a valid Erlang module name"
-                        );
-                        continue;
-                    }
-                    eprintln!("Reading {module_name}.beam ...");
-                    beam_files.push((module_name, utf8_path));
+                    );
+                    continue;
                 }
+                eprintln!("Reading {module_name}.beam ...");
+                beam_files.push((module_name, utf8_path));
             }
         }
     }

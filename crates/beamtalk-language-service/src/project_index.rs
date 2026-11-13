@@ -1086,10 +1086,10 @@ impl ProjectIndex {
         let class_names = self.file_classes.get(file)?;
         let file_hierarchy = self.file_hierarchies.get(file)?;
         for name in class_names {
-            if let Some(info) = file_hierarchy.get_class(name.as_str()) {
-                if let Some(ref pkg) = info.package {
-                    return Some(pkg.clone());
-                }
+            if let Some(info) = file_hierarchy.get_class(name.as_str())
+                && let Some(ref pkg) = info.package
+            {
+                return Some(pkg.clone());
             }
         }
         None

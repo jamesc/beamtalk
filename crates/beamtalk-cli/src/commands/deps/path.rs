@@ -142,10 +142,10 @@ pub fn collect_dep_ebin_paths(layout: &BuildLayout) -> Vec<Utf8PathBuf> {
     if let Ok(entries) = std::fs::read_dir(&deps_dir) {
         for entry in entries.flatten() {
             let ebin = entry.path().join("ebin");
-            if ebin.is_dir() {
-                if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
-                    paths.push(utf8);
-                }
+            if ebin.is_dir()
+                && let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin)
+            {
+                paths.push(utf8);
             }
         }
     }

@@ -70,10 +70,10 @@ impl BeamtalkMcp {
         let warnings: Vec<ContentBlock> = warning_blocks(&response).collect();
         let mut parts = Vec::new();
 
-        if let Some(ref output) = response.output {
-            if !output.is_empty() {
-                parts.push(ContentBlock::text(format!("Output: {output}")));
-            }
+        if let Some(ref output) = response.output
+            && !output.is_empty()
+        {
+            parts.push(ContentBlock::text(format!("Output: {output}")));
         }
 
         if use_trace {

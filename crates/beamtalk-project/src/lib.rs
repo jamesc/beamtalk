@@ -81,10 +81,10 @@ pub fn discover_project_root(start_dir: &Path) -> PathBuf {
         }
 
         // Check generic fallback marker (.git)
-        if let Some(marker) = PROJECT_MARKERS.last() {
-            if current.join(marker).exists() {
-                return current;
-            }
+        if let Some(marker) = PROJECT_MARKERS.last()
+            && current.join(marker).exists()
+        {
+            return current;
         }
 
         if !current.pop() {

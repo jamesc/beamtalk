@@ -622,20 +622,20 @@ fn handle_sync(client: &mut ReplClient) {
 
             if response.is_error() {
                 // Show generic error message only when no structured diagnostics were printed
-                if response.errors.is_empty() {
-                    if let Some(msg) = response.error_message() {
-                        eprintln!("{}", display::format_error(msg));
-                    }
+                if response.errors.is_empty()
+                    && let Some(msg) = response.error_message()
+                {
+                    eprintln!("{}", display::format_error(msg));
                 }
             } else {
                 // Display summary and classes only on success
                 if let Some(ref summary) = response.summary {
                     println!("{summary}");
                 }
-                if let Some(ref classes) = response.classes {
-                    if !classes.is_empty() {
-                        println!("Classes: {}", classes.join(", "));
-                    }
+                if let Some(ref classes) = response.classes
+                    && !classes.is_empty()
+                {
+                    println!("Classes: {}", classes.join(", "));
                 }
             }
         }
@@ -696,10 +696,11 @@ fn sync_tests_then_run(client: &mut ReplClient, test_expr: &str) {
     match client.load_project_opts(".", true) {
         Ok(response) => {
             display_sync_diagnostics(&response);
-            if response.is_error() && response.errors.is_empty() {
-                if let Some(msg) = response.error_message() {
-                    eprintln!("{}", display::format_error(msg));
-                }
+            if response.is_error()
+                && response.errors.is_empty()
+                && let Some(msg) = response.error_message()
+            {
+                eprintln!("{}", display::format_error(msg));
             }
         }
         Err(e) => eprintln!(

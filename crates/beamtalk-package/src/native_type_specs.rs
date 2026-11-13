@@ -80,10 +80,10 @@ pub fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
         paths.compiler_ebin,
     ];
     for dir in candidates {
-        if dir.exists() {
-            if let Ok(utf8) = Utf8PathBuf::from_path_buf(dir) {
-                ebin_dirs.push(utf8);
-            }
+        if dir.exists()
+            && let Ok(utf8) = Utf8PathBuf::from_path_buf(dir)
+        {
+            ebin_dirs.push(utf8);
         }
     }
 

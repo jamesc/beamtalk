@@ -113,15 +113,14 @@ fn read_port_file_nonce(workspaces_root: &std::path::Path, port: u16) -> Option<
         };
         // Port file format: PORT\nNONCE (two lines of plain text)
         let mut lines = contents.lines();
-        if let Some(port_line) = lines.next() {
-            if let Ok(file_port) = port_line.trim().parse::<u16>() {
-                if file_port == port {
-                    return lines
-                        .next()
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty());
-                }
-            }
+        if let Some(port_line) = lines.next()
+            && let Ok(file_port) = port_line.trim().parse::<u16>()
+            && file_port == port
+        {
+            return lines
+                .next()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
         }
     }
     None
