@@ -67,6 +67,11 @@ outcome(Pid, Selector) ->
         Class:Reason -> {Class, strip_stacktrace(Reason)}
     end.
 
+%% The error kind of a raised outcome, whatever its wrapping.
+dnu_kind({error, #{error := #beamtalk_error{kind = Kind}}}) -> Kind;
+dnu_kind({error, #beamtalk_error{kind = Kind}}) -> Kind;
+dnu_kind(Other) -> Other.
+
 strip_stacktrace(#{} = Wrapped) -> maps:remove(raw_stacktrace, Wrapped);
 strip_stacktrace(Other) -> Other.
 
@@ -107,6 +112,41 @@ in_caller_test_() ->
         {"a class with class variables keeps its process", fun() ->
             with_class('Bt4300Stateful', none, #{count => 0}, fun(Pid) ->
                 ?assertEqual(Pid, send(Pid, testSelf, []))
+            end)
+        end},
+        {"a stateful class's method is memoised as a process verdict (BT-4771)", fun() ->
+            with_class('Bt4771Stateful', none, #{count => 0}, fun(Pid) ->
+                ?assertEqual(Pid, send(Pid, testSelf, [])),
+                %% A positive verdict, not a miss: the caller asks the class
+                %% process directly instead of walking the chain again.
+                ?assertEqual(
+                    process,
+                    beamtalk_class_derived_cache:fetch(
+                        {class_method_owner, Pid, testSelf}, fun() -> {nocache, miss} end
+                    )
+                ),
+                %% Served from the memo, the send is unchanged.
+                ?assertEqual(Pid, send(Pid, testSelf, [])),
+                ?assertEqual({with_arg, 3}, send(Pid, 'testWith:', [3]))
+            end)
+        end},
+        {"a stale process verdict falls back to the class process's own lookup", fun() ->
+            with_class('Bt4771Stale', none, #{count => 0}, fun(Pid) ->
+                %% Plant `process` for a selector the class does not define: the
+                %% class process does the authoritative lookup, finds nothing
+                %% and the send raises the same DNU a fresh send does.
+                Fresh = outcome(Pid, bt4771Missing),
+                beamtalk_class_derived_cache:invalidate(),
+                _ = beamtalk_class_derived_cache:fetch(
+                    {class_method_owner, Pid, bt4771Missing2}, fun() -> {cache, process} end
+                ),
+                Planted = outcome(Pid, bt4771Missing2),
+                ?assertMatch({error, _}, Fresh),
+                ?assertMatch({error, _}, Planted),
+                ?assertEqual(
+                    dnu_kind(Fresh),
+                    dnu_kind(Planted)
+                )
             end)
         end},
         {"a stateless subclass of a stateful class keeps its process", fun() ->
