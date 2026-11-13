@@ -544,11 +544,16 @@ method records, flags, subclass edge) are only dropped after a won claim.
 -spec delete_if_owner(class_name(), pid()) -> boolean().
 delete_if_owner(Name, Owner) when is_pid(Owner) ->
     OldSuperclass = field(Name, #class_metadata.superclass),
+    %% A match head with every other field a wildcard (built as a tuple: a
+    %% record with `'_'` fields violates the record's declared field types).
+    Head = erlang:make_tuple(record_info(size, class_metadata), '_', [
+        {1, class_metadata},
+        {#class_metadata.name, Name},
+        {#class_metadata.owner, Owner}
+    ]),
     Claimed =
         try
-            ets:select_delete(?TABLE, [
-                {#class_metadata{name = Name, owner = Owner, _ = '_'}, [], [true]}
-            ]) > 0
+            ets:select_delete(?TABLE, [{Head, [], [true]}]) > 0
         catch
             error:badarg -> false
         end,
