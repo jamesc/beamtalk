@@ -66,7 +66,47 @@ key set as a unit and no stale value from a previous call can leak into this one
     | {pid() | undefined, binary() | undefined}
     | term()
 ) -> fun(() -> ok).
-seed_session_context_from({SessionPid, SessionId, SessionMeta, EntryGroupLeader}) ->
+seed_session_context_from({SessionPid, SessionId, SessionMeta, EntryGroupLeader} = Ctx) ->
+    case session_context_unchanged(Ctx) of
+        true ->
+            %% BT-4771: the process already holds exactly this context, so the
+            %% put/restore pair would write back what is there. A pid sink is
+            %% excluded (see `session_context_unchanged/1`).
+            fun() -> ok end;
+        false ->
+            seed_session_context_changed(
+                SessionPid, SessionId, SessionMeta, EntryGroupLeader
+            )
+    end;
+seed_session_context_from({SessionPid, SessionId, SessionMeta}) ->
+    seed_session_context_from({SessionPid, SessionId, SessionMeta, undefined});
+seed_session_context_from({SessionPid, SessionId}) ->
+    %% A 2-tuple context carries no metadata, so clear any leftover `meta` for
+    %% the duration of this call (and restore it after). Managing all the keys
+    %% as a unit means `Session current kind` inside this call can never read a
+    %% stale other-session's metadata, regardless of what ran before.
+    seed_session_context_from({SessionPid, SessionId, undefined, undefined});
+seed_session_context_from(_Other) ->
+    %% Unrecognised context shape: seed nothing rather than crash the call.
+    fun() -> ok end.
+
+%% True when the process dictionary already holds exactly `Ctx`. Readers use
+%% `get/1`, so an absent key and one holding `undefined` are the same. An
+%% entry group leader that is a pid is never "unchanged": adopting it also
+%% depends on the live group leader and the sink's liveness, so that path
+%% always runs in full.
+-spec session_context_unchanged(
+    {pid() | undefined, term(), term(), term()}
+) -> boolean().
+session_context_unchanged({SessionPid, SessionId, SessionMeta, EntryGroupLeader}) ->
+    not is_pid(EntryGroupLeader) andalso
+        get(beamtalk_session_pid) =:= SessionPid andalso
+        get(beamtalk_session_id) =:= SessionId andalso
+        get(beamtalk_session_meta) =:= SessionMeta andalso
+        get(beamtalk_entry_group_leader) =:= EntryGroupLeader.
+
+-spec seed_session_context_changed(term(), term(), term(), term()) -> fun(() -> ok).
+seed_session_context_changed(SessionPid, SessionId, SessionMeta, EntryGroupLeader) ->
     PrevPid = put(beamtalk_session_pid, SessionPid),
     PrevId = put(beamtalk_session_id, SessionId),
     PrevMeta = put(beamtalk_session_meta, SessionMeta),
@@ -82,18 +122,7 @@ seed_session_context_from({SessionPid, SessionId, SessionMeta, EntryGroupLeader}
         restore_dict_key(beamtalk_session_meta, PrevMeta),
         restore_dict_key(beamtalk_entry_group_leader, PrevEntryGl),
         ok
-    end;
-seed_session_context_from({SessionPid, SessionId, SessionMeta}) ->
-    seed_session_context_from({SessionPid, SessionId, SessionMeta, undefined});
-seed_session_context_from({SessionPid, SessionId}) ->
-    %% A 2-tuple context carries no metadata, so clear any leftover `meta` for
-    %% the duration of this call (and restore it after). Managing all the keys
-    %% as a unit means `Session current kind` inside this call can never read a
-    %% stale other-session's metadata, regardless of what ran before.
-    seed_session_context_from({SessionPid, SessionId, undefined, undefined});
-seed_session_context_from(_Other) ->
-    %% Unrecognised context shape: seed nothing rather than crash the call.
-    fun() -> ok end.
+    end.
 
 -doc """
 Adopt `EntryGroupLeader` as this process's group leader for the duration of one
