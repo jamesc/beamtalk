@@ -64,6 +64,9 @@ raise via `raise_not_string/2`.
     from_iolist/1
 ]).
 -export([parse_integer/2]).
+-ifdef(TEST).
+-export([byte_per_grapheme/1]).
+-endif.
 
 %% Instance methods — URL encoding (explicit `(Erlang beamtalk_string) sel:
 %% self` FFI dispatch, not @primitive — see docs/beamtalk-native-erlang.md
@@ -869,12 +872,24 @@ True when every byte of the binary is a whole grapheme cluster on its own (BT-47
 That holds for pure ASCII with no carriage return: UTF-8 multi-byte text can
 carry combining marks / ZWJ sequences, and `\r\n` is a single grapheme. Such
 binaries take the byte-level fast paths; anything else uses the grapheme walk.
-Single O(n) pass, no allocation.
+Scans 4 bytes per step (BT-4773): one word-wide test rejects any byte >= 128 and
+any `\r` (0x0D) together, using the exact "word has a zero byte" bit trick on
+`W bxor 16#0D0D0D0D`. The tail (< 4 bytes) falls back to the per-byte clause.
+No allocation. 32-bit words keep the arithmetic in small integers; a 64-bit word
+exceeds the 59-bit small-int range and allocates bignums, which benchmarked
+slower than the per-byte loop.
 """.
 -spec byte_per_grapheme(binary()) -> boolean().
+byte_per_grapheme(<<W:32, Rest/binary>>) ->
+    Cr = W bxor 16#0D0D0D0D,
+    W band 16#80808080 =:= 0 andalso
+        (Cr - 16#01010101) band (bnot Cr) band 16#80808080 =:= 0 andalso
+        byte_per_grapheme(Rest);
 byte_per_grapheme(<<C, Rest/binary>>) when C < 128, C =/= $\r -> byte_per_grapheme(Rest);
-byte_per_grapheme(<<>>) -> true;
-byte_per_grapheme(_) -> false.
+byte_per_grapheme(<<>>) ->
+    true;
+byte_per_grapheme(_) ->
+    false.
 
 -doc "Grapheme-aware substring search.".
 -spec index_of_graphemes([string:grapheme_cluster()], [string:grapheme_cluster()], integer()) ->
