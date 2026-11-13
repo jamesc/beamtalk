@@ -1449,10 +1449,11 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
                 return pipeline.unparse();
             }
             // Flatten ++ chains for width-aware line breaking
-            if matches!(selector, MessageSelector::Binary(op) if op.as_str() == "++") && !*is_cast {
-                if let Some(doc) = unparse_concat_chain(expr) {
-                    return doc;
-                }
+            if matches!(selector, MessageSelector::Binary(op) if op.as_str() == "++")
+                && !*is_cast
+                && let Some(doc) = unparse_concat_chain(expr)
+            {
+                return doc;
             }
             unparse_message_send(receiver, selector, arguments, *is_cast)
         }
@@ -2242,12 +2243,12 @@ fn collect_concat_segments<'a>(expr: &'a Expression, out: &mut Vec<&'a Expressio
         is_cast: false,
         ..
     } = expr
+        && op.as_str() == "++"
+        && arguments.len() == 1
     {
-        if op.as_str() == "++" && arguments.len() == 1 {
-            collect_concat_segments(receiver, out);
-            out.push(&arguments[0]);
-            return;
-        }
+        collect_concat_segments(receiver, out);
+        out.push(&arguments[0]);
+        return;
     }
     out.push(expr);
 }

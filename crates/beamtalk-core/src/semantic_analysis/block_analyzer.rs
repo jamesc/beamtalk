@@ -132,15 +132,15 @@ impl Analyser {
             Identifier(id) => {
                 // Check if this is a captured variable
                 let binding_info = self.scope.lookup_immut(&id.name).map(|b| b.defined_at);
-                if let Some(defined_at) = binding_info {
-                    if self.scope.is_captured(&id.name) {
-                        // Only add if not already in captures list
-                        if !captures.iter().any(|c| c.name == id.name) {
-                            captures.push(CapturedVar {
-                                name: id.name.clone(),
-                                defined_at,
-                            });
-                        }
+                if let Some(defined_at) = binding_info
+                    && self.scope.is_captured(&id.name)
+                {
+                    // Only add if not already in captures list
+                    if !captures.iter().any(|c| c.name == id.name) {
+                        captures.push(CapturedVar {
+                            name: id.name.clone(),
+                            defined_at,
+                        });
                     }
                 }
             }

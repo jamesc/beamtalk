@@ -143,10 +143,10 @@ pub fn render_signature_text(
         }
     }
 
-    if options.show_return_type {
-        if let Some(ret) = return_type {
-            let _ = write!(out, " -> {ret}");
-        }
+    if options.show_return_type
+        && let Some(ret) = return_type
+    {
+        let _ = write!(out, " -> {ret}");
     }
 
     out

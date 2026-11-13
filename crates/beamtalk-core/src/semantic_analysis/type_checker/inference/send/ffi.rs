@@ -508,17 +508,18 @@ impl TypeChecker {
             }
 
             // Check against the declared keyword at this position
-            if let Some(param) = sig.params.get(i) {
-                if let Some(ref declared_keyword) = param.keyword {
-                    // Skip generic/non-canonical param names — "arg" is used
-                    // by beamtalk_spec_reader for placeholder parameters, and
-                    // normalization also lowercases an explicit `Arg` to "arg".
-                    if declared_keyword == "arg" {
-                        continue;
-                    }
-                    if call_keyword != declared_keyword.as_str() {
-                        let param_pos = i + 1;
-                        self.diagnostics.push(
+            if let Some(param) = sig.params.get(i)
+                && let Some(ref declared_keyword) = param.keyword
+            {
+                // Skip generic/non-canonical param names — "arg" is used
+                // by beamtalk_spec_reader for placeholder parameters, and
+                // normalization also lowercases an explicit `Arg` to "arg".
+                if declared_keyword == "arg" {
+                    continue;
+                }
+                if call_keyword != declared_keyword.as_str() {
+                    let param_pos = i + 1;
+                    self.diagnostics.push(
                             Diagnostic::warning(
                                 format!(
                                     "FFI keyword '{call_keyword}:' does not match declaration '{declared_keyword}:' \
@@ -533,7 +534,6 @@ impl TypeChecker {
                             ))
                             .with_category(DiagnosticCategory::Type),
                         );
-                    }
                 }
             }
         }

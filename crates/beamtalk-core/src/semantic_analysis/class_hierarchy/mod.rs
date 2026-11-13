@@ -690,22 +690,22 @@ impl ClassHierarchy {
             i += 1;
             // Find all classes whose direct superclass is `parent`.
             for (name, info) in self.classes.iter_unrecorded() {
-                if !visited.contains(name) {
-                    if let Some(ref sup) = info.superclass {
-                        if sup == &parent {
-                            visited.insert(name.clone());
-                            to_check.push(name.clone());
-                        }
-                    }
+                if !visited.contains(name)
+                    && let Some(ref sup) = info.superclass
+                    && sup == &parent
+                {
+                    visited.insert(name.clone());
+                    to_check.push(name.clone());
                 }
             }
         }
         for class_name in &to_check {
             let is_value = self.is_value_subclass(class_name.as_str());
-            if let Some(info) = self.classes.get_mut(class_name.as_str()) {
-                if is_value && !info.is_value {
-                    info.is_value = true;
-                }
+            if let Some(info) = self.classes.get_mut(class_name.as_str())
+                && is_value
+                && !info.is_value
+            {
+                info.is_value = true;
             }
         }
         true
@@ -722,13 +722,12 @@ impl ClassHierarchy {
     pub fn add_from_beam_meta(&mut self, classes: Vec<ClassInfo>) -> bool {
         let mut changed = false;
         for info in classes {
-            if !Self::is_builtin_class(&info.name) {
-                if let std::collections::hash_map::Entry::Vacant(e) =
+            if !Self::is_builtin_class(&info.name)
+                && let std::collections::hash_map::Entry::Vacant(e) =
                     self.classes.entry(info.name.clone())
-                {
-                    e.insert(info);
-                    changed = true;
-                }
+            {
+                e.insert(info);
+                changed = true;
             }
         }
         if changed {

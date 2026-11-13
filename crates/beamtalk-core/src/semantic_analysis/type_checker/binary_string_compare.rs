@@ -157,10 +157,10 @@ fn assigned_locals(exprs: &[Expression]) -> HashSet<EcoString> {
     let mut names = HashSet::new();
     for expr in exprs {
         crate::ast_walker::walk_expression(expr, &mut |e| {
-            if let Expression::Assignment { target, .. } = e {
-                if let Expression::Identifier(ident) = target.as_ref() {
-                    names.insert(ident.name.clone());
-                }
+            if let Expression::Assignment { target, .. } = e
+                && let Expression::Identifier(ident) = target.as_ref()
+            {
+                names.insert(ident.name.clone());
             }
         });
     }

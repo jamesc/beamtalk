@@ -300,12 +300,11 @@ fn first_use_span(block: &Block, name: &str) -> Option<Span> {
     let mut found: Option<Span> = None;
     for stmt in &block.body {
         walk_expression(&stmt.expression, &mut |e| {
-            if found.is_none() {
-                if let Expression::Identifier(id) = e {
-                    if id.name.as_str() == name {
-                        found = Some(id.span);
-                    }
-                }
+            if found.is_none()
+                && let Expression::Identifier(id) = e
+                && id.name.as_str() == name
+            {
+                found = Some(id.span);
             }
         });
         if found.is_some() {

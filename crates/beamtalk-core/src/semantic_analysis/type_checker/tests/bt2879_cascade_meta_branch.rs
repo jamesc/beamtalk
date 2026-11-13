@@ -174,10 +174,9 @@ typed Object subclass: App
                 type_args,
                 ..
             } = ty
+                && class_name.as_str() == "Block"
             {
-                if class_name.as_str() == "Block" {
-                    return Some(type_args.first().and_then(InferredType::as_known).cloned());
-                }
+                return Some(type_args.first().and_then(InferredType::as_known).cloned());
             }
             None
         })

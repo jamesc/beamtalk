@@ -686,10 +686,10 @@ impl TypeChecker {
                 }
                 // BT-4714: remember what a Boolean condition proves (computed
                 // before the write, against the pre-assignment env).
-                if let Some(facts) = alias_facts {
-                    if !facts.mentions(&key) {
-                        env.set_cond_alias(key.clone(), facts);
-                    }
+                if let Some(facts) = alias_facts
+                    && !facts.mentions(&key)
+                {
+                    env.set_cond_alias(key.clone(), facts);
                 }
                 // BT-4257: the write above cleared any raw-Binary fact.
                 if value_is_raw_binary && !target_written_by_block {

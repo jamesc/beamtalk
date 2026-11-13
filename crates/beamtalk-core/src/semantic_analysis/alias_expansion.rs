@@ -176,10 +176,10 @@ impl InternalAliasExpander {
             return signature.clone();
         }
         let mut parsed = DeclaredType::parse(signature);
-        if signature.contains(['\\', '&']) {
-            if let Some(real) = parse_type_with_parser(signature) {
-                parsed = real;
-            }
+        if signature.contains(['\\', '&'])
+            && let Some(real) = parse_type_with_parser(signature)
+        {
+            parsed = real;
         }
         let expanded = self.expand_shadowing(&parsed, shadowed);
         if expanded == parsed {

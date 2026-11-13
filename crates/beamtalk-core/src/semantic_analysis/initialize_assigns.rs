@@ -213,10 +213,9 @@ fn analyze_expr(expr: &Expression, current: &BTreeSet<EcoString>) -> FlowResult 
             if let Expression::FieldAccess {
                 receiver, field, ..
             } = target.as_ref()
+                && receiver.is_self()
             {
-                if receiver.is_self() {
-                    after_value.insert(field.name.clone());
-                }
+                after_value.insert(field.name.clone());
             }
             FlowResult {
                 fallthrough: Some(after_value),
@@ -429,78 +428,76 @@ fn analyze_message_send(
 ) -> FlowResult {
     let selector_name = selector.name();
 
-    if selector_name == "ifTrue:ifFalse:" {
-        if let (Some(Expression::Block(true_block)), Some(Expression::Block(false_block))) =
+    if selector_name == "ifTrue:ifFalse:"
+        && let (Some(Expression::Block(true_block)), Some(Expression::Block(false_block))) =
             (arguments.first(), arguments.get(1))
-        {
-            let recv_result = analyze_expr(receiver, current);
-            let Some(base) = recv_result.fallthrough else {
-                return FlowResult {
-                    fallthrough: None,
-                    diverging: recv_result.diverging,
-                };
-            };
-            let true_result = analyze_block_body(true_block, &base);
-            let false_result = analyze_block_body(false_block, &base);
-            let mut diverging = recv_result.diverging;
-            diverging.extend(true_result.diverging);
-            diverging.extend(false_result.diverging);
-            // Both arms are exhaustive (there is no third path), so a slot
-            // is only definite here if BOTH arms assign it.
-            let fallthrough = match (true_result.fallthrough, false_result.fallthrough) {
-                (Some(t), Some(f)) => Some(t.intersection(&f).cloned().collect()),
-                (Some(t), None) => Some(t),
-                (None, Some(f)) => Some(f),
-                (None, None) => None,
-            };
+    {
+        let recv_result = analyze_expr(receiver, current);
+        let Some(base) = recv_result.fallthrough else {
             return FlowResult {
-                fallthrough,
-                diverging,
+                fallthrough: None,
+                diverging: recv_result.diverging,
             };
-        }
+        };
+        let true_result = analyze_block_body(true_block, &base);
+        let false_result = analyze_block_body(false_block, &base);
+        let mut diverging = recv_result.diverging;
+        diverging.extend(true_result.diverging);
+        diverging.extend(false_result.diverging);
+        // Both arms are exhaustive (there is no third path), so a slot
+        // is only definite here if BOTH arms assign it.
+        let fallthrough = match (true_result.fallthrough, false_result.fallthrough) {
+            (Some(t), Some(f)) => Some(t.intersection(&f).cloned().collect()),
+            (Some(t), None) => Some(t),
+            (None, Some(f)) => Some(f),
+            (None, None) => None,
+        };
+        return FlowResult {
+            fallthrough,
+            diverging,
+        };
     }
 
-    if selector_name == "ifTrue:" || selector_name == "ifFalse:" {
-        if let Some(Expression::Block(block)) = arguments.first() {
-            let recv_result = analyze_expr(receiver, current);
-            let Some(base) = recv_result.fallthrough else {
-                return FlowResult {
-                    fallthrough: None,
-                    diverging: recv_result.diverging,
-                };
-            };
-            let branch_result = analyze_block_body(block, &base);
-            let mut diverging = recv_result.diverging;
-            diverging.extend(branch_result.diverging);
-            // The block may not run at all — its own assignments are not
-            // definite, but an early return inside it is still a real
-            // completion path.
+    if (selector_name == "ifTrue:" || selector_name == "ifFalse:")
+        && let Some(Expression::Block(block)) = arguments.first()
+    {
+        let recv_result = analyze_expr(receiver, current);
+        let Some(base) = recv_result.fallthrough else {
             return FlowResult {
-                fallthrough: Some(base),
-                diverging,
+                fallthrough: None,
+                diverging: recv_result.diverging,
             };
-        }
+        };
+        let branch_result = analyze_block_body(block, &base);
+        let mut diverging = recv_result.diverging;
+        diverging.extend(branch_result.diverging);
+        // The block may not run at all — its own assignments are not
+        // definite, but an early return inside it is still a real
+        // completion path.
+        return FlowResult {
+            fallthrough: Some(base),
+            diverging,
+        };
     }
 
-    if selector_name == "on:do:" {
-        if let (Expression::Block(protected), Some(Expression::Block(handler))) =
+    if selector_name == "on:do:"
+        && let (Expression::Block(protected), Some(Expression::Block(handler))) =
             (receiver, arguments.get(1))
-        {
-            let protected_result = analyze_block_body(protected, current);
-            // The handler may not run at all (only on a raised exception) —
-            // analyzed from the pre-try state, since the protected body may
-            // have thrown before assigning anything.
-            let handler_result = analyze_block_body(handler, current);
-            let mut diverging = protected_result.diverging;
-            diverging.extend(handler_result.diverging);
-            // ADR 0124 §6's documented simplification: the protected body is
-            // treated as straight-line (an exception firing mid-body is not
-            // modelled), so its fallthrough is this construct's own.
-            return FlowResult {
-                fallthrough: protected_result.fallthrough,
-                diverging,
-            };
-        }
+    {
+        let protected_result = analyze_block_body(protected, current);
+        // The handler may not run at all (only on a raised exception) —
+        // analyzed from the pre-try state, since the protected body may
+        // have thrown before assigning anything.
+        let handler_result = analyze_block_body(handler, current);
+        let mut diverging = protected_result.diverging;
+        diverging.extend(handler_result.diverging);
+        // ADR 0124 §6's documented simplification: the protected body is
+        // treated as straight-line (an exception firing mid-body is not
+        // modelled), so its fallthrough is this construct's own.
+        return FlowResult {
+            fallthrough: protected_result.fallthrough,
+            diverging,
+        };
     }
 
     // Generic fallback (see `thread_receiver_and_args`'s doc comment for the

@@ -129,38 +129,37 @@ pub(super) fn report_nlr_out_of_ensure(
                 && parts[0].keyword == "ensure:"
                 && let Expression::Block(protected) = receiver.as_ref()
                 && let [Expression::Block(cleanup)] = arguments.as_slice()
+                && let Some(dropped) = nlr_dropped_local(protected, cleanup, &sources)
             {
-                if let Some(dropped) = nlr_dropped_local(protected, cleanup, &sources) {
-                    let EnsureDroppedLocal { name, cause, exit } = dropped;
-                    let fix = match exit {
-                        AbruptExit::Return => format!(
-                            "assign `{name}` and return after the `ensure:`, or keep the \
+                let EnsureDroppedLocal { name, cause, exit } = dropped;
+                let fix = match exit {
+                    AbruptExit::Return => format!(
+                        "assign `{name}` and return after the `ensure:`, or keep the \
                              non-local return out of the protected block"
-                        ),
-                        AbruptExit::Error => format!(
-                            "assign `{name}` after the `ensure:`, or move what may raise \
+                    ),
+                    AbruptExit::Error => format!(
+                        "assign `{name}` after the `ensure:`, or move what may raise \
                              before the assignment (the check is conservative: anything after \
                              the write that may raise counts, even inside an `on:do:` that \
                              catches it)"
-                        ),
-                    };
-                    diagnostics.push(
-                        Diagnostic::error(
-                            format!(
-                                "an `ensure:` protected block that writes `{name}` {cause}, and \
+                    ),
+                };
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "an `ensure:` protected block that writes `{name}` {cause}, and \
                                  its cleanup reads `{name}`: in {context} the cleanup would not \
                                  see the new `{name}` (ADR 0133)"
-                            ),
-                            protected.span,
-                        )
-                        .with_hint(format!(
-                            "{fix}; or do not read `{name}` in the cleanup (an `ensure:` \
+                        ),
+                        protected.span,
+                    )
+                    .with_hint(format!(
+                        "{fix}; or do not read `{name}` in the cleanup (an `ensure:` \
                              cleanup cannot read a local its protected block writes when the \
                              block can exit early)"
-                        ))
-                        .with_category(DiagnosticCategory::UnthreadedLocalWrite),
-                    );
-                }
+                    ))
+                    .with_category(DiagnosticCategory::UnthreadedLocalWrite),
+                );
             }
         });
     }

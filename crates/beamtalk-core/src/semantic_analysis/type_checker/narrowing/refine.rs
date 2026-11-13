@@ -148,16 +148,12 @@ impl TypeChecker {
         // Only refine to a protocol type when the variable is currently Dynamic.
         // If the variable already has a concrete type (e.g., Integer), narrowing
         // to a protocol (e.g., Printable) would lose type-specific APIs.
-        if matches!(info.true_type, InferredType::Dynamic(_)) {
-            if let Some(ref selector) = info.responded_selector {
-                if let Some(ref registry) = self.protocol_registry {
-                    if let Some(protocol_name) =
-                        registry.find_unique_protocol_for_selector(selector)
-                    {
-                        info.true_type = InferredType::known(protocol_name.clone());
-                    }
-                }
-            }
+        if matches!(info.true_type, InferredType::Dynamic(_))
+            && let Some(ref selector) = info.responded_selector
+            && let Some(ref registry) = self.protocol_registry
+            && let Some(protocol_name) = registry.find_unique_protocol_for_selector(selector)
+        {
+            info.true_type = InferredType::known(protocol_name.clone());
         }
         info
     }

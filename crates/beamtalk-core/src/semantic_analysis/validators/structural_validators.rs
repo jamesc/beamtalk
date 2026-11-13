@@ -420,16 +420,16 @@ fn visit_unresolved_ffi(
         span,
         ..
     } = expr
+        && let Expression::ClassReference { name, package, .. } = receiver.as_ref()
     {
-        if let Expression::ClassReference { name, package, .. } = receiver.as_ref() {
-            // Skip class-protocol selectors (class, new, methods, etc.) and
-            // package-qualified references (`json@Erlang` is not the FFI bridge).
-            if package.is_none()
-                && name.name == "Erlang"
-                && !crate::ffi_receiver::is_class_protocol_selector(module_name.as_str())
-                && !is_known_erlang_module(module_name.as_str(), known_modules)
-            {
-                diagnostics.push(
+        // Skip class-protocol selectors (class, new, methods, etc.) and
+        // package-qualified references (`json@Erlang` is not the FFI bridge).
+        if package.is_none()
+            && name.name == "Erlang"
+            && !crate::ffi_receiver::is_class_protocol_selector(module_name.as_str())
+            && !is_known_erlang_module(module_name.as_str(), known_modules)
+        {
+            diagnostics.push(
                     Diagnostic::warning(
                         format!("Unknown Erlang module `{module_name}` in FFI call"),
                         *span,
@@ -440,7 +440,6 @@ fn visit_unresolved_ffi(
                     )
                     .with_category(DiagnosticCategory::UnresolvedFfi),
                 );
-            }
         }
     }
 }
@@ -508,43 +507,40 @@ fn visit_ffi_arity(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
         span,
         ..
     } = expr
+        && let Some(module_name) = crate::ffi_receiver::erlang_module_of_receiver(receiver)
+        && let Some(function_name) = erlang_function_name(selector)
     {
-        if let Some(module_name) = crate::ffi_receiver::erlang_module_of_receiver(receiver) {
-            if let Some(function_name) = erlang_function_name(selector) {
-                let arity = erlang_arity(selector, arguments.len());
+        let arity = erlang_arity(selector, arguments.len());
 
-                // Check if this function has known arities.
-                let known: Vec<usize> =
-                    crate::ffi_exports::known_arities(module_name, &function_name)
-                        .into_iter()
-                        .map(usize::from)
-                        .collect();
+        // Check if this function has known arities.
+        let known: Vec<usize> = crate::ffi_exports::known_arities(module_name, &function_name)
+            .into_iter()
+            .map(usize::from)
+            .collect();
 
-                if !known.is_empty() && !known.contains(&arity) {
-                    let expected = if known.len() == 1 {
-                        format!("{}", known[0])
-                    } else {
-                        let strs: Vec<String> = known.iter().map(ToString::to_string).collect();
-                        strs.join(" or ")
-                    };
+        if !known.is_empty() && !known.contains(&arity) {
+            let expected = if known.len() == 1 {
+                format!("{}", known[0])
+            } else {
+                let strs: Vec<String> = known.iter().map(ToString::to_string).collect();
+                strs.join(" or ")
+            };
 
-                    diagnostics.push(
-                        Diagnostic::warning(
-                            format!(
-                                "Arity mismatch: `{module_name}:{function_name}/{arity}` — \
+            diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "Arity mismatch: `{module_name}:{function_name}/{arity}` — \
                                  expected arity {expected}"
-                            ),
-                            *span,
-                        )
-                        .with_hint(format!(
-                            "The Erlang function `{module_name}:{function_name}` \
+                    ),
+                    *span,
+                )
+                .with_hint(format!(
+                    "The Erlang function `{module_name}:{function_name}` \
                              expects {expected} argument(s), but {arity} provided. \
                              Suppress with @expect arity_mismatch.",
-                        ))
-                        .with_category(DiagnosticCategory::ArityMismatch),
-                    );
-                }
-            }
+                ))
+                .with_category(DiagnosticCategory::ArityMismatch),
+            );
         }
     }
 }

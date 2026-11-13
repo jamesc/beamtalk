@@ -112,92 +112,91 @@ impl TypeChecker {
                 Self::infer_constructor_type(class_name, hierarchy, selector, arg_types)
             }
             _ => {
-                if let Some(method) = hierarchy.find_class_method(class_name, selector) {
-                    if let Some(ref ret_ty) = method.return_type {
-                        // `Self` resolves to the static receiver class —
-                        // with constructor inference for generic classes (ADR 0068 Phase 1c)
-                        if matches!(ret_ty, DeclaredType::SelfType) {
-                            return Self::infer_constructor_type(
-                                class_name, hierarchy, selector, arg_types,
-                            );
-                        }
-                        // Parse parameterised return types like
-                        // `Result(List(String), Error)` into a fully-nested
-                        // `Known { class_name, type_args }` so that downstream
-                        // sends on the bound local resolve correctly.
-                        //
-                        // `Self` appearing as a (nested) type argument —
-                        // e.g. `class named: -> Result(Self, Error)` on Actor —
-                        // resolves to the static receiver class. This powers
-                        // ADR 0079's typed-lookup API where `Counter named: #c`
-                        // should infer as `Result(Counter, Error)`.
-                        //
-                        // Build the class-level substitution map (for generic
-                        // class methods like `class wrap: v :: T -> Box(T)`)
-                        // by mapping declared param types to argument types.
-                        let class_subst = Self::class_method_substitution(
-                            class_name, hierarchy, method, arg_types,
-                        );
-                        // Method-local type params (`inject: initial :: A
-                        // into: Block(A, E, A) -> A`) bind from the arguments
-                        // exactly as on the instance side (BT-4110).
-                        let method_subst = Self::infer_method_local_params(
-                            method,
-                            arg_types,
-                            &class_subst,
-                            hierarchy,
-                            &method.defined_in,
-                        );
-                        // Self resolves to the receiver class. For a generic
-                        // receiver (e.g. `Box(T)`) we thread the inferred
-                        // type args through `self_type` so nested `Self` in
-                        // the return type — `-> Result(Self, Error)` —
-                        // resolves to `Result(Box(Integer), Error)` rather
-                        // than the erased `Result(Box, Error)`. CodeRabbit
-                        // on PR #2065.
-                        let self_type_args: Vec<InferredType> = hierarchy
-                            .get_class(class_name)
-                            .map(|info| {
-                                info.type_params
-                                    .iter()
-                                    .map(|param| {
-                                        class_subst
-                                            .get(param)
-                                            .cloned()
-                                            .unwrap_or_else(|| InferredType::known(param.clone()))
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        let self_type = if self_type_args.is_empty() {
-                            InferredType::known(class_name.clone())
-                        } else {
-                            InferredType::Known {
-                                class_name: class_name.clone(),
-                                type_args: self_type_args,
-                                provenance: crate::semantic_analysis::TypeProvenance::Inferred(
-                                    crate::source_analysis::Span::default(),
-                                ),
-                            }
-                        };
-                        // Thread `self_type` under the reserved
-                        // `Self` subst key (see `resolve_declared_type`'s
-                        // `SelfType` arm) so nested `Self` in the return type
-                        // resolves the same way the old `self_type` parameter
-                        // did.
-                        return type_resolver::resolve_declared_type_in(
-                            ret_ty,
-                            &type_resolver::merge_substitutions(
-                                &class_subst,
-                                &method_subst,
-                                Some(&self_type),
-                            ),
-                            self.protocol_registry.as_deref(),
-                            self.alias_registry.as_deref(),
-                            super::super::TypeStringContext::Substitution,
-                            Some(hierarchy),
+                if let Some(method) = hierarchy.find_class_method(class_name, selector)
+                    && let Some(ref ret_ty) = method.return_type
+                {
+                    // `Self` resolves to the static receiver class —
+                    // with constructor inference for generic classes (ADR 0068 Phase 1c)
+                    if matches!(ret_ty, DeclaredType::SelfType) {
+                        return Self::infer_constructor_type(
+                            class_name, hierarchy, selector, arg_types,
                         );
                     }
+                    // Parse parameterised return types like
+                    // `Result(List(String), Error)` into a fully-nested
+                    // `Known { class_name, type_args }` so that downstream
+                    // sends on the bound local resolve correctly.
+                    //
+                    // `Self` appearing as a (nested) type argument —
+                    // e.g. `class named: -> Result(Self, Error)` on Actor —
+                    // resolves to the static receiver class. This powers
+                    // ADR 0079's typed-lookup API where `Counter named: #c`
+                    // should infer as `Result(Counter, Error)`.
+                    //
+                    // Build the class-level substitution map (for generic
+                    // class methods like `class wrap: v :: T -> Box(T)`)
+                    // by mapping declared param types to argument types.
+                    let class_subst =
+                        Self::class_method_substitution(class_name, hierarchy, method, arg_types);
+                    // Method-local type params (`inject: initial :: A
+                    // into: Block(A, E, A) -> A`) bind from the arguments
+                    // exactly as on the instance side (BT-4110).
+                    let method_subst = Self::infer_method_local_params(
+                        method,
+                        arg_types,
+                        &class_subst,
+                        hierarchy,
+                        &method.defined_in,
+                    );
+                    // Self resolves to the receiver class. For a generic
+                    // receiver (e.g. `Box(T)`) we thread the inferred
+                    // type args through `self_type` so nested `Self` in
+                    // the return type — `-> Result(Self, Error)` —
+                    // resolves to `Result(Box(Integer), Error)` rather
+                    // than the erased `Result(Box, Error)`. CodeRabbit
+                    // on PR #2065.
+                    let self_type_args: Vec<InferredType> = hierarchy
+                        .get_class(class_name)
+                        .map(|info| {
+                            info.type_params
+                                .iter()
+                                .map(|param| {
+                                    class_subst
+                                        .get(param)
+                                        .cloned()
+                                        .unwrap_or_else(|| InferredType::known(param.clone()))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let self_type = if self_type_args.is_empty() {
+                        InferredType::known(class_name.clone())
+                    } else {
+                        InferredType::Known {
+                            class_name: class_name.clone(),
+                            type_args: self_type_args,
+                            provenance: crate::semantic_analysis::TypeProvenance::Inferred(
+                                crate::source_analysis::Span::default(),
+                            ),
+                        }
+                    };
+                    // Thread `self_type` under the reserved
+                    // `Self` subst key (see `resolve_declared_type`'s
+                    // `SelfType` arm) so nested `Self` in the return type
+                    // resolves the same way the old `self_type` parameter
+                    // did.
+                    return type_resolver::resolve_declared_type_in(
+                        ret_ty,
+                        &type_resolver::merge_substitutions(
+                            &class_subst,
+                            &method_subst,
+                            Some(&self_type),
+                        ),
+                        self.protocol_registry.as_deref(),
+                        self.alias_registry.as_deref(),
+                        super::super::TypeStringContext::Substitution,
+                        Some(hierarchy),
+                    );
                 }
                 // Fall back to return types inferred earlier in this pass.
                 // Return the full InferredType (including type_args).
@@ -218,15 +217,13 @@ impl TypeChecker {
                 // semantics that aren't modelled in the static hierarchy
                 // (e.g. `Metaclass` not knowing arbitrary class-side
                 // selectors), so propagating them would surface false DNUs.
-                if !has_class_method {
-                    if let Some(method) = hierarchy.find_method("Class", selector) {
-                        if method.return_type.as_ref().is_some_and(|ty| {
+                if !has_class_method
+                    && let Some(method) = hierarchy.find_method("Class", selector)
+                        && method.return_type.as_ref().is_some_and(|ty| {
                             matches!(ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
                         }) {
                             return InferredType::Never;
                         }
-                    }
-                }
                 // BT-4526: an absent selector is not an "unannotated return".
                 // Where the DNU was reported it is the root cause, so the
                 // result is a non-warning `DynamicReceiver` (as on the
@@ -332,11 +329,11 @@ impl TypeChecker {
                 continue;
             };
             // Exact match: a bare class type param (e.g. `T` in `Box(T)`).
-            if let DeclaredType::Simple(name) = param_ty {
-                if class_info.type_params.contains(name) {
-                    subst.insert(name.clone(), arg_ty.clone());
-                    continue;
-                }
+            if let DeclaredType::Simple(name) = param_ty
+                && class_info.type_params.contains(name)
+            {
+                subst.insert(name.clone(), arg_ty.clone());
+                continue;
             }
             // ADR 0083 Slice 2: nested match — a param shaped like `List(E)`
             // where `E` is a class type param. Recover the binding from a

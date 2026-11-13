@@ -1222,10 +1222,10 @@ impl Parser {
         }
         let mut o = self.skip_type_name_with_metatype(offset);
         // Skip generic type parameters: `Name(Type, Type, ...)`
-        if matches!(self.peek_at(o), Some(TokenKind::LeftParen)) {
-            if let Some(after) = self.skip_paren_type_params(o) {
-                o = after;
-            }
+        if matches!(self.peek_at(o), Some(TokenKind::LeftParen))
+            && let Some(after) = self.skip_paren_type_params(o)
+        {
+            o = after;
         }
         Some(o)
     }
@@ -2000,14 +2000,15 @@ impl Parser {
                 // starts a new statement — typically a class-method definition
                 // on the next line — and must not be consumed as a metatype
                 // suffix.
-                if let TokenKind::Identifier(next) = self.current_kind() {
-                    if next.as_str() == "class" && !self.current_token().has_leading_newline() {
-                        let end_span = self.current_token().span();
-                        self.advance();
-                        return TypeAnnotation::SelfClass {
-                            span: span.merge(end_span),
-                        };
-                    }
+                if let TokenKind::Identifier(next) = self.current_kind()
+                    && next.as_str() == "class"
+                    && !self.current_token().has_leading_newline()
+                {
+                    let end_span = self.current_token().span();
+                    self.advance();
+                    return TypeAnnotation::SelfClass {
+                        span: span.merge(end_span),
+                    };
                 }
                 TypeAnnotation::SelfType { span }
             } else {
@@ -3153,15 +3154,15 @@ impl Parser {
             // this (the protocol's) file.
             let pending = self.parse_pending_declaration_expect();
             let pending_has_expect = pending.expect.is_some();
-            if let Some((_, _, span)) = pending.expect {
-                if !self.is_at_method_definition() {
-                    self.diagnostics.push(Diagnostic::error(
+            if let Some((_, _, span)) = pending.expect
+                && !self.is_at_method_definition()
+            {
+                self.diagnostics.push(Diagnostic::error(
                         "`@expect` in a protocol body applies only to a provided method (one with a `=>` body)",
                         span,
                     ));
-                    while self.match_token(&TokenKind::Period) {}
-                    continue;
-                }
+                while self.match_token(&TokenKind::Period) {}
+                continue;
             }
 
             // A provided method — any selector shape ending in `=>`,

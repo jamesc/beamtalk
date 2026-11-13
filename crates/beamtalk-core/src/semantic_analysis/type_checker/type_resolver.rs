@@ -475,50 +475,50 @@ fn resolve_declared_type_inner(
             // recursively resolved through this same function so a chain of
             // aliases (`type B = A | #z`, `type A = #x | #y`) resolves all
             // the way down to a plain structural `InferredType`.
-            if let Some(registry) = alias_registry {
-                if let Some(alias_info) = registry.get(name) {
-                    // See `resolve_declared_type_inner`'s doc: a name
-                    // already fully resolved earlier in this call is reused
-                    // verbatim, avoiding the exponential re-walk a chain of
-                    // doubling aliases would otherwise trigger.
-                    if let Some(cached) = memo.get(name) {
-                        return cached.clone();
-                    }
-                    if expanding.contains(name) {
-                        // A cycle slipped through declaration-time checking
-                        // (e.g. a live redefinition that bypassed
-                        // `AliasRegistry::redefine_alias`) — never hang. See
-                        // `resolve_declared_type_inner`'s doc.
-                        return InferredType::Dynamic(DynamicReason::Unknown);
-                    }
-                    expanding.push(name.clone());
-                    let alias_declared = DeclaredType::from(&alias_info.annotation);
-                    let resolved = resolve_declared_type_inner(
-                        &alias_declared,
-                        subst,
-                        protocol_registry,
-                        alias_registry,
-                        ctx,
-                        hierarchy,
-                        expanding,
-                        memo,
-                    );
-                    expanding.pop();
-                    // ADR 0108: tag the *exact* value just produced
-                    // with the alias name for display — see `InferredType::
-                    // tag_alias_expansion`'s doc. This is the single
-                    // construction point for `TypeProvenance::Aliased`, so
-                    // every hover/diagnostic use of this resolved type can
-                    // render `RestartStrategy (#temporary | …)` instead of
-                    // the bare expansion. Tagged *before* memoizing so a
-                    // later reference to the same alias reuses the tagged
-                    // value verbatim (see the `memo.get` early-return above).
-                    // Span degradation: `Span::default()` — see
-                    // `resolve_declared_type`'s doc.
-                    let resolved = resolved.tag_alias_expansion(name.clone(), Span::default());
-                    memo.insert(name.clone(), resolved.clone());
-                    return resolved;
+            if let Some(registry) = alias_registry
+                && let Some(alias_info) = registry.get(name)
+            {
+                // See `resolve_declared_type_inner`'s doc: a name
+                // already fully resolved earlier in this call is reused
+                // verbatim, avoiding the exponential re-walk a chain of
+                // doubling aliases would otherwise trigger.
+                if let Some(cached) = memo.get(name) {
+                    return cached.clone();
                 }
+                if expanding.contains(name) {
+                    // A cycle slipped through declaration-time checking
+                    // (e.g. a live redefinition that bypassed
+                    // `AliasRegistry::redefine_alias`) — never hang. See
+                    // `resolve_declared_type_inner`'s doc.
+                    return InferredType::Dynamic(DynamicReason::Unknown);
+                }
+                expanding.push(name.clone());
+                let alias_declared = DeclaredType::from(&alias_info.annotation);
+                let resolved = resolve_declared_type_inner(
+                    &alias_declared,
+                    subst,
+                    protocol_registry,
+                    alias_registry,
+                    ctx,
+                    hierarchy,
+                    expanding,
+                    memo,
+                );
+                expanding.pop();
+                // ADR 0108: tag the *exact* value just produced
+                // with the alias name for display — see `InferredType::
+                // tag_alias_expansion`'s doc. This is the single
+                // construction point for `TypeProvenance::Aliased`, so
+                // every hover/diagnostic use of this resolved type can
+                // render `RestartStrategy (#temporary | …)` instead of
+                // the bare expansion. Tagged *before* memoizing so a
+                // later reference to the same alias reuses the tagged
+                // value verbatim (see the `memo.get` early-return above).
+                // Span degradation: `Span::default()` — see
+                // `resolve_declared_type`'s doc.
+                let resolved = resolved.tag_alias_expansion(name.clone(), Span::default());
+                memo.insert(name.clone(), resolved.clone());
+                return resolved;
             }
             let resolved_name = resolve_type_keyword(name);
             InferredType::Known {

@@ -974,10 +974,10 @@ impl InferredType {
                 EcoString::from(format!("{protocol_name} class"))
             }
             Self::Dynamic(reason) => {
-                if opts.show_dynamic_reason {
-                    if let Some(desc) = reason.description() {
-                        return EcoString::from(format!("Dynamic ({desc})"));
-                    }
+                if opts.show_dynamic_reason
+                    && let Some(desc) = reason.description()
+                {
+                    return EcoString::from(format!("Dynamic ({desc})"));
                 }
                 EcoString::from("Dynamic")
             }
@@ -1096,13 +1096,12 @@ impl InferredType {
                         best_provenance = provenance.clone();
                     }
                     for inner_m in inner {
-                        if let Self::Known { provenance: p, .. } = inner_m {
-                            if matches!(best_provenance, TypeProvenance::Inferred(_))
+                        if let Self::Known { provenance: p, .. } = inner_m
+                            && matches!(best_provenance, TypeProvenance::Inferred(_))
                                 && Self::provenance_wins_union_default(p)
                             {
                                 best_provenance = p.clone();
                             }
-                        }
                         if !flat.contains(inner_m) {
                             flat.push(inner_m.clone());
                         }

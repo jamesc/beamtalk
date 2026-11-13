@@ -611,14 +611,14 @@ impl Parser {
         let size = seg.size.as_deref();
         let unit = seg.unit;
         let size_lit = size.and_then(binary_literal_size);
-        if let Some((n, span)) = size_lit {
-            if n < 0 {
-                self.diagnostics.push(Diagnostic::error(
-                    format!("binary segment sizes must be non-negative, got {n}"),
-                    span,
-                ));
-                return;
-            }
+        if let Some((n, span)) = size_lit
+            && n < 0
+        {
+            self.diagnostics.push(Diagnostic::error(
+                format!("binary segment sizes must be non-negative, got {n}"),
+                span,
+            ));
+            return;
         }
         let seg_type = seg.effective_type();
         if self.reject_utf_size_or_unit(seg_type, value.binary_value_span(), size, size_lit, unit) {
@@ -673,10 +673,10 @@ impl Parser {
             _ => None,
         };
         if let Some(v) = int_value {
-            if let (Literal::Character(c), BinarySegmentType::Integer) = (lit, seg_type) {
-                if is_eight_bits_wide(size.is_none(), size_lit, unit) {
-                    self.warn_non_ascii_byte_character(*c, value_span, direction);
-                }
+            if let (Literal::Character(c), BinarySegmentType::Integer) = (lit, seg_type)
+                && is_eight_bits_wide(size.is_none(), size_lit, unit)
+            {
+                self.warn_non_ascii_byte_character(*c, value_span, direction);
             }
             self.check_binary_int_literal_shape(
                 v,
@@ -1049,12 +1049,10 @@ impl Parser {
                     // `bits`/`bitstring` imply unit 1 and `bytes` unit 8
                     // (`binary` implies none): `erlc` rejects a different
                     // explicit `unit:`, in either order (BT-4376).
-                    if !had_type {
-                        if let Some(implied) = implied_segment_unit(&name) {
-                            implied_unit = Some(implied);
-                            if let Some(explicit) = unit {
-                                self.check_unit_conflict(implied, explicit, span);
-                            }
+                    if !had_type && let Some(implied) = implied_segment_unit(&name) {
+                        implied_unit = Some(implied);
+                        if let Some(explicit) = unit {
+                            self.check_unit_conflict(implied, explicit, span);
                         }
                     }
                 } else if let TokenKind::Keyword(kw) = self.current_kind() {

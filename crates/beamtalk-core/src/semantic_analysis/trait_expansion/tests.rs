@@ -941,14 +941,13 @@ fn first_body_assignment_type(method: &MethodDefinition) -> Option<TypeAnnotatio
     let mut found: Option<TypeAnnotation> = None;
     for stmt in &method.body {
         walk_expression(&stmt.expression, &mut |expr| {
-            if found.is_none() {
-                if let Expression::Assignment {
+            if found.is_none()
+                && let Expression::Assignment {
                     type_annotation: Some(ty),
                     ..
                 } = expr
-                {
-                    found = Some(ty.clone());
-                }
+            {
+                found = Some(ty.clone());
             }
         });
     }

@@ -581,10 +581,10 @@ impl ClassHierarchy {
                 // keyword decision, and never over an anchor the info already
                 // carries (e.g. a generated stdlib builtin's, decided from its
                 // AST); otherwise leave `None` (fail closed).
-                if info.auto_ctors.is_none() {
-                    if let KeywordDecision::Known(keyword_constructor) = keyword_decision {
-                        info.record_constructor_anchor(keyword_constructor);
-                    }
+                if info.auto_ctors.is_none()
+                    && let KeywordDecision::Known(keyword_constructor) = keyword_decision
+                {
+                    info.record_constructor_anchor(keyword_constructor);
                 }
             }
         }

@@ -160,20 +160,20 @@ impl TypeChecker {
             // (ADR 0101). A `native:` Actor delegates through
             // `gen_server:call` to the module's own callbacks instead, so it
             // is not covered.
-            if let Some(backing) = class.backing_module.as_ref() {
-                if !hierarchy.is_actor_subclass(&class.name.name) {
-                    for (method, is_class_method) in class
-                        .methods
-                        .iter()
-                        .map(|m| (m, false))
-                        .chain(class.class_methods.iter().map(|m| (m, true)))
-                    {
-                        self.check_native_delegate_nested_string_params(
-                            backing.name.as_str(),
-                            method,
-                            is_class_method,
-                        );
-                    }
+            if let Some(backing) = class.backing_module.as_ref()
+                && !hierarchy.is_actor_subclass(&class.name.name)
+            {
+                for (method, is_class_method) in class
+                    .methods
+                    .iter()
+                    .map(|m| (m, false))
+                    .chain(class.class_methods.iter().map(|m| (m, true)))
+                {
+                    self.check_native_delegate_nested_string_params(
+                        backing.name.as_str(),
+                        method,
+                        is_class_method,
+                    );
                 }
             }
 
@@ -729,31 +729,29 @@ impl TypeChecker {
                 receiver, field, ..
             } => {
                 let mut result = InferredType::Dynamic(DynamicReason::Unknown);
-                if let Expression::Identifier(recv_id) = receiver.as_ref() {
-                    if recv_id.name == "self" {
-                        // Check for a narrowed type in the env
-                        // first. Inside `self.field isNil ifFalse: [...]`, the
-                        // block env will have `SelfField("field")` → narrowed
-                        // non-nil type. Assign to `result` (rather than returning
-                        // early) so the shared post-processing hook still runs on
-                        // narrowed reads.
-                        if let Some(narrowed) = env.get(&EnvKey::self_field(field.name.clone())) {
-                            result = narrowed;
-                        } else if let Some(InferredType::Known { class_name, .. }) =
-                            env.get_local("self")
-                        {
-                            if let Some(field_type) =
-                                hierarchy.state_field_type(&class_name, &field.name)
-                            {
-                                result = type_resolver::resolve_declared_type(
-                                    &field_type,
-                                    &type_resolver::SubstitutionMap::new(),
-                                    self.protocol_registry.as_deref(),
-                                    self.alias_registry.as_deref(),
-                                    TypeStringContext::Declared,
-                                );
-                            }
-                        }
+                if let Expression::Identifier(recv_id) = receiver.as_ref()
+                    && recv_id.name == "self"
+                {
+                    // Check for a narrowed type in the env
+                    // first. Inside `self.field isNil ifFalse: [...]`, the
+                    // block env will have `SelfField("field")` → narrowed
+                    // non-nil type. Assign to `result` (rather than returning
+                    // early) so the shared post-processing hook still runs on
+                    // narrowed reads.
+                    if let Some(narrowed) = env.get(&EnvKey::self_field(field.name.clone())) {
+                        result = narrowed;
+                    } else if let Some(InferredType::Known { class_name, .. }) =
+                        env.get_local("self")
+                        && let Some(field_type) =
+                            hierarchy.state_field_type(&class_name, &field.name)
+                    {
+                        result = type_resolver::resolve_declared_type(
+                            &field_type,
+                            &type_resolver::SubstitutionMap::new(),
+                            self.protocol_registry.as_deref(),
+                            self.alias_registry.as_deref(),
+                            TypeStringContext::Declared,
+                        );
                     }
                 }
                 result

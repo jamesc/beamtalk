@@ -347,13 +347,13 @@ impl ClassCtx<'_> {
                     return;
                 }
                 let name = send.selector.name();
-                if let Some(by_reference) = self.own_class_receiver(send.receiver) {
-                    if self.may_write_class_var(&name, by_reference) {
-                        through_send = Some((
-                            send.receiver.span().start(),
-                            format!("writes class variables through '{name}' of {class}"),
-                        ));
-                    }
+                if let Some(by_reference) = self.own_class_receiver(send.receiver)
+                    && self.may_write_class_var(&name, by_reference)
+                {
+                    through_send = Some((
+                        send.receiver.span().start(),
+                        format!("writes class variables through '{name}' of {class}"),
+                    ));
                 }
             });
         }

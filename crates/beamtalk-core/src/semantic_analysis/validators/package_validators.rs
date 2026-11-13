@@ -38,23 +38,23 @@ pub fn check_package_qualifiers(
     // Check class references within class definitions
     for class in &module.classes {
         // Check superclass if it has a package qualifier
-        if let Some(ref pkg) = class.superclass_package {
-            if !known_packages.contains(pkg.name.as_str()) {
-                let superclass_name = class.superclass.as_ref().map_or("?", |s| s.name.as_str());
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "Unknown package '{}' in superclass reference '{}@{}'",
-                            pkg.name, pkg.name, superclass_name
-                        ),
-                        pkg.span,
-                    )
-                    .with_hint(format!(
-                        "Add '{}' to [dependencies] in beamtalk.toml",
-                        pkg.name
-                    )),
-                );
-            }
+        if let Some(ref pkg) = class.superclass_package
+            && !known_packages.contains(pkg.name.as_str())
+        {
+            let superclass_name = class.superclass.as_ref().map_or("?", |s| s.name.as_str());
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "Unknown package '{}' in superclass reference '{}@{}'",
+                        pkg.name, pkg.name, superclass_name
+                    ),
+                    pkg.span,
+                )
+                .with_hint(format!(
+                    "Add '{}' to [dependencies] in beamtalk.toml",
+                    pkg.name
+                )),
+            );
         }
 
         // Check expressions in method bodies
@@ -80,22 +80,22 @@ pub fn check_package_qualifiers(
 
     // Check standalone method definitions
     for method_def in &module.method_definitions {
-        if let Some(ref pkg) = method_def.package {
-            if !known_packages.contains(pkg.name.as_str()) {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "Unknown package '{}' in extension target '{}@{}'",
-                            pkg.name, pkg.name, method_def.class_name.name
-                        ),
-                        pkg.span,
-                    )
-                    .with_hint(format!(
-                        "Add '{}' to [dependencies] in beamtalk.toml",
-                        pkg.name
-                    )),
-                );
-            }
+        if let Some(ref pkg) = method_def.package
+            && !known_packages.contains(pkg.name.as_str())
+        {
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "Unknown package '{}' in extension target '{}@{}'",
+                        pkg.name, pkg.name, method_def.class_name.name
+                    ),
+                    pkg.span,
+                )
+                .with_hint(format!(
+                    "Add '{}' to [dependencies] in beamtalk.toml",
+                    pkg.name
+                )),
+            );
         }
 
         for stmt in &method_def.method.body {

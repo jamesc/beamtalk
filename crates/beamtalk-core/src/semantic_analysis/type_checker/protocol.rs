@@ -666,119 +666,116 @@ impl TypeChecker {
                 ..
             } => {
                 // Check if any argument has generic type args that need variance checking
-                if let Some(receiver_type) = self.type_map.get(receiver.span()) {
-                    if let InferredType::Known {
+                if let Some(receiver_type) = self.type_map.get(receiver.span())
+                    && let InferredType::Known {
                         class_name,
                         type_args: ref receiver_type_args,
                         ..
                     } = receiver_type.clone()
-                    {
-                        let sel_name = selector.name();
-                        let method = hierarchy.find_method(&class_name, &sel_name);
-                        if let Some(method) = method {
-                            // Substitution map from the receiver's own
-                            // class-level generic type-param names (e.g. `E` in
-                            // `List(E)`) to its concrete `receiver_type_args`
-                            // (e.g. `List(Integer)` gives `{E -> Integer}`).
-                            // Without this, a declared parameter type naming a
-                            // class type param (`List(E)`, `Dictionary(K, V)`)
-                            // never matched `class_subst`'s keys below and
-                            // `is_assignable_to_with_variance` compared the
-                            // argument against the literal unresolved param
-                            // name, which — like a bare `E`/`V`/`K` anywhere
-                            // else in the checker — is treated as a wildcard
-                            // and always passes.
-                            // Widen singleton (or union-of-singleton)
-                            // substitution values to `Symbol` — see the
-                            // identical widening and its doc in
-                            // `validation/`'s `check_argument_types`
-                            // (`widen_singleton_type_arg`). Without this, a
-                            // `Dictionary`/`List`/`Result` inferred from
-                            // symbol literals (`d1 merge: d2` with
-                            // differently-keyed dict literals, `#(#a, #b) ++
-                            // #(#c, #d)`, `Result ok: #active`) would compare
-                            // its narrow substituted type arg invariantly
-                            // against a different literal's singleton and
-                            // flag entirely correct code as a mismatch.
-                            let class_subst: HashMap<EcoString, InferredType> =
-                                TypeChecker::build_inherited_substitution_map(
-                                    hierarchy,
-                                    &class_name,
-                                    receiver_type_args,
-                                    &method.defined_in,
-                                )
-                                .into_iter()
-                                .map(|(param, ty)| {
-                                    (param, TypeChecker::widen_singleton_type_arg(&ty))
-                                })
-                                .collect();
-                            for (i, arg) in arguments.iter().enumerate() {
-                                if let Some(Some(expected_declared)) = method.param_types.get(i) {
-                                    // BT-4385: a list literal judged element
-                                    // by element is not judged again whole.
-                                    if self
-                                        .list_literal_element_expectation(
-                                            arg,
-                                            expected_declared,
-                                            &class_name,
-                                            hierarchy,
-                                        )
-                                        .is_some()
-                                    {
-                                        continue;
-                                    }
-                                    // `type_string_references_class_param` /
-                                    // `is_assignable_to_with_variance` below are
-                                    // string-level helpers (`DeclaredType`
-                                    // is out of scope here) — render the structured type once
-                                    // at this boundary (byte-identical to the
-                                    // old stored string) and keep them
-                                    // unchanged; `resolve_type_param` itself
-                                    // takes the structured `DeclaredType`
-                                    // directly.
-                                    let expected_declared_str: EcoString =
-                                        expected_declared.to_string().into();
-                                    let substituted_expected;
-                                    let expected_ty = if !class_subst.is_empty()
-                                        && TypeChecker::type_string_references_class_param(
-                                            &expected_declared_str,
-                                            &class_subst,
-                                        ) {
-                                        substituted_expected = TypeChecker::resolve_type_param(
-                                            expected_declared,
-                                            &class_subst,
-                                            &HashMap::new(),
-                                            hierarchy,
-                                        )
-                                        .display_name();
-                                        &substituted_expected
-                                    } else {
-                                        &expected_declared_str
-                                    };
-                                    // Only check when expected type is generic
-                                    if expected_ty.contains('(') {
-                                        if let Some(arg_type) = self.type_map.get(arg.span()) {
-                                            if let InferredType::Known { type_args, .. } = arg_type
-                                            {
-                                                if !type_args.is_empty() {
-                                                    let arg_str = arg_type.display_annotation();
-                                                    if !Self::is_assignable_to_with_variance(
-                                                        &arg_str,
-                                                        expected_ty,
-                                                        hierarchy,
-                                                        protocol_registry,
-                                                    ) {
-                                                        let param_pos = i + 1;
-                                                        // Render `UndefinedObject` as `Nil` in user-facing messages.
-                                                        let expected_display =
-                                                            InferredType::class_name_for_diagnostic(
-                                                                expected_ty.as_str(),
-                                                            );
-                                                        let arg_display =
-                                                            InferredType::class_name_for_diagnostic(
-                                                                arg_str.as_str(),
-                                                            );
-                                                        self.diagnostics.push(
+                {
+                    let sel_name = selector.name();
+                    let method = hierarchy.find_method(&class_name, &sel_name);
+                    if let Some(method) = method {
+                        // Substitution map from the receiver's own
+                        // class-level generic type-param names (e.g. `E` in
+                        // `List(E)`) to its concrete `receiver_type_args`
+                        // (e.g. `List(Integer)` gives `{E -> Integer}`).
+                        // Without this, a declared parameter type naming a
+                        // class type param (`List(E)`, `Dictionary(K, V)`)
+                        // never matched `class_subst`'s keys below and
+                        // `is_assignable_to_with_variance` compared the
+                        // argument against the literal unresolved param
+                        // name, which — like a bare `E`/`V`/`K` anywhere
+                        // else in the checker — is treated as a wildcard
+                        // and always passes.
+                        // Widen singleton (or union-of-singleton)
+                        // substitution values to `Symbol` — see the
+                        // identical widening and its doc in
+                        // `validation/`'s `check_argument_types`
+                        // (`widen_singleton_type_arg`). Without this, a
+                        // `Dictionary`/`List`/`Result` inferred from
+                        // symbol literals (`d1 merge: d2` with
+                        // differently-keyed dict literals, `#(#a, #b) ++
+                        // #(#c, #d)`, `Result ok: #active`) would compare
+                        // its narrow substituted type arg invariantly
+                        // against a different literal's singleton and
+                        // flag entirely correct code as a mismatch.
+                        let class_subst: HashMap<EcoString, InferredType> =
+                            TypeChecker::build_inherited_substitution_map(
+                                hierarchy,
+                                &class_name,
+                                receiver_type_args,
+                                &method.defined_in,
+                            )
+                            .into_iter()
+                            .map(|(param, ty)| (param, TypeChecker::widen_singleton_type_arg(&ty)))
+                            .collect();
+                        for (i, arg) in arguments.iter().enumerate() {
+                            if let Some(Some(expected_declared)) = method.param_types.get(i) {
+                                // BT-4385: a list literal judged element
+                                // by element is not judged again whole.
+                                if self
+                                    .list_literal_element_expectation(
+                                        arg,
+                                        expected_declared,
+                                        &class_name,
+                                        hierarchy,
+                                    )
+                                    .is_some()
+                                {
+                                    continue;
+                                }
+                                // `type_string_references_class_param` /
+                                // `is_assignable_to_with_variance` below are
+                                // string-level helpers (`DeclaredType`
+                                // is out of scope here) — render the structured type once
+                                // at this boundary (byte-identical to the
+                                // old stored string) and keep them
+                                // unchanged; `resolve_type_param` itself
+                                // takes the structured `DeclaredType`
+                                // directly.
+                                let expected_declared_str: EcoString =
+                                    expected_declared.to_string().into();
+                                let substituted_expected;
+                                let expected_ty = if !class_subst.is_empty()
+                                    && TypeChecker::type_string_references_class_param(
+                                        &expected_declared_str,
+                                        &class_subst,
+                                    ) {
+                                    substituted_expected = TypeChecker::resolve_type_param(
+                                        expected_declared,
+                                        &class_subst,
+                                        &HashMap::new(),
+                                        hierarchy,
+                                    )
+                                    .display_name();
+                                    &substituted_expected
+                                } else {
+                                    &expected_declared_str
+                                };
+                                // Only check when expected type is generic
+                                if expected_ty.contains('(')
+                                    && let Some(arg_type) = self.type_map.get(arg.span())
+                                    && let InferredType::Known { type_args, .. } = arg_type
+                                    && !type_args.is_empty()
+                                {
+                                    let arg_str = arg_type.display_annotation();
+                                    if !Self::is_assignable_to_with_variance(
+                                        &arg_str,
+                                        expected_ty,
+                                        hierarchy,
+                                        protocol_registry,
+                                    ) {
+                                        let param_pos = i + 1;
+                                        // Render `UndefinedObject` as `Nil` in user-facing messages.
+                                        let expected_display =
+                                            InferredType::class_name_for_diagnostic(
+                                                expected_ty.as_str(),
+                                            );
+                                        let arg_display = InferredType::class_name_for_diagnostic(
+                                            arg_str.as_str(),
+                                        );
+                                        self.diagnostics.push(
                                                             Diagnostic::warning(
                                                                 format!(
                                                                     "Argument {param_pos} of '{sel_name}' on {class_name} expects {expected_display}, got {arg_display}"
@@ -790,10 +787,6 @@ impl TypeChecker {
                                                                 "Type arguments are not compatible: expected {expected_display}, got {arg_display}"
                                                             )),
                                                         );
-                                                    }
-                                                }
-                                            }
-                                        }
                                     }
                                 }
                             }

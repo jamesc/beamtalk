@@ -949,12 +949,12 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // `register_extensions` skips selectors the class already defines, so
     // the current file's definitions win and an index that includes the
     // current file's own entries is harmless.
-    if let Some(cross_file_extensions) = cross_file_extensions {
-        if !cross_file_extensions.is_empty() {
-            result
-                .class_hierarchy
-                .register_extensions(cross_file_extensions);
-        }
+    if let Some(cross_file_extensions) = cross_file_extensions
+        && !cross_file_extensions.is_empty()
+    {
+        result
+            .class_hierarchy
+            .register_extensions(cross_file_extensions);
     }
 
     // Phase 0.5: Protocol Registration (ADR 0068 Phase 2b)

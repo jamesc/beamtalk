@@ -115,12 +115,11 @@ pub(crate) fn classify(
             // followed, matching the "flow-local, shallow" contract: the
             // checker does not attempt data-flow analysis *inside* an
             // arbitrary block body.
-            if name == "ifOk:ifError:" {
-                if let [Expression::Block(ok_block), _] = arguments.as_slice() {
-                    if is_trivial_param_forward(ok_block) {
-                        return classify(receiver, is_remote_ident);
-                    }
-                }
+            if name == "ifOk:ifError:"
+                && let [Expression::Block(ok_block), _] = arguments.as_slice()
+                && is_trivial_param_forward(ok_block)
+            {
+                return classify(receiver, is_remote_ident);
             }
             None
         }

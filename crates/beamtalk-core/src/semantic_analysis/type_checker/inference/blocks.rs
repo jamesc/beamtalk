@@ -400,10 +400,10 @@ impl TypeChecker {
         if class_name.as_str() != "Block" {
             return None;
         }
-        if let Expression::Block(block) = arg {
-            if block_has_any_return(block) {
-                return Some(InferredType::Never);
-            }
+        if let Expression::Block(block) = arg
+            && block_has_any_return(block)
+        {
+            return Some(InferredType::Never);
         }
         type_args.last().cloned()
     }
@@ -840,13 +840,13 @@ impl TypeChecker {
             DeclaredType::Union(members) => {
                 let mut found: Option<&[DeclaredType]> = None;
                 for member in members {
-                    if let DeclaredType::Generic { base, parameters } = member {
-                        if base == "Block" {
-                            if found.is_some() {
-                                return None;
-                            }
-                            found = Some(parameters);
+                    if let DeclaredType::Generic { base, parameters } = member
+                        && base == "Block"
+                    {
+                        if found.is_some() {
+                            return None;
                         }
+                        found = Some(parameters);
                     }
                 }
                 found
@@ -923,26 +923,25 @@ impl TypeChecker {
         if matches!(
             WellKnownSelector::from_name(selector_name),
             Some(WellKnownSelector::IfTrue | WellKnownSelector::IfFalse)
-        ) {
-            if let InferredType::Union { .. } = receiver_ty {
-                return arguments
-                    .iter()
-                    .map(|arg| {
-                        if let Expression::Block(block) = arg {
-                            self.infer_block_with_typed_params(
-                                block,
-                                arg.span(),
-                                &[],
-                                hierarchy,
-                                env,
-                                in_abstract_method,
-                            )
-                        } else {
-                            self.infer_expr(arg, hierarchy, env, in_abstract_method)
-                        }
-                    })
-                    .collect();
-            }
+        ) && let InferredType::Union { .. } = receiver_ty
+        {
+            return arguments
+                .iter()
+                .map(|arg| {
+                    if let Expression::Block(block) = arg {
+                        self.infer_block_with_typed_params(
+                            block,
+                            arg.span(),
+                            &[],
+                            hierarchy,
+                            env,
+                            in_abstract_method,
+                        )
+                    } else {
+                        self.infer_expr(arg, hierarchy, env, in_abstract_method)
+                    }
+                })
+                .collect();
         }
 
         // A `Union`-typed receiver (e.g. the `V | T` widened result of
@@ -1367,20 +1366,20 @@ impl TypeChecker {
                 // `foo: ([:x | ...])` gets the same Dynamic(DynamicReceiver)
                 // propagation as `foo: [:x | ...]`: the checker reads the
                 // operand-normalised tree (BT-4238).
-                if let Expression::Block(block) = arg {
-                    if propagate_dynamic {
-                        let param_types: Vec<InferredType> = (0..block.parameters.len())
-                            .map(|_| InferredType::Dynamic(DynamicReason::DynamicReceiver))
-                            .collect();
-                        return self.infer_block_with_typed_params(
-                            block,
-                            arg.span(),
-                            &param_types,
-                            hierarchy,
-                            env,
-                            in_abstract_method,
-                        );
-                    }
+                if let Expression::Block(block) = arg
+                    && propagate_dynamic
+                {
+                    let param_types: Vec<InferredType> = (0..block.parameters.len())
+                        .map(|_| InferredType::Dynamic(DynamicReason::DynamicReceiver))
+                        .collect();
+                    return self.infer_block_with_typed_params(
+                        block,
+                        arg.span(),
+                        &param_types,
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    );
                 }
                 self.infer_expr(arg, hierarchy, env, in_abstract_method)
             })
@@ -1747,10 +1746,10 @@ impl TypeChecker {
         expr: &Expression,
         expected: &InferredType,
     ) {
-        if let Expression::Block(block) = expr.unwrap_parens() {
-            if let Some(params) = Self::block_arm_param_types(expected) {
-                self.block_param_pushdown.insert(block.span, params);
-            }
+        if let Expression::Block(block) = expr.unwrap_parens()
+            && let Some(params) = Self::block_arm_param_types(expected)
+        {
+            self.block_param_pushdown.insert(block.span, params);
         }
     }
 

@@ -935,22 +935,22 @@ fn check_alias_leak_ref(
         return;
     }
 
-    if let Some(info) = hierarchy.get_class(type_name) {
-        if info.is_internal {
-            diagnostics.push(
-                Diagnostic::error(
-                    format!(
-                        "Internal class '{type_name}' appears in the expansion of \
+    if let Some(info) = hierarchy.get_class(type_name)
+        && info.is_internal
+    {
+        diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "Internal class '{type_name}' appears in the expansion of \
                          public type alias '{alias_name}'"
-                    ),
-                    span,
-                )
-                .with_hint(format!(
-                    "'{type_name}' is declared 'internal' — make it public, or change '{alias_name}'"
-                ))
-                .with_category(DiagnosticCategory::Visibility),
-            );
-        }
+                ),
+                span,
+            )
+            .with_hint(format!(
+                "'{type_name}' is declared 'internal' — make it public, or change '{alias_name}'"
+            ))
+            .with_category(DiagnosticCategory::Visibility),
+        );
     }
     // Protocols have no `is_internal` flag yet — nothing to check.
 }

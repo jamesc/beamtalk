@@ -181,10 +181,10 @@ fn receiver_kind(receiver: &Expression, selector: &MessageSelector) -> ReceiverK
 
 fn ffi_target_module(receiver: &Expression, selector: &MessageSelector) -> Option<String> {
     if crate::ffi_receiver::is_erlang_class_reference(receiver) {
-        if let MessageSelector::Unary(module_name) = selector {
-            if !crate::ffi_receiver::is_class_protocol_selector(module_name) {
-                return Some(module_name.to_string());
-            }
+        if let MessageSelector::Unary(module_name) = selector
+            && !crate::ffi_receiver::is_class_protocol_selector(module_name)
+        {
+            return Some(module_name.to_string());
         }
         return None;
     }
@@ -675,12 +675,10 @@ fn collect_selector_send_spans(
             if !receiver_rooted_in_error(receiver)
                 && self_or_super_kind(receiver).is_some()
                 && selector.name() == old_selector
-            {
-                if let Some(spans) =
+                && let Some(spans) =
                     selector_send_spans_for_match(selector, receiver, source, new_selector)
-                {
-                    out.push(spans);
-                }
+            {
+                out.push(spans);
             }
             collect_selector_send_spans(receiver, source, old_selector, new_selector, out);
             for arg in arguments {

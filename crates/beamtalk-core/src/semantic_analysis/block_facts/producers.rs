@@ -516,18 +516,17 @@ pub fn producer_packed_blocks(expr: &Expression) -> Vec<&Block> {
         return Vec::new();
     };
     let mut packed: Vec<&Block> = Vec::with_capacity(3);
-    if matches!(sel.as_str(), "whileTrue:" | "whileFalse:") {
-        if let Expression::Block(cond) = receiver.as_ref() {
-            packed.push(cond);
-        }
+    if matches!(sel.as_str(), "whileTrue:" | "whileFalse:")
+        && let Expression::Block(cond) = receiver.as_ref()
+    {
+        packed.push(cond);
     }
     packed.push(body);
     if let Some(index) =
         crate::state_threading_selectors::producer_handler_arg_index(&sel, arguments.len())
+        && let Some(Expression::Block(handler)) = arguments.get(index)
     {
-        if let Some(Expression::Block(handler)) = arguments.get(index) {
-            packed.push(handler);
-        }
+        packed.push(handler);
     }
     packed
 }
@@ -1004,26 +1003,26 @@ fn arm_statement_lowers(
         if matches!(e, Expression::Parenthesized { .. }) {
             return;
         }
-        if let Some(construct) = local_threading_construct(e) {
-            if !inside_producer(e.span())
-                && !construct_outer_local_writes(&construct, arm_bound).is_empty()
-            {
-                ok = false;
-            }
+        if let Some(construct) = local_threading_construct(e)
+            && !inside_producer(e.span())
+            && !construct_outer_local_writes(&construct, arm_bound).is_empty()
+        {
+            ok = false;
         }
         // BT-3947: a nested `match:` that writes an outer local and is not a
         // producer here would drop the write, like any construct.
-        if let Expression::Match { arms, .. } = e {
-            if !inside_producer(e.span()) && !match_arm_body_writes(arms, arm_bound).is_empty() {
-                ok = false;
-            }
+        if let Expression::Match { arms, .. } = e
+            && !inside_producer(e.span())
+            && !match_arm_body_writes(arms, arm_bound).is_empty()
+        {
+            ok = false;
         }
-        if kind == RootMethodKind::ValueType && !field_writes_carried {
-            if let Expression::Assignment { target, .. } = e {
-                if is_self_field_target(target) {
-                    ok = false;
-                }
-            }
+        if kind == RootMethodKind::ValueType
+            && !field_writes_carried
+            && let Expression::Assignment { target, .. } = e
+            && is_self_field_target(target)
+        {
+            ok = false;
         }
     });
     ok
@@ -1205,10 +1204,8 @@ fn match_arm_writes_in(
         walker
             .frames
             .push(ids.into_iter().map(|id| id.name).collect());
-        if with_guards {
-            if let Some(guard) = &arm.guard {
-                walker.expr(guard);
-            }
+        if with_guards && let Some(guard) = &arm.guard {
+            walker.expr(guard);
         }
         walker.expr(&arm.body);
         walker.frames.pop();
@@ -1444,10 +1441,10 @@ pub fn repl_evaluated_block(expr: &Expression) -> Option<&Block> {
 #[must_use]
 pub fn repl_arm_producer_sites(stmt: &Expression) -> Vec<&Expression> {
     let inner = stmt.unwrap_parens();
-    if let Expression::Assignment { target, .. } = inner {
-        if is_self_field_target(target) {
-            return Vec::new();
-        }
+    if let Expression::Assignment { target, .. } = inner
+        && is_self_field_target(target)
+    {
+        return Vec::new();
     }
     let mut sites = sequenced_operand_sites(stmt);
     if local_threading_construct(inner).is_some() || match_arms(inner).is_some() {

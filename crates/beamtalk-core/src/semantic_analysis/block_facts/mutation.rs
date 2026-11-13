@@ -490,14 +490,14 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
                 if let Expression::FieldAccess {
                     receiver, field, ..
                 } = target.as_ref()
+                    && receiver.is_self()
+                    && vars.contains(field.name.as_str())
                 {
-                    if receiver.is_self() && vars.contains(field.name.as_str()) {
-                        accesses
-                            .writes
-                            .entry(field.name.to_string())
-                            .or_insert_with(|| target.span());
-                        written_targets.insert(std::ptr::from_ref::<Expression>(target));
-                    }
+                    accesses
+                        .writes
+                        .entry(field.name.to_string())
+                        .or_insert_with(|| target.span());
+                    written_targets.insert(std::ptr::from_ref::<Expression>(target));
                 }
             }
             WalkEvent::Expr(

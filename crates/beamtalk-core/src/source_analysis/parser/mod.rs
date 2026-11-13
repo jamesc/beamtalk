@@ -343,10 +343,10 @@ pub fn is_input_complete(source: &str) -> bool {
         // Check for unterminated block comments in the EOF token's leading trivia
         if kind.is_eof() {
             for trivia in token.leading_trivia() {
-                if let Trivia::BlockComment(text) = trivia {
-                    if !text.ends_with("*/") {
-                        return false;
-                    }
+                if let Trivia::BlockComment(text) = trivia
+                    && !text.ends_with("*/")
+                {
+                    return false;
                 }
             }
         }
@@ -502,10 +502,10 @@ pub fn needs_blank_line_to_complete(source: &str) -> bool {
 
         if kind.is_eof() {
             for trivia in token.leading_trivia() {
-                if let Trivia::BlockComment(text) = trivia {
-                    if !text.ends_with("*/") {
-                        return false;
-                    }
+                if let Trivia::BlockComment(text) = trivia
+                    && !text.ends_with("*/")
+                {
+                    return false;
                 }
             }
         }
@@ -1834,10 +1834,10 @@ impl Parser {
         }
 
         // Skip optional superclass type arguments: `Collection(E)`, `Mapping(K, V)`
-        if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
-            if let Some(after) = self.skip_paren_type_params(offset) {
-                offset = after;
-            }
+        if matches!(self.peek_at(offset), Some(TokenKind::LeftParen))
+            && let Some(after) = self.skip_paren_type_params(offset)
+        {
+            offset = after;
         }
 
         // Expect `subclass:` keyword
@@ -2025,10 +2025,10 @@ impl Parser {
                 }
                 offset += 1;
                 // Skip generic type params: `Type(T, E)`
-                if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
-                    if let Some(after) = self.skip_paren_type_params(offset) {
-                        offset = after;
-                    }
+                if matches!(self.peek_at(offset), Some(TokenKind::LeftParen))
+                    && let Some(after) = self.skip_paren_type_params(offset)
+                {
+                    offset = after;
                 }
                 // Skip union tail: `| Type | Type ...`
                 while self.is_type_chain_operator(offset) {
@@ -2038,10 +2038,10 @@ impl Parser {
                     }
                     offset += 1;
                     // Skip generic type params on union member
-                    if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
-                        if let Some(after) = self.skip_paren_type_params(offset) {
-                            offset = after;
-                        }
+                    if matches!(self.peek_at(offset), Some(TokenKind::LeftParen))
+                        && let Some(after) = self.skip_paren_type_params(offset)
+                    {
+                        offset = after;
                     }
                 }
                 match self.peek_at(offset) {
@@ -2087,10 +2087,10 @@ impl Parser {
                     }
                     offset += 1; // skip type name
                     // Skip generic type params: `Type(T, E)`
-                    if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
-                        if let Some(after) = self.skip_paren_type_params(offset) {
-                            offset = after;
-                        }
+                    if matches!(self.peek_at(offset), Some(TokenKind::LeftParen))
+                        && let Some(after) = self.skip_paren_type_params(offset)
+                    {
+                        offset = after;
                     }
                     // Skip union tail: `| Type | Type ...`
                     while self.is_type_chain_operator(offset) {
@@ -2100,10 +2100,10 @@ impl Parser {
                         }
                         offset += 1;
                         // Skip generic type params on union member
-                        if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
-                            if let Some(after) = self.skip_paren_type_params(offset) {
-                                offset = after;
-                            }
+                        if matches!(self.peek_at(offset), Some(TokenKind::LeftParen))
+                            && let Some(after) = self.skip_paren_type_params(offset)
+                        {
+                            offset = after;
                         }
                     }
                     match self.peek_at(offset) {
@@ -2164,11 +2164,11 @@ impl Parser {
 
     /// Checks if the current token is a specific binary selector, and consumes it if so.
     pub(super) fn match_binary_selector(&mut self, expected: &str) -> bool {
-        if let TokenKind::BinarySelector(s) = self.current_kind() {
-            if s.as_str() == expected {
-                self.advance();
-                return true;
-            }
+        if let TokenKind::BinarySelector(s) = self.current_kind()
+            && s.as_str() == expected
+        {
+            self.advance();
+            return true;
         }
         false
     }

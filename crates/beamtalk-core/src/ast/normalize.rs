@@ -1260,11 +1260,10 @@ Protocol define: P
             if let Expression::MessageSend {
                 arguments, span, ..
             } = node
+                && let [Expression::Block(body)] = arguments.as_slice()
             {
-                if let [Expression::Block(body)] = arguments.as_slice() {
-                    assert_eq!(body.span, desugared_body_span(*span));
-                    unary += 1;
-                }
+                assert_eq!(body.span, desugared_body_span(*span));
+                unary += 1;
             }
         });
         assert_eq!(unary, 1);

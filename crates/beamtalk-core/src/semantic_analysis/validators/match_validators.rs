@@ -209,27 +209,27 @@ fn visit_assignment_in_match_arm(
         }
         Expression::Match { arms, .. } => {
             for arm in arms {
-                if let Expression::Assignment { target, span, .. } = &arm.body {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        if bound.contains(&id.name) {
-                            continue;
-                        }
-                        diagnostics.push(
-                            Diagnostic::warning(
-                                format!(
-                                    "Assignment to `{}` inside a match arm has no effect — \
-                                     the variable is not updated after the match expression.",
-                                    id.name,
-                                ),
-                                *span,
-                            )
-                            .with_hint(format!(
-                                "Capture the match result instead: `{} := value match: [...]`",
-                                id.name,
-                            ))
-                            .with_category(DiagnosticCategory::DeadAssignment),
-                        );
+                if let Expression::Assignment { target, span, .. } = &arm.body
+                    && let Expression::Identifier(id) = target.as_ref()
+                {
+                    if bound.contains(&id.name) {
+                        continue;
                     }
+                    diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "Assignment to `{}` inside a match arm has no effect — \
+                                     the variable is not updated after the match expression.",
+                                id.name,
+                            ),
+                            *span,
+                        )
+                        .with_hint(format!(
+                            "Capture the match result instead: `{} := value match: [...]`",
+                            id.name,
+                        ))
+                        .with_category(DiagnosticCategory::DeadAssignment),
+                    );
                 }
             }
         }

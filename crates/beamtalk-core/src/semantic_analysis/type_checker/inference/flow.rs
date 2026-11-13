@@ -178,14 +178,11 @@ impl TypeChecker {
             type_args,
             ..
         }) = self.type_map.get(block.span)
+            && WellKnownClass::from_str(class_name) == Some(WellKnownClass::Block)
+            && let Some(body_ty) = type_args.last()
+            && matches!(body_ty, InferredType::Never)
         {
-            if WellKnownClass::from_str(class_name) == Some(WellKnownClass::Block) {
-                if let Some(body_ty) = type_args.last() {
-                    if matches!(body_ty, InferredType::Never) {
-                        return true;
-                    }
-                }
-            }
+            return true;
         }
         block
             .body
@@ -328,18 +325,17 @@ impl TypeChecker {
         }
         // For `self.<field>` keys, resolve via the class
         // hierarchy using the `self` binding in the env.
-        if let EnvKey::SelfField(field_name) = var_key {
-            if let Some(InferredType::Known { class_name, .. }) = env.get_local("self") {
-                if let Some(field_type) = hierarchy.state_field_type(&class_name, field_name) {
-                    return type_resolver::resolve_declared_type(
-                        &field_type,
-                        &type_resolver::SubstitutionMap::new(),
-                        protocol_registry,
-                        alias_registry,
-                        TypeStringContext::Declared,
-                    );
-                }
-            }
+        if let EnvKey::SelfField(field_name) = var_key
+            && let Some(InferredType::Known { class_name, .. }) = env.get_local("self")
+            && let Some(field_type) = hierarchy.state_field_type(&class_name, field_name)
+        {
+            return type_resolver::resolve_declared_type(
+                &field_type,
+                &type_resolver::SubstitutionMap::new(),
+                protocol_registry,
+                alias_registry,
+                TypeStringContext::Declared,
+            );
         }
         InferredType::Dynamic(DynamicReason::Unknown)
     }
@@ -403,16 +399,14 @@ impl TypeChecker {
             // reassigns a tested variable (e.g. `[self.user := nil]`
             // or `[x := nil]`), the post-statement narrowing would be
             // unsound — skip it.
-            if is_if_true_if_false {
-                if let Some(Expression::Block(false_block)) = arguments.get(1) {
-                    if facts
-                        .when_false
-                        .keys()
-                        .any(|key| block_may_reassign(false_block, key))
-                    {
-                        return;
-                    }
-                }
+            if is_if_true_if_false
+                && let Some(Expression::Block(false_block)) = arguments.get(1)
+                && facts
+                    .when_false
+                    .keys()
+                    .any(|key| block_may_reassign(false_block, key))
+            {
+                return;
             }
             // The true block diverges, so any execution reaching the next
             // statement came through the false path.

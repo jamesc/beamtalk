@@ -165,17 +165,17 @@ impl TypeChecker {
                 // (e.g., when both child and parent use `E` but no explicit mapping).
                 let receiver_subst =
                     Self::build_substitution_map(hierarchy, receiver_class, receiver_type_args);
-                if !receiver_subst.is_empty() {
-                    if let Some(method_info) = hierarchy.get_class(method_class) {
-                        let mut result = HashMap::new();
-                        for param in &method_info.type_params {
-                            if let Some(val) = receiver_subst.get(param) {
-                                result.insert(param.clone(), val.clone());
-                            }
+                if !receiver_subst.is_empty()
+                    && let Some(method_info) = hierarchy.get_class(method_class)
+                {
+                    let mut result = HashMap::new();
+                    for param in &method_info.type_params {
+                        if let Some(val) = receiver_subst.get(param) {
+                            result.insert(param.clone(), val.clone());
                         }
-                        if !result.is_empty() {
-                            return result;
-                        }
+                    }
+                    if !result.is_empty() {
+                        return result;
                     }
                 }
                 // Continue walking up — a higher ancestor might have type args

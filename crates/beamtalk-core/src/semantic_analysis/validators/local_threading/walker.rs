@@ -165,10 +165,10 @@ impl<'d> Walker<'d> {
         let mut value_operands = HashSet::new();
         for stmt in body {
             crate::ast_walker::walk_expression(&stmt.expression, &mut |e| {
-                if let Expression::Assignment { target, value, .. } = e {
-                    if matches!(target.as_ref(), Expression::Identifier(_)) {
-                        value_operands.extend(value_blocks(value).into_iter().map(|b| b.span));
-                    }
+                if let Expression::Assignment { target, value, .. } = e
+                    && matches!(target.as_ref(), Expression::Identifier(_))
+                {
+                    value_operands.extend(value_blocks(value).into_iter().map(|b| b.span));
                 }
             });
         }
@@ -224,10 +224,10 @@ impl<'d> Walker<'d> {
     }
 
     fn define(&mut self, name: &EcoString) {
-        if !self.is_bound(name) {
-            if let Some(frame) = self.scope.last_mut() {
-                frame.insert(name.clone());
-            }
+        if !self.is_bound(name)
+            && let Some(frame) = self.scope.last_mut()
+        {
+            frame.insert(name.clone());
         }
     }
 
@@ -299,10 +299,11 @@ impl<'d> Walker<'d> {
             // ADR 0133: a block literal that is the value of a collection
             // operation's block (`collect: [:x | [t := t + x]]`) escapes into
             // the operation's result.
-            if i + 1 == body.len() && self.containers.last() == Some(&Container::ListOpBody) {
-                if let Expression::Block(block) = stmt.expression.unwrap_parens() {
-                    self.report_literal(block, &Escape::CollectionResult);
-                }
+            if i + 1 == body.len()
+                && self.containers.last() == Some(&Container::ListOpBody)
+                && let Expression::Block(block) = stmt.expression.unwrap_parens()
+            {
+                self.report_literal(block, &Escape::CollectionResult);
             }
             self.expr(&stmt.expression, Position::Statement);
         }
@@ -313,10 +314,10 @@ impl<'d> Walker<'d> {
         if let Some(shape) = self.escapes.get(&block.span).copied() {
             self.report_escaping_literal(block, shape);
         }
-        if self.value_operands.contains(&block.span) {
-            if let Some(write) = self.escape_write_of(block) {
-                self.value_block_writes.insert(block.span, write);
-            }
+        if self.value_operands.contains(&block.span)
+            && let Some(write) = self.escape_write_of(block)
+        {
+            self.value_block_writes.insert(block.span, write);
         }
         let frame_body = self.pending_frame_body.take();
         self.frame_sites.push(frame_body.map(|body| FrameSites {

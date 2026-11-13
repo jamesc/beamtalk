@@ -119,13 +119,12 @@ impl TypeChecker {
         // (`#premanent` vs `#permanent`), and only when the receiver is a
         // *closed* singleton union, so the suggestion pool is the finite,
         // known member set rather than an open-ended guess.
-        if !negated {
-            if let Some(suggestion) =
+        if !negated
+            && let Some(suggestion) =
                 Self::closest_singleton_member(singleton.as_type_name(), current_ty)
-            {
-                use std::fmt::Write;
-                let _ = write!(message, " — did you mean `{suggestion}`?");
-            }
+        {
+            use std::fmt::Write;
+            let _ = write!(message, " — did you mean `{suggestion}`?");
         }
         self.diagnostics.push(
             Diagnostic::hint(message, test_span)
