@@ -232,7 +232,7 @@ fn assert_catch_boundary_order(text: &str, expected_catches: usize) {
             let before = &text[..i];
             !before.ends_with("CastBuiltStack = ")
                 && !before.ends_with("InfoBuiltStack = ")
-                && !before.ends_with("<D4Built> = ")
+                && !before.ends_with("D4Built = ")
         })
         .collect();
     assert_eq!(anchors.len(), expected_catches, "{text}");

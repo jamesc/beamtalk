@@ -360,6 +360,7 @@ const HAND_WRITTEN_CAPITALIZED: &[&str] = &[
     "D4Result",
     "D4Stack",
     "D4Type",
+    "D4Wrapped",
     "DefaultState",
     "DispArg",
     "DispatchError",
