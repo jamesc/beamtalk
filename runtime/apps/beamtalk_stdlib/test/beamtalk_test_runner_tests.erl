@@ -337,6 +337,8 @@ result_to_json_includes_structured_frames_test() ->
     Frame = #{
         class => <<"A">>,
         selector => <<"m1">>,
+        class_side => true,
+        kind => beamtalk,
         block => true,
         file => nil,
         line => nil,
@@ -358,6 +360,8 @@ result_to_json_includes_structured_frames_test() ->
         #{
             <<"class">> => <<"A">>,
             <<"selector">> => <<"m1">>,
+            <<"class_side">> => true,
+            <<"kind">> => <<"beamtalk">>,
             <<"block">> => true,
             <<"file">> => null,
             <<"line">> => null,

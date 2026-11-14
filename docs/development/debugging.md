@@ -58,10 +58,13 @@ with no backing file falls back to a bare line number, no file).
 
 ## Reading Beamtalk Stack Traces
 
-Test failures and `Exception>>stackTrace` show Beamtalk-level frames only.
-Both go through one renderer, `beamtalk_stack_frame:format_frame/1`, so the
-same frame prints the same way in both places. Raw Erlang
-`module:function/arity` text is never emitted, and arity is never shown.
+Test failures, `Exception>>stackTrace` and JSON log stacktraces all go
+through one renderer, `beamtalk_stack_frame:format_frame/1` (ADR 0139: hide
+what the compiler made up, show what a person named), so the same frame
+prints the same way everywhere. A bare `{Module, Function, Arity}` is
+rendered by `beamtalk_stack_frame:render_mfa/1` in the same notation;
+`beamtalk_stack_frame:raw_mfa/1` is the one raw `module:function/arity`
+formatter, used for the machine-readable `mfa` log field and process stats.
 
 A default test failure (3 frames, see below):
 
@@ -69,21 +72,32 @@ A default test failure (3 frames, see below):
 FAIL testParse
   Expected 3, got 4
   at Parser>>readToken (parser.bt:42)
-  at Parser>>parse: [block] (parser.bt:31)
+  at [] in Parser>>parse: (parser.bt:31)
   at ParserTest>>testParse (parser_test.bt:12)
 ```
 
 ### Frame format
 
-Each frame is `Class>>selector [block] (file:line)`:
+| Frame | Rendered as |
+|---|---|
+| Instance method | `Counter>>increment (counter.bt:12)` |
+| Class-side method | `Counter class>>new (counter.bt:3)` (no `class_` prefix) |
+| Block | `[] in Counter>>increment (counter.bt:14)` |
+| Erlang code (any module that is not a Beamtalk class) | `lists:foldl/3 (lists.erl:2471)` |
+| A `bt@...` module the class table cannot resolve | `bt@user@Hpack>>class_encode:headers:table: (hpack.bt:40)` |
 
 - **Order is innermost-first.** The first line is where the error was raised;
   each following line is its caller; the last is the outermost caller (for a
   test failure, the test method).
-- **Class** is the Beamtalk class that owns the frame. If the module is not
-  mapped to a class, the module name is shown instead; `?` if neither is known.
-- **`[block]`** marks a compiler-lifted block (a closure body or loop body)
-  inside the named method, so `Parser>>parse: [block]` means "inside a block
+- **Class** is resolved through the runtime class table
+  (`beamtalk_class_registry`); nothing is guessed from the module name. A
+  `bt@...` module whose class is not loaded shows the raw module name (and
+  its raw function name). A class name is package-qualified (`json@Parser`)
+  only when two loaded class modules share the name. A same-named module with no registered class counts too, since the class table holds one row per name and cannot see it.
+- **Erlang frames** are written `module:function/arity` as recorded, never
+  as `Module>>function`. Test failure output lists only Beamtalk frames.
+- **`[] in`** marks a compiler-lifted block (a closure body or loop body)
+  inside the named method, so `[] in Parser>>parse:` means "inside a block
   in `parse:`", not a separate method.
 - **File** comes from the frame itself, falling back to the module's
   `beamtalk_source` attribute (via `beamtalk_reflection:source_file_from_module/1`).
@@ -144,7 +158,7 @@ supported interface.
 ```
 
 `printString` on a `StackFrame` uses the same renderer, so it shows the same
-`Class>>selector [block] (file:line)` text as test failures. `stackTrace`
+`Class>>selector (file:line)` text as test failures. `stackTrace`
 returns every frame the VM recorded; Beamtalk neither caps nor collapses it
 (the VM's own stacktrace depth limit still applies). REPL-evaluated
 code with no backing file shows no file in its frames.
