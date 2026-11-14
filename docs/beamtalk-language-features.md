@@ -1094,7 +1094,9 @@ x := nil
 x < 5              // => ERROR: UndefinedObject does not understand '<'
 ```
 
-This holds however the receiver is typed: an untyped local or parameter, or an `:: Integer | Nil` field that holds `nil`. Only a receiver statically known to be a number, character or string (a literal, a `:: Integer`/`:: String`-style parameter or field, `self` in those classes) compiles to the bare comparison instruction; everything else is checked at run time (one inline type test), so there is no "total order over every value" to fall back on.
+This holds however the receiver is typed: an untyped local or parameter, an `:: Integer | Nil` field that holds `nil`, or an `:: Integer` parameter or field that was handed a wrong value. A declared type is not enforced at run time (a `Dynamic` argument, an FFI result or a cast can violate it), and the BEAM's `<` is a total order that never raises, so trusting a declaration would answer `nil > 10` with `true`. Only a receiver whose kind the compiler *proves* (a literal, `self` in `Integer`/`Float`/`Character`/`String`) compiles to the bare comparison instruction. Every other receiver is checked at run time with one inline type test: a `:: Integer`-style parameter or field is tested for its declared kind, anything else for a number, character or string. A receiver that fails the test is sent the operator as a message, so it raises `does_not_understand` (or reaches its own overload). There is no "total order over every value" to fall back on.
+
+`==`, `=:=`, `/=` and `=/=` are unaffected: Erlang equality never term-orders, so a wrong-kind value answers `false` (`true` for the inequalities), not a wrong ordering.
 
 The **argument** is not checked at run time: a number, character, string or symbol receiver compared with an argument of a different kind falls back to the BEAM's term order and does not raise, so `5 < nil` answers `true` and `#a < 5` answers `false`. The compiler warns when it can see the mismatch (the argument's static type is known and is not the receiver's kind, e.g. `5 < nil`, `$a < 1`, `$x < nil`, `#a < 5`); an untyped or generic argument stays silent. Comparison operators have no number-on-the-left coercion (see above).
 
@@ -1102,14 +1104,17 @@ The **argument** is not checked at run time: a number, character, string or symb
 
 Arithmetic and comparison operators are messages, so `self.count + 1` must
 dispatch to the object's `+` when `count` holds a `Point` or `Money`. The
-compiler emits the bare Erlang arithmetic/comparison instruction only when it
-*knows* the operand is a primitive; otherwise it adds a runtime type test that
-sends the message to objects. For a field, "knows" means the declared type: a
-field annotated `:: Integer`, `:: Float` or `:: Number` takes the bare fast
-path, and comparisons also accept `:: Character` / `:: String`. A union with
-`Nil` (`:: Integer | Nil`) stays bare for arithmetic only; its comparisons get
-the runtime test so a `nil` raises instead of term-ordering (see Comparison
-above). An **untyped** field always gets the runtime test,
+compiler emits the bare Erlang arithmetic instruction only when it *knows* the
+operand is a primitive; otherwise it adds a runtime type test that sends the
+message to objects. For a field, "knows" means the declared type: a field
+annotated `:: Integer`, `:: Float` or `:: Number` takes the bare fast path for
+arithmetic. A comparison is bare only on a receiver the compiler *proves* (a
+literal, `self` in a builtin class); on a field declared `:: Integer`,
+`:: Float`, `:: Number`, `:: Character` or `:: String` it gets one inline test
+for the declared kind, because a declaration is not enforced at run time
+(BT-4823; see Comparison above). A union with `Nil` (`:: Integer | Nil`) stays
+bare for arithmetic only; its comparisons get the general runtime test so a
+`nil` raises instead of term-ordering. An **untyped** field always gets the runtime test,
 whatever its default, because writers outside the class can store any object in
 it (BT-3925):
 

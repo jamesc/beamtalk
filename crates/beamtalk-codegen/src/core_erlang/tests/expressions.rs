@@ -643,9 +643,11 @@ fn test_bt3924_nilable_primitive_field_comparison_is_guarded() {
         !method_body_contains(&core, "addN:", "is_number"),
         "arithmetic on an `Integer | Nil` field stays bare:\n{core}"
     );
+    // BT-4823: a declared `Integer` field is kind-tested, not bare.
     assert!(
-        !method_body_contains(&core, "ltC:", "is_binary"),
-        "comparison on an `Integer` field stays bare:\n{core}"
+        method_body_contains(&core, "ltC:", "call 'erlang':'is_number'(")
+            && !method_body_contains(&core, "ltC:", "is_binary"),
+        "comparison on an `Integer` field tests only its declared kind:\n{core}"
     );
 }
 
@@ -675,9 +677,11 @@ fn test_bt3925_untyped_actor_counter_is_guarded_and_typed_counter_is_bare() {
          increment => self.count := self.count + 1\n  \
          below: n => self.count < n\n",
     );
+    // Arithmetic on the `:: Integer` counter stays bare; its comparison keeps
+    // a single `is_number` kind test (BT-4823), never the general guard.
     assert!(
-        !typed.contains("is_number") && !typed.contains("'is_binary'("),
-        "an `:: Integer` counter must stay bare:\n{typed}"
+        typed.contains("is_number") && !typed.contains("'is_binary'("),
+        "an `:: Integer` counter's arithmetic stays bare and its comparison tests only `is_number`:\n{typed}"
     );
 }
 
@@ -752,8 +756,9 @@ fn test_bt3921_rebound_typed_param_name_is_guarded() {
         method_body_contains(&core, "rightAdd:in:", "try call 'erlang':'+'("),
         "a rebound typed-param name on the right must take the coercion path:\n{core}"
     );
-    // A typed parameter the body never rebinds stays on the bare BIF.
-    for sel in ["plainAdd:", "plainLt:", "plainRight:"] {
+    // A typed parameter the body never rebinds keeps arithmetic on the bare
+    // BIF; its comparison tests only the declared kind (BT-4823).
+    for sel in ["plainAdd:", "plainRight:"] {
         assert!(
             !method_body_contains(&core, sel, "is_number")
                 && !method_body_contains(&core, sel, "'is_binary'(")
@@ -761,12 +766,17 @@ fn test_bt3921_rebound_typed_param_name_is_guarded() {
             "{sel}: an unshadowed typed param must stay bare:\n{core}"
         );
     }
+    assert!(
+        method_body_contains(&core, "plainLt:", "call 'erlang':'is_number'(")
+            && !method_body_contains(&core, "plainLt:", "'is_binary'("),
+        "a trusted typed param's comparison tests only its declared kind:\n{core}"
+    );
 }
 
 // comparison operators (`< > <= >=`) are dispatchable messages. The
-// bare-BIF fast path holds for statically-comparable receivers (numeric / char
-// / string literals, `self` in Integer/Float/Character/String, and
-// Integer/Float/Number/Character/String params); everything else gets a runtime
+// bare-BIF fast path holds for *proven* receivers (numeric / char / string
+// literals, `self` in Integer/Float/Character/String); declared params and
+// fields get a kind test (BT-4823); everything else gets a runtime
 // primitive-comparable guard (`is_number or is_binary`) that keeps the bare
 // comparison BIF for numbers/characters/strings and dispatches everything else
 // — objects, but also `nil`, symbols, lists and tuples (BT-3924).
@@ -837,9 +847,18 @@ fn test_comparison_bare_bif_for_self_in_comparable_class() {
 }
 
 #[test]
-fn test_comparison_bare_bif_for_comparable_param() {
+fn test_comparison_declared_param_gets_a_kind_test() {
+    // BT-4823: a declared parameter type is not proof, so the comparison is
+    // guarded by a test for exactly the declared kind, and dispatches
+    // otherwise. Only a proven receiver stays bare.
     use beamtalk_core::ast::Identifier;
-    for ty in ["Integer", "Float", "Number", "Character", "String"] {
+    for (ty, test, absent) in [
+        ("Integer", "'is_number'(", "is_binary"),
+        ("Float", "'is_number'(", "is_binary"),
+        ("Number", "'is_number'(", "is_binary"),
+        ("Character", "'is_integer'(", "is_binary"),
+        ("String", "'is_binary'(", "is_number"),
+    ] {
         let mut generator = CoreErlangGenerator::new("test");
         generator
             .current_method_param_types
@@ -851,10 +870,48 @@ fn test_comparison_bare_bif_for_comparable_param() {
             .unwrap()
             .to_pretty_string();
         assert!(
-            output.contains("call 'erlang':'>='(") && !output.contains("is_binary"),
-            "`other >= 1` with other :: {ty} must be a bare BIF; got: {output}"
+            output.contains(&format!("case call 'erlang':{test}"))
+                && output.contains("call 'erlang':'>='(")
+                && output.contains("call 'beamtalk_message_dispatch':'send'(")
+                && !output.contains(absent)
+                && !output.contains("'or'("),
+            "`other >= 1` with other :: {ty} must test only its declared kind; got: {output}"
         );
     }
+}
+
+#[test]
+fn test_comparison_declared_union_field_gets_an_or_of_its_kind_tests() {
+    // BT-4823: a `Nil`-free union of comparable types is tested for exactly
+    // its members: `or` of the two type tests, never the general guard's pair.
+    let core = crate::core_erlang::tests::codegen(
+        "Value subclass: Holder\n  field: a :: Integer | String = 0\n  \
+         field: b :: Character | String = \"\"\n  field: c :: Integer | Float = 0\n  \
+         ltA: q => self.a < q\n  ltB: q => self.b < q\n  ltC: q => self.c < q\n",
+    );
+    assert!(
+        method_body_contains(
+            &core,
+            "ltA:",
+            "call 'erlang':'or'(call 'erlang':'is_number'("
+        ) && method_body_contains(&core, "ltA:", "call 'erlang':'is_binary'("),
+        "Integer | String tests is_number or is_binary:\n{core}"
+    );
+    assert!(
+        method_body_contains(
+            &core,
+            "ltB:",
+            "call 'erlang':'or'(call 'erlang':'is_integer'("
+        ) && method_body_contains(&core, "ltB:", "call 'erlang':'is_binary'(")
+            && !method_body_contains(&core, "ltB:", "is_number"),
+        "Character | String tests is_integer or is_binary, never is_number:\n{core}"
+    );
+    assert!(
+        method_body_contains(&core, "ltC:", "call 'erlang':'is_number'(")
+            && !method_body_contains(&core, "ltC:", "'or'(")
+            && !method_body_contains(&core, "ltC:", "is_binary"),
+        "Integer | Float collapses to one is_number:\n{core}"
+    );
 }
 
 #[test]

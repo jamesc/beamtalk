@@ -43,6 +43,9 @@ use super::workspace;
 ///   run-mode node. Only valid in script mode.
 /// - `workspace`: explicit workspace name to connect to (implies `connect`);
 ///   disambiguates when a project has more than one.
+/// - `raw_mfa`: on an uncaught error, also print the complete stack (hidden
+///   frames included), each frame's display name beside its raw MFA. Script
+///   mode only.
 #[instrument(skip_all, fields(class_or_dot = %class_or_dot))]
 pub fn run(
     class_or_dot: &str,
@@ -50,6 +53,7 @@ pub fn run(
     args: &[String],
     connect: bool,
     workspace: Option<&str>,
+    raw_mfa: bool,
 ) -> Result<()> {
     info!("Starting run command");
 
@@ -81,6 +85,12 @@ pub fn run(
                      (`beamtalk run ClassName selector`), not to `beamtalk run .`."
                 ));
             }
+            if raw_mfa {
+                return Err(miette!(
+                    "`--raw-mfa` applies to script mode \
+                     (`beamtalk run ClassName selector`), not to `beamtalk run .`."
+                ));
+            }
             // Service mode: requires [application] section
             let app_config = manifest::find_application_config(&project_root)?;
             match app_config {
@@ -99,11 +109,11 @@ pub fn run(
         }
         (class_name, Some(sel)) if connect => {
             // Connected mode: dispatch into a live shared workspace.
-            run_connected(&project_root, class_name, sel, args, workspace)
+            run_connected(&project_root, class_name, sel, args, workspace, raw_mfa)
         }
         (class_name, Some(sel)) => {
             // Script mode: beamtalk run ClassName selector [args...]
-            run_script(&project_root, &pkg, class_name, sel, args)
+            run_script(&project_root, &pkg, class_name, sel, args, raw_mfa)
         }
         (class_name, None) if class_name != "." => {
             // Got class name but no selector
@@ -217,6 +227,7 @@ fn prepare_eval_environment(
     class_name: &str,
     selector: &str,
     args: &[String],
+    raw_mfa: bool,
 ) -> Result<Vec<OsString>> {
     eprintln!("Building...");
     super::build::build(
@@ -255,6 +266,7 @@ fn prepare_eval_environment(
         args,
         &beam_env.otp_apps,
         root_package,
+        raw_mfa,
     );
 
     // BEAM code-path + `-eval` invocation args (distinct from the program `args`
@@ -279,6 +291,7 @@ fn run_script(
     class_name: &str,
     selector: &str,
     program_args: &[String],
+    raw_mfa: bool,
 ) -> Result<()> {
     let is_keyword = validate_class_and_selector(class_name, selector)?;
 
@@ -299,8 +312,14 @@ fn run_script(
 
     info!(class = %class_name, selector = %selector, "Running script");
 
-    let args =
-        prepare_eval_environment(project_root, &pkg.name, class_name, selector, program_args)?;
+    let args = prepare_eval_environment(
+        project_root,
+        &pkg.name,
+        class_name,
+        selector,
+        program_args,
+        raw_mfa,
+    )?;
 
     eprintln!("\nRunning {class_name}>>{selector}...");
 
@@ -364,7 +383,8 @@ fn run_script(
 /// * `Program exit: N` ends only that session (the node and other sessions stay
 ///   up) and this process exits `N`;
 /// * a normal return exits `0`;
-/// * an uncaught error prints to stderr and exits `1`
+/// * an uncaught error prints to stderr and exits `1` (with `--raw-mfa`, also
+///   the complete stack, each frame's display name beside its raw MFA)
 ///
 /// — mirroring `beamtalk_script_harness`'s implicit exit contract, but driven by
 /// the protocol's `exit_code` / error reply rather than the node's own exit code.
@@ -374,6 +394,7 @@ fn run_connected(
     selector: &str,
     program_args: &[String],
     workspace_name: Option<&str>,
+    raw_mfa: bool,
 ) -> Result<()> {
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
@@ -460,6 +481,13 @@ fn run_connected(
         if let Some(err) = response.error.as_ref().or(response.message.as_ref()) {
             eprintln!("{err}");
         }
+        // `--raw-mfa`: the reply carries the complete stack, both forms per
+        // frame; render it here, on the client that asked for it.
+        if raw_mfa && let Some(frames) = &response.frames {
+            for line in beamtalk_repl_protocol::render_raw_frames(frames) {
+                eprintln!("{line}");
+            }
+        }
         std::process::exit(1);
     }
 
@@ -477,6 +505,7 @@ fn run_connected(
 /// ADR 0072: When the package has `[native.dependencies]`, the corresponding
 /// OTP applications (gun, cowboy, etc.) are started before the workspace so
 /// that FFI calls into hex deps work at runtime.
+#[allow(clippy::too_many_arguments)] // one eval-string input per run-mode knob
 fn build_script_eval_cmd(
     workspace_id: &str,
     project_path_escaped: &str,
@@ -485,6 +514,7 @@ fn build_script_eval_cmd(
     program_args: &[String],
     hex_dep_names: &[String],
     root_package: &str,
+    raw_mfa: bool,
 ) -> String {
     let hex_deps_start = repl_startup::hex_deps_start_fragment(hex_dep_names);
     // BT-3651: record the root package (and load its .app) before the workspace
@@ -506,6 +536,18 @@ fn build_script_eval_cmd(
         "[]".to_string()
     };
 
+    // BT-4821: `--raw-mfa` is a render option handed to the harness as an
+    // argument. This node has one consumer, and nothing is written to the
+    // application environment.
+    let dispatch_call = if raw_mfa {
+        format!(
+            "beamtalk_script_harness:dispatch(ClassPid, {selector_atom}, {dispatch_args}, \
+             #{{raw_mfa => true}})"
+        )
+    } else {
+        format!("beamtalk_script_harness:dispatch(ClassPid, {selector_atom}, {dispatch_args})")
+    };
+
     format!(
         "{hex_deps_start}\
          {root_package_start}\
@@ -522,7 +564,7 @@ fn build_script_eval_cmd(
                  io:format(standard_error, \"Error: class '{class_name}' not found~n\", []), \
                  halt(1); \
              _ -> \
-                 beamtalk_script_harness:dispatch(ClassPid, {selector_atom}, {dispatch_args}) \
+                 {dispatch_call} \
          end."
     )
 }
@@ -836,7 +878,7 @@ mod tests {
         fs::create_dir_all(&src_path).unwrap();
         fs::write(src_path.join("main.bt"), "main := [42].").unwrap();
 
-        let result = with_project_dir(temp.path(), || run(".", None, &[], false, None));
+        let result = with_project_dir(temp.path(), || run(".", None, &[], false, None, false));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -857,7 +899,7 @@ mod tests {
             &temp,
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
-        let result = with_project_dir(temp.path(), || run(".", None, &[], true, None));
+        let result = with_project_dir(temp.path(), || run(".", None, &[], true, None, false));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -878,7 +920,7 @@ mod tests {
         );
         let args = vec!["Alice".to_string()];
         let result = with_project_dir(temp.path(), || {
-            run("Greeter", Some("run"), &args, true, None)
+            run("Greeter", Some("run"), &args, true, None, false)
         });
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
@@ -899,7 +941,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
         let result = with_project_dir(temp.path(), || {
-            run("bad", Some("main:"), &[], false, Some("ws"))
+            run("bad", Some("main:"), &[], false, Some("ws"), false)
         });
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
@@ -918,7 +960,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run(".", None, &[], false, None));
+        let result = with_project_dir(temp.path(), || run(".", None, &[], false, None, false));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -936,7 +978,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run("Main", None, &[], false, None));
+        let result = with_project_dir(temp.path(), || run("Main", None, &[], false, None, false));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -954,7 +996,9 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run("main", Some("run"), &[], false, None));
+        let result = with_project_dir(temp.path(), || {
+            run("main", Some("run"), &[], false, None, false)
+        });
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -974,7 +1018,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
         let result = with_project_dir(temp.path(), || {
-            run("/looks/like/path", None, &[], false, None)
+            run("/looks/like/path", None, &[], false, None, false)
         });
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
@@ -993,7 +1037,9 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run("Main", Some("Run"), &[], false, None));
+        let result = with_project_dir(temp.path(), || {
+            run("Main", Some("Run"), &[], false, None, false)
+        });
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -1015,7 +1061,9 @@ mod tests {
         )
         .unwrap();
 
-        let result = with_project_dir(temp.path(), || run("Main", Some("run"), &[], false, None));
+        let result = with_project_dir(temp.path(), || {
+            run("Main", Some("run"), &[], false, None, false)
+        });
         assert!(result.is_err());
     }
 
@@ -1030,7 +1078,7 @@ mod tests {
             "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\nstart = \"main\"\n",
         );
 
-        let result = with_project_dir(temp.path(), || run(".", None, &[], false, None));
+        let result = with_project_dir(temp.path(), || run(".", None, &[], false, None, false));
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
@@ -1051,6 +1099,7 @@ mod tests {
             &[],
             &[],
             "my_pkg",
+            false,
         );
         assert!(
             !cmd.contains("%%"),
@@ -1064,7 +1113,16 @@ mod tests {
 
     #[test]
     fn test_script_eval_cmd_contains_dispatch_and_halt() {
-        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[], &[], "my_pkg");
+        let cmd = build_script_eval_cmd(
+            "run_1",
+            "/proj",
+            "MyClass",
+            "run",
+            &[],
+            &[],
+            "my_pkg",
+            false,
+        );
         // The entry dispatch + implicit exit-code mapping is owned by the run
         // harness (ADR 0099 §3); the eval routes through it instead of an inline
         // class_send + halt(0).
@@ -1118,6 +1176,7 @@ mod tests {
             &[],
             &[],
             "my_pkg",
+            false,
         );
         assert!(cmd.contains("run_99"), "workspace_id not interpolated");
         assert!(cmd.contains("/my/project"), "project_path not interpolated");
@@ -1137,8 +1196,16 @@ mod tests {
     #[test]
     fn test_script_eval_cmd_starts_hex_deps() {
         let hex_deps = vec!["gun".to_string(), "cowboy".to_string()];
-        let cmd =
-            build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[], &hex_deps, "my_pkg");
+        let cmd = build_script_eval_cmd(
+            "run_1",
+            "/proj",
+            "MyClass",
+            "run",
+            &[],
+            &hex_deps,
+            "my_pkg",
+            false,
+        );
         assert!(
             cmd.contains("application:ensure_all_started(cowboy)"),
             "Should start cowboy: {cmd}"
@@ -1158,7 +1225,16 @@ mod tests {
 
     #[test]
     fn test_script_eval_cmd_no_hex_deps_unchanged() {
-        let cmd = build_script_eval_cmd("run_1", "/proj", "MyClass", "run", &[], &[], "my_pkg");
+        let cmd = build_script_eval_cmd(
+            "run_1",
+            "/proj",
+            "MyClass",
+            "run",
+            &[],
+            &[],
+            "my_pkg",
+            false,
+        );
         // Should only have one ensure_all_started call (for workspace)
         let count = cmd.matches("ensure_all_started").count();
         assert_eq!(
@@ -1209,7 +1285,16 @@ mod tests {
         // Args are emitted as explicit UTF-8 byte-segment binaries:
         // "Alice" = 65,108,105,99,101  and  "Bob" = 66,111,98.
         let args = vec!["Alice".to_string(), "Bob".to_string()];
-        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[], "my_pkg");
+        let cmd = build_script_eval_cmd(
+            "run_1",
+            "/proj",
+            "Greeter",
+            "main:",
+            &args,
+            &[],
+            "my_pkg",
+            false,
+        );
         assert!(
             cmd.contains(
                 "beamtalk_script_harness:dispatch(ClassPid, 'main:', \
@@ -1222,7 +1307,16 @@ mod tests {
     #[test]
     fn test_script_eval_cmd_keyword_dispatch_empty_args_is_empty_list() {
         // No args → the argv List(String) is empty, but the entry is still arity-1.
-        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &[], &[], "my_pkg");
+        let cmd = build_script_eval_cmd(
+            "run_1",
+            "/proj",
+            "Greeter",
+            "main:",
+            &[],
+            &[],
+            "my_pkg",
+            false,
+        );
         assert!(
             cmd.contains("beamtalk_script_harness:dispatch(ClassPid, 'main:', [[]])"),
             "Empty argv should be a one-element dispatch list holding []: {cmd}"
@@ -1234,7 +1328,16 @@ mod tests {
         // Byte-segment encoding is injection-proof (quotes/backslashes are just
         // bytes) and encoding-agnostic. `a"b\c` = 97,34,98,92,99.
         let args = vec![r#"a"b\c"#.to_string()];
-        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[], "my_pkg");
+        let cmd = build_script_eval_cmd(
+            "run_1",
+            "/proj",
+            "Greeter",
+            "main:",
+            &args,
+            &[],
+            "my_pkg",
+            false,
+        );
         assert!(
             cmd.contains("<<97, 34, 98, 92, 99>>"),
             "Arg should be emitted as raw UTF-8 bytes, not a quoted literal: {cmd}"
@@ -1246,7 +1349,16 @@ mod tests {
         // "café" → UTF-8 bytes 99,97,102,195,169 (é = 0xC3 0xA9). This matches the
         // escript path's `unicode:characters_to_binary`, not a mangled Latin-1 byte.
         let args = vec!["café".to_string()];
-        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "main:", &args, &[], "my_pkg");
+        let cmd = build_script_eval_cmd(
+            "run_1",
+            "/proj",
+            "Greeter",
+            "main:",
+            &args,
+            &[],
+            "my_pkg",
+            false,
+        );
         assert!(
             cmd.contains("<<99, 97, 102, 195, 169>>"),
             "Non-ASCII arg should be a UTF-8 byte sequence: {cmd}"
@@ -1255,7 +1367,16 @@ mod tests {
 
     #[test]
     fn test_script_eval_cmd_records_root_package_before_workspace_starts() {
-        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "run", &[], &[], "my_pkg");
+        let cmd = build_script_eval_cmd(
+            "run_1",
+            "/proj",
+            "Greeter",
+            "run",
+            &[],
+            &[],
+            "my_pkg",
+            false,
+        );
         let root = cmd
             .find(r#"beamtalk_package:set_root_package(<<"my_pkg">>)"#)
             .unwrap_or_else(|| panic!("root_package not recorded: {cmd}"));
@@ -1270,7 +1391,16 @@ mod tests {
     fn test_script_eval_cmd_seeds_program_name_env() {
         // program_name app env is seeded at boot so `Program name` returns
         // "beamtalk" under run-mode (the escript path overrides it in Phase 4).
-        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "run", &[], &[], "my_pkg");
+        let cmd = build_script_eval_cmd(
+            "run_1",
+            "/proj",
+            "Greeter",
+            "run",
+            &[],
+            &[],
+            "my_pkg",
+            false,
+        );
         assert!(
             cmd.contains(r#"application:set_env(beamtalk_runtime, program_name, <<"beamtalk">>)"#),
             "Run-mode boot should seed program_name: {cmd}"
@@ -1282,7 +1412,16 @@ mod tests {
         // node_owning is recorded as a capability at boot so `System halt:` / `Program exit:`
         // know the program owns the node (ADR 0099 §3, BT-3634). Not set on the
         // shared/persistent path, where halt is refused.
-        let cmd = build_script_eval_cmd("run_1", "/proj", "Greeter", "run", &[], &[], "my_pkg");
+        let cmd = build_script_eval_cmd(
+            "run_1",
+            "/proj",
+            "Greeter",
+            "run",
+            &[],
+            &[],
+            "my_pkg",
+            false,
+        );
         assert!(
             cmd.contains("node_owning => true"),
             "Run-mode boot should record node_owning: {cmd}"

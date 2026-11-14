@@ -1,0 +1,7 @@
+{
+  "comment": "BT-4821: the raw-output line for one structured frame, display name then the raw MFA in brackets. beamtalk_stack_frame:format_frame_raw/1 (Erlang) and beamtalk_repl_protocol::StackFrameInfo::display_raw (Rust) are both checked against these cases, so the two renderers cannot drift.",
+  "cases": [
+    {"module": "lists", "function": "foldl", "arity": 3, "display": "lists:foldl/3", "raw_line": "lists:foldl/3  [lists:foldl/3]"},
+    {"module": "erlang", "function": "error", "arity": 1, "display": "erlang:error/1", "raw_line": "erlang:error/1  [erlang:error/1]"}
+  ]
+}

@@ -342,7 +342,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     let eval_cmd = format!(
         "{cover_preamble}\
          {{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
-         application:set_env(beamtalk_stdlib, full_traces, {full_traces}), \
+         application:set_env(beamtalk_stdlib, raw_mfa, {raw_mfa}), \
          ok = beamtalk_workspace_callback:register_if_loaded(beamtalk_repl_eval), \
          {root_package_start}\
          {hex_deps_start_cmd}\
@@ -353,7 +353,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
          {cover_epilogue}\
          init:stop(case beamtalk_test_runner:result_has_passed(Result) of true -> 0; _ -> 1 end).",
         jobs = pipeline.jobs,
-        full_traces = pipeline.full_traces
+        raw_mfa = pipeline.raw_mfa
     );
 
     let mut cmd = build_beam_test_command(pipeline, &pa_args, &eval_cmd);

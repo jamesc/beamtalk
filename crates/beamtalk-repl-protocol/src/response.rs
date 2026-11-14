@@ -313,6 +313,29 @@ impl StackFrameInfo {
             self.arity
         ))
     }
+
+    /// The raw-output line for this frame: the display name with the raw MFA
+    /// beside it, `Counter>>increment (counter.bt:12)  [bt@counter:increment/1]`
+    /// (the text the Erlang `beamtalk_stack_frame:format_frame_raw/1` renders;
+    /// both are checked against `tests/repl-protocol/raw_frame_lines.json`).
+    /// A frame with no raw MFA shows the display name alone.
+    #[must_use]
+    pub fn display_raw(&self) -> String {
+        match self.raw_mfa() {
+            Some(raw) => format!("{}  [{raw}]", self.display),
+            None => self.display.clone(),
+        }
+    }
+}
+
+/// The `--raw-mfa` listing of an error reply's complete stack: one `  at ` line
+/// per frame, hidden ones included. Empty when the reply carries no frames.
+#[must_use]
+pub fn render_raw_frames(frames: &[StackFrameInfo]) -> Vec<String> {
+    frames
+        .iter()
+        .map(|f| format!("  at {}", f.display_raw()))
+        .collect()
 }
 
 /// One compilation warning with its optional hint (`warning_details` entry).
@@ -413,6 +436,27 @@ mod tests {
     }
 
     #[test]
+    fn raw_rendering_puts_the_raw_mfa_beside_the_display_name() {
+        let json = r#"{"error":"boom","status":["done","error"],"frames":[
+            {"display":"Counter>>increment (counter.bt:12)","module":"bt@counter","function":"increment","arity":1,"file":"counter.bt","line":12,"hidden":false},
+            {"display":"gen_server:loop/7","module":"gen_server","function":"loop","arity":7,"file":null,"line":null,"hidden":true},
+            {"display":"?","module":null,"function":null,"arity":0,"file":null,"line":null,"hidden":true}
+        ]}"#;
+        let frames = serde_json::from_str::<ReplResponse>(json)
+            .expect("decodes")
+            .frames
+            .expect("frames");
+        assert_eq!(
+            render_raw_frames(&frames),
+            vec![
+                "  at Counter>>increment (counter.bt:12)  [bt@counter:increment/1]",
+                "  at gen_server:loop/7  [gen_server:loop/7]",
+                "  at ?",
+            ]
+        );
+    }
+
+    #[test]
     fn off_shape_frames_do_not_lose_the_error() {
         let json = r#"{"error":"boom","status":["done","error"],"frames":[{"display":7}]}"#;
         let resp: ReplResponse = serde_json::from_str(json).unwrap();
@@ -425,6 +469,30 @@ mod tests {
         let resp: ReplResponse =
             serde_json::from_str(r#"{"error":"x","status":["done","error"]}"#).unwrap();
         assert!(resp.frames.is_none());
+    }
+
+    /// `display_raw` and `beamtalk_stack_frame:format_frame_raw/1` render the
+    /// same lines, through `tests/repl-protocol/raw_frame_lines.json`.
+    #[test]
+    fn display_raw_matches_shared_fixture() {
+        let path = beamtalk_workspace::cargo_workspace_root!()
+            .join("tests/repl-protocol/raw_frame_lines.json");
+        let raw = std::fs::read_to_string(&path).expect("read raw_frame_lines.json");
+        let fixture: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let frame = StackFrameInfo {
+                display: case["display"].as_str().unwrap().into(),
+                module: Some(case["module"].as_str().unwrap().into()),
+                function: Some(case["function"].as_str().unwrap().into()),
+                arity: u32::try_from(case["arity"].as_u64().unwrap()).unwrap(),
+                file: None,
+                line: None,
+                hidden: false,
+            };
+            assert_eq!(frame.display_raw(), case["raw_line"].as_str().unwrap());
+        }
     }
 
     /// The Rust frame type and `beamtalk_stack_frame:structured_frame/1` agree

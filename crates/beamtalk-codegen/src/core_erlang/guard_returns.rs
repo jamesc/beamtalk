@@ -68,16 +68,22 @@
 //!   `true`, `false`, a structural BIF comparison such as `=:=`
 //!   ([`is_boolean_by_construction`]), or an ordering comparison
 //!   (`< > <= >=`) codegen lowers to a bare BIF because its left operand is
-//!   a number/string/character literal or a trusted `:: Integer`-family
-//!   parameter ([`Rewriter::typed_comparison`], BT-4452). The rewrite
-//!   records each such comparison, and the compile fails unless codegen did
+//!   a number/string/character literal ([`Rewriter::typed_comparison`],
+//!   BT-4452). The rewrite records each such comparison, and the compile
+//!   fails unless codegen did
 //!   lower it bare ([`CoreErlangGenerator::unconfirmed_boolean_comparisons`]);
 //!   or an `and:`/`or:` of Booleans by construction with a literal
 //!   one-statement block, which inlines to a `case` that sends only for a
 //!   non-Boolean receiver (BT-4496);
 //!   or
 //! - it is a one-branch guard, `c ifTrue: [^v]` or `c ifFalse: [^v]`, whose
-//!   `v` has no effects ([`is_effect_free`]). Its receiver is then recorded
+//!   `v` has no effects ([`is_effect_free`]), or whose receiver `c` is a
+//!   comparison on a *declared* parameter ([`Rewriter::is_declared_boolean`],
+//!   BT-4823): its kind guard answers a Boolean while the declaration holds,
+//!   and only a receiver that broke it can reach the helper, so any block
+//!   ending in `^` is accepted. A declared comparison is not a Boolean by
+//!   construction, so the other shapes (two-branch, tail position) keep
+//!   their NLR frame. Its receiver is then recorded
 //!   in [`GuardRewrite::conditions`], and codegen
 //!   ([`CoreErlangGenerator::guard_condition_doc`]) decides the branch with
 //!   `beamtalk_guard_return`, which sends a non-Boolean the guard's own
@@ -108,7 +114,7 @@ use beamtalk_core::state_threading_selectors::{
 };
 use ecow::EcoString;
 
-use crate::core_erlang::field_types::{COMPARABLE_TYPES, trusted_param_types};
+use crate::core_erlang::field_types::{ComparisonKinds, trusted_param_types};
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::operators::{is_comparable_literal, is_ordering_comparison};
 use beamtalk_cerl_doc::{Document, docvec, leaf};
@@ -268,10 +274,11 @@ struct Rewriter {
     /// The left-operand spans of the typed comparisons the rewrite relied on
     /// as Booleans by construction.
     boolean_comparisons: HashSet<Span>,
-    /// The method's parameters codegen trusts to hold a value with a builtin
-    /// total order ([`trusted_param_types`] in [`COMPARABLE_TYPES`]), so a
-    /// comparison on one lowers to a bare BIF.
-    comparable_params: HashSet<EcoString>,
+    /// The method's parameters whose comparison kind is only *declared*
+    /// ([`trusted_param_types`] with a [`ComparisonKinds`] kind). A comparison
+    /// on one carries a kind guard that dispatches a wrong-kind receiver
+    /// (BT-4823), so it is a Boolean only while the declaration holds.
+    declared_params: HashSet<EcoString>,
     /// How many times the method assigns each local, nested blocks included.
     assignments: HashMap<EcoString, usize>,
     /// The method's and its blocks' parameter names.
@@ -286,9 +293,9 @@ impl Rewriter {
         let mut rw = Self {
             conditions: HashMap::new(),
             boolean_comparisons: HashSet::new(),
-            comparable_params: trusted_param_types(method)
+            declared_params: trusted_param_types(method)
                 .into_iter()
-                .filter(|(_, ty)| COMPARABLE_TYPES.contains(ty))
+                .filter(|(_, ty)| ComparisonKinds::of_type_name(ty).is_some())
                 .map(|(name, _)| EcoString::from(name))
                 .collect(),
             assignments: HashMap::new(),
@@ -320,8 +327,43 @@ impl Rewriter {
     /// Boolean ([`is_boolean_by_construction`]) or a [`Self::typed_comparison`].
     fn is_boolean(&self, expr: &Expression) -> bool {
         is_boolean_by_construction(expr)
-            || self.typed_comparison(expr).is_some()
+            || Self::typed_comparison(expr).is_some()
             || self.short_circuit_operands(expr).is_some()
+    }
+
+    /// Whether `expr` is a comparison on a *declared* parameter
+    /// (`x > 0`, `x :: Integer`), or an `and:`/`or:` of Booleans and such
+    /// comparisons (BT-4823). It answers a Boolean while the declaration
+    /// holds; a receiver that breaks it is dispatched and may answer anything,
+    /// which [`helper_guard_sense`] decides through `beamtalk_guard_return`.
+    fn is_declared_boolean(&self, expr: &Expression) -> bool {
+        if let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Binary(op),
+            is_cast: false,
+            ..
+        } = expr
+            && is_ordering_comparison(op)
+        {
+            return matches!(receiver.as_ref(), Expression::Identifier(id)
+                if self.declared_params.contains(&id.name));
+        }
+        self.short_circuit_declared_operands(expr).is_some()
+    }
+
+    /// The operands of `a and: [b]` / `a or: [b]` (literal one-statement
+    /// block) when each is a Boolean by construction or a declared
+    /// comparison, and at least one is the latter.
+    fn short_circuit_declared_operands<'e>(
+        &self,
+        expr: &'e Expression,
+    ) -> Option<(&'e Expression, &'e Expression)> {
+        let (first, second) = and_or_operands(expr)?;
+        let ok = |e: &Expression| self.is_boolean(e) || self.is_declared_boolean(e);
+        (ok(first)
+            && ok(second)
+            && (self.is_declared_boolean(first) || self.is_declared_boolean(second)))
+        .then_some((first, second))
     }
 
     /// The receiver and block value of `expr` when it is `a and: [b]` /
@@ -334,36 +376,18 @@ impl Rewriter {
         &self,
         expr: &'e Expression,
     ) -> Option<(&'e Expression, &'e Expression)> {
-        let Expression::MessageSend {
-            receiver,
-            selector: MessageSelector::Keyword(parts),
-            arguments,
-            is_cast: false,
-            ..
-        } = expr
-        else {
-            return None;
-        };
-        let ([part], [Expression::Block(block)]) = (parts.as_slice(), arguments.as_slice()) else {
-            return None;
-        };
-        if !matches!(part.keyword.as_str(), "and:" | "or:") || !block.parameters.is_empty() {
-            return None;
-        }
-        let [stmt] = block.body.as_slice() else {
-            return None;
-        };
-        (self.is_boolean(receiver) && self.is_boolean(&stmt.expression))
-            .then_some((receiver.as_ref(), &stmt.expression))
+        let (first, second) = and_or_operands(expr)?;
+        (self.is_boolean(first) && self.is_boolean(second)).then_some((first, second))
     }
 
     /// The left operand of `expr` when it is a comparison (`< > <= >=`)
     /// codegen lowers to a bare Erlang BIF, which answers a Boolean and never
-    /// sends: its left operand is a literal with a builtin total order or a
-    /// trusted comparable parameter — the operands
-    /// [`CoreErlangGenerator::receiver_is_statically_comparable`] accepts
-    /// from the method alone (BT-4452).
-    fn typed_comparison<'e>(&self, expr: &'e Expression) -> Option<&'e Expression> {
+    /// sends: its left operand is a literal with a builtin total order, the
+    /// one operand whose kind the compiler proves
+    /// ([`CoreErlangGenerator::comparison_receiver`]). A typed parameter is
+    /// only declared, so its comparison carries a kind guard that dispatches
+    /// a wrong-kind receiver (BT-4823) and is not a Boolean by construction.
+    fn typed_comparison(expr: &Expression) -> Option<&Expression> {
         let Expression::MessageSend {
             receiver,
             selector: MessageSelector::Binary(op),
@@ -376,16 +400,13 @@ impl Rewriter {
         if !is_ordering_comparison(op) {
             return None;
         }
-        let bare = is_comparable_literal(receiver)
-            || matches!(receiver.as_ref(), Expression::Identifier(id)
-                if self.comparable_params.contains(&id.name));
-        bare.then_some(receiver.as_ref())
+        is_comparable_literal(receiver).then_some(receiver.as_ref())
     }
 
     /// Records `receiver`, a conditional's receiver the rewrite treats as a
     /// Boolean by construction, when that rests on a typed comparison.
     fn note_boolean(&mut self, receiver: &Expression) {
-        if let Some(left) = self.typed_comparison(receiver) {
+        if let Some(left) = Self::typed_comparison(receiver) {
             self.boolean_comparisons.insert(left.span());
         } else if let Some((first, second)) = self.short_circuit_operands(receiver) {
             self.note_boolean(first);
@@ -552,6 +573,33 @@ fn selector_of(parts: &[KeywordPart]) -> String {
     parts.iter().map(|p| p.keyword.as_str()).collect()
 }
 
+/// The receiver and block value of `expr` when it is `a and: [b]` /
+/// `a or: [b]` with a literal one-statement block: the one shape both
+/// [`Rewriter::short_circuit_operands`] and
+/// [`Rewriter::short_circuit_declared_operands`] decide a condition on.
+fn and_or_operands(expr: &Expression) -> Option<(&Expression, &Expression)> {
+    let Expression::MessageSend {
+        receiver,
+        selector: MessageSelector::Keyword(parts),
+        arguments,
+        is_cast: false,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    let ([part], [Expression::Block(block)]) = (parts.as_slice(), arguments.as_slice()) else {
+        return None;
+    };
+    if !matches!(part.keyword.as_str(), "and:" | "or:") || !block.parameters.is_empty() {
+        return None;
+    }
+    let [stmt] = block.body.as_slice() else {
+        return None;
+    };
+    Some((receiver.as_ref(), &stmt.expression))
+}
+
 /// Whether `parts`/`arguments` name an inlined `ifTrue:`/`ifNil:`-family
 /// conditional with literal block arguments (the shared
 /// [`is_inlined_conditional_send`], less `and:`/`or:`).
@@ -664,7 +712,11 @@ fn guard_shape(expr: &Expression, rw: &Rewriter) -> Option<GuardShape> {
     let helper = match family {
         Family::Nil => None,
         Family::Boolean if rw.is_boolean(receiver) => None,
-        Family::Boolean => Some(helper_guard_sense(parts, slots[1 - falling_slot]?)?),
+        Family::Boolean => Some(helper_guard_sense(
+            parts,
+            slots[1 - falling_slot]?,
+            rw.is_declared_boolean(receiver),
+        )?),
     };
     Some(GuardShape {
         family,
@@ -674,20 +726,38 @@ fn guard_shape(expr: &Expression, rw: &Rewriter) -> Option<GuardShape> {
 }
 
 /// The [`GuardSense`] of a one-branch Boolean guard `c ifTrue: [^v]` /
-/// `c ifFalse: [^v]` with an effect-free `v`, the only Boolean guard on a
-/// receiver that is not a Boolean by construction the rewrite keeps exact.
-fn helper_guard_sense(parts: &[KeywordPart], returning: &Block) -> Option<GuardSense> {
+/// `c ifFalse: [^v]` decided by `beamtalk_guard_return`: with an effect-free
+/// `v` on any receiver, or any block ending in `^` when `declared` (below).
+/// These are the only Boolean guards on a receiver that is not a Boolean by
+/// construction the rewrite keeps exact, except that `declared` accepts a
+/// small, documented difference for a receiver that broke its declaration
+/// (see `beamtalk_guard_return`'s moduledoc).
+///
+/// `declared` is a receiver that answers a Boolean while a parameter's
+/// declared type holds ([`Rewriter::is_declared_boolean`], BT-4823). Then the
+/// helper only ever decides a receiver that broke its declaration, so the
+/// returning block may be any block that ends in `^`: a `v` with effects, or
+/// statements before the `^`, run after that receiver's own `ifTrue:` has
+/// unwound instead of inside it. This keeps `x > 0 ifTrue: [^self one]` on an
+/// `:: Integer` parameter the direct return BT-4452 compiled it to.
+fn helper_guard_sense(
+    parts: &[KeywordPart],
+    returning: &Block,
+    declared: bool,
+) -> Option<GuardSense> {
     let [part] = parts else {
         return None;
     };
-    let [stmt] = returning.body.as_slice() else {
-        return None;
-    };
-    let Expression::Return { value, .. } = &stmt.expression else {
-        return None;
-    };
-    if !is_effect_free(value) {
-        return None;
+    if !declared {
+        let [stmt] = returning.body.as_slice() else {
+            return None;
+        };
+        let Expression::Return { value, .. } = &stmt.expression else {
+            return None;
+        };
+        if !is_effect_free(value) {
+            return None;
+        }
     }
     match part.keyword.as_str() {
         "ifTrue:" => Some(GuardSense::IfTrue),
@@ -1043,13 +1113,13 @@ mod tests {
 
     #[test]
     fn typed_comparison_allows_every_shape() {
-        // BT-4452: `x :: Integer` makes `x > 0` a bare BIF, so every shape
-        // the helper cannot keep exact on a non-Boolean is exact here.
+        // BT-4452: a literal left operand makes `3 > x` a bare BIF, so every
+        // shape the helper cannot keep exact on a non-Boolean is exact here.
         for body in [
-            "    x > 0 ifTrue: [^self withN: 0]\n    2",
-            "    x > 0 ifTrue: [self foo. ^1]\n    2",
-            "    x <= 0 ifTrue: [^1] ifFalse: [self foo]\n    2",
-            "    x >= 0 ifTrue: [^1]",
+            "    3 > x ifTrue: [^self withN: 0]\n    2",
+            "    3 > x ifTrue: [self foo. ^1]\n    2",
+            "    3 <= x ifTrue: [^1] ifFalse: [self foo]\n    2",
+            "    3 >= x ifTrue: [^1]",
             "    0 < x ifFalse: [^x foo]\n    2",
         ] {
             let src = typed_class(body);
@@ -1058,6 +1128,41 @@ mod tests {
             assert!(!out.contains('^'), "{out}");
             assert_eq!(helpers, 0, "{body}");
             assert_eq!(boolean_comparisons(&src), 1, "{body}");
+        }
+    }
+
+    #[test]
+    fn declared_param_comparison_guard_is_decided_by_the_helper() {
+        // BT-4823: `x :: Integer` is only declared, so `x > 0` carries a kind
+        // guard that dispatches a wrong-kind receiver and may answer a
+        // non-Boolean. A one-branch guard on it is rewritten whatever its
+        // returned block does, with the condition decided by the helper and
+        // nothing recorded as a Boolean by construction.
+        for body in [
+            "    x > 0 ifTrue: [^self withN: 0]\n    2",
+            "    x > 0 ifTrue: [self foo. ^1]\n    2",
+            "    x > 0 ifFalse: [^x foo]\n    2",
+            "    (x < 0 or: [x > 9]) ifTrue: [^self withN: 0]\n    2",
+            "    (x =:= 0 and: [x > 9]) ifTrue: [^self withN: 0]\n    2",
+        ] {
+            let src = typed_class(body);
+            let (out, helpers) =
+                rewritten_with_conditions(&src).unwrap_or_else(|| panic!("{body}"));
+            assert!(!out.contains('^'), "{out}");
+            assert_eq!(helpers, 1, "{body}");
+            assert_eq!(boolean_comparisons(&src), 0, "{body}");
+        }
+    }
+
+    #[test]
+    fn declared_param_comparison_in_other_shapes_is_not_rewritten() {
+        // A two-branch guard and a tail conditional need a Boolean, which a
+        // declared comparison is not by construction: the frame stays.
+        for body in [
+            "    x <= 0 ifTrue: [^1] ifFalse: [self foo]\n    2",
+            "    x > 0 ifTrue: [^1] ifFalse: [^2]",
+        ] {
+            assert_eq!(rewritten(&typed_class(body)), None, "{body}");
         }
     }
 
@@ -1102,7 +1207,7 @@ mod tests {
             assert_eq!(helpers, 0, "{body}");
         }
         // Typed comparisons inside are recorded for the lowering check.
-        let src = typed_class("    (x > 0 and: [x < 9]) ifTrue: [^x foo]\n    2");
+        let src = typed_class("    (3 > x and: [3 < x]) ifTrue: [^x foo]\n    2");
         assert!(rewritten(&src).is_some());
         assert_eq!(boolean_comparisons(&src), 2);
     }

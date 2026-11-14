@@ -1,29 +1,29 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// NOTE: this file pins TODAY's behaviour. BT-4823 flips the
-// `...AnswersSilently` cases (`<`, `>`, the field case and
-// `testSameWrongAnswerWithoutAnyCast`) to expect `does_not_understand`.
-
 // BT-4772: what a WRONG narrowing local annotation does at run time.
 //
 // `n :: Integer := opts at: #v` is a narrowing cast: the checker accepts it
-// (BT-2015) and nothing checks it at run time. These tests pin today's
-// behaviour for a value that is not an Integer, to answer one question:
-// can a wrong cast give a silently wrong ANSWER, or does it always crash?
+// (BT-2015) and nothing checks it at run time. These tests pin the behaviour
+// for a value that is not an Integer, to answer one question: can a wrong
+// cast give a silently wrong ANSWER, or does it always fail?
 //
-// Result (the reason ADR 0148 exists):
-//   * Operators on the cast LOCAL are guarded (codegen trusts typed
-//     parameters and fields, not annotated locals): a wrong value fails
-//     loudly with `does_not_understand`.
+// Result:
+//   * Operators on the cast LOCAL are guarded: a wrong value fails loudly
+//     with `does_not_understand`.
 //   * The same value passed on to a typed parameter, or stored in a typed
-//     field, is trusted: `<` / `>` compile to the bare Erlang term-order
-//     BIF and ANSWER. `nil > 10` is `true`, `nil < 10` is `false`.
+//     field, used to be trusted: `<` / `>` compiled to the bare Erlang
+//     term-order BIF and ANSWERED (`nil > 10` was `true`, `nil < 10`
+//     `false`). BT-4823 puts an inline kind test in front of that BIF, so a
+//     receiver that is not the declared kind is dispatched like any other and
+//     fails with `does_not_understand`. A Symbol is the exception that
+//     proves the rule: it defines its own ordering, so `#foo > 10` reaches
+//     `Symbol>>>`, whose argument is unchecked (BT-3928).
 //   * Arithmetic on a trusted parameter fails as a raw `type_error`
 //     (badarith), as row 11b of `just bench-vs-elixir` predicts.
 //
-// If the decision in ADR 0148 adds a run-time guard, the "silent" tests flip
-// to expecting a type error at the cast line.
+// ADR 0148 stays open for the rest (explicit checked cast, implicit guard on
+// `::` locals).
 
 TestCase subclass: NarrowingCastWrongValueTest
   field: probe = nil
@@ -63,32 +63,48 @@ TestCase subclass: NarrowingCastWrongValueTest
       self.probe castThenParamAdd: #{#v => #foo}
     ]) equals: #type_error
 
-  // --- a typed parameter IS trusted: comparison gives a silent wrong answer
-  testWrongValueInTypedParamGreaterAnswersSilently =>
-    // Erlang term order: number < atom, so `nil > 10` is `true`.
-    self assert: (self.probe castThenParamGreater: #{#v => nil}) equals: true
+  // --- a typed parameter: comparison on a wrong kind is loud (BT-4823) ------
+  testWrongValueInTypedParamGreaterRaises =>
+    // Erlang term order says `nil > 10` is `true`; the kind test in front of
+    // the BIF sends it to `nil`, which defines no `>`.
+    self assert: (self kindOf: [
+      self.probe castThenParamGreater: #{#v => nil}
+    ]) equals: #does_not_understand
+    self assert: (self kindOf: [
+      self.probe castThenParamGreater: #{#v => true}
+    ]) equals: #does_not_understand
+    // A Symbol defines `>`: it reaches `Symbol>>>`, whose argument is
+    // unchecked (BT-3928), so it term-orders against the Integer.
     self assert: (self.probe castThenParamGreater: #{#v => #foo}) equals: true
-    self assert: (self.probe castThenParamGreater: #{#v => true}) equals: true
     // An actual Integer or Float still answers correctly.
     self assert: (self.probe castThenParamGreater: #{#v => 11}) equals: true
     self assert: (self.probe castThenParamGreater: #{#v => 7.5}) equals: false
 
-  testWrongValueInTypedParamLessAnswersSilently =>
-    // The loud local path raised `does_not_understand` for `nil < 10`;
-    // through the typed parameter it answers `false`.
-    self assert: (self.probe castThenParamLess: #{#v => nil}) equals: false
-    self assert: (self.probe castThenParamLess: #{#v => true}) equals: false
+  testWrongValueInTypedParamLessRaises =>
+    self assert: (self kindOf: [
+      self.probe castThenParamLess: #{#v => nil}
+    ]) equals: #does_not_understand
+    self assert: (self kindOf: [
+      self.probe castThenParamLess: #{#v => true}
+    ]) equals: #does_not_understand
 
-  testSameWrongAnswerWithoutAnyCast =>
+  testSameWrongValueWithoutAnyCastRaises =>
     // No narrowing annotation anywhere: a value of the wrong type reaches
     // the typed parameter straight from a dictionary read. A guard at
-    // narrowing casts alone would not see this route.
+    // narrowing casts alone would not see this route; the comparison's own
+    // kind test does.
     d := #{#v => nil}
-    self assert: (self.probe paramGreater: (d at: #v)) equals: true
-    self assert: (self.probe paramLess: (d at: #v)) equals: false
+    self assert: (self kindOf: [
+      self.probe paramGreater: (d at: #v)
+    ]) equals: #does_not_understand
+    self assert: (self kindOf: [
+      self.probe paramLess: (d at: #v)
+    ]) equals: #does_not_understand
 
-  // --- a typed field IS trusted: same silent answer, stored first -----------
-  testWrongValueInTypedFieldGreaterAnswersSilently =>
-    self assert: (self.probe castThenField: #{#v => nil}) equals: true
+  // --- a typed field: same, stored first ------------------------------------
+  testWrongValueInTypedFieldGreaterRaises =>
+    self assert: (self kindOf: [
+      self.probe castThenField: #{#v => nil}
+    ]) equals: #does_not_understand
     self assert: (self.probe castThenField: #{#v => #foo}) equals: true
     self assert: (self.probe castThenField: #{#v => 7.5}) equals: false

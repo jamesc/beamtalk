@@ -1,0 +1,66 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4823 fixture: comparisons on receivers whose kind is only DECLARED (a
+// typed parameter or field). A declaration is not enforced at runtime, so a
+// wrong value can arrive; the comparison must then raise
+// `does_not_understand` instead of term-ordering (`nil > 10` → `true`).
+
+Value subclass: TypedComparisonProbe
+  field: limit :: Integer = 0
+  field: ratio :: Float = 0.0
+  field: label :: String = ""
+  field: either :: Integer | Float = 0
+  field: mixed :: Integer | String = 0
+
+  intLt: n :: Integer -> Boolean => n < 10
+
+  intGt: n :: Integer -> Boolean => n > 10
+
+  intLe: n :: Integer -> Boolean => n <= 10
+
+  intGe: n :: Integer -> Boolean => n >= 10
+
+  floatLt: n :: Float -> Boolean => n < 1.5
+
+  floatGt: n :: Float -> Boolean => n > 1.5
+
+  numberLe: n :: Number -> Boolean => n <= 10
+
+  numberGe: n :: Number -> Boolean => n >= 10
+
+  charLt: c :: Character -> Boolean => c < $m
+
+  charGe: c :: Character -> Boolean => c >= $m
+
+  stringLt: s :: String -> Boolean => s < "m"
+
+  stringGt: s :: String -> Boolean => s > "m"
+
+  /// A typed local is guarded already; kept as the contrast case.
+  localGt: v -> Boolean =>
+    n :: Integer := v
+    n > 10
+
+  fieldLt -> Boolean => self.limit < 10
+
+  fieldGt -> Boolean => self.limit > 10
+
+  fieldLe -> Boolean => self.limit <= 10
+
+  fieldGe -> Boolean => self.limit >= 10
+
+  floatFieldGt -> Boolean => self.ratio > 1.5
+
+  stringFieldLt -> Boolean => self.label < "m"
+
+  unionFieldGt -> Boolean => self.either > 10
+
+  mixedFieldLt -> Boolean => self.mixed < 10
+
+  /// A proven receiver (a literal) stays on the bare BIF whatever the argument.
+  literalLtArg: other -> Boolean => 5 < other
+
+  /// The argument is unchecked (BT-3928): a typed receiver with a wrong-kind
+  /// argument still term-orders.
+  intLtArg: n :: Integer other: other -> Boolean => n < other

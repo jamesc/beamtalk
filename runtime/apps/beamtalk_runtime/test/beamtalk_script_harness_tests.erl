@@ -83,3 +83,19 @@ entry_completion_defers_to_requested_stop_test_() ->
             exit(Entry, kill)
         end
     end}.
+
+%%% BT-4821: `--raw-mfa` lists every frame with its raw MFA; the default adds nothing.
+raw_trace_lists_every_frame_with_raw_mfa_test() ->
+    Stack = [
+        {'bt@user@A', m1, 0, [{file, "a.bt"}, {line, 1}]},
+        {gen_server, loop, 7, [{file, "gen_server.erl"}, {line, 2}]}
+    ],
+    Out = iolist_to_binary(beamtalk_script_harness:raw_trace(#{raw_mfa => true}, Stack)),
+    ?assertEqual(2, length(binary:matches(Out, <<"  at ">>))),
+    ?assertNotEqual(nomatch, binary:match(Out, <<"[bt@user@A:m1/0]">>)),
+    ?assertNotEqual(nomatch, binary:match(Out, <<"[gen_server:loop/7]">>)).
+
+raw_trace_is_empty_by_default_test() ->
+    Stack = [{'bt@user@A', m1, 0, []}],
+    ?assertEqual([], beamtalk_script_harness:raw_trace(#{}, Stack)),
+    ?assertEqual([], beamtalk_script_harness:raw_trace(#{raw_mfa => false}, Stack)).

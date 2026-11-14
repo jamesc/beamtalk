@@ -81,7 +81,7 @@ FAIL testParse
 One classifier, `beamtalk_stack_frame:classify_frames/1`, decides which frames
 a surface lists by default (ADR 0139: show what a person named). Test failure
 output and `Exception>>stackTrace` use it; hidden frames are collapsed, not
-dropped, so `beamtalk_exception_handler:frames/1` and `--full-traces` still
+dropped, so `beamtalk_exception_handler:frames/1` and `--raw-mfa` still
 carry the whole ordered trace (every wrapped frame has a `visible` flag).
 
 | Frame | Default |
@@ -144,8 +144,16 @@ shows (below), then applies these rules:
   the 2 innermost frames (the error site) plus the outermost frame (the test
   method), so the caller's file and line are never truncated away. Frames in
   between are dropped. With 3 or fewer, all are shown.
-- **`beamtalk test --full-traces`** disables the cap and the visibility
-  filter: every frame of the trace is printed.
+- **`beamtalk test --raw-mfa`** disables the cap and the visibility filter:
+  every frame of the trace is printed, hidden ones included, each as its
+  display name followed by the raw `module:function/arity` in brackets
+  (`Counter>>increment (counter.bt:12)  [bt@counter:increment/1]`).
+  `--full-traces` is a deprecated hidden alias: it behaves the same and prints
+  a one-line deprecation notice.
+- **The default output names the switch.** When the default trace left frames
+  out (hidden by visibility, or dropped by the cap), the failure ends with
+  `(N frames hidden; --raw-mfa shows all)`. It does not start with `  at `, so
+  `frames[i]` still pairs with the i-th `at` line.
 - **Repeats are collapsed.** Adjacent identical lines are merged, with a
   trailing `[xN]` after the whole line, e.g. a recursive send whose frames
   render identically:
@@ -166,7 +174,7 @@ shows (below), then applies these rules:
   frames — they never start with ` at `, so `frames[i]` still pairs with
   the i-th `at` line. Missing, unreadable or out-of-range sources produce
   no snippet.
-- **setUp failures carry no frames**, so there is no `--full-traces` detail
+- **setUp failures carry no frames**, so there is no `--raw-mfa` detail
   for them.
 
 The `beamtalk test` runner also builds a structured `frames` list in each
@@ -174,6 +182,30 @@ failed `TestResult` JSON (`class`, `selector`, `block`, `file`, `line`,
 `repeat`), index-aligned with the `at` lines and built from the same parts as
 the text. Nothing consumes the `frames` key yet; the text output is the
 supported interface.
+
+### Raw output (`--raw-mfa`, `:raw-mfa`)
+
+Raw output is chosen by whoever consumes the output, never by a node-wide
+setting: one workspace node serves the REPL, LSP, MCP and the IDE at once.
+Structured frames always carry both forms (`display`, raw `module`/`function`/
+`arity`) and every frame, hidden ones flagged; each client decides what to
+print.
+
+| Where | Switch | Effect |
+|---|---|---|
+| `beamtalk test` | `--raw-mfa` | every frame per failure, raw MFA beside the display name; `frames` in the result JSON include hidden frames too |
+| `beamtalk run Class sel` | `--raw-mfa` | an uncaught error is followed by the whole stack in the same format (`--connect` renders the reply's `frames` client-side) |
+| REPL | `:raw-mfa [on\|off]` (bare toggles) | this session only: an error is followed by every frame; without it, an error reply that carries frames ends with `(N frames hidden; :raw-mfa shows all)` |
+
+`run --raw-mfa` lists the stack the caller caught. For an entry that runs in a class process (its class or an ancestor declares class variables, ADR 0142) the relay re-raises with the caller's stacktrace, so the listing shows the dispatch frames rather than the class-method frames.
+
+The REPL toggle is a render option of the attached client. It is not sent to
+the node, so a second session on the same workspace is unchanged, and no
+application env or `persistent_term` is written. `beamtalk test` runs on a
+node of its own with one consumer, so its option travels as the
+`beamtalk_stdlib` `raw_mfa` application env to reach test workers; `run`
+passes it to the harness as an argument. `printString`, `messageText` and
+stored log lines never depend on either switch.
 
 ### `Exception>>stackTrace`
 

@@ -151,6 +151,13 @@ enum Command {
         /// disambiguates when a project has more than one running workspace.
         #[arg(long)]
         workspace: Option<String>,
+
+        /// On an uncaught error, list every stack frame (hidden ones included)
+        /// with the raw `module:function/arity` beside each display name.
+        /// Put it before the program arguments: after the first one it is
+        /// passed to the program.
+        #[arg(long)]
+        raw_mfa: bool,
     },
 
     /// Create a new Beamtalk project (library by default, --app for application)
@@ -392,9 +399,13 @@ enum Command {
         #[arg(long, short)]
         quiet: bool,
 
-        /// Show the complete filtered stack trace for each failure instead of
-        /// the default 3 frames (innermost two plus the test method)
+        /// Show every stack frame for each failure, hidden ones included, with
+        /// the raw `module:function/arity` beside each display name
         #[arg(long)]
+        raw_mfa: bool,
+
+        /// Deprecated alias for `--raw-mfa`
+        #[arg(long, hide = true)]
         full_traces: bool,
     },
 
@@ -698,12 +709,14 @@ fn dispatch_command(command: Command) -> Result<()> {
             args,
             connect,
             workspace,
+            raw_mfa,
         } => commands::run::run(
             &class_or_dot,
             selector.as_deref(),
             &args,
             connect,
             workspace.as_deref(),
+            raw_mfa,
         ),
         Command::New { name, app } => commands::new::new_project(&name, app),
         Command::Clean { deps, all, dry_run } => commands::clean::run(deps, all, dry_run),
@@ -798,8 +811,20 @@ fn dispatch_command(command: Command) -> Result<()> {
             warnings_as_errors,
             jobs,
             quiet,
+            raw_mfa,
             full_traces,
-        } => commands::test::run_tests(&path, warnings_as_errors, jobs, quiet, full_traces),
+        } => {
+            if full_traces {
+                eprintln!("warning: `--full-traces` is deprecated; use `--raw-mfa`");
+            }
+            commands::test::run_tests(
+                &path,
+                warnings_as_errors,
+                jobs,
+                quiet,
+                raw_mfa || full_traces,
+            )
+        }
         Command::Generate { action } => commands::generate::cli::run(action),
         Command::Deps { action } => commands::deps::cli::run(action),
         Command::Version { args } => commands::version::run(&args),

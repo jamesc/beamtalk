@@ -44,6 +44,7 @@ enum CommandAction<'a> {
     Help,
     HelpTopic(&'a str),
     Clear,
+    RawMfa(&'a str),
     Bindings,
     Sync,
     SyncArgsError,
@@ -91,6 +92,13 @@ fn classify_command(line: &str) -> Option<CommandAction<'_>> {
     }
     if commands::CLEAR.is_form(word) {
         return bare.then_some(CommandAction::Clear);
+    }
+    if commands::RAW_MFA.is_form(word) {
+        return Some(if bare {
+            CommandAction::RawMfa("")
+        } else {
+            CommandAction::RawMfa(commands::RAW_MFA.arg(line)?)
+        });
     }
     if commands::BINDINGS.is_form(word) {
         return bare.then_some(CommandAction::Bindings);
@@ -199,6 +207,7 @@ pub(super) fn handle_repl_command(line: &str, client: &mut ReplClient) -> Comman
         CommandAction::Help => print_help(),
         CommandAction::HelpTopic(args) => handle_help_topic(args, client),
         CommandAction::Clear => handle_clear(client),
+        CommandAction::RawMfa(arg) => handle_raw_mfa(arg, client),
         CommandAction::Bindings => handle_bindings(client),
         CommandAction::Sync => handle_sync(client),
         CommandAction::SyncArgsError => {
@@ -210,7 +219,7 @@ pub(super) fn handle_repl_command(line: &str, client: &mut ReplClient) -> Comman
                 eprintln!("Usage: :unload <ClassName>");
             } else {
                 match client.unload(class_name) {
-                    Ok(response) => display_eval_response(&response),
+                    Ok(response) => display_eval_response(&response, client.raw_mfa()),
                     Err(e) => eprintln!("Error: {e}"),
                 }
             }
@@ -560,6 +569,30 @@ fn handle_erlang_help(tokens: &[&str], client: &mut ReplClient) {
         }
         Err(e) => eprintln!("Error: {e}"),
     }
+}
+
+/// Handle `:raw-mfa [on|off]` -- BT-4821, ADR 0139 decision 4.
+///
+/// Sets how *this* session renders the stack of an error reply: with it on,
+/// every frame (hidden ones included) is listed with its raw
+/// `module:function/arity` beside the display name. The option lives on this
+/// client only; nothing is sent to the node, so a second session attached to
+/// the same workspace is unchanged. A bare `:raw-mfa` toggles.
+fn handle_raw_mfa(arg: &str, client: &mut ReplClient) {
+    let on = match arg {
+        "" => !client.raw_mfa(),
+        "on" => true,
+        "off" => false,
+        _ => {
+            eprintln!("Usage: :raw-mfa [on|off]");
+            return;
+        }
+    };
+    client.set_raw_mfa(on);
+    println!(
+        "Raw frames {} for this session.",
+        if on { "on" } else { "off" }
+    );
 }
 
 /// Handle `:clear` -- clear the current session's local bindings.
@@ -1109,6 +1142,45 @@ mod tests {
         }
 
         #[test]
+        fn raw_mfa_toggle_is_per_session_and_never_reaches_the_node() {
+            // BT-4821 / ADR 0139 decision 4: two sessions attached to one node
+            // (one fake server). `:raw-mfa` on one is a render option of that
+            // client only: the other is unchanged, and the node sees no request
+            // at all, so no node-wide state can have been written.
+            let contacted = Arc::new(AtomicBool::new(false));
+            let contacted_writer = Arc::clone(&contacted);
+            let port = spawn_auth_ok_server(move |_req, _ws| {
+                contacted_writer.store(true, Ordering::SeqCst);
+            });
+            let mut first = connect_to(port);
+            let mut second = connect_to(port);
+            assert!(!first.raw_mfa() && !second.raw_mfa());
+
+            assert_eq!(
+                handle_repl_command(":raw-mfa on", &mut first),
+                CommandResult::Handled
+            );
+            assert!(first.raw_mfa(), "the session that set it is raw");
+            assert!(!second.raw_mfa(), "the other session is unchanged");
+
+            // A bare `:raw-mfa` toggles; `off` clears; junk is rejected.
+            assert_eq!(
+                handle_repl_command(":raw-mfa", &mut first),
+                CommandResult::Handled
+            );
+            assert!(!first.raw_mfa());
+            handle_repl_command(":raw-mfa on", &mut second);
+            handle_repl_command(":raw-mfa off", &mut second);
+            handle_repl_command(":raw-mfa maybe", &mut second);
+            assert!(!second.raw_mfa());
+
+            assert!(
+                !contacted.load(Ordering::SeqCst),
+                ":raw-mfa must not send anything to the node"
+            );
+        }
+
+        #[test]
         fn exit_command_returns_exit_without_contacting_server() {
             // See unload_command_with_no_class_name_does_not_reach_server: a
             // `panic!` inside spawn_auth_ok_server's unjoined background
@@ -1178,6 +1250,22 @@ mod tests {
         assert_eq!(
             classify_command(":unload   Counter  "),
             Some(CommandAction::Unload("Counter"))
+        );
+    }
+
+    #[test]
+    fn classify_command_raw_mfa_takes_an_optional_argument() {
+        assert_eq!(
+            classify_command(":raw-mfa"),
+            Some(CommandAction::RawMfa(""))
+        );
+        assert_eq!(
+            classify_command(":raw-mfa on"),
+            Some(CommandAction::RawMfa("on"))
+        );
+        assert_eq!(
+            classify_command(":raw-mfa off"),
+            Some(CommandAction::RawMfa("off"))
         );
     }
 

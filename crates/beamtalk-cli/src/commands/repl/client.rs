@@ -27,6 +27,10 @@ pub(crate) struct ReplClient {
     port: u16,
     /// Cookie used for this connection (needed for interrupt reconnection)
     cookie: String,
+    /// `:raw-mfa` (BT-4821): render error stacks with raw MFAs and hidden
+    /// frames. A render option of this client alone: it is never sent to the
+    /// node, so no other session or client is affected.
+    raw_mfa: bool,
 }
 
 impl ReplClient {
@@ -41,7 +45,18 @@ impl ReplClient {
             host: host.to_string(),
             port,
             cookie: cookie.to_string(),
+            raw_mfa: false,
         })
+    }
+
+    /// Whether this session renders error stacks in raw form (`:raw-mfa`).
+    pub(crate) fn raw_mfa(&self) -> bool {
+        self.raw_mfa
+    }
+
+    /// Set this session's raw-output render option. Client-side only.
+    pub(crate) fn set_raw_mfa(&mut self, on: bool) {
+        self.raw_mfa = on;
     }
 
     /// Reconnect to the REPL backend, attempting to resume the previous session if possible.
