@@ -2987,6 +2987,64 @@ fn test_self_call_error_branch_threads_selector_class_breadcrumb() {
 }
 
 #[test]
+fn test_self_call_error_branch_builds_the_caught_stack_bt_4850() {
+    // BT-4850: the caught raw trace is built (`primop 'build_stacktrace'`)
+    // before `reraise/4`, which keeps only a list: a raw trace reads as empty and
+    // the raise-site frames of a self-send's error were lost. (The line
+    // annotations are pinned in `call_site_lines.rs`.)
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: value = 0\n\n",
+        "  setup =>\n",
+        "    self.value := 42\n\n",
+        "  doWork =>\n",
+        "    self setup\n",
+        "    self.value\n",
+    );
+    let code = codegen_source(src);
+
+    let built_then_reraise = regex::Regex::new(
+        r"let ([\w@]+) = primop 'build_stacktrace'\([\w@]+\) in let [\w@]+ = call 'beamtalk_actor':'lookup_class'\(call 'erlang':'self'\(\)\) in call 'beamtalk_exception_handler':'reraise'\([\w@]+, [\w@]+, ([\w@]+), ~\{'selector' => 'setup'",
+    )
+    .unwrap();
+    let captures = built_then_reraise.captures(&code).unwrap_or_else(|| {
+        panic!(
+            "The self-send error clause must build the caught stacktrace and \
+             pass the built one to an annotated reraise/4. Got:\n{code}"
+        )
+    });
+    assert_eq!(
+        &captures[1], &captures[2],
+        "reraise/4 must receive the built stacktrace. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_handle_call_error_arm_builds_the_caught_stack_bt_4850() {
+    // BT-4850: the actor builds a caught exception's raw trace before replying,
+    // so the caller's `ensure_wrapped` keeps the actor's raise-site frames.
+    let src = concat!(
+        "Actor subclass: Srv\n",
+        "  state: value = 0\n\n",
+        "  doWork =>\n",
+        "    self.value\n",
+    );
+    let code = codegen_source(src);
+    assert!(
+        regex::Regex::new(
+            r"let BuiltError = case Error of <\{ReplyType, ReplyReason, ReplyRaw\}> when 'true' -> let ReplyBuilt = primop 'build_stacktrace'\(ReplyRaw\) in \{ReplyType, ReplyReason, ReplyBuilt\} <ReplyOther> when 'true' -> ReplyOther end in"
+        )
+        .unwrap()
+        .is_match(&code),
+        "handle_call's error arm must build a caught triple's stacktrace. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'maybe_reclassify_compiled_dispatch_error'(Args, BuiltError)"),
+        "handle_call must reclassify the built error. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_self_call_error_branch_sealed_direct_call_breadcrumb() {
     // generate_direct_sealed_call (a sealed class self-sending one
     // of its own sealed methods, in *closed* expression position — e.g. as

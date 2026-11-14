@@ -1115,7 +1115,14 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                         MethodName, beamtalk_text:to_binary(FailMsg), Module, TestST
                     );
                 error:TestReason:TestST ->
-                    test_failure(MethodName, error_head(error, TestReason), Module, TestST);
+                    %% BT-4850: an error raised in an actor or a class process keeps
+                    %% that process's stack; show it, as `beamtalk run` does.
+                    test_failure(
+                        MethodName,
+                        error_head(error, TestReason),
+                        Module,
+                        beamtalk_exception_handler:raise_site_stacktrace(TestReason, TestST)
+                    );
                 TestClass:TestReason:TestST ->
                     test_failure(MethodName, error_head(TestClass, TestReason), Module, TestST)
             after

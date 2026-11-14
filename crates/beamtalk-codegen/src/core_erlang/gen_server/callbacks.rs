@@ -10,7 +10,7 @@
 //! and `terminate/2`.
 
 use super::super::actor_state_access::{actor_state_call, actor_state_helper};
-use super::super::exception_forms::{CatchVars, wrap_and_reraise_doc};
+use super::super::exception_forms::{CatchVars, build_caught_triple_doc, wrap_and_reraise_doc};
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form::Layout;
@@ -2109,7 +2109,16 @@ impl CoreErlangGenerator {
                             line(),
                             Self::discard_continuations_binding(),
                             line(),
-                            "let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in",
+                            // BT-4850: a caught exception's raw trace is built here,
+                            // in the actor that caught it, so the caller's
+                            // `ensure_wrapped` keeps the raise-site frames.
+                            docvec![
+                                "let BuiltError = ",
+                                build_caught_triple_doc(leaf::var("Error"), "Reply"),
+                                " in",
+                            ],
+                            line(),
+                            "let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, BuiltError) in",
                             line(),
                             "case call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) of",
                             nest(

@@ -21,8 +21,8 @@
 //! [`beamtalk_cerl_doc::form`], so each site picks a [`Layout`] and owns no
 //! indentation of its own.
 
-use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::form::{self, Layout};
+use beamtalk_cerl_doc::{Document, docvec, leaf};
 
 /// Variables of a catch clause: the exception class, reason and raw stacktrace.
 pub(super) struct CatchVars {
@@ -83,6 +83,64 @@ pub(super) fn wrap_and_reraise_doc(
             layout,
         ),
         layout,
+    )
+}
+
+/// Turns the raw stacktrace of a caught-exception triple into a built one:
+///
+/// ```text
+/// case Err of
+///   <{Type, Reason, Raw}> when 'true' -> let Built = primop 'build_stacktrace'(Raw) in {Type, Reason, Built}
+///   <Other> when 'true' -> Other
+/// end
+/// ```
+///
+/// `safe_dispatch` packs a caught exception as `{Type, Reason, Raw}` where `Raw`
+/// is the opaque trace the catch clause binds. Only `primop 'build_stacktrace'`
+/// can turn it into a list, and the runtime's `capture_stacktrace/1` reads a raw
+/// trace as empty, so a consumer that hands the triple to `ensure_wrapped` or
+/// `reraise` (the self-send error clause, the `handle_call` error arm) builds it
+/// first, in the actor process that caught it (BT-4850). A value that is not a
+/// triple (a bare `#beamtalk_error{}`, an NLR tuple) passes through unchanged.
+///
+/// `prefix` names the clause variables so nested uses stay distinct.
+pub(super) fn build_caught_triple_doc(error: Document<'static>, prefix: &str) -> Document<'static> {
+    // `format!` derives variable-name *inputs* for `leaf::var` (ADR 0089).
+    let type_v = leaf::var(format!("{prefix}Type"));
+    let reason_v = leaf::var(format!("{prefix}Reason"));
+    let raw_v = leaf::var(format!("{prefix}Raw"));
+    let built_v = leaf::var(format!("{prefix}Built"));
+    let other_v = leaf::var(format!("{prefix}Other"));
+    form::case_of(
+        error,
+        [
+            form::clause(
+                [docvec![
+                    "{",
+                    type_v.clone(),
+                    ", ",
+                    reason_v.clone(),
+                    ", ",
+                    raw_v.clone(),
+                    "}"
+                ]],
+                Some(leaf::atom("true")),
+                form::let_in(
+                    built_v.clone(),
+                    form::primop("build_stacktrace", [raw_v]),
+                    docvec!["{", type_v, ", ", reason_v, ", ", built_v, "}"],
+                    Layout::Flat,
+                ),
+                Layout::Flat,
+            ),
+            form::clause(
+                [other_v.clone()],
+                Some(leaf::atom("true")),
+                other_v,
+                Layout::Flat,
+            ),
+        ],
+        Layout::Flat,
     )
 }
 

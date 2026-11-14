@@ -606,3 +606,28 @@ fn the_scanner_finds_static_named_loop_entries_not_back_edges() {
     assert!(unannotated_dispatch_calls(&good).is_empty());
     assert_eq!(loop_entry_applies(&good).len(), 1);
 }
+
+/// BT-4850: an actor method's self-send puts its line on the `safe_dispatch`
+/// call and on the `reraise`/`raise` calls of its error clauses, so the frame of
+/// the sending method reads `Class>>selector (file.bt:N)`, not a line-less
+/// `dispatch`. The raising frame of a does-not-understand is the `raise` call.
+#[test]
+fn a_self_send_annotates_its_dispatch_and_error_calls_bt_4850() {
+    let code = codegen_with_lines(concat!(
+        "Actor subclass: Srv\n",
+        "  state: value = 0\n\n",
+        "  setup =>\n",
+        "    self.value := 42\n\n",
+        "  doWork =>\n",
+        "    self setup\n",
+        "    self.value\n",
+    ));
+    // `self setup` is on line 8 of the source.
+    assert_every_node_annotated(&code, "call _ClassMod", 8);
+    assert_every_node_annotated(
+        &code,
+        "call 'beamtalk_exception_handler':'reraise'(_SDErrorType",
+        8,
+    );
+    assert_every_node_annotated(&code, "call 'beamtalk_error':'raise'(_SDErrorPlain", 8);
+}

@@ -56,6 +56,7 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
     reraise/1,
     reraise/3,
     reraise/4,
+    raise_site_stacktrace/2,
     matches_class/2,
     dispatch/3,
     frames/1,
@@ -1025,13 +1026,14 @@ drop_frame_args(Frame) ->
     Frame.
 
 -doc """
-Whether an exception already carries a captured stacktrace, under either the
-`raw_stacktrace` key or the legacy `stacktrace` key (StackFrame objects, as
+Whether an exception already carries a captured stacktrace, under either a
+non-empty `raw_stacktrace` (an empty one is none, so a later catch backfills it, BT-4850) or the legacy `stacktrace` key (StackFrame objects, as
 built by an older node or code version before BT-4115).
 """.
 -spec has_stacktrace(map()) -> boolean().
-has_stacktrace(Exception) ->
-    is_map_key(raw_stacktrace, Exception) orelse is_map_key(stacktrace, Exception).
+has_stacktrace(#{raw_stacktrace := [_ | _]}) -> true;
+has_stacktrace(#{raw_stacktrace := _}) -> false;
+has_stacktrace(Exception) -> is_map_key(stacktrace, Exception).
 
 -doc """
 The StackFrame objects for an exception's captured stacktrace (BT-4115).
@@ -1050,6 +1052,25 @@ frames(#{stacktrace := Frames}) when is_list(Frames) ->
     Frames;
 frames(_) ->
     [].
+
+-doc """
+The stacktrace to show for a caught exception: the raise-site stack the
+exception carries when it has one, else the stack of the catch (BT-4850).
+
+An exception that crossed a process (an actor reply, a class-process relay, a
+rejected future) keeps the callee's stack, which is the one that names where it
+happened; the catch stack of the process that finally caught it only shows the
+caller. A bare Erlang reason carries nothing, so its catch stack is the only
+one. The single rule behind the `beamtalk run` and `beamtalk test` traces.
+""".
+-spec raise_site_stacktrace(term(), list()) -> list().
+raise_site_stacktrace(#{'$beamtalk_class' := _} = Exception, CatchStacktrace) ->
+    case raise_stacktrace(Exception) of
+        [] -> CatchStacktrace;
+        Carried -> Carried
+    end;
+raise_site_stacktrace(_Reason, CatchStacktrace) ->
+    CatchStacktrace.
 
 %% The Erlang stacktrace `pass` re-raises with: the raw capture as-is, else one
 %% rebuilt from legacy StackFrame objects, else none.
