@@ -93,7 +93,7 @@ FAIL testParse
   (`beamtalk_class_registry`); nothing is guessed from the module name. A
   `bt@...` module whose class is not loaded shows the raw module name (and
   its raw function name). A class name is package-qualified (`json@Parser`)
-  only when two loaded class modules share the name (a registered class with a same-named module that has no registered class counts, since the class table holds one row per name).
+  only when two loaded class modules share the name. A same-named module with no registered class counts too, since the class table holds one row per name and cannot see it.
 - **Erlang frames** are written `module:function/arity` as recorded, never
   as `Module>>function`. Test failure output lists only Beamtalk frames.
 - **`[] in`** marks a compiler-lifted block (a closure body or loop body)

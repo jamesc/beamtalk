@@ -219,9 +219,16 @@ package_path(Module) ->
 
 -spec class_segment(atom()) -> binary() | undefined.
 class_segment(Module) ->
-    case binary:split(atom_to_binary(Module, utf8), <<"@">>, [global]) of
-        [<<"bt">>, _ | _] = Parts -> lists:last(Parts);
-        _ -> undefined
+    %% The prefix test first: most loaded modules are OTP and runtime ones,
+    %% and this runs over all of them.
+    case atom_to_binary(Module, utf8) of
+        <<"bt@", _/binary>> = Name ->
+            case binary:split(Name, <<"@">>, [global]) of
+                [_, _ | _] = Parts -> lists:last(Parts);
+                _ -> undefined
+            end;
+        _ ->
+            undefined
     end.
 
 %% The package qualifier for a resolved class, only when another loaded class
