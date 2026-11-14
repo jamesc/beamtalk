@@ -1292,13 +1292,28 @@ impl ThreadingPlan {
         docvec![
             " in let ",
             leaf::var(fold_result.to_string()),
-            " = call 'lists':'foldl'(",
+            " = ",
+            Self::foldl_expr_doc(lambda_var, init_acc, safe_list_var),
+            " in ",
+        ]
+    }
+
+    /// Builds the bare `call 'lists':'foldl'(<lambda>, <init_acc>, <list>)`
+    /// expression — [`Self::foldl_call_doc`] binds it to a result variable;
+    /// the stateless `inject:into:` fast path returns it as the value.
+    pub fn foldl_expr_doc(
+        lambda_var: &str,
+        init_acc: Document<'static>,
+        safe_list_var: &str,
+    ) -> Document<'static> {
+        docvec![
+            "call 'lists':'foldl'(",
             leaf::var(lambda_var.to_string()),
             ", ",
             init_acc,
             ", ",
             leaf::var(safe_list_var.to_string()),
-            ") in ",
+            ")",
         ]
     }
 

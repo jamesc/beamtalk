@@ -7,7 +7,7 @@ use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::family_slots::FoldFamilySlots;
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
-use super::fold_driver::{AccumulateOp, FoldHead};
+use super::fold_driver::{FoldHead, FoldOp};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -243,6 +243,6 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        self.generate_accumulate_fold_with_mutations(receiver, body, AccumulateOp::Collect)
+        self.generate_fold_with_mutations(receiver, body, FoldOp::Collect)
     }
 }
