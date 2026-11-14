@@ -27,7 +27,7 @@ Adding one catch-all clause to the outer `case` makes the module compile.
 cp q1.core.txt q1.core && erlc +from_core q1.core
 ```
 
-`q1.core.txt` is in this directory (copy it to `q1.core`; the repo ignores `*.core`) (8 lines of Core Erlang, no Beamtalk involved):
+`q1.core.txt` is in this directory (11 lines of Core Erlang, no Beamtalk involved; copy it to `q1.core` first, because the repo ignores `*.core`):
 
 ```erlang
 module 'q1' ['run'/1]
