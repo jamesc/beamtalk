@@ -230,8 +230,16 @@ handle_cast(_Msg, State) ->
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     %% Find which classes this Pid was registered under
     %% This is more efficient than scanning all monitors when there are many instances
-    Matches = ets:match(?INSTANCE_REGISTRY, {'$1', Pid}),
-    Classes = [Class || [Class] <- Matches],
+    %% BT-4845: the pid-keyed index answers in O(1) (a pid is registered under
+    %% one class, see class_of/1). The bag can only be searched by value, a scan
+    %% of the whole registry per exit, which kept up only because the
+    %% synchronous `register/2` once held spawners to the server's pace; the
+    %% scan stays as the fallback for a pid the index does not know.
+    Classes =
+        case ets:lookup(?INSTANCE_CLASS, Pid) of
+            [{_, Class}] -> [Class];
+            [] -> [C || [C] <- ets:match(?INSTANCE_REGISTRY, {'$1', Pid})]
+        end,
 
     %% Remove from ETS
     ets:delete(?INSTANCE_CLASS, Pid),
