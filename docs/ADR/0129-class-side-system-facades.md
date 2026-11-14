@@ -1,7 +1,7 @@
 # ADR 0129: Replace Injected `Beamtalk`/`Workspace`/`Transcript` Bindings with Class-Side Facades
 
 ## Status
-Accepted (2026-09-25)
+Implemented (2026-09-30) — accepted 2026-09-25; all phases (0a–6 and validation) shipped under Epic BT-3636.
 
 > **Amended by [ADR 0142](0142-class-process-owns-only-class-state.md) (2026-10-30), Constraint 1 and Phase 0b.** The class-process hazards of Constraint 1 now apply only to classes that keep their process: those whose chain declares class variables, process-bound selectors, and classes whose own methods a class-side extension or runtime fun shadows. Sealing plays no part: every class method of a stateless class runs in the caller, through a static, REPL or dynamic send. Phase 0b's mechanism is replaced: the unguarded static calls with a `nil` `ClassSelf`, the `direct_class_methods` table in `__beamtalk_meta/0` and `lookup_direct_call/3` are gone. Static sends compile to a guarded direct call (`beamtalk_class_shadow_flags:direct_call_ok/2`) and dynamic sends use the in-caller owner memo in `beamtalk_class_dispatch:class_send_plain/3`. The facades stay `sealed` and `class sealed`, and keep running in the caller, with one guard read per static send. The one eligibility rule is `ClassHierarchy::runs_class_method_in_caller` / `is_direct_call_eligible` (Rust), shared by module codegen, REPL codegen and the lints.
 
@@ -27,8 +27,8 @@ Settles BT-3632 (§6).
 
 **Related follow-ups (outside the epic):** BT-3633 (node introspection →
 `Node`), BT-3634 (`Program exit:` outside run mode), BT-3635 (`File` handle
-ownership; blocks Phase 0b).
-**Status:** Planned
+ownership; blocks Phase 0b) — all three done.
+**Status:** Implemented (2026-09-30) — Epic BT-3636 and every issue above are Done
 
 ## Context
 

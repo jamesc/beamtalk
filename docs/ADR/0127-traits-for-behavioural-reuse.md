@@ -1,7 +1,7 @@
 # ADR 0127: Traits — Protocols with Provided Methods, Flattened into Users
 
 ## Status
-Accepted (2026-09-23)
+Implemented (2026-09-28) — accepted 2026-09-23; v1 (Phases 0–6) shipped under Epic BT-3586. Of the post-v1 items, browse grouping (BT-3654) and LSP hover provenance (BT-3655) are done; protocol composition, `aliasing:`, class-side provisions and protocol-wide rename remain in BT-3595 (Backlog).
 
 Closes the question ADR 0005 left open as Q9 ("Mixins/traits: deferred to a
 future ADR") and BT-274 (cancelled 2026-04-01 as "not pressing"; reopened by
@@ -1661,7 +1661,7 @@ criterion — moot while flattening already gives per-class sealing).
 ## Implementation Tracking
 
 **Epic:** [BT-3586](https://linear.app/beamtalk/issue/BT-3586)
-**Status:** Implemented (v1); post-v1 items tracked in [BT-3595](https://linear.app/beamtalk/issue/BT-3595)
+**Status:** Implemented (v1, 2026-09-28); browse grouping (BT-3654) and LSP hover provenance (BT-3655) done; remaining post-v1 items tracked in [BT-3595](https://linear.app/beamtalk/issue/BT-3595) (Backlog)
 
 | ADR phase | Issue | Title | Size | Blocked by |
 |---|---|---|---|---|
@@ -1673,7 +1673,7 @@ criterion — moot while flattening already gives per-class sealing).
 | 4 | [BT-3592](https://linear.app/beamtalk/issue/BT-3592) | Runtime users index and reflection API | M | BT-3590 |
 | 5 | [BT-3593](https://linear.app/beamtalk/issue/BT-3593) | All-or-nothing reload and live patching | M | BT-3591, BT-3592 |
 | 6 | [BT-3594](https://linear.app/beamtalk/issue/BT-3594) | Stdlib adoption, Traits docs, end-to-end test | M | BT-3589, BT-3593 |
-| 7 | [BT-3595](https://linear.app/beamtalk/issue/BT-3595) | Post-v1 (needs-spec) | L | v1 |
+| 7 | [BT-3595](https://linear.app/beamtalk/issue/BT-3595) | Post-v1 (needs-spec; Backlog — browse grouping and hover provenance split out and done as BT-3654, BT-3655) | L | v1 |
 
 Merged phase PRs: BT-3587 (#4034), BT-3588 (#4037), BT-3589 (#4044), BT-3590 (#4049), BT-3591 (#4051), BT-3592 (#4052), BT-3593 (#4054), BT-3594 (#4060).
 
