@@ -704,11 +704,16 @@ trace_entries(Frames) ->
 
 -spec frame_entries(list()) -> [trace_entry()].
 frame_entries(Frames) ->
-    [frame_entry(F) || F <- Frames].
+    %% One `wrap/1` for the whole selection shares the class-table fold and
+    %% the loaded-module scan across frames.
+    [wrapped_entry(W) || W <- beamtalk_stack_frame:wrap(Frames)].
 
 -spec frame_entry(term()) -> trace_entry().
 frame_entry(Frame) ->
-    Wrapped = beamtalk_stack_frame:wrap_frame(Frame),
+    wrapped_entry(beamtalk_stack_frame:wrap_frame(Frame)).
+
+-spec wrapped_entry(map()) -> trace_entry().
+wrapped_entry(Wrapped) ->
     {
         beamtalk_stack_frame:format_frame(Wrapped),
         beamtalk_stack_frame:frame_parts(Wrapped),

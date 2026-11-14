@@ -200,6 +200,13 @@ shared_class_segments(Frames, ModuleToClass) ->
             maps:filter(fun(_, N) -> N > 1 end, Counts)
     end.
 
+%% Everything between `bt@` and the class segment (`bt@json@a@parser` is
+%% `json@a`), so nested packages with the same class name stay distinguishable.
+-spec package_path(atom()) -> binary().
+package_path(Module) ->
+    [<<"bt">> | Rest] = binary:split(atom_to_binary(Module, utf8), <<"@">>, [global]),
+    iolist_to_binary(lists:join(<<"@">>, lists:droplast(Rest))).
+
 -spec class_segment(atom()) -> binary() | undefined.
 class_segment(Module) ->
     case binary:split(atom_to_binary(Module, utf8), <<"@">>, [global]) of
@@ -216,7 +223,7 @@ package_qualifier(Module, ClassName, Shared) when
     case {beamtalk_module_name:package_of(Module), class_segment(Module)} of
         {Pkg, Seg} when Pkg =/= undefined, Seg =/= undefined ->
             case maps:is_key(Seg, Shared) of
-                true -> Pkg;
+                true -> package_path(Module);
                 false -> nil
             end;
         _ ->

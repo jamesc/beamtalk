@@ -307,21 +307,28 @@ module_to_class_resolves_acronym_class_via_registry_test_() ->
 -define(SOLO_MOD, 'bt@bt4815pkg@bt4815_solo').
 -define(DUPE_A, 'bt@bt4815a@bt4815_dupe').
 -define(DUPE_B, 'bt@bt4815b@bt4815_dupe').
+-define(NEST_A, 'bt@bt4815n@a@bt4815_nest').
+-define(NEST_B, 'bt@bt4815n@b@bt4815_nest').
 
 frame_table_test_() ->
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
-            Mods = [?SOLO_MOD, ?DUPE_A, ?DUPE_B],
+            Mods = [?SOLO_MOD, ?DUPE_A, ?DUPE_B, ?NEST_A, ?NEST_B],
             [load_empty_module(M) || M <- Mods],
             Pids = [
                 register_class('Bt4815Solo', ?SOLO_MOD),
-                register_class('Bt4815Dupe', ?DUPE_A)
+                register_class('Bt4815Dupe', ?DUPE_A),
+                register_class('Bt4815Nest', ?NEST_A)
             ],
             {Mods, Pids}
         end,
         fun({Mods, Pids}) ->
-            [beamtalk_test_class:stop(P) || P <- Pids],
+            _ = Pids,
+            [
+                beamtalk_test_class:stop_graceful(N)
+             || N <- ['Bt4815Solo', 'Bt4815Dupe', 'Bt4815Nest']
+            ],
             [unload_module(M) || M <- Mods]
         end,
         fun(_) ->
@@ -414,6 +421,12 @@ frame_table_test_() ->
                     %% the qualified class is still the class for `receiverClass`
                     [Wrapped] = beamtalk_stack_frame:wrap([{?DUPE_A, go, 1, []}]),
                     ?assertEqual('Bt4815Dupe', maps:get(class_name, Wrapped))
+                end},
+                {"nested packages are qualified by the whole package path", fun() ->
+                    ?assertEqual(
+                        <<"bt4815n@a@Bt4815Nest>>go">>,
+                        render({?NEST_A, go, 1, []})
+                    )
                 end},
                 {"the single-frame path resolves like wrap/1", fun() ->
                     Frame = {?DUPE_A, go, 1, []},

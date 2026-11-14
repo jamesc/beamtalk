@@ -580,16 +580,16 @@ format_stacktrace_class_side_block_resolved_test_() ->
                 superclass => none,
                 methods => #{},
                 class_methods => #{},
-                module => 'bt@user@Hpack'
+                module => 'bt@user@bt4815_hpack_resolved'
             })
         end,
-        fun beamtalk_test_class:stop/1, fun(_) ->
+        fun(_Pid) -> beamtalk_test_class:stop_graceful('Bt4815Hpack') end, fun(_) ->
             fun() ->
                 Frames = [
-                    {'bt@user@Hpack', '-class_encode:headers:table:/4-fun-0-', 2, [
+                    {'bt@user@bt4815_hpack_resolved', '-class_encode:headers:table:/4-fun-0-', 2, [
                         {file, "hpack.bt"}, {line, 40}
                     ]},
-                    {'bt@user@Hpack', 'class_encode:headers:table:', 4, [
+                    {'bt@user@bt4815_hpack_resolved', 'class_encode:headers:table:', 4, [
                         {file, "hpack.bt"}, {line, 40}
                     ]}
                 ],
