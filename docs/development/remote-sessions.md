@@ -61,6 +61,15 @@ through. `install.sh` extracts into the prefix in place and writes the marker
 last, so an install that is interrupted leaves the old marker and is retried at
 the next session start; it is self-healing, not atomic.
 
+Further hardening (BT-4841): every protected fetch pins redirects with
+`--proto-redir '=https'`; `--prefix=PATH` is accepted; `BEAMTALK_INSTALLER`
+(an unverified local installer, for tests) is ignored with a warning when
+`CLAUDE_CODE_REMOTE=true`; `Last-Modified` is reduced to `A-Za-z0-9 ,:+-` and
+40 characters, because hook stdout reaches the agent's context; a reinstall
+whose marker still does not match prints `refreshed, but unverified (marker
+mismatch; ...)`. `REFRESH_EDGE_VERSION=` in the script identifies a vendored
+copy.
+
 Force a refresh by removing the marker and rerunning the script, or by running
 the installer directly:
 

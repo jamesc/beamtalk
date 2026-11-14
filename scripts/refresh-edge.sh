@@ -19,7 +19,7 @@
 # (warnings go to stderr).
 #
 # Usage (from a file, or piped like scripts/setup-cloud.sh):
-#   scripts/refresh-edge.sh [--prefix PATH]
+#   scripts/refresh-edge.sh [--prefix PATH | --prefix=PATH]
 #   curl -fsSL https://raw.githubusercontent.com/jamesc/beamtalk/main/scripts/refresh-edge.sh | bash
 #
 # The installer is not trusted on TLS alone: the edge workflow publishes
@@ -36,7 +36,8 @@
 #                           release's install.sh asset); its checksum is read
 #                           from "<url>.sha256". An override is for tests and
 #                           lifts the https-only rule for the installer fetches only.
-#   BEAMTALK_INSTALLER      path of a local installer, run unverified; wins over the URL
+#   BEAMTALK_INSTALLER      path of a local installer, run unverified; wins over the URL.
+#                           Ignored (with a warning) when CLAUDE_CODE_REMOTE=true
 #   BEAMTALK_EDGE_BASE_URL  release download base for the tarball checksum
 #                           (default: the edge release); an override is for tests
 #                           and lifts the https-only rule for that fetch only
@@ -45,6 +46,11 @@
 # and rerun, or run `install.sh --edge --prefix <prefix>` directly.
 
 set -uo pipefail
+
+# Bump when the script's behaviour changes, so vendored copies can be compared
+# (`grep '^REFRESH_EDGE_VERSION=' .claude/hooks/refresh-edge.sh`).
+# shellcheck disable=SC2034  # read by grep, not by this script
+REFRESH_EDGE_VERSION=2
 
 # Time budget (BT-4841). The SessionStart hook kills this script at 360s, and a
 # kill bypasses the "always exit 0" contract. Worst case on the reinstall path:
@@ -72,6 +78,8 @@ while [ $# -gt 0 ]; do
     --prefix)
       if [ $# -lt 2 ]; then echo "refresh-edge: --prefix requires a value" >&2; exit 0; fi
       PREFIX="$2"; shift 2 ;;
+    --prefix=*)
+      PREFIX="${1#--prefix=}"; shift ;;
     *) echo "refresh-edge: unknown option: $1" >&2; exit 0 ;;
   esac
 done
@@ -109,9 +117,9 @@ trap 'rm -rf "${WORK}"' EXIT
 
 # https-only is the default for every fetch; each override lifts it for its own
 # fetches only (a test base URL must not weaken the installer download).
-BASE_PROTO=(--proto '=https')
+BASE_PROTO=(--proto '=https' --proto-redir '=https')
 [ -n "${BEAMTALK_EDGE_BASE_URL:-}" ] && BASE_PROTO=()
-INSTALLER_PROTO=(--proto '=https')
+INSTALLER_PROTO=(--proto '=https' --proto-redir '=https')
 [ -n "${BEAMTALK_INSTALLER_URL:-}" ] && INSTALLER_PROTO=()
 
 # --- 1. The published checksum: one small request ---
@@ -126,9 +134,10 @@ if ! [[ "${REMOTE_SUM}" =~ ^[0-9a-f]{64}$ ]]; then
   warn "the edge release checksum is malformed; keeping the installed build"
   exit 0
 fi
-# Strip control characters (and cap the length): the value goes into the single status line.
+# The value goes into the status line, which SessionStart hooks feed to the
+# agent's context: keep a strict safe character set (an HTTP date) and cap the length.
 PUBLISHED="$(grep -i '^last-modified:' "${WORK}/headers" | tail -1 | cut -d: -f2- \
-  | LC_ALL=C tr -d '\000-\037\177' | sed 's/^ *//' | cut -c1-64)"
+  | LC_ALL=C tr -cd 'A-Za-z0-9 ,:+-' | sed 's/^ *//' | cut -c1-40)"
 PUBLISHED="${PUBLISHED:-unknown}"
 
 # --- 2. The installed checksum: the marker install.sh wrote ---
@@ -165,6 +174,11 @@ if marker_matches; then
   exit 0
 fi
 
+if [ -n "${BEAMTALK_INSTALLER:-}" ] && [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+  # A local installer runs unverified: not in cloud sessions (BT-4841).
+  warn "BEAMTALK_INSTALLER is ignored in cloud sessions (CLAUDE_CODE_REMOTE=true); using the verified release installer"
+  BEAMTALK_INSTALLER=""
+fi
 if [ -n "${BEAMTALK_INSTALLER:-}" ]; then
   INSTALLER="${BEAMTALK_INSTALLER}"
 else
@@ -196,8 +210,10 @@ if ! timeout -k "${INSTALL_KILL_GRACE}" "${INSTALL_TIMEOUT}" sh "${INSTALLER}" -
   exit 0
 fi
 
-if ! marker_matches; then
+if marker_matches; then
+  echo "beamtalk edge ${REMOTE_SUM:0:12} (published ${PUBLISHED}): refreshed (was ${WAS})$(build_identity)"
+else
   warn "reinstalled, but the marker does not match the release (an older install.sh?); it will retry next session"
+  echo "beamtalk edge ${REMOTE_SUM:0:12} (published ${PUBLISHED}): refreshed, but unverified (marker mismatch; was ${WAS})$(build_identity)"
 fi
-echo "beamtalk edge ${REMOTE_SUM:0:12} (published ${PUBLISHED}): refreshed (was ${WAS})$(build_identity)"
 exit 0
