@@ -23,7 +23,8 @@ StackFrame objects are value types (tagged maps) with fields:
   file => binary() | nil,    % Source file path
   line => non_neg_integer() | nil, % Source line number
   class_name => atom() | nil, % Beamtalk class name (if the runtime class table knows the module)
-  package => binary() | nil   % package qualifier, set only when two loaded class modules share the name
+  package => binary() | nil,  % package qualifier, set only when two loaded class modules share the name
+  visible => boolean()        % set by wrap/1 and wrap_frame/1 from classify_frames/1: shown by default?
 }
 ```
 
@@ -50,6 +51,26 @@ Frame table (the first column is what the frame is, not what it is called):
 | Erlang code (any module that is not a Beamtalk class) | `lists:foldl/3 (lists.erl:2471)` |
 | A `bt@...` module the class table cannot resolve | `bt@user@Hpack>>class_encode:headers:table:`: the raw module, nothing guessed |
 
+## Frame visibility (ADR 0139, decision 3)
+
+`classify_frames/1` is the one place that decides which frames a surface lists
+by default; test failure output and `Exception>>stackTrace` use it, and
+`wrap/1` stamps the verdict on each frame as `visible`. Nothing is dropped:
+`beamtalk_exception_handler:frames/1` and `--full-traces` keep the whole
+ordered list.
+
+| Frame | Default |
+|---|---|
+| Beamtalk method or block (resolved class, or a `bt@...` module the table cannot resolve) | shown |
+| Generated callback of a Beamtalk actor module, by name and arity (`init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`, `handle_continue/2`, `terminate/2`, `code_change/3`, `safe_dispatch/3,4`) | hidden |
+| Erlang module a Beamtalk package declares (`beamtalk_package:declared_native_modules/0`, the `native_modules` app env, ADR 0072) | shown |
+| The frame that raised (innermost), other Erlang code (OTP, hex dependency) | shown |
+| Any other OTP or hex-dependency frame | hidden |
+| `beamtalk_*` runtime internals (unless a package declares the module) | hidden |
+
+Classification reads the loaded applications of the node it runs on, so run
+it where the exception was raised or read.
+
 Names resolve through the runtime class table
 (`beamtalk_class_registry:module_to_class_map/0`); there is no string-guessing
 fallback. A class name is package-qualified (`json@Parser`) only when two
@@ -62,6 +83,8 @@ loaded class modules share it. Which frames are listed is not decided here.
     has_method/1,
     module_to_class/1,
     wrap_frame/1,
+    classify_frames/1,
+    visible_frames/1,
     format_frame/1,
     render_mfa/1,
     render_mfas/1,
@@ -97,7 +120,11 @@ behind `e stackTrace`). So class names are resolved at read time.
 wrap(Stacktrace) when is_list(Stacktrace) ->
     ModuleToClass = beamtalk_class_registry:module_to_class_map(),
     Shared = shared_class_segments(Stacktrace, ModuleToClass),
-    [wrap_frame(Frame, ModuleToClass, Shared) || Frame <- Stacktrace];
+    Frames = [wrap_frame(Frame, ModuleToClass, Shared) || Frame <- Stacktrace],
+    [
+        Frame#{visible => Verdict =:= shown}
+     || {Verdict, Frame} <- classify_frames(Frames)
+    ];
 wrap(_) ->
     [].
 
@@ -108,6 +135,15 @@ one frame at a time (test failure output) so they share `format_frame/1`.
 """.
 -spec wrap_frame(term()) -> map().
 wrap_frame(Frame) ->
+    Wrapped = wrap_unclassified(Frame),
+    %% Alone, the frame is the innermost one, so it is judged as the raising frame.
+    [{Verdict, _}] = classify_frames([Wrapped]),
+    Wrapped#{visible => Verdict =:= shown}.
+
+%% One frame wrapped without a visibility verdict, for callers that only render
+%% it (`render_mfa/1`): classifying reads every loaded application's env.
+-spec wrap_unclassified(term()) -> map().
+wrap_unclassified(Frame) ->
     ModuleToClass = beamtalk_class_registry:module_to_class_map(),
     wrap_frame(Frame, ModuleToClass, shared_class_segments([Frame], ModuleToClass)).
 
@@ -153,6 +189,125 @@ wrap_frame(_Other, _ModuleToClass, _Shared) ->
         class_name => nil,
         package => nil
     }.
+
+-doc """
+The one classifier for default frame visibility (see the module doc table).
+Takes wrapped frames, innermost first (as `wrap/1` answers), and answers each
+as `{shown | hidden, Frame}` in the same order. The innermost frame is the one
+that raised; it is listed even when it is OTP or hex-dependency code, so the
+trace says where the failure happened.
+""".
+-spec classify_frames([map()]) -> [{shown | hidden, map()}].
+classify_frames(Frames) ->
+    Natives =
+        case lists:any(fun is_plain_erlang_frame/1, Frames) of
+            true -> beamtalk_package:declared_native_modules();
+            false -> #{}
+        end,
+    classify_frames(Frames, true, Natives).
+
+classify_frames([], _Raising, _Natives) ->
+    [];
+classify_frames([Frame | Rest], Raising, Natives) ->
+    [{frame_verdict(Frame, Raising, Natives), Frame} | classify_frames(Rest, false, Natives)].
+
+-doc "The frames of a wrapped stacktrace that are shown by default, in order.".
+-spec visible_frames([map()]) -> [map()].
+visible_frames(Frames) ->
+    case
+        lists:all(
+            fun(F) -> is_map(F) andalso is_boolean(maps:get(visible, F, undefined)) end, Frames
+        )
+    of
+        %% `wrap/1` already stamped the verdict: no second classification.
+        true -> [F || #{visible := true} = F <- Frames];
+        false -> [Frame || {shown, Frame} <- classify_frames(Frames)]
+    end.
+
+-spec is_plain_erlang_frame(map()) -> boolean().
+is_plain_erlang_frame(#{module := Module} = Frame) ->
+    frame_kind(Module, maps:get(class_name, Frame, nil)) =:= erlang;
+is_plain_erlang_frame(_) ->
+    false.
+
+-spec frame_verdict(map(), boolean(), #{atom() => true}) -> shown | hidden.
+frame_verdict(#{module := Module, function := Function} = Frame, Raising, Natives) ->
+    case frame_kind(Module, maps:get(class_name, Frame, nil)) of
+        unknown ->
+            %% A malformed entry wraps to a `?>>?` placeholder: nothing a person
+            %% named. Hidden here, still in the full list.
+            hidden;
+        erlang ->
+            %% A package's own module wins over the `beamtalk_` prefix: packages
+            %% are told to prefix their native modules with their name.
+            case maps:is_key(Module, Natives) of
+                true ->
+                    shown;
+                false ->
+                    case Raising andalso not runtime_internal(Module) of
+                        true -> shown;
+                        false -> hidden
+                    end
+            end;
+        _Beamtalk ->
+            case generated_callback(Module, Function, maps:get(arity, Frame, undefined)) of
+                true -> hidden;
+                false -> shown
+            end
+    end;
+frame_verdict(_, _, _) ->
+    %% Not a wrapped frame (a legacy object with no `module`): nothing to classify by, keep it.
+    shown.
+
+-spec runtime_internal(atom()) -> boolean().
+runtime_internal(Module) ->
+    lists:prefix("beamtalk_", atom_to_list(Module)).
+
+%% Callbacks the compiler generates for every actor module, with their
+%% arities; the user wrote none of them. A value-type method may share a name
+%% (`init`, `terminate`), so a frame is a generated callback only when its
+%% name and arity match AND its module is an actor (it exports `handle_call/3`).
+%% A block lifted from a callback is named `-name/Arity-fun-N-`.
+-define(GENERATED_CALLBACKS, [
+    {<<"init">>, [1]},
+    {<<"handle_call">>, [3]},
+    {<<"handle_cast">>, [2]},
+    {<<"handle_info">>, [2]},
+    {<<"handle_continue">>, [2]},
+    {<<"terminate">>, [2]},
+    {<<"code_change">>, [3]},
+    {<<"safe_dispatch">>, [3, 4]}
+]).
+
+-spec generated_callback(atom(), atom(), term()) -> boolean().
+generated_callback(Module, Function, Arity) when is_atom(Function), is_integer(Arity) ->
+    {Name, FunArity} = callback_name_arity(Function, Arity),
+    case lists:keyfind(Name, 1, ?GENERATED_CALLBACKS) of
+        {Name, Arities} ->
+            %% `function_exported/3` is false for a module not loaded on this node;
+            %% that only shows more frames. Do not "fix" it with `code:ensure_loaded`
+            %% inside exception reading: classify on the node that raised.
+            lists:member(FunArity, Arities) andalso
+                erlang:function_exported(Module, handle_call, 3);
+        false ->
+            false
+    end;
+generated_callback(_, _, _) ->
+    false.
+
+%% The name and arity a frame's function stands for: a lifted fun carries the
+%% enclosing function's arity in its name.
+-spec callback_name_arity(atom(), arity()) -> {binary(), non_neg_integer()}.
+callback_name_arity(Function, Arity) ->
+    case atom_to_list(Function) of
+        [$- | _] = Chars ->
+            case re:run(Chars, "^-(.+?)/([0-9]+)-", [{capture, all_but_first, list}, unicode]) of
+                {match, [Name, A]} -> {unicode:characters_to_binary(Name), list_to_integer(A)};
+                nomatch -> {unicode:characters_to_binary(Chars), Arity}
+            end;
+        Chars ->
+            {unicode:characters_to_binary(Chars), Arity}
+    end.
 
 -doc """
 Resolve `Module` to a class name using a pre-built module→class map (from
@@ -367,7 +522,7 @@ Machine-readable fields use `raw_mfa/1` instead.
 render_mfa({Module, Function, Arity} = _Mfa) when
     is_atom(Module), is_atom(Function), is_integer(Arity)
 ->
-    head(frame_parts(wrap_frame({Module, Function, Arity, []}))).
+    head(frame_parts(wrap_unclassified({Module, Function, Arity, []}))).
 
 -doc """
 A bare `{Module, Function, Arity}` as the raw `module:function/arity` binary.

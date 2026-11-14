@@ -583,3 +583,172 @@ unload_module(Module) ->
     code:delete(Module),
     code:purge(Module),
     ok.
+
+%%% ===================================================================
+%%% Frame visibility (BT-4818)
+%%% ===================================================================
+
+with_native_package(Modules, Fun) ->
+    App = bt4818_pkg,
+    ok = application:load(
+        {application, App, [
+            {description, "bt4818"},
+            {vsn, "0.0.1"},
+            {modules, []},
+            {registered, []},
+            {applications, [kernel]},
+            {env, [{native_modules, Modules}]}
+        ]}
+    ),
+    try
+        Fun()
+    after
+        application:unload(App)
+    end.
+
+shown(Stack) ->
+    [
+        {M, F}
+     || #{module := M, function := F} <- beamtalk_stack_frame:visible_frames(
+            beamtalk_stack_frame:wrap(Stack)
+        )
+    ].
+
+%% A package's declared native module is shown, wherever it sits in the trace,
+%% even under the `beamtalk_` prefix the ADR tells packages to use.
+visibility_package_native_module_shown_test() ->
+    with_native_package([bt4818_native, beamtalk_bt4818_http], fun() ->
+        Stack = [
+            {lists, map, 2, []},
+            {bt4818_native, decode, 1, [{file, "native/bt4818_native.erl"}, {line, 9}]},
+            {beamtalk_bt4818_http, get, 1, []},
+            {beamtalk_dispatch, lookup, 3, []},
+            {gen_server, handle_msg, 6, []}
+        ],
+        ?assertEqual(
+            [{lists, map}, {bt4818_native, decode}, {beamtalk_bt4818_http, get}],
+            shown(Stack)
+        )
+    end).
+
+%% Declared natives are read from the `native_modules` app env and nowhere else.
+visibility_declared_native_modules_source_test() ->
+    ?assertNot(maps:is_key(bt4818_native, beamtalk_package:declared_native_modules())),
+    with_native_package([bt4818_native], fun() ->
+        ?assert(maps:is_key(bt4818_native, beamtalk_package:declared_native_modules()))
+    end),
+    ?assertNot(maps:is_key(bt4818_native, beamtalk_package:declared_native_modules())).
+
+%% A failure raised inside OTP: the raising frame is shown, the plumbing is not.
+visibility_raising_otp_frame_shown_plumbing_hidden_test() ->
+    Stack = [
+        {lists, foldl, 3, [{file, "lists.erl"}, {line, 2471}]},
+        {gen_server, try_handle_call, 4, []},
+        {gen_server, handle_msg, 6, []},
+        {proc_lib, init_p_do_apply, 3, []}
+    ],
+    ?assertEqual([{lists, foldl}], shown(Stack)),
+    %% Only the innermost frame counts as the raising one.
+    ?assertEqual([{gen_server, try_handle_call}], shown(tl(Stack))),
+    %% With a runtime internal innermost, nothing of the OTP plumbing is listed.
+    ?assertEqual([], shown([{beamtalk_error, raise, 1, []} | tl(Stack)])).
+
+%% `beamtalk_*` runtime internals are hidden, the raising one included.
+visibility_runtime_internal_hidden_test() ->
+    Stack = [
+        {beamtalk_error, raise, 1, []},
+        {beamtalk_dispatch, send, 3, []}
+    ],
+    ?assertEqual([], shown(Stack)).
+
+%% Compile and load a module from source text, for frames that need a real module.
+load_module(Name, Source) ->
+    {ok, Tokens, _} = erl_scan:string(Source),
+    Forms = [
+        begin
+            {ok, F} = erl_parse:parse_form(T),
+            F
+        end
+     || T <- split_forms(Tokens)
+    ],
+    {ok, Name, Bin} = compile:forms(Forms),
+    {module, Name} = code:load_binary(Name, "bt4818.erl", Bin),
+    ok.
+
+split_forms(Tokens) ->
+    split_forms(Tokens, [], []).
+split_forms([], [], Acc) ->
+    lists:reverse(Acc);
+split_forms([{dot, _} = D | Rest], Cur, Acc) ->
+    split_forms(Rest, [], [lists:reverse([D | Cur]) | Acc]);
+split_forms([T | Rest], Cur, Acc) ->
+    split_forms(Rest, [T | Cur], Acc).
+
+%% Generated callbacks of a Beamtalk actor module are hidden, by name and arity;
+%% its methods and blocks are not. A value class's own `init`/`terminate`
+%% method (a module with no `handle_call/3`) stays.
+visibility_generated_callbacks_hidden_test() ->
+    Actor = 'bt@bt4818@counter',
+    Value = 'bt@bt4818@point',
+    ok = load_module(
+        Actor,
+        "-module('bt@bt4818@counter'). -export([handle_call/3]). handle_call(_, _, S) -> S."
+    ),
+    ok = load_module(Value, "-module('bt@bt4818@point'). -export([init/1]). init(S) -> S."),
+    try
+        Stack = [
+            {Actor, 'increment', 1, []},
+            {Actor, '-increment/1-fun-0-', 2, []},
+            {Actor, safe_dispatch, 3, []},
+            {Actor, safe_dispatch, 4, []},
+            {Actor, handle_call, 3, []},
+            {Actor, '-handle_call/3-fun-0-', 1, []},
+            {Actor, handle_info, 2, []},
+            {Actor, handle_continue, 2, []},
+            {Actor, init, 1, []},
+            %% Same name, other arity: a method the user wrote.
+            {Actor, init, 2, []},
+            {Value, init, 1, []},
+            {Value, '-init/1-fun-0-', 0, []}
+        ],
+        ?assertEqual(
+            [
+                {Actor, 'increment'},
+                {Actor, '-increment/1-fun-0-'},
+                {Actor, init},
+                {Value, init},
+                {Value, '-init/1-fun-0-'}
+            ],
+            shown(Stack)
+        )
+    after
+        [unload_module(M) || M <- [Actor, Value]]
+    end.
+
+%% A malformed entry wraps to a placeholder frame; it is hidden by default but
+%% stays in the full list.
+visibility_malformed_frame_hidden_test() ->
+    ?assertEqual([], shown([not_a_frame])),
+    ?assertEqual(1, length(beamtalk_stack_frame:wrap([not_a_frame]))).
+
+%% A frame wrapped alone carries the verdict too (the map shape is the same).
+visibility_wrap_frame_stamps_visible_test() ->
+    ?assertMatch(#{visible := true}, beamtalk_stack_frame:wrap_frame({lists, map, 2, []})),
+    ?assertMatch(
+        #{visible := false}, beamtalk_stack_frame:wrap_frame({beamtalk_error, raise, 1, []})
+    ).
+
+%% The unfiltered list stays whole and ordered; `wrap/1` only stamps a verdict.
+visibility_full_list_is_kept_test() ->
+    Stack = [
+        {lists, foldl, 3, []},
+        {gen_server, handle_msg, 6, []},
+        {'bt@bt4818@counter', increment, 1, []}
+    ],
+    Wrapped = beamtalk_stack_frame:wrap(Stack),
+    ?assertEqual([lists, gen_server, 'bt@bt4818@counter'], [M || #{module := M} <- Wrapped]),
+    ?assertEqual([true, false, true], [V || #{visible := V} <- Wrapped]),
+    ?assertEqual(
+        [shown, hidden, shown],
+        [V || {V, _} <- beamtalk_stack_frame:classify_frames(Wrapped)]
+    ).
