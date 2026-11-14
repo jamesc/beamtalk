@@ -420,6 +420,11 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
     view |> element(~s(div[phx-value-class="#{class}"])) |> render_click()
     view |> element(~s(div[phx-value-selector="value"])) |> render_click()
 
+    # BT-4810: trace the view's mailbox BEFORE the save so the save's own REAL
+    # coalesced refresh is observed rather than raced against (see
+    # `await_real_source_refresh/1`).
+    trace_source_refreshes(view)
+
     # The `tab` hidden field must ride the submit exactly as the real form does
     # — `compile_clean/3` (which clears the tab's dirty flag, making it eligible
     # for `resync_active_tab/2`'s `%{dirty: false}` guard) is a no-op without it.
@@ -435,8 +440,10 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     assert save_html =~ "Saved value on #{class}"
 
-    send(view.pid, :do_source_refresh)
-    refreshed_html = render(view)
+    # The save's own echo IS the real coalesced refresh; wait for it to be
+    # handled instead of hand-sending one (BT-4810: a hand-sent push raced the
+    # real one, which consumed `:save_echo_pending` first).
+    refreshed_html = await_real_source_refresh(view)
 
     assert refreshed_html =~ "Saved value on #{class}"
   end
@@ -506,6 +513,7 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   test "a class-definition tab's banner survives its own echo but clears on the next unrelated push (BT-2588)",
        %{conn: conn} do
     {view, _html, class} = open_fresh_def_tab(conn)
+    trace_source_refreshes(view)
 
     save_html =
       view
@@ -519,9 +527,9 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
 
     assert save_html =~ "Compiled #{class}"
 
-    # First push: the save's own echo — the banner must survive it.
-    send(view.pid, :do_source_refresh)
-    echo_html = render(view)
+    # First push: the save's own echo (the REAL coalesced refresh, BT-4810) —
+    # the banner must survive it.
+    echo_html = await_real_source_refresh(view)
     assert echo_html =~ "Compiled #{class}"
 
     # Second push: nothing else changed, but this is no longer the echo (the
@@ -2799,6 +2807,26 @@ defmodule BtAttachWeb.WorkspaceLiveTest do
   # so peek at the LiveView's socket to assert the selection-guard behaviour.
   defp edit_selection(view) do
     :sys.get_state(view.pid).socket.assigns.edit_selection
+  end
+
+  # BT-4810: a save triggers a REAL, coalesced `:do_source_refresh` (60ms after
+  # the workspace's `ClassLoaded` push). Tests that assert on the save echo must
+  # not hand-send a refresh and assume it is the first one: the real one can land
+  # first, consume `:save_echo_pending`, and leave the hand-sent one to clear the
+  # banner. Instead, trace the view's received messages before the save...
+  defp trace_source_refreshes(view) do
+    :erlang.trace(view.pid, true, [:receive, {:tracer, self()}])
+    :ok
+  end
+
+  # ...then wait for the real refresh to be dequeued and rendered. The trace
+  # event fires as the view dequeues the message, so the following `render/1`
+  # (a call queued behind it) only returns once the refresh has been handled.
+  defp await_real_source_refresh(view) do
+    pid = view.pid
+    assert_receive {:trace, ^pid, :receive, :do_source_refresh}, 5_000
+    :erlang.trace(pid, false, [:receive])
+    render(view)
   end
 
   # ~6s total — generous for cross-node async transcript delivery under CI load.
