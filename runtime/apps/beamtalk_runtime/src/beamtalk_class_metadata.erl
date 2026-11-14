@@ -47,16 +47,17 @@ absence of the others.
 ## Reverse subclass index
 
 `match_subclasses/1` is answered from a second table,
-`beamtalk_class_subclass_index` — a `bag` of `{Superclass, ClassName}` edges,
-keyed on `Superclass` — instead of an `ets:match/2` scan of every row in
+`beamtalk_class_subclass_index` — a `bag` of `{Superclass, ClassName, Owner}`
+edges (`Owner`: the class process that wrote it, BT-4808), keyed on `Superclass` — instead of an `ets:match/2` scan of every row in
 `?TABLE`. A `bag` table (many rows per key) cannot share `?TABLE`'s `set`
 semantics, so this is a genuine second table rather than a field on the
 existing row; the "second table" it replaces is only the mental model of a
 "seventh, independently-lifecycled table" that the original consolidation weighed against — this
 one has no owner module, public API, or lifecycle of its own. It is created
 and destroyed by this module's own `new/0`, and every write that can change a
-row's `superclass` (`insert/5`, `merge_identity/5`, `delete/1`) maintains it
-as an internal side effect via `sync_subclass_index/3`, keyed off the row's
+row's `superclass` (`insert/5` via `claim_subclass_edge/3`, `merge_identity/5`
+via `sync_subclass_index/3`, `delete/1`, `delete_if_owner/2`) maintains it
+as an internal side effect, keyed off the row's
 *previous* superclass value (read via `field/2` before the write lands) so a
 re-register that changes superclass removes the stale edge from the old
 parent rather than leaving it to accumulate. Storing the edge independently of
@@ -350,15 +351,15 @@ new() ->
         {keypos, #class_metadata.name},
         {read_concurrency, true}
     ]),
-    %% The funs table is a plain {Key, Value} set (default keypos 1),
-    %% Key = {DefiningClass, Selector}, Value = #{block, arity}.
+    %% The funs table is a plain set (default keypos 1) of
+    %% {{DefiningClass, Selector}, #{block, arity}, Owner} (BT-4808).
     ensure_table(?FUN_TABLE, [
         set,
         public,
         named_table,
         {read_concurrency, true}
     ]),
-    %% Reverse-edge index, {Superclass, ClassName} rows, default
+    %% Reverse-edge index, {Superclass, ClassName, Owner} rows, default
     %% keypos 1 (Superclass). `bag` because a superclass has many subclasses.
     ensure_table(?SUBCLASS_INDEX, [
         bag,
@@ -366,7 +367,7 @@ new() ->
         named_table,
         {read_concurrency, true}
     ]),
-    %% BT-3832: per-method records, {{Class, Side, Selector}, Record}.
+    %% BT-3832: per-method records, {{Class, Side, Selector}, Record, Owner}.
     ensure_table(?METHOD_RECORDS, [
         ordered_set,
         public,
@@ -581,9 +582,10 @@ delete_if_owner(Name, Owner) when is_pid(Owner) ->
             false
     end.
 
-%% Whose dependents a teardown drops: every class's (`'_'`, a live class
-%% removing itself, whose own entries are the only ones that can exist) or
-%% only those a given dead class process wrote (BT-4808).
+%% Whose dependents a teardown drops: every owner's (`'_'`, `delete/1`, for
+%% callers that are not a class process) or only those a given class process
+%% wrote (BT-4808). The class process's own rename and `terminate/2` use the
+%% owner-scoped `delete_if_owner/2`.
 -type owner_scope() :: '_' | pid().
 
 -spec drop_dependents(class_name(), owner_scope()) -> ok.

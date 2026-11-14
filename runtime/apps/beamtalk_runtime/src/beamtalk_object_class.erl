@@ -1592,7 +1592,9 @@ call_rename_class(
             %% left naming `OldName` for a later, unrelated class of that name.
             beamtalk_class_registry:rename_class_pids(OldName, NewName),
             beamtalk_class_registry:record_loaded_class(NewName, self()),
-            beamtalk_class_metadata:delete(OldName),
+            %% BT-4808: only this class's own row and dependents; a class that
+            %% registered `OldName` since the unregister keeps its own.
+            _ = beamtalk_class_metadata:delete_if_owner(OldName, self()),
             _ = beamtalk_class_registry:forget_loaded_class(OldName, self()),
             beamtalk_class_monitor:unwatch(OldName),
             beamtalk_class_monitor:watch(NewName, self()),
@@ -2058,12 +2060,12 @@ remove_registration(ClassName, ForgetPidRows) ->
 
 -spec teardown_registration(class_name(), fun((pid()) -> term())) -> ok.
 teardown_registration(ClassName, ForgetPidRows) ->
-    %% Single metadata row → single delete; it also drops the class-method
-    %% funs. Wrapped in try/catch to be safe during node shutdown when
+    %% Single metadata row → single owner-scoped delete (BT-4808: never a
+    %% rebuilt class's row); it also drops the class-method funs. Wrapped in try/catch to be safe during node shutdown when
     %% ETS/pg may be gone.
     _ =
         (try
-            beamtalk_class_metadata:delete(ClassName)
+            beamtalk_class_metadata:delete_if_owner(ClassName, self())
         catch
             _:_ -> ok
         end),
