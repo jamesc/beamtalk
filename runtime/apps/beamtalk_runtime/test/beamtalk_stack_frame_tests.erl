@@ -847,13 +847,15 @@ format_frame_raw_matches_shared_fixture_test() ->
         "tests", "repl-protocol", "raw_frame_lines.json"
     ]),
     lists:foreach(
-        fun(#{
-            <<"module">> := M,
-            <<"function">> := F,
-            <<"arity">> := A,
-            <<"display">> := Display,
-            <<"raw_line">> := Line
-        }) ->
+        fun(
+            #{
+                <<"module">> := M,
+                <<"function">> := F,
+                <<"arity">> := A,
+                <<"display">> := Display,
+                <<"raw_line">> := Line
+            }
+        ) ->
             [Frame] = beamtalk_stack_frame:wrap([
                 {binary_to_atom(M, utf8), binary_to_atom(F, utf8), A, []}
             ]),
