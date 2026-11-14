@@ -189,9 +189,16 @@ apply when a case is unclear.
    finds the frame's line in it. Codegen and state threading are
    unchanged; value classes already have one function per method and need
    no table. A frame with no line falls back to `Class>>dispatch`.
-   Expected cost, to be confirmed by spike 1: nothing on the dispatch
-   path; one binary search per rendered actor frame; about 32 bytes per
-   actor method loaded, a few KB across the stdlib.
+   Measured cost (BT-4817, spike 1): nothing on the dispatch path (the
+   table is read only when a frame is rendered); one binary search per
+   rendered actor frame, about 0.85 µs per lookup on a 24-entry table
+   (including the benchmark loop); the stdlib `.beam` total moves from
+   3,320,508 to 3,320,868 bytes. Only the 8 of 125 stdlib modules that
+   are actors carry the table, +1,608 bytes across them; the largest,
+   `bt@stdlib@actor`, grows from 118,984 to 119,492 bytes. Not
+   measured: the fraction of actor frames in the existing test traces
+   that have no line and so fall back to `Class>>dispatch`, and the
+   actor-dispatch benchmarks (no code on that path changed).
 2. **Names resolve through the runtime class table**, not the ADR 0119
    registry (which is compile-time only and stays the resolver for
    compiler diagnostics). When a module cannot be resolved the frame
