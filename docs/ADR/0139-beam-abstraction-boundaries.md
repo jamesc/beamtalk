@@ -3,6 +3,8 @@
 ## Status
 Accepted (2026-10-26). Amended 2026-10-26 (post-acceptance lead review): raw-mode flag renamed, frame semantics and printString rule decided, tuple scope clamped, `error_info` mechanism specified, crash-report hook and 0028 verdict scoped into Phase 1 — see "Amendment (2026-10-26)" below.
 
+Progress (2026-11-14): none of the four phase epics has been filed, and the Phase 1 core (central MFA→display translator, `--raw-mfa`, Erlang-reason translation, crash-report logger hook, ADR 0028 verdict) is not built. Adjacent work has landed: epic BT-4353 (test stacktraces render `Class>>selector (file.bt:line)` frames with no raw MFA, plus line-annotated codegen for block/loop call sites; done 2026-11-05 via BT-4356) covers part of Phase 1 for test output only; the Phase 3 binaries row is settled by epic BT-4170 (done 2026-10-28; ADR 0140, which proposed flipping it, was rejected); the cited issues BT-4094, BT-4106, BT-4144, BT-4022 and BT-4052 are done.
+
 ## Amendment (2026-10-26): post-acceptance review fixes
 
 A lead review pass after acceptance found eight gaps: an under-specified

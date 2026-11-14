@@ -1,7 +1,7 @@
 # ADR 0145: Cascade Semantics for Immutable Values — Keep `;` Fan-Out, Add a `|>` Pipeline
 
 ## Status
-Accepted (2026-11-06); proposed 2026-11-05; amended 2026-11-09 (review: stage spans; the parser desugars `|>`, with a re-sugaring side table).
+Implemented (2026-11-10) — epic BT-4511 done: Phase 1 (BT-4512, BT-4513, BT-4573), Phase 2 (BT-4514, BT-4515), Phase 3 (BT-4516, BT-4517, BT-4518), Phase 4 (BT-4519). Accepted (2026-11-06); proposed 2026-11-05; amended 2026-11-09 (review: stage spans; the parser desugars `|>`, with a re-sugaring side table).
 
 Decision record for the "Cascade Semantics" question that ADR 0042 deferred
 (to a planned "ADR 0044" that was never written — 0044 became
@@ -1039,27 +1039,28 @@ it later would break code.
 ## Implementation Tracking
 
 **Epic:** BT-4511
-**Status:** In progress. Phase 1 shipped on 2026-11-09: BT-4512
-(jamesc/beamtalk#4920) and BT-4513 (jamesc/beamtalk#4919), plus the
-follow-up BT-4573 that removes their duplicate `setUp` warning.
+**Status:** Done (epic closed 2026-11-10). Phase 1 shipped 2026-11-09
+(BT-4512, jamesc/beamtalk#4920; BT-4513, jamesc/beamtalk#4919; follow-up
+BT-4573); Phases 2–4 shipped 2026-11-10. A later epic child, BT-4620 (warn on
+a `then:` block that doesn't take one parameter), landed 2026-11-11.
 
-| Phase | Issue | Size | Blocked by |
-|---|---|---|---|
-| 1 | BT-4512: `cascade-drops-update` warning | M | — |
-| 1 | BT-4513: `setUp` lint rejects multi-`with*:` cascades | S | — |
-| 2 | BT-4514: wire check (lex `\|>`, parser desugar, re-sugaring record) | M | — |
-| 2 | BT-4515: `Object >> then:` and its typing rule | S | BT-4514 |
-| 3 | BT-4516: complete `\|>` parsing and errors, REPL multi-line | M | BT-4514 |
-| 3 | BT-4517: source fidelity (unparse, fmt, reflected source, editors) | M | BT-4514 |
-| 3 | BT-4518: completion after `\|>` | S | BT-4514 |
-| 4 | BT-4519: docs and end-to-end REPL-protocol case | S | BT-4512, BT-4515, BT-4516, BT-4517, BT-4518 |
+| Phase | Issue | Size | Blocked by | Status |
+|---|---|---|---|---|
+| 1 | BT-4512: `cascade-drops-update` warning | M | — | Done |
+| 1 | BT-4513: `setUp` lint rejects multi-`with*:` cascades | S | — | Done |
+| 2 | BT-4514: wire check (lex `\|>`, parser desugar, re-sugaring record) | M | — | Done |
+| 2 | BT-4515: `Object >> then:` and its typing rule | S | BT-4514 | Done |
+| 3 | BT-4516: complete `\|>` parsing and errors, REPL multi-line | M | BT-4514 | Done |
+| 3 | BT-4517: source fidelity (unparse, fmt, reflected source, editors) | M | BT-4514 | Done |
+| 3 | BT-4518: completion after `\|>` | S | BT-4514 | Done |
+| 4 | BT-4519: docs and end-to-end REPL-protocol case | S | BT-4512, BT-4515, BT-4516, BT-4517, BT-4518 | Done |
 
 Follow-ups outside the epic (low priority, `needs-spec`):
 
-- BT-4520: inline `then:` so it runs in the caller
-- BT-4521: multi-field functional update (Alternative F)
-- BT-4522: statement-level lint for discarded copies (shipped: `discarded-update`)
-- BT-4508: cascade parts silently drop trailing tokens
+- BT-4520: inline `then:` so it runs in the caller (canceled)
+- BT-4521: multi-field functional update (Alternative F) (canceled)
+- BT-4522: statement-level lint for discarded copies (done 2026-11-12: `discarded-update`)
+- BT-4508: cascade parts silently drop trailing tokens (done 2026-11-09)
 
 ## References
 - Related issues: BT-4352 (this ADR), BT-506 (canceled pipeline-chaining

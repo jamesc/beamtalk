@@ -1,7 +1,7 @@
 # ADR 0135: Supervisor Instances and Start Arguments
 
 ## Status
-Accepted (2026-10-20); amended 2026-10-21 (BT-4033, hang rule (b) covers every actor child). Extends and amends ADR 0059 and delivers ADR 0080 § Future Work #4 ("anonymous supervisor start"). Specifies BT-3962 and BT-3963.
+Implemented (2026-10-21) — BT-3963 (instance-side configuration, args into `init`) and BT-3962 (spawn family, nesting, discovery) done 2026-10-20 under epic BT-3957; BT-4033 amendment done 2026-10-21. Accepted (2026-10-20); amended 2026-10-21 (BT-4033, hang rule (b) covers every actor child). Extends and amends ADR 0059 and delivers ADR 0080 § Future Work #4 ("anonymous supervisor start"). Specifies BT-3962 and BT-3963.
 
 ## Context
 
