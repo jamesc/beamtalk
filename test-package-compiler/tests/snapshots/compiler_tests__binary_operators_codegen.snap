@@ -541,7 +541,7 @@ module 'binary_operators' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_con
 
 
 '__beamtalk_method_lines'/0 = fun () ->
-    {}
+    []
 
 
 'has_method'/1 = fun (Selector) ->

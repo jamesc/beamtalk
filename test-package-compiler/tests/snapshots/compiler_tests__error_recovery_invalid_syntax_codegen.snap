@@ -533,7 +533,7 @@ module 'error_recovery_invalid_syntax' ['start_link'/1, 'start_link'/2, 'init'/1
 
 
 '__beamtalk_method_lines'/0 = fun () ->
-    {}
+    []
 
 
 'has_method'/1 = fun (Selector) ->

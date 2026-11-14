@@ -98,67 +98,108 @@ impl CoreErlangGenerator {
         Ok(doc)
     }
 
-    /// Generates `__beamtalk_method_lines/0`: the sorted `{StartLine, Selector}`
-    /// table the stack-frame renderer uses to name the method behind a
+    /// Generates `__beamtalk_method_lines/0`: the per-file `{StartLine, Selector}`
+    /// tables the stack-frame renderer uses to name the method behind a
     /// `dispatch/4` frame (ADR 0139 amendment, decision 1).
     ///
     /// Every method of an actor-style module is a clause of the one
     /// `dispatch/4` function, so a frame's MFA cannot name it. The table is
     /// built from the same method spans `dispatch/4` is generated from (no
-    /// second source of line data) and is a tuple, so the runtime binary-searches
-    /// it with `element/2` without copying it. It is a function returning a
-    /// literal, not a module attribute, because attributes are copied on every
-    /// read. Methods with no resolvable line (no source text) are omitted.
+    /// second source of line data). Its shape is a list of
+    /// `{File, Rows}`: `File` is the exact path string the method's line
+    /// annotations carry and `Rows` is a tuple of `{StartLine, Selector}`
+    /// sorted by line, so the runtime selects the frame's file and
+    /// binary-searches the tuple with `element/2` without copying it. A
+    /// `uses:`-flattened method's span is an offset into its protocol's file,
+    /// so it gets a row under the protocol's path, from the protocol's text;
+    /// lines of different files are never compared. A method whose file or
+    /// line cannot be resolved is omitted. It is a function returning a
+    /// literal, not a module attribute, because attributes are copied on
+    /// every read.
     ///
     /// # Generated Code
     ///
     /// ```erlang
     /// '__beamtalk_method_lines'/0 = fun () ->
-    ///     {{3, 'increment'}, {7, 'at:put:'}}
+    ///     [{#{#63,#2e,#62,#74}#, {{3, 'increment'}, {7, 'at:put:'}}}]
     /// ```
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_method_lines(
         &self,
         module: &Module,
     ) -> Result<Document<'static>> {
-        let mut rows: Vec<(u32, String)> = Vec::new();
+        // (file, rows) in first-seen order; own file first when it has rows.
+        let mut files: Vec<(String, Vec<(u32, String)>)> = Vec::new();
+        let mut push = |file: &str, line: u32, selector: String| {
+            if let Some((_, rows)) = files.iter_mut().find(|(f, _)| f == file) {
+                rows.push((line, selector));
+            } else {
+                files.push((file.to_string(), vec![(line, selector)]));
+            }
+        };
+        let own_path = self.source_path.as_deref();
         for stmt in &module.expressions {
             if let Expression::Assignment { target, value, .. } = &stmt.expression
                 && let (Expression::Identifier(id), Expression::Block(_)) =
                     (target.as_ref(), value.as_ref())
+                && let Some(path) = own_path
                 && let Some(line) = self.span_to_line(stmt.expression.span())
             {
-                rows.push((line, id.name.to_string()));
+                push(path, line, id.name.to_string());
             }
         }
         for class in &module.classes {
             for method in &class.methods {
-                if method.kind == MethodKind::Primary
+                if method.kind != MethodKind::Primary {
+                    continue;
+                }
+                let selector = method.selector.name().to_string();
+                if let Some(protocol) = self.flattened_method_source(&selector, false) {
+                    // Spans are offsets into the protocol's file.
+                    if let Some(path) = protocol.path.as_deref()
+                        && (method.span.start() as usize) <= protocol.text.len()
+                    {
+                        push(path, method.span.line_number(&protocol.text), selector);
+                    }
+                } else if let Some(path) = own_path
                     && let Some(line) = self.span_to_line(method.span)
                 {
-                    rows.push((line, method.selector.name().to_string()));
+                    push(path, line, selector);
                 }
             }
         }
-        rows.sort_by_key(|(line, _)| *line);
 
-        let mut entry_docs: Vec<Document<'static>> = Vec::with_capacity(rows.len() * 2);
-        for (i, (line, selector)) in rows.into_iter().enumerate() {
+        let mut file_docs: Vec<Document<'static>> = Vec::with_capacity(files.len() * 2);
+        for (i, (file, mut rows)) in files.into_iter().enumerate() {
+            rows.sort_by_key(|(line, _)| *line);
             if i > 0 {
-                entry_docs.push(Document::Str(", "));
+                file_docs.push(Document::Str(", "));
             }
-            entry_docs.push(docvec![
+            let mut row_docs: Vec<Document<'static>> = Vec::with_capacity(rows.len() * 2);
+            for (j, (line, selector)) in rows.into_iter().enumerate() {
+                if j > 0 {
+                    row_docs.push(Document::Str(", "));
+                }
+                row_docs.push(docvec![
+                    "{",
+                    leaf::int_lit(i64::from(line)),
+                    ", ",
+                    leaf::atom(selector),
+                    "}",
+                ]);
+            }
+            file_docs.push(docvec![
                 "{",
-                leaf::int_lit(i64::from(line)),
-                ", ",
-                leaf::atom(selector),
-                "}",
+                leaf::binary_lit(&file),
+                ", {",
+                Document::Vec(row_docs),
+                "}}",
             ]);
         }
 
         Ok(docvec![
             "'__beamtalk_method_lines'/0 = fun () ->",
-            nest(INDENT, docvec![line(), "{", Document::Vec(entry_docs), "}"]),
+            nest(INDENT, docvec![line(), "[", Document::Vec(file_docs), "]"]),
             "\n\n",
         ])
     }

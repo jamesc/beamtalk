@@ -557,7 +557,7 @@ module 'self_send_open_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
 
 
 '__beamtalk_method_lines'/0 = fun () ->
-    {}
+    []
 
 
 'has_method'/1 = fun (Selector) ->

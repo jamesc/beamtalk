@@ -626,8 +626,13 @@ fn test_method_lines_table_pins_renderer_contract() {
     let src = "Actor subclass: Ticker\n  state: n = 0\n\n  tick: by :: Integer =>\n    self.n := self.n + by\n\n  reset => self.n := 0\n";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("bt@ticker").with_source(src))
-        .expect("codegen should succeed");
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("bt@ticker")
+            .with_source(src)
+            .with_source_path_opt(Some("ticker.bt")),
+    )
+    .expect("codegen should succeed");
 
     assert!(
         code.contains("'__beamtalk_method_lines'/0"),
@@ -635,9 +640,16 @@ fn test_method_lines_table_pins_renderer_contract() {
     );
     let body = extract_core_fn(&code, "'__beamtalk_method_lines'/0 = fun")
         .expect("should have __beamtalk_method_lines/0");
+    // One `{File, Rows}` entry: the file as the annotations' path (a binary
+    // literal, "ticker.bt"), then the rows sorted by line.
+    let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        flat.starts_with("() -> [{#{") && flat.ends_with("}#, {{4, 'tick:'}, {7, 'reset'}}}]"),
+        "Got:\n{body}"
+    );
     assert_eq!(
-        body.split_whitespace().collect::<Vec<_>>().join(" "),
-        "() -> {{4, 'tick:'}, {7, 'reset'}}",
+        flat.matches("#<").count(),
+        "ticker.bt".len(),
         "Got:\n{body}"
     );
 }

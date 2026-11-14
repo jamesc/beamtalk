@@ -455,37 +455,43 @@ frame_parts(#{module := Module, function := Function} = Frame) ->
                 end,
             Base#{
                 class => class_part(Kind, Module, ClassName, maps:get(package, Frame, nil)),
-                selector => actor_selector(Kind, Module, Selector, Line),
+                selector => actor_selector(Kind, Module, Selector, Line, maps:get(file, Frame, nil)),
                 class_side => ClassSide,
                 block => IsBlock
             }
     end.
 
 %% Actor methods are clauses of one `dispatch/4`, so the MFA of a frame inside
-%% one reads `dispatch`. The compiler emits `__beamtalk_method_lines/0`, a tuple
-%% of `{StartLine, Selector}` sorted by line; the method is the entry with the
-%% greatest StartLine =< the frame's line. No line, no table (older `.beam`) or
-%% a line before the first method leaves `dispatch` as it was.
--spec actor_selector(beamtalk | unresolved | unknown, atom(), binary(), pos_integer() | nil) ->
-    binary().
-actor_selector(beamtalk, Module, <<"dispatch">>, Line) when is_integer(Line) ->
-    case method_lines(Module) of
-        {} ->
-            <<"dispatch">>;
-        Table ->
-            case lookup_method_line(Table, Line) of
+%% one reads `dispatch`. The compiler emits `__beamtalk_method_lines/0`, a list
+%% of `{File, Rows}` where `Rows` is a tuple of `{StartLine, Selector}` sorted by
+%% line, one entry per source file the module's methods come from (a
+%% `uses:`-flattened method's lines are in its protocol's file). The method is
+%% the row of the frame's own file with the greatest StartLine =< the frame's
+%% line. No line, no file, a file the table does not list, no table (older
+%% `.beam`) or a line before the first method leaves `dispatch` as it was.
+-spec actor_selector(
+    beamtalk | unresolved | unknown, atom(), binary(), pos_integer() | nil, binary() | nil
+) -> binary().
+actor_selector(beamtalk, Module, <<"dispatch">>, Line, File) when
+    is_integer(Line), is_binary(File)
+->
+    case lists:keyfind(File, 1, method_lines(Module)) of
+        {File, Rows} ->
+            case lookup_method_line(Rows, Line) of
                 {ok, Selector} -> atom_to_binary(Selector, utf8);
                 not_found -> <<"dispatch">>
-            end
+            end;
+        false ->
+            <<"dispatch">>
     end;
-actor_selector(_Kind, _Module, Selector, _Line) ->
+actor_selector(_Kind, _Module, Selector, _Line, _File) ->
     Selector.
 
--spec method_lines(atom()) -> tuple().
+-spec method_lines(atom()) -> [{binary(), tuple()}].
 method_lines(Module) ->
     case erlang:function_exported(Module, '__beamtalk_method_lines', 0) of
         true -> Module:'__beamtalk_method_lines'();
-        false -> {}
+        false -> []
     end.
 
 -doc """

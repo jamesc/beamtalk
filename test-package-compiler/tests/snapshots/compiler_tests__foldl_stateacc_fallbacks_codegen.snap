@@ -571,7 +571,7 @@ module 'foldl_stateacc_fallbacks' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
 
 
 '__beamtalk_method_lines'/0 = fun () ->
-    {}
+    []
 
 
 'has_method'/1 = fun (Selector) ->

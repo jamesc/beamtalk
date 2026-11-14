@@ -591,7 +591,8 @@ unload_module(Module) ->
 %%% the method from `__beamtalk_method_lines/0`, the sorted tuple of
 %%% `{StartLine, Selector}` the compiler emits. The fixture module below has
 %%% the exact shape the generator emits (pinned on the Rust side by the actor
-%%% codegen snapshots): methods `tick:` at line 14 and `reset` at 20.
+%%% codegen snapshots): methods `tick:` at line 14 and `reset` at 20 in
+%%% `counter.bt`, and two methods flattened in from `greetable.bt`.
 %%% ===================================================================
 
 -define(ACTOR_MOD, 'bt@bt4817@ticker').
@@ -604,7 +605,9 @@ actor_selector_test_() ->
                 ?ACTOR_MOD,
                 "-module('bt@bt4817@ticker').\n"
                 "-export(['__beamtalk_method_lines'/0]).\n"
-                "'__beamtalk_method_lines'() -> {{3, 'increment'}, {14, 'tick:'}, {20, 'reset'}}.\n"
+                "'__beamtalk_method_lines'() ->\n"
+                "    [{<<\"counter.bt\">>, {{3, 'increment'}, {14, 'tick:'}, {20, 'reset'}}},\n"
+                "     {<<\"greetable.bt\">>, {{9, 'greet'}, {11, 'greetingWidth'}}}].\n"
             ),
             ok = load_empty_module(?NO_TABLE_MOD),
             register_class('Ticker4817', ?ACTOR_MOD),
@@ -670,6 +673,34 @@ actor_selector_test_() ->
                     ?assertEqual(
                         <<"Legacy4817>>dispatch (counter.bt:20)">>,
                         render({?NO_TABLE_MOD, dispatch, 4, loc(20)})
+                    )
+                end},
+                {"method flattened in from another file uses that file's lines", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>greet (greetable.bt:9)">>,
+                        render({?ACTOR_MOD, dispatch, 4, [{file, "greetable.bt"}, {line, 9}]})
+                    ),
+                    ?assertEqual(
+                        <<"Ticker4817>>greetingWidth (greetable.bt:12)">>,
+                        render({?ACTOR_MOD, dispatch, 4, [{file, "greetable.bt"}, {line, 12}]})
+                    )
+                end},
+                {"a line of one file never matches another file's rows", fun() ->
+                    %% Line 9 is `greet` in greetable.bt but inside `increment` in counter.bt.
+                    ?assertEqual(
+                        <<"Ticker4817>>increment (counter.bt:9)">>,
+                        render({?ACTOR_MOD, dispatch, 4, loc(9)})
+                    ),
+                    %% Before greetable.bt's first method: no fallback to counter.bt's rows.
+                    ?assertEqual(
+                        <<"Ticker4817>>dispatch (greetable.bt:5)">>,
+                        render({?ACTOR_MOD, dispatch, 4, [{file, "greetable.bt"}, {line, 5}]})
+                    )
+                end},
+                {"a file the table does not list falls back", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>dispatch (other.bt:14)">>,
+                        render({?ACTOR_MOD, dispatch, 4, [{file, "other.bt"}, {line, 14}]})
                     )
                 end},
                 {"other functions are untouched", fun() ->

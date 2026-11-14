@@ -552,7 +552,7 @@ module 'class_var_single_mutation' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
 
 
 '__beamtalk_method_lines'/0 = fun () ->
-    {}
+    []
 
 
 'has_method'/1 = fun (Selector) ->
