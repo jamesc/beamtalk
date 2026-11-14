@@ -445,6 +445,11 @@ insert(Name, Module, Selectors, Superclass, IsAbstract) ->
             ets:insert(?TABLE, Row),
             claim_subclass_edge(Name, OldSuperclass, Superclass)
     end,
+    %% BT-4808: the name's funs and method records stamped by an earlier
+    %% (dead) owner are not this class's; a removal that lost its claim to this
+    %% row would never match them, so they go now. The new class seeds its own
+    %% after this returns.
+    drop_entries_not_owned_by(Name, self()),
     %% BT-3669: a full-row write resets has_runtime_class_methods to false;
     %% clear the shadow flag only AFTER the gate is closed (a stale true is safe).
     beamtalk_class_shadow_flags:clear(runtime_fun, Name),
@@ -2031,6 +2036,17 @@ claim_subclass_edge(Name, OldSuperclass, NewSuperclass) ->
             delete_subclass_edge(OldSuperclass, Name, '_')
     end,
     ok.
+
+-spec drop_entries_not_owned_by(class_name(), pid()) -> ok.
+drop_entries_not_owned_by(Name, Owner) ->
+    Guard = [{'=/=', '$1', {const, Owner}}],
+    try
+        ets:select_delete(?FUN_TABLE, [{{{Name, '_'}, '_', '$1'}, Guard, [true]}]),
+        ets:select_delete(?METHOD_RECORDS, [{{{Name, '_', '_'}, '_', '$1'}, Guard, [true]}]),
+        ok
+    catch
+        error:badarg -> ok
+    end.
 
 -spec insert_subclass_edge(superclass(), class_name(), pid() | undefined) -> ok.
 insert_subclass_edge(Superclass, Name, Owner) ->

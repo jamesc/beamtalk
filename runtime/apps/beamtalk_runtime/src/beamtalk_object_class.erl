@@ -2000,13 +2000,13 @@ remove_dead_class_registration(ClassName, Module) ->
 -spec remove_claimed_dead_class(class_name(), module(), pid()) -> ok | {alive, pid()}.
 remove_claimed_dead_class(ClassName, Module, Owner) ->
     case beamtalk_class_metadata:delete_if_owner(ClassName, Owner) of
-        Lost when Lost =:= false; Lost =:= superseded ->
-            %% The row names another owner, or a rebuild wrote one mid-teardown:
-            %% the class was rebuilt after the re-check. Leave it registered and
-            %% announce nothing. The dead pid's index rows are kept: a holder of
-            %% the old class object recovers through the reverse-index row
-            %% (BT-4552), exactly as after `restart_compiled_class/4`; the
-            %% stale loaded-class/backing rows are filtered by liveness.
+        false ->
+            %% The row names another owner: the class was rebuilt after the
+            %% re-check. Leave it registered and announce nothing. The dead
+            %% pid's index rows are kept: a holder of the old class object
+            %% recovers through the reverse-index row (BT-4552), exactly as
+            %% after `restart_compiled_class/4`; the stale loaded-class/backing
+            %% rows are filtered by liveness.
             case beamtalk_class_registry:whereis_class(ClassName) of
                 NewPid when is_pid(NewPid) -> {alive, NewPid};
                 undefined -> ok

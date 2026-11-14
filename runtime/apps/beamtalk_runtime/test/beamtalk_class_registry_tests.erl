@@ -2256,7 +2256,7 @@ bt4646_assert_removed(Name, Pid) ->
     ?assertNot(lists:member(Name, beamtalk_class_registry:all_classes())),
     ?assertNot(sets:is_element(Name, beamtalk_class_registry:loaded_class_names())),
     ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(Pid)),
-    ?assertEqual([], ets:match_object(beamtalk_class_method_funs, {{Name, '_'}, '_'})).
+    ?assertEqual([], ets:match_object(beamtalk_class_method_funs, {{Name, '_'}, '_', '_'})).
 
 bt4646_await_down(Pid, MRef) ->
     receive
@@ -2629,6 +2629,26 @@ bt4808_flag_clear_rechecks_under_the_tag_lock_test() ->
         persistent_term:erase(Key),
         Live ! stop
     end.
+
+%% A rebuild that wins the claim race drops the dead owner's funs and method
+%% records it does not redefine (a later removal only matches its own).
+bt4808_rebuild_drops_dead_owners_leftover_entries_test() ->
+    Name = 'BT4808Orphans',
+    Dead = spawn(fun() ->
+        ok = beamtalk_class_metadata:insert(Name, undefined, [], 'Object', false),
+        beamtalk_class_metadata:put_class_method_fun(Name, gone, #{
+            block => fun() -> ok end, arity => 0
+        }),
+        beamtalk_class_metadata:put_method_records(Name, class, #{
+            gone => #{info => #{}, source => <<>>, signature => none, doc => none}
+        })
+    end),
+    beamtalk_test_wait:dead(Dead),
+    ?assertMatch({ok, _}, beamtalk_class_metadata:lookup_method_record(Name, class, gone)),
+    ok = beamtalk_class_metadata:insert(Name, undefined, [], 'Object', false),
+    ?assertEqual([], ets:match_object(beamtalk_class_method_funs, {{Name, '_'}, '_', '_'})),
+    ?assertEqual(not_found, beamtalk_class_metadata:lookup_method_record(Name, class, gone)),
+    true = beamtalk_class_metadata:delete_if_owner(Name, self()).
 
 bt4808_builder_class(Name, Super, HasClassVars) ->
     beamtalk_class_registry:ensure_pg_started(),
