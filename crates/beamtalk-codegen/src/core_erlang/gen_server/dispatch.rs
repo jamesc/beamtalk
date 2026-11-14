@@ -158,10 +158,7 @@ impl CoreErlangGenerator {
 
         Ok(docvec![
             "'__beamtalk_method_lines'/0 = fun () ->",
-            nest(
-                INDENT,
-                docvec![line(), "{", Document::Vec(entry_docs), "}"]
-            ),
+            nest(INDENT, docvec![line(), "{", Document::Vec(entry_docs), "}"]),
             "\n\n",
         ])
     }

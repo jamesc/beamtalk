@@ -615,6 +615,33 @@ fn test_method_table_with_script_methods_includes_arity() {
     );
 }
 
+// ── '__beamtalk_method_lines'/0 (BT-4817) ───────────────────────────────────
+
+#[test]
+fn test_method_lines_table_pins_renderer_contract() {
+    // The Erlang renderer (`beamtalk_stack_frame:lookup_method_line/2`) reads a
+    // tuple of `{StartLine, Selector}` sorted by line, from an exported
+    // function returning a literal. This pins the generator side of that
+    // contract; `beamtalk_stack_frame_tests` pins the reader.
+    let src = "Actor subclass: Ticker\n  state: n = 0\n\n  tick: by :: Integer =>\n    self.n := self.n + by\n\n  reset => self.n := 0\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = generate_module(&module, CodegenOptions::new("bt@ticker").with_source(src))
+        .expect("codegen should succeed");
+
+    assert!(
+        code.contains("'__beamtalk_method_lines'/0"),
+        "must be exported. Got:\n{code}"
+    );
+    let body = extract_core_fn(&code, "'__beamtalk_method_lines'/0 = fun")
+        .expect("should have __beamtalk_method_lines/0");
+    assert_eq!(
+        body.split_whitespace().collect::<Vec<_>>().join(" "),
+        "() -> {{4, 'tick:'}, {7, 'reset'}}",
+        "Got:\n{body}"
+    );
+}
+
 // ── format_status / '__beamtalk_secrets' (BT-4567) ──────────────────────────
 
 #[test]
