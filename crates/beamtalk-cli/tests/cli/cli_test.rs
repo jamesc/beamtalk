@@ -661,6 +661,60 @@ fn test_native_badarg_frames_show_in_default_trace_bt_4838() {
         .stderr(contains("beamtalk_erlang_proxy:").not());
 }
 
+/// BT-4850: a `TestCase` that calls an actor which raises shows the actor's
+/// raise-site frames (`Class>>selector (file.bt:N)`), as `beamtalk run` does, then
+/// the test method; no compiler-made name appears. Covers an Erlang failure and a
+/// does-not-understand raised inside the actor.
+#[test]
+fn test_actor_raise_site_frames_show_in_the_failure_bt_4850() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Boomer.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Actor subclass: Boomer\n\
+         \n\
+         \x20\x20boom =>\n\
+         \x20\x20\x20\x20x := Erlang maps get: #missing from: (Dictionary new).\n\
+         \x20\x20\x20\x20x\n\
+         \n\
+         \x20\x20boomDnu =>\n\
+         \x20\x20\x20\x20self noSuchThing.\n\
+         \x20\x20\x20\x201\n",
+    )
+    .expect("write src/Boomer.bt");
+    std::fs::write(
+        project.path().join("test/BoomerTest.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         TestCase subclass: BoomerTest\n\
+         \n\
+         \x20\x20testBoom =>\n\
+         \x20\x20\x20\x20b := Boomer spawn.\n\
+         \x20\x20\x20\x20b boom\n\
+         \n\
+         \x20\x20testBoomDnu =>\n\
+         \x20\x20\x20\x20b := Boomer spawn.\n\
+         \x20\x20\x20\x20b boomDnu\n",
+    )
+    .expect("write test/BoomerTest.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet"])
+        .assert()
+        .failure()
+        .stderr(contains("  at maps:get/2"))
+        .stderr(contains("  at Boomer>>boom (src/Boomer.bt:7)"))
+        .stderr(contains("  at Boomer>>boomDnu (src/Boomer.bt:11)"))
+        .stderr(contains("BoomerTest>>testBoom"))
+        .stderr(contains("BoomerTest>>testBoomDnu"))
+        .stderr(contains("Boomer>>dispatch").not())
+        .stderr(contains("bt@").not());
+}
+
 /// BT-4821: `--full-traces` still works as a hidden alias and says it is deprecated.
 #[test]
 fn test_full_traces_is_a_deprecated_alias_for_raw_mfa_bt_4821() {

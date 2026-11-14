@@ -48,6 +48,7 @@ Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
 -export([
     format_stacktrace/1,
     stack_frames/1,
+    failure_stacktrace/3,
     source_snippet/2,
     test_failure/4,
     test_failure_untraced/4
@@ -871,6 +872,45 @@ error_head(Class, Reason) ->
     <<ClassBin/binary, ": ", ReasonBin/binary>>.
 
 -doc """
+The stack a failed test reports (BT-4850): the exception's raise-site stack when it
+carries one (an actor or class process raised it), followed by the test module's own
+frames from the catch stack, so the report shows both where the error was raised
+and which line of the test made the call. Without a carried stack it is the catch
+stack as before.
+""".
+-spec failure_stacktrace(atom(), term(), list()) -> list().
+failure_stacktrace(Module, Reason, CatchStacktrace) ->
+    case beamtalk_exception_handler:raise_site_stacktrace(Reason, CatchStacktrace) of
+        CatchStacktrace ->
+            CatchStacktrace;
+        Carried ->
+            %% A stack taken in the test process itself (an FFI error wrapped by the
+            %% proxy, an `ensure:` reraise) already holds the test method's frames.
+            %% A block defined in the test method but run by an actor also puts a
+            %% test-module frame in the carried stack, so compare the frames themselves.
+            TestFrames = [Frame || {M, _, _, _} = Frame <- CatchStacktrace, M =:= Module],
+            %% The lines can differ (the raise and the re-raise are different calls),
+            %% so match the function, not the location.
+            HasTestFrame =
+                case TestFrames of
+                    [{_, TF, TA, _} | _] ->
+                        lists:any(
+                            fun
+                                ({M, F, A, _}) -> {M, F, A} =:= {Module, TF, TA};
+                                (_) -> false
+                            end,
+                            Carried
+                        );
+                    [] ->
+                        false
+                end,
+            case HasTestFrame of
+                true -> Carried;
+                false -> Carried ++ TestFrames
+            end
+    end.
+
+-doc """
 Build a failed-test result from the message `Head` (no stacktrace) and the
 stack: the message with its `at` lines, plus the structured frames, both
 rendered from the single entry list of `build_trace/3` (BT-4402), so
@@ -1114,10 +1154,15 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                     test_failure_untraced(
                         MethodName, beamtalk_text:to_binary(FailMsg), Module, TestST
                     );
-                error:TestReason:TestST ->
-                    test_failure(MethodName, error_head(error, TestReason), Module, TestST);
                 TestClass:TestReason:TestST ->
-                    test_failure(MethodName, error_head(TestClass, TestReason), Module, TestST)
+                    %% BT-4850: an error raised in an actor or a class process keeps
+                    %% that process's stack; show it, as `beamtalk run` does.
+                    test_failure(
+                        MethodName,
+                        error_head(TestClass, TestReason),
+                        Module,
+                        failure_stacktrace(Module, TestReason, TestST)
+                    )
             after
                 case HasTearDown of
                     true ->

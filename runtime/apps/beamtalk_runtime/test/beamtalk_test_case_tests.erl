@@ -946,3 +946,42 @@ source_snippet_none_one_past_end_of_newline_terminated_file_test() ->
             <<"\n      2 | b\n    > 3 | c">>, beamtalk_test_case:source_snippet(Path, 3)
         )
     end).
+
+%% BT-4850: a failed test reports the raise-site stack an exception carries, plus the
+%% test module's own frames from the catch stack, but never twice.
+failure_stacktrace_appends_the_test_frames_once_test() ->
+    Test = [{'bt@user@t', testBoom, 0, [{line, 8}]}, {other, f, 1, []}],
+    Catch = [{beamtalk_actor, sync_call, 5, []} | Test],
+    Ex = fun(Raw) ->
+        (beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'Object')))#{
+            raw_stacktrace => Raw
+        }
+    end,
+    Actor = [{maps, get, 2, []}, {'bt@user@boomer', dispatch, 4, []}],
+    %% From another process: the test's frames follow the actor's.
+    ?assertEqual(
+        Actor ++ [hd(Test)],
+        beamtalk_test_case:failure_stacktrace('bt@user@t', Ex(Actor), Catch)
+    ),
+    %% Taken in the test process: it has them already.
+    InProcess = [{beamtalk_erlang_proxy, apply, 6, []} | Test],
+    ?assertEqual(
+        InProcess,
+        beamtalk_test_case:failure_stacktrace('bt@user@t', Ex(InProcess), Catch)
+    ),
+    %% Taken in the test process, with the test frame at the raise line rather than
+    %% the re-raise line: still not repeated.
+    OtherLine = [{beamtalk_erlang_proxy, apply, 6, []}, {'bt@user@t', testBoom, 0, [{line, 7}]}],
+    ?assertEqual(
+        OtherLine,
+        beamtalk_test_case:failure_stacktrace('bt@user@t', Ex(OtherLine), Catch)
+    ),
+    %% An actor ran a block defined in the test method: its fun frame is in the
+    %% carried stack, but the test method's own frame is not, so it is appended.
+    Block = [{maps, get, 2, []}, {'bt@user@t', '-testBoom/0-fun-0-', 1, [{line, 8}]}],
+    ?assertEqual(
+        Block ++ [hd(Test)],
+        beamtalk_test_case:failure_stacktrace('bt@user@t', Ex(Block), Catch)
+    ),
+    %% Nothing carried: the catch stack.
+    ?assertEqual(Catch, beamtalk_test_case:failure_stacktrace('bt@user@t', not_found, Catch)).

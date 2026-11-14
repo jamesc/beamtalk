@@ -356,7 +356,8 @@ module 'error_recovery_invalid_syntax' ['start_link'/1, 'start_link'/2, 'init'/1
                                 end
                             <{'error', Error, ErrState}> when 'true' ->
                                 let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
-                                let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in
+                                let BuiltError = case Error of <{ReplyType, ReplyReason, ReplyRaw}> when 'true' -> let ReplyBuilt = call 'beamtalk_exception_handler':'capture_stacktrace'(primop 'build_stacktrace'(ReplyRaw)) in {ReplyType, ReplyReason, ReplyBuilt} <ReplyOther> when 'true' -> ReplyOther end in
+                                let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, BuiltError) in
                                 case call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) of
                                     <{'error', EncErr}> when 'true' ->
                                         {'reply', {'error', EncErr}, ErrState}
@@ -393,7 +394,8 @@ module 'error_recovery_invalid_syntax' ['start_link'/1, 'start_link'/2, 'init'/1
                                 end
                             <{'error', Error, ErrState}> when 'true' ->
                                 let _ContDiscarded = call 'beamtalk_actor':'discard_pending_continuations'() in
-                                let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, Error) in
+                                let BuiltError = case Error of <{ReplyType, ReplyReason, ReplyRaw}> when 'true' -> let ReplyBuilt = call 'beamtalk_exception_handler':'capture_stacktrace'(primop 'build_stacktrace'(ReplyRaw)) in {ReplyType, ReplyReason, ReplyBuilt} <ReplyOther> when 'true' -> ReplyOther end in
+                                let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, BuiltError) in
                                 case call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) of
                                     <{'error', EncErr}> when 'true' ->
                                         {'reply', {'error', EncErr}, ErrState}

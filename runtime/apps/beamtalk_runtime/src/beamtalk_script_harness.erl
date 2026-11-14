@@ -138,13 +138,8 @@ raw_trace(Opts, Reason, Stacktrace) when is_list(Stacktrace) ->
 %% The exception's own frames when it carries a raise-site stack, else the
 %% catch stack (a bare Erlang reason has no other).
 -spec trace_frames(term(), list()) -> [map()].
-trace_frames(#{'$beamtalk_class' := _} = Exception, Stacktrace) ->
-    case beamtalk_exception_handler:frames(Exception) of
-        [] -> beamtalk_stack_frame:wrap(Stacktrace);
-        Frames -> Frames
-    end;
-trace_frames(_Reason, Stacktrace) ->
-    beamtalk_stack_frame:wrap(Stacktrace).
+trace_frames(Reason, Stacktrace) ->
+    beamtalk_stack_frame:wrap(beamtalk_exception_handler:raise_site_stacktrace(Reason, Stacktrace)).
 
 %% The notice names `--raw-mfa`, so it is printed only for a consumer that has the
 %% switch: `beamtalk run` passes `raw_mfa` explicitly (true or false). A built
