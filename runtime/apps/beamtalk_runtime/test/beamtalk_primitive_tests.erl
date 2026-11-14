@@ -1970,8 +1970,9 @@ print_string_table_test_() ->
             {"list of strings", <<"#(\"a\", \"b\")">>, [<<"a">>, <<"b">>]},
             {"nested tuple", <<"{{1, 2}, {3, 4}}">>, {{1, 2}, {3, 4}}},
             {"empty set", <<"Set()">>, #{'$beamtalk_class' => 'Set', elements => []}},
-            {"set with elements", <<"Set(1, 2, 3)">>,
-                #{'$beamtalk_class' => 'Set', elements => [1, 2, 3]}},
+            {"set with elements", <<"Set(1, 2, 3)">>, #{
+                '$beamtalk_class' => 'Set', elements => [1, 2, 3]
+            }},
             %% A Block reached via direct recursion (e.g. nested inside a collection)
             %% previously fell into the ~p catch-all as a raw `#Fun<...>`.
             {"block/0", <<"Block/0">>, fun() -> ok end},
@@ -2037,8 +2038,7 @@ print_display_prefix_table_test_() ->
             {"print_string pid", print_string, self(), <<"#Pid<">>, $>},
             {"print_string pid uses opaque ops", print_string, self(), <<"#Pid<">>, none},
             {"print_string reference", print_string, make_ref(), <<"#Ref<">>, none},
-            {"print_string reference uses opaque ops", print_string, make_ref(), <<"#Ref<">>,
-                none},
+            {"print_string reference uses opaque ops", print_string, make_ref(), <<"#Ref<">>, none},
             %% Without a dedicated clause a supervisor tuple nested in a collection fell into
             %% the generic is_tuple/1 clause and rendered as a raw Erlang tuple.
             {"print_string supervisor tuple", print_string, Sup, <<"Supervisor(MySup, ">>, none},
@@ -2050,8 +2050,7 @@ print_display_prefix_table_test_() ->
             %% Erlang `<0.123.0>` instead of matching print_string/1's `#Pid<0.123.0>`.
             {"display_string pid", display_string, self(), <<"#Pid<">>, $>},
             {"display_string reference", display_string, make_ref(), <<"#Ref<">>, none},
-            {"display_string supervisor tuple", display_string, Sup, <<"Supervisor(MySup, ">>,
-                none}
+            {"display_string supervisor tuple", display_string, Sup, <<"Supervisor(MySup, ">>, none}
         ]
     ].
 

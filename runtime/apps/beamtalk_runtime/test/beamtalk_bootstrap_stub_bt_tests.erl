@@ -78,7 +78,6 @@ superclass(Class, Super) ->
 %%% dispatch/4 and has_method/1 (BT-4806)
 %%% ============================================================================
 
-
 %% Per stub: the class name reported in errors, selectors answered by a reply
 %% (`{Selector, Reply}`), selectors that must raise does_not_understand
 %% (`{Selector, Args, State}`), and the selectors has_method/1 is checked on.

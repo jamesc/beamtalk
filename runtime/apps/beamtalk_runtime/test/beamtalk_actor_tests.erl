@@ -1690,8 +1690,7 @@ sync_send_to_gone_actor_raises_actor_dead_test_() ->
      || {Label, StartFun, WayGone, Extra} <- [
             {"/3: stopped", Linked, Stop, []},
             {"/4: stopped", Linked, Stop, [5000]},
-            {"/3: stopped with normal", Plain, fun(C) -> gen_server:stop(C, normal, 1000) end,
-                []},
+            {"/3: stopped with normal", Plain, fun(C) -> gen_server:stop(C, normal, 1000) end, []},
             {"/3: killed", Unlinked, fun(C) -> exit(C, kill) end, []},
             {"/3: stopped with shutdown", Plain, fun(C) -> gen_server:stop(C, shutdown, 1000) end,
                 []},
@@ -2210,8 +2209,8 @@ safe_spawn_monitored_down_reason_test_() ->
      || {Label, SpawnFun, Module, Args, Matches} <- [
             {"monitored: stop after initialize reports bad_config", safe_spawn_monitored,
                 test_init_ack_actor, #{mode => stop_continue}, fun(R) -> R =:= bad_config end},
-            {"async: {stop, Reason} from init/1", safe_spawn_monitored_async,
-                test_async_init_actor, #{mode => stop}, fun(R) -> R =:= init_refused end},
+            {"async: {stop, Reason} from init/1", safe_spawn_monitored_async, test_async_init_actor,
+                #{mode => stop}, fun(R) -> R =:= init_refused end},
             {"async: init/1 answering ignore exits normal", safe_spawn_monitored_async,
                 test_async_init_actor, #{mode => ignore}, fun(R) -> R =:= normal end},
             {"async: init/1 answering a bad return", safe_spawn_monitored_async,
@@ -2233,21 +2232,24 @@ safe_spawn_monitored_down_reason_test_() ->
 %% monitor taken after the start reports when the actor is already gone.
 safe_spawn_monitored_fast_exit_reports_normal_test_() ->
     [
-        {atom_to_list(SpawnFun), {timeout, 60, fun() ->
-            Reasons = [
-                begin
-                    {ok, {Pid, MonRef}} =
-                        beamtalk_actor:SpawnFun(test_init_ack_actor, #{mode => exit_normal}),
-                    receive
-                        {'DOWN', MonRef, process, Pid, Reason} -> Reason
-                    after 5000 -> no_down
+        {
+            atom_to_list(SpawnFun),
+            {timeout, 60, fun() ->
+                Reasons = [
+                    begin
+                        {ok, {Pid, MonRef}} =
+                            beamtalk_actor:SpawnFun(test_init_ack_actor, #{mode => exit_normal}),
+                        receive
+                            {'DOWN', MonRef, process, Pid, Reason} -> Reason
+                        after 5000 -> no_down
+                        end
                     end
-                end
-             || _ <- lists:seq(1, 200)
-            ],
-            ?assertEqual([normal], lists:usort(Reasons)),
-            ?assertEqual(no_stray_ack, stray_ack())
-        end}}
+                 || _ <- lists:seq(1, 200)
+                ],
+                ?assertEqual([normal], lists:usort(Reasons)),
+                ?assertEqual(no_stray_ack, stray_ack())
+            end}
+        }
      || SpawnFun <- [safe_spawn_monitored, safe_spawn_monitored_async]
     ].
 
@@ -2257,25 +2259,26 @@ safe_spawn_monitored_fast_exit_reports_normal_test_() ->
 %% {Label, Args, ExpectedResult}.
 safe_spawn_monitored_failed_start_cleans_up_test_() ->
     [
-        {Label, {timeout, 30, fun() ->
-            logger:set_primary_config(level, none),
-            flush_downs(),
-            try
-                {monitors, Before} = process_info(self(), monitors),
-                ?assertEqual(
-                    Expected, beamtalk_actor:safe_spawn_monitored(test_init_ack_actor, Args)
-                ),
-                {monitors, After} = process_info(self(), monitors),
-                ?assertEqual(Before, After),
-                ?assertEqual(no_stray_ack, stray_ack()),
-                receive
-                    {'DOWN', _, process, _, _} = Down -> error({stray_down, Down})
-                after 50 -> ok
+        {Label,
+            {timeout, 30, fun() ->
+                logger:set_primary_config(level, none),
+                flush_downs(),
+                try
+                    {monitors, Before} = process_info(self(), monitors),
+                    ?assertEqual(
+                        Expected, beamtalk_actor:safe_spawn_monitored(test_init_ack_actor, Args)
+                    ),
+                    {monitors, After} = process_info(self(), monitors),
+                    ?assertEqual(Before, After),
+                    ?assertEqual(no_stray_ack, stray_ack()),
+                    receive
+                        {'DOWN', _, process, _, _} = Down -> error({stray_down, Down})
+                    after 50 -> ok
+                    end
+                after
+                    logger:set_primary_config(level, all)
                 end
-            after
-                logger:set_primary_config(level, all)
-            end
-        end}}
+            end}}
      || {Label, Args, Expected} <- [
             {"initialize crashes", #{mode => crash}, {error, {error, function_clause}}},
             {"initialize times out", #{mode => slow_initialize, delay => 7000}, {error, timeout}}
