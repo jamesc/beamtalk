@@ -132,9 +132,7 @@ raw_trace(Opts, Reason, Stacktrace) when is_list(Stacktrace) ->
                 [["  at ", beamtalk_stack_frame:format_frame(F), $\n] || F <- Visible],
                 hidden_note(length(Frames) - length(Visible))
             ]
-    end;
-raw_trace(_Opts, _Reason, _Stacktrace) ->
-    [].
+    end.
 
 %% The exception's own frames when it carries a raise-site stack, else the
 %% catch stack (a bare Erlang reason has no other).

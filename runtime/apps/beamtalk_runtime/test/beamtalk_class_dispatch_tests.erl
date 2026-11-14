@@ -1235,7 +1235,13 @@ test_invoke_raises_error() ->
         LocalMethods,
         #{}
     ),
-    ?assertMatch({reply, {error, test_deliberate_error}, _}, Result).
+    %% BT-4829: the reply carries the wrapped exception with the class
+    %% process's own stacktrace, not the bare reason.
+    ?assertMatch({reply, {error, #{raw_stacktrace := [_ | _]}}, _}, Result),
+    {reply, {error, Err}, _} = Result,
+    ?assertEqual(
+        test_deliberate_error, maps:get(reason, (maps:get(error, Err))#beamtalk_error.details)
+    ).
 
 %% A class method raising the connected `Program exit:` signal
 %% (`throw({beamtalk_script_exit, 7})`) is passed through the apply catch as
@@ -1317,7 +1323,11 @@ test_invoke_error_discards_writes() ->
         LocalMethods,
         #{count => 1}
     ),
-    ?assertMatch({reply, {error, test_deliberate_error}, #{count := 1}}, Result),
+    ?assertMatch({reply, {error, #{raw_stacktrace := [_ | _]}}, #{count := 1}}, Result),
+    {reply, {error, Err}, _} = Result,
+    ?assertEqual(
+        test_deliberate_error, maps:get(reason, (maps:get(error, Err))#beamtalk_error.details)
+    ),
     assert_home_absent(ClassName).
 
 %% ADR 0130 §1: a normal return replies with the live map (the write is kept)

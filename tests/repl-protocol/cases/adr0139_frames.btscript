@@ -19,23 +19,24 @@
 t := Adr0139Ticker spawn
 // => _
 
-(t trace first) includesSubstring: "Adr0139Ticker>>boom"
+(t trace) anySatisfy: [:f | f includesSubstring: "Adr0139Ticker>>boom ("]
 // => true
 
-// BT-4837: the frame is located by its selector and line, not `dispatch`.
-(t trace first) includesSubstring: "Adr0139Ticker>>dispatch"
-// => false
-
-(t trace first) includesSubstring: "adr0139_ticker.bt:"
+// BT-4837: the frame is located by its selector and line, not `dispatch`: it
+// follows the Erlang frame that raised.
+(t trace at: 2) includesSubstring: "Adr0139Ticker>>boom ("
 // => true
 
-(t trace first) includesSubstring: "bt@"
+(t trace) anySatisfy: [:f | f includesSubstring: "adr0139_ticker.bt:"]
+// => true
+
+(t trace) anySatisfy: [:f | f includesSubstring: "bt@"]
 // => false
 
-(t trace first) includesSubstring: "safe_dispatch"
+(t trace) anySatisfy: [:f | f includesSubstring: "safe_dispatch"]
 // => false
 
-(t trace first) includesSubstring: "dispatch/4"
+(t trace) anySatisfy: [:f | f includesSubstring: "dispatch/4"]
 // => false
 
 // ===========================================================================

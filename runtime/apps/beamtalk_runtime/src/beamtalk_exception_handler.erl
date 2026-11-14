@@ -746,16 +746,16 @@ ensure_wrapped(Other, Stacktrace) ->
 An already-wrapped exception keeps the stacktrace it carries: that one was
 taken where the exception was raised, and a later catch (dispatch, a
 `sync_call` relay, a reraise) sees only its own, shallower stack. The catch
-stack backfills an exception that carries none (BT-4837). The cost is one map
+stack backfills an exception that carries none, or only an empty one (BT-4837). The cost is one map
 lookup on the error path; the success path is untouched.
 """.
 -spec keep_innermost_stacktrace(map(), list()) -> map().
-keep_innermost_stacktrace(#{raw_stacktrace := _} = Already, _Stacktrace) ->
+keep_innermost_stacktrace(#{raw_stacktrace := [_ | _]} = Already, _Stacktrace) ->
     maps:remove(stacktrace, Already);
-keep_innermost_stacktrace(#{stacktrace := _} = Already, _Stacktrace) ->
-    Already;
 keep_innermost_stacktrace(Already, Stacktrace) ->
-    Already#{raw_stacktrace => capture_stacktrace(Stacktrace)}.
+    %% None captured (or only a legacy `stacktrace`, which the raw capture replaces
+    %% so the map keeps one stacktrace source).
+    maps:remove(stacktrace, Already#{raw_stacktrace => capture_stacktrace(Stacktrace)}).
 
 -doc """
 Idempotent exception wrapper with Erlang exception type.

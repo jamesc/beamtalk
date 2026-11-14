@@ -496,7 +496,9 @@ fn run_raw_mfa_rejects_service_mode_bt_4821() {
 fn write_run_fixture(project: &std::path::Path, name: &str, source: &str) {
     std::fs::write(
         project.join(format!("src/{name}.bt")),
-        format!("// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\n{source}"),
+        format!(
+            "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\n{source}"
+        ),
     )
     .unwrap();
 }
