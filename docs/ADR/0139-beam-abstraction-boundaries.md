@@ -3,7 +3,9 @@
 ## Status
 Accepted (2026-10-26). Amended 2026-10-26 (post-acceptance lead review): raw-mode flag renamed, frame semantics and printString rule decided, tuple scope clamped, `error_info` mechanism specified, crash-report hook and 0028 verdict scoped into Phase 1 — see "Amendment (2026-10-26)" below.
 
-Progress (2026-11-14): none of the four phase epics has been filed, and the Phase 1 core (central MFA→display translator, `--raw-mfa`, Erlang-reason translation, crash-report logger hook, ADR 0028 verdict) is not built. Adjacent work has landed: epic BT-4353 (test stacktraces render `Class>>selector (file.bt:line)` frames with no raw MFA, plus line-annotated codegen for block/loop call sites; done 2026-11-05 via BT-4356) covers part of Phase 1 for test output only; the Phase 3 binaries row is settled by epic BT-4170 (done 2026-10-28; ADR 0140, which proposed flipping it, was rejected); the cited issues BT-4094, BT-4106, BT-4144, BT-4022 and BT-4052 are done.
+Progress (2026-11-14): none of the four phase epics has been filed. Phase 1 is partly built by adjacent work: a shared frame renderer (`beamtalk_stack_frame:format_frame/1`; BT-4353/BT-4357) serves test failures and `StackFrame>>printString`, sends are line-annotated (BT-3127, extended by BT-4356), and Erlang reasons are classified by `beamtalk_exception_handler:wrap_raw/2`. Not built: `--raw-mfa`, the crash-report logger hook, selector recovery for actor frames, rules for class-side and non-Beamtalk frames, removal of raw MFA from error messages and FFI diagnostics, the ADR 0028 verdict. The Phase 3 binaries row is settled by epic BT-4170 (done 2026-10-28; ADR 0140, which proposed flipping it, was rejected). All seven cited issues are done.
+
+**Not ready to plan from — see "Review (2026-11-14)" below.** That review corrected stale statements in place and lists the questions that must be answered before a Phase 1 epic is filed.
 
 ## Amendment (2026-10-26): post-acceptance review fixes
 
@@ -16,8 +18,9 @@ original name everywhere below. No original verdict is withdrawn.
 
 ### Decision
 
-1. **The raw-mode flag is `--raw-mfa`, not `--verbose`.** btscript already
-   owns `--verbose`, so every `--verbose` in this ADR reads `--raw-mfa`:
+1. **The raw-mode flag is `--raw-mfa`, not `--verbose`.** `-v/--verbose`
+   is already the global logging-verbosity flag on every `beamtalk`
+   subcommand, so the raw-mode flag is named `--raw-mfa` throughout this ADR:
    the one flag that renders raw MFA on any user-facing surface, alongside
    machine MFA in the JSON formatter and explicit tooling APIs.
 2. **Frames reconstruct, Elixir-style.** Inlined `dispatch/4` erases the
@@ -55,11 +58,99 @@ original name everywhere below. No original verdict is withdrawn.
 ### Consequences
 
 - The two-mode maintenance cost is unchanged in kind; the rename only
-  removes the btscript collision.
+  removes the collision with the global `--verbose` flag.
 - The Phase 1 epic must name all of: the translator, line-annotated
   codegen, 0119-registry resolution, the crash-report logger hook, the
   0028 verdict, and its suites (per the Implementation section's test
   rule).
+
+## Review (2026-11-14): not ready to plan from
+
+A three-pass review (facts against the code at 2026-11-14, reasoning,
+adversarial) found the one-line policy sound and the baseline stale. Stale
+or wrong statements of fact were corrected in place and are marked
+*(Corrected 2026-11-14)*. No verdict was changed. The items below are
+design gaps; they need the owner's decision, recorded as an amendment,
+before a Phase 1 epic is filed.
+
+### Must be decided before planning
+
+1. **Actor frames have no selector.** Actor methods compile to clauses
+   inside `dispatch/4`, so an MFA cannot yield `Class>>selector`; frames
+   read `Counter>>dispatch`. Amendment 2 ("each MFA translated to
+   `Class>>selector`") is not implementable as written. Choose: a
+   function per actor method, an emitted line→selector table, or accept
+   `Class>>dispatch (file:line)`.
+2. **Amendment 3 names the wrong registry.** ADR 0119's registry is a
+   Rust compile-time class→module structure; the runtime cannot consult
+   it. Runtime frames resolve through the class table
+   (`beamtalk_class_registry:class_name_for_module/1`) with a lossy
+   heuristic fallback. Decide capture-time vs render-time resolution, and
+   the rendering for renamed, unloaded and remote-node modules and for
+   same-named classes in different packages (ADR 0070).
+3. **Frame taxonomy is undecided.** The shipped renderer already answers
+   some cases against the rule: class-side methods print the `class_`
+   prefix and, on a registry miss, the raw module
+   (`bt@user@Hpack>>class_encode:headers:table:`, pinned by a test);
+   Erlang frames are dressed as selectors (`lists>>foldl_1`). Decide the
+   exact string for: class-side method, block, generated callback
+   (`init/1`, `handle_call/3`), runtime `beamtalk_*` module, OTP or
+   dependency module, user `native/*.erl`.
+4. **`--raw-mfa` is not a mechanism yet.** Where it is passed (CLI flag,
+   REPL command, session setting) is unstated. The workspace node is
+   shared by the REPL, LSP, MCP and the LiveView IDE, so a node-wide
+   switch changes output for every client; a release has no command line.
+   Messages that embed MFA are composed at raise time and structured test
+   frames already drop it, so a render-time flag cannot recover it.
+   Amendment 4 would make `printString` depend on a flag. The likely
+   shape is: always carry both forms in structured data and let each
+   client choose. Its relation to `test --full-traces` is undefined.
+5. **The tuple verdict contradicts implemented ADRs.** ADR 0076 owns
+   conversion in the runtime proxy, return values only, and explicitly
+   excludes outbound arguments and messages. ADR 0136 added tuple
+   literals for handwritten FFI code. `handleInfo:` receives raw tuples.
+   ADR 0028 §2 says values are not converted at boundaries. Scope the
+   rule to ok/error-tagged returns, say what "both directions" means,
+   and state here which of 0028, 0076 and 0136 are amended — not in an
+   epic (amendment 8), and not in Phase 1, since the conflict is with
+   Phases 2–3.
+
+### Should be fixed
+
+6. **The examples are not acceptance examples.** BT-4094 was a codegen
+   bug diagnosed from the raw module name; no rendering policy turns its
+   `undef` into "connection refused". `gen_tcp:connect/2` exists, so
+   "expected (host, port), got 2 args" is self-contradictory; today's
+   output is already selector-shaped. Replace with real before/after
+   output from a live site.
+7. **The FFI row misapplies the rule.** `gen_tcp:connect/3` is the
+   foreign library's own name and its arity identifies the function; it
+   is not an accident of Beamtalk compilation. The rule that decides the
+   hard cases is narrower: hide identifiers the Beamtalk compiler
+   synthesised (`bt@…` atoms, mangled function names, arities inflated by
+   self and state); show what the user or a foreign library named
+   (Erlang modules, registered names, ETS tables, node names).
+8. **Phases 2–4 have little defined work left.** Typed FFI is ADR 0075
+   (implemented); `native/` is ADR 0072; binaries are BT-4170; the app
+   template (`beamtalk new --app`) and supervisor defaults exist. Reduce
+   each to a concrete gap list or to "recorded, owned by X". The `stop`
+   vocabulary pass is an API break, against "no API breaks intended".
+9. **The crash-report hook needs its own spike.** Crash reports are
+   mostly terms, not frames; shapes vary across OTP versions; a logger
+   filter that crashes is silently removed.
+10. **Missing alternatives and consequences.** Not considered: show both
+    forms always (`Class>>sel (called m:f/a)`, which the actor messages
+    already do), translate at the viewer, a reversible name mangling.
+    "Thin membrane" is rejected by slogan yet is what Phase 1 ships.
+    Unlisted costs: no reverse lookup from display name to MFA for
+    `dbg`/`recon`; hidden names can hide compiler bugs; nothing enforces
+    the rule in CI.
+11. **Evidence and prior art.** Of the seven cited issues only BT-4022 is
+    a diagnostics-policy case; five come from one epic (the Catalina
+    port). Gleam does not hide supervision or translate stack traces, so
+    it is a weak precedent for "purity". The Implementation section names
+    no affected components, per-phase estimates, test suites or
+    validation step.
 
 ## Context
 
@@ -71,28 +162,42 @@ inconsistent leakage:
 - **Names leak.** `Undefined function: bt@catalina:'class_start:'/2`
   (BT-4094), `bt@stdlib@stack_frame:module_info/1` in an eprof crash
   (BT-4106), `{module}:{function}/{arity}` in FFI type errors
-  (`inference/send/ffi.rs`). There is no central MFA→display translator
-  (only `beamtalk_json_formatter`'s log-only `format_mfa`).
+  (`crates/beamtalk-core/src/semantic_analysis/type_checker/inference/send/ffi.rs`).
+  A shared frame renderer exists (`beamtalk_stack_frame:format_frame/1`,
+  used by test failures and `StackFrame>>printString`), but it is not the
+  only one: the JSON formatter has its own `format_stack_frame/1`, three
+  `format_mfa/1` copies exist (`beamtalk_json_formatter`,
+  `beamtalk_ws_log_handler`, `beamtalk_repl_ops_watch`), and error
+  *messages* still embed raw MFA (`beamtalk_exception_handler`,
+  `beamtalk_actor`, `beamtalk_erlang_proxy`, the Rust FFI diagnostics).
+  *(Corrected 2026-11-14: the original said no central translator existed.)*
 - **Error rendering is half-built.** `#beamtalk_error{}` records +
-  `format/1`, the exception handler's wrap/reraise, ADR 0015 (REPL error
-  objects), ADR 0134 (crash semantics) exist — but there is no `error_info`
-  integration, no line-annotated codegen, no stacktrace translation. (The
-  repo's only "EEP" work is EEP-48 doc chunks — since removed by ADR 0033 —
-  and EEP-59 `-doc` attributes; no EEP-based error work exists.)
-- **Tuples leak.** `{#error, {#invalid_utf8, 0}}`, `{ok, nil}`, `unwrap` at
+  `format/1`, the exception handler's wrap/reraise (which already classifies
+  `undef`, `badarg`, `badarith`, `function_clause`, `noproc`), ADR 0015
+  (REPL error objects), ADR 0134 (crash semantics) exist. Sends carry line
+  annotations (BT-3127) and frames render through `beamtalk_stack_frame`.
+  EEP-54 `error_info` is consumed only for binary construction (ADR 0143).
+  Missing: selector names for actor frames (actor methods are clauses of
+  `dispatch/4`, so frames read `Counter>>dispatch`), rules for class-side
+  and non-Beamtalk frames, crash-report rendering, and a raw mode.
+  *(Corrected 2026-11-14: the original said there was no line-annotated
+  codegen, no stacktrace translation and no `error_info` work.)*
+- **Tuples leak.** `{#error, {#invalid_utf8, 0}}` (since fixed: `Binary>>asString`
+  answers a Result), `{ok, nil}`, `unwrap` at
   every FFI boundary, the `stopResult`-seam pattern (ADR 0101). ADR 0076
   converts ok/error tuples at the boundary in one direction; handwritten
   `.bt` still converts by hand.
-- **Bytes leak.** `byteAt:` vs `at:`, `byteSize` vs `size`,
-  `asStringUnchecked`, byte offsets in errors, `fromIolist:`. The default
-  path doesn't commit to graphemes.
+- **Bytes leaked** (`byteSize` vs `size`, sniffed dispatch) until epic
+  BT-4170 (done 2026-10-28). Residue: 0-based `byteAt:` next to 1-based
+  `at:`, `asStringUnchecked`, `fromIolist:`.
 - **The FFI membrane is raw.** `(Erlang telemetry) execute: ...` with
   arity-in-the-error, `Unknown Erlang module` warnings (BT-4022 fixed the
   known-modules half), `native/*.erl` escape hatches, second-class
   `declare native:` (BT-4144).
 - **Lifecycle is OTP transliterated.** Supervision, links, restarts,
   `terminate:`, `handleInfo:`, `continueWith:` — faithful, but no on-ramp
-  and inconsistent naming (`stop:` vs `stopWithin:` vs `stopWith:timeout:`).
+  and inconsistent naming (`stop` / `stopWith:` / `stopWith:timeout:` on Actor
+  vs `stop` / `stopWithin:` on supervisors).
 
 ### Constraints
 
@@ -111,10 +216,10 @@ verdicts:
 
 | Area | Verdict | Rule |
 |------|---------|------|
-| Display names | **HIDE** | Every user-facing surface (errors, stacktraces, `describe`, FFI diagnostics, test failures) renders `Class>>selector`, never `bt@package:'class_sel'/2`. Raw MFA available via `--verbose`/tooling flag only. One shared translator, no ad-hoc prefix stripping. |
+| Display names | **HIDE** | Every user-facing surface (errors, stacktraces, `describe`, FFI diagnostics, test failures) renders `Class>>selector`, never `bt@package:'class_sel'/2`. Raw MFA available via `--raw-mfa`/tooling flag only. One shared translator, no ad-hoc prefix stripping. |
 | Errors + stacktraces | **HIDE mechanics** | Frames render as `Class>>selector (file.bt:line)`; Erlang reasons translate to `#beamtalk_error{}` with Smalltalk-readable messages. Line-annotated codegen + `error_info`-style rendering. *(Amended: callee frames only, reconstructed Elixir-style — no synthetic send frames; names resolve via codegen maps + the ADR 0119 registry. `printString` renders display names. See Amendment.)* |
 | Tuples / Result | **CONVERT at boundary** | Codegen owns the conversion both directions; handwritten `.bt` never sees a 2-tuple. Extends ADR 0076's direction to a rule. *(Amended: public API surfaces only; codegen-internal traffic unaffected. See Amendment.)* |
-| Binaries | **BYTES for Binary, GRAPHEMES for String — decided in BT-4170** | Epic BT-4170 (Remove Binary UTF-8 sniffing, in progress) owns this row: class = construction type, no sniffed dispatch — `Binary>>size` bytes, `String>>size` graphemes, `Binary>>at:` 1-based bytes, `Binary>>do:` yields Integers, `byteSize` deleted, native text boundaries construct String, `asString` returns a real Result. This ADR adds no new verdict here; it cites the split as the policy's worked example (representation is essence, like lifecycle — decided explicitly, not leaked accidentally). |
+| Binaries | **BYTES for Binary, GRAPHEMES for String — decided in BT-4170** | Epic BT-4170 (Remove Binary UTF-8 sniffing, done 2026-10-28; ADR 0140, which proposed flipping it, rejected) owns this row: class = construction type, no sniffed dispatch — `Binary>>size` bytes, `String>>size` graphemes, `Binary>>at:` 1-based bytes, `Binary>>do:` yields Integers, `byteSize` deleted, native text boundaries construct String, `asString` returns a real Result. Open: `Binary>>byteAt:` (0-based) vs `at:` (1-based). This ADR adds no new verdict here; it cites the split as the policy's worked example (representation is essence, like lifecycle — decided explicitly, not leaked accidentally). |
 | FFI membrane | **TYPED + Beamtalk-shaped** | FFI calls get typed specs; failures name the selector and expectation (`telemetry execute: expected 3 args`), never arities and module atoms. `native/` is a first-class package member, not a trapdoor. |
 | Process lifecycle | **KEEP, with OOB defaults** | Supervision, links, restarts, `terminate:` stay visible with Beamtalk spelling — plus one template supervised app and defaults (restart intensity, shutdown timeouts) so the common case needs no OTP knowledge. |
 | Distribution / releases / hot reload | **KEEP (OTP-native)** | Per ADR 0125/0126 direction; Beamtalk spelling where it exists, OTP concepts undisguised. |
@@ -127,7 +232,7 @@ Catalina start: #{}                // when unreachable
 // After:
 Catalina start: #{}
 // => Error: Catalina>>start: failed: connection refused
-//    (raw MFA under --verbose)
+//    (raw MFA under --raw-mfa)
 ```
 
 REPL:
@@ -135,10 +240,10 @@ REPL:
 ```beamtalk
 > (Erlang gen_tcp) connect: "x" with: 1
 => Error: gen_tcp connect: expected (host, port), got 2 args
-   "Beamtalk-shaped; no m:f/a"
+   // Beamtalk-shaped; no m:f/a
 
-> (Erlang mt19937) seed: 42   "unknown module, typo'd"
-=> Unknown FFI module 'mt19937' — did you mean…?  "spans + suggestions, not atoms"
+> (Erlang mt19937) seed: 42   // unknown module, typo'd
+=> Unknown FFI module 'mt19937' — did you mean…?  // spans + suggestions, not atoms
 ```
 
 ## Prior Art
@@ -147,17 +252,17 @@ REPL:
 |----------|---------|--------------|
 | **Elixir** | Hides `Elixir.` prefix everywhere; `** (UndefinedFunctionError)` with `Foo.bar/1`; `error_info` pretty-printing | Closest reference: names hidden, VM reachable, errors structured. We adopt the shape. |
 | **Gleam** | Hides almost everything (`gleam/otp` wraps supervision/actors in supervised, typed APIs; raw `gleam/erlang/process` remains for the few) | The purity precedent — and the caution: Gleam chose it deliberately for its audience. Rejected here: it would hide the lifecycle this ADR keeps visible, and fight the BEAM-native principle. |
-| **Erlang** | Fully raw (`undef`, `badarg`, `{M,F,A}`) | The floor. Rejected as user-facing posture; kept as the `--verbose` substrate. |
+| **Erlang** | Fully raw (`undef`, `badarg`, `{M,F,A}`) | The floor. Rejected as user-facing posture; kept as the `--raw-mfa` substrate. |
 | **Pharo** | No VM concept at all (image model) | Proof that hiding works when the VM is truly an implementation detail — inapplicable while we embrace OTP interop. |
 | **Python** | C extensions must translate failures to Python exceptions (return NULL + set); a raw segfault is the equivalent leak | The membrane precedent outside BEAM: translation at the boundary is the norm, raw passthrough is a bug. Supports the FFI-membrane and tuple-conversion verdicts. |
 
 ## User Impact
 
-- **Newcomer**: errors speak their language from day one; lifecycle defaults mean the first actor program needs no OTP. Discovery: `--verbose` teaches the mapping on demand. Cost: two output modes to learn ("which error is real?") — mitigated by making display output the default everywhere and documenting `--verbose` once.
+- **Newcomer**: errors speak their language from day one; lifecycle defaults mean the first actor program needs no OTP. Discovery: `--raw-mfa` teaches the mapping on demand. Cost: two output modes to learn ("which error is real?") — mitigated by making display output the default everywhere and documenting `--raw-mfa` once.
 - **Smalltalk developer**: message-passing stays pure at every surface they touch; supervision is the one new concept, and it arrives with a template, not a manual. Cost: supervision/links stay unconcealed by design — the one pill to swallow.
-- **Erlang/BEAM developer**: nothing is taken away — raw MFA, observer, recon all remain one flag away; typed FFI makes Beamtalk→Erlang calls safer than raw `apply`. Cost: display names hide the info they want most — mitigated by `--verbose` plus machine MFA in the JSON formatter.
+- **Erlang/BEAM developer**: nothing is taken away — raw MFA, observer, recon all remain one flag away; typed FFI makes Beamtalk→Erlang calls safer than raw `apply`. Cost: display names hide the info they want most — mitigated by `--raw-mfa` plus machine MFA in the JSON formatter.
 - **Operator**: sensible OOB defaults (restart intensity, shutdowns) with full observability underneath; log output keeps machine-parseable MFA via the JSON formatter. Cost: log scrapers migrate per phase (see Migration Path).
-- **Tooling developer**: one translator + one error taxonomy to consume instead of N ad-hoc formats; spans on every diagnostic. Cost: someone must build and own the translator — Phase 1 funds it.
+- **Tooling developer**: one translator + one error taxonomy to consume instead of N ad-hoc formats; spans on every diagnostic. Cost: someone must own the translator; unfunded until the Phase 1 epic is filed.
 
 ## Steelman Analysis
 
@@ -218,7 +323,7 @@ re-litigates hide-vs-keep.
 - A durable rule for every future leak report: names hidden, lifecycle
   visible — no re-litigation.
 - Day-one experience transforms (errors) while power users lose nothing
-  (`--verbose`, observer, recon intact).
+  (`--raw-mfa`, observer, recon intact).
 - FFI becomes approachable: typed specs + named errors instead of arities
   and atoms.
 
@@ -228,13 +333,15 @@ re-litigates hide-vs-keep.
   raw output — a migration sweep with each phase.
 - Line-annotated codegen + translator + typed FFI is real multi-epic work;
   this ADR commits to it without funding it.
-- Two output modes (`--verbose`) to maintain forever.
+- Two output modes (`--raw-mfa`) to maintain forever.
 
 ### Neutral
 
 - OTP lifecycle surface unchanged in shape, only in defaults and naming
   consistency.
-- No runtime cost: translation happens at diagnostic-render time.
+- No cost on the success path beyond the line annotations already
+  emitted; translation runs at render time. (`class_name_for_module/1` is
+  a full ETS scan per call, which matters for the crash-report hook.)
 
 ## Implementation
 
@@ -243,18 +350,16 @@ Phased, each phase its own epic (no code in this ADR):
 1. **Names + error rendering** (highest value): central MFA→display
    translator; `Class>>selector (file.bt:line)` frames via line-annotated
    codegen; Erlang-reason → `#beamtalk_error{}` translation;
-   `--verbose` raw mode. Consumes BT-4094/4106-class issues.
+   `--raw-mfa` raw mode. Consumes BT-4094/4106-class issues.
    *(Amended: also owns the crash-report logger hook, 0119-registry
-   resolution, and the ADR 0028 verdict; `--verbose` reads `--raw-mfa`.
-   See Amendment.)*
+   resolution, and the ADR 0028 verdict. See Amendment.)*
 2. **FFI membrane**: typed FFI specs with named errors; `native/` as
    first-class package member; `declare native:` parity (BT-4144).
 3. **Tuples + binaries**: codegen-owned boundary conversion; the
-   Binary/String audit itself lives in Epic BT-4170 (BT-4168/69/71/72/73) —
-   this phase tracks its completion for the `bin at: 1` drift resolution
-   and conversion-door docs rather than re-doing it.
+   Binary/String audit was done in Epic BT-4170 (2026-10-28), leaving only
+   the `byteAt:` / `at:` indexing question and conversion-door docs.
 4. **Lifecycle defaults**: template supervised app; audited OOB defaults;
-   vocabulary pass (`stop:` family naming).
+   vocabulary pass (`stop` family naming).
 
 Effort: L–XL total, sliced per phase. Each phase lands green independently,
 and each phase epic must name its suites: unit tests for the translator/rules,
@@ -266,7 +371,7 @@ touches the REPL or CLI surface (Phase 1 and 2 do).
 - Snapshot/golden tests asserting raw `bt@…` output get re-blessed to
   display names per phase.
 - Log scrapers move to the JSON formatter (keeps machine MFA) or
-  `--verbose`.
+  `--raw-mfa`.
 - Downstream packages: display-only changes; no API breaks intended. Any
   phase that breaks an API states it in its own epic.
 
@@ -276,9 +381,14 @@ touches the REPL or CLI surface (Phase 1 and 2 do).
   (stdlib naming), ADR 0028 (interop strategy), ADR 0060 (Result hybrid),
   ADR 0076 (tuple→Result), ADR 0094 (printString=Debug), ADR 0101 (native
   objects), ADR 0119 (module registry), ADR 0121 (ok/error specs), ADR 0125
-  (releases), ADR 0126 (distribution), ADR 0134 (crash semantics)
+  (releases), ADR 0126 (distribution), ADR 0134 (crash semantics); also
+  bearing on the verdicts: ADR 0072 (user Erlang sources), ADR 0075 (FFI
+  type definitions), ADR 0136 (tuple literals), ADR 0140 (rejected),
+  ADR 0143 (binary construction, `error_info`)
 - Related issues: BT-4094 (naming), BT-4106 (stackframe), BT-4022 (FFI),
   BT-4144 (native), BT-4052 (linked exits), BT-4046/47 (supervision),
   BT-4170 (epic: Binary/String split — owns the binaries row)
-- Documentation: `docs/beamtalk-principles.md` (BEAM-native,
-  interactive-first)
+- Documentation: `docs/beamtalk-principles.md` (§9 Seamless BEAM
+  Ecosystem Integration, §10 Fault Tolerance via OTP, interactive-first);
+  `docs/development/debugging.md` (the shipped frame renderer)
+- Related work: BT-4353 / BT-4357 (shared frame renderer, test stacktraces)
