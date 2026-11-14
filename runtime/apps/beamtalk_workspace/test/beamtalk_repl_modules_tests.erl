@@ -163,7 +163,7 @@ get_actor_count_with_dead_registry_test() ->
     Tracker2 = beamtalk_repl_modules:add_module(my_module, "/path.bt", Tracker),
     DeadPid = spawn(fun() -> ok end),
     %% Ensure process exits
-    timer:sleep(10),
+    ok = beamtalk_test_wait:dead(DeadPid),
     %% Function should handle error gracefully and return 0
     Count = beamtalk_repl_modules:get_actor_count(my_module, DeadPid, Tracker2),
     ?assertEqual(0, Count).

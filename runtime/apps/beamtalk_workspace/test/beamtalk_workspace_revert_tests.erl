@@ -157,7 +157,7 @@ suite_setup() ->
         {error, {already_started, _}} -> ok
     end,
     %% Let the runtime register bootstrap classes before compiling user code.
-    timer:sleep(300),
+    ok = beamtalk_test_wait:class('Object'),
     %% ADR 0129: workspace-only operations (rename/remove/revert) refuse with
     %% `no_workspace` unless this node records a workspace capability.
     ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
@@ -1427,15 +1427,13 @@ define_stdlib_class(Tmp, ClassNameBin, Methods) ->
 
 %% Poll for the class registration (reload is synchronous, but registration can
 %% lag a few ms behind module load).
-wait_for_class(_ClassAtom, 0) ->
-    error(class_not_registered);
 wait_for_class(ClassAtom, N) ->
-    case beamtalk_runtime_api:whereis_class(ClassAtom) of
-        Pid when is_pid(Pid) -> Pid;
-        _ ->
-            timer:sleep(20),
-            wait_for_class(ClassAtom, N - 1)
-    end.
+    try
+        ok = beamtalk_test_wait:class(ClassAtom, N * 20)
+    catch
+        error:{class_not_registered, _} -> error(class_not_registered)
+    end,
+    beamtalk_runtime_api:whereis_class(ClassAtom).
 
 stop_existing(Name) ->
     case whereis(Name) of

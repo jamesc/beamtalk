@@ -130,8 +130,8 @@ update_activity_updates_timestamp_test() ->
     {ok, InitialMeta} = beamtalk_workspace_meta:get_metadata(),
     InitialActivity = maps:get(last_activity, InitialMeta),
 
-    %% Wait a bit to ensure timestamp changes (seconds resolution)
-    timer:sleep(1100),
+    %% Wait for the wall clock to tick past the (seconds-resolution) timestamp
+    ok = wait_clock_tick(InitialActivity),
 
     %% Update activity
     ok = beamtalk_workspace_meta:update_activity(),
@@ -164,7 +164,7 @@ get_last_activity_test() ->
     %% Update activity
 
     % Ensure time passes (seconds resolution)
-    timer:sleep(1100),
+    ok = wait_clock_tick(Activity1),
     ok = beamtalk_workspace_meta:update_activity(),
 
     %% Get updated activity
@@ -251,7 +251,7 @@ register_actor_test() ->
     end),
     ok = beamtalk_workspace_meta:register_actor(ActorPid),
     % Let cast process
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
 
     {ok, Actors} = beamtalk_workspace_meta:supervised_actors(),
     ?assertEqual([ActorPid], Actors),
@@ -414,7 +414,7 @@ persist_and_restore_modules_test() ->
     ok = beamtalk_workspace_meta:register_module(lists),
     ok = beamtalk_workspace_meta:register_module(maps, "/bt_test/src/maps_test.bt"),
     %% Wait for debounce timer to fire
-    timer:sleep(2500),
+    ok = beamtalk_test_wait:until(fun() -> filelib:is_file(MetaFile) end),
     gen_server:stop(Pid1),
     beamtalk_test_wait:dead(Pid1),
 
@@ -882,14 +882,17 @@ debounce_coalesces_rapid_changes_test() ->
     ok = beamtalk_workspace_meta:register_module(Mod3),
 
     %% All 3 should be in state immediately
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     {ok, Modules} = beamtalk_workspace_meta:loaded_modules(),
     ?assert(lists:keymember(Mod1, 1, Modules)),
     ?assert(lists:keymember(Mod2, 1, Modules)),
     ?assert(lists:keymember(Mod3, 1, Modules)),
 
     %% Wait for debounce to fire (2s from LAST change, not first)
-    timer:sleep(2500),
+    ok = beamtalk_test_wait:until(fun() ->
+        Names = persisted_module_names(MetaFile),
+        lists:all(fun(M) -> lists:member(atom_to_binary(M, utf8), Names) end, [Mod1, Mod2, Mod3])
+    end),
 
     %% Verify all 3 modules were persisted to disk
     ?assert(filelib:is_file(MetaFile)),
@@ -928,6 +931,7 @@ run_mode_no_disk_write_test() ->
 
     %% Register a module and wait longer than the debounce window
     ok = beamtalk_workspace_meta:register_module(lists),
+    %% sleep: asserts-nothing-happens window (debounce is 2s); nothing to wait for
     timer:sleep(2500),
 
     %% No file should have been written
@@ -949,6 +953,7 @@ release_mode_no_disk_write_test() ->
         mode => release
     }),
     ok = beamtalk_workspace_meta:register_module(lists),
+    %% sleep: asserts-nothing-happens window (debounce is 2s); nothing to wait for
     timer:sleep(2500),
     ?assertNot(filelib:is_file(MetaFile)),
     gen_server:stop(Pid).
@@ -1532,3 +1537,17 @@ loaded_modules_dropped_when_module_not_loaded_test() ->
 %% Cross-platform absolute temp dir (AGENTS.md: never hardcode /tmp in tests).
 temp_dir_meta() ->
     unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())).
+
+%% Block until the wall clock (seconds resolution) is past `Last`.
+wait_clock_tick(Last) ->
+    beamtalk_test_wait:until(fun() -> erlang:system_time(second) > Last end, 3000, 10).
+
+%% Names of the modules persisted in the metadata file; [] if unreadable/partial.
+persisted_module_names(MetaFile) ->
+    try
+        {ok, Binary} = file:read_file(MetaFile),
+        Map = json:decode(Binary),
+        [maps:get(<<"name">>, E) || E <- maps:get(<<"loaded_modules">>, Map, []), is_map(E)]
+    catch
+        _:_ -> []
+    end.

@@ -60,6 +60,7 @@ gather_all_down_path_marks_killed_slot_as_error_test() ->
             beamtalk_parallel:'all:'([
                 fun() ->
                     Caller ! {worker_pid, self()},
+                    %% sleep: simulates a long-running worker, killed by the test
                     timer:sleep(5000)
                 end,
                 fun() -> 42 end
@@ -95,6 +96,7 @@ gather_all_down_path_other_slots_unaffected_test() ->
                 fun() -> 100 end,
                 fun() ->
                     Caller ! {worker_pid, self()},
+                    %% sleep: simulates a long-running worker, killed by the test
                     timer:sleep(5000)
                 end,
                 fun() -> 300 end
@@ -132,10 +134,12 @@ gather_any_down_path_all_killed_returns_error_test() ->
             beamtalk_parallel:'any:'([
                 fun() ->
                     Caller ! {worker_pid, 1, self()},
+                    %% sleep: simulates a long-running worker, killed by the test
                     timer:sleep(5000)
                 end,
                 fun() ->
                     Caller ! {worker_pid, 2, self()},
+                    %% sleep: simulates a long-running worker, killed by the test
                     timer:sleep(5000)
                 end
             ])
@@ -173,6 +177,7 @@ gather_any_down_path_one_killed_winner_succeeds_test() ->
             beamtalk_parallel:'any:'([
                 fun() ->
                     Caller ! {worker_pid, self()},
+                    %% sleep: simulates a long-running worker, killed by the test
                     timer:sleep(5000)
                 end,
                 fun() ->
@@ -185,6 +190,7 @@ gather_any_down_path_one_killed_winner_succeeds_test() ->
                     %% found before a loser has registered. The assertion holds
                     %% under both interleavings; what changes is which code path
                     %% is covered.
+                    %% sleep: simulates work in a helper (see comment above)
                     timer:sleep(200),
                     winner
                 end
@@ -257,6 +263,7 @@ all_timeout_kills_slow_worker_and_marks_slot_as_error_test() ->
     Results = beamtalk_parallel:'all:timeout:'(
         [
             fun() ->
+                %% sleep: simulates a slow worker that outlives the deadline
                 timer:sleep(5000),
                 slow
             end,
@@ -293,6 +300,7 @@ any_first_succeeding_block_wins_test() ->
     %% Block 1 sleeps; block 2 returns immediately — block 2 is the winner.
     Result = beamtalk_parallel:'any:'([
         fun() ->
+            %% sleep: simulates a slow worker that loses the race
             timer:sleep(5000),
             slow
         end,

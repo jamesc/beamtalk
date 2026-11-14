@@ -331,8 +331,8 @@ handle_call_unknown_returns_error(Pid) ->
 %% `handle_cast/2` is a no-op; the store's state is unaffected (line 314).
 handle_cast_is_ignored(_Pid) ->
     gen_server:cast(beamtalk_workspace_findings_store, some_cast),
-    %% Give the cast time to be processed before reading state.
-    timer:sleep(20),
+    %% Wait for the cast to be processed before reading state.
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_findings_store),
     [
         ?_assertEqual([], beamtalk_workspace_findings_store:all())
     ].

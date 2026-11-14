@@ -2240,16 +2240,10 @@ wait_dead(Pid) ->
 
 %% The registry reclaims asynchronously on 'DOWN'; poll briefly for the entry.
 wait_unlisted(Path) ->
-    wait_unlisted(Path, 100).
-wait_unlisted(Path, 0) ->
-    ?assertNot(open_mode_listed(Path));
-wait_unlisted(Path, N) ->
-    case open_mode_listed(Path) of
-        false ->
-            ok;
-        true ->
-            timer:sleep(10),
-            wait_unlisted(Path, N - 1)
+    try
+        beamtalk_test_wait:until(fun() -> not open_mode_listed(Path) end, 1000, 10)
+    catch
+        error:{wait_timeout, _} -> ?assertNot(open_mode_listed(Path))
     end.
 
 with_registry(Fun) ->

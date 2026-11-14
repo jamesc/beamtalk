@@ -1550,6 +1550,8 @@ trigger_pending_does_not_clobber_concurrent_register_class_test_() ->
                         size => #{arity => 0, param_types => [], return_type => 'Boolean'}
                     }),
                     _ = spawn(fun() ->
+                        %% sleep: simulates the concurrent session committing
+                        %% shortly after the advisory read its generation
                         timer:sleep(1),
                         ok = beamtalk_compiler_server:register_class(
                             'ReCheckCounter', ConcurrentGeneration
@@ -1568,7 +1570,21 @@ trigger_pending_does_not_clobber_concurrent_register_class_test_() ->
                     %% Let the concurrent cast land if it somehow has not yet,
                     %% then assert ambient state shows the concurrent commit —
                     %% never reverted to the pre-advisory snapshot.
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:until(
+                        fun() ->
+                            case beamtalk_compiler_server:get_classes() of
+                                #{
+                                    'ReCheckCounter' := #{
+                                        method_info := #{size := #{return_type := 'Boolean'}}
+                                    }
+                                } ->
+                                    true;
+                                _ ->
+                                    false
+                            end
+                        end
+                    ),
+                    ok = beamtalk_test_wait:sync(beamtalk_compiler_server),
                     #{'ReCheckCounter' := FinalMeta} = beamtalk_compiler_server:get_classes(),
                     #{method_info := #{size := FinalEntry}} = FinalMeta,
                     ?assertEqual('Boolean', maps:get(return_type, FinalEntry))

@@ -137,12 +137,13 @@ show_codegen_rejects_during_eval_test_() ->
                 {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-codegen-busy">>),
                 %% Start a long-running eval to occupy the worker slot
                 Self = self(),
-                spawn(fun() ->
+                Caller = spawn(fun() ->
                     Res = beamtalk_repl_shell:eval(Pid, "1 + 2"),
                     Self ! {eval_done, Res}
                 end),
-                %% Give eval time to start (even if it fails, the worker is set briefly)
-                timer:sleep(50),
+                %% Wait until the eval request is in flight (caller blocked on
+                %% the reply) or already finished
+                ok = beamtalk_test_wait:idle(Caller),
                 %% Try show_codegen - if eval is still in progress, should get eval_busy
                 Result = beamtalk_repl_shell:show_codegen(Pid, "42"),
                 case Result of
@@ -198,7 +199,7 @@ handle_info_ignored_test_() ->
             ?_test(begin
                 {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-info-1">>),
                 Pid ! random_info,
-                timer:sleep(20),
+                ok = beamtalk_test_wait:sync(Pid),
                 ?assert(is_process_alive(Pid)),
                 beamtalk_repl_shell:stop(Pid)
             end)
@@ -357,7 +358,7 @@ class_removed_event_updates_tracker_test_() ->
                 %% Send class_removed info message directly (simulates the event from runtime)
                 Pid ! {class_removed, 'BT1242TestClass', DummyMod},
                 %% Wait for handle_info to process
-                timer:sleep(50),
+                ok = beamtalk_test_wait:sync(Pid),
                 {ok, Tracker2} = beamtalk_repl_shell:get_module_tracker(Pid),
                 ?assertNot(beamtalk_repl_modules:module_exists(DummyMod, Tracker2)),
                 beamtalk_repl_shell:stop(Pid)

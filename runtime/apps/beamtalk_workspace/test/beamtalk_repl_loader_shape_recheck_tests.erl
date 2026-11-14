@@ -805,6 +805,8 @@ precheck_class_shape_waits_for_pending_capture_test_() ->
                         %% below must block on the drain until then rather
                         %% than report "no baseline".
                         spawn(fun() ->
+                            %% sleep: simulates the worker resuming later; the
+                            %% precheck below must block on the drain until then
                             timer:sleep(300),
                             sys:resume(beamtalk_workspace_shape_recheck_worker)
                         end),

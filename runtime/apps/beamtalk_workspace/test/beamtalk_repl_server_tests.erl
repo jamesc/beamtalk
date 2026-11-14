@@ -145,8 +145,18 @@ tcp_setup() ->
     ok = beamtalk_test_actor_registry:begin_isolated(),
     %% Find a free port and start workspace, with retry on port conflict
     {Port, SupPid} = tcp_start_workspace(3),
-    timer:sleep(100),
+    ok = beamtalk_test_wait:until(fun() -> tcp_port_accepts(Port) end),
     {Port, SupPid}.
+
+%% True once a TCP connection to the REPL port is accepted.
+tcp_port_accepts(Port) ->
+    case gen_tcp:connect({127, 0, 0, 1}, Port, [binary, {active, false}], 200) of
+        {ok, Sock} ->
+            gen_tcp:close(Sock),
+            true;
+        {error, _} ->
+            false
+    end.
 
 tcp_start_workspace(0) ->
     error(failed_to_start_workspace);
@@ -154,6 +164,7 @@ tcp_start_workspace(Retries) ->
     {ok, LSock} = gen_tcp:listen(0, [{reuseaddr, true}]),
     {ok, Port} = inet:port(LSock),
     gen_tcp:close(LSock),
+    %% sleep: gives the OS time to release the just-closed port before rebinding
     timer:sleep(50),
     {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
     Config = #{
@@ -178,7 +189,7 @@ tcp_cleanup({_Port, SupPid}) ->
         true ->
             unlink(SupPid),
             exit(SupPid, shutdown),
-            timer:sleep(200);
+            ok = beamtalk_test_wait:dead(SupPid);
         false ->
             ok
     end.
@@ -680,6 +691,7 @@ tcp_client_disconnect_test(Port) ->
     %% Connect and immediately close the TCP socket
     {ok, Sock} = gen_tcp:connect({127, 0, 0, 1}, Port, [binary, {active, false}], 5000),
     gen_tcp:close(Sock),
+    %% sleep: asserts-nothing-happens window; gives the server time to observe the close
     timer:sleep(100),
     %% Server should still be responsive
     Msg = iolist_to_binary(
@@ -1007,7 +1019,8 @@ tcp_info_unknown_check2() ->
     Pid = whereis(beamtalk_repl_server),
     ?assert(is_pid(Pid)),
     beamtalk_repl_server ! some_random_message,
-    timer:sleep(50).
+    ok = beamtalk_test_wait:sync(beamtalk_repl_server),
+    ?assert(is_process_alive(Pid)).
 
 tcp_health_op_test(Port) ->
     %% Covers handle_op(<<"health">>, ...) which exercises get_nonce/0 (lines 714-725)
@@ -1523,6 +1536,7 @@ session_binding_lookup_pipeline_test() ->
     application:ensure_all_started(beamtalk_runtime),
     SessionId = <<"test-pipeline-bt1045">>,
     {ok, ShellPid} = beamtalk_repl_shell:start_link(SessionId),
+    %% sleep: keeps a stand-in default session process alive for the test
     DefaultPid = spawn(fun() -> timer:sleep(10000) end),
     beamtalk_session_table:new(),
     beamtalk_session_table:insert(SessionId, ShellPid),

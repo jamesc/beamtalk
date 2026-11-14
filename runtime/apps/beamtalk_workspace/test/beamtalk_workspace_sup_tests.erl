@@ -286,7 +286,7 @@ all_children_alive_test() ->
 
     %% If supervisor was already running, give children time to stabilize
     case WeStarted of
-        false -> timer:sleep(100);
+        false -> ok = beamtalk_test_wait:sync(Sup);
         true -> ok
     end,
 

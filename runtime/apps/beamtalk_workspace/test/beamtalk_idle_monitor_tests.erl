@@ -65,8 +65,8 @@ idle_monitor_checks_recent_activity_test() ->
     Config = #{enabled => true, max_idle_seconds => 14400},
     {ok, MonitorPid} = beamtalk_idle_monitor:start_link(Config),
 
-    %% Wait a moment
-    timer:sleep(50),
+    %% Let the monitor finish starting up
+    ok = beamtalk_test_wait:sync(MonitorPid),
 
     %% Monitor should still be alive (not idle)
     ?assert(is_process_alive(MonitorPid)),

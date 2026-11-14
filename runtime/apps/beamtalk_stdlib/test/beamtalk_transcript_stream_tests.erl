@@ -135,8 +135,9 @@ dead_subscriber_auto_removed_test() ->
     %% Sync barrier: ensure subscribe is processed before killing
     _ = gen_server:call(Pid, recent),
     exit(Sub, kill),
-    %% Wait for DOWN message to be delivered and processed
-    timer:sleep(50),
+    %% Wait for the subscriber to die, then for the stream to process its DOWN
+    ok = beamtalk_test_wait:dead(Sub),
+    ok = beamtalk_test_wait:sync(Pid),
     _ = gen_server:call(Pid, {'show:', [<<"after_death">>]}),
     Result = gen_server:call(Pid, recent),
     ?assertEqual([{beamtalk_string, <<"after_death">>}], Result),
