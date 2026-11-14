@@ -30,6 +30,7 @@ TestResult is a tagged map:
     %% TestRunner class-side primitives
     run_all/0,
     run_all/1,
+    run_classes/2,
     run_file/1,
     run_class/1,
     run_class_by_name/1,
@@ -113,10 +114,29 @@ run_all(Invalid) ->
     Error2 = beamtalk_error:with_message(Error1, Msg),
     beamtalk_error:raise(Error2).
 
+-doc """
+Run exactly the given TestCase classes (BT-4832), with the same concurrency
+semantics as `run_all/1`.
+
+`beamtalk test` uses this instead of `run_all/1` so that loaded-but-not-under-test
+`TestCase` subclasses (the sample classes in `stdlib/test/fixtures`) are not run
+and do not inflate the totals past the per-class lines it prints. Names that are
+not currently registered (concrete) test classes are ignored.
+""".
+-spec run_classes([atom()], non_neg_integer()) -> test_result().
+run_classes(Classes, 0) ->
+    run_classes(Classes, erlang:system_info(schedulers));
+run_classes(Classes, MaxJobs) when is_list(Classes), is_integer(MaxJobs), MaxJobs >= 1 ->
+    Known = beamtalk_test_case:find_test_classes(),
+    run_classes_impl([C || C <- Classes, lists:member(C, Known)], MaxJobs).
+
 -doc "Implementation of run_all after argument validation.".
 -spec run_all_impl(pos_integer()) -> test_result().
 run_all_impl(MaxJobs) ->
-    Classes = beamtalk_test_case:find_test_classes(),
+    run_classes_impl(beamtalk_test_case:find_test_classes(), MaxJobs).
+
+-spec run_classes_impl([atom()], pos_integer()) -> test_result().
+run_classes_impl(Classes, MaxJobs) ->
     case Classes of
         [] ->
             make_test_result(0, 0, 0, 0, 0.0, []);

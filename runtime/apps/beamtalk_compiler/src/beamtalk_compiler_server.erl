@@ -214,7 +214,8 @@ compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
 -doc """
 Compile a file/class definition.
 Options: #{path => binary(), stdlib_mode => boolean(),
-protocol_sources => #{binary() => binary()}} — the last is an explicit,
+protocol_sources => #{binary() => binary()},
+protocol_source_paths => #{binary() => binary()}} — the last two are explicit,
 opt-in map of protocol name to raw `.bt` source (ADR 0127 §10a / BT-3593),
 used by `beamtalk_repl_loader`'s protocol-reload fan-out to carry a
 just-edited protocol's full source into each of its users' own recompiles,
@@ -1562,12 +1563,23 @@ do_compile(Port, Source, Options) ->
             0 -> Request7;
             _ -> Request7#{protocol_sources => ProtocolSources}
         end,
+    %% BT-4828: protocol name -> `.bt` path, so codegen's method-lines table
+    %% covers methods provided by a protocol in another file.
+    ProtocolSourcePaths = maps:map(
+        fun(_Name, P) -> unicode:characters_to_binary(P) end,
+        maps:get(protocol_source_paths, Options, #{})
+    ),
+    Request8b =
+        case map_size(ProtocolSourcePaths) of
+            0 -> Request8;
+            _ -> Request8#{protocol_source_paths => ProtocolSourcePaths}
+        end,
     %% BT-4378: one token per `load_project' batch, so the port verifies the
     %% project scope once per batch rather than once per file.
     RequestFinal =
         case maps:get(project_batch, Options, undefined) of
-            ProjectBatch when is_binary(ProjectBatch) -> Request8#{project_batch => ProjectBatch};
-            _ -> Request8
+            ProjectBatch when is_binary(ProjectBatch) -> Request8b#{project_batch => ProjectBatch};
+            _ -> Request8b
         end,
     case send_port_request(Port, RequestFinal, 30000) of
         {ok, Response} ->
