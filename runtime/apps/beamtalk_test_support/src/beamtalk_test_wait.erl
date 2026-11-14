@@ -141,8 +141,11 @@ Synchronise with a plain (non-OTP) process, where `sync/1` cannot work:
 return once `Pid` is blocked in a `receive` with an empty message queue, i.e.
 it has consumed everything sent to it so far. Returns `ok` immediately if the
 process is dead. Only meaningful for messages already sent by the caller.
+A list of pids is synchronised one after another.
 """.
--spec idle(pid()) -> ok.
+-spec idle(pid() | [pid()]) -> ok.
+idle(Pids) when is_list(Pids) ->
+    lists:foreach(fun idle/1, Pids);
 idle(Pid) ->
     until(
         fun() ->

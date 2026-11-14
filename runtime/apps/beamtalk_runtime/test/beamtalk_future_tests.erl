@@ -37,13 +37,14 @@ await_then_resolve_test() ->
     Parent = self(),
 
     %% Spawn a process that waits on the future
-    spawn(fun() ->
+    Waiter = spawn(fun() ->
         Result = beamtalk_future:await(Future),
         Parent ! {result, Result}
     end),
 
-    %% Give it a moment to register as a waiter
-    timer:sleep(10),
+    %% Wait until the waiter is blocked in await and the future has queued it
+    ok = beamtalk_test_wait:idle(Waiter),
+    ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
 
     %% Now resolve the future
     beamtalk_future:resolve(Future, hello),
@@ -69,7 +70,7 @@ await_then_reject_test() ->
     Parent = self(),
 
     %% Spawn a process that waits on the future
-    spawn(fun() ->
+    Waiter = spawn(fun() ->
         try
             beamtalk_future:await(Future)
         catch
@@ -78,8 +79,9 @@ await_then_reject_test() ->
         end
     end),
 
-    %% Give it a moment to register as a waiter
-    timer:sleep(10),
+    %% Wait until the waiter is blocked in await and the future has queued it
+    ok = beamtalk_test_wait:idle(Waiter),
+    ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
 
     %% Now reject the future
     beamtalk_future:reject(Future, oops),
@@ -100,7 +102,7 @@ multiple_waiters_resolved_test() ->
 
     %% Spawn 5 waiters
     NumWaiters = 5,
-    lists:foreach(
+    Waiters = lists:map(
         fun(N) ->
             spawn(fun() ->
                 Result = beamtalk_future:await(Future),
@@ -110,8 +112,9 @@ multiple_waiters_resolved_test() ->
         lists:seq(1, NumWaiters)
     ),
 
-    %% Give them time to register
-    timer:sleep(50),
+    %% Wait until every waiter is blocked in await and the future has queued them
+    ok = beamtalk_test_wait:idle(Waiters),
+    ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
 
     %% Resolve the future
     beamtalk_future:resolve(Future, shared_value),
@@ -137,7 +140,7 @@ multiple_waiters_rejected_test() ->
 
     %% Spawn 3 waiters
     NumWaiters = 3,
-    lists:foreach(
+    Waiters = lists:map(
         fun(N) ->
             spawn(fun() ->
                 try
@@ -151,8 +154,9 @@ multiple_waiters_rejected_test() ->
         lists:seq(1, NumWaiters)
     ),
 
-    %% Give them time to register
-    timer:sleep(50),
+    %% Wait until every waiter is blocked in await and the future has queued them
+    ok = beamtalk_test_wait:idle(Waiters),
+    ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
 
     %% Reject the future
     beamtalk_future:reject(Future, shared_error),
@@ -258,6 +262,7 @@ await_with_timeout_resolved_test() ->
 
     %% Spawn a task that resolves the future after 50ms
     spawn(fun() ->
+        %% sleep: simulates slow work in helper (delayed resolve under test)
         timer:sleep(50),
         beamtalk_future:resolve(Future, quick)
     end),
@@ -285,6 +290,7 @@ await_with_timeout_rejected_test() ->
 
     %% Spawn a task that rejects the future after 50ms
     spawn(fun() ->
+        %% sleep: simulates slow work in helper (delayed resolve under test)
         timer:sleep(50),
         beamtalk_future:reject(Future, failed)
     end),
@@ -297,6 +303,7 @@ await_default_timeout_test() ->
 
     %% Spawn a task that resolves the future after 100ms
     spawn(fun() ->
+        %% sleep: simulates slow work in helper (delayed resolve under test)
         timer:sleep(100),
         beamtalk_future:resolve(Future, within_default_timeout)
     end),
@@ -311,6 +318,7 @@ await_forever_test() ->
 
     %% Spawn a task that resolves after 200ms
     spawn(fun() ->
+        %% sleep: simulates slow work in helper (delayed resolve under test)
         timer:sleep(200),
         beamtalk_future:resolve(Future, late_value)
     end),
@@ -417,8 +425,9 @@ multiple_awaiters_on_same_future_test() ->
      || _ <- lists:seq(1, NumWaiters)
     ],
 
-    %% Give them time to register as waiters
-    timer:sleep(50),
+    %% Wait until every waiter is blocked in await and the future has queued them
+    ok = beamtalk_test_wait:idle(Pids),
+    ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
 
     %% Now resolve the future
     beamtalk_future:resolve(Future, shared_value),
@@ -503,7 +512,7 @@ process_cleanup_when_future_abandoned_test() ->
     Parent = self(),
 
     %% Create future in a separate process that will die
-    _CreatorPid = spawn(fun() ->
+    CreatorPid = spawn(fun() ->
         F = beamtalk_future:new(),
         Parent ! {future, F},
         %% Process exits, but future should remain
@@ -517,8 +526,8 @@ process_cleanup_when_future_abandoned_test() ->
         after 1000 -> error(timeout)
         end,
 
-    %% Give creator time to exit
-    timer:sleep(50),
+    %% Wait for the creator to exit
+    ok = beamtalk_test_wait:dead(CreatorPid),
 
     %% Future process should still be alive
     ?assert(is_process_alive(beamtalk_future:pid(FutureRef))),
@@ -569,8 +578,8 @@ rejected_callback_on_resolved_future_test() ->
         Parent ! {unexpected_callback, Reason}
     end),
 
-    %% Give time for processing
-    timer:sleep(50),
+    %% Let the future process handle the callback registration
+    ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
 
     %% Callback should NOT fire
     receive
@@ -590,8 +599,8 @@ resolved_callback_on_rejected_future_test() ->
         Parent ! {unexpected_callback, Value}
     end),
 
-    %% Give time for processing
-    timer:sleep(50),
+    %% Let the future process handle the callback registration
+    ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
 
     %% Callback should NOT fire
     receive
@@ -627,7 +636,7 @@ callback_exception_does_not_crash_future_test() ->
     end,
 
     %% Future process should still be alive
-    timer:sleep(50),
+    ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
     ?assert(is_process_alive(beamtalk_future:pid(Future))),
 
     %% Subsequent await should work
@@ -637,6 +646,7 @@ await_infinity_resolves_test() ->
     %% await with infinity timeout should not trigger the after clause
     Future = beamtalk_future:new(),
     spawn(fun() ->
+        %% sleep: simulates slow work in helper (delayed resolve under test)
         timer:sleep(100),
         beamtalk_future:resolve(Future, done)
     end),
@@ -673,7 +683,7 @@ concurrent_callback_registration_test() ->
     NumCallbacks = 10,
 
     %% Register multiple callbacks concurrently
-    [
+    Registrars = [
         spawn(fun() ->
             beamtalk_future:when_resolved(Future, fun(Value) ->
                 Parent ! {callback_fired, Value}
@@ -682,8 +692,9 @@ concurrent_callback_registration_test() ->
      || _ <- lists:seq(1, NumCallbacks)
     ],
 
-    %% Give time for callbacks to register
-    timer:sleep(50),
+    %% Wait until every registrar has sent its callback and the future has queued them
+    ok = beamtalk_test_wait:dead(Registrars),
+    ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
 
     %% Resolve the future
     beamtalk_future:resolve(Future, callback_value),
@@ -851,6 +862,7 @@ timeout_and_resolve_race_test() ->
             Future = beamtalk_future:new(),
             spawn(fun() ->
                 %% Resolve at roughly the same time as the timeout
+                %% sleep: simulates slow work in helper (resolve races the timeout)
                 timer:sleep(5),
                 beamtalk_future:resolve(Future, raced)
             end),
@@ -961,7 +973,7 @@ multiple_crashing_callbacks_isolation_test() ->
     ?assertEqual([{good_1, 99}, {good_2, 99}], Results),
 
     %% Future should still be alive and functional
-    timer:sleep(50),
+    ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
     ?assert(is_process_alive(beamtalk_future:pid(Future))),
     ?assertEqual(99, beamtalk_future:await(Future)).
 

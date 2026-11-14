@@ -287,8 +287,8 @@ aggregate_counters_updated_test_() ->
                     beamtalk_actor:sync_send(Pid, increment, []),
                     beamtalk_actor:sync_send(Pid, getValue, []),
 
-                    %% Allow telemetry handlers to process
-                    timer:sleep(50),
+                    %% Wait until the actor has finished all dispatches (and their telemetry)
+                    ok = beamtalk_test_wait:sync(Pid),
 
                     %% Check aggregate stats (always-on class entry; no
                     %% per-actor entry while tracing is disabled)
@@ -325,13 +325,13 @@ trace_events_captured_when_enabled_test_() ->
                 try
                     %% Dispatch without tracing enabled — no trace events
                     beamtalk_actor:sync_send(Pid, increment, []),
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:sync(Pid),
                     ?assertEqual([], beamtalk_trace_store:get_traces()),
 
                     %% Enable tracing and dispatch again
                     beamtalk_trace_store:enable(),
                     beamtalk_actor:sync_send(Pid, getValue, []),
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:sync(Pid),
 
                     Traces = beamtalk_trace_store:get_traces(),
                     %% Filter to dispatch events only (exclude lifecycle)
@@ -573,8 +573,8 @@ multiple_modes_aggregate_test_() ->
                     beamtalk_actor:cast_send(Pid, increment, []),
                     beamtalk_actor:sync_send(Pid, getValue, []),
 
-                    %% Allow telemetry handlers to process
-                    timer:sleep(100),
+                    %% Wait until the actor has finished all dispatches (and their telemetry)
+                    ok = beamtalk_test_wait:sync(Pid),
 
                     %% Verify stats show calls for both methods (in the
                     %% always-on class entry)
@@ -830,7 +830,7 @@ lifecycle_terminate_reason_test_() ->
                         {'EXIT', Pid, _} -> ok
                     after 100 -> ok
                     end,
-                    timer:sleep(100),
+                    ok = beamtalk_test_wait:dead(Pid),
                     %% Verify lifecycle stop event from terminate/2 has non-normal reason
                     %% Note: when killed, terminate/2 may or may not be called
                     %% depending on trap_exit. Check for any stop event.

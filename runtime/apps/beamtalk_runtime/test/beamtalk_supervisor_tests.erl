@@ -1839,8 +1839,11 @@ start_child_via_class_method_supervisor_restart_test() ->
                 error(child_did_not_die)
             end,
 
-            %% Give the supervisor time to restart.
-            timer:sleep(100),
+            %% Wait for the supervisor to restart the child.
+            ok = beamtalk_test_wait:until(fun() ->
+                [{_, P, _, _}] = supervisor:which_children(SupPid),
+                is_pid(P) andalso P =/= ChildPid1
+            end),
 
             %% Verify a new child is running with a different pid.
             [{_, ChildPid2, _, _}] = supervisor:which_children(SupPid),
@@ -1897,7 +1900,10 @@ start_child_via_class_method_real_self_spawn_supervisor_restart_test() ->
                 error(child_did_not_die)
             end,
 
-            timer:sleep(100),
+            ok = beamtalk_test_wait:until(fun() ->
+                [{_, P, _, _}] = supervisor:which_children(SupPid),
+                is_pid(P) andalso P =/= ChildPid1
+            end),
 
             [{_, ChildPid2, _, _}] = supervisor:which_children(SupPid),
             ?assert(is_pid(ChildPid2)),
@@ -1955,7 +1961,10 @@ start_child_via_class_method_real_self_spawn_as_supervisor_restart_test() ->
                 error(child_did_not_die)
             end,
 
-            timer:sleep(100),
+            ok = beamtalk_test_wait:until(fun() ->
+                [{_, P, _, _}] = supervisor:which_children(SupPid),
+                is_pid(P) andalso P =/= ChildPid1
+            end),
 
             [{_, ChildPid2, _, _}] = supervisor:which_children(SupPid),
             ?assert(is_pid(ChildPid2)),
@@ -2128,8 +2137,9 @@ supervise_callers_racing_during_start_get_one_instance_test() ->
                 {in_start, P} -> P
             after 5000 -> error(not_started)
             end,
-        Caller(second),
-        timer:sleep(50),
+        SecondCaller = Caller(second),
+        %% Wait until the second caller is blocked waiting on the in-flight start.
+        ok = beamtalk_test_wait:idle(SecondCaller),
         SupPid ! go,
         First =
             receive
@@ -2196,7 +2206,8 @@ start_honours_exit_signals_from_existing_links_test() ->
             end,
         %% Kill the caller's link while the caller is inside the start.
         exit(Helper, boom),
-        timer:sleep(20),
+        %% The link's exit signal has propagated once the helper is dead.
+        ok = beamtalk_test_wait:dead(Helper),
         SupPid ! go,
         try
             receive
@@ -3407,41 +3418,22 @@ start_enforced_capped_dynamic_supervisor(Max, Restart) ->
 
 %% Poll a pool's children for one outside `Exclude`, e.g. a restarted child.
 await_pool_child(SupPid, Exclude) ->
-    await_pool_child(SupPid, Exclude, 200).
+    ok = beamtalk_test_wait:until(fun() -> pool_children_outside(SupPid, Exclude) =/= [] end),
+    hd(pool_children_outside(SupPid, Exclude)).
 
-await_pool_child(_SupPid, _Exclude, 0) ->
-    error(pool_child_timeout);
-await_pool_child(SupPid, Exclude, N) ->
-    Pids = [
+pool_children_outside(SupPid, Exclude) ->
+    [
         P
      || {_, P, _, _} <- supervisor:which_children(SupPid),
         is_pid(P),
         not lists:member(P, Exclude)
-    ],
-    case Pids of
-        [New | _] ->
-            New;
-        [] ->
-            timer:sleep(10),
-            await_pool_child(SupPid, Exclude, N - 1)
-    end.
+    ].
 
 %% Poll a capacity table until its counter reads `Expected` (a death's DOWN
 %% is processed asynchronously, so the count settles a moment after the
 %% restart it overlaps).
 await_capacity_count(Tid, Expected) ->
-    await_capacity_count(Tid, Expected, 200).
-
-await_capacity_count(_Tid, Expected, 0) ->
-    error({capacity_count_timeout, Expected});
-await_capacity_count(Tid, Expected, N) ->
-    case ets:lookup_element(Tid, count, 2) of
-        Expected ->
-            ok;
-        _ ->
-            timer:sleep(10),
-            await_capacity_count(Tid, Expected, N - 1)
-    end.
+    beamtalk_test_wait:until(fun() -> ets:lookup_element(Tid, count, 2) =:= Expected end).
 
 %% Trace `supervisor:count_children/1` and `supervisor:start_child/2` calls
 %% (global patterns; only explicitly traced processes report). Callers must
@@ -3916,22 +3908,16 @@ teardown_class_dispatch_runtime(_Ctx) ->
 %% Helper: poll until erlang:whereis(Name) is a pid (the supervisor has
 %% restarted the child) or the deadline expires.
 bt1990_wait_for_registration(Name, Except, TimeoutMs) ->
-    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
-    bt1990_wait_for_registration_loop(Name, Except, Deadline).
-
-bt1990_wait_for_registration_loop(Name, Except, Deadline) ->
-    case erlang:whereis(Name) of
-        Pid when is_pid(Pid), Pid =/= Except ->
-            Pid;
-        _ ->
-            case erlang:monotonic_time(millisecond) >= Deadline of
-                true ->
-                    error({registration_timeout, Name, Except});
-                false ->
-                    timer:sleep(5),
-                    bt1990_wait_for_registration_loop(Name, Except, Deadline)
+    ok = beamtalk_test_wait:until(
+        fun() ->
+            case erlang:whereis(Name) of
+                Pid when is_pid(Pid), Pid =/= Except -> true;
+                _ -> false
             end
-    end.
+        end,
+        TimeoutMs
+    ),
+    erlang:whereis(Name).
 
 bt1990_cleanup_name(Name) ->
     case erlang:whereis(Name) of
@@ -4262,21 +4248,15 @@ startChild_arity2_restart_replays_original_call_args_test() ->
     end.
 
 bt3365_wait_for_restart(SupPid, OldPid, TimeoutMs) ->
-    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
-    bt3365_wait_for_restart_loop(SupPid, OldPid, Deadline).
+    ok = beamtalk_test_wait:until(
+        fun() -> bt3365_restarted_child(SupPid, OldPid) =/= undefined end, TimeoutMs
+    ),
+    bt3365_restarted_child(SupPid, OldPid).
 
-bt3365_wait_for_restart_loop(SupPid, OldPid, Deadline) ->
+bt3365_restarted_child(SupPid, OldPid) ->
     case [Pid || {_, Pid, _, _} <- supervisor:which_children(SupPid), is_pid(Pid)] of
-        [NewPid] when NewPid =/= OldPid ->
-            NewPid;
-        _ ->
-            case erlang:monotonic_time(millisecond) >= Deadline of
-                true ->
-                    error(restart_timeout);
-                false ->
-                    timer:sleep(5),
-                    bt3365_wait_for_restart_loop(SupPid, OldPid, Deadline)
-            end
+        [NewPid] when NewPid =/= OldPid -> NewPid;
+        _ -> undefined
     end.
 
 %%====================================================================
@@ -4892,10 +4872,4 @@ wait_until_slots_used(SupPid, N) ->
     await_capacity_count(Tid, N).
 
 wait_until_count(Self, N) ->
-    case beamtalk_supervisor:countChildren(Self) of
-        {ok, N} ->
-            ok;
-        _ ->
-            timer:sleep(10),
-            wait_until_count(Self, N)
-    end.
+    beamtalk_test_wait:until(fun() -> beamtalk_supervisor:countChildren(Self) =:= {ok, N} end).

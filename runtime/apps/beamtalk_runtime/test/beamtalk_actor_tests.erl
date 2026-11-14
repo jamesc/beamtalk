@@ -199,8 +199,8 @@ malformed_cast_message_test() ->
 
     %% Verify actor still works
 
-    % Give it time to process the malformed message
-    timer:sleep(10),
+    % Wait until the actor has processed the malformed message
+    ok = beamtalk_test_wait:sync(Counter),
     Result = gen_server:call(Counter, {getValue, []}),
     ?assertEqual(0, Result),
 
@@ -308,8 +308,8 @@ handle_info_ignores_unknown_messages_test() ->
     Counter ! {some, random, message},
     Counter ! another_random_message,
 
-    %% Give it time to process
-    timer:sleep(10),
+    %% Wait until the actor has processed them
+    ok = beamtalk_test_wait:sync(Counter),
 
     %% Verify actor still works normally
     Result = gen_server:call(Counter, {getValue, []}),
@@ -772,10 +772,12 @@ memory_cleanup_after_termination_test() ->
     %% Stop all actors
     [gen_server:stop(A) || A <- Actors],
 
-    %% Give GC time to clean up
-    timer:sleep(100),
-    erlang:garbage_collect(),
-    timer:sleep(100),
+    %% Wait until the actors are gone and their memory is reclaimed
+    ok = beamtalk_test_wait:dead(Actors),
+    ok = beamtalk_test_wait:until(fun() ->
+        erlang:garbage_collect(),
+        erlang:memory(processes) - InitialMemory < InitialMemory * 0.1
+    end),
 
     FinalMemory = erlang:memory(processes),
 
@@ -1344,8 +1346,6 @@ on_exit_sync_calls_block_on_death_test() ->
     Block = fun(Reason) -> Self ! {exit_reason, Reason} end,
     beamtalk_actor:sync_send(Counter, 'onExit:', [Block]),
     gen_server:stop(Counter, normal, 1000),
-    %% Give the watcher process time to be scheduled and call the block
-    timer:sleep(50),
     receive
         {exit_reason, normal} -> ok
     after 2000 ->
@@ -1360,8 +1360,6 @@ on_exit_async_calls_block_on_death_test() ->
     beamtalk_actor:async_send(Counter, 'onExit:', [Block], Future),
     ?assertEqual(ok, beamtalk_future:await(Future)),
     gen_server:stop(Counter, normal, 1000),
-    %% Give the watcher process time to be scheduled and call the block
-    timer:sleep(50),
     receive
         {exit_reason_async, normal} -> ok
     after 2000 ->
@@ -3727,8 +3725,8 @@ sync_send_timeout_raises_timeout_error_test() ->
     try
         ?assertBtError(timeout, beamtalk_actor:sync_send(Counter, 'slowGet:', [500], 50))
     after
-        %% slowGet returns before test exits; give it time to drain
-        timer:sleep(600),
+        %% slowGet returns before test exits; sync waits for it to drain
+        ok = beamtalk_test_wait:sync(Counter),
         case is_process_alive(Counter) of
             true -> gen_server:stop(Counter);
             false -> ok
@@ -4392,22 +4390,7 @@ bt1990_proxy_unregister_dead_proxy_is_idempotent_test() ->
 %% deadline expires. Used after gen_server:stop to make name-release
 %% ordering deterministic for the no_such_process tests.
 bt1990_wait_until_unregistered(Name, TimeoutMs) ->
-    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
-    bt1990_wait_until_unregistered_loop(Name, Deadline).
-
-bt1990_wait_until_unregistered_loop(Name, Deadline) ->
-    case erlang:whereis(Name) of
-        undefined ->
-            ok;
-        _ ->
-            case erlang:monotonic_time(millisecond) >= Deadline of
-                true ->
-                    error({still_registered, Name});
-                false ->
-                    timer:sleep(5),
-                    bt1990_wait_until_unregistered_loop(Name, Deadline)
-            end
-    end.
+    beamtalk_test_wait:until(fun() -> erlang:whereis(Name) =:= undefined end, TimeoutMs).
 
 %%% `__local__` threading temporaries must not leak into persisted
 %%% actor state or watch-notification changed slots.
@@ -4557,8 +4540,8 @@ pid_class_name_native_backing_module_test() ->
     %% A helper the backing module starts with proc_lib is not its gen_server.
     Helper = proc_lib:spawn(?MODULE, bt4657_wait, []),
     %% proc_lib sets '$initial_call' inside the new process; wait for it.
-    ok = wait_for_initial_call(Pid, 100),
-    ok = wait_for_initial_call(Helper, 100),
+    ok = wait_for_initial_call(Pid),
+    ok = wait_for_initial_call(Helper),
     LivePid = spawn(fun bt4657_wait/0),
     OtherPid = spawn(fun bt4657_wait/0),
     register(beamtalk_class_registry_name(Live), LivePid),
@@ -4609,17 +4592,11 @@ pid_class_name_native_backing_module_test() ->
 bt4664_hint(#beamtalk_error{hint = {beamtalk_string, Bin}}) -> Bin;
 bt4664_hint(#beamtalk_error{hint = Bin}) when is_binary(Bin) -> Bin.
 
-wait_for_initial_call(_Pid, 0) ->
-    timeout;
-wait_for_initial_call(Pid, N) ->
-    {dictionary, Dict} = erlang:process_info(Pid, dictionary),
-    case lists:keymember('$initial_call', 1, Dict) of
-        true ->
-            ok;
-        false ->
-            timer:sleep(10),
-            wait_for_initial_call(Pid, N - 1)
-    end.
+wait_for_initial_call(Pid) ->
+    beamtalk_test_wait:until(fun() ->
+        {dictionary, Dict} = erlang:process_info(Pid, dictionary),
+        lists:keymember('$initial_call', 1, Dict)
+    end).
 
 beamtalk_class_registry_name(ClassName) ->
     beamtalk_class_registry:registry_name(ClassName).

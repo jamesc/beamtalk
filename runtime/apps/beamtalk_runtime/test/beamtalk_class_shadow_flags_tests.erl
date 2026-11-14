@@ -149,12 +149,13 @@ shadow_flag_test_() ->
                 Sender = spawn_link(fun() ->
                     Parent ! {sender, beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)}
                 end),
-                timer:sleep(50),
+                %% Wait until the sender is blocked behind the held lock.
+                ok = beamtalk_test_wait:idle(Sender),
                 Raiser = spawn_link(fun() ->
                     ok = beamtalk_class_shadow_flags:set(extension, Tag),
                     Parent ! raised
                 end),
-                timer:sleep(50),
+                ok = beamtalk_test_wait:idle(Raiser),
                 _ = {Sender, Raiser}
             end),
             receive
@@ -274,12 +275,13 @@ shadow_flag_test_() ->
                         ok = beamtalk_extensions:unregister('Bt3669Ser', bt3669_ser_a, true),
                         Parent ! {u_done, self()}
                     end),
-                    timer:sleep(100),
+                    %% Wait until the unregister is blocked behind the held lock.
+                    ok = beamtalk_test_wait:idle(U),
                     R = spawn_link(fun() ->
                         ok = beamtalk_extensions:register(Tag, bt3669_ser_b, noop_fun(), bt3669),
                         Parent ! {r_done, self()}
                     end),
-                    timer:sleep(100),
+                    ok = beamtalk_test_wait:idle(R),
                     %% Neither has run: state is untouched while the lock is held.
                     ?assert(beamtalk_class_shadow_flags:is_set(extension, Tag)),
                     put(bt3669_workers, {U, R})
@@ -543,11 +545,12 @@ class_ref_test_() ->
             with_static_class(Name, fun(_Pid) ->
                 Parent = self(),
                 beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() ->
-                    _ = spawn_link(fun() ->
+                    Installer = spawn_link(fun() ->
                         _ = beamtalk_class_shadow_flags:class_ref(Name),
                         Parent ! installed
                     end),
-                    timer:sleep(50)
+                    %% Wait until the installer is blocked behind the held lock.
+                    ok = beamtalk_test_wait:idle(Installer)
                 end),
                 receive
                     installed -> ok
@@ -781,15 +784,16 @@ class_map_present(Tag) ->
 race_install_against(Name, Tag, Writer) ->
     Parent = self(),
     beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() ->
-        _ = spawn_link(fun() ->
+        Installer = spawn_link(fun() ->
             Parent ! {installed, target(Name, static_key(Name, class_testSelf), testSelf)}
         end),
-        timer:sleep(50),
-        _ = spawn_link(fun() ->
+        %% Wait until each process is blocked behind the held lock.
+        ok = beamtalk_test_wait:idle(Installer),
+        WriterPid = spawn_link(fun() ->
             ok = Writer(),
             Parent ! written
         end),
-        timer:sleep(50)
+        ok = beamtalk_test_wait:idle(WriterPid)
     end),
     receive
         {installed, _} -> ok
@@ -1000,11 +1004,12 @@ static_call_target_test_() ->
                 Ref = {beamtalk_object, Tag, ?HELPER, Pid},
                 Parent = self(),
                 beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() ->
-                    [
+                    Installers = [
                         spawn_link(fun() -> Parent ! {installed, target(Name, K, Sel)} end)
                      || {K, Sel} <- [{Self, testSelf}, {ClassSelf, testClassSelf}]
                     ],
-                    timer:sleep(50)
+                    %% Wait until both installers are blocked behind the held lock.
+                    ok = beamtalk_test_wait:idle(Installers)
                 end),
                 [
                     receive
@@ -1455,6 +1460,7 @@ static_call_target_test_() ->
                     %% declined.
                     ?assertEqual({false, false, true}, persistent_term:get(Probe)),
                     ?assertNot(erlang:function_exported(Module, class_dropped, 1)),
+                    %% sleep: lets the concurrent sender keep sending across the reload window
                     timer:sleep(20),
                     Sender ! stop,
                     receive
