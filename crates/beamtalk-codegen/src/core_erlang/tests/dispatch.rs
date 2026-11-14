@@ -3469,70 +3469,155 @@ fn try_codegen(src: &str) -> std::result::Result<String, CodeGenError> {
         .map(|doc| doc.to_pretty_string())
 }
 
+/// BT-4806: the former `test_bt2276_class_methods_{zero_arg,keyword_wrong_arity}_block_rejected` pair.
+/// A literal `classMethods:` block whose parameter count does not match the selector's
+/// (`self` plus one per keyword) is a compile-time `BlockArityError` naming the selector.
 #[test]
-fn test_bt2276_class_methods_zero_arg_block_rejected() {
-    // `#greet => [42]` forgot the leading `:self`: a unary class-method block
-    // needs exactly one parameter (`self`).
-    let src = "Object classBuilder name: #BT2276Z; superclass: Object; \
-               classMethods: #{ #greet => [42] }; register";
-    match try_codegen(src) {
-        Err(CodeGenError::BlockArityError {
-            selector,
-            expected,
-            actual,
-            ..
-        }) => {
-            assert!(
-                selector.contains("greet"),
-                "error should name the selector, got: {selector}"
-            );
-            assert_eq!(expected, "1", "unary class method expects `self` only");
-            assert_eq!(actual, 0, "the block declared zero parameters");
+#[allow(clippy::too_many_lines, clippy::type_complexity)] // a data table: one entry per former test
+fn test_bt2276_class_methods_wrong_arity_block_rejected_table() {
+    // (label, source, selector needle, expected arity, declared params, hint needle)
+    let cases: [(&str, &str, &str, &str, usize, Option<&str>); 2] = [
+        (
+            // `#greet => [42]` forgot the leading `:self`: a unary class-method block
+            // needs exactly one parameter (`self`).
+            "unary, zero params",
+            "Object classBuilder name: #BT2276Z; superclass: Object; \
+             classMethods: #{ #greet => [42] }; register",
+            "greet",
+            "1",
+            0,
+            None,
+        ),
+        (
+            // Keyword selector `scale:` needs `self` + one arg = 2 params; the block
+            // declares only `self`.
+            "keyword, one param",
+            "Object classBuilder name: #BT2276K; superclass: Object; \
+             classMethods: #{ #scale: => [:self | 1] }; register",
+            "scale:",
+            "2",
+            1,
+            Some("classMethods:"),
+        ),
+    ];
+    for (label, src, selector_needle, want_expected, want_actual, hint_needle) in cases {
+        match try_codegen(src) {
+            Err(CodeGenError::BlockArityError {
+                selector,
+                expected,
+                actual,
+                hint,
+            }) => {
+                assert!(
+                    selector.contains(selector_needle),
+                    "[{label}] error should name the selector, got: {selector}"
+                );
+                assert_eq!(expected, want_expected, "[{label}] expected arity");
+                assert_eq!(actual, want_actual, "[{label}] declared parameter count");
+                if let Some(needle) = hint_needle {
+                    assert!(
+                        hint.contains(needle),
+                        "[{label}] hint should mention {needle}, got: {hint}"
+                    );
+                }
+            }
+            other => panic!("[{label}] expected BlockArityError, got: {other:?}"),
         }
-        other => panic!("expected BlockArityError for zero-arg classMethods block, got: {other:?}"),
     }
 }
 
+/// BT-4806: the former `test_bt2276_class_methods_{computed_fun_passes_compile,correct_block_unaffected}` pair.
+/// A well-formed `classMethods:` value compiles. A computed (non-block) value cannot have
+/// its arity checked at compile time, so it must NOT be rejected — its arity is validated at
+/// registration time (`beamtalk_class_builder`). A correct literal block lowers to a
+/// class-method fun that, per ADR 0130 §3, takes no `ClassVars` parameter.
 #[test]
-fn test_bt2276_class_methods_keyword_wrong_arity_block_rejected() {
-    // Keyword selector `scale:` needs `self` + one arg = 2 params; the block
-    // declares only `self`.
-    let src = "Object classBuilder name: #BT2276K; superclass: Object; \
-               classMethods: #{ #scale: => [:self | 1] }; register";
-    match try_codegen(src) {
-        Err(CodeGenError::BlockArityError {
-            selector,
-            expected,
-            actual,
-            hint,
-        }) => {
-            assert!(
-                selector.contains("scale:"),
-                "error should name the selector, got: {selector}"
-            );
-            assert_eq!(expected, "2", "scale: expects self + one arg");
-            assert_eq!(actual, 1, "the block declared one parameter");
-            assert!(
-                hint.contains("classMethods:"),
-                "hint should mention classMethods:, got: {hint}"
-            );
-        }
-        other => {
-            panic!(
-                "expected BlockArityError for wrong-arity keyword classMethods block, got: {other:?}"
-            )
-        }
+fn test_bt2276_class_methods_accepted_values_compile_table() {
+    // (label, source, must contain, must not contain)
+    let cases: [(&str, &str, &[&str], &[&str]); 2] = [
+        (
+            "computed fun",
+            "Object classBuilder name: #BT2276C; superclass: Object; \
+             classMethods: #{ #greet => someFun }; register",
+            &[],
+            &[],
+        ),
+        (
+            "correct literal blocks",
+            "Object classBuilder name: #BT2276OK; superclass: Object; \
+             classMethods: #{ #answer => [:self | 42], #scale: => [:self :n | n * 3] }; register",
+            &["fun (ClassSelf) ->", "fun (ClassSelf, "],
+            &["ClassVars"],
+        ),
+    ];
+    for (label, src, has, lacks) in cases {
+        let code = try_codegen(src)
+            .unwrap_or_else(|e| panic!("[{label}] classMethods value must compile: {e:?}"));
+        assert_has(label, &code, has);
+        assert_lacks(label, &code, lacks);
     }
 }
 
+/// BT-4806: the former `test_class_method_self_send_{in_sealed_class_is_guarded,in_open_class_passes_and_rebinds_nothing,in_open_class_with_class_vars_has_no_unwrap}`
+/// trio (ADR 0130 §3 / BT-4301). A class-side self-send is a guarded direct call plus a
+/// runtime walk, and passes nothing and rebinds nothing: no `ClassVars` argument, no
+/// `{class_var_result, ..}` unwrap.
 #[test]
-fn test_bt2276_class_methods_computed_fun_passes_compile() {
-    // A computed (non-block) value cannot have its arity checked at compile
-    // time, so it must NOT be rejected by the compiler — its arity is validated
-    // at registration time (beamtalk_class_builder).
-    let src = "Object classBuilder name: #BT2276C; superclass: Object; \
-               classMethods: #{ #greet => someFun }; register";
-    try_codegen(src).expect("computed classMethods fun must compile (validated at register time)");
+#[allow(clippy::too_many_lines, clippy::type_complexity)] // a data table: one entry per former test
+fn test_class_method_self_send_shape_table() {
+    // (label, source, function whose body is inspected (whole module when None),
+    //  must contain, must not contain)
+    let cases: [(&str, &str, Option<&str>, &[&str], &[&str]); 3] = [
+        (
+            // A sealed class's self-send passes its own `ClassSelf` to the guarded direct
+            // call and to the walk alike.
+            "sealed class is guarded",
+            "sealed Object subclass: SealedCls\n  class foo => 1\n\n  class bar => self foo\n",
+            None,
+            &[
+                "call 'test':'class_foo'(ClassSelf",
+                "call 'beamtalk_class_dispatch':'class_self_send'(ClassSelf, 'foo', [])",
+            ],
+            &[],
+        ),
+        (
+            // Both branches of the guarded fast path are one plain reply.
+            "open class passes and rebinds nothing",
+            "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => self foo\n",
+            Some("'class_bar'/1 = fun"),
+            &[
+                "class_self_direct_ok",
+                "call 'test':'class_foo'(ClassSelf)",
+                "'class_self_send'(",
+                "'foo', [])",
+            ],
+            &["ClassVars", "class_var_result"],
+        ),
+        (
+            // A subclass override reached by the walk may write class variables, in place.
+            "open class with class vars has no unwrap",
+            "Object subclass: OpenCls\n  classState: n = 0\n  class foo => 1\n\n  class bar => self foo\n",
+            None,
+            &[],
+            &["class_var_result"],
+        ),
+    ];
+    for (label, src, function, has, lacks) in cases {
+        let code = codegen_source(src);
+        let inspected = match function {
+            Some(header) => {
+                let start = code
+                    .find(header)
+                    .unwrap_or_else(|| panic!("[{label}] {header} present"));
+                let rest = &code[start..];
+                let end = rest[1..].find("\n'").map_or(rest.len(), |e| e + 1);
+                &rest[..end]
+            }
+            None => code.as_str(),
+        };
+        assert_has(label, inspected, has);
+        assert_lacks(label, inspected, lacks);
+    }
 }
 
 #[test]
@@ -3661,22 +3746,6 @@ fn test_every_class_side_self_send_carries_the_guard() {
             "the guard's fallback is a runtime lookup. Got:\n{code}"
         );
     }
-}
-
-/// BT-4301: a sealed class's self-send passes its own `ClassSelf` to the
-/// guarded direct call and to the walk alike.
-#[test]
-fn test_class_method_self_send_in_sealed_class_is_guarded() {
-    let src = "sealed Object subclass: SealedCls\n  class foo => 1\n\n  class bar => self foo\n";
-    let code = codegen_source(src);
-    assert!(
-        code.contains("call 'test':'class_foo'(ClassSelf"),
-        "the guarded arm calls class_foo with ClassSelf. Got:\n{code}"
-    );
-    assert!(
-        code.contains("call 'beamtalk_class_dispatch':'class_self_send'(ClassSelf, 'foo', [])"),
-        "the walk starts from ClassSelf itself. Got:\n{code}"
-    );
 }
 
 /// BT-4301: an explicit own-class reference (`OpenCls foo`) binds the method
@@ -4096,23 +4165,6 @@ fn test_spawn_with_args_validates_map_argument() {
 // --- ADR 0130 §2/§3: class variables are read and written in place; class
 // methods and class-side self-sends neither take nor return them ---
 
-/// ADR 0130 §3: a `classMethods:` block lowers to `fun (ClassSelf, Args...)`,
-/// with no `ClassVars` parameter.
-#[test]
-fn test_bt2276_class_methods_correct_block_unaffected() {
-    let src = "Object classBuilder name: #BT2276OK; superclass: Object; \
-               classMethods: #{ #answer => [:self | 42], #scale: => [:self :n | n * 3] }; register";
-    let code = try_codegen(src).expect("correct classMethods blocks must compile");
-    assert!(
-        code.contains("fun (ClassSelf) ->") && code.contains("fun (ClassSelf, "),
-        "correct classMethods block should lower to a class-method fun. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("ClassVars"),
-        "a ClassBuilder fun takes no ClassVars (ADR 0130 §3). Got:\n{code}"
-    );
-}
-
 /// ADR 0130 §2: a class-var write inside a `classMethods:` fun is an in-place
 /// `put` (inlined), with the runtime helper as the miss path.
 #[test]
@@ -4304,43 +4356,6 @@ fn test_builder_cascade_at_block_depth_still_lowers_in_place_access() {
     assert_eq!(
         generator.block_depth, 1,
         "block_depth must be restored after lowering the builder fun"
-    );
-}
-
-/// ADR 0130 §3: the guarded fast path of an open-class self-send passes
-/// nothing and rebinds nothing; both branches are one plain reply.
-#[test]
-fn test_class_method_self_send_in_open_class_passes_and_rebinds_nothing() {
-    let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => self foo\n";
-    let code = codegen_source(src);
-    let start = code
-        .find("'class_bar'/1 = fun")
-        .expect("class_bar function present");
-    let bar = &code[start..];
-    let end = bar[1..].find("\n'").map_or(bar.len(), |e| e + 1);
-    let bar = &bar[..end];
-    assert!(
-        bar.contains("class_self_direct_ok")
-            && bar.contains("call 'test':'class_foo'(ClassSelf)")
-            && bar.contains("'class_self_send'(")
-            && bar.contains("'foo', [])"),
-        "guarded case keeps only the call (direct, then the walk). Got:\n{bar}"
-    );
-    assert!(
-        !bar.contains("ClassVars") && !bar.contains("class_var_result"),
-        "a class-side self-send passes nothing and rebinds nothing. Got:\n{bar}"
-    );
-}
-
-/// ADR 0130 §3: the same holds for an open class with class variables (a
-/// subclass override reached by the walk may write them, in place).
-#[test]
-fn test_class_method_self_send_in_open_class_with_class_vars_has_no_unwrap() {
-    let src = "Object subclass: OpenCls\n  classState: n = 0\n  class foo => 1\n\n  class bar => self foo\n";
-    let code = codegen_source(src);
-    assert!(
-        !code.contains("class_var_result"),
-        "no `{{class_var_result, ..}}` unwrap anywhere. Got:\n{code}"
     );
 }
 

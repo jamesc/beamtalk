@@ -4,18 +4,6 @@
 use crate::core_erlang::tests::{assert_has, assert_lacks, codegen};
 
 #[test]
-fn test_list_do_pure_generates_foreach() {
-    // Pure do: (no mutations) generates lists:foreach
-    let src =
-        "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items do: [:item | item]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foreach'"),
-        "Pure do: should generate lists:foreach. Got:\n{code}"
-    );
-}
-
-#[test]
 fn test_list_do_pure_answers_nil_not_foreach_ok() {
     // BT-4619: `lists:foreach/2` answers `ok`; `do:` is declared `-> Nil`,
     // so the inlined call is sequenced and the list arm answers `'nil'`.
@@ -40,29 +28,6 @@ fn test_list_collect_generates_map() {
     assert!(
         code.contains("'lists':'map'"),
         "collect: should generate lists:map. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_list_inject_into_pure_generates_inline_foldl() {
-    // inject:into: (no mutations) with a literal block emits inline
-    // lists:foldl with the block body compiled directly in foldl arg order
-    // (Elem, Acc) — no wrapper function, no runtime helper call.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items inject: 0 into: [:acc :item | acc + item]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "Pure inject:into: should emit inline lists:foldl. Got:\n{code}"
-    );
-    // Should NOT call the runtime helper
-    assert!(
-        !code.contains("'beamtalk_collection':'inject_into'"),
-        "Pure inject:into: should NOT delegate to beamtalk_collection:inject_into. Got:\n{code}"
-    );
-    // Should NOT have a wrapper apply (literal block compiles body directly)
-    assert!(
-        !code.contains("fun (Elem, Acc) -> apply"),
-        "Literal block should compile body directly, not via wrapper apply. Got:\n{code}"
     );
 }
 
@@ -272,36 +237,6 @@ fn test_do_with_field_mutation_uses_stateacc() {
 }
 
 #[test]
-fn test_collect_with_local_mutation_uses_tuple_acc() {
-    // collect: with only local mutation should use element/2 (tuple acc).
-    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    count := 0\n    items collect: [:item | count := count + 1. item * 2]\n";
-    let code = codegen(src);
-    assert!(
-        !code.contains("maps':'get'('__local__count'"),
-        "collect: with local mutation should NOT use maps:get inside lambda. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'element'(2,"),
-        "collect: tuple acc should use element(2, ...) for first threaded var. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_inject_with_local_mutation_uses_tuple_acc() {
-    // inject:into: with only local mutation should use element/2 (tuple acc).
-    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    count := 0\n    items inject: 0 into: [:acc :item | count := count + 1. acc + item]\n";
-    let code = codegen(src);
-    assert!(
-        !code.contains("maps':'get'('__local__count'"),
-        "inject: with local mutation should NOT use maps:get inside lambda. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'element'(2,"),
-        "inject: tuple acc should use element(2, ...) for first threaded var. Got:\n{code}"
-    );
-}
-
-#[test]
 fn test_inject_literal_initial_elides_acc_maybe_await() {
     // Binary op codegen no longer emits maybe_await on any operand, so
     // maybe_await is never emitted on the fold accumulator.
@@ -381,22 +316,6 @@ fn test_inject_nested_scope_no_maybe_await() {
 }
 
 #[test]
-fn test_filter_with_local_mutation_uses_tuple_acc() {
-    // select: with only local mutation should use tuple accumulator.
-    // element(2, ...) reads the first threaded var (slot 1 is AccList).
-    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    count := 0\n    items select: [:item | count := count + 1. item > 0]\n";
-    let code = codegen(src);
-    assert!(
-        !code.contains("maps':'get'('__local__count'"),
-        "select: with local mutation should NOT use maps:get inside lambda. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'element'(2,"),
-        "select: tuple acc should use element(2, ...) for first threaded var. Got:\n{code}"
-    );
-}
-
-#[test]
 fn test_collect_with_mutation_has_list_like_result() {
     // collect: with mutations reconstructs the result to match the
     // receiver via beamtalk_collection:from_list_like/2 (String → binary, Array → Array,
@@ -418,78 +337,6 @@ fn test_select_with_mutation_has_list_like_result() {
     assert!(
         code.contains("'beamtalk_collection':'from_list_like'("),
         "BT-2342: select: with mutations should reconstruct the result via from_list_like. Got:\n{code}"
-    );
-}
-
-// ── takeWhile/dropWhile/groupBy/partition/sort ──────────────
-
-#[test]
-fn test_take_while_with_mutation_compiles() {
-    let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items takeWhile: [:x | self.n := self.n + 1. x < 10]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "takeWhile: with mutation should use foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("StillTaking"),
-        "takeWhile: should track StillTaking flag. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_drop_while_with_mutation_compiles() {
-    let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items dropWhile: [:x | self.n := self.n + 1. x < 10]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "dropWhile: with mutation should use foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("StillDropping"),
-        "dropWhile: should track StillDropping flag. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_partition_with_mutation_compiles() {
-    let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items partition: [:x | self.n := self.n + 1. x > 0]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "partition: with mutation should use foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("MatchList"),
-        "partition: should have MatchList accumulator. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_group_by_with_mutation_compiles() {
-    let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items groupBy: [:x | self.n := self.n + 1. x > 0]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "groupBy: with mutation should use foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("GroupMap"),
-        "groupBy: should have GroupMap accumulator. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_sort_with_mutation_compiles() {
-    let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items sort: [:a :b | self.n := self.n + 1. a < b]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'sort'"),
-        "sort: with mutation should use lists:sort. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'make_ref'"),
-        "sort: should use a fresh per-invocation process dictionary key (BT-2948). Got:\n{code}"
     );
 }
 
@@ -529,84 +376,7 @@ fn test_sort_with_mutation_erases_key_on_every_exit() {
     );
 }
 
-#[test]
-fn test_take_while_pure_generates_takewhile() {
-    let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items takeWhile: [:x | x < 10]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'takewhile'"),
-        "Pure takeWhile: should use lists:takewhile. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_drop_while_pure_generates_dropwhile() {
-    let src = "Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    items dropWhile: [:x | x < 10]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'dropwhile'"),
-        "Pure dropWhile: should use lists:dropwhile. Got:\n{code}"
-    );
-}
-
 // ── Search ops: anySatisfy:, allSatisfy:, detect:, detect:ifNone: ──────
-
-#[test]
-fn test_any_satisfy_pure_generates_lists_any() {
-    // Pure anySatisfy: (no mutations) delegates to lists:any/2 with an
-    // is_list guard so non-list receivers fall back to beamtalk_message_dispatch:send
-    // (not beamtalk_primitive:send — the receiver may be a live actor, whose
-    // reply envelope only beamtalk_actor:sync_send/3 knows how to unwrap).
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items anySatisfy: [:item | item > 0]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'any'"),
-        "Pure anySatisfy: should generate lists:any. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'is_list'("),
-        "Pure anySatisfy: should guard with erlang:is_list. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'beamtalk_message_dispatch':'send'("),
-        "Pure anySatisfy: should fall back to beamtalk_message_dispatch:send for non-lists. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Pure anySatisfy: should NOT use lists:foldl. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_all_satisfy_pure_generates_lists_all() {
-    // Pure allSatisfy: (no mutations) delegates to lists:all/2.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items allSatisfy: [:item | item > 0]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'all'"),
-        "Pure allSatisfy: should generate lists:all. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Pure allSatisfy: should NOT use lists:foldl. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_detect_pure_generates_beamtalk_list_detect() {
-    // Pure detect: (no mutations) delegates to beamtalk_list:detect/2
-    // with an is_list guard for non-list fallback via beamtalk_message_dispatch:send.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items detect: [:item | item > 0]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'beamtalk_list':'detect'"),
-        "Pure detect: should generate beamtalk_list:detect. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Pure detect: should NOT use lists:foldl. Got:\n{code}"
-    );
-}
 
 #[test]
 fn test_detect_if_none_pure_dispatches_to_runtime() {
@@ -799,27 +569,332 @@ fn test_search_op_nested_in_direct_params_loop_table() {
     }
 }
 
-// ── count: ───────────────────────────────────────────────────
+// ── transform ops: pure and mutating tables ────────────────────
 
+/// BT-4806: the former `test_{collect,inject,filter,count,flat_map,take_while,drop_while,partition,group_by,list_reject}_with_local_mutation_uses_tuple_acc`
+/// group (the `do:` sibling asserts exact `maps:get`/`maps:put` counts, so it stays its own
+/// test). A list op whose block mutates only a local variable takes the tuple-accumulator
+/// path: the local is unpacked via `element(N, AccSt)` inside the lambda rather than
+/// `maps:get`, and is repacked into `StateAcc` at fold exit. `N` is one past the op's own
+/// accumulator slots (`AccList`, `StillTaking`, `MatchList`, ...).
 #[test]
-fn test_count_pure_generates_filter_then_length() {
-    // Pure count: (no mutations) uses lists:filter + erlang:length on the filtered result.
-    // Falls back to beamtalk_message_dispatch:send for non-list receivers.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items count: [:item | item > 0]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'filter'"),
-        "Pure count: should filter with lists:filter. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'length'"),
-        "Pure count: should compute length with erlang:length. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Pure count: should NOT use lists:foldl. Got:\n{code}"
-    );
+#[allow(clippy::too_many_lines, clippy::type_complexity)] // a data table: one entry per former test
+fn test_transform_op_with_local_mutation_uses_tuple_acc_table() {
+    // (label, mutated local, sent expression, whether the method answers the local afterwards,
+    //  must contain, must not contain)
+    let cases: [(&str, &str, &str, bool, &[&str], &[&str]); 10] = [
+        (
+            "collect:",
+            "count",
+            "items collect: [:item | count := count + 1. item * 2]",
+            false,
+            // AccList at element(1); first threaded local at element(2).
+            &["'erlang':'element'(2,"],
+            &["maps':'get'('__local__count'"],
+        ),
+        (
+            "inject:into:",
+            "count",
+            "items inject: 0 into: [:acc :item | count := count + 1. acc + item]",
+            false,
+            &["'erlang':'element'(2,"],
+            &["maps':'get'('__local__count'"],
+        ),
+        (
+            "select:",
+            "count",
+            "items select: [:item | count := count + 1. item > 0]",
+            false,
+            &["'erlang':'element'(2,"],
+            &["maps':'get'('__local__count'"],
+        ),
+        (
+            // `n` is both read inside the predicate and used after the loop, so the
+            // threading plan must carry it — guarding against a future optimisation that
+            // drops unreferenced locals. CountAcc is at position 1.
+            "count:",
+            "n",
+            "items count: [:item | n := n + 1. item > 0]",
+            true,
+            &[
+                "'lists':'foldl'",
+                "let N@ = call 'erlang':'element'(2, ",
+                "maps':'put'('__local__n'",
+                "maps':'get'('__local__n'",
+            ],
+            &[],
+        ),
+        (
+            // Result accumulator at element(1); local at element(2).
+            "flatMap:",
+            "n",
+            "items flatMap: [:item | n := n + 1. #(item, item)]",
+            true,
+            &[
+                "'lists':'foldl'",
+                "let N@ = call 'erlang':'element'(2, ",
+                "maps':'put'('__local__n'",
+            ],
+            &["'lists':'flatmap'"],
+        ),
+        (
+            // {AccList, StillTaking, LocalVars...}: locals start at position 3.
+            "takeWhile:",
+            "n",
+            "items takeWhile: [:item | n := n + 1. item < 10]",
+            true,
+            &[
+                "'lists':'foldl'",
+                "StillTaking",
+                "let N@ = call 'erlang':'element'(3, ",
+                "maps':'put'('__local__n'",
+            ],
+            &[],
+        ),
+        (
+            // {AccList, StillDropping, LocalVars...}: locals start at position 3.
+            "dropWhile:",
+            "n",
+            "items dropWhile: [:item | n := n + 1. item < 3]",
+            true,
+            &[
+                "'lists':'foldl'",
+                "StillDropping",
+                "let N@ = call 'erlang':'element'(3, ",
+                "maps':'put'('__local__n'",
+            ],
+            &[],
+        ),
+        (
+            // {MatchList, NoMatchList, LocalVars...}: locals start at position 3.
+            "partition:",
+            "n",
+            "items partition: [:item | n := n + 1. item > 3]",
+            true,
+            &[
+                "'lists':'foldl'",
+                "MatchList",
+                "let N@ = call 'erlang':'element'(3, ",
+                "maps':'put'('__local__n'",
+            ],
+            &[],
+        ),
+        (
+            // {GroupMap, LocalVars...}: locals start at position 2.
+            "groupBy:",
+            "n",
+            "items groupBy: [:item | n := n + 1. item > 3]",
+            true,
+            &[
+                "'lists':'foldl'",
+                "GroupMap",
+                "let N@ = call 'erlang':'element'(2, ",
+                "maps':'put'('__local__n'",
+            ],
+            &[],
+        ),
+        (
+            // {ResultList, Var1, ...}; negate=true wraps the predicate with erlang:not, and
+            // the result is rebuilt via from_list_like (String → binary, Array → Array).
+            "reject:",
+            "count",
+            "items reject: [:item | count := count + 1. item > 0]",
+            true,
+            &[
+                "'lists':'foldl'",
+                "let Count@ = call 'erlang':'element'(2, ",
+                "call 'erlang':'not'",
+                "'beamtalk_collection':'from_list_like'(",
+            ],
+            &[],
+        ),
+    ];
+    for (label, local, expr, answers_local, has, lacks) in cases {
+        let tail = if answers_local {
+            format!("    {local}\n")
+        } else {
+            String::new()
+        };
+        let src = format!(
+            "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    {local} := 0\n    {expr}\n{tail}"
+        );
+        let code = codegen(&src);
+        assert_has(label, &code, has);
+        assert_lacks(label, &code, lacks);
+    }
 }
+
+/// BT-4806: the former `test_{list_do,list_inject_into,take_while,drop_while,any_satisfy,all_satisfy,detect,count,flat_map,partition,group_by,list_select,list_reject,sort}_pure_generates_*`
+/// group (the two `multi_stmt_first_is_pure` tests inspect statement sequencing, not
+/// the op's lowering, so they stay separate). A list op whose block mutates nothing takes the
+/// pure fast path: a direct `lists:*` / `beamtalk_list:*` call, never the mutation-threading
+/// `lists:foldl`, with an `is_list` guard that sends non-list receivers through
+/// `beamtalk_message_dispatch:send` under the op's own selector.
+#[test]
+#[allow(clippy::too_many_lines, clippy::type_complexity)] // a data table: one entry per former test
+fn test_transform_op_pure_generates_direct_call_table() {
+    // (label, sent expression, must contain, must not contain)
+    let cases: [(&str, &str, &[&str], &[&str]); 14] = [
+        // `lists:foreach/2` answers `ok`; see `test_list_do_pure_answers_nil_not_foreach_ok`.
+        (
+            "do:",
+            "items do: [:item | item]",
+            &["'lists':'foreach'"],
+            &[],
+        ),
+        (
+            // Inline lists:foldl with the block body compiled directly in foldl arg order
+            // (Elem, Acc) — no wrapper function, no runtime helper call.
+            "inject:into:",
+            "items inject: 0 into: [:acc :item | acc + item]",
+            &["'lists':'foldl'"],
+            &[
+                "'beamtalk_collection':'inject_into'",
+                "fun (Elem, Acc) -> apply",
+            ],
+        ),
+        (
+            "takeWhile:",
+            "items takeWhile: [:x | x < 10]",
+            &["'lists':'takewhile'"],
+            &[],
+        ),
+        (
+            "dropWhile:",
+            "items dropWhile: [:x | x < 10]",
+            &["'lists':'dropwhile'"],
+            &[],
+        ),
+        (
+            // The fallback goes through beamtalk_message_dispatch:send (not
+            // beamtalk_primitive:send): the receiver may be a live actor, whose reply
+            // envelope only beamtalk_actor:sync_send/3 knows how to unwrap.
+            "anySatisfy:",
+            "items anySatisfy: [:item | item > 0]",
+            &[
+                "'lists':'any'",
+                "'erlang':'is_list'(",
+                "'beamtalk_message_dispatch':'send'(",
+            ],
+            &["'lists':'foldl'"],
+        ),
+        (
+            "allSatisfy:",
+            "items allSatisfy: [:item | item > 0]",
+            &["'lists':'all'"],
+            &["'lists':'foldl'"],
+        ),
+        (
+            "detect:",
+            "items detect: [:item | item > 0]",
+            &["'beamtalk_list':'detect'"],
+            &["'lists':'foldl'"],
+        ),
+        (
+            // lists:filter + erlang:length on the filtered result.
+            "count:",
+            "items count: [:item | item > 0]",
+            &["'lists':'filter'", "'erlang':'length'"],
+            &["'lists':'foldl'"],
+        ),
+        (
+            "flatMap:",
+            "items flatMap: [:item | #(item, item)]",
+            &["'lists':'flatmap'", "'beamtalk_message_dispatch':'send'("],
+            &["'lists':'foldl'"],
+        ),
+        (
+            "partition:",
+            "items partition: [:item | item > 0]",
+            &["'beamtalk_list':'partition'"],
+            &["'lists':'foldl'"],
+        ),
+        (
+            "groupBy:",
+            "items groupBy: [:item | item > 0]",
+            &["'beamtalk_list':'group_by'"],
+            &["'lists':'foldl'"],
+        ),
+        (
+            // The runtime fallback uses the `select:` selector (mapped from the "filter"
+            // operation by generate_simple_list_op).
+            "select:",
+            "items select: [:item | item > 0]",
+            &["'lists':'filter'", "'select:'"],
+            &["'lists':'foldl'"],
+        ),
+        (
+            // The predicate is wrapped in `erlang:not` and the runtime fallback selector
+            // is `reject:` (not `select:` or `filter`).
+            "reject:",
+            "items reject: [:item | item > 0]",
+            &["'lists':'filter'", "call 'erlang':'not'", "'reject:'"],
+            &["'lists':'foldl'"],
+        ),
+        (
+            // lists:sort is the mutation path (process-dictionary state threading) only.
+            "sort:",
+            "items sort: [:a :b | a < b]",
+            &[
+                "'beamtalk_list':'sort_with'",
+                "'erlang':'is_list'(",
+                "'beamtalk_message_dispatch':'send'(",
+                "'sort:'",
+            ],
+            &["'lists':'sort'"],
+        ),
+    ];
+    for (label, expr, has, lacks) in cases {
+        let src = format!("Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    {expr}\n");
+        let code = codegen(&src);
+        assert_has(label, &code, has);
+        assert_lacks(label, &code, lacks);
+    }
+}
+
+/// BT-4806: the former `test_{take_while,drop_while,partition,group_by,sort}_with_mutation_compiles`
+/// group. A field-mutating block routes these ops through the state-threading path:
+/// `lists:foldl` carrying the op's own accumulator marker, or `lists:sort` with a fresh
+/// per-invocation process-dictionary key for `sort:`.
+#[test]
+fn test_transform_op_with_field_mutation_compiles_table() {
+    // (label, sent expression, must contain)
+    let cases: [(&str, &str, &[&str]); 5] = [
+        (
+            "takeWhile:",
+            "items takeWhile: [:x | self.n := self.n + 1. x < 10]",
+            &["'lists':'foldl'", "StillTaking"],
+        ),
+        (
+            "dropWhile:",
+            "items dropWhile: [:x | self.n := self.n + 1. x < 10]",
+            &["'lists':'foldl'", "StillDropping"],
+        ),
+        (
+            "partition:",
+            "items partition: [:x | self.n := self.n + 1. x > 0]",
+            &["'lists':'foldl'", "MatchList"],
+        ),
+        (
+            "groupBy:",
+            "items groupBy: [:x | self.n := self.n + 1. x > 0]",
+            &["'lists':'foldl'", "GroupMap"],
+        ),
+        (
+            // BT-2948: a fresh per-invocation process dictionary key.
+            "sort:",
+            "items sort: [:a :b | self.n := self.n + 1. a < b]",
+            &["'lists':'sort'", "'erlang':'make_ref'"],
+        ),
+    ];
+    for (label, expr, has) in cases {
+        let src = format!("Actor subclass: Ctr\n  state: n = 0\n\n  run: items =>\n    {expr}\n");
+        let code = codegen(&src);
+        assert_has(label, &code, has);
+    }
+}
+
+// ── count: ───────────────────────────────────────────────────
 
 #[test]
 fn test_count_with_field_mutation_uses_foldl() {
@@ -841,64 +916,7 @@ fn test_count_with_field_mutation_uses_foldl() {
     );
 }
 
-#[test]
-fn test_count_with_local_mutation_uses_tuple_acc() {
-    // count: with only a local variable mutation uses the tuple-accumulator
-    // path: {CountAcc, N, ...}. The local is unpacked inside the lambda via
-    // element(2, AccSt) — not via maps:get.
-    // `n` is both read inside the predicate (n := n + 1) and used after the loop, so
-    // the threading plan must carry it — guarding against a future optimization that
-    // drops unreferenced locals.
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    n := 0\n",
-        "    items count: [:item | n := n + 1. item > 0]\n",
-        "    n\n",
-    );
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "count: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    // CountAcc is at position 1; 'n' is the first threaded local at position 2.
-    assert!(
-        code.contains("let N@ = call 'erlang':'element'(2, "),
-        "count: tuple-acc should extract 'n' via element(2, AccSt) inside the lambda. Got:\n{code}"
-    );
-    // Packs 'n' into StateAcc at fold exit and threads it back via maps:get.
-    assert!(
-        code.contains("maps':'put'('__local__n'"),
-        "count: with local mutation should pack '__local__n' into StateAcc at fold exit. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'get'('__local__n'"),
-        "count: with local mutation should thread '__local__n' back via maps:get after the fold. Got:\n{code}"
-    );
-}
-
 // ── flatMap: ──────────────────────────────────────────────────────────
-
-#[test]
-fn test_flat_map_pure_generates_lists_flatmap() {
-    // Pure flatMap: (no mutations) delegates to lists:flatmap with an is_list guard.
-    // Non-list receivers fall back to beamtalk_message_dispatch:send.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items flatMap: [:item | #(item, item)]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'flatmap'"),
-        "Pure flatMap: should generate lists:flatmap. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Pure flatMap: should NOT use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'beamtalk_message_dispatch':'send'("),
-        "Pure flatMap: should fall back to beamtalk_message_dispatch:send for non-lists. Got:\n{code}"
-    );
-}
 
 #[test]
 fn test_flat_map_with_field_mutation_uses_foldl() {
@@ -917,232 +935,6 @@ fn test_flat_map_with_field_mutation_uses_foldl() {
     assert!(
         code.contains("maps':'put'('n'"),
         "flatMap: body should update 'n' field via maps:put. Got:\n{code}"
-    );
-}
-
-// ── flatMap: with local mutation (tuple-acc path) ────────────────────
-
-#[test]
-fn test_flat_map_with_local_mutation_uses_tuple_acc() {
-    // flatMap: where the block mutates a local variable uses the tuple-accumulator
-    // path (use_tuple_acc=true). Result accumulator is at element(1, AccSt) and
-    // the local 'n' is unpacked at element(2, AccSt) inside the lambda.
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    n := 0\n",
-        "    items flatMap: [:item | n := n + 1. #(item, item)]\n",
-        "    n\n",
-    );
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "flatMap: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'flatmap'"),
-        "flatMap: with local mutation should NOT use lists:flatmap. Got:\n{code}"
-    );
-    assert!(
-        code.contains("let N@ = call 'erlang':'element'(2, "),
-        "flatMap: tuple-acc should unpack 'n' at element(2, AccSt) inside the lambda. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'put'('__local__n'"),
-        "flatMap: with local mutation should repack '__local__n' into StateAcc at fold exit. Got:\n{code}"
-    );
-}
-
-// ── takeWhile: ────────────────────────────────────────────────────────
-
-#[test]
-fn test_take_while_with_local_mutation_uses_tuple_acc() {
-    // takeWhile: where the block mutates a local uses the tuple-accumulator path.
-    // Accumulator structure is {AccList, StillTaking, LocalVars...}.
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    n := 0\n",
-        "    items takeWhile: [:item | n := n + 1. item < 10]\n",
-        "    n\n",
-    );
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "takeWhile: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("StillTaking"),
-        "takeWhile: with local mutation should carry StillTaking in the accumulator. Got:\n{code}"
-    );
-    assert!(
-        // State vars start at position 3 (after AccList and StillTaking).
-        code.contains("let N@ = call 'erlang':'element'(3, "),
-        "takeWhile: tuple-acc should unpack 'n' at element(3, AccSt) inside the lambda. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'put'('__local__n'"),
-        "takeWhile: with local mutation should repack '__local__n' into StateAcc at fold exit. Got:\n{code}"
-    );
-}
-
-// ── dropWhile: ────────────────────────────────────────────────────────
-
-#[test]
-fn test_drop_while_with_local_mutation_uses_tuple_acc() {
-    // dropWhile: where the block mutates a local uses the tuple-accumulator path.
-    // Accumulator structure is {AccList, StillDropping, LocalVars...}.
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    n := 0\n",
-        "    items dropWhile: [:item | n := n + 1. item < 3]\n",
-        "    n\n",
-    );
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "dropWhile: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("StillDropping"),
-        "dropWhile: with local mutation should carry StillDropping in the accumulator. Got:\n{code}"
-    );
-    assert!(
-        // State vars start at position 3 (after AccList and StillDropping).
-        code.contains("let N@ = call 'erlang':'element'(3, "),
-        "dropWhile: tuple-acc should unpack 'n' at element(3, AccSt) inside the lambda. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'put'('__local__n'"),
-        "dropWhile: with local mutation should repack '__local__n' into StateAcc at fold exit. Got:\n{code}"
-    );
-}
-
-// ── partition: ────────────────────────────────────────────────────────
-
-#[test]
-fn test_partition_pure_generates_beamtalk_list_partition() {
-    // Pure partition: (no mutations) delegates to beamtalk_list:partition.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items partition: [:item | item > 0]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'beamtalk_list':'partition'"),
-        "Pure partition: should generate beamtalk_list:partition. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Pure partition: should NOT use lists:foldl. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_partition_with_local_mutation_uses_tuple_acc() {
-    // partition: where the block mutates a local uses the tuple-accumulator path.
-    // Accumulator structure is {MatchList, NoMatchList, LocalVars...}.
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    n := 0\n",
-        "    items partition: [:item | n := n + 1. item > 3]\n",
-        "    n\n",
-    );
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "partition: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("MatchList"),
-        "partition: with local mutation should carry MatchList in the accumulator. Got:\n{code}"
-    );
-    assert!(
-        // State vars start at position 3 (after MatchList and NoMatchList).
-        code.contains("let N@ = call 'erlang':'element'(3, "),
-        "partition: tuple-acc should unpack 'n' at element(3, AccSt) inside the lambda. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'put'('__local__n'"),
-        "partition: with local mutation should repack '__local__n' into StateAcc at fold exit. Got:\n{code}"
-    );
-}
-
-// ── groupBy: ──────────────────────────────────────────────────────────
-
-#[test]
-fn test_group_by_pure_generates_beamtalk_list_group_by() {
-    // Pure groupBy: (no mutations) delegates to beamtalk_list:group_by.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items groupBy: [:item | item > 0]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'beamtalk_list':'group_by'"),
-        "Pure groupBy: should generate beamtalk_list:group_by. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Pure groupBy: should NOT use lists:foldl. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_group_by_with_local_mutation_uses_tuple_acc() {
-    // groupBy: where the block mutates a local uses the tuple-accumulator path.
-    // Accumulator structure is {GroupMap, LocalVars...}.
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    n := 0\n",
-        "    items groupBy: [:item | n := n + 1. item > 3]\n",
-        "    n\n",
-    );
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "groupBy: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("GroupMap"),
-        "groupBy: with local mutation should carry GroupMap in the accumulator. Got:\n{code}"
-    );
-    assert!(
-        // State vars start at position 2 (after GroupMap only).
-        code.contains("let N@ = call 'erlang':'element'(2, "),
-        "groupBy: tuple-acc should unpack 'n' at element(2, AccSt) inside the lambda. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'put'('__local__n'"),
-        "groupBy: with local mutation should repack '__local__n' into StateAcc at fold exit. Got:\n{code}"
-    );
-}
-
-// ── select: pure (no mutations) ───────────────────────────────────────
-
-#[test]
-fn test_list_select_pure_generates_lists_filter() {
-    // Pure select: with a literal block and no mutations delegates to lists:filter.
-    // This exercises the path: generate_list_select → generate_simple_list_op("filter")
-    // covering filter_ops.rs:38 and the "filter" => "select:" match arm in mod.rs.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items select: [:item | item > 0]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'filter'"),
-        "Pure select: should generate lists:filter. Got:\n{code}"
-    );
-    // Runtime fallback for non-list receivers uses the 'select:' selector (mapped
-    // from the 'filter' operation string by generate_simple_list_op).
-    assert!(
-        code.contains("'select:'"),
-        "Runtime fallback should use 'select:' selector. Got:\n{code}"
-    );
-    // Pure path must NOT use foldl (that's the mutation-threading path).
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Pure select: must NOT use lists:foldl. Got:\n{code}"
     );
 }
 
@@ -1533,34 +1325,6 @@ fn test_non_literal_callable_in_expression_position_is_a_plain_value() {
 // ── reject: ───────────────────────────────────────────────────────────
 
 #[test]
-fn test_list_reject_pure_generates_negated_filter() {
-    // Pure reject: (no mutations) wraps the predicate in an `erlang:not` negating fun
-    // and delegates to lists:filter. An is_list guard routes non-list receivers to
-    // beamtalk_message_dispatch:send with 'reject:' selector.
-    let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items reject: [:item | item > 0]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'filter'"),
-        "Pure reject: should generate lists:filter (negated). Got:\n{code}"
-    );
-    // The predicate is wrapped with erlang:not to invert the inclusion decision.
-    assert!(
-        code.contains("call 'erlang':'not'"),
-        "Pure reject: must wrap predicate with erlang:not. Got:\n{code}"
-    );
-    // Runtime fallback selector must be 'reject:' (not 'select:' or 'filter').
-    assert!(
-        code.contains("'reject:'"),
-        "Runtime fallback for reject: should use 'reject:' selector. Got:\n{code}"
-    );
-    // Pure path must NOT fall through to the stateful foldl path.
-    assert!(
-        !code.contains("'lists':'foldl'"),
-        "Pure reject: must NOT use lists:foldl. Got:\n{code}"
-    );
-}
-
-#[test]
 fn test_list_reject_with_field_mutation_uses_foldl() {
     // reject: with a field mutation cannot use the pure negating-filter path; it must
     // thread state via lists:foldl. The negate=true flag produces `call 'erlang':'not'`
@@ -1579,77 +1343,6 @@ fn test_list_reject_with_field_mutation_uses_foldl() {
     assert!(
         code.contains("maps':'put'('n'"),
         "reject: body should update 'n' field via maps:put. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_list_reject_with_local_mutation_uses_tuple_acc() {
-    // reject: with only a local variable mutation uses the
-    // tuple-accumulator path: {ResultList, Var1, ...}. Locals are unpacked via
-    // element(2, AccSt) inside the lambda, and the result is wrapped via
-    // from_list_like for string-aware reconstruction — parity with select:.
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    count := 0\n",
-        "    items reject: [:item | count := count + 1. item > 0]\n",
-        "    count\n",
-    );
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "reject: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    // ResultList is at element(1, AccSt); 'count' is the first threaded local at element(2, ...).
-    assert!(
-        code.contains("let Count@ = call 'erlang':'element'(2, "),
-        "reject: tuple-acc should extract 'count' via element(2, AccSt) inside lambda. Got:\n{code}"
-    );
-    // negate=true: the tuple-acc case expression wraps the predicate with erlang:not.
-    assert!(
-        code.contains("call 'erlang':'not'"),
-        "reject: with local mutation should emit erlang:not for the negate=true case condition. Got:\n{code}"
-    );
-    // result must be reconstructed via from_list_like (String → binary, Array → Array).
-    assert!(
-        code.contains("'beamtalk_collection':'from_list_like'("),
-        "reject: with local mutation should use from_list_like for string-aware result. Got:\n{code}"
-    );
-}
-
-// ── sort: pure path ───────────────────────────────────────────────────
-
-#[test]
-fn test_sort_pure_generates_beamtalk_list_sort_with() {
-    // Pure sort: (no mutations) delegates to beamtalk_list:sort_with/2 with an
-    // is_list guard. Non-list receivers fall back to beamtalk_message_dispatch:send
-    // with 'sort:' selector. The mutation path (lists:sort + process-dict)
-    // must NOT appear.
-    let src =
-        "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items sort: [:a :b | a < b]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'beamtalk_list':'sort_with'"),
-        "Pure sort: should generate beamtalk_list:sort_with. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'erlang':'is_list'("),
-        "Pure sort: should guard with erlang:is_list. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'beamtalk_message_dispatch':'send'("),
-        "Pure sort: should fall back to beamtalk_message_dispatch:send for non-lists. Got:\n{code}"
-    );
-    // Runtime fallback selector is 'sort:' (consistent with 'select:' / 'reject:' pattern).
-    assert!(
-        code.contains("'sort:'"),
-        "Pure sort: runtime fallback should use 'sort:' selector. Got:\n{code}"
-    );
-    // lists:sort is used only in the mutation path (process-dictionary state threading).
-    assert!(
-        !code.contains("'lists':'sort'"),
-        "Pure sort: should NOT use lists:sort (that is the mutation path). Got:\n{code}"
     );
 }
 
