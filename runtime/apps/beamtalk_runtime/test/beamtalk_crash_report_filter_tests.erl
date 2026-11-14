@@ -147,7 +147,9 @@ supervisor_child() ->
         (_) -> false
     end),
     Text = format(Event),
-    ?assertNotEqual(nomatch, binary:match(Text, <<"Bt4820Crasher>>start_link">>)),
+    ?assertNotEqual(
+        nomatch, binary:match(Text, <<"{mfargs,{<<\"Bt4820Crasher>>start_link\">>,[]}}">>)
+    ),
     ?assertEqual(nomatch, binary:match(Text, ?RAW)),
     exit(Sup, shutdown).
 

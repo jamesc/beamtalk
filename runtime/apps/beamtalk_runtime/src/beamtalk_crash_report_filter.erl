@@ -53,6 +53,7 @@ back to the original callback on error too.
 %% Bounds on the walk of a `reason` term looking for stacktraces.
 -define(MAX_DEPTH, 4).
 -define(MAX_LIST, 1000).
+-define(MAX_TUPLE, 16).
 
 -doc """
 Install the primary filter. Called once at runtime start; installing it
@@ -183,7 +184,7 @@ frames_in(_Term, 0) ->
     [];
 frames_in({M, F, A, Loc}, _Depth) when is_atom(M), is_atom(F), is_list(Loc) ->
     mfa_of(M, F, A);
-frames_in(Term, Depth) when is_tuple(Term) ->
+frames_in(Term, Depth) when is_tuple(Term), tuple_size(Term) =< ?MAX_TUPLE ->
     lists:flatmap(fun(E) -> frames_in(E, Depth - 1) end, tuple_to_list(Term));
 frames_in(Term, Depth) when is_list(Term) ->
     try
@@ -245,8 +246,14 @@ rename_terms(_Label, Report, _Rendered) ->
 rename_offender({offender, Offender}, Rendered) when is_list(Offender) ->
     {offender, [
         case Prop of
-            {Key, {M, F, A}} when Key =:= mfargs; Key =:= mfa ->
-                rename_mfa_item(Key, M, F, A, Prop, Rendered);
+            {mfargs, {M, F, Args}} when is_list(Args) ->
+                %% Keep the `{Name, Args}` shape so the start arguments stay visible.
+                case rename_mfa_item(mfargs, M, F, Args, Prop, Rendered) of
+                    {mfargs, Name} when is_binary(Name) -> {mfargs, {Name, Args}};
+                    Other -> Other
+                end;
+            {mfa, {M, F, A}} ->
+                rename_mfa_item(mfa, M, F, A, Prop, Rendered);
             _ ->
                 Prop
         end
@@ -320,9 +327,9 @@ rename_tuple_frame(Text, M, F, A, Name) ->
         re:replace(io_lib:write_atom(M), "[^A-Za-z0-9_]", "\\\\&", [global, {return, binary}]),
         ",\\s*",
         re:replace(io_lib:write_atom(F), "[^A-Za-z0-9_]", "\\\\&", [global, {return, binary}]),
-        ",\\s*(?:",
+        ",\\s*",
         integer_to_binary(A),
-        "|\\[[^\\]]*\\]),"
+        ","
     ]),
     re:replace(
         Text,
