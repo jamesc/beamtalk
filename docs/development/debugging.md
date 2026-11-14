@@ -197,6 +197,8 @@ print.
 | `beamtalk run Class sel` | `--raw-mfa` | an uncaught error is followed by the whole stack in the same format (`--connect` renders the reply's `frames` client-side) |
 | REPL | `:raw-mfa [on\|off]` (bare toggles) | this session only: an error is followed by every frame; without it, an error reply that carries frames ends with `(N frames hidden; :raw-mfa shows all)` |
 
+`run --raw-mfa` lists the stack the caller caught. For an entry that runs in a class process (its class or an ancestor declares class variables, ADR 0142) the relay re-raises with the caller's stacktrace, so the listing shows the dispatch frames rather than the class-method frames.
+
 The REPL toggle is a render option of the attached client. It is not sent to
 the node, so a second session on the same workspace is unchanged, and no
 application env or `persistent_term` is written. `beamtalk test` runs on a
