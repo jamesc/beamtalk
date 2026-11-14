@@ -1104,14 +1104,17 @@ The **argument** is not checked at run time: a number, character, string or symb
 
 Arithmetic and comparison operators are messages, so `self.count + 1` must
 dispatch to the object's `+` when `count` holds a `Point` or `Money`. The
-compiler emits the bare Erlang arithmetic/comparison instruction only when it
-*knows* the operand is a primitive; otherwise it adds a runtime type test that
-sends the message to objects. For a field, "knows" means the declared type: a
-field annotated `:: Integer`, `:: Float` or `:: Number` takes the bare fast
-path, and comparisons also accept `:: Character` / `:: String`. A union with
-`Nil` (`:: Integer | Nil`) stays bare for arithmetic only; its comparisons get
-the runtime test so a `nil` raises instead of term-ordering (see Comparison
-above). An **untyped** field always gets the runtime test,
+compiler emits the bare Erlang arithmetic instruction only when it *knows* the
+operand is a primitive; otherwise it adds a runtime type test that sends the
+message to objects. For a field, "knows" means the declared type: a field
+annotated `:: Integer`, `:: Float` or `:: Number` takes the bare fast path for
+arithmetic. A comparison is bare only on a receiver the compiler *proves* (a
+literal, `self` in a builtin class); on a field declared `:: Integer`,
+`:: Float`, `:: Number`, `:: Character` or `:: String` it gets one inline test
+for the declared kind, because a declaration is not enforced at run time
+(BT-4823; see Comparison above). A union with `Nil` (`:: Integer | Nil`) stays
+bare for arithmetic only; its comparisons get the general runtime test so a
+`nil` raises instead of term-ordering. An **untyped** field always gets the runtime test,
 whatever its default, because writers outside the class can store any object in
 it (BT-3925):
 

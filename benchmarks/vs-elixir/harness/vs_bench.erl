@@ -610,7 +610,7 @@ compiles_to("11b") -> "erlang:'+'(A, 1)";
 compiles_to("11c") -> "is_number guard, erlang:'+'";
 compiles_to("11d") -> "send(Bool, 'ifTrue:ifFalse:', [fun, fun]) -> True:dispatch/3";
 compiles_to("11e") -> "is_number guard (declared Integer, BT-4823), erlang:'<'";
-compiles_to("11f") -> "letrec loop; is_number guard on the typed limit (BT-4823), erlang:'<'";
+compiles_to("11f") -> "letrec loop; is_number guard on the typed limit (BT-4823), erlang:'>'";
 compiles_to("11g") -> "Number>>max: (self guarded: Number is not a proven class), erlang:'>'";
 compiles_to("12a") -> "typed receiver (BT-4127): is_map + tag guard, erlang:whereis + class-object tuple with the pinned module; untyped: beamtalk_primitive:class_of_object derived-cache hit";
 compiles_to("12b") -> "class ref built per call (whereis_class + module_name_safe) + send(P, 'isKindOf:') -> direct objectIsKindOf/2 call (no FFI proxy, BT-4410): one memoised {is_kind_of, C, B} lookup (BT-4221)";

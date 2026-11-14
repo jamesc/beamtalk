@@ -10,7 +10,7 @@
 
 use crate::core_erlang::class_meta;
 use crate::core_erlang::field_types::{
-    BareOperator, ComparisonKinds, FieldTypeFact, NUMERIC_TYPES, classify_fields,
+    ComparisonKinds, FieldTypeFact, NUMERIC_TYPES, classify_fields,
 };
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::generator::{ClassContext, DirectCallTable, ReplContext, ValueTypeContext};
@@ -459,11 +459,10 @@ impl CoreErlangGenerator {
             .is_some_and(|ty| NUMERIC_TYPES.contains(&ty.as_str()))
     }
 
-    /// Whether `name` refers to a parameter declared with a builtin
-    /// comparable type. A superset of [`Self::param_is_numeric`]: bare
-    /// comparison BIFs are correct for `Character`/`String` too (both define
-    /// `< <=` as `@primitive`), so a `:: Character`/`:: String` param stays on
-    /// the bare-BIF fast path and skips the runtime comparison guard.
+    /// The comparison kinds of `name` when it is a parameter declared with a
+    /// builtin comparable type (`Integer`/`Float`/`Number`/`Character`/
+    /// `String`). A declaration is not a proof, so a comparison on it carries a
+    /// guard testing exactly these kinds (BT-4823).
     pub(in crate::core_erlang) fn param_comparison_kinds(
         &self,
         name: &str,
@@ -530,37 +529,33 @@ impl CoreErlangGenerator {
         self.current_class_var_types.clear();
     }
 
-    /// Whether a `self.<name>` read is known to hold a value on which the
-    /// operator BIF for `op` is correct, so the fast path may stay
-    /// bare. Inside a class method `self.<name>` is a class variable, so the
-    /// class-side facts are consulted. A name with no fact is guarded — the
-    /// runtime guard is always correct (BT-3892).
-    pub(in crate::core_erlang) fn field_is_bare(&self, name: &str, op: BareOperator) -> bool {
-        let facts = if self.in_class_method() {
-            &self.current_class_var_types
-        } else {
-            &self.current_class_field_types
-        };
-        facts.get(name).is_some_and(|fact| fact.is_bare(op))
-    }
-
-    /// `self.<field>` is comparison-bare when known primitive-ordered
-    /// (numeric, `Character`, or `String`) and not nilable (BT-3924).
+    /// The comparison kinds of a `self.<name>` read when its field is declared
+    /// with a comparable type (numeric, `Character` or `String`, or a `Nil`-free
+    /// union of them): the `DeclaredComparison` guard tests exactly these
+    /// (BT-4823). Inside a class method `self.<name>` is a class variable, so
+    /// the class-side facts are consulted. A name with no such fact gets the
+    /// general guard (BT-3892, BT-3924).
     pub(in crate::core_erlang) fn field_comparison_kinds(
         &self,
         name: &str,
     ) -> Option<ComparisonKinds> {
+        self.field_fact(name)
+            .and_then(FieldTypeFact::comparison_kinds)
+    }
+
+    fn field_fact(&self, name: &str) -> Option<&FieldTypeFact> {
         let facts = if self.in_class_method() {
             &self.current_class_var_types
         } else {
             &self.current_class_field_types
         };
-        facts.get(name).and_then(FieldTypeFact::comparison_kinds)
+        facts.get(name)
     }
 
-    /// `self.<field>` is arithmetic-bare when known numeric.
+    /// `self.<field>` is arithmetic-bare when known numeric. A name with no
+    /// fact is guarded: the runtime guard is always correct (BT-3892).
     pub(in crate::core_erlang) fn field_is_numeric(&self, name: &str) -> bool {
-        self.field_is_bare(name, BareOperator::Arithmetic)
+        self.field_fact(name).is_some_and(FieldTypeFact::is_numeric)
     }
 
     /// Returns whether stdlib mode is active.

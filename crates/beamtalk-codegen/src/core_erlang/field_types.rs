@@ -24,7 +24,7 @@
 //!   `Nil`-free union of them, gets a guard testing exactly the declared kinds
 //!   ([`ComparisonKinds`]); a `Nil` member (or any object member) gets the
 //!   general guard instead, which dispatches `nil` to a
-//!   `does_not_understand` (BT-3924). See [`BareOperator`]. Every other shape
+//!   `does_not_understand` (BT-3924). Every other shape
 //!   (generic, singleton, false-or, …) is an object type and is guarded.
 //! * An **untyped** field — `state:`, `field:` or `classState:`, of any class
 //!   kind, whatever its default — is always guarded
@@ -88,8 +88,8 @@ impl ComparisonKinds {
         }
     }
 
-    /// The kinds a declared field type may hold when comparison is bare on it:
-    /// a comparable simple type, or a `Nil`-free union of them.
+    /// The kinds a declared field type may hold: a comparable simple type, or
+    /// a `Nil`-free union of them; `None` otherwise.
     pub(in crate::core_erlang) fn of_declared_type(ty: &DeclaredType) -> Option<Self> {
         match ty {
             DeclaredType::Simple(name) => Self::of_type_name(name),
@@ -117,19 +117,10 @@ pub(in crate::core_erlang) enum FieldTypeFact {
     Untyped,
 }
 
-/// The operator family a bare-BIF fast-path decision is for. Only arithmetic
-/// decides from a field's declared type alone: a comparison receiver, declared
-/// or not, always carries a kind guard ([`ComparisonKinds`], BT-4823).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::core_erlang) enum BareOperator {
-    /// `+ - * /` — bare on [`NUMERIC_TYPES`]; the BIF raises `badarith` on
-    /// `nil`, so a `Nil` union member does not force the guard.
-    Arithmetic,
-}
-
 impl FieldTypeFact {
     /// The kinds a `self.<field>` comparison receiver with this fact may hold,
-    /// when comparison on it is bare (BT-4823).
+    /// which the `DeclaredComparison` guard tests (BT-4823); `None` for an
+    /// untyped field or a type with no primitive order.
     pub(in crate::core_erlang) fn comparison_kinds(&self) -> Option<ComparisonKinds> {
         match self {
             Self::Declared(ty) => ComparisonKinds::of_declared_type(ty),
@@ -138,9 +129,8 @@ impl FieldTypeFact {
     }
 
     /// Whether a `self.<field>` read with this fact may skip the runtime
-    /// operator guard for `op`.
-    pub(in crate::core_erlang) fn is_bare(&self, op: BareOperator) -> bool {
-        let BareOperator::Arithmetic = op;
+    /// arithmetic guard.
+    pub(in crate::core_erlang) fn is_numeric(&self) -> bool {
         match self {
             Self::Declared(ty) => declared_type_is_bare(ty),
             Self::Untyped => false,
@@ -266,7 +256,7 @@ mod tests {
     }
 
     fn numeric(facts: &HashMap<String, FieldTypeFact>, f: &str) -> bool {
-        facts[f].is_bare(BareOperator::Arithmetic)
+        facts[f].is_numeric()
     }
 
     fn comparable(facts: &HashMap<String, FieldTypeFact>, f: &str) -> bool {
@@ -370,6 +360,6 @@ mod tests {
     #[test]
     fn nil_only_union_is_not_bare() {
         let ty = DeclaredType::union(vec![DeclaredType::simple("Nil")]);
-        assert!(!FieldTypeFact::Declared(ty).is_bare(BareOperator::Arithmetic));
+        assert!(!FieldTypeFact::Declared(ty).is_numeric());
     }
 }
