@@ -5,7 +5,7 @@ Accepted (2026-10-26). Amended 2026-10-26 (post-acceptance lead review): raw-mod
 
 Progress (2026-11-14): none of the four phase epics has been filed. Phase 1 is partly built by adjacent work: a shared frame renderer (`beamtalk_stack_frame:format_frame/1`; BT-4353/BT-4357) serves test failures and `StackFrame>>printString`, sends are line-annotated (BT-3127, extended by BT-4356), and Erlang reasons are classified by `beamtalk_exception_handler:wrap_raw/2`. Not built: `--raw-mfa`, the crash-report logger hook, selector recovery for actor frames, rules for class-side and non-Beamtalk frames, removal of raw MFA from error messages and FFI diagnostics, the ADR 0028 verdict. The Phase 3 binaries row is settled by epic BT-4170 (done 2026-10-28; ADR 0140, which proposed flipping it, was rejected). All seven cited issues are done.
 
-**Not ready to plan from — see "Review (2026-11-14)" below.** That review corrected stale statements in place and lists the questions that must be answered before a Phase 1 epic is filed.
+Amended 2026-11-14 (after review): the rule is restated as "hide what the compiler made up; show what a person named", the five blocking questions from the review are decided, and the plan is cut to one phase with two spikes — see "Amendment (2026-11-14)" below. Where the amendment and older text disagree, the amendment wins.
 
 ## Amendment (2026-10-26): post-acceptance review fixes
 
@@ -64,7 +64,11 @@ original name everywhere below. No original verdict is withdrawn.
   0028 verdict, and its suites (per the Implementation section's test
   rule).
 
-## Review (2026-11-14): not ready to plan from
+## Review (2026-11-14): findings
+
+*Items 1–8 and 10 are decided by the "Amendment (2026-11-14)" that follows;
+item 9 becomes its spike 2. Item 11's evidence and prior-art notes stand as
+recorded.*
 
 A three-pass review (facts against the code at 2026-11-14, reasoning,
 adversarial) found the one-line policy sound and the baseline stale. Stale
@@ -152,6 +156,169 @@ before a Phase 1 epic is filed.
     no affected components, per-phase estimates, test suites or
     validation step.
 
+## Amendment (2026-11-14): the rule that decides, and one phase
+
+The review above found the policy sound but too broad to decide hard cases,
+and five gaps blocking a plan. This amendment restates the rule, decides
+the gaps, and cuts the work to what follows from the rule. It replaces
+amendment items 2, 3 and 4 of 2026-10-26, narrows the Tuples and FFI
+verdicts, and replaces the four-phase plan.
+
+### The rule
+
+**Hide what the compiler made up; show what a person named.**
+
+- *Compiler-made, hidden:* `bt@package@module` atoms, mangled function
+  names (the `class_` prefix, `dispatch/4`, `safe_dispatch`, `-fun-0-`),
+  arities inflated by self and state.
+- *Person-named, shown:* classes and selectors, Erlang modules and
+  functions written by someone (including a package's own `native/*.erl`),
+  registered names, ETS tables, node names, tuples and atoms in user data,
+  and every lifecycle concept.
+
+"Names hidden, lifecycle visible" remains the summary; this is the test to
+apply when a case is unclear.
+
+### Decisions
+
+1. **Actor frames get their selector from a line→selector table.** Actor
+   methods are clauses of `dispatch/4`, so the MFA alone cannot name the
+   method. The compiler emits, per actor-style module, a sorted table of
+   `{StartLine, Selector}` as a generated function returning a constant
+   (not a module attribute, which is copied on every read). The renderer
+   finds the frame's line in it. Codegen and state threading are
+   unchanged; value classes already have one function per method and need
+   no table. A frame with no line falls back to `Class>>dispatch`.
+   Expected cost, to be confirmed by spike 1: nothing on the dispatch
+   path; one binary search per rendered actor frame; about 32 bytes per
+   actor method loaded, a few KB across the stdlib.
+2. **Names resolve through the runtime class table**, not the ADR 0119
+   registry (which is compile-time only and stays the resolver for
+   compiler diagnostics). When a module cannot be resolved the frame
+   shows the raw module; the renderer never guesses a class name. A class
+   name is package-qualified only when two loaded classes share it.
+   Frames are resolved on the node that raised them.
+3. **Frame rendering.**
+
+   | Frame | Rendered as |
+   |---|---|
+   | Instance method | `Counter>>increment (counter.bt:12)` |
+   | Class-side method | `Counter class>>new (counter.bt:3)` |
+   | Block | `[] in Counter>>increment (counter.bt:14)` |
+   | Erlang code in a Beamtalk package (`native/*.erl`, the project's or a dependency's) | `beamtalk_http_client:request/4 (beamtalk_http_client.erl:88)` — shown; a person named it |
+   | The frame that raised, when it is other Erlang code (OTP, a hex dependency) | `gen_tcp:connect/3` — shown, so the trace says where it failed |
+   | Other OTP and hex-dependency frames (`gen_server`, `proc_lib`, `lists` internals) | hidden by default |
+   | Generated callbacks and runtime internals (`init/1`, `handle_call/3`, `safe_dispatch`, `beamtalk_*`) | hidden by default |
+
+   Erlang frames are written `module:function/arity`: that is the name
+   their author gave them, and the arity identifies the function. They
+   are never dressed as `lists>>foldl_1`. Hidden frames are collapsed,
+   not deleted: the full list is in the structured data (decision 4).
+   How a module is known to belong to a Beamtalk package comes from the
+   package's module list (ADR 0072); spike 1 confirms the lookup.
+4. **Raw output is chosen per client, not by a node-wide switch.** Every
+   structured frame and error carries both forms: display name and raw
+   MFA, plus the complete unfiltered frame list. Text renderers print the
+   display form. Raw is selected where the output is consumed:
+   `--raw-mfa` on `beamtalk run` and `beamtalk test` (where it also
+   un-hides frames, subsuming `--full-traces`), a per-session REPL
+   toggle, and fields in JSON logs, LSP and MCP payloads. `printString`
+   never depends on a flag; `StackFrame` answers its raw MFA through an
+   accessor. One exception to hiding: an undefined-function error on a
+   `bt@…` module always carries the raw MFA in its details, because that
+   usually means a compiler bug.
+5. **Tuples are data, not a leak.** "Handwritten `.bt` never sees a
+   2-tuple" and "both directions" are withdrawn. The verdict is what ADR
+   0076 and ADR 0121 already do: `ok`/`error`-tagged returns from FFI
+   calls become `Result`. Outbound arguments, messages to `handleInfo:`
+   and tuple literals (ADR 0136) are untouched. No ADR is amended, so
+   the "ADR 0028 verdict" item of 2026-10-26 is closed: none is needed.
+6. **FFI errors keep the foreign name.** A failed `(Erlang gen_tcp)
+   connect: …` names `gen_tcp:connect/3`. The work is only to remove
+   `bt@…` and mangled names from the messages that embed them
+   (`beamtalk_exception_handler`, `beamtalk_actor`,
+   `beamtalk_erlang_proxy`, the Rust FFI diagnostics). Messages may show
+   both forms — `Bad argument in Ticker>>bump: (called lists:reverse/1)`
+   — which the actor messages already do.
+7. **Rows with no work here.** Binaries: decided by BT-4170; the
+   `byteAt:`/`at:` indexing question is a separate issue. Typed FFI: ADR
+   0075. `native/` membership: ADR 0072. Lifecycle, distribution,
+   releases: ADRs 0059, 0125, 0126, 0135 — visible by policy, nothing
+   planned. The `stop` family naming is an API break and gets its own
+   issue, not this ADR.
+8. **The rule is enforced.** A CI check fails when a golden file or a
+   user-facing message template contains `bt@` or a mangled function
+   name, outside raw-mode fixtures.
+
+### Examples (real output, replacing the Decision section's)
+
+```text
+// Undefined function, class-side method in a dependency
+Before: Undefined function: 'bt@catalina':'class_start:'/2
+After:  Undefined function: Catalina class>>start:
+        (details: bt@catalina:'class_start:'/2)
+
+// Class-side block frame, registry miss
+Before: at bt@user@Hpack>>class_encode:headers:table: [block] (hpack.bt:40)
+After:  at [] in Hpack class>>encode:headers:table: (hpack.bt:40)
+
+// Actor method frame
+Before: at Ticker>>dispatch (src/ticker.bt)
+After:  at Ticker>>tick: (src/ticker.bt:14)
+
+// Erlang frames
+Before: at lists>>foldl_1 (lists.erl:2471)
+        at gen_server>>try_handle_call (gen_server.erl:2470)
+After:  at lists:foldl/3 (lists.erl:2471)     // only if it raised
+        (gen_server frame hidden)
+```
+
+### Plan (replaces Phases 1–4)
+
+One epic, "Names and error rendering", preceded by two spikes:
+
+- **Spike 1 — actor frame selectors.** Emit the table for one actor
+  class; measure the stdlib size change, lookup time, and how often a
+  frame has no line. Confirm the package-module lookup for decision 3.
+- **Spike 2 — crash reports.** Crash reports are mostly terms, their
+  shape varies across supported OTP versions, and a logger filter that
+  crashes is silently removed. Decide what is translated and the
+  failure behaviour before committing to the hook.
+
+Then, in order:
+
+1. One renderer: fold `beamtalk_json_formatter:format_stack_frame/1` and
+   the three `format_mfa/1` copies into `beamtalk_stack_frame`; drop the
+   heuristic class-name fallback; apply the frame table above.
+   Components: `beamtalk_runtime`, `beamtalk_workspace`,
+   `beamtalk_stdlib` (test output).
+2. Line→selector table in codegen (`beamtalk-codegen`, actor/gen_server
+   generator) and its use in the renderer.
+3. Messages: remove compiler-made names from the runtime and compiler
+   message sites listed in decision 6 (`beamtalk_runtime`;
+   `beamtalk-core` type checker and validators).
+4. Both forms in structured data; `--raw-mfa` on `run`/`test`; REPL
+   toggle; JSON/LSP/MCP fields (`beamtalk-cli`, `beamtalk_workspace`,
+   `beamtalk-lsp`, `beamtalk-mcp`).
+5. Crash-report hook, as scoped by spike 2.
+6. The CI check of decision 8.
+
+Suites: EUnit for the renderer and frame table; codegen snapshots for
+the table; re-blessed goldens for every changed message; a btscript E2E
+for an actor error and for the REPL raw toggle. Effort: M–L, plus the
+two spikes (S each).
+
+### Consequences
+
+- A trace mixes two notations (`Class>>selector` and `module:function/arity`).
+  Accepted: the second names things that exist and can be looked up.
+- Default traces are shorter; a failure deep inside OTP shows only the
+  raising frame until raw mode is on.
+- The earlier "never `m:f/a` on a user-facing surface" claim is replaced
+  by "never a compiler-made name".
+- Carrying both forms makes structured frames larger; nothing is
+  recomputed and no flag changes what a value prints.
+
 ## Context
 
 Beamtalk runs on BEAM and embraces it (principles: BEAM-native, hot reload is
@@ -212,7 +379,8 @@ inconsistent leakage:
 
 **Names hidden, lifecycle visible.** One line draws the boundary: *names are
 accidents of compilation; lifecycle is essence of the model.* Per-area
-verdicts:
+verdicts *(the Display names, Errors, Tuples and FFI rows are narrowed by
+the Amendment of 2026-11-14, whose examples replace the ones below)*:
 
 | Area | Verdict | Rule |
 |------|---------|------|
@@ -344,6 +512,9 @@ re-litigates hide-vs-keep.
   a full ETS scan per call, which matters for the crash-report hook.)
 
 ## Implementation
+
+*(Superseded by the plan in the Amendment of 2026-11-14: one epic and two
+spikes. The original four phases are kept below as the record.)*
 
 Phased, each phase its own epic (no code in this ADR):
 
