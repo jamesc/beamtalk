@@ -2061,8 +2061,9 @@ remove_registration(ClassName, ForgetPidRows) ->
 -spec teardown_registration(class_name(), fun((pid()) -> term())) -> ok.
 teardown_registration(ClassName, ForgetPidRows) ->
     %% Single metadata row → single owner-scoped delete (BT-4808: never a
-    %% rebuilt class's row); it also drops the class-method funs. Wrapped in try/catch to be safe during node shutdown when
-    %% ETS/pg may be gone.
+    %% rebuilt class's row); it also drops this process's class-method funs,
+    %% method records, flags and subclass edge. Wrapped in try/catch to be
+    %% safe during node shutdown when ETS/pg may be gone.
     _ =
         (try
             beamtalk_class_metadata:delete_if_owner(ClassName, self())

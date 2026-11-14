@@ -594,13 +594,14 @@ clear(Kind, Name) ->
 
 -doc """
 BT-4808: clear the `Kind` flag for `Name` only while it still names `Owner`,
-the (dead) class process that raised it, and erase the class's derived
+the class process that raised it (dead, or `self()` for a live class tearing
+itself down: its only writer), and erase the class's derived
 direct-call flag with it. A flag a rebuilt class raised under the same name
 holds that class's pid and is left alone. The compare and the erase run under
 the per-tag lock every `set/3` takes, so a rebuild's raise is either ordered
 before the compare (and kept) or after the erase (and unaffected). No lock is
 taken when the flag does not name `Owner`: only `Owner` raises a flag
-carrying its pid, and it is dead.
+carrying its pid, so it cannot appear later.
 """.
 -spec clear_if_owner(kind(), atom(), pid()) -> ok.
 clear_if_owner(Kind, Name, Owner) when is_pid(Owner) ->

@@ -521,8 +521,9 @@ merge_identity(Name, Module, Selectors, Superclass, IsAbstract) ->
 -doc """
 Remove a class's metadata row.
 
-Called from the class gen_server `terminate/2`. Safe if the row — or the table —
-does not exist.
+Unscoped by owner: for callers that are not a class process (tests). A class
+process removing itself (`terminate/2`, rename) uses `delete_if_owner/2`. Safe
+if the row — or the table — does not exist.
 """.
 -spec delete(class_name()) -> ok.
 delete(Name) ->
