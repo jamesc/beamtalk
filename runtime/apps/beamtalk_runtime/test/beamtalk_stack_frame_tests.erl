@@ -1041,8 +1041,15 @@ load_module_from_source(Module, Source) ->
     ok.
 
 %% BT-4835: the one definition of the notice behind `beamtalk test` and `beamtalk run`.
-hidden_note_names_the_raw_mfa_switch_test() ->
-    ?assertEqual(<<"(1 frame hidden; --raw-mfa shows all)">>, beamtalk_stack_frame:hidden_note(1)),
-    ?assertEqual(
-        <<"(6 frames hidden; --raw-mfa shows all)">>, beamtalk_stack_frame:hidden_note(6)
+%% The Rust `render_run_error_frames` prints the same text from the same fixture.
+hidden_note_matches_shared_fixture_test() ->
+    #{<<"cases">> := Cases} = beamtalk_test_corpus:load_json_fixture([
+        "tests", "repl-protocol", "hidden_note_lines.json"
+    ]),
+    ?assertNotEqual([], Cases),
+    lists:foreach(
+        fun(#{<<"hidden">> := N, <<"note">> := Note}) ->
+            ?assertEqual(Note, beamtalk_stack_frame:hidden_note(N))
+        end,
+        Cases
     ).

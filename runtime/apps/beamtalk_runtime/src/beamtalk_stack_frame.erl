@@ -290,7 +290,8 @@ visible_frames(Frames) ->
 The notice that names the `--raw-mfa` switch when a default trace left `N` frames
 out: `(2 frames hidden; --raw-mfa shows all)`, no indentation or newline. The
 one definition behind `beamtalk test` and `beamtalk run`, so the two print the
-same line (the Rust twin for `--connect` is checked against it by the CLI tests).
+same line. The Rust twin for `--connect` is checked against the same cases in
+`tests/repl-protocol/hidden_note_lines.json`.
 """.
 -spec hidden_note(pos_integer()) -> binary().
 hidden_note(N) when is_integer(N), N > 0 ->

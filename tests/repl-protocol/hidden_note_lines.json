@@ -1,0 +1,8 @@
+{
+  "comment": "BT-4835: the notice that names --raw-mfa when a default trace left frames out, with its singular/plural rule. beamtalk_stack_frame:hidden_note/1 (Erlang) and beamtalk_repl_protocol::render_run_error_frames (Rust, which indents it by two spaces) are both checked against these cases, so `run` and `run --connect` cannot drift.",
+  "cases": [
+    {"hidden": 1, "note": "(1 frame hidden; --raw-mfa shows all)"},
+    {"hidden": 2, "note": "(2 frames hidden; --raw-mfa shows all)"},
+    {"hidden": 11, "note": "(11 frames hidden; --raw-mfa shows all)"}
+  ]
+}

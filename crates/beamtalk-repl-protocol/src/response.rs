@@ -579,6 +579,34 @@ mod tests {
         assert!(resp.frames.is_none());
     }
 
+    /// `render_run_error_frames` prints the notice `beamtalk_stack_frame:hidden_note/1`
+    /// builds, through `tests/repl-protocol/hidden_note_lines.json`.
+    #[test]
+    fn hidden_note_matches_shared_fixture() {
+        let path = beamtalk_workspace::cargo_workspace_root!()
+            .join("tests/repl-protocol/hidden_note_lines.json");
+        let raw = std::fs::read_to_string(&path).expect("read hidden_note_lines.json");
+        let fixture: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let hidden = usize::try_from(case["hidden"].as_u64().unwrap()).unwrap();
+            let frames: Vec<StackFrameInfo> = (0..hidden)
+                .map(|_| StackFrameInfo {
+                    display: "gen_server:loop/7".into(),
+                    module: Some("gen_server".into()),
+                    function: Some("loop".into()),
+                    arity: 7,
+                    file: None,
+                    line: None,
+                    hidden: true,
+                })
+                .collect();
+            let lines = render_run_error_frames(&frames, false);
+            assert_eq!(lines, vec![format!("  {}", case["note"].as_str().unwrap())]);
+        }
+    }
+
     /// `display_raw` and `beamtalk_stack_frame:format_frame_raw/1` render the
     /// same lines, through `tests/repl-protocol/raw_frame_lines.json`.
     #[test]
