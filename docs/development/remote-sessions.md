@@ -37,7 +37,13 @@ To keep it current, the `SessionStart` hook runs `scripts/refresh-edge.sh`
 (cloud sessions only). It fetches the release's small `.sha256` asset (one
 request, well under two seconds), compares it with the marker
 `<prefix>/.beamtalk-build.sha256` that `install.sh` writes on every `--edge`
-and `--nightly` install, and reinstalls only when they differ. An environment
+and `--nightly` install, and reinstalls only when they differ. The installer it runs is the `install.sh`
+asset published on the edge release (same commit as the tarball); the download
+is checked against the published `install.sh.sha256` first, and a mismatch
+warns and keeps the installed build. The reinstall holds an exclusive `flock`
+on `<prefix>/.beamtalk-refresh.lock`, so sessions starting together do not
+install into the same prefix at once: the loser prints a `skipped, another
+session is refreshing` status line. An environment
 with no marker is treated as stale once. It prints one line, for example
 `beamtalk edge 78b4b5df659f (published ...): refreshed (was no marker)`, and
 never fails the session: no network, a missing release, a failed download or
