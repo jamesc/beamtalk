@@ -575,8 +575,9 @@ fn test_search_op_nested_in_direct_params_loop_table() {
 /// group (the `do:` sibling asserts exact `maps:get`/`maps:put` counts, so it stays its own
 /// test). A list op whose block mutates only a local variable takes the tuple-accumulator
 /// path: the local is unpacked via `element(N, AccSt)` inside the lambda rather than
-/// `maps:get`, and is repacked into `StateAcc` at fold exit. `N` is one past the op's own
-/// accumulator slots (`AccList`, `StillTaking`, `MatchList`, ...).
+/// `maps:get`. `N` is one past the op's own accumulator slots (`AccList`, `StillTaking`,
+/// `MatchList`, ...). Rows that answer the local afterwards also assert it is repacked into
+/// `StateAcc` at fold exit (`maps:put('__local__…')`).
 #[test]
 #[allow(clippy::too_many_lines, clippy::type_complexity)] // a data table: one entry per former test
 fn test_transform_op_with_local_mutation_uses_tuple_acc_table() {
@@ -727,9 +728,10 @@ fn test_transform_op_with_local_mutation_uses_tuple_acc_table() {
 /// BT-4806: the former `test_{list_do,list_inject_into,take_while,drop_while,any_satisfy,all_satisfy,detect,count,flat_map,partition,group_by,list_select,list_reject,sort}_pure_generates_*`
 /// group (the two `multi_stmt_first_is_pure` tests inspect statement sequencing, not
 /// the op's lowering, so they stay separate). A list op whose block mutates nothing takes the
-/// pure fast path: a direct `lists:*` / `beamtalk_list:*` call, never the mutation-threading
-/// `lists:foldl`, with an `is_list` guard that sends non-list receivers through
-/// `beamtalk_message_dispatch:send` under the op's own selector.
+/// pure fast path: a direct `lists:*` / `beamtalk_list:*` call (an inline `lists:foldl` for
+/// `inject:into:`), not the mutation-threading fold. Rows additionally pin the `is_list`
+/// guard, the `beamtalk_message_dispatch:send` fallback and its selector where the former
+/// test did.
 #[test]
 #[allow(clippy::too_many_lines, clippy::type_complexity)] // a data table: one entry per former test
 fn test_transform_op_pure_generates_direct_call_table() {
