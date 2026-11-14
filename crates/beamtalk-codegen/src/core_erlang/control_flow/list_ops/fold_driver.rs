@@ -118,7 +118,7 @@ fn bind_detect_found_or_raise_doc(
 /// the first decisive element). `lists:foldl` has no early exit, so the lambda
 /// returns the accumulator unchanged for every later element: `decided_value` is
 /// the value of `decided_var` (`BoolAcc` / `FoundFlag`) that means decided.
-fn skip_when_decided(
+pub(super) fn skip_when_decided(
     decided_value: &'static str,
     decided_var: &'static str,
     acc_state_var: &str,
@@ -372,8 +372,8 @@ impl FoldOp<'_> {
     }
 
     /// The `let` chain turning the fold result into the op's value.
-    #[allow(clippy::too_many_lines)]
     /// `str_check_var` is the receiver temp the String-aware repack tests.
+    #[allow(clippy::too_many_lines)]
     fn epilogue(
         &self,
         generator: &mut CoreErlangGenerator,
@@ -872,6 +872,9 @@ impl CoreErlangGenerator {
         state_var: &str,
         slots: Option<&FoldFamilySlots>,
     ) -> Result<Document<'static>> {
+        // `detect:ifNone:` is not in `SELF_THREADING_FOLDS` (pinned exactly by
+        // `self_threading_is_exactly_the_named_folds`), so it never has `Self`
+        // slots to close here; its two arms would need them together.
         if let (FoldOp::DetectIfNone { if_none }, Some(flag)) = (op, found_flag) {
             return self.if_none_case_doc(if_none, flag, result, state_var);
         }

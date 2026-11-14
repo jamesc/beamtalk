@@ -122,7 +122,7 @@ impl CoreErlangGenerator {
     /// Like `lists:any/2` and `lists:all/2` the block stops running at the first
     /// decisive element (BT-3805): the fold lambda returns its accumulator
     /// unchanged once `BoolAcc` is decided, so the later elements' writes never
-    /// happen ([`skip_when_decided`]).
+    /// happen ([`skip_when_decided`](super::fold_driver::skip_when_decided)).
     ///
     /// Accumulator is `{BoolAcc, StateVars...}` (tuple) or `{BoolAcc, StateAcc}` (map).
     /// - `is_all = false` (anySatisfy): `BoolAcc` starts `false`, set to `true` on match
@@ -369,7 +369,7 @@ impl CoreErlangGenerator {
     /// with state threading and a found-item accumulator.
     ///
     /// The elements are processed up to and including the first match
-    /// ([`skip_when_decided`], BT-3805). Accumulator is
+    /// ([`skip_when_decided`](super::fold_driver::skip_when_decided), BT-3805). Accumulator is
     /// `{FoundItem, FoundFlag, StateVars...}`.
     ///
     /// Returns `{FoundItem, StateAcc}` where `FoundItem` is `nil` if no match.
