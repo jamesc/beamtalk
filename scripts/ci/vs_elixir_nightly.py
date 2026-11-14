@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Nightly vs-elixir subset (BT-4844): parse a bench report, compare two nights.
 
-  vs_elixir_nightly.py parse   REPORT.md --out results.json [--meta k=v ...]
+  vs_elixir_nightly.py parse   REPORT.md --out results.json [--meta k=v ...] [--expect ID ...]
   vs_elixir_nightly.py compare results.json [--baseline base.json]
                                [--threshold 25] [--summary FILE]
 
@@ -64,6 +64,13 @@ def compare(current, baseline, threshold):
             "words before", "words after", "EX ns after", "verdict"]
     lines.append("| " + " | ".join(head) + " |")
     lines.append("|---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|")
+    # A baseline row absent tonight (errored, printed "-") must not pass
+    # silently and then drop out of the next baseline.
+    for rid in sorted(set(base_rows) - set(cur_rows), key=row_key):
+        b = base_rows[rid]
+        lines.append(f"| {rid} | {b['label'].replace('|', chr(92) + '|')} | {fmt(b['bt_ns'])} | - | - | "
+                     f"{fmt(b['bt_red'])} | - | {fmt(b['bt_words'])} | - | - | **MISSING** |")
+        regressed.append(rid)
     for rid in sorted(cur_rows, key=row_key):
         c = cur_rows[rid]
         b = base_rows.get(rid)
@@ -107,6 +114,10 @@ def cmd_parse(args):
     if not rows:
         print("error: no Results table rows found in " + args.report, file=sys.stderr)
         return 2
+    missing = [r for r in args.expect if r not in rows]
+    if missing:
+        print("error: expected rows missing from the report: " + ", ".join(missing), file=sys.stderr)
+        return 2
     meta = dict(kv.split("=", 1) for kv in args.meta)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump({"meta": meta, "rows": rows}, f, indent=2, sort_keys=True)
@@ -136,7 +147,8 @@ def cmd_compare(args):
     out += lines
     out.append("")
     if regressed:
-        out.append(f"**FAIL:** {', '.join(regressed)} more than {args.threshold:g}% slower than the previous night.")
+        out.append(f"**FAIL:** {', '.join(regressed)}: more than {args.threshold:g}% slower than the previous night, "
+                   "or missing from tonight's results.")
     else:
         out.append("**PASS**")
     text = "\n".join(out) + "\n"
@@ -154,6 +166,7 @@ def main(argv=None):
     pp.add_argument("report")
     pp.add_argument("--out", required=True)
     pp.add_argument("--meta", nargs="*", default=[])
+    pp.add_argument("--expect", nargs="*", default=[], help="row ids that must be in the report")
     pp.set_defaults(fn=cmd_parse)
     pc = sub.add_parser("compare")
     pc.add_argument("current")

@@ -463,7 +463,7 @@ jobs:
           mkdir -p bench-out
           benchmarks/vs-elixir/run.sh bench "$BENCH_ROUNDS" "$BENCH_ROWS" | tee bench-out/report.md
           python3 scripts/ci/vs_elixir_nightly.py parse bench-out/report.md \
-            --out bench-out/results.json \
+            --out bench-out/results.json --expect ${BENCH_ROWS//,/ } \
             --meta "sha=$(git rev-parse --short HEAD)" "date=$(date -u +%Y-%m-%d)" "ref=$GITHUB_REF_NAME"
 
       - name: Fetch the previous night's results

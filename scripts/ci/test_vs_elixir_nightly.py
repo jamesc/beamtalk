@@ -41,6 +41,14 @@ class Parse(unittest.TestCase):
         self.assertEqual(rows["7a"]["ex_ns"], 945.0)
         self.assertEqual(rows["16a"]["label"], "async | start")
 
+    def test_expected_row_missing_is_an_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            r, o = os.path.join(d, "r.md"), os.path.join(d, "o.json")
+            with open(r, "w") as f:
+                f.write(REPORT)
+            self.assertEqual(v.main(["parse", r, "--out", o, "--expect", "7a", "16a"]), 0)
+            self.assertEqual(v.main(["parse", r, "--out", o, "--expect", "7a", "7b"]), 2)
+
     def test_empty_report_is_an_error(self):
         with tempfile.TemporaryDirectory() as d:
             r, o = os.path.join(d, "r.md"), os.path.join(d, "o.json")
@@ -81,6 +89,11 @@ class Compare(unittest.TestCase):
     def test_faster_and_new_rows_pass(self):
         code, _ = self.run_cmp(results(**{"7a": 10.0, "16a": 500.0}), results(**{"7a": 100.0}))
         self.assertEqual(code, 0)
+
+    def test_baseline_row_missing_tonight_fails(self):
+        code, s = self.run_cmp(results(**{"7a": 100.0}), results(**{"7a": 100.0, "7b": 100.0}))
+        self.assertEqual(code, 1)
+        self.assertIn("MISSING", s)
 
     def test_reductions_do_not_gate(self):
         cur = results(**{"7a": 100.0})
