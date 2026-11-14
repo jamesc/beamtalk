@@ -177,7 +177,7 @@ rows() ->
         {"11e", dispatch, "a < 10, a :: Integer / a < 10", 200000, 'lessTyped:a:', int, [
             {less, int}
         ]},
-        {"11f", dispatch, "[i < a] whileTrue:, a :: Integer / recursion", 200000, 'whileTyped:a:',
+        {"11f", dispatch, "[a > i] whileTrue:, a :: Integer / recursion", 200000, 'whileTyped:a:',
             int, [{while_to, int}]},
         {"11g", dispatch, "a max: 3, a :: Integer / max(a, 3)", 200000, 'maxTyped:a:', int, [
             {max_of, int}

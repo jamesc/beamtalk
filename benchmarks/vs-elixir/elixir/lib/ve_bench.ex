@@ -191,7 +191,7 @@ defmodule VeBench do
   defbench(:while_to, a, do: count_to(0, a))
   defbench(:max_of, a, do: max(a, 3))
 
-  defp count_to(i, a) when i < a, do: count_to(i + 1, a)
+  defp count_to(i, a) when a > i, do: count_to(i + 1, a)
   defp count_to(i, _a), do: i
 
   # === 12. Struct checks ===

@@ -397,12 +397,12 @@ sealed Object subclass: VbBench
     n timesRepeat: [last := a < 10]
     last
 
-  // BT-4823: the same test in a loop condition (five iterations at `a` = 5).
+  // BT-4823: the same test in a loop condition (five iterations at `a` = 5; the receiver is the typed `a`).
   class whileTyped: n :: Integer a: a :: Integer -> Integer =>
     last := 0
     n timesRepeat: [
       i := 0
-      [i < a] whileTrue: [i := i + 1]
+      [a > i] whileTrue: [i := i + 1]
       last := i
     ]
     last
