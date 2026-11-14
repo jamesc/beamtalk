@@ -704,6 +704,7 @@ visibility_generated_callbacks_hidden_test() ->
             {Actor, handle_call, 3, []},
             {Actor, '-handle_call/3-fun-0-', 1, []},
             {Actor, handle_info, 2, []},
+            {Actor, handle_continue, 2, []},
             {Actor, init, 1, []},
             %% Same name, other arity: a method the user wrote.
             {Actor, init, 2, []},

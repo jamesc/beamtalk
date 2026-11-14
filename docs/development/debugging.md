@@ -90,7 +90,7 @@ carry the whole ordered trace (every wrapped frame has a `visible` flag).
 | Erlang module a Beamtalk package declares (`native/*.erl` of the project or a dependency) | shown |
 | The frame that raised (innermost), when it is other Erlang code (OTP, hex dependency) | shown, so the trace says where it failed |
 | Other OTP and hex-dependency frames (`gen_server`, `proc_lib`, `lists` internals) | hidden |
-| Generated callbacks of a Beamtalk actor module, by name and arity (`init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`, `terminate/2`, `code_change/3`, `safe_dispatch/3,4`); a value class's own `init` or `terminate` method stays | hidden |
+| Generated callbacks of a Beamtalk actor module, by name and arity (`init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`, `handle_continue/2`, `terminate/2`, `code_change/3`, `safe_dispatch/3,4`); a value class's own `init` or `terminate` method stays | hidden |
 | `beamtalk_*` runtime internals | hidden |
 
 "Belongs to a Beamtalk package" is read from the generated

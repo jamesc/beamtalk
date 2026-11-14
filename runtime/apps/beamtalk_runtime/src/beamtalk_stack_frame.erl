@@ -62,7 +62,7 @@ ordered list.
 | Frame | Default |
 |---|---|
 | Beamtalk method or block (resolved class, or a `bt@...` module the table cannot resolve) | shown |
-| Generated callback of a Beamtalk actor module, by name and arity (`init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`, `terminate/2`, `code_change/3`, `safe_dispatch/3,4`) | hidden |
+| Generated callback of a Beamtalk actor module, by name and arity (`init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`, `handle_continue/2`, `terminate/2`, `code_change/3`, `safe_dispatch/3,4`) | hidden |
 | Erlang module a Beamtalk package declares (`beamtalk_package:declared_native_modules/0`, the `native_modules` app env, ADR 0072) | shown |
 | The frame that raised (innermost), other Erlang code (OTP, hex dependency) | shown |
 | Any other OTP or hex-dependency frame | hidden |
@@ -272,6 +272,7 @@ runtime_internal(Module) ->
     {<<"handle_call">>, [3]},
     {<<"handle_cast">>, [2]},
     {<<"handle_info">>, [2]},
+    {<<"handle_continue">>, [2]},
     {<<"terminate">>, [2]},
     {<<"code_change">>, [3]},
     {<<"safe_dispatch">>, [3, 4]}

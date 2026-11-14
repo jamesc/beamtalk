@@ -43,6 +43,7 @@ See also: docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
     dependencies/1,
     find_app_for_package/1,
     declared_native_modules/0,
+    native_modules_of_app/1,
     root_package/0,
     root_package_name/0,
     supervisorClass/1,
@@ -442,23 +443,24 @@ declared_native_modules() ->
     %% modules, and only a Beamtalk build writes the key.
     lists:foldl(
         fun({App, _Desc, _Vsn}, Acc) ->
-            case application:get_env(App, native_modules) of
-                {ok, Mods} when is_list(Mods) ->
-                    lists:foldl(
-                        fun
-                            (M, A) when is_atom(M) -> A#{M => true};
-                            (_, A) -> A
-                        end,
-                        Acc,
-                        Mods
-                    );
-                _ ->
-                    Acc
-            end
+            lists:foldl(fun(M, A) -> A#{M => true} end, Acc, native_modules_of_app(App))
         end,
         #{},
         application:loaded_applications()
     ).
+
+-doc """
+The native Erlang modules one application declares in its generated
+`{native_modules, [...]}` env key (ADR 0072), `[]` when it has none. The one
+reader of that key: `declared_native_modules/0` and the System Browser's
+`browse-native-modules` both go through it.
+""".
+-spec native_modules_of_app(atom()) -> [atom()].
+native_modules_of_app(App) ->
+    case application:get_env(App, native_modules) of
+        {ok, Mods} when is_list(Mods) -> [M || M <- Mods, is_atom(M)];
+        _ -> []
+    end.
 
 -doc """
 Find the OTP application that hosts a given package name.
