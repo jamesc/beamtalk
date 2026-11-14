@@ -390,6 +390,29 @@ sealed Object subclass: VbBench
     n timesRepeat: [last := a > 0 ifTrue: [1] ifFalse: [2]]
     last
 
+  // BT-4823: a comparison on a declared `:: Integer` receiver carries one
+  // inline `is_number` test in front of the bare BIF.
+  class lessTyped: n :: Integer a: a :: Integer -> Boolean =>
+    last := false
+    n timesRepeat: [last := a < 10]
+    last
+
+  // BT-4823: the same test in a loop condition (five iterations at `a` = 5; the receiver is the typed `a`).
+  class whileTyped: n :: Integer a: a :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [
+      i := 0
+      [a > i] whileTrue: [i := i + 1]
+      last := i
+    ]
+    last
+
+  // BT-3928: `max:` on the Number protocol, the stdlib hot path for sort-like code.
+  class maxTyped: n :: Integer a: a :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := a max: 3]
+    last
+
   // === 12. Class references and isKindOf: ===
   class classOf: n :: Integer p: p :: VbPoint -> Object =>
     last := nil

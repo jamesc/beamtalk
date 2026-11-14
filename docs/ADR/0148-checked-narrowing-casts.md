@@ -11,8 +11,11 @@ typed-parameter guard clauses. Parts 2 (an explicit `checkedAs:` cast) and 3
 deferred. What would bring them back: a real FFI or JSON boundary bug where a
 wrong value travels far before failing, or demand for a cast-site error. The
 open questions stay as listed below: String vs Binary, dead actors, the
-selector name, and a runtime `Object>>checkedAs:`. BT-4823 has not merged, so
-the ~1 ns estimates below stand; BT-4823's PR reports the measured cost.
+selector name, and a runtime `Object>>checkedAs:`. BT-4823 (PR #5284)
+measured the cost: reductions and heap words are unchanged on the benchmark
+rows and the ns differences are inside run-to-run noise, so the ~1 ns
+estimates below were not contradicted (`docs/development/benchmarks.md`
+§ BT-4823).
 
 ### Scope amendment (2026-11-14): part 1 is being done as BT-4823
 
@@ -29,16 +32,15 @@ of this ADR. Consequences for this document:
   `5 < nil` still answers `true`, with the static warning and the documented
   term-order fallback. Part 1 never proposed otherwise; this note makes it
   explicit.
-- BT-4823 must be benchmarked, and adds the row this ADR called 11e. The ~1 ns
-  figures below are estimates until that PR reports a measurement; **replace
-  them with its numbers** when it merges.
-- The evidence test `stdlib/test/narrowing_cast_wrong_value_test.bt` pins
-  today's wrong answers. It **will need flipping** when BT-4823 merges: the
-  `...AnswersSilently` tests for `<`, `>` and the field case (and
-  `testSameWrongAnswerWithoutAnyCast`) must expect `does_not_understand`.
-  BT-4823's description tells its author to flag this so this branch can be
-  rebased; whoever merges first updates the test. The cast-local and
-  arithmetic tests do not change.
+- BT-4823 was benchmarked, and adds rows 11e–11g to `just bench-vs-elixir`
+  (this ADR called the typed comparison row 11e). The ~1 ns figures below are
+  the estimates made before that measurement; the PR's numbers are in
+  `docs/development/benchmarks.md` § BT-4823.
+- The evidence test `stdlib/test/narrowing_cast_wrong_value_test.bt` pinned
+  the wrong answers. BT-4823's PR flipped it: the typed-parameter and
+  typed-field comparison tests now expect `does_not_understand` (a Symbol
+  still reaches `Symbol>>>`, whose argument is unchecked, BT-3928). The
+  cast-local and arithmetic tests did not change.
 
 ## Context
 

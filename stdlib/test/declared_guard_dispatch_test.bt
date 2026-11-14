@@ -1,0 +1,68 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4823: a guard clause whose condition is a comparison on a declared
+// `:: Integer` parameter compiles as a direct return (no NLR frame, BT-4452).
+// The comparison carries a kind guard, so a receiver that breaks the
+// declaration is dispatched, like any receiver. These tests pin that the
+// dispatch reaches the receiver's own `>` / `<`, and that a non-Boolean answer
+// is decided as the guard as written would decide it (BT-4244). Fixture:
+// `fixtures/declared_guard_probe.bt`.
+
+TestCase subclass: DeclaredGuardDispatchTest
+  field: probe = nil
+
+  setUp => self.probe := DeclaredGuardProbe new
+
+  /// Hides a value's class from the checker, as a `Dynamic` argument would.
+  hidden: v => #{#v => v} at: #v
+
+  testIntegersTakeTheFastForm =>
+    self assert: (self.probe tagIfPositive: 5) equals: #positive
+    self assert: (self.probe tagIfPositive: -5) equals: #other
+    self assert: (self.probe tagIfNotPositive: -5) equals: #notPositive
+    self assert: (self.probe tagIfNotPositive: 5) equals: #positive
+    self assert: (self.probe tagTwice: 5) equals: #second
+    self assert: (self.probe tagTwice: 0) equals: #other
+    self assert: (self.probe tagOutside: 500) equals: #outside
+    self assert: (self.probe tagOutside: 50) equals: #inside
+
+  testReceiverBreakingTheDeclarationDispatchesToItsOwnOrdering =>
+    rival := self hidden: DeclaredGuardRival new
+    // `rival > 0` answers true, so the guard returns its value.
+    self assert: (self.probe tagIfPositive: rival) equals: #positive
+    self assert: (self.probe tagTwice: rival) equals: #second
+    // `rival < 0` answers false, so `tagOutside:`'s `n < 0 or: [n > 100]`
+    // asks `rival > 100`, which answers true.
+    self assert: (self.probe tagOutside: rival) equals: #outside
+    // `ifFalse:` guard: `rival > 0` is true, so it does not return.
+    self assert: (self.probe tagIfNotPositive: rival) equals: #positive
+
+  testNonBooleanAnswerThatCallsTheBlockReturnsEarly =>
+    gate := self hidden: DeclaredGuardGate new
+    // `gate > 0` answers a receiver whose `ifTrue:` calls the block.
+    self assert: (self.probe tagIfPositive: gate) equals: #positive
+    self assert: (self.probe tagTwice: gate) equals: #second
+
+  testNonBooleanAnswerThatIgnoresTheBlockFallsThrough =>
+    gate := self hidden: DeclaredGuardGate new
+    // `gate < 0` answers a receiver whose `ifTrue:` ignores its block.
+    self assert: (self.probe tagIfNegative: gate) equals: #other
+    self assert: (self.probe tagIfNegative: -1) equals: #negative
+
+  testNonBooleanAnswerWithoutTheShortCircuitSelectorRaises =>
+    gate := self hidden: DeclaredGuardGate new
+    // `n < 0 or: [...]` sends `or:` to the non-Boolean `gate < 0`, as the
+    // guard as written would.
+    self should: [self.probe tagOutside: gate] raise: #does_not_understand
+
+  testReceiverWithNoOrderingStillRaises =>
+    self should: [
+      self.probe tagIfPositive: (self hidden: nil)
+    ] raise: #does_not_understand
+    self should: [
+      self.probe tagIfNotPositive: (self hidden: true)
+    ] raise: #does_not_understand
+    self should: [
+      self.probe tagOutside: (self hidden: nil)
+    ] raise: #does_not_understand

@@ -1,0 +1,38 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4823 fixture: guard clauses (`c ifTrue: [^v]. rest`) whose condition is a
+// comparison on a `:: Integer` parameter, so the receiver's kind is declared
+// but not proven. The returned value has effects (`self tag: ...`), the case
+// BT-4452 compiled as a direct return and BT-4823 must keep. A receiver that
+// breaks the declaration is dispatched; see `DeclaredGuardRival` and
+// `DeclaredGuardGate`.
+
+Value subclass: DeclaredGuardProbe
+
+  /// Records which branch ran.
+  tag: label => label
+
+  tagIfPositive: n :: Integer =>
+    n > 0 ifTrue: [^self tag: #positive]
+    #other
+
+  tagIfNegative: n :: Integer =>
+    n < 0 ifTrue: [^self tag: #negative]
+    #other
+
+  tagIfNotPositive: n :: Integer =>
+    n > 0 ifFalse: [^self tag: #notPositive]
+    #positive
+
+  tagTwice: n :: Integer =>
+    n > 0
+      ifTrue: [
+        self tag: #first
+        ^self tag: #second
+      ]
+    #other
+
+  tagOutside: n :: Integer =>
+    (n < 0 or: [n > 100]) ifTrue: [^self tag: #outside]
+    #inside

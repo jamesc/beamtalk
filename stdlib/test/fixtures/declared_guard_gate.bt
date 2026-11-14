@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4823 fixture (see declared_guard_probe.bt).
+
+/// Breaks an `:: Integer` declaration and answers non-Booleans from its
+/// ordering: `gate > 0` answers a receiver whose `ifTrue:` calls its block,
+/// `gate < 0` one whose `ifTrue:` ignores it.
+Value subclass: DeclaredGuardGate
+
+  > _other => NonBooleanCondCalling new
+
+  < _other => NonBooleanCondIgnoring new

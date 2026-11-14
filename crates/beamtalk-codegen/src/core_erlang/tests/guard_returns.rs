@@ -111,17 +111,51 @@ fn expect_directive_in_absorbed_statements_compiles() {
 
 #[test]
 fn typed_comparison_guard_needs_no_helper() {
-    // BT-4452: `x :: Integer` lowers `x > 0` to a bare BIF, a Boolean by
-    // construction, so the condition needs no helper.
+    // BT-4452: a literal left operand lowers `0 < x` to a bare BIF, a Boolean
+    // by construction, so the condition needs no helper.
     let code = codegen(
         "Object subclass: G\n\
          \x20 sign: x :: Integer =>\n\
-         \x20   x > 0 ifTrue: [^1]\n\
-         \x20   x < 0 ifTrue: [^-1]\n\
+         \x20   0 < x ifTrue: [^1]\n\
+         \x20   0 > x ifTrue: [^-1]\n\
          \x20   0\n",
     );
     assert_no_nlr_frame(&code);
     assert!(!code.contains("beamtalk_guard_return"), "{code}");
+}
+
+#[test]
+fn declared_param_guard_clause_keeps_the_direct_return() {
+    // BT-4823: `x :: Integer` is only declared, so `x > 0` carries a kind
+    // guard and its dispatching arm may answer a non-Boolean. The guard
+    // clause is still a direct return, with the condition decided by
+    // `beamtalk_guard_return`, even though `^self one` has effects.
+    let code = codegen(
+        "Object subclass: G\n\
+         \x20 class sealed one => 1\n\
+         \x20 class sealed guard: x :: Integer =>\n\
+         \x20   x > 0 ifTrue: [^self one]\n\
+         \x20   2\n",
+    );
+    assert_no_nlr_frame(&code);
+    assert!(
+        code.contains("call 'erlang':'is_number'(")
+            && code.contains("call 'beamtalk_guard_return':'if_true'"),
+        "{code}"
+    );
+}
+
+#[test]
+fn declared_param_two_branch_and_tail_guards_keep_their_frame() {
+    // Not a Boolean by construction, and no helper decides a two-branch
+    // conditional: the frame stays (BT-4823).
+    let code = codegen(
+        "Value subclass: W\n\
+         \x20 field: n :: Integer = 0\n\
+         \x20 clamp: x :: Integer =>\n\
+         \x20   x > 100 ifTrue: [^self withN: 100] ifFalse: [self withN: x]\n",
+    );
+    assert!(code.contains("make_ref"), "{code}");
 }
 
 #[test]
@@ -140,14 +174,15 @@ fn guard_with_effectful_return_on_non_boolean_receiver_keeps_its_frame() {
 
 #[test]
 fn guard_with_effectful_return_on_typed_comparison_has_no_frame() {
-    // BT-4452: with `x :: Integer`, `x < 0` is a bare BIF, so the effectful
-    // `^self withN: 0` (and every other guard shape) is exact as rewritten.
+    // BT-4452: with a literal left operand, `0 > x` is a bare BIF, so the
+    // effectful `^self withN: 0` (and every other guard shape) is exact as
+    // rewritten.
     let code = codegen(
         "Value subclass: W\n\
          \x20 field: n :: Integer = 0\n\
          \x20 clamp: x :: Integer =>\n\
-         \x20   x < 0 ifTrue: [^self withN: 0]\n\
-         \x20   x > 100 ifTrue: [^self withN: 100] ifFalse: [self withN: x]\n",
+         \x20   0 > x ifTrue: [^self withN: 0]\n\
+         \x20   100 < x ifTrue: [^self withN: 100] ifFalse: [self withN: x]\n",
     );
     assert_no_nlr_frame(&code);
     assert!(!code.contains("beamtalk_guard_return"), "{code}");
@@ -294,7 +329,7 @@ fn typed_comparison_guard_on_every_method_kind_has_no_frame() {
         "Object subclass: K\n\
          \x20 class sealed one => 1\n\
          \x20 class sealed pick: x :: Integer =>\n\
-         \x20   x > 0 ifTrue: [^self one]\n\
+         \x20   0 < x ifTrue: [^self one]\n\
          \x20   2\n",
     );
     assert_no_nlr_frame(&class_side);
@@ -317,7 +352,7 @@ fn typed_comparison_guard_on_every_method_kind_has_no_frame() {
 
     let extension = codegen(
         "Integer >> bt4452Pick: x :: Integer =>\n\
-         \x20   x > 0 ifTrue: [^self abs]\n\
+         \x20   0 < x ifTrue: [^self abs]\n\
          \x20   2\n",
     );
     assert!(extension.contains("bt4452Pick"), "{extension}");
@@ -389,13 +424,13 @@ fn same_file_extension_guard_is_not_recorded() {
 #[test]
 fn and_or_guard_of_booleans_has_no_frame() {
     // BT-4496: an inlined `and:`/`or:` of Booleans by construction (here
-    // `=:=`, `==` and typed comparisons) is a Boolean, so every guard shape
+    // `=:=`, `==` and literal-receiver comparisons) is a Boolean, so every guard shape
     // on it compiles as a direct return with no helper.
     let code = codegen(
         "Value subclass: A\n\
          \x20 field: n :: Integer = 0\n\
          \x20 clamp: x :: Integer =>\n\
-         \x20   (x < 0 or: [x > 100]) ifTrue: [^self withN: 0]\n\
+         \x20   (0 > x or: [100 < x]) ifTrue: [^self withN: 0]\n\
          \x20   (x =:= 5 and: [x == 5]) ifTrue: [^self withN: 5] ifFalse: [self withN: x]\n",
     );
     assert_no_nlr_frame(&code);
