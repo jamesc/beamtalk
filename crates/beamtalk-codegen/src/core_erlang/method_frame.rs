@@ -151,21 +151,34 @@ impl<'a> MethodFrame<'a> {
         // A `uses:`-flattened method's spans are offsets into its protocol's
         // file, so for the duration of the frame map lines (and stamp the
         // `file` of line annotations) through that protocol's source.
-        let prev_source = generator
-            .flattened_method_source(
-                selector_name.as_str(),
-                boundary == MethodBoundary::ClassMethod,
-            )
-            .map(|protocol_source| {
+        let is_class_method = boundary == MethodBoundary::ClassMethod;
+        let protocol_source =
+            generator.flattened_method_source(selector_name.as_str(), is_class_method);
+        let prev_source = if !is_class_method
+            && generator.flattened_method_lacks_source(selector_name.as_str())
+        {
+            // Flattened, but its protocol's source is not available: the spans
+            // are offsets into a file we do not have, so any line mapped
+            // through the user's text is made up. Emit no line annotations
+            // (and let location labels read `offset N`) rather than stamp the
+            // user's file with a made-up line.
+            Some((generator.source_text.take(), generator.source_path.take()))
+        } else {
+            protocol_source.map(|protocol_source| {
                 let prev_path = generator.source_path.clone();
                 let prev_text = generator
                     .source_text
                     .replace(protocol_source.text.to_string());
-                if let Some(path) = protocol_source.path {
-                    generator.source_path = Some(path.to_string());
-                }
+                // A protocol with no path (REPL-defined) must not borrow the
+                // user's: its lines count through the protocol's text, so
+                // stamping them with the user's file would name a line of a
+                // file they are not in (the stack-frame selector table would
+                // then read them against the user's own methods). Bare line
+                // annotations carry no file, and the renderer falls back.
+                generator.source_path = protocol_source.path.map(|path| path.to_string());
                 (prev_text, prev_path)
-            });
+            })
+        };
 
         (
             Self {

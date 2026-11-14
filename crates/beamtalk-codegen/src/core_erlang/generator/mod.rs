@@ -208,6 +208,10 @@ pub struct CoreErlangGenerator {
     /// method's protocol's for the method's body.
     pub(in crate::core_erlang) protocol_sources:
         beamtalk_core::semantic_analysis::ProtocolSourceMap,
+    /// Names of the protocols declared in the module being compiled. A
+    /// provision flattened from one of these has spans that are offsets into
+    /// the module's own text, so it needs no `protocol_sources` entry.
+    pub(in crate::core_erlang) local_protocol_names: std::collections::HashSet<EcoString>,
     /// `(class, protocol)` pairs whose `uses:` resolved to the stdlib's own
     /// protocol (BT-3915); those classes' provisions map through the stdlib
     /// file rather than `protocol_sources`. See `set_stdlib_protocol_uses`.
@@ -710,6 +714,7 @@ impl CoreErlangGenerator {
             class_var_key_scope: super::class_var_keys::KeyScope::Unscoped,
             source_text: None,
             protocol_sources: std::collections::HashMap::new(),
+            local_protocol_names: std::collections::HashSet::new(),
             stdlib_protocol_uses: std::collections::HashSet::new(),
             primitive_bindings: PrimitiveBindingTable::new(),
             current_method_params: Vec::new(),

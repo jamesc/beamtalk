@@ -140,6 +140,11 @@ pub fn generate_module_with_warnings(
     generator.source_text = options.source_text;
     generator.set_stdlib_mode(options.stdlib_mode);
     generator.protocol_sources = options.protocol_sources;
+    generator.local_protocol_names = module
+        .protocols
+        .iter()
+        .map(|p| p.name.name.clone())
+        .collect();
     generator.set_class_module_index(options.class_module_index);
     // BT-4200: the unit's own class lives in the unit's own module, whatever
     // the (possibly stale) index says.

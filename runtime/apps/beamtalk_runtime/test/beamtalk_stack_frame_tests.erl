@@ -864,3 +864,178 @@ format_frame_raw_matches_shared_fixture_test() ->
         end,
         Cases
     ).
+
+%%% ===================================================================
+%%% Actor selector lookup (BT-4817, ADR 0139 amendment decision 1)
+%%%
+%%% An actor's methods are clauses of one `dispatch/4`, so the renderer names
+%%% the method from `__beamtalk_method_lines/0`, the sorted tuple of
+%%% `{StartLine, Selector}` the compiler emits. The fixture module below has
+%%% the exact shape the generator emits (pinned on the Rust side by the actor
+%%% codegen snapshots): methods `tick:` at line 14 and `reset` at 20 in
+%%% `counter.bt`, and two methods flattened in from `greetable.bt`.
+%%% ===================================================================
+
+-define(ACTOR_MOD, 'bt@bt4817@ticker').
+-define(NO_TABLE_MOD, 'bt@bt4817@legacy').
+
+actor_selector_test_() ->
+    {setup,
+        fun() ->
+            ok = load_module_from_source(
+                ?ACTOR_MOD,
+                "-module('bt@bt4817@ticker').\n"
+                "-export(['__beamtalk_method_lines'/0]).\n"
+                "'__beamtalk_method_lines'() ->\n"
+                "    [{<<\"counter.bt\">>, {{3, 'increment'}, {14, 'tick:'}, {20, 'reset'}}},\n"
+                "     {<<\"greetable.bt\">>, {{9, 'greet'}, {11, 'greetingWidth'}}}].\n"
+            ),
+            ok = load_empty_module(?NO_TABLE_MOD),
+            register_class('Ticker4817', ?ACTOR_MOD),
+            register_class('Legacy4817', ?NO_TABLE_MOD)
+        end,
+        fun(_) ->
+            beamtalk_test_class:stop_graceful('Ticker4817'),
+            beamtalk_test_class:stop_graceful('Legacy4817'),
+            unload_module(?ACTOR_MOD),
+            unload_module(?NO_TABLE_MOD)
+        end,
+        fun(_) ->
+            [
+                {"first method", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>increment (counter.bt:3)">>,
+                        render({?ACTOR_MOD, dispatch, 4, loc(3)})
+                    )
+                end},
+                {"line inside a method body", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>tick: (counter.bt:17)">>,
+                        render({?ACTOR_MOD, dispatch, 4, loc(17)})
+                    )
+                end},
+                {"exact start line of a middle method", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>tick: (counter.bt:14)">>,
+                        render({?ACTOR_MOD, dispatch, 4, loc(14)})
+                    )
+                end},
+                {"last method, line past it", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>reset (counter.bt:99)">>,
+                        render({?ACTOR_MOD, dispatch, 4, loc(99)})
+                    )
+                end},
+                {"line before the first method falls back", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>dispatch (counter.bt:2)">>,
+                        render({?ACTOR_MOD, dispatch, 4, loc(2)})
+                    )
+                end},
+                {"block inside a method", fun() ->
+                    ?assertEqual(
+                        <<"[] in Ticker4817>>tick: (counter.bt:16)">>,
+                        render({?ACTOR_MOD, '-dispatch/4-fun-2-', 2, loc(16)})
+                    )
+                end},
+                {"no line falls back", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>dispatch (counter.bt)">>,
+                        render({?ACTOR_MOD, dispatch, 4, [{file, "counter.bt"}]})
+                    )
+                end},
+                {"bare MFA has no line and falls back", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>dispatch">>,
+                        beamtalk_stack_frame:render_mfa({?ACTOR_MOD, dispatch, 4})
+                    )
+                end},
+                {"module without the table falls back", fun() ->
+                    ?assertEqual(
+                        <<"Legacy4817>>dispatch (counter.bt:20)">>,
+                        render({?NO_TABLE_MOD, dispatch, 4, loc(20)})
+                    )
+                end},
+                {"method flattened in from another file uses that file's lines", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>greet (greetable.bt:9)">>,
+                        render({?ACTOR_MOD, dispatch, 4, [{file, "greetable.bt"}, {line, 9}]})
+                    ),
+                    ?assertEqual(
+                        <<"Ticker4817>>greetingWidth (greetable.bt:12)">>,
+                        render({?ACTOR_MOD, dispatch, 4, [{file, "greetable.bt"}, {line, 12}]})
+                    )
+                end},
+                {"a line of one file never matches another file's rows", fun() ->
+                    %% Line 9 is `greet` in greetable.bt but inside `increment` in counter.bt.
+                    ?assertEqual(
+                        <<"Ticker4817>>increment (counter.bt:9)">>,
+                        render({?ACTOR_MOD, dispatch, 4, loc(9)})
+                    ),
+                    %% Before greetable.bt's first method: no fallback to counter.bt's rows.
+                    ?assertEqual(
+                        <<"Ticker4817>>dispatch (greetable.bt:5)">>,
+                        render({?ACTOR_MOD, dispatch, 4, [{file, "greetable.bt"}, {line, 5}]})
+                    )
+                end},
+                {"a file the table does not list falls back", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>dispatch (other.bt:14)">>,
+                        render({?ACTOR_MOD, dispatch, 4, [{file, "other.bt"}, {line, 14}]})
+                    )
+                end},
+                {"class-side method named dispatch keeps its name", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817 class>>dispatch (counter.bt:17)">>,
+                        render({?ACTOR_MOD, class_dispatch, 4, loc(17)})
+                    ),
+                    ?assertEqual(
+                        <<"[] in Ticker4817 class>>dispatch (counter.bt:17)">>,
+                        render({?ACTOR_MOD, '-class_dispatch/4-fun-0-', 1, loc(17)})
+                    )
+                end},
+                {"dispatch/3 is not the actor dispatch", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>dispatch (counter.bt:17)">>,
+                        render({?ACTOR_MOD, dispatch, 3, loc(17)})
+                    )
+                end},
+                {"structured form: display names the selector, raw fields stay raw", fun() ->
+                    [S] = beamtalk_stack_frame:structured_frames([
+                        {?ACTOR_MOD, dispatch, 4, loc(17)}
+                    ]),
+                    ?assertEqual(
+                        <<"Ticker4817>>tick: (counter.bt:17)">>, maps:get(<<"display">>, S)
+                    ),
+                    ?assertEqual(<<"dispatch">>, maps:get(<<"function">>, S)),
+                    ?assertEqual(4, maps:get(<<"arity">>, S))
+                end},
+                {"other functions are untouched", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>init (counter.bt:20)">>,
+                        render({?ACTOR_MOD, init, 1, loc(20)})
+                    )
+                end}
+            ]
+        end}.
+
+lookup_method_line_test() ->
+    T = {{3, a}, {14, b}, {20, c}},
+    ?assertEqual(not_found, beamtalk_stack_frame:lookup_method_line(T, 2)),
+    ?assertEqual({ok, a}, beamtalk_stack_frame:lookup_method_line(T, 3)),
+    ?assertEqual({ok, b}, beamtalk_stack_frame:lookup_method_line(T, 19)),
+    ?assertEqual({ok, c}, beamtalk_stack_frame:lookup_method_line(T, 1000)),
+    ?assertEqual(not_found, beamtalk_stack_frame:lookup_method_line({}, 5)).
+
+load_module_from_source(Module, Source) ->
+    {ok, Tokens, _} = erl_scan:string(Source),
+    Forms = [
+        begin
+            {ok, F} = erl_parse:parse_form(Form),
+            F
+        end
+     || Form <- split_forms(Tokens)
+    ],
+    {ok, Module, Bin} = compile:forms(Forms, [binary]),
+    {module, Module} = code:load_binary(Module, atom_to_list(Module) ++ ".beam", Bin),
+    ok.

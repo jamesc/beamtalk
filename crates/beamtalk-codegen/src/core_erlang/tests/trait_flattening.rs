@@ -148,6 +148,22 @@ fn generate_cross_file(
     protocol_path: &str,
     with_protocol_source: bool,
 ) -> String {
+    generate_cross_file_at(
+        user_src,
+        protocol_src,
+        Some(protocol_path),
+        with_protocol_source,
+    )
+}
+
+/// [`generate_cross_file`] with an optional protocol path (`None`: a
+/// REPL-defined protocol, which has text but no file).
+fn generate_cross_file_at(
+    user_src: &str,
+    protocol_src: &str,
+    protocol_path: Option<&str>,
+    with_protocol_source: bool,
+) -> String {
     let protocol = parse_protocol_file(protocol_src);
     let mut module = parse_fixture(user_src);
     let analysis = analyse_full(
@@ -173,7 +189,7 @@ fn generate_cross_file(
             [(
                 protocol.name.name.clone(),
                 beamtalk_core::semantic_analysis::ProtocolSource {
-                    path: Some(protocol_path.into()),
+                    path: protocol_path.map(Into::into),
                     text: protocol_src.into(),
                     package: None,
                 },
@@ -234,6 +250,112 @@ fn flattened_provision_line_annotation_points_into_the_protocol_file() {
         code.contains("{'file', \"pkg/describable.bt\"}") && code.contains("[5,"),
         "expected the flattened `describe` to be annotated with \
          describable.bt line 5, got:\n{code}"
+    );
+}
+
+/// BT-4817: a flattened provision whose protocol has text but no path (a
+/// REPL-defined protocol) counts its lines through the protocol's text, so
+/// they must not be stamped with the user's file. The stack-frame renderer
+/// reads the `__beamtalk_method_lines/0` rows of a frame's own file; a
+/// protocol-relative line under the user's file would name the wrong method.
+#[test]
+fn flattened_provision_from_pathless_protocol_never_carries_the_users_file() {
+    let code = generate_cross_file_at(REPORT_FILE, DESCRIBABLE_FILE, None, true);
+    assert!(code.contains("describe"), "{code}");
+    // Its line (5, in the protocol) is annotated bare: no `{'file', ..}` entry.
+    let line5 = code
+        .lines()
+        .find(|l| l.contains("-| [5"))
+        .unwrap_or_else(|| panic!("expected a line-5 annotation, got:\n{code}"));
+    assert!(
+        !line5.contains("'file'"),
+        "a pathless protocol's lines must not be stamped with a file, got: {line5}"
+    );
+}
+
+/// BT-4817: a flattened provision whose protocol source is not available has a
+/// span that is an offset into a file we do not have; mapping it through the
+/// user's text would put a made-up line under the user's own file in the
+/// stack-frame selector table. It gets no row; the actor's own method does.
+#[test]
+fn flattened_provision_without_protocol_source_has_no_method_lines_row() {
+    // `describe` makes a send, which (unlike a literal) carries a line annotation.
+    const SENDING_PROTOCOL: &str = concat!(
+        "// header comment so the provision is not on line 1\n",
+        "// second header line\n\n",
+        "Protocol define: Describable\n",
+        "  describe -> String => 1 printString\n",
+    );
+    use std::fmt::Write as _;
+    // Long enough that the protocol offset of `describe` falls inside it,
+    // so the bug (a made-up row) cannot hide behind an out-of-range offset.
+    let mut actor = String::from("Actor subclass: Report\n  uses: Describable\n\n  bump => 1\n");
+    for i in 0..12 {
+        writeln!(actor, "  bump{i} => {i}").unwrap();
+    }
+    let code = generate_cross_file(&actor, SENDING_PROTOCOL, "pkg/describable.bt", false);
+    let table = code
+        .split("'__beamtalk_method_lines'/0 = fun")
+        .nth(1)
+        .and_then(|rest| rest.split("'has_method'/1 = fun").next())
+        .unwrap_or_else(|| panic!("expected a method-lines table, got:\n{code}"));
+    assert!(
+        table.contains("'bump'") && !table.contains("'describe'"),
+        "own method only, no row for the flattened `describe`, got:\n{table}"
+    );
+    // The body's line annotations must not carry the user's file with a line
+    // that is really a protocol offset, so no frame reads `report.bt:N` and
+    // gets matched against the user's methods.
+    // `describe`'s own `dispatch/4` clause: up to the next clause.
+    let clause = code
+        .split("<'describe'> when 'true' ->")
+        .nth(1)
+        .and_then(|rest| rest.split("<OtherSelector>").next())
+        .unwrap_or_else(|| panic!("expected a describe clause, got:\n{code}"));
+    assert!(
+        !clause.contains("'file'"),
+        "a provision without protocol source must be annotated bare, got:\n{clause}"
+    );
+}
+
+/// BT-4817: a protocol declared in the *same file* as the class that uses it
+/// needs no `protocol_sources` entry (the compiler port never passes one for a
+/// REPL/workspace load): its spans are real offsets into the user's own text.
+/// Its provisions keep their `file:line` annotation and get a selector row.
+#[test]
+fn same_file_protocol_provision_keeps_its_file_and_gets_a_method_lines_row() {
+    const SRC: &str = concat!(
+        "Protocol define: Greetable\n",
+        "  greet -> String => 1 printString\n\n",
+        "Actor subclass: Greeter\n",
+        "  uses: Greetable\n",
+        "  bump => 1\n",
+    );
+    let module = parse_fixture(SRC);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("greeter")
+            .with_source(SRC)
+            .with_source_path_opt(Some("greeter.bt")),
+    )
+    .expect("codegen should succeed");
+    let clause = code
+        .split("<'greet'> when 'true' ->")
+        .nth(1)
+        .and_then(|rest| rest.split("<OtherSelector>").next())
+        .unwrap_or_else(|| panic!("expected a greet clause, got:\n{code}"));
+    assert!(
+        clause.contains("{'file', \"greeter.bt\"}"),
+        "a same-file provision keeps its file annotation, got:\n{clause}"
+    );
+    let table = code
+        .split("'__beamtalk_method_lines'/0 = fun")
+        .nth(1)
+        .and_then(|rest| rest.split("'has_method'/1 = fun").next())
+        .unwrap_or_else(|| panic!("expected a method-lines table, got:\n{code}"));
+    assert!(
+        table.contains("'greet'") && table.contains("'bump'"),
+        "a same-file provision has a row, got:\n{table}"
     );
 }
 

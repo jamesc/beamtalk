@@ -112,7 +112,8 @@ loaded class modules share it. Which frames are listed is not decided here.
     frame_parts/1,
     structured_frame/1,
     structured_frames/1,
-    frame_source_path/1
+    frame_source_path/1,
+    lookup_method_line/2
 ]).
 
 -doc """
@@ -712,10 +713,79 @@ frame_parts(#{module := Module, function := Function} = Frame) ->
                 end,
             Base#{
                 class => class_part(Kind, Module, ClassName, maps:get(package, Frame, nil)),
-                selector => Selector,
+                selector =>
+                    case ClassSide orelse not (IsBlock orelse maps:get(arity, Frame, 0) =:= 4) of
+                        true ->
+                            Selector;
+                        false ->
+                            actor_selector(
+                                Kind, Module, Selector, Line, maps:get(file, Frame, nil)
+                            )
+                    end,
                 class_side => ClassSide,
                 block => IsBlock
             }
+    end.
+
+%% Actor methods are clauses of one `dispatch/4`, so the MFA of a frame inside
+%% one reads `dispatch`. The compiler emits `__beamtalk_method_lines/0`, a list
+%% of `{File, Rows}` where `Rows` is a tuple of `{StartLine, Selector}` sorted by
+%% line, one entry per source file the module's methods come from (a
+%% `uses:`-flattened method's lines are in its protocol's file). The method is
+%% the row of the frame's own file with the greatest StartLine =< the frame's
+%% line. No line, no file, a file the table does not list, no table (older
+%% `.beam`) or a line before the first method leaves `dispatch` as it was.
+%% Only instance-side `dispatch/4` frames (and blocks lifted out of them) are
+%% looked up: the table holds instance methods, so a class-side method that is
+%% itself named `dispatch`, or another arity (`dispatch/3`), keeps its own name
+%% (for a block the parent's arity is not known, so a block lifted out of
+%% `dispatch/3` is still looked up).
+%% Two methods starting on one source line cannot be told apart by line; the
+%% later one is named.
+-spec actor_selector(
+    beamtalk | unresolved | unknown, atom(), binary(), pos_integer() | nil, binary() | nil
+) -> binary().
+actor_selector(beamtalk, Module, <<"dispatch">>, Line, File) when
+    is_integer(Line), is_binary(File)
+->
+    case lists:keyfind(File, 1, method_lines(Module)) of
+        {File, Rows} ->
+            case lookup_method_line(Rows, Line) of
+                {ok, Selector} -> atom_to_binary(Selector, utf8);
+                not_found -> <<"dispatch">>
+            end;
+        false ->
+            <<"dispatch">>
+    end;
+actor_selector(_Kind, _Module, Selector, _Line, _File) ->
+    Selector.
+
+-spec method_lines(atom()) -> [{binary(), tuple()}].
+method_lines(Module) ->
+    case erlang:function_exported(Module, '__beamtalk_method_lines', 0) of
+        true -> Module:'__beamtalk_method_lines'();
+        false -> []
+    end.
+
+-doc """
+Find the method containing `Line` in a `__beamtalk_method_lines/0` table: the
+entry with the greatest `StartLine =< Line`, by binary search over the tuple
+(`element/2` is O(1) and copies nothing).
+""".
+-spec lookup_method_line(tuple(), integer()) -> {ok, atom()} | not_found.
+lookup_method_line(Table, Line) ->
+    search_method_lines(Table, Line, 1, tuple_size(Table), not_found).
+
+-spec search_method_lines(tuple(), integer(), pos_integer(), non_neg_integer(), term()) ->
+    {ok, atom()} | not_found.
+search_method_lines(_Table, _Line, Lo, Hi, Best) when Lo > Hi ->
+    Best;
+search_method_lines(Table, Line, Lo, Hi, Best) ->
+    Mid = (Lo + Hi) div 2,
+    {Start, Selector} = element(Mid, Table),
+    case Start =< Line of
+        true -> search_method_lines(Table, Line, Mid + 1, Hi, {ok, Selector});
+        false -> search_method_lines(Table, Line, Lo, Mid - 1, Best)
     end.
 
 -spec frame_kind(term(), atom() | nil) -> beamtalk | unresolved | erlang | unknown.
