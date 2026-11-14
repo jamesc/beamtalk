@@ -78,10 +78,22 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     // saw (or nothing, for a protocol it never compiled at all). See
     // `parse_protocol_defs`'s own doc for why this is a full-source channel
     // rather than a signature-only one like `protocol_registry` above.
-    let pre_loaded_protocol_defs = match extract_optional_string_map(request, "protocol_sources") {
-        Ok(sources) => parse_protocol_defs(&sources),
+    let protocol_source_texts = match extract_optional_string_map(request, "protocol_sources") {
+        Ok(sources) => sources,
         Err(resp) => return resp,
     };
+    // BT-4828: `protocol_source_paths` (name -> the protocol's `.bt` path)
+    // rides beside `protocol_sources` so codegen can map a `uses:`-flattened
+    // method's spans through its protocol's text and file. Optional: a
+    // protocol without a path (REPL-defined) still gets its text mapped.
+    let protocol_source_paths = match extract_optional_string_map(request, "protocol_source_paths")
+    {
+        Ok(paths) => paths,
+        Err(resp) => return resp,
+    };
+    let codegen_protocol_sources =
+        codegen_protocol_sources(&protocol_source_texts, &protocol_source_paths);
+    let pre_loaded_protocol_defs = parse_protocol_defs(&protocol_source_texts);
 
     // Parse the source
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
@@ -242,7 +254,8 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         .with_class_superclass_index(class_superclass_index)
         .with_class_hierarchy(pre_class_hierarchy)
         .with_pre_loaded_aliases(pre_loaded_aliases)
-        .with_source_path_opt(source_path.as_deref());
+        .with_source_path_opt(source_path.as_deref())
+        .with_protocol_sources(codegen_protocol_sources);
     // Only trust `analysis` (computed pre-merge) when nothing was
     // merged into `module` afterward — see `had_standalone_method_definitions`'s
     // doc above.
@@ -266,6 +279,33 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         ),
         Err(e) => error_response(&[format_codegen_error(&e, &source)]),
     }
+}
+
+/// Build codegen's [`ProtocolSourceMap`](beamtalk_core::semantic_analysis::ProtocolSourceMap)
+/// from the wire's `protocol_sources` texts and optional `protocol_source_paths`
+/// (BT-4828), so the per-file `'__beamtalk_method_lines'/0` table covers methods
+/// a class gets from a protocol in another file. Keyed through
+/// `insert_protocol_source` like every other compile path.
+fn codegen_protocol_sources(
+    texts: &std::collections::HashMap<String, String>,
+    paths: &std::collections::HashMap<String, String>,
+) -> beamtalk_core::semantic_analysis::ProtocolSourceMap {
+    use beamtalk_core::semantic_analysis::ProtocolSource;
+    use beamtalk_core::semantic_analysis::protocol_source::insert_protocol_source;
+    let mut map = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
+    for (name, text) in texts {
+        let name = ecow::EcoString::from(name.as_str());
+        insert_protocol_source(
+            &mut map,
+            &name,
+            ProtocolSource {
+                path: paths.get(name.as_str()).map(|p| p.as_str().into()),
+                text: text.as_str().into(),
+                package: None,
+            },
+        );
+    }
+    map
 }
 
 /// Parse `protocol_sources` (`{name => raw .bt source}`, see `handle_compile`'s
