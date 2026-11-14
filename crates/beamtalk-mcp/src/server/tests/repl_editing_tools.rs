@@ -485,5 +485,12 @@ fn get_info_advertises_tool_capabilities_and_instructions() {
     let info = mcp.get_info();
     assert!(info.capabilities.tools.is_some());
     assert!(info.instructions.unwrap().contains("evaluate"));
+    // BT-4812: server info carries the build identity, not Cargo's bare version.
+    let server = info.server_info;
+    assert_eq!(server.name, "beamtalk-mcp");
+    assert_eq!(
+        server.version,
+        beamtalk_repl_protocol::handshake::build_id()
+    );
     drop(fake);
 }

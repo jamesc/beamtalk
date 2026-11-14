@@ -82,6 +82,19 @@ pub fn beamtalk_version() -> &'static str {
     env!("BEAMTALK_VERSION")
 }
 
+/// The human-facing build identity (`BEAMTALK_BUILD_ID`, BT-4812) — e.g.
+/// `0.4.0` for a tagged release, `0.4.0-edge+2ce49a8 (2026-11-14)` for an edge
+/// build, `0.4.0-dev+2ce49a8.dirty (2026-11-14)` for a local checkout.
+///
+/// Display only: it starts with the same `VERSION` as [`beamtalk_version`] but
+/// adds the channel, `dirty` marker and commit date, so it must never be
+/// compared across the wire. The handshake keeps matching on
+/// [`beamtalk_version`], whose `-dev+<sha>` suffix already names the commit.
+#[must_use]
+pub fn build_id() -> &'static str {
+    env!("BEAMTALK_BUILD_ID")
+}
+
 /// True when `frame` is the pre-auth `{"op": "auth-required"}` welcome the
 /// workspace sends immediately on connect, before any auth message is sent.
 #[must_use]

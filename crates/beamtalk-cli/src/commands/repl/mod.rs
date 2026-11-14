@@ -272,7 +272,10 @@ pub fn run(
     // Node name: CLI --node > BEAMTALK_NODE_NAME > None
     let node_name = resolve_node_name(node_arg);
 
-    println!("Beamtalk v{}", env!("BEAMTALK_VERSION"));
+    println!(
+        "Beamtalk v{}",
+        beamtalk_repl_protocol::handshake::build_id()
+    );
     println!("Type :help for available commands, :exit to quit.");
     println!();
 

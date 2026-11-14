@@ -36,5 +36,8 @@ libc = { workspace = true }
 # why: Win32 Job Object APIs for process group isolation on Windows (BT-1133)
 windows-sys.workspace = true
 
+[build-dependencies]
+beamtalk-build.workspace = true
+
 [lints]
 workspace = true
