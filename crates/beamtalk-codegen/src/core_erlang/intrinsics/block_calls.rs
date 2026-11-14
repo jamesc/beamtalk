@@ -18,23 +18,27 @@ use super::{
 
 use beamtalk_cerl_doc::form::{self, Layout, let_in};
 
+/// Which clause spelling a call site historically emitted: `<'true'> when 'true' -> …`
+/// or `'true' when 'true' -> …`. The two are the same Core Erlang but not the same
+/// text, and the output is kept byte-identical.
+#[derive(Clone, Copy)]
+enum ClauseSpelling {
+    Bare,
+    Bracketed,
+}
+
 /// `case call 'erlang':'is_function'(args) of 'true' -> on_true 'false' -> on_false end`.
-///
-/// `bracketed` selects the clause spelling the call site historically emitted
-/// (`<'true'> when 'true' -> …` vs. `'true' when 'true' -> …`); the two are the
-/// same Core Erlang but not the same text, and the output is kept byte-identical.
 fn is_function_case(
     args: impl IntoIterator<Item = Document<'static>>,
     on_true: Document<'static>,
     on_false: Document<'static>,
-    bracketed: bool,
+    spelling: ClauseSpelling,
 ) -> Document<'static> {
     let arm = |pattern: &str, body| {
         let pattern = leaf::atom(pattern);
-        if bracketed {
-            form::clause([pattern], None, body, Layout::Flat)
-        } else {
-            form::clause_bare(pattern, None, body, Layout::Flat)
+        match spelling {
+            ClauseSpelling::Bracketed => form::clause([pattern], None, body, Layout::Flat),
+            ClauseSpelling::Bare => form::clause_bare(pattern, None, body, Layout::Flat),
         }
     };
     form::case_of(
@@ -256,11 +260,11 @@ impl CoreErlangGenerator {
                             [leaf::var(recv_var)],
                             badarity_apply_doc,
                             send_doc,
-                            false,
+                            ClauseSpelling::Bare,
                         ),
-                        false,
+                        ClauseSpelling::Bare,
                     ),
-                    false,
+                    ClauseSpelling::Bare,
                 ),
                 Layout::Flat,
             );
@@ -1007,10 +1011,15 @@ impl CoreErlangGenerator {
                     leaf::int_lit(i64::try_from(arity.saturating_add(1)).unwrap_or(i64::MAX)),
                 ],
                 stateful_branch,
-                is_function_case([leaf::var(recv_var)], apply_doc, send_doc, false),
-                false,
+                is_function_case(
+                    [leaf::var(recv_var)],
+                    apply_doc,
+                    send_doc,
+                    ClauseSpelling::Bare,
+                ),
+                ClauseSpelling::Bare,
             ),
-            false,
+            ClauseSpelling::Bare,
         );
 
         // ADR 0118 phase 5b: `parts` is already a self-contained
@@ -1222,9 +1231,9 @@ impl CoreErlangGenerator {
                 ],
                 stateful_branch,
                 placeholder_branch,
-                true,
+                ClauseSpelling::Bracketed,
             ),
-            true,
+            ClauseSpelling::Bracketed,
         )
     }
 
@@ -1315,7 +1324,7 @@ impl CoreErlangGenerator {
             ],
             stateful_branch,
             tier1_doc,
-            true,
+            ClauseSpelling::Bracketed,
         )
     }
 
@@ -1367,7 +1376,12 @@ impl CoreErlangGenerator {
             ),
             at,
         );
-        let case_doc = is_function_case([leaf::var(recv_var)], apply_doc, send_doc, false);
+        let case_doc = is_function_case(
+            [leaf::var(recv_var)],
+            apply_doc,
+            send_doc,
+            ClauseSpelling::Bare,
+        );
 
         parts.push(case_doc);
 
@@ -1478,9 +1492,9 @@ impl CoreErlangGenerator {
                 [leaf::var(fun_var), leaf::var(tier2_arity_var)],
                 tier2_apply,
                 result_pair(send_doc, current_state),
-                false,
+                ClauseSpelling::Bare,
             ),
-            false,
+            ClauseSpelling::Bare,
         );
 
         Ok(docvec![preamble, case_doc])
