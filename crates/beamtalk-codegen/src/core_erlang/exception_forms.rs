@@ -90,7 +90,7 @@ pub(super) fn wrap_and_reraise_doc(
 ///
 /// ```text
 /// case Err of
-///   <{Type, Reason, Raw}> when 'true' -> let Built = primop 'build_stacktrace'(Raw) in {Type, Reason, Built}
+///   <{Type, Reason, Raw}> when 'true' -> let Built = call 'beamtalk_exception_handler':'capture_stacktrace'(primop 'build_stacktrace'(Raw)) in {Type, Reason, Built}
 ///   <Other> when 'true' -> Other
 /// end
 /// ```

@@ -1124,7 +1124,12 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                         beamtalk_exception_handler:raise_site_stacktrace(TestReason, TestST)
                     );
                 TestClass:TestReason:TestST ->
-                    test_failure(MethodName, error_head(TestClass, TestReason), Module, TestST)
+                    test_failure(
+                        MethodName,
+                        error_head(TestClass, TestReason),
+                        Module,
+                        beamtalk_exception_handler:raise_site_stacktrace(TestReason, TestST)
+                    )
             after
                 case HasTearDown of
                     true ->
