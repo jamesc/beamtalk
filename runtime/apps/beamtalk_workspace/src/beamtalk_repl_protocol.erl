@@ -25,6 +25,7 @@ requests, "type"-keyed responses) has been removed.
     encode_result/3, encode_result/4, encode_result/5,
     encode_script_exit/4,
     encode_error/3, encode_error/4, encode_error/5, encode_error/6,
+    frames_metadata/1,
     encode_status/3,
     encode_out/3,
     encode_need_input/2,
@@ -203,6 +204,29 @@ encode_error(Reason, Msg, FormatError, Output, Warnings, Metadata) ->
     iolist_to_binary(
         json:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
     ).
+
+-doc """
+The `frames` metadata for an eval error (ADR 0139, decision 4), taken from the
+*raw* reason (`{eval_error, Class, ExObj}`) before `ensure_structured_error/1`
+reduces it to a bare `#beamtalk_error{}`, which carries no stacktrace. One
+`beamtalk_stack_frame:structured_frame/1` map per frame: display string and raw
+MFA together, hidden frames flagged rather than removed. Callers pass the result
+as `encode_error` metadata. Errors without a captured stacktrace add nothing.
+""".
+-spec frames_metadata(term()) -> map().
+frames_metadata({eval_error, _Class, ExObj}) when is_map(ExObj) ->
+    %% The whole build is protected: a frame that cannot be rendered must cost
+    %% the `frames`, never the error response.
+    try
+        [beamtalk_stack_frame:structured_frame(F) || F <- beamtalk_exception_handler:frames(ExObj)]
+    of
+        [] -> #{};
+        Frames -> #{<<"frames">> => Frames}
+    catch
+        _:_ -> #{}
+    end;
+frames_metadata(_Reason) ->
+    #{}.
 
 -doc "Encode a status-only response (e.g., for clear, close).".
 -spec encode_status(atom(), protocol_msg(), fun((term()) -> term())) -> binary().

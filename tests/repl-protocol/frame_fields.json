@@ -1,0 +1,4 @@
+{
+  "comment": "ADR 0139 decision 4: the keys of one structured stack frame, as sent in the REPL error payload `frames`, the JSON log `stacktrace` array and the test runner's `frames`. beamtalk_stack_frame:structured_frame/1 (Erlang) and beamtalk_repl_protocol::StackFrameInfo (Rust) are both checked against this file.",
+  "frame_fields": ["arity", "display", "file", "function", "hidden", "line", "module"]
+}

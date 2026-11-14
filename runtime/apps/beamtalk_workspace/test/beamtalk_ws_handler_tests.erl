@@ -716,6 +716,24 @@ eval_error_sends_error_and_clears_pending_test() ->
     ?assertEqual(undefined, State1#ws_state.pending_eval),
     ?assertMatch([{text, _} | _], Frames).
 
+%% BT-4819: the real async path unwraps the reason for the message, so the
+%% frames must be taken from the raw `{eval_error, Class, ExObj}` first.
+eval_error_response_carries_frames_test() ->
+    State = (authed_state())#ws_state{pending_eval = make_msg(<<"eval">>)},
+    Stack = [
+        {lists, foldl, 3, [{file, "lists.erl"}, {line, 2471}]},
+        {gen_server, try_handle_call, 4, [{file, "gen_server.erl"}, {line, 1}]}
+    ],
+    ExObj = beamtalk_exception_handler:ensure_wrapped(error, badarg, Stack),
+    {[{text, Json}], _} = beamtalk_ws_handler:websocket_info(
+        {eval_error, {eval_error, error, ExObj}, <<>>, []}, State
+    ),
+    #{<<"frames">> := [First, Second], <<"error">> := _} = json:decode(Json),
+    ?assertEqual(<<"lists:foldl/3 (lists.erl:2471)">>, maps:get(<<"display">>, First)),
+    ?assertEqual(<<"lists">>, maps:get(<<"module">>, First)),
+    ?assertEqual(false, maps:get(<<"hidden">>, First)),
+    ?assertEqual(true, maps:get(<<"hidden">>, Second)).
+
 eval_error_with_compile_location_test() ->
     %% A compile_error reason carrying line + hint exercises
     %% extract_compile_error_location/1's success branch.

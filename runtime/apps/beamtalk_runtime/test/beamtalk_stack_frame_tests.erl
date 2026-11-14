@@ -752,3 +752,76 @@ visibility_full_list_is_kept_test() ->
         [shown, hidden, shown],
         [V || {V, _} <- beamtalk_stack_frame:classify_frames(Wrapped)]
     ).
+
+%%% ===================================================================
+%%% Structured frames carry both forms (BT-4819, ADR 0139 decision 4)
+%%% ===================================================================
+
+structured_frame_carries_display_and_raw_mfa_test() ->
+    [Frame] = beamtalk_stack_frame:wrap([
+        {lists, foldl, 3, [{file, "lists.erl"}, {line, 2471}]}
+    ]),
+    S = beamtalk_stack_frame:structured_frame(Frame),
+    ?assertEqual(<<"lists:foldl/3 (lists.erl:2471)">>, maps:get(<<"display">>, S)),
+    ?assertEqual(<<"lists">>, maps:get(<<"module">>, S)),
+    ?assertEqual(<<"foldl">>, maps:get(<<"function">>, S)),
+    ?assertEqual(3, maps:get(<<"arity">>, S)),
+    ?assertEqual(2471, maps:get(<<"line">>, S)),
+    ?assertEqual(false, maps:get(<<"hidden">>, S)).
+
+structured_frames_keep_hidden_frames_flagged_test() ->
+    Stack = [
+        {lists, foldl, 3, [{file, "lists.erl"}, {line, 1}]},
+        {gen_server, try_handle_call, 4, [{file, "gen_server.erl"}, {line, 2}]}
+    ],
+    All = beamtalk_stack_frame:structured_frames(Stack),
+    ?assertEqual(2, length(All)),
+    [First, Second] = All,
+    ?assertEqual(false, maps:get(<<"hidden">>, First)),
+    ?assertEqual(true, maps:get(<<"hidden">>, Second)),
+    ?assertEqual(
+        1, length(beamtalk_stack_frame:visible_frames(beamtalk_stack_frame:wrap(Stack)))
+    ).
+
+%% A method named like a JSON literal must not become one on the wire.
+structured_frame_function_named_like_json_literal_test() ->
+    [Frame] = beamtalk_stack_frame:wrap([{'bt@user@x', true, 1, []}]),
+    S = beamtalk_stack_frame:structured_frame(Frame),
+    ?assertEqual(<<"true">>, maps:get(<<"function">>, S)),
+    Decoded = json:decode(iolist_to_binary(json:encode(S))),
+    ?assertEqual(<<"true">>, maps:get(<<"function">>, Decoded)).
+
+structured_frame_unknown_module_is_null_test() ->
+    [Frame] = beamtalk_stack_frame:wrap([not_a_frame]),
+    S = beamtalk_stack_frame:structured_frame(Frame),
+    ?assertEqual(null, maps:get(<<"module">>, S)),
+    ?assertEqual(null, maps:get(<<"function">>, S)).
+
+%% The key set is the one in tests/repl-protocol/frame_fields.json, which the
+%% Rust `StackFrameInfo` is checked against too.
+structured_frame_keys_match_shared_fixture_test() ->
+    #{<<"frame_fields">> := Fields} = beamtalk_test_corpus:load_json_fixture([
+        "tests", "repl-protocol", "frame_fields.json"
+    ]),
+    [Frame] = beamtalk_stack_frame:wrap([{lists, foldl, 3, []}]),
+    S = beamtalk_stack_frame:structured_frame(Frame),
+    ?assertEqual(lists:sort(Fields), lists:sort(maps:keys(S))).
+
+dispatch_raw_mfa_and_is_hidden_test() ->
+    [Frame] = beamtalk_stack_frame:wrap([{lists, foldl, 3, []}]),
+    ?assertEqual(
+        beamtalk_primitive:string_from_binary(<<"lists:foldl/3">>),
+        beamtalk_stack_frame:dispatch('rawMfa', [], Frame)
+    ),
+    ?assertEqual(false, beamtalk_stack_frame:dispatch('isHidden', [], Frame)),
+    ?assert(beamtalk_stack_frame:has_method('rawMfa')),
+    ?assert(beamtalk_stack_frame:has_method('isHidden')),
+    [Bad] = beamtalk_stack_frame:wrap([not_a_frame]),
+    ?assertEqual(nil, beamtalk_stack_frame:dispatch('rawMfa', [], Bad)).
+
+%% printString is the display name whatever the frame's flags say.
+print_string_independent_of_hidden_flag_test() ->
+    [Frame] = beamtalk_stack_frame:wrap([{lists, foldl, 3, []}]),
+    Shown = beamtalk_stack_frame:dispatch('printString', [], Frame#{visible => true}),
+    Hidden = beamtalk_stack_frame:dispatch('printString', [], Frame#{visible => false}),
+    ?assertEqual(Shown, Hidden).

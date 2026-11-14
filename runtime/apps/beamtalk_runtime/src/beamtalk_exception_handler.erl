@@ -940,6 +940,9 @@ dispatch('stackTrace', [], Self) ->
     %% Default visibility (ADR 0139): hidden frames are collapsed, not dropped;
     %% `frames/1` answers the full ordered list.
     beamtalk_stack_frame:visible_frames(frames(Self));
+dispatch('fullStackTrace', [], Self) ->
+    %% Every captured frame, innermost first, hidden ones flagged (`isHidden`).
+    frames(Self);
 dispatch('class', [], #{'$beamtalk_class' := Class}) ->
     Class;
 dispatch('signal', [], Self) ->
@@ -1140,6 +1143,7 @@ has_method('reason') -> true;
 has_method('details') -> true;
 has_method('printString') -> true;
 has_method('stackTrace') -> true;
+has_method('fullStackTrace') -> true;
 has_method('class') -> true;
 has_method('signal') -> true;
 has_method('signal:') -> true;

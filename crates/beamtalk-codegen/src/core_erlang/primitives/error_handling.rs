@@ -23,7 +23,7 @@ pub(crate) fn generate_exception_bif(
 ) -> Option<Document<'static>> {
     match selector {
         "message" | "hint" | "kind" | "selector" | "errorClass" | "reason" | "details"
-        | "printString" | "signal" | "pass" | "stackTrace" => Some(docvec![
+        | "printString" | "signal" | "pass" | "stackTrace" | "fullStackTrace" => Some(docvec![
             "call 'beamtalk_exception_handler':'dispatch'(",
             leaf::atom(selector.to_owned()),
             ", [], Self)",
@@ -158,8 +158,8 @@ pub(crate) fn generate_stack_frame_bif(
     _params: &[String],
 ) -> Option<Document<'static>> {
     match selector {
-        "method" | "receiverClass" | "arguments" | "sourceLocation" | "moduleName" | "line"
-        | "file" | "printString" => Some(docvec![
+        "method" | "receiverClass" | "arguments" | "sourceLocation" | "moduleName" | "rawMfa"
+        | "isHidden" | "line" | "file" | "printString" => Some(docvec![
             "call 'beamtalk_stack_frame':'dispatch'(",
             leaf::atom(selector.to_owned()),
             ", [], Self)",
@@ -260,6 +260,31 @@ mod tests {
                 "call 'beamtalk_exception_handler':'dispatch'('signal:', [Msg], Self)".to_string()
             )
         );
+    }
+
+    #[test]
+    fn test_exception_full_stack_trace() {
+        let result = doc_to_string(generate_exception_bif("fullStackTrace", &[]));
+        assert_eq!(
+            result,
+            Some(
+                "call 'beamtalk_exception_handler':'dispatch'('fullStackTrace', [], Self)"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_stack_frame_raw_mfa_and_is_hidden() {
+        for sel in ["rawMfa", "isHidden"] {
+            let result = doc_to_string(generate_stack_frame_bif(sel, &[]));
+            assert_eq!(
+                result,
+                Some(format!(
+                    "call 'beamtalk_stack_frame':'dispatch'('{sel}', [], Self)"
+                ))
+            );
+        }
     }
 
     #[test]

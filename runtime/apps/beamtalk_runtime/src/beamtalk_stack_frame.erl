@@ -40,6 +40,25 @@ the workspace log stream, process stats) calls these; none keeps its own.
 | `render_mfa/1` | a bare `{M, F, A}`, same notation, no location |
 | `raw_mfa/1` | a bare `{M, F, A}` as `module:function/arity`, always raw (machine-readable log fields) |
 | `frame_parts/1` | the structured pieces `format_frame/1` is built from |
+| `structured_frame/1`, `structured_frames/1` | the wire form: display string plus raw module, function and arity, a `hidden` flag |
+
+## Structured frames carry both forms (ADR 0139, decision 4)
+
+Raw output is chosen by whoever consumes it, not by a node-wide switch, so the
+data always carries both forms. `structured_frame/1` is the one definition of
+the JSON-ready frame map (binary keys, `null` for unknown), used by the REPL
+protocol error payload, the JSON log `stacktrace` field and the test runner's
+`frames`:
+
+| Key | Value |
+|---|---|
+| `display` | the `format_frame/1` text |
+| `module`, `function`, `arity` | the raw MFA (`module` and `function` are `null` and `arity` is `0` when the frame has none) |
+| `file`, `line` | display path and line (`null` when unknown) |
+| `hidden` | `true` when `classify_frames/1` hides the frame by default |
+
+Hidden frames stay in the list, flagged. The key set is pinned to
+`tests/repl-protocol/frame_fields.json`, which the Rust protocol crate checks too.
 
 Frame table (the first column is what the frame is, not what it is called):
 
@@ -90,6 +109,8 @@ loaded class modules share it. Which frames are listed is not decided here.
     render_mfas/1,
     raw_mfa/1,
     frame_parts/1,
+    structured_frame/1,
+    structured_frames/1,
     frame_source_path/1
 ]).
 
@@ -189,6 +210,44 @@ wrap_frame(_Other, _ModuleToClass, _Shared) ->
         class_name => nil,
         package => nil
     }.
+
+-doc """
+The JSON-ready structured form of one wrapped frame: the display string and the
+raw MFA side by side, plus the `hidden` verdict (see the module doc table).
+""".
+-spec structured_frame(map()) -> #{binary() => term()}.
+structured_frame(Frame) ->
+    Parts = frame_parts(Frame),
+    Module = maps:get(module, Frame, undefined),
+    Function = maps:get(function, Frame, undefined),
+    #{
+        <<"display">> => format_frame(Frame),
+        <<"module">> => atom_or_null(Module),
+        <<"function">> => atom_or_null(Function),
+        <<"arity">> => maps:get(arity, Frame, 0),
+        <<"file">> => null_if_nil(maps:get(file, Parts)),
+        <<"line">> => null_if_nil(maps:get(line, Parts)),
+        <<"hidden">> => maps:get(visible, Frame, true) =:= false
+    }.
+
+-doc """
+Every frame of a raw Erlang stacktrace in structured form, innermost first,
+hidden ones flagged and kept (the complete unfiltered list).
+""".
+-spec structured_frames(list()) -> [#{binary() => term()}].
+structured_frames(Stacktrace) ->
+    [structured_frame(F) || F <- wrap(Stacktrace)].
+
+%% Binaries, never atoms: `json:encode/1` writes the atoms `null`, `true` and
+%% `false` as JSON literals, and a Beamtalk method can be named any of them.
+-spec atom_or_null(term()) -> binary() | null.
+atom_or_null(undefined) -> null;
+atom_or_null(Atom) when is_atom(Atom) -> atom_to_binary(Atom, utf8);
+atom_or_null(_) -> null.
+
+-spec null_if_nil(term()) -> term().
+null_if_nil(nil) -> null;
+null_if_nil(Value) -> Value.
 
 -doc """
 The one classifier for default frame visibility (see the module doc table).
@@ -465,6 +524,14 @@ dispatch('file', [], #{file := File}) when is_binary(File) ->
     beamtalk_primitive:string_from_binary(File);
 dispatch('file', [], #{file := File}) ->
     File;
+dispatch('rawMfa', [], #{module := Module, function := Function, arity := Arity}) when
+    is_atom(Module), is_atom(Function), Module =/= undefined, Function =/= undefined
+->
+    beamtalk_primitive:string_from_binary(raw_mfa({Module, Function, Arity}));
+dispatch('rawMfa', [], _Frame) ->
+    nil;
+dispatch('isHidden', [], Frame) ->
+    maps:get(visible, Frame, true) =:= false;
 dispatch('printString', [], Frame) ->
     beamtalk_primitive:string_from_binary(format_frame(Frame)).
 
@@ -478,6 +545,8 @@ has_method('sourceLocation') -> true;
 has_method('moduleName') -> true;
 has_method('line') -> true;
 has_method('file') -> true;
+has_method('rawMfa') -> true;
+has_method('isHidden') -> true;
 has_method('printString') -> true;
 has_method(_) -> false.
 
