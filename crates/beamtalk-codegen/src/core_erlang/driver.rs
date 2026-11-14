@@ -85,6 +85,7 @@ pub fn generate_module_surfacing_verifier(
 /// - The module uses unsupported features
 /// - Code generation encounters an internal error
 /// - Formatting fails
+/// - A class defines the same method twice (BT-4811)
 #[allow(
     clippy::too_many_lines,
     reason = "one linear driver: option plumbing, analysis hand-off, hierarchy set-up, then generation"
@@ -117,6 +118,7 @@ pub fn generate_module_with_warnings(
         } else {
             module
         };
+    check_no_duplicate_methods(module)?;
     let peeled_storage;
     let mut peeled_parens = normalize::PeeledParens::default();
     let module: &Module = if normalize::needs_normalising(module) {
@@ -838,4 +840,27 @@ impl CoreErlangGenerator {
             .first()
             .is_none_or(|class| hierarchy.compiles_as_actor(class))
     }
+}
+
+/// BT-4811 backstop: reject a class that defines one selector twice (after the
+/// same-file fold), naming it, instead of emitting two Core Erlang functions
+/// with the same name/arity, which makes `erlc` crash with an internal error.
+/// Analysis already reports this; a caller that skips its diagnostics gets this.
+fn check_no_duplicate_methods(module: &Module) -> Result<()> {
+    for class in &module.classes {
+        for (methods, side) in [
+            (&class.methods, "instance"),
+            (&class.class_methods, "class"),
+        ] {
+            if let Some(dup) = beamtalk_core::ast::duplicate_methods(methods).first() {
+                return Err(CodeGenError::DuplicateMethod {
+                    class: class.name.name.to_string(),
+                    selector: dup.method.selector.name().to_string(),
+                    side,
+                    span: Some(dup.method.head_span()),
+                });
+            }
+        }
+    }
+    Ok(())
 }
