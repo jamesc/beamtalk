@@ -821,11 +821,11 @@ raise_function_or_arity_error(Module, FunName, Arity, OrigSelector, Exports) ->
                 })
             );
         _ ->
-            %% The first arity goes through the shared MFA formatter; any
-            %% further arities follow as bare numbers (`m:f/1, 2`).
+            %% Arity is the point of this hint, so name the target raw
+            %% (`m:f/1, 2`), even when the target is a Beamtalk class module.
             [First | Rest] = lists:sort(MatchingArities),
             Existing = [
-                beamtalk_stack_frame:render_mfa({Module, FunName, First})
+                beamtalk_stack_frame:raw_mfa({Module, FunName, First})
                 | [[<<", ">>, integer_to_binary(A)] || A <- Rest]
             ],
             Hint = iolist_to_binary([

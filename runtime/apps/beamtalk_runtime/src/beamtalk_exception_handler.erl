@@ -766,9 +766,9 @@ ensure_wrapped(_Type, #beamtalk_error{} = Error, Stacktrace) ->
     Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error};
 ensure_wrapped(error, undef, Stacktrace) ->
     %% A Beamtalk class is shown as `Class>>selector`; foreign Erlang stays
-    %% `module:function/arity` (ADR 0139). A `bt@...` module that is not a
-    %% registered class also carries the raw MFA in `details`: it usually means
-    %% a compiler bug, and the raw name is the diagnosis.
+    %% `module:function/arity` (ADR 0139). Any compiled Beamtalk module also
+    %% carries the raw MFA in `details`: for one that is not a registered
+    %% class it usually means a compiler bug, and the raw name is the diagnosis.
     {Message, Details} =
         case Stacktrace of
             [{Mod, Fun, ArgsOrArity, _} | _] ->
@@ -781,7 +781,7 @@ ensure_wrapped(error, undef, Stacktrace) ->
                 Mfa = {Mod, Fun, Arity},
                 Rendered = beamtalk_stack_frame:render_mfa(Mfa),
                 Msg = <<"Undefined function: ", Rendered/binary>>,
-                case is_bt_module(Mod) of
+                case beamtalk_module_name:is_compiled_beamtalk_module(Mod) of
                     true -> {Msg, #{reason => undef, mfa => beamtalk_stack_frame:raw_mfa(Mfa)}};
                     false -> {Msg, #{reason => undef}}
                 end;
@@ -1328,11 +1328,3 @@ class_signal_kind(Kind, Class, Selector, Hint) ->
     %% (index_out_of_bounds, empty_collection), which must keep an error-level
     %% record when they escape a class method (BT-4115).
     beamtalk_error:raise(beamtalk_error:new(Kind, Class, Selector, Hint)).
-
-%% A compiler-generated Beamtalk module (`bt@...`).
--spec is_bt_module(atom()) -> boolean().
-is_bt_module(Mod) when is_atom(Mod) ->
-    case atom_to_binary(Mod, utf8) of
-        <<"bt@", _/binary>> -> true;
-        _ -> false
-    end.
