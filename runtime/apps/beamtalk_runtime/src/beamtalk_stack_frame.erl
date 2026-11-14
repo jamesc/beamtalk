@@ -23,7 +23,8 @@ StackFrame objects are value types (tagged maps) with fields:
   file => binary() | nil,    % Source file path
   line => non_neg_integer() | nil, % Source line number
   class_name => atom() | nil, % Beamtalk class name (if the runtime class table knows the module)
-  package => binary() | nil   % package qualifier, set only when two loaded class modules share the name
+  package => binary() | nil,  % package qualifier, set only when two loaded class modules share the name
+  visible => boolean()        % set by wrap/1 from classify_frames/1: shown by default?
 }
 ```
 
@@ -50,6 +51,26 @@ Frame table (the first column is what the frame is, not what it is called):
 | Erlang code (any module that is not a Beamtalk class) | `lists:foldl/3 (lists.erl:2471)` |
 | A `bt@...` module the class table cannot resolve | `bt@user@Hpack>>class_encode:headers:table:`: the raw module, nothing guessed |
 
+## Frame visibility (ADR 0139, decision 3)
+
+`classify_frames/1` is the one place that decides which frames a surface lists
+by default; test failure output and `Exception>>stackTrace` use it, and
+`wrap/1` stamps the verdict on each frame as `visible`. Nothing is dropped:
+`beamtalk_exception_handler:frames/1` and `--full-traces` keep the whole
+ordered list.
+
+| Frame | Default |
+|---|---|
+| Beamtalk method or block (resolved class, or a `bt@...` module the table cannot resolve) | shown |
+| Generated callback in a Beamtalk module (`init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`, `terminate/2`, `code_change/3`, `safe_dispatch`) | hidden |
+| Erlang module a Beamtalk package declares (`beamtalk_package:declared_native_modules/0`, the `native_modules` app env, ADR 0072) | shown |
+| The frame that raised (innermost), other Erlang code (OTP, hex dependency) | shown |
+| Any other OTP or hex-dependency frame | hidden |
+| `beamtalk_*` runtime internals (unless a package declares the module) | hidden |
+
+Classification reads the loaded applications of the node it runs on, so run
+it where the exception was raised or read.
+
 Names resolve through the runtime class table
 (`beamtalk_class_registry:module_to_class_map/0`); there is no string-guessing
 fallback. A class name is package-qualified (`json@Parser`) only when two
@@ -62,6 +83,8 @@ loaded class modules share it. Which frames are listed is not decided here.
     has_method/1,
     module_to_class/1,
     wrap_frame/1,
+    classify_frames/1,
+    visible_frames/1,
     format_frame/1,
     render_mfa/1,
     raw_mfa/1,
@@ -96,7 +119,11 @@ behind `e stackTrace`). So class names are resolved at read time.
 wrap(Stacktrace) when is_list(Stacktrace) ->
     ModuleToClass = beamtalk_class_registry:module_to_class_map(),
     Shared = shared_class_segments(Stacktrace, ModuleToClass),
-    [wrap_frame(Frame, ModuleToClass, Shared) || Frame <- Stacktrace];
+    Frames = [wrap_frame(Frame, ModuleToClass, Shared) || Frame <- Stacktrace],
+    [
+        Frame#{visible => Verdict =:= shown}
+     || {Verdict, Frame} <- classify_frames(Frames)
+    ];
 wrap(_) ->
     [].
 
@@ -152,6 +179,85 @@ wrap_frame(_Other, _ModuleToClass, _Shared) ->
         class_name => nil,
         package => nil
     }.
+
+-doc """
+The one classifier for default frame visibility (see the module doc table).
+Takes wrapped frames, innermost first (as `wrap/1` answers), and answers each
+as `{shown | hidden, Frame}` in the same order. The innermost frame is the one
+that raised; it is listed even when it is OTP or hex-dependency code, so the
+trace says where the failure happened.
+""".
+-spec classify_frames([map()]) -> [{shown | hidden, map()}].
+classify_frames(Frames) ->
+    Natives =
+        case lists:any(fun is_plain_erlang_frame/1, Frames) of
+            true -> beamtalk_package:declared_native_modules();
+            false -> #{}
+        end,
+    classify_frames(Frames, true, Natives).
+
+classify_frames([], _Raising, _Natives) ->
+    [];
+classify_frames([Frame | Rest], Raising, Natives) ->
+    [{frame_verdict(Frame, Raising, Natives), Frame} | classify_frames(Rest, false, Natives)].
+
+-doc "The frames of a wrapped stacktrace that are shown by default, in order.".
+-spec visible_frames([map()]) -> [map()].
+visible_frames(Frames) ->
+    [Frame || {shown, Frame} <- classify_frames(Frames)].
+
+-spec is_plain_erlang_frame(map()) -> boolean().
+is_plain_erlang_frame(#{module := Module} = Frame) ->
+    frame_kind(Module, maps:get(class_name, Frame, nil)) =:= erlang;
+is_plain_erlang_frame(_) ->
+    false.
+
+-spec frame_verdict(map(), boolean(), #{atom() => true}) -> shown | hidden.
+frame_verdict(#{module := Module, function := Function} = Frame, Raising, Natives) ->
+    case frame_kind(Module, maps:get(class_name, Frame, nil)) of
+        unknown ->
+            hidden;
+        erlang ->
+            %% A package's own module wins over the `beamtalk_` prefix: packages
+            %% are told to prefix their native modules with their name.
+            case maps:is_key(Module, Natives) of
+                true ->
+                    shown;
+                false ->
+                    case Raising andalso not runtime_internal(Module) of
+                        true -> shown;
+                        false -> hidden
+                    end
+            end;
+        _Beamtalk ->
+            case generated_callback(Function) of
+                true -> hidden;
+                false -> shown
+            end
+    end;
+frame_verdict(_, _, _) ->
+    hidden.
+
+-spec runtime_internal(atom()) -> boolean().
+runtime_internal(Module) ->
+    lists:prefix("beamtalk_", atom_to_list(Module)).
+
+%% Callbacks the compiler generates for every actor module; the user wrote none
+%% of them. Matched by name (lifted funs of them included).
+-spec generated_callback(atom()) -> boolean().
+generated_callback(Function) when is_atom(Function) ->
+    {Name, _IsBlock} = fun_name_parts(Function),
+    lists:member(Name, [
+        <<"init">>,
+        <<"handle_call">>,
+        <<"handle_cast">>,
+        <<"handle_info">>,
+        <<"terminate">>,
+        <<"code_change">>,
+        <<"safe_dispatch">>
+    ]);
+generated_callback(_) ->
+    false.
 
 -doc """
 Resolve `Module` to a class name using a pre-built module→class map (from

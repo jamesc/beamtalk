@@ -929,7 +929,9 @@ dispatch('printString', [], #{error := Error}) ->
 dispatch('stackTrace', [], Self) ->
     %% `[]` when no stacktrace was captured (e.g. a signal-time error without
     %% a catch).
-    frames(Self);
+    %% Default visibility (ADR 0139): hidden frames are collapsed, not dropped;
+    %% `frames/1` answers the full ordered list.
+    beamtalk_stack_frame:visible_frames(frames(Self));
 dispatch('class', [], #{'$beamtalk_class' := Class}) ->
     Class;
 dispatch('signal', [], Self) ->

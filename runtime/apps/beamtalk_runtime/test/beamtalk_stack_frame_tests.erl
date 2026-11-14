@@ -537,3 +537,108 @@ unload_module(Module) ->
     code:delete(Module),
     code:purge(Module),
     ok.
+
+%%% ===================================================================
+%%% Frame visibility (BT-4818)
+%%% ===================================================================
+
+with_native_package(Modules, Fun) ->
+    App = bt4818_pkg,
+    ok = application:load(
+        {application, App, [
+            {description, "bt4818"},
+            {vsn, "0.0.1"},
+            {modules, []},
+            {registered, []},
+            {applications, [kernel]},
+            {env, [{native_modules, Modules}]}
+        ]}
+    ),
+    try
+        Fun()
+    after
+        application:unload(App)
+    end.
+
+shown(Stack) ->
+    [
+        {M, F}
+     || #{module := M, function := F} <- beamtalk_stack_frame:visible_frames(
+            beamtalk_stack_frame:wrap(Stack)
+        )
+    ].
+
+%% A package's declared native module is shown, wherever it sits in the trace,
+%% even under the `beamtalk_` prefix the ADR tells packages to use.
+visibility_package_native_module_shown_test() ->
+    with_native_package([bt4818_native, beamtalk_bt4818_http], fun() ->
+        Stack = [
+            {lists, map, 2, []},
+            {bt4818_native, decode, 1, [{file, "native/bt4818_native.erl"}, {line, 9}]},
+            {beamtalk_bt4818_http, get, 1, []},
+            {beamtalk_dispatch, lookup, 3, []},
+            {gen_server, handle_msg, 6, []}
+        ],
+        ?assertEqual(
+            [{lists, map}, {bt4818_native, decode}, {beamtalk_bt4818_http, get}],
+            shown(Stack)
+        )
+    end).
+
+%% Declared natives are read from the `native_modules` app env and nowhere else.
+visibility_declared_native_modules_source_test() ->
+    ?assertNot(maps:is_key(bt4818_native, beamtalk_package:declared_native_modules())),
+    with_native_package([bt4818_native], fun() ->
+        ?assert(maps:is_key(bt4818_native, beamtalk_package:declared_native_modules()))
+    end),
+    ?assertNot(maps:is_key(bt4818_native, beamtalk_package:declared_native_modules())).
+
+%% A failure raised inside OTP: the raising frame is shown, the plumbing is not.
+visibility_raising_otp_frame_shown_plumbing_hidden_test() ->
+    Stack = [
+        {lists, foldl, 3, [{file, "lists.erl"}, {line, 2471}]},
+        {gen_server, try_handle_call, 4, []},
+        {gen_server, handle_msg, 6, []},
+        {proc_lib, init_p_do_apply, 3, []}
+    ],
+    ?assertEqual([{lists, foldl}], shown(Stack)),
+    %% Only the innermost frame counts as the raising one.
+    ?assertEqual([], shown(tl(Stack))).
+
+%% `beamtalk_*` runtime internals are hidden, the raising one included.
+visibility_runtime_internal_hidden_test() ->
+    Stack = [
+        {beamtalk_error, raise, 1, []},
+        {beamtalk_dispatch, send, 3, []}
+    ],
+    ?assertEqual([], shown(Stack)).
+
+%% Generated callbacks of a Beamtalk module are hidden; its methods and blocks are not.
+visibility_generated_callbacks_hidden_test() ->
+    Stack = [
+        {'bt@bt4818@counter', 'increment', 1, []},
+        {'bt@bt4818@counter', '-increment/1-fun-0-', 2, []},
+        {'bt@bt4818@counter', safe_dispatch, 3, []},
+        {'bt@bt4818@counter', handle_call, 3, []},
+        {'bt@bt4818@counter', handle_info, 2, []},
+        {'bt@bt4818@counter', init, 1, []}
+    ],
+    ?assertEqual(
+        [{'bt@bt4818@counter', 'increment'}, {'bt@bt4818@counter', '-increment/1-fun-0-'}],
+        shown(Stack)
+    ).
+
+%% The unfiltered list stays whole and ordered; `wrap/1` only stamps a verdict.
+visibility_full_list_is_kept_test() ->
+    Stack = [
+        {lists, foldl, 3, []},
+        {gen_server, handle_msg, 6, []},
+        {'bt@bt4818@counter', handle_call, 3, []}
+    ],
+    Wrapped = beamtalk_stack_frame:wrap(Stack),
+    ?assertEqual([lists, gen_server, 'bt@bt4818@counter'], [M || #{module := M} <- Wrapped]),
+    ?assertEqual([true, false, false], [V || #{visible := V} <- Wrapped]),
+    ?assertEqual(
+        [shown, hidden, hidden],
+        [V || {V, _} <- beamtalk_stack_frame:classify_frames(Wrapped)]
+    ).

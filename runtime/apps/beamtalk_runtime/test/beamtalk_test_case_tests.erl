@@ -249,13 +249,26 @@ is_valid_setUp_result_actor_instance_test() ->
 format_stacktrace_empty_test() ->
     ?assertEqual(<<>>, beamtalk_test_case:format_stacktrace([])).
 
-%% Stacktrace with only non-bt@ frames returns empty binary.
+%% Only plumbing frames and no raising OTP frame: nothing is listed.
 format_stacktrace_no_relevant_frames_test() ->
     Frames = [
-        {erl_eval, expr, 3, [{file, "erl_eval.erl"}, {line, 100}]},
+        {beamtalk_dispatch, lookup, 3, [{file, "beamtalk_dispatch.erl"}, {line, 1}]},
         {gen_server, call, 2, [{file, "gen_server.erl"}, {line, 200}]}
     ],
     ?assertEqual(<<>>, beamtalk_test_case:format_stacktrace(Frames)).
+
+%% BT-4818: the raising frame is listed even when it is OTP code; the plumbing
+%% around it is not.
+format_stacktrace_shows_raising_otp_frame_test() ->
+    Frames = [
+        {lists, foldl, 3, [{file, "lists.erl"}, {line, 2471}]},
+        {gen_server, try_handle_call, 4, [{file, "gen_server.erl"}, {line, 1}]},
+        {proc_lib, init_p, 5, [{file, "proc_lib.erl"}, {line, 1}]}
+    ],
+    ?assertEqual(
+        <<"\n  at lists:foldl/3 (lists.erl:2471)">>,
+        beamtalk_test_case:format_stacktrace(Frames)
+    ).
 
 %% Multi-frame stacktrace preserves most-recent-first order (innermost first).
 %% BEAM stacktraces have the error location at the head — format_stacktrace

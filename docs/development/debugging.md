@@ -76,6 +76,29 @@ FAIL testParse
   at ParserTest>>testParse (parser_test.bt:12)
 ```
 
+### Frame visibility
+
+One classifier, `beamtalk_stack_frame:classify_frames/1`, decides which frames
+a surface lists by default (ADR 0139: show what a person named). Test failure
+output and `Exception>>stackTrace` use it; hidden frames are collapsed, not
+dropped, so `beamtalk_exception_handler:frames/1` and `--full-traces` still
+carry the whole ordered trace (every wrapped frame has a `visible` flag).
+
+| Frame | Default |
+|---|---|
+| Beamtalk method or block | shown |
+| Erlang module a Beamtalk package declares (`native/*.erl` of the project or a dependency) | shown |
+| The frame that raised (innermost), when it is other Erlang code (OTP, hex dependency) | shown, so the trace says where it failed |
+| Other OTP and hex-dependency frames (`gen_server`, `proc_lib`, `lists` internals) | hidden |
+| Generated callbacks of a Beamtalk module (`init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`, `terminate/2`, `code_change/3`, `safe_dispatch`) | hidden |
+| `beamtalk_*` runtime internals | hidden |
+
+"Belongs to a Beamtalk package" is read from the generated
+`{native_modules, [...]}` key of each loaded package application (ADR 0072),
+through `beamtalk_package:declared_native_modules/0`; there is no second module
+list. The check reads the loaded applications of the node running it, so it
+sees the code of the node that raised.
+
 ### Frame format
 
 | Frame | Rendered as |
@@ -95,7 +118,8 @@ FAIL testParse
   its raw function name). A class name is package-qualified (`json@Parser`)
   only when two loaded class modules share the name. A same-named module with no registered class counts too, since the class table holds one row per name and cannot see it.
 - **Erlang frames** are written `module:function/arity` as recorded, never
-  as `Module>>function`. Test failure output lists only Beamtalk frames.
+  as `Module>>function`. Which ones are listed is decided by
+  [Frame visibility](#frame-visibility).
 - **`[] in`** marks a compiler-lifted block (a closure body or loop body)
   inside the named method, so `[] in Parser>>parse:` means "inside a block
   in `parse:`", not a separate method.
@@ -113,15 +137,15 @@ FAIL testParse
 
 ### Test failure traces
 
-Test failure output filters out runtime, OTP and test-runner frames and keeps
-only Beamtalk user and stdlib frames, then applies these rules:
+Test failure output lists the frames `beamtalk_stack_frame:classify_frames/1`
+shows (below), then applies these rules:
 
 - **Default cap of 3 frames.** If more than 3 frames remain, the output keeps
   the 2 innermost frames (the error site) plus the outermost frame (the test
   method), so the caller's file and line are never truncated away. Frames in
   between are dropped. With 3 or fewer, all are shown.
-- **`beamtalk test --full-traces`** disables the cap and prints the complete
-  filtered trace. Filtering of internal frames still applies.
+- **`beamtalk test --full-traces`** disables the cap and the visibility
+  filter: every frame of the trace is printed.
 - **Repeats are collapsed.** Adjacent identical lines are merged, with a
   trailing `[xN]` after the whole line, e.g. a recursive send whose frames
   render identically:
