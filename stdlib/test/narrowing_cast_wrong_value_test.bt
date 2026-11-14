@@ -1,6 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+// NOTE: this file pins TODAY's behaviour. BT-4823 flips the
+// `...AnswersSilently` cases (`<`, `>`, the field case and
+// `testSameWrongAnswerWithoutAnyCast`) to expect `does_not_understand`.
+
 // BT-4772: what a WRONG narrowing local annotation does at run time.
 //
 // `n :: Integer := opts at: #v` is a narrowing cast: the checker accepts it

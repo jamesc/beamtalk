@@ -1,7 +1,18 @@
 # ADR 0148: Checked Narrowing Casts and the Trusted-Type Comparison Hole
 
 ## Status
-Proposed (2026-11-14). Draft for owner review; not accepted. Tracking: BT-4772.
+**Deferred (2026-11-14).** Tracking: BT-4772.
+
+The owner deferred this ADR on 2026-11-14. Part 1 (the correctness bug) is
+implemented separately as BT-4823, receiver side only; the owner chose
+BT-4823's option 3 for the guard-return rewrite, which keeps the fast form for
+typed-parameter guard clauses. Parts 2 (an explicit `checkedAs:` cast) and 3
+(no implicit guard on `::` locals) are ergonomics, not correctness, and are
+deferred. What would bring them back: a real FFI or JSON boundary bug where a
+wrong value travels far before failing, or demand for a cast-site error. The
+open questions stay as listed below: String vs Binary, dead actors, the
+selector name, and a runtime `Object>>checkedAs:`. BT-4823 has not merged, so
+the ~1 ns estimates below stand; BT-4823's PR reports the measured cost.
 
 ### Scope amendment (2026-11-14): part 1 is being done as BT-4823
 
