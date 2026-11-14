@@ -369,6 +369,15 @@ text across surfaces:
   processes, bare `ClassName` for plain objects. The old `a ClassName` article
   form is gone. This is **not surface-specific** — REPL, logs, and tooling must
   show the same text for the same value.
+- Crash reports (BT-4820, ADR 0139): the OTP crash report of a crashing actor
+  shows `Class>>selector` instead of `bt@pkg@mod:fn/arity` for stacktrace
+  frames, `initial_call` and a supervisor's child `mfargs`. This is **not
+  surface-specific**: the text of every log surface (console and file
+  handlers, the JSON formatter's `message`, the `subscribe-logs` stream)
+  comes through the report callback that `beamtalk_crash_report_filter`
+  wraps, so they all show the translated names. The report term stays raw, so
+  fields the JSON formatter and `ws_log_handler` read from it (`reason`,
+  `initial_call`) keep the raw `module:function/arity`.
 - A declared `late` slot (ADR 0124) that has not been assigned renders as
   `<unassigned>` rather than being omitted, e.g.
   `CodexClient(proc: <unassigned>, nextId: 1)` — matching the inspector's
