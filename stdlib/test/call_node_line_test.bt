@@ -58,10 +58,6 @@ TestCase subclass: CallNodeLineTest
     x := Erlang erlang binary_to_integer: s
     x + 1
 
-  // BT-4851 audit: a tail-position `Erlang ...` call leaves no frame for the
-  // method (the call is a tail call), so there is no line to report; the
-  // node is annotated like every other send (see `core_erlang/dispatch_codegen`).
-
   testIfNotNilFrameReportsItsLine =>
     trace := [
       self notNil: 1 block: [:x | x / 0]
@@ -111,7 +107,9 @@ TestCase subclass: CallNodeLineTest
     self assert: (frame file endsWith: "call_node_line_test.bt")
 
   testConcatDynamicFrameReportsItsLine =>
-    trace := [self concatDynamic: "a" with: 1] on: Exception do: [:e | e stackTrace]
+    trace := [
+      self concatDynamic: "a" with: 1
+    ] on: Exception do: [:e | e stackTrace]
     frame := self frameFor: #concatDynamic:with: in: trace
     self assert: frame line equals: 47
     self assert: (frame file endsWith: "call_node_line_test.bt")
@@ -122,6 +120,9 @@ TestCase subclass: CallNodeLineTest
     self assert: frame line equals: 52
     self assert: (frame file endsWith: "call_node_line_test.bt")
 
+  // BT-4851 audit: a tail-position `Erlang ...` call leaves no frame for the
+  // method (a tail call), so there is no line to report; the proxy call node
+  // is annotated like every other send.
   testInlineErlangDirectFrameReportsItsLine =>
     trace := [self inlineDirect: "a"] on: Exception do: [:e | e stackTrace]
     frame := self frameFor: #inlineDirect: in: trace
