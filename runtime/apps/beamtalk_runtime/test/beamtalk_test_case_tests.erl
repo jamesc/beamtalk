@@ -342,14 +342,20 @@ test_failure_names_raw_mfa_when_frames_are_hidden_test() ->
         {'bt@user@A', m3, 0, [{file, "a.bt"}, {line, 3}]},
         {'bt@user@A', m4, 0, [{file, "a.bt"}, {line, 4}]}
     ],
-    {fail, m4, Msg, _} = beamtalk_test_case:test_failure(m4, <<"boom">>, 'bt@user@A', Frames),
-    ?assertNotEqual(nomatch, binary:match(Msg, <<"\n  (1 frame hidden; --raw-mfa shows all)">>)),
-    {fail, m1, Quiet, _} = beamtalk_test_case:test_failure(
-        m1, <<"boom">>, 'bt@user@A', [hd(Frames)]
-    ),
-    ?assertEqual(nomatch, binary:match(Quiet, <<"--raw-mfa">>)),
-    application:set_env(beamtalk_stdlib, raw_mfa, true),
+    %% A node that did not set `raw_mfa` (a workspace) gets no hint.
+    {fail, m4, NoFlag, _} = beamtalk_test_case:test_failure(m4, <<"boom">>, 'bt@user@A', Frames),
+    ?assertEqual(nomatch, binary:match(NoFlag, <<"--raw-mfa">>)),
+    application:set_env(beamtalk_stdlib, raw_mfa, false),
     try
+        {fail, m4, Msg, _} = beamtalk_test_case:test_failure(m4, <<"boom">>, 'bt@user@A', Frames),
+        ?assertNotEqual(
+            nomatch, binary:match(Msg, <<"\n  (1 frame hidden; --raw-mfa shows all)">>)
+        ),
+        {fail, m1, Quiet, _} = beamtalk_test_case:test_failure(
+            m1, <<"boom">>, 'bt@user@A', [hd(Frames)]
+        ),
+        ?assertEqual(nomatch, binary:match(Quiet, <<"--raw-mfa">>)),
+        application:set_env(beamtalk_stdlib, raw_mfa, true),
         {fail, m4, RawMsg, _} = beamtalk_test_case:test_failure(
             m4, <<"boom">>, 'bt@user@A', Frames
         ),

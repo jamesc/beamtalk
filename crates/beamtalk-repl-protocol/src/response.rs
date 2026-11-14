@@ -327,12 +327,6 @@ impl StackFrameInfo {
     }
 }
 
-/// How many frames of an error reply the default output leaves out.
-#[must_use]
-pub fn hidden_frame_count(frames: &[StackFrameInfo]) -> usize {
-    frames.iter().filter(|f| f.hidden).count()
-}
-
 /// The `--raw-mfa` listing of an error reply's complete stack: one `  at ` line
 /// per frame, hidden ones included. Empty when the reply carries no frames.
 #[must_use]
@@ -459,7 +453,6 @@ mod tests {
                 "  at ?",
             ]
         );
-        assert_eq!(hidden_frame_count(&frames), 2);
     }
 
     #[test]

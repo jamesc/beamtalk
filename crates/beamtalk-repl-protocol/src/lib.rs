@@ -36,5 +36,5 @@ pub mod ws_client;
 pub use request::{RequestBuilder, next_msg_id};
 pub use response::{
     ActorInfo, ClassInfo, ModuleInfo, ReplResponse, SessionInfo, StackFrameInfo, Warning,
-    hidden_frame_count, render_raw_frames,
+    render_raw_frames,
 };

@@ -195,7 +195,7 @@ print.
 |---|---|---|
 | `beamtalk test` | `--raw-mfa` | every frame per failure, raw MFA beside the display name; `frames` in the result JSON include hidden frames too |
 | `beamtalk run Class sel` | `--raw-mfa` | an uncaught error is followed by the whole stack in the same format (`--connect` renders the reply's `frames` client-side) |
-| REPL | `:raw-mfa [on\|off]` (bare toggles) | this session only: an error is followed by every frame; without it, a reply with hidden frames ends with `(N frames hidden; :raw-mfa shows all)` |
+| REPL | `:raw-mfa [on\|off]` (bare toggles) | this session only: an error is followed by every frame; without it, an error reply that carries frames ends with `(N frames hidden; :raw-mfa shows all)` |
 
 The REPL toggle is a render option of the attached client. It is not sent to
 the node, so a second session on the same workspace is unchanged, and no

@@ -153,7 +153,9 @@ enum Command {
         workspace: Option<String>,
 
         /// On an uncaught error, list every stack frame (hidden ones included)
-        /// with the raw `module:function/arity` beside each display name
+        /// with the raw `module:function/arity` beside each display name.
+        /// Put it before the program arguments: after the first one it is
+        /// passed to the program.
         #[arg(long)]
         raw_mfa: bool,
     },

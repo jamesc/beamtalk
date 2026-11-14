@@ -708,7 +708,7 @@ every frame, hidden ones included, each with its raw MFA beside the display name
 `beamtalk test` runs on a node of its own with one consumer (the CLI), so the
 option travels through the `beamtalk_stdlib` application environment to reach
 the test worker processes. It is the only transport: a workspace node, which
-serves many clients, never reads or writes it.
+serves many clients, never sets it.
 """.
 -spec raw_mfa() -> boolean().
 raw_mfa() ->
@@ -729,7 +729,10 @@ stack shares the class-table fold and the loaded-module scan across frames.
 """.
 -spec shown_frames(list()) -> [map()].
 shown_frames(Frames) ->
-    Wrapped = beamtalk_stack_frame:wrap(Frames),
+    shown_of(beamtalk_stack_frame:wrap(Frames)).
+
+-spec shown_of([map()]) -> [map()].
+shown_of(Wrapped) ->
     case raw_mfa() of
         true -> Wrapped;
         false -> beamtalk_stack_frame:visible_frames(Wrapped)
@@ -767,7 +770,20 @@ any other frame, from an empty location, so it gets the same
 """.
 -spec build_trace(atom(), atom(), list()) -> {[trace_entry()], [trace_entry()]}.
 build_trace(Module, MethodName, Stacktrace) ->
-    Relevant = select_frames(shown_frames(Stacktrace)),
+    {Real, Synthetic, _NotShown} = build_trace_counted(Module, MethodName, Stacktrace),
+    {Real, Synthetic}.
+
+-doc """
+`build_trace/3` plus the number of stack frames the default output left out
+(hidden by visibility or dropped by the 3-frame cap), counted from the same
+single wrap and selection so the note cannot disagree with the lines.
+""".
+-spec build_trace_counted(atom(), atom(), list()) ->
+    {[trace_entry()], [trace_entry()], non_neg_integer()}.
+build_trace_counted(Module, MethodName, Stacktrace) ->
+    Wrapped = beamtalk_stack_frame:wrap(Stacktrace),
+    Relevant = select_frames(shown_of(Wrapped)),
+    NotShown = length(Wrapped) - length(Relevant),
     HasTestFrame = lists:any(
         fun(W) ->
             maps:get(module, W, undefined) =:= Module andalso
@@ -780,7 +796,7 @@ build_trace(Module, MethodName, Stacktrace) ->
             true -> [];
             false -> [frame_entry({Module, MethodName, 0, []})]
         end,
-    {collapse_repeats([wrapped_entry(W) || W <- Relevant]), Synthetic}.
+    {collapse_repeats([wrapped_entry(W) || W <- Relevant]), Synthetic, NotShown}.
 
 -spec entry_line(trace_entry()) -> binary().
 entry_line({Line, _Parts, 1, _Src, _Std}) ->
@@ -863,9 +879,9 @@ rendered from the single entry list of `build_trace/3` (BT-4402), so
 -spec test_failure(atom(), binary(), atom(), list()) ->
     {fail, atom(), binary(), [map()]}.
 test_failure(MethodName, Head, Module, Stacktrace) ->
-    {Real, Synthetic} = build_trace(Module, MethodName, Stacktrace),
+    {Real, Synthetic, NotShown} = build_trace_counted(Module, MethodName, Stacktrace),
     Entries = Real ++ Synthetic,
-    Note = hidden_note(Stacktrace),
+    Note = hidden_note(NotShown),
     {fail, MethodName, <<Head/binary, (render_at(Entries))/binary, Note/binary>>, [
         entry_frame(E)
      || E <- Entries
@@ -873,33 +889,32 @@ test_failure(MethodName, Head, Module, Stacktrace) ->
 
 -doc """
 The trailing line that names the `--raw-mfa` switch when the default output
-left frames out: `\n  (N frames hidden; --raw-mfa shows all)`, empty when
-nothing is hidden or `--raw-mfa` is on. It does not start with `  at `, so the
+left frames out: `\n  (N frames hidden; --raw-mfa shows all)`. Empty when nothing
+is left out, when `--raw-mfa` is on, and on any node that did not set `raw_mfa`
+(the workspace). It does not start with `  at `, so the
 i-th `at` line still pairs with `frames[i]`.
 """.
--spec hidden_note(list()) -> binary().
-hidden_note(Stacktrace) ->
-    case raw_mfa() of
-        true ->
-            <<>>;
-        false ->
-            Total = length(Stacktrace),
-            Shown = length(select_frames(shown_frames(Stacktrace))),
-            case Total - Shown of
-                N when N > 0 ->
-                    iolist_to_binary([
-                        "\n  (",
-                        integer_to_binary(N),
-                        case N of
-                            1 -> " frame hidden";
-                            _ -> " frames hidden"
-                        end,
-                        "; --raw-mfa shows all)"
-                    ]);
-                _ ->
-                    <<>>
-            end
-    end.
+-spec hidden_note(non_neg_integer()) -> binary().
+hidden_note(NotShown) when NotShown > 0 ->
+    %% Only where `--raw-mfa` exists: `beamtalk test` sets `raw_mfa` explicitly
+    %% (true or false). A workspace node never sets it, so `Workspace test`,
+    %% the MCP `test` tool and the IDE get no flag they cannot pass.
+    case application:get_env(beamtalk_stdlib, raw_mfa) of
+        {ok, false} ->
+            iolist_to_binary([
+                "\n  (",
+                integer_to_binary(NotShown),
+                case NotShown of
+                    1 -> " frame hidden";
+                    _ -> " frames hidden"
+                end,
+                "; --raw-mfa shows all)"
+            ]);
+        _ ->
+            <<>>
+    end;
+hidden_note(_) ->
+    <<>>.
 
 -doc """
 Like `test_failure/4` for failures whose message carries no rendered

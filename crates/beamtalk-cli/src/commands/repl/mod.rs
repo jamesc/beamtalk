@@ -713,7 +713,7 @@ fn attempt_reconnect_and_retry(
 ///
 /// `raw_mfa` is the session's `:raw-mfa` render option (BT-4821): an error
 /// reply is followed by its complete stack, each frame's display name beside
-/// its raw MFA. Without it, a reply that has hidden frames names the switch.
+/// its raw MFA. Without it, a reply that carries frames names the switch.
 fn display_eval_response(response: &ReplResponse, raw_mfa: bool) {
     // Print captured stdout before value/error
     if let Some(ref output) = response.output
@@ -749,10 +749,12 @@ fn display_eval_response(response: &ReplResponse, raw_mfa: bool) {
                             eprintln!("{line}");
                         }
                     } else {
-                        let hidden = beamtalk_repl_protocol::hidden_frame_count(frames);
-                        if hidden > 0 {
-                            let noun = if hidden == 1 { "frame" } else { "frames" };
-                            eprintln!("({hidden} {noun} hidden; :raw-mfa shows all)");
+                        // The default display lists no frames, so every one of
+                        // them is left out.
+                        let n = frames.len();
+                        if n > 0 {
+                            let noun = if n == 1 { "frame" } else { "frames" };
+                            eprintln!("({n} {noun} hidden; :raw-mfa shows all)");
                         }
                     }
                 }
