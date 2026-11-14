@@ -250,8 +250,8 @@ fn cross_file_inherited_late_field_read_is_guarded() {
 /// test below and tracked as a follow-up, not part of ADR 0124 B3).
 #[test]
 fn late_field_read_inside_hybrid_while_loop_is_not_pre_extracted_and_compiles() {
-    // BT-4121: neither the condition (`limit` is a never-rebound `:: Integer`
-    // parameter, so the comparison is a bare BIF) nor the body (`self.n + 1`
+    // BT-4121: neither the condition (its receiver is the literal `3`, so the
+    // comparison is a bare BIF) nor the body (`self.n + 1`
     // is bare on the `:: Integer` field) holds a guarded operator; one would
     // route the loop to `StateAcc` (a hybrid loop cannot bracket its slow
     // path).
@@ -261,7 +261,7 @@ fn late_field_read_inside_hybrid_while_loop_is_not_pre_extracted_and_compiles() 
         "  state: n :: Integer = 0\n\n",
         "  pump: limit :: Integer =>\n",
         "    i := 0\n",
-        "    [limit > i] whileTrue: [\n",
+        "    [3 > i] whileTrue: [\n",
         "      p := self.proc\n",
         "      self.n := self.n + 1\n",
         "      i := limit\n",

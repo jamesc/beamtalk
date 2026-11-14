@@ -6,58 +6,58 @@
 // wrong value can arrive; the comparison must then raise
 // `does_not_understand` instead of term-ordering (`nil > 10` → `true`).
 
-typed Value subclass: TypedComparisonProbe
+Value subclass: TypedComparisonProbe
   field: limit :: Integer = 0
   field: ratio :: Float = 0.0
   field: label :: String = ""
   field: either :: Integer | Float = 0
 
-  intLt: n :: Integer -> Object => n < 10
+  intLt: n :: Integer -> Boolean => n < 10
 
-  intGt: n :: Integer -> Object => n > 10
+  intGt: n :: Integer -> Boolean => n > 10
 
-  intLe: n :: Integer -> Object => n <= 10
+  intLe: n :: Integer -> Boolean => n <= 10
 
-  intGe: n :: Integer -> Object => n >= 10
+  intGe: n :: Integer -> Boolean => n >= 10
 
-  floatLt: n :: Float -> Object => n < 1.5
+  floatLt: n :: Float -> Boolean => n < 1.5
 
-  floatGt: n :: Float -> Object => n > 1.5
+  floatGt: n :: Float -> Boolean => n > 1.5
 
-  numberLe: n :: Number -> Object => n <= 10
+  numberLe: n :: Number -> Boolean => n <= 10
 
-  numberGe: n :: Number -> Object => n >= 10
+  numberGe: n :: Number -> Boolean => n >= 10
 
-  charLt: c :: Character -> Object => c < $m
+  charLt: c :: Character -> Boolean => c < $m
 
-  charGe: c :: Character -> Object => c >= $m
+  charGe: c :: Character -> Boolean => c >= $m
 
-  stringLt: s :: String -> Object => s < "m"
+  stringLt: s :: String -> Boolean => s < "m"
 
-  stringGt: s :: String -> Object => s > "m"
+  stringGt: s :: String -> Boolean => s > "m"
 
   /// A typed local is guarded already; kept as the contrast case.
-  localGt: v -> Object =>
+  localGt: v -> Boolean =>
     n :: Integer := v
     n > 10
 
-  fieldLt -> Object => self.limit < 10
+  fieldLt -> Boolean => self.limit < 10
 
-  fieldGt -> Object => self.limit > 10
+  fieldGt -> Boolean => self.limit > 10
 
-  fieldLe -> Object => self.limit <= 10
+  fieldLe -> Boolean => self.limit <= 10
 
-  fieldGe -> Object => self.limit >= 10
+  fieldGe -> Boolean => self.limit >= 10
 
-  floatFieldGt -> Object => self.ratio > 1.5
+  floatFieldGt -> Boolean => self.ratio > 1.5
 
-  stringFieldLt -> Object => self.label < "m"
+  stringFieldLt -> Boolean => self.label < "m"
 
-  unionFieldGt -> Object => self.either > 10
+  unionFieldGt -> Boolean => self.either > 10
 
   /// A proven receiver (a literal) stays on the bare BIF whatever the argument.
-  literalLtArg: other -> Object => 5 < other
+  literalLtArg: other -> Boolean => 5 < other
 
   /// The argument is unchecked (BT-3928): a typed receiver with a wrong-kind
   /// argument still term-orders.
-  intLtArg: n :: Integer other: other -> Object => n < other
+  intLtArg: n :: Integer other: other -> Boolean => n < other

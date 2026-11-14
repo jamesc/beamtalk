@@ -1030,13 +1030,13 @@ mod tests {
 
     #[test]
     fn typed_comparison_allows_every_shape() {
-        // BT-4452: `x :: Integer` makes `x > 0` a bare BIF, so every shape
-        // the helper cannot keep exact on a non-Boolean is exact here.
+        // BT-4452: a literal left operand makes `3 > x` a bare BIF, so every
+        // shape the helper cannot keep exact on a non-Boolean is exact here.
         for body in [
-            "    x > 0 ifTrue: [^self withN: 0]\n    2",
-            "    x > 0 ifTrue: [self foo. ^1]\n    2",
-            "    x <= 0 ifTrue: [^1] ifFalse: [self foo]\n    2",
-            "    x >= 0 ifTrue: [^1]",
+            "    3 > x ifTrue: [^self withN: 0]\n    2",
+            "    3 > x ifTrue: [self foo. ^1]\n    2",
+            "    3 <= x ifTrue: [^1] ifFalse: [self foo]\n    2",
+            "    3 >= x ifTrue: [^1]",
             "    0 < x ifFalse: [^x foo]\n    2",
         ] {
             let src = typed_class(body);
@@ -1045,6 +1045,20 @@ mod tests {
             assert!(!out.contains('^'), "{out}");
             assert_eq!(helpers, 0, "{body}");
             assert_eq!(boolean_comparisons(&src), 1, "{body}");
+        }
+    }
+
+    #[test]
+    fn declared_param_comparison_is_not_boolean_by_construction() {
+        // BT-4823: `x :: Integer` is only declared, so `x > 0` carries a kind
+        // guard that dispatches a wrong-kind receiver and may answer a
+        // non-Boolean: the effectful shapes are not rewritten.
+        for body in [
+            "    x > 0 ifTrue: [^self withN: 0]\n    2",
+            "    x <= 0 ifTrue: [^1] ifFalse: [self foo]\n    2",
+        ] {
+            assert_eq!(rewritten(&typed_class(body)), None, "{body}");
+            assert_eq!(boolean_comparisons(&typed_class(body)), 0, "{body}");
         }
     }
 
@@ -1089,7 +1103,7 @@ mod tests {
             assert_eq!(helpers, 0, "{body}");
         }
         // Typed comparisons inside are recorded for the lowering check.
-        let src = typed_class("    (x > 0 and: [x < 9]) ifTrue: [^x foo]\n    2");
+        let src = typed_class("    (3 > x and: [3 < x]) ifTrue: [^x foo]\n    2");
         assert!(rewritten(&src).is_some());
         assert_eq!(boolean_comparisons(&src), 2);
     }

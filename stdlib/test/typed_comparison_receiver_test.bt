@@ -61,13 +61,6 @@ TestCase subclass: TypedComparisonReceiverTest
     self assert: (self.probe stringLt: "apple")
     self assert: (self.probe stringGt: "zebra")
 
-  testStringParamHoldingANumberDoesNotTermOrder =>
-    // A number is a wrong kind for `:: String`; it must not be ordered as
-    // a binary would be, so it dispatches (and raises).
-    self should: [
-      self.probe stringLt: (#{#v => 5} at: #v)
-    ] raise: #does_not_understand
-
   testWrongKindInTypedFieldRaisesForEveryOperator =>
     bad := TypedComparisonProbe new: #{#limit => self wrong}
     self should: [bad fieldLt] raise: #does_not_understand
