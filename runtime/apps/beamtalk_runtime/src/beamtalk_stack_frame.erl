@@ -190,8 +190,16 @@ shared_class_segments(Frames, ModuleToClass) ->
             Counts = lists:foldl(
                 fun(Loaded, Acc) ->
                     case class_segment(Loaded) of
-                        undefined -> Acc;
-                        Seg -> Acc#{Seg => maps:get(Seg, Acc, 0) + 1}
+                        undefined ->
+                            Acc;
+                        Seg ->
+                            %% `erlang:loaded/0` also lists modules with only old
+                            %% code (a removed class awaiting a purge); they are
+                            %% not loaded class modules.
+                            case erlang:module_loaded(Loaded) of
+                                true -> Acc#{Seg => maps:get(Seg, Acc, 0) + 1};
+                                false -> Acc
+                            end
                     end
                 end,
                 #{},

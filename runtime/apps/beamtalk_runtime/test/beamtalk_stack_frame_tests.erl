@@ -307,6 +307,8 @@ module_to_class_resolves_acronym_class_via_registry_test_() ->
 -define(SOLO_MOD, 'bt@bt4815pkg@bt4815_solo').
 -define(DUPE_A, 'bt@bt4815a@bt4815_dupe').
 -define(DUPE_B, 'bt@bt4815b@bt4815_dupe').
+-define(OLD_A, 'bt@bt4815o1@bt4815_old').
+-define(OLD_B, 'bt@bt4815o2@bt4815_old').
 -define(NEST_A, 'bt@bt4815n@a@bt4815_nest').
 -define(NEST_B, 'bt@bt4815n@b@bt4815_nest').
 
@@ -427,6 +429,24 @@ frame_table_test_() ->
                         <<"bt4815n@a@Bt4815Nest>>go">>,
                         render({?NEST_A, go, 1, []})
                     )
+                end},
+                {"a same-named module with only old code does not qualify", fun() ->
+                    %% Delete without purging, as class removal does: the module
+                    %% stays in erlang:loaded/0 as old code only.
+                    load_empty_module(?OLD_B),
+                    load_empty_module(?OLD_A),
+                    register_class('Bt4815Old', ?OLD_A),
+                    try
+                        ?assertEqual(
+                            <<"bt4815o1@Bt4815Old>>go">>, render({?OLD_A, go, 1, []})
+                        ),
+                        code:delete(?OLD_B),
+                        ?assertEqual(<<"Bt4815Old>>go">>, render({?OLD_A, go, 1, []}))
+                    after
+                        beamtalk_test_class:stop_graceful('Bt4815Old'),
+                        unload_module(?OLD_A),
+                        unload_module(?OLD_B)
+                    end
                 end},
                 {"the single-frame path resolves like wrap/1", fun() ->
                     Frame = {?DUPE_A, go, 1, []},
