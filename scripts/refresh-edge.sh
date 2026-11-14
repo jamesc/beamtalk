@@ -36,11 +36,15 @@
 #                           release's install.sh asset); its checksum is read
 #                           from "<url>.sha256". An override is for tests and
 #                           lifts the https-only rule for the installer fetches only.
+#                           Ignored (with a warning) when CLAUDE_CODE_REMOTE=true: its
+#                           checksum would come from the same overridden host.
 #   BEAMTALK_INSTALLER      path of a local installer, run unverified; wins over the URL.
 #                           Ignored (with a warning) when CLAUDE_CODE_REMOTE=true
 #   BEAMTALK_EDGE_BASE_URL  release download base for the tarball checksum
 #                           (default: the edge release); an override is for tests
-#                           and lifts the https-only rule for that fetch only
+#                           and lifts the https-only rule for that fetch only.
+#                           Ignored (with a warning) when CLAUDE_CODE_REMOTE=true,
+#                           like BEAMTALK_INSTALLER_URL
 #
 # Force a refresh: delete the marker (`rm <prefix>/.beamtalk-build.sha256`)
 # and rerun, or run `install.sh --edge --prefix <prefix>` directly.
@@ -50,13 +54,14 @@ set -uo pipefail
 # Bump when the script's behaviour changes, so vendored copies can be compared
 # (`grep '^REFRESH_EDGE_VERSION=' .claude/hooks/refresh-edge.sh`).
 # shellcheck disable=SC2034  # read by grep, not by this script
-REFRESH_EDGE_VERSION=2
+REFRESH_EDGE_VERSION=3
 
 # Time budget (BT-4841). The SessionStart hook kills this script at 360s, and a
 # kill bypasses the "always exit 0" contract. Worst case on the reinstall path:
 #   release checksum 10 + install.sh 20 + install.sh checksum 10
 #   + install 240 (+ 5 grace for `timeout -k`) + build_identity 5 = 290s,
-# about 70s under the hook. Keep the sum under 300 when changing any of these.
+# about 70s under the hook. Keep the sum under 300 when changing any of these;
+# a runtime check below warns and exits 0 if they drift past it.
 # install.sh extracts into the prefix in place and writes the marker last, so an
 # install that is killed or times out leaves the old marker and retries next
 # session; it never records a half-upgraded prefix as current.
@@ -64,22 +69,42 @@ SMALL_FETCH_MAX_TIME=10
 INSTALLER_FETCH_MAX_TIME=20
 INSTALL_TIMEOUT=240
 INSTALL_KILL_GRACE=5
+BUILD_IDENTITY_TIMEOUT=5
 # Size caps for the small fetches (the .sha256 files hold one line; install.sh is a few KB).
 CHECKSUM_MAX_FILESIZE=4096
 INSTALLER_MAX_FILESIZE=1048576
 
+TIME_BUDGET=$(( 2 * SMALL_FETCH_MAX_TIME + INSTALLER_FETCH_MAX_TIME + INSTALL_TIMEOUT \
+  + INSTALL_KILL_GRACE + BUILD_IDENTITY_TIMEOUT ))
+if [ "${TIME_BUDGET}" -ge 300 ]; then
+  echo "refresh-edge: warning: worst-case time budget is ${TIME_BUDGET}s (must stay under 300s, the hook kills at 360s); skipping" >&2
+  exit 0
+fi
+
 REPO="jamesc/beamtalk"
 PREFIX="${BEAMTALK_PREFIX:-/usr/local}"
+# URL overrides lift https-only and take the checksum from the same host, so
+# verification would be circular: not in cloud sessions (BT-4847).
+if [ "${CLAUDE_CODE_REMOTE:-}" = "true" ]; then
+  for _var in BEAMTALK_INSTALLER_URL BEAMTALK_EDGE_BASE_URL; do
+    if [ -n "${!_var:-}" ]; then
+      echo "refresh-edge: warning: ${_var} is ignored in cloud sessions (CLAUDE_CODE_REMOTE=true); using the verified release URL" >&2
+      unset "${_var}"
+    fi
+  done
+fi
 INSTALLER_URL="${BEAMTALK_INSTALLER_URL:-https://github.com/${REPO}/releases/download/edge/install.sh}"
 BASE_URL="${BEAMTALK_EDGE_BASE_URL:-https://github.com/${REPO}/releases/download/edge}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix)
-      if [ $# -lt 2 ]; then echo "refresh-edge: --prefix requires a value" >&2; exit 0; fi
+      if [ $# -lt 2 ] || [ -z "$2" ]; then echo "refresh-edge: --prefix requires a value" >&2; exit 0; fi
       PREFIX="$2"; shift 2 ;;
     --prefix=*)
-      PREFIX="${1#--prefix=}"; shift ;;
+      PREFIX="${1#--prefix=}"
+      if [ -z "${PREFIX}" ]; then echo "refresh-edge: --prefix requires a value" >&2; exit 0; fi
+      shift ;;
     *) echo "refresh-edge: unknown option: $1" >&2; exit 0 ;;
   esac
 done
@@ -100,7 +125,7 @@ marker_matches() {
 # appended to the status line when the binary exists and answers.
 build_identity() {
   local v
-  v="$(timeout 5 "${PREFIX}/bin/beamtalk" --version 2>/dev/null | head -n 1)" || return 0
+  v="$(timeout "${BUILD_IDENTITY_TIMEOUT}" "${PREFIX}/bin/beamtalk" --version 2>/dev/null | head -n 1)" || return 0
   [ -n "${v}" ] && printf ' [%s]' "${v}"
   return 0
 }
@@ -115,8 +140,9 @@ ASSET="beamtalk-edge-linux-x86_64.tar.gz"
 WORK="$(mktemp -d 2>/dev/null)" || { warn "no temp directory; skipping"; exit 0; }
 trap 'rm -rf "${WORK}"' EXIT
 
-# https-only is the default for every fetch; each override lifts it for its own
-# fetches only (a test base URL must not weaken the installer download).
+# https-only is the default for every fetch (--proto and --proto-redir); an
+# override lifts both for its own fetches only, so a test base URL must not
+# weaken the installer download.
 BASE_PROTO=(--proto '=https' --proto-redir '=https')
 [ -n "${BEAMTALK_EDGE_BASE_URL:-}" ] && BASE_PROTO=()
 INSTALLER_PROTO=(--proto '=https' --proto-redir '=https')
@@ -153,14 +179,24 @@ if ! command -v flock >/dev/null 2>&1; then
   exit 0
 fi
 mkdir -p "${PREFIX}" 2>/dev/null
-# `exec 9>` follows symlinks: refuse a planted one rather than write through it.
+# The open follows symlinks and bash has no O_NOFOLLOW, so the [ -L ] check and
+# the open are two steps. We narrow the race instead of closing it: open with
+# `>>` (never truncates, and nothing is ever written to fd 9, so a swapped-in
+# symlink cannot damage its target), then check the path still names the file
+# we hold. What remains, with write access to the prefix, is creating an empty
+# file through a symlink planted in the window; that fits the script's
+# "catches corruption, not compromise" trust model.
 if [ -L "${PREFIX}/.beamtalk-refresh.lock" ]; then
   warn "${PREFIX}/.beamtalk-refresh.lock is a symlink; keeping the installed build"
   exit 0
 fi
 # (the brace group scopes 2>/dev/null; a bare `exec ... 2>/dev/null` would silence stderr for good)
-if ! { exec 9>"${PREFIX}/.beamtalk-refresh.lock"; } 2>/dev/null; then
+if ! { exec 9>>"${PREFIX}/.beamtalk-refresh.lock"; } 2>/dev/null; then
   warn "cannot create the lock file under ${PREFIX}; keeping the installed build"
+  exit 0
+fi
+if [ -L "${PREFIX}/.beamtalk-refresh.lock" ] || ! [ "${PREFIX}/.beamtalk-refresh.lock" -ef /dev/fd/9 ]; then
+  warn "${PREFIX}/.beamtalk-refresh.lock changed while locking; keeping the installed build"
   exit 0
 fi
 if ! flock -n 9; then
@@ -183,9 +219,15 @@ if [ -n "${BEAMTALK_INSTALLER:-}" ]; then
   INSTALLER="${BEAMTALK_INSTALLER}"
 else
   INSTALLER="${WORK}/install.sh"
-  if ! curl -fsSL ${INSTALLER_PROTO[@]+"${INSTALLER_PROTO[@]}"} --connect-timeout 5 \
+  FETCH_RC=0
+  curl -fsSL ${INSTALLER_PROTO[@]+"${INSTALLER_PROTO[@]}"} --connect-timeout 5 \
        --max-time "${INSTALLER_FETCH_MAX_TIME}" --max-filesize "${INSTALLER_MAX_FILESIZE}" \
-       -o "${INSTALLER}" "${INSTALLER_URL}" 2>/dev/null; then
+       -o "${INSTALLER}" "${INSTALLER_URL}" 2>/dev/null || FETCH_RC=$?
+  if [ "${FETCH_RC}" -eq 63 ]; then
+    # curl exit 63: --max-filesize exceeded. Not a network failure.
+    warn "install.sh is larger than the ${INSTALLER_MAX_FILESIZE}-byte size cap; not running it, keeping the installed build"
+    exit 0
+  elif [ "${FETCH_RC}" -ne 0 ]; then
     warn "could not download install.sh; keeping the installed build"
     exit 0
   fi
