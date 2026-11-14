@@ -1,9 +1,9 @@
 # ADR 0139: BEAM Abstraction Boundaries — What Leaks and What Doesn't
 
 ## Status
-Accepted (2026-10-26). Amended 2026-10-26 (post-acceptance lead review): raw-mode flag renamed, frame semantics and printString rule decided, tuple scope clamped, `error_info` mechanism specified, crash-report hook and 0028 verdict scoped into Phase 1 — see "Amendment (2026-10-26)" below.
+Implemented (2026-11-14; epic BT-4814, see Implementation Tracking). Accepted (2026-10-26). Amended 2026-10-26 (post-acceptance lead review): raw-mode flag renamed, frame semantics and printString rule decided, tuple scope clamped, `error_info` mechanism specified, crash-report hook and 0028 verdict scoped into Phase 1 — see "Amendment (2026-10-26)" below.
 
-Progress (2026-11-14): Phase 1 is partly built by adjacent work: a shared frame renderer (`beamtalk_stack_frame:format_frame/1`; BT-4353/BT-4357) serves test failures and `StackFrame>>printString`, sends are line-annotated (BT-3127, extended by BT-4356), and Erlang reasons are classified by `beamtalk_exception_handler:wrap_raw/2`. Not built: `--raw-mfa`, the crash-report logger hook, selector recovery for actor frames, rules for class-side and non-Beamtalk frames, removal of raw MFA from error messages and FFI diagnostics, the ADR 0028 verdict. The Phase 3 binaries row is settled by epic BT-4170 (done 2026-10-28; ADR 0140, which proposed flipping it, was rejected). All seven cited issues are done. Implementation is planned as epic BT-4814 (see Implementation Tracking).
+Progress (2026-11-14): Phase 1 is partly built by adjacent work: a shared frame renderer (`beamtalk_stack_frame:format_frame/1`; BT-4353/BT-4357) serves test failures and `StackFrame>>printString`, sends are line-annotated (BT-3127, extended by BT-4356), and Erlang reasons are classified by `beamtalk_exception_handler:wrap_raw/2`. Everything that was not yet built at that point (`--raw-mfa`, the crash-report logger hook, selector recovery for actor frames, rules for class-side and non-Beamtalk frames, removal of raw MFA from error messages and FFI diagnostics; the ADR 0028 verdict was closed by decision 5) shipped under epic BT-4814 and was validated on 2026-11-14; see Implementation Tracking, including its known gaps. The Phase 3 binaries row is settled by epic BT-4170 (done 2026-10-28; ADR 0140, which proposed flipping it, was rejected). All seven cited issues are done.
 
 Amended 2026-11-14 (after review): the rule is restated as "hide what the compiler made up; show what a person named", the five blocking questions from the review are decided, and the plan is cut to one phase with two spikes — see "Amendment (2026-11-14)" below. Where the amendment and older text disagree, the amendment wins.
 
@@ -607,18 +607,38 @@ touches the REPL or CLI surface (Phase 1 and 2 do).
 ## Implementation Tracking
 
 **Epic:** [BT-4814](https://linear.app/beamtalk/issue/BT-4814) — Names and error rendering: hide compiler-made names
-**Status:** Planned (2026-11-14)
+**Status:** Done (2026-11-14)
 
-| Phase | Issue | Title | Size | Blocked by |
-|-------|-------|-------|------|------------|
-| 1 Foundation | BT-4815 | One frame renderer with the frame table (class-side, block and Erlang frames) | M | — |
-| 2 Core | BT-4817 | Actor frames name their selector: line→selector table (carries spike 1 measurements) | M | BT-4815 |
-| 2 Core | BT-4818 | Frame visibility: package native Erlang and the raising frame shown, OTP and generated frames hidden | M | BT-4815 |
-| 2 Core | BT-4816 | Remove compiler-made names from error messages | S | — |
-| 2 Core | BT-4819 | Structured frames carry both forms and the full frame list | M | BT-4815, BT-4818 |
-| 3 Integration | BT-4821 | Per-client raw output: `--raw-mfa` on run/test, REPL session toggle | M | BT-4819 |
-| 3 Integration | BT-4820 | Crash reports through the frame renderer (carries spike 2 scope decision) | M | BT-4815 |
-| 4 Validation | BT-4822 | CI check, end-to-end btscript, docs, ADR to Implemented | M | BT-4816, BT-4817, BT-4818, BT-4820, BT-4821 |
+| Phase | Issue | Title | Size | Blocked by | Done |
+|-------|-------|-------|------|------------|------|
+| 1 Foundation | BT-4815 | One frame renderer with the frame table (class-side, block and Erlang frames) | M | — | #5278 |
+| 2 Core | BT-4817 | Actor frames name their selector: line→selector table (carries spike 1 measurements) | M | BT-4815 | #5286 |
+| 2 Core | BT-4818 | Frame visibility: package native Erlang and the raising frame shown, OTP and generated frames hidden | M | BT-4815 | #5283 |
+| 2 Core | BT-4816 | Remove compiler-made names from error messages | S | — | #5281 |
+| 2 Core | BT-4819 | Structured frames carry both forms and the full frame list | M | BT-4815, BT-4818 | #5288 |
+| 3 Integration | BT-4821 | Per-client raw output: `--raw-mfa` on run/test, REPL session toggle | M | BT-4819 | #5289 |
+| 3 Integration | BT-4820 | Crash reports through the frame renderer (carries spike 2 scope decision) | M | BT-4815 | #5282, #5287 |
+| 4 Validation | BT-4822 | CI check, end-to-end btscript, docs, ADR to Implemented | M | BT-4816, BT-4817, BT-4818, BT-4820, BT-4821 | this change |
+
+### Known gaps at Implemented
+
+Validation (BT-4822) found four gaps between the decisions and what a user sees.
+None changes a decision; each is filed under the epic.
+
+- **BT-4837 — actor frames.** Decision 1's table works, but in real runs an
+  actor frame has no line (the raise-site stack is replaced by the reraise
+  stack), so it renders `Class>>dispatch`. The end-to-end test asserts the class
+  name and the absence of compiler-made names, not the selector.
+- **BT-4838 — FFI `badarg`/`badarith`/`function_clause`.** Decision 3 shows the
+  Erlang frame that raised; the specific clauses of
+  `beamtalk_erlang_proxy:raise_wrapped_error/7` start a new stack and lose it.
+  Other FFI errors keep it.
+- **BT-4836 — frames with no line** when the failing operation is a BIF.
+- **BT-4835 — `beamtalk run`** prints no frames by default, and its `--raw-mfa`
+  listing is the reraise stack.
+
+Tail calls drop frames by VM rule, which no renderer can undo
+(`docs/development/debugging.md`, "Frames that are not there").
 
 The two spikes named in the amendment's plan are folded into BT-4817 and
 BT-4820 as acceptance criteria: their measurements and scope decision are

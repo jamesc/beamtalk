@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0139 / BT-4822 fixture: class-side methods that raise, one in Beamtalk and one
+// in Erlang code (adr0139_frames.btscript).
+Object subclass: Adr0139Hpack
+
+  class encode: n =>
+    x := n missingSelector
+    x + 1
+
+  class fromErlang =>
+    x := Erlang maps get: #missing from: (Dictionary new)
+    x isNil

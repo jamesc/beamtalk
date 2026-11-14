@@ -1,0 +1,120 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4822 / ADR 0139: stack frames hide what the compiler made up and show
+// what a person named, end to end through the REPL protocol.
+//
+// `:raw-mfa [on|off]` and `:error-frames` are the harness twins of the REPL's
+// per-session `:raw-mfa` toggle and of what `beamtalk repl` prints under an
+// error (both go through `beamtalk_repl_protocol::render_repl_error_frames`).
+// `CONTAINS:` / `NOT-CONTAINS:` assert on that multi-line output.
+
+// @load tests/repl-protocol/fixtures/adr0139_ticker.bt
+// @load tests/repl-protocol/fixtures/adr0139_hpack.bt
+
+// ===========================================================================
+// ACTOR FRAME: named by its class, never by the dispatch plumbing
+// ===========================================================================
+
+t := Adr0139Ticker spawn
+// => _
+
+(t trace first) includesSubstring: "Adr0139Ticker>>"
+// => true
+
+(t trace first) includesSubstring: "bt@"
+// => false
+
+(t trace first) includesSubstring: "safe_dispatch"
+// => false
+
+(t trace first) includesSubstring: "dispatch/4"
+// => false
+
+// ===========================================================================
+// CLASS-SIDE FRAME: `Class class>>selector`, no `class_` prefix
+// ===========================================================================
+
+[Adr0139Hpack encode: 1] on: Error do: [:e | e stackTrace first printString includesSubstring: "Adr0139Hpack class>>encode:"]
+// => true
+
+[Adr0139Hpack encode: 1] on: Error do: [:e | e stackTrace first printString includesSubstring: "class_encode"]
+// => false
+
+[Adr0139Hpack encode: 1] on: Error do: [:e | e stackTrace first printString includesSubstring: "bt@"]
+// => false
+
+// ===========================================================================
+// FAILURE RAISED IN ERLANG CODE: the raising frame is `module:function/arity`;
+// OTP and runtime plumbing is hidden from `stackTrace` but kept in
+// `fullStackTrace`
+// ===========================================================================
+
+[Adr0139Hpack fromErlang] on: Error do: [:e | e stackTrace first printString]
+// => "maps:get/2"
+
+[Adr0139Hpack fromErlang] on: Error do: [:e | e stackTrace anySatisfy: [:f | f printString includesSubstring: "beamtalk_erlang_proxy"]]
+// => false
+
+[Adr0139Hpack fromErlang] on: Error do: [:e | e fullStackTrace size > e stackTrace size]
+// => true
+
+// ===========================================================================
+// REPL RAW TOGGLE: raw names and hidden frames appear, then switch off again
+// ===========================================================================
+
+Adr0139Hpack fromErlang
+// => ERROR: key not found
+
+// Default: no frames listed, the notice names the switch.
+:error-frames
+// => CONTAINS: frames hidden; :raw-mfa shows all)
+
+:error-frames
+// => NOT-CONTAINS: maps:get/2
+
+:raw-mfa on
+// => raw-mfa on
+
+// On: every frame, the raising Erlang frame and a hidden runtime frame included.
+:error-frames
+// => CONTAINS: at maps:get/2  [maps:get/2]
+
+:error-frames
+// => CONTAINS: [beamtalk_repl_eval:execute_and_process/5]
+
+:raw-mfa off
+// => raw-mfa off
+
+:error-frames
+// => NOT-CONTAINS: [beamtalk_repl_eval:
+
+:error-frames
+// => CONTAINS: frames hidden; :raw-mfa shows all)
+
+// A bare `:raw-mfa` toggles.
+:raw-mfa
+// => raw-mfa on
+
+:raw-mfa
+// => raw-mfa off
+
+// A class-side frame in raw mode shows the compiler-made name beside the
+// display name, and only there.
+Adr0139Hpack encode: 1
+// => ERROR: does not understand
+
+:raw-mfa on
+// => raw-mfa on
+
+:error-frames
+// => CONTAINS: Adr0139Hpack class>>encode:
+
+:error-frames
+// => CONTAINS: :class_encode:/2]
+
+:raw-mfa off
+// => raw-mfa off
+
+:error-frames
+// => NOT-CONTAINS: class_encode

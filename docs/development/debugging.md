@@ -135,6 +135,53 @@ sees the code of the node that raised.
   identifies the class and selector; just don't expect a line to jump to.
   Frames with neither file nor line print as `Class>>selector`.
 
+### Frames that are not there
+
+A trace shows what the BEAM stack held when the error was caught. Some calls
+leave no frame, and that is the VM's tail-call rule, not a rendering choice:
+
+- **A call in tail position replaces its caller's frame.** `total => self items collect: [:item | item subtotal]` ends in a call, so `Order>>total`
+  is gone from the trace and `Collection>>collect:` sits where it was. The same
+  holds for a block whose last expression is a send: `[:item | item subtotal]`
+  calls `subtotal` in tail position, so no `[] in Order>>total` frame appears.
+  Following the call with another expression (`r := self items collect: [...].
+  r size`) keeps the frame while debugging.
+- **A call the compiler proves never returns** has the same effect on its
+  caller: in `outer(X) -> Y = inner(X), {ok, Y}` a single-clause `inner/1` that
+  always raises turns the call into a tail call.
+- **A frame can have a file but no line** when the failing operation is a
+  BIF (`n / 0`) rather than a send; see BT-4836.
+- **Actor methods** are clauses of `dispatch/4`, so a frame names its
+  selector through the module's line-to-selector table
+  (`'__beamtalk_method_lines'/0`, BT-4817) and falls back to
+  `Counter>>dispatch` when it has no line. An error that crosses the process
+  boundary carries the caller's frames, not the actor's (BT-4837).
+
+`--raw-mfa` shows the frames the VM kept, so it cannot bring these back.
+
+### Keeping compiler-made names out of output
+
+`just lint-compiler-made-names` (part of `just lint` and the standard CI lane)
+fails when user-facing output contains a compiler-made name: `bt@`, a
+`class_`-prefixed function name, `dispatch/4`, `safe_dispatch` or `-fun-N-`
+(ADR 0139 decision 8). It scans golden files (`*.snap` except the Core Erlang
+`*codegen*` ones), the `// =>` expectations in `stdlib/test`,
+`stdlib/bootstrap-test`, `tests` and `examples`, and the prose string literals
+(a string with a space or `~`) in `runtime/apps/*/src/*.erl` and the user-facing
+Rust crates.
+
+- **The pattern list lives in one file**, `scripts/ci/compiler-made-name-patterns.txt`.
+  The check and `has_raw_mfa/1` in `beamtalk_test_case_tests.erl` both read it;
+  add a pattern there, never copy the list.
+- **A fixture that shows these names on purpose** (a `--raw-mfa` or `:raw-mfa`
+  listing) goes in `scripts/ci/compiler-made-names-allowlist.txt`, one
+  `path  # reason` line per file. The check fails on an entry with no reason,
+  for a file that no longer exists, or for one that no longer contains a name.
+- **To clear a failure**, reword to the display name (`Class>>selector`,
+  `Class class>>selector`). The unresolved-class fallback of the frame renderer
+  (`bt@user@Hpack>>...`, above) is a renderer test, so those cases assert
+  `has_mfa_token/1` rather than `has_raw_mfa/1`.
+
 ### Test failure traces
 
 Test failure output lists the frames `beamtalk_stack_frame:classify_frames/1`
@@ -282,6 +329,15 @@ beamtalk repl
 cat tests/repl-protocol/cases/actors.btscript
 # Look for // => expected output comments
 ```
+
+Besides `// =>` exact matches, a `.btscript` case can assert `ERROR: <text>`,
+`WARNING: <text>`, `INCLUDES: <item>`, `CONTAINS: <text>` and
+`NOT-CONTAINS: <text>` (verbatim substring of a multi-line result). The harness
+also speaks the REPL's frame commands: `:raw-mfa [on|off]` sets the harness
+client's render option, and `:error-frames` answers what `beamtalk repl` would
+print under the last error, through the same
+`beamtalk_repl_protocol::render_repl_error_frames`. See
+`tests/repl-protocol/cases/adr0139_frames.btscript`.
 
 ## Codegen Debugging
 

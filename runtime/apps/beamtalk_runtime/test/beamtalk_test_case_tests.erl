@@ -563,12 +563,73 @@ with_trace_fixture(Fun) ->
         code:purge(Mod)
     end.
 
-%% True when Bin contains a raw Erlang `module:function/arity`-style token.
+%% True when Bin contains a compiler-made name (ADR 0139) or a raw Erlang
+%% `module:function/arity`-style token. The compiler-made names come from the
+%% one shared list, scripts/ci/compiler-made-name-patterns.txt, which the
+%% `just lint-compiler-made-names` check reads too (BT-4822): never copy it here.
 has_raw_mfa(Bin) ->
+    has_mfa_token(Bin) orelse
+        lists:any(
+            fun(Re) -> match =:= re:run(Bin, Re, [{capture, none}]) end,
+            compiler_made_name_patterns()
+        ).
+
+%% True when Bin contains a raw `module:function/arity` token (or the
+%% `/N-fun-` suffix of an anonymous function). Frames of a `bt@...` module the
+%% class table cannot resolve are a documented fallback (ADR 0139 decision 2,
+%% BT-4815): they keep the raw module, so a test over such a fixture asserts
+%% this narrower property. A frame whose class resolves uses `has_raw_mfa/1`.
+has_mfa_token(Bin) ->
     match =:=
-        re:run(Bin, "[a-z_@]+:[A-Za-z_'-]+/[0-9]+|/[0-9]+-(fun|anonymous)-", [
-            {capture, none}
-        ]).
+        re:run(Bin, "[a-z_@]+:[A-Za-z_'-]+/[0-9]+|/[0-9]+-(fun|anonymous)-", [{capture, none}]).
+
+compiler_made_name_patterns() ->
+    {ok, Lines} = file:read_file(compiler_made_name_patterns_path()),
+    [
+        binary_to_list(L)
+     || L <- binary:split(Lines, <<"\n">>, [global]),
+        L =/= <<>>,
+        binary:first(L) =/= $#
+    ].
+
+compiler_made_name_patterns_path() ->
+    Rel = filename:join(["scripts", "ci", "compiler-made-name-patterns.txt"]),
+    find_up(filename:dirname(?FILE), Rel).
+
+find_up(Dir, Rel) ->
+    Candidate = filename:join(Dir, Rel),
+    case filelib:is_regular(Candidate) of
+        true ->
+            Candidate;
+        false ->
+            case filename:dirname(Dir) of
+                Dir -> error({patterns_file_not_found, Rel});
+                Parent -> find_up(Parent, Rel)
+            end
+    end.
+
+%% The guard reads the shared compiler-made-name list (BT-4822): the exact leak
+%% the old token-only check let through must be caught, and display names pass.
+has_raw_mfa_uses_the_shared_compiler_made_name_list_test() ->
+    [
+        ?assert(has_raw_mfa(Leak))
+     || Leak <- [
+            <<"at bt@user@Hpack>>class_encode:headers:table: (hpack.bt:40)">>,
+            <<"at Hpack>>class_encode:headers:table: (hpack.bt:40)">>,
+            <<"at Ticker>>dispatch/4">>,
+            <<"at safe_dispatch">>,
+            <<"at -run/0-fun-3-">>,
+            <<"at lists:foldl/3 (lists.erl:2471) via lists:foldl/3">>
+        ]
+    ],
+    [
+        ?assertNot(has_raw_mfa(Shown))
+     || Shown <- [
+            <<"at Hpack class>>encode:headers:table: (hpack.bt:40)">>,
+            <<"at [] in Counter>>increment (counter.bt:14)">>,
+            <<"at Counter>>dispatch (counter.bt)">>
+        ]
+    ].
 
 %% A frame with an empty BEAM location falls back to the module's
 %% `beamtalk_source` file, rendered `(file)` with the workspace-relative rule.
@@ -579,7 +640,7 @@ format_stacktrace_bare_location_uses_beamtalk_source_test() ->
         ]),
         Expected = iolist_to_binary(["\n  at bt@user@trace_fixture_test>>testFoo (", RelPath, ")"]),
         ?assertEqual(Expected, Result),
-        ?assertNot(has_raw_mfa(Result))
+        ?assertNot(has_mfa_token(Result))
     end).
 
 %% A frame with a known line but no file keeps the line alongside the
@@ -620,7 +681,7 @@ format_stacktrace_block_distinct_from_method_test() ->
         >>,
         Result
     ),
-    ?assertNot(has_raw_mfa(Result)).
+    ?assertNot(has_mfa_token(Result)).
 
 %% Resolved class (BT-4815): the same class-side block frame, with the class in
 %% the runtime class table, renders as the ADR 0139 table says.
@@ -645,13 +706,16 @@ format_stacktrace_class_side_block_resolved_test_() ->
                         {file, "hpack.bt"}, {line, 40}
                     ]}
                 ],
+                Result = beamtalk_test_case:format_stacktrace(Frames),
                 ?assertEqual(
                     <<
                         "\n  at [] in Bt4815Hpack class>>encode:headers:table: (hpack.bt:40)"
                         "\n  at Bt4815Hpack class>>encode:headers:table: (hpack.bt:40)"
                     >>,
-                    beamtalk_test_case:format_stacktrace(Frames)
-                )
+                    Result
+                ),
+                %% A resolved frame carries no compiler-made name (BT-4822).
+                ?assertNot(has_raw_mfa(Result))
             end
         end}.
 
@@ -690,7 +754,7 @@ format_frame_identical_across_test_and_stackframe_paths_test_() ->
             [Wrapped] = beamtalk_stack_frame:wrap([F]),
             ViaFrame = beamtalk_stack_frame:format_frame(Wrapped),
             ?assertEqual(ViaFrame, ViaTest),
-            ?assertNot(has_raw_mfa(ViaTest))
+            ?assertNot(has_mfa_token(ViaTest))
         end)
      || F <- Frames
     ].
@@ -720,7 +784,7 @@ ensure_test_context_includes_test_file_test() ->
             FailMsg, "\n  at bt@user@trace_fixture_test>>testBar (", RelPath, ")"
         ]),
         ?assertEqual(Expected, Result),
-        ?assertNot(has_raw_mfa(Result))
+        ?assertNot(has_mfa_token(Result))
     end).
 
 %%% ============================================================================
@@ -810,7 +874,7 @@ format_stacktrace_adds_snippet_for_readable_file_test() ->
         [First, Second] = binary:split(Text, <<"\n  at ">>, [global, trim_all]),
         ?assertNotEqual(nomatch, binary:match(First, <<"> 2 | b := x at: 1">>)),
         ?assertEqual(nomatch, binary:match(Second, <<" | ">>)),
-        ?assertNot(has_raw_mfa(Text)),
+        ?assertNot(has_mfa_token(Text)),
         %% frames[i] <-> i-th `at` line is unchanged.
         ?assertEqual(
             length(beamtalk_test_case:stack_frames(Frames)),
@@ -850,7 +914,7 @@ format_stacktrace_prefers_user_frame_over_stdlib_frame_test() ->
             [Std, User] = binary:split(Text, <<"\n  at ">>, [global, trim_all]),
             ?assertEqual(nomatch, binary:match(Std, <<" | ">>)),
             ?assertNotEqual(nomatch, binary:match(User, <<" | u2">>)),
-            ?assertNot(has_raw_mfa(Text)),
+            ?assertNot(has_mfa_token(Text)),
             ?assertEqual(
                 length(beamtalk_test_case:stack_frames(Frames)),
                 length(binary:matches(Text, <<"\n  at ">>))

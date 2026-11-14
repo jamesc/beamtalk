@@ -165,7 +165,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0136](0136-tuple-literal-expressions.md) | Tuple Literal Expressions | Implemented | 2026-10-20 |
 | [0137](0137-actor-closures-see-live-state.md) | Actor Closures See the Actor's Live State | Implemented (2026-10-26; amended by 0142, 2026-10-30) | 2026-10-20 |
 | [0138](0138-string-literal-escape-sequences.md) | String Literal Escape Sequences | Implemented (2026-10-26) | 2026-10-25 |
-| [0139](0139-beam-abstraction-boundaries.md) | BEAM Abstraction Boundaries — What Leaks and What Doesn't | Accepted (amended 2026-10-26 and 2026-11-14: rule narrowed to compiler-made names; planned as epic BT-4814) | 2026-10-26 |
+| [0139](0139-beam-abstraction-boundaries.md) | BEAM Abstraction Boundaries — What Leaks and What Doesn't | Implemented (2026-11-14; epic BT-4814; amended 2026-10-26 and 2026-11-14: rule narrowed to compiler-made names) | 2026-10-26 |
 | [0140](0140-text-default-binaries.md) | Text-Default Binaries — a String Is the Raw Binary, Binary Is Explicit | Rejected | 2026-10-28 |
 | [0141](0141-bitstring-sealed-class-for-unaligned-bitstrings.md) | Bitstring — a Sealed Class for Unaligned Bitstrings | Implemented | 2026-10-28 |
 | [0142](0142-class-process-owns-only-class-state.md) | The Class Process Only Owns Class State — Stateless Class Methods Run in the Caller | Implemented (2026-10-30) | 2026-10-29 |

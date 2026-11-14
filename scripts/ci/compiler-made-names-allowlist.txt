@@ -1,0 +1,15 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# Files exempt from scripts/ci/lint-compiler-made-names.sh (BT-4822, ADR 0139
+# decision 8). One entry per line: `<tracked path>  # <reason>`. The reason is
+# required. The path is exact, no globs. An entry whose file no longer exists,
+# or no longer contains a compiler-made name, fails the check, so this list
+# cannot rot.
+#
+# Raw-mode fixtures show compiler-made names on purpose (`--raw-mfa`,
+# `:raw-mfa`, machine-readable MFA fields). Anything else here is a gap to fix,
+# not a place to hide a leak.
+
+crates/beamtalk-repl-protocol/src/response.rs  # unit test pinning the --raw-mfa listing (`display  [module:function/arity]`)
+tests/repl-protocol/cases/adr0139_frames.btscript  # asserts the REPL `:raw-mfa on` listing shows the raw `class_encode` MFA beside the display name

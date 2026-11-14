@@ -946,6 +946,11 @@ struct ReplClient {
     last_warnings: Vec<Warning>,
     /// Last loaded path for :reload support (path, `is_directory`)
     last_loaded_path: Option<(String, bool)>,
+    /// `:raw-mfa` render option of this client (BT-4821); a render choice made
+    /// here, never sent to the node.
+    raw_mfa: bool,
+    /// Frames of the last error reply (BT-4819), for `:error-frames`.
+    last_error_frames: Option<Vec<beamtalk_repl_protocol::StackFrameInfo>>,
 }
 
 impl ReplClient {
@@ -1030,6 +1035,8 @@ impl ReplClient {
             ws,
             last_warnings: Vec::new(),
             last_loaded_path: None,
+            raw_mfa: false,
+            last_error_frames: None,
         })
     }
 
@@ -1086,6 +1093,7 @@ impl ReplClient {
 
         if response.is_error() {
             let message = response.error_message().unwrap_or("Unknown error");
+            self.last_error_frames.clone_from(&response.frames);
             return Err(message.to_string());
         }
 
@@ -1094,6 +1102,37 @@ impl ReplClient {
             Some(serde_json::Value::String(s)) => s.clone(),
             Some(v) => v.to_string(),
         })
+    }
+
+    /// `:raw-mfa [on|off]` (BT-4821, ADR 0139 decision 4): the REPL's per-session
+    /// render option. Like the real REPL it is a choice of this client; nothing
+    /// is sent to the node. A bare `:raw-mfa` toggles. Answers the new state.
+    fn set_raw_mfa(&mut self, arg: &str) -> Result<String, String> {
+        self.raw_mfa = match arg.trim() {
+            "" => !self.raw_mfa,
+            "on" => true,
+            "off" => false,
+            other => return Err(format!("Usage: :raw-mfa [on|off] (got `{other}`)")),
+        };
+        Ok(format!(
+            "raw-mfa {}",
+            if self.raw_mfa { "on" } else { "off" }
+        ))
+    }
+
+    /// `:error-frames`: what the REPL prints under the last error, exactly as
+    /// `beamtalk repl` renders it for this client's `:raw-mfa` state (the shared
+    /// `render_repl_error_frames`), one line per `\n`. Errors when the last error
+    /// reply carried no frames.
+    fn error_frames(&self) -> Result<String, String> {
+        match &self.last_error_frames {
+            Some(frames) => Ok(beamtalk_repl_protocol::render_repl_error_frames(
+                frames,
+                self.raw_mfa,
+            )
+            .join("\n")),
+            None => Err("the last error reply carried no frames".to_string()),
+        }
     }
 
     /// Clear REPL bindings between tests.
@@ -1700,6 +1739,10 @@ fn run_test_file_opts(
                 };
                 client.get_docs(class_name, selector)
             }
+        } else if case.expression == ":raw-mfa" || case.expression.starts_with(":raw-mfa ") {
+            client.set_raw_mfa(case.expression.strip_prefix(":raw-mfa").unwrap())
+        } else if case.expression == ":error-frames" {
+            client.error_frames()
         } else if case.expression == ":clear" {
             client.clear_and_report()
         } else if case.expression == ":bindings" {
@@ -1925,6 +1968,30 @@ fn run_test_file_opts(
                         failures.push(format!(
                             "{file_name}:{}: `{}` expected NO warning containing `{}`, got: {hit:?}",
                             case.line, case.expression, banned
+                        ));
+                    } else {
+                        pass_count += 1;
+                    }
+                } else if let Some(needle) = case.expected.strip_prefix("CONTAINS:") {
+                    // CONTAINS:<text> -- the result contains <text> verbatim
+                    // (no `_` wildcards), for multi-line results such as
+                    // `:error-frames`.
+                    let needle = needle.trim();
+                    if result.contains(needle) {
+                        pass_count += 1;
+                    } else {
+                        failures.push(format!(
+                            "{file_name}:{}: `{}` expected result to contain `{}`, got `{}`",
+                            case.line, case.expression, needle, result
+                        ));
+                    }
+                } else if let Some(needle) = case.expected.strip_prefix("NOT-CONTAINS:") {
+                    // NOT-CONTAINS:<text> -- the result does not contain <text>.
+                    let needle = needle.trim();
+                    if result.contains(needle) {
+                        failures.push(format!(
+                            "{file_name}:{}: `{}` expected result not to contain `{}`, got `{}`",
+                            case.line, case.expression, needle, result
                         ));
                     } else {
                         pass_count += 1;

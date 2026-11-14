@@ -579,6 +579,55 @@ fn test_raw_mfa_shows_raw_frames_bt_4821() {
         .stderr(contains("--raw-mfa shows all").not());
 }
 
+/// BT-4822 (ADR 0139 decision 3): Erlang code a Beamtalk package ships in
+/// `native/*.erl` is written by a person, so its frames show in the default
+/// trace as `module:function/arity (file:line)`, while OTP plumbing stays hidden
+/// and no compiler-made name (`bt@...`) appears.
+#[test]
+fn test_native_package_frames_show_in_default_trace_bt_4822() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("native")).expect("mkdir native");
+    std::fs::write(
+        project.path().join("native/my_native.erl"),
+        "%% Copyright 2026 James Casey\n\
+         %% SPDX-License-Identifier: Apache-2.0\n\
+         -module(my_native).\n\
+         -moduledoc \"Fixture native module for the BT-4822 test.\".\n\
+         -export([outer/1]).\n\
+         -doc \"Fails with a custom reason one frame down.\".\n\
+         outer(X) ->\n\
+         \x20\x20\x20\x20Y = inner(X),\n\
+         \x20\x20\x20\x20{ok, Y}.\n\
+         %% Two clauses, so the compiler cannot prove `inner/1` never returns and\n\
+         %% turn the call in `outer/1` into a tail call that drops its frame.\n\
+         inner([]) -> erlang:error({boom, 1});\n\
+         inner([H | _]) -> H.\n",
+    )
+    .expect("write native/my_native.erl");
+    std::fs::write(
+        project.path().join("test/NativeFrameTest.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         TestCase subclass: NativeFrameTest\n\
+         \n\
+         \x20\x20testNativeFails => Erlang my_native outer: (List new)\n",
+    )
+    .expect("write test/NativeFrameTest.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet"])
+        .assert()
+        .failure()
+        .stderr(contains("my_native:outer/1 (native/my_native.erl:"))
+        .stderr(contains("my_native:inner/1 (native/my_native.erl:"))
+        .stderr(contains("NativeFrameTest>>testNativeFails"))
+        .stderr(contains("bt@").not())
+        .stderr(contains("beamtalk_test_case:").not())
+        .stderr(contains("beamtalk_erlang_proxy:").not());
+}
+
 /// BT-4821: `--full-traces` still works as a hidden alias and says it is deprecated.
 #[test]
 fn test_full_traces_is_a_deprecated_alias_for_raw_mfa_bt_4821() {

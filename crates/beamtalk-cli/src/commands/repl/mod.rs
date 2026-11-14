@@ -744,18 +744,8 @@ fn display_eval_response(response: &ReplResponse, raw_mfa: bool) {
             } else {
                 eprintln!("{}", format_error(msg));
                 if let Some(frames) = &response.frames {
-                    if raw_mfa {
-                        for line in beamtalk_repl_protocol::render_raw_frames(frames) {
-                            eprintln!("{line}");
-                        }
-                    } else {
-                        // The default display lists no frames, so every one of
-                        // them is left out.
-                        let n = frames.len();
-                        if n > 0 {
-                            let noun = if n == 1 { "frame" } else { "frames" };
-                            eprintln!("({n} {noun} hidden; :raw-mfa shows all)");
-                        }
+                    for line in beamtalk_repl_protocol::render_repl_error_frames(frames, raw_mfa) {
+                        eprintln!("{line}");
                     }
                 }
             }

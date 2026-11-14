@@ -1,0 +1,25 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+#
+# The single list of compiler-made names (ADR 0139: "hide what the compiler
+# made up; show what a person named"). User-facing output must never print
+# one. It is read by:
+#
+#   * scripts/ci/lint-compiler-made-names.sh   (the `just lint` check, BT-4822)
+#   * beamtalk_test_case_tests:has_raw_mfa/1   (the EUnit trace guard)
+#
+# One extended regular expression per line (POSIX ERE, also valid PCRE).
+# Blank lines and lines starting with `#` are ignored. Add a pattern here and
+# both consumers pick it up; never copy this list.
+
+# `bt@package@module` atoms.
+bt@
+# A class-side method's mangled function name in selector position
+# (`Hpack>>class_encode:`) or as a function (`mod:'class_encode:'/2`).
+>>class_[a-z]
+:'?class_[a-z][A-Za-z0-9_:]*'?/[0-9]
+# The actor dispatch plumbing.
+dispatch/4
+safe_dispatch
+# Anonymous-function names (`-collect:/2-fun-0-`).
+-fun-[0-9]
