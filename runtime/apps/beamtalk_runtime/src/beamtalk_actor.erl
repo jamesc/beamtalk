@@ -924,6 +924,8 @@ async_init_and_loop(Module, InitArgs) ->
     %% in `$ancestors` (crash reports, and inherited by `proc_lib` children);
     %% `enter_loop` has no public way to pass the parent, so this is deliberate.
     put('$ancestors', [self() | get('$ancestors')]),
+    %% BT-4844 DEMO ONLY (never merge): deliberate slowdown to trip the nightly gate.
+    timer:sleep(1),
     case Module:init(InitArgs) of
         {ok, State} ->
             gen_server:enter_loop(Module, [], State, self(), infinity);
