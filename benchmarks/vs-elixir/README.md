@@ -38,6 +38,33 @@ how the in-flight PRs below were measured. Elixir comes from the repo's
 | `harness/vs_bench.erl` | the row table, the measurement, the report, the profiler |
 | `results/` | the runs this README quotes |
 
+## Nightly subset (BT-4844)
+
+The nightly workflow (`.github/workflows/nightly.yml`, job `vs-elixir-bench`,
+Linux only) runs a short, time-gated subset of this benchmark and compares it
+with the previous night. Nothing else in this directory changes.
+
+| | |
+|---|---|
+| Rows | 7a-7d (actor sync read, state update, cast, `self hasField:`) and 16a-16d (actor start-up: async start + `continueWith:` + stop, with args, plain `Actor` spawn + stop, 100 in flight) |
+| Rounds | 5 (`BENCH_ROUNDS` in the workflow); row 0 always runs |
+| Recorded | Beamtalk ns/op, reductions/op and words/op, net of the loop baseline, plus Elixir ns/op measured in the same node as a control |
+| Gate | Time only: Beamtalk ns/op **relative to the Elixir ns/op of the same row** (BT/EX), timed in the same node and rounds. A row fails when that ratio is more than **25%** above the baseline's (`THRESHOLD_PCT`), or when a baseline row is missing tonight. Reductions and words are shown, never gated: BT-4842 showed reductions staying flat while latency rose 5x. The ratio is used because shared runners vary by tens of percent night to night: two runs of identical code differed by 30% in raw ns, and the Elixir control moved with them |
+| Baseline | the `vs-elixir-nightly` artifact (`results.json`) of the latest earlier run on the same branch. It is uploaded only when the check passes, so a regressed night never becomes the baseline |
+| First run | no earlier artifact: the table shows the current figures, the check passes and the night becomes the baseline |
+| Output | a before/after table in the job summary on every run; the full report is the `vs-elixir-nightly-report` artifact |
+
+The 25% is a starting point; the fast rows are short, so tune
+`THRESHOLD_PCT` (or the rows) once a week of nightlies shows the spread.
+A row whose Elixir control is under 0.5 ns net is shown but not gated. The summary shows raw ns and the Elixir control beside the gated ratio.
+
+To try it on a branch: run the Nightly workflow with `workflow_dispatch`,
+`bench_only` set (skips the macOS, Windows and dist jobs). The first dispatch
+on a branch has no baseline; later ones compare with the last passing run of
+that branch. `baseline_branch` points a run at another branch's last night
+(for example `main`). The comparison and the gate are
+`scripts/ci/vs_elixir_nightly.py` (tests: `just test-vs-elixir-nightly`).
+
 ## Method
 
 **One loop shape on both sides.** Every Beamtalk row is
