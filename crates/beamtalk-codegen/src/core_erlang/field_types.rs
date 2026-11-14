@@ -156,7 +156,7 @@ fn declared_type_is_bare(ty: &DeclaredType) -> bool {
         DeclaredType::Simple(name) => NUMERIC_TYPES.contains(&name.as_str()),
         DeclaredType::Union(members) => {
             let mut non_nil = members.iter().filter(|m| !is_nil_type(m)).peekable();
-            non_nil.peek().is_some() && non_nil.all(|m| declared_type_is_bare(m))
+            non_nil.peek().is_some() && non_nil.all(declared_type_is_bare)
         }
         _ => false,
     }

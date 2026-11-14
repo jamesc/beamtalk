@@ -413,7 +413,10 @@ impl CoreErlangGenerator {
     ///
     /// Only the receiver is checked. The argument is deliberately not
     /// (BT-3928): `5 < nil` term-orders and answers `true`.
-    pub(in crate::core_erlang) fn comparison_receiver(&self, expr: &Expression) -> ComparisonReceiver {
+    pub(in crate::core_erlang) fn comparison_receiver(
+        &self,
+        expr: &Expression,
+    ) -> ComparisonReceiver {
         match expr {
             Expression::Literal(..) if is_comparable_literal(expr) => ComparisonReceiver::Proven,
             Expression::Identifier(id) if id.name == "self" => {

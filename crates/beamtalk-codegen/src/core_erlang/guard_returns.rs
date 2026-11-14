@@ -309,7 +309,7 @@ impl Rewriter {
     /// Boolean ([`is_boolean_by_construction`]) or a [`Self::typed_comparison`].
     fn is_boolean(&self, expr: &Expression) -> bool {
         is_boolean_by_construction(expr)
-            || self.typed_comparison(expr).is_some()
+            || Self::typed_comparison(expr).is_some()
             || self.short_circuit_operands(expr).is_some()
     }
 
@@ -353,7 +353,7 @@ impl Rewriter {
     /// ([`CoreErlangGenerator::comparison_receiver`]). A typed parameter is
     /// only declared, so its comparison carries a kind guard that dispatches
     /// a wrong-kind receiver (BT-4823) and is not a Boolean by construction.
-    fn typed_comparison<'e>(&self, expr: &'e Expression) -> Option<&'e Expression> {
+    fn typed_comparison(expr: &Expression) -> Option<&Expression> {
         let Expression::MessageSend {
             receiver,
             selector: MessageSelector::Binary(op),
@@ -372,7 +372,7 @@ impl Rewriter {
     /// Records `receiver`, a conditional's receiver the rewrite treats as a
     /// Boolean by construction, when that rests on a typed comparison.
     fn note_boolean(&mut self, receiver: &Expression) {
-        if let Some(left) = self.typed_comparison(receiver) {
+        if let Some(left) = Self::typed_comparison(receiver) {
             self.boolean_comparisons.insert(left.span());
         } else if let Some((first, second)) = self.short_circuit_operands(receiver) {
             self.note_boolean(first);
