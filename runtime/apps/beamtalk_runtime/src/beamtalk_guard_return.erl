@@ -32,7 +32,8 @@ after the receiver's own `ifTrue:` has unwound, like `v`. So nothing that
 `ensure:` cleanup runs before them instead of after, an `on:do:` handler no
 longer catches an error they raise, and for an actor receiver they run in the
 caller's process. This shows only for a receiver that broke its declaration,
-defines its own `>` and answers a non-Boolean.
+defines its own ordering operator (`<`, `>`, `<=`, `>=`) and answers a
+non-Boolean.
 """.
 
 -include("beamtalk.hrl").
