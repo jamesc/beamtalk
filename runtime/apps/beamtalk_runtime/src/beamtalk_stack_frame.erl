@@ -104,6 +104,7 @@ loaded class modules share it. Which frames are listed is not decided here.
     wrap_frame/1,
     classify_frames/1,
     visible_frames/1,
+    hidden_note/1,
     format_frame/1,
     format_frame_raw/1,
     render_mfa/1,
@@ -284,6 +285,21 @@ visible_frames(Frames) ->
         true -> [F || #{visible := true} = F <- Frames];
         false -> [Frame || {shown, Frame} <- classify_frames(Frames)]
     end.
+
+-doc """
+The notice that names the `--raw-mfa` switch when a default trace left `N` frames
+out: `(2 frames hidden; --raw-mfa shows all)`, no indentation or newline. The
+one definition behind `beamtalk test` and `beamtalk run`, so the two print the
+same line (the Rust twin for `--connect` is checked against it by the CLI tests).
+""".
+-spec hidden_note(pos_integer()) -> binary().
+hidden_note(N) when is_integer(N), N > 0 ->
+    Noun =
+        case N of
+            1 -> <<" frame hidden">>;
+            _ -> <<" frames hidden">>
+        end,
+    iolist_to_binary(["(", integer_to_binary(N), Noun, "; --raw-mfa shows all)"]).
 
 -spec is_plain_erlang_frame(map()) -> boolean().
 is_plain_erlang_frame(#{module := Module} = Frame) ->

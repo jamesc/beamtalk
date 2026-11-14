@@ -338,6 +338,30 @@ pub fn render_raw_frames(frames: &[StackFrameInfo]) -> Vec<String> {
         .collect()
 }
 
+/// What `beamtalk run --connect` prints after an uncaught error's message, the
+/// client-side twin of what the script-mode harness prints
+/// (`beamtalk_script_harness:raw_trace/3`): with `raw_mfa`, the complete stack as
+/// [`render_raw_frames`] lists it; without, the visible frames in display form
+/// and, when some were left out, `(N frames hidden; --raw-mfa shows all)` (the
+/// text of `beamtalk_stack_frame:hidden_note/1`). Empty when there are no frames.
+#[must_use]
+pub fn render_run_error_frames(frames: &[StackFrameInfo], raw_mfa: bool) -> Vec<String> {
+    if raw_mfa {
+        return render_raw_frames(frames);
+    }
+    let mut lines: Vec<String> = frames
+        .iter()
+        .filter(|f| !f.hidden)
+        .map(|f| format!("  at {}", f.display))
+        .collect();
+    let hidden = frames.iter().filter(|f| f.hidden).count();
+    if hidden > 0 {
+        let noun = if hidden == 1 { "frame" } else { "frames" };
+        lines.push(format!("  ({hidden} {noun} hidden; --raw-mfa shows all)"));
+    }
+    lines
+}
+
 /// What a REPL client prints after an error reply that carries frames
 /// (`:raw-mfa`, ADR 0139 decision 4): with the session's raw option on, the
 /// complete stack as [`render_raw_frames`] lists it; off, a one-line notice that
@@ -474,6 +498,37 @@ mod tests {
                 "  at ?",
             ]
         );
+    }
+
+    /// BT-4835: `run --connect` prints the visible frames by default, naming the
+    /// hidden ones with the same notice the script-mode harness prints.
+    #[test]
+    fn render_run_error_frames_lists_visible_frames_and_notice() {
+        let json = r#"{"id":"x","status":["error"],"error":"boom","frames":[
+            {"display":"Counter>>increment (counter.bt:12)","module":"bt@counter","function":"increment","arity":1,"file":"counter.bt","line":12,"hidden":false},
+            {"display":"gen_server:loop/7","module":"gen_server","function":"loop","arity":7,"file":null,"line":null,"hidden":true},
+            {"display":"proc_lib:init_p/3","module":"proc_lib","function":"init_p","arity":3,"file":null,"line":null,"hidden":true}
+        ]}"#;
+        let frames = serde_json::from_str::<ReplResponse>(json)
+            .expect("decodes")
+            .frames
+            .expect("frames");
+        assert_eq!(
+            render_run_error_frames(&frames, false),
+            vec![
+                "  at Counter>>increment (counter.bt:12)",
+                "  (2 frames hidden; --raw-mfa shows all)",
+            ]
+        );
+        assert_eq!(
+            render_run_error_frames(&frames[..2], false).last().unwrap(),
+            "  (1 frame hidden; --raw-mfa shows all)"
+        );
+        assert_eq!(
+            render_run_error_frames(&frames, true),
+            render_raw_frames(&frames)
+        );
+        assert!(render_run_error_frames(&[], false).is_empty());
     }
 
     #[test]

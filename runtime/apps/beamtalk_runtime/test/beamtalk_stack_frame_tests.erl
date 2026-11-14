@@ -1039,3 +1039,10 @@ load_module_from_source(Module, Source) ->
     {ok, Module, Bin} = compile:forms(Forms, [binary]),
     {module, Module} = code:load_binary(Module, atom_to_list(Module) ++ ".beam", Bin),
     ok.
+
+%% BT-4835: the one definition of the notice behind `beamtalk test` and `beamtalk run`.
+hidden_note_names_the_raw_mfa_switch_test() ->
+    ?assertEqual(<<"(1 frame hidden; --raw-mfa shows all)">>, beamtalk_stack_frame:hidden_note(1)),
+    ?assertEqual(
+        <<"(6 frames hidden; --raw-mfa shows all)">>, beamtalk_stack_frame:hidden_note(6)
+    ).

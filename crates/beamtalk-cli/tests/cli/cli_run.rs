@@ -555,3 +555,45 @@ fn run_shows_class_process_frames_bt_4829() {
             .stderr(contains("  at Counter class>>run (src/Counter.bt:"));
     }
 }
+
+/// BT-4835: `run --connect` prints the same frames as script mode: the visible
+/// ones by default (with the hidden-frames notice), everything under `--raw-mfa`.
+#[test]
+#[ignore = "requires beamtalk binary and erlang runtime (boots a live workspace, slow)"]
+fn run_connected_lists_the_raise_site_frames_bt_4835() {
+    let project = cli_common::fixture_project();
+    write_run_fixture(
+        project.path(),
+        "Main",
+        "Object subclass: Main\n\n  class run =>\n    x := 1 / 0.\n    x\n",
+    );
+    let _guard = WorkspaceStopGuard {
+        project_dir: project.path().to_path_buf(),
+    };
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("repl")
+        .write_stdin("exit\n")
+        .timeout(std::time::Duration::from_mins(2))
+        .assert()
+        .success();
+
+    cli_common::beamtalk_run()
+        .current_dir(project.path())
+        .args(["Main", "run", "--connect"])
+        .timeout(std::time::Duration::from_mins(1))
+        .assert()
+        .failure()
+        .stderr(contains("  at Main class>>run (src/Main.bt:"))
+        .stderr(contains("--raw-mfa shows all)"))
+        .stderr(contains("bt@").not());
+
+    cli_common::beamtalk_run()
+        .current_dir(project.path())
+        .args(["Main", "run", "--connect", "--raw-mfa"])
+        .timeout(std::time::Duration::from_mins(1))
+        .assert()
+        .failure()
+        .stderr(contains("  at Main class>>run (src/Main.bt:"))
+        .stderr(contains("--raw-mfa shows all)").not());
+}

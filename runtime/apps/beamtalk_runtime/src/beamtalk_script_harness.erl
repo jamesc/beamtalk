@@ -149,15 +149,7 @@ trace_frames(_Reason, Stacktrace) ->
 hidden_note(0) ->
     [];
 hidden_note(N) ->
-    [
-        "  (",
-        integer_to_binary(N),
-        case N of
-            1 -> " frame hidden";
-            _ -> " frames hidden"
-        end,
-        "; --raw-mfa shows all)\n"
-    ].
+    ["  ", beamtalk_stack_frame:hidden_note(N), $\n].
 
 -doc """
 Stop the node gracefully with exit status `Code` (`Program exit:` where the

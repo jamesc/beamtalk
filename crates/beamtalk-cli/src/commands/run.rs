@@ -43,9 +43,9 @@ use super::workspace;
 ///   run-mode node. Only valid in script mode.
 /// - `workspace`: explicit workspace name to connect to (implies `connect`);
 ///   disambiguates when a project has more than one.
-/// - `raw_mfa`: on an uncaught error, also print the complete stack (hidden
-///   frames included), each frame's display name beside its raw MFA. Script
-///   mode only.
+/// - `raw_mfa`: on an uncaught error, print the complete stack (hidden frames
+///   included), each frame's display name beside its raw MFA, instead of the
+///   visible frames. Script mode and `--connect`; rejected for service mode.
 #[instrument(skip_all, fields(class_or_dot = %class_or_dot))]
 pub fn run(
     class_or_dot: &str,
@@ -481,10 +481,11 @@ fn run_connected(
         if let Some(err) = response.error.as_ref().or(response.message.as_ref()) {
             eprintln!("{err}");
         }
-        // `--raw-mfa`: the reply carries the complete stack, both forms per
-        // frame; render it here, on the client that asked for it.
-        if raw_mfa && let Some(frames) = &response.frames {
-            for line in beamtalk_repl_protocol::render_raw_frames(frames) {
+        // The reply carries the complete stack, both forms per frame; render it
+        // here, on the client that asked for it: the visible frames by default,
+        // everything under `--raw-mfa` (as script mode prints).
+        if let Some(frames) = &response.frames {
+            for line in beamtalk_repl_protocol::render_run_error_frames(frames, raw_mfa) {
                 eprintln!("{line}");
             }
         }
