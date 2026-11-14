@@ -1,0 +1,12 @@
+module 'q1_fixed' ['run'/1]
+  attributes []
+'run'/1 = fun (Self) ->
+  case case call 'foo':'bar'() of
+         <'true'> when 'true' -> 'a'
+         <N> when 'true' -> call 'foo':'send'(1)
+       end of
+    <'false'> when 'true' -> 'k'
+    <'true'> when 'true' -> 'nil'
+    <M> when 'true' -> call 'erlang':'error'({'case_clause', M})
+  end
+end
