@@ -43,14 +43,14 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0014](0014-beamtalk-test-framework.md) | Beamtalk Test Framework — Native Unit Tests and CLI Integration Tests | Implemented | 2026-02-15 |
 | [0015](0015-repl-error-objects-and-exception-hierarchy.md) | Signal-Time Exception Objects and Error Class Hierarchy | Implemented | 2026-02-15 |
 | [0016](0016-unified-stdlib-module-naming.md) | Unified Stdlib Packaging and Module Naming | Implemented | 2026-02-10 |
-| [0017](0017-browser-connectivity-to-running-workspaces.md) | Browser Connectivity to Running Workspaces | Implemented (Phases 0–2) | 2026-02-17 |
+| [0017](0017-browser-connectivity-to-running-workspaces.md) | Browser Connectivity to Running Workspaces | Implemented (2026-06-07; Phase 3 LiveView IDE shipped, auth via 0091) | 2026-02-17 |
 | [0018](0018-document-tree-codegen.md) | Document Tree Code Generation (Wadler-Lindig Pretty Printer) | Implemented | 2026-02-15 |
 | [0019](0019-singleton-class-variables.md) | Singleton Access via Class Variables | Implemented | 2026-02-15 |
 | [0020](0020-connection-security.md) | Connection Security — mTLS, Proxies, and Network Overlays | Implemented | 2026-02-17 |
 | [0021](0021-streams-and-io-design.md) | Stream — Lazy Pipeline for Value-Side Data | Implemented (Revised) | 2026-02-15 |
 | [0022](0022-embedded-compiler-via-otp-port.md) | Embedded Compiler via OTP Port (with NIF option) | Implemented | 2026-02-15 |
 | [0023](0023-string-interpolation-and-binaries.md) | String Interpolation Syntax and Compilation | Implemented | 2026-02-17 |
-| [0024](0024-static-first-live-augmented-ide-tooling.md) | Static-First, Live-Augmented IDE Tooling | Implemented (Phase 1) | 2026-02-17 |
+| [0024](0024-static-first-live-augmented-ide-tooling.md) | Static-First, Live-Augmented IDE Tooling | Implemented (Phase 1; Phase 3 largely done, Phase 2 not started) | 2026-02-17 |
 | [0025](0025-gradual-typing-and-protocols.md) | Gradual Typing and Protocols | Implemented (Phases 1–2); Phase 3 shipped via ADR 0068 (amended 2026-10-29: guarded static dispatch) | 2026-02-15 |
 | [0026](0026-package-definition-and-project-manifest.md) | Package Definition and Project Manifest | Implemented | 2026-02-17 |
 | [0027](0027-cross-platform-support.md) | Cross-Platform Support | Implemented | 2026-02-17 |
@@ -82,7 +82,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0053](0053-double-colon-type-annotation-syntax.md) | Double-Colon Type Annotation Syntax | Implemented | 2026-03-05 |
 | [0054](0054-communication-protocols.md) | Communication Protocols | Accepted \| Implemented | 2026-03-05 |
 | [0055](0055-erlang-backed-class-authoring-protocol.md) | Erlang-Backed Class Authoring Protocol | Implemented | 2026-03-06 |
-| [0056](0056-native-erlang-backed-actors.md) | `@native` — Erlang-Backed Actors | Accepted (partial) | 2026-03-07 |
+| [0056](0056-native-erlang-backed-actors.md) | `@native` — Erlang-Backed Actors | Implemented (2026-04-01) | 2026-03-07 |
 | [0057](0057-authoritative-superclass-source.md) | Authoritative Superclass Source for Abstract Stdlib Classes | Implemented | 2026-03-07 |
 | [0058](0058-platform-security-model.md) | Platform Security Model | Accepted (policy) | 2026-03-07 |
 | [0059](0059-supervision-tree-syntax.md) | Supervision Tree Syntax | Implemented (extended and amended by 0135) | 2026-03-07 |
@@ -99,9 +99,9 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0070](0070-package-namespaces-and-dependencies.md) | Package Namespaces and Dependencies | Implemented | 2026-03-24 |
 | [0071](0071-class-visibility-internal-modifier.md) | Class Visibility — `internal` Modifier for Package-Scoped Access Control | Implemented | 2026-03-28 |
 | [0072](0072-user-erlang-sources-in-packages.md) | User Erlang Sources in Beamtalk Packages | Implemented | 2026-03-29 |
-| [0073](0073-package-distribution-and-discovery.md) | Package Distribution and Discovery | Implemented (Phase 1; Phase 2 implemented in simplified form, amended 2026-07-26) | 2026-03-31 |
+| [0073](0073-package-distribution-and-discovery.md) | Package Distribution and Discovery | Implemented (Phases 1–2, 2026-07-27; Phase 2 simplified; Phase 3 not started) | 2026-03-31 |
 | [0074](0074-deferred-metaprogramming.md) | Deferred Metaprogramming | Accepted (deferral) | 2026-04-01 |
-| [0075](0075-erlang-ffi-type-definitions.md) | Erlang FFI Type Definitions | Implemented (Phase 1; Phase 2 deferred) | 2026-04-02 |
+| [0075](0075-erlang-ffi-type-definitions.md) | Erlang FFI Type Definitions | Implemented (all phases, 2026-09-03) | 2026-04-02 |
 | [0076](0076-ok-error-tuple-to-result-at-ffi-boundary.md) | Convert Erlang ok/error Tuples to Result at FFI Boundary | Implemented | 2026-04-03 |
 | [0077](0077-type-coverage-visibility.md) | Type Coverage Visibility | Implemented | 2026-04-05 |
 | [0078](0078-actor-initialize-inheritance.md) | Actor Initialize Inheritance | Implemented | 2026-04-12 |
