@@ -199,6 +199,17 @@ apply when a case is unclear.
    measured: the fraction of actor frames in the existing test traces
    that have no line and so fall back to `Class>>dispatch`, and the
    actor-dispatch benchmarks (no code on that path changed).
+
+   Two limits are accepted. The table is read from the module's *current*
+   version, so a stacktrace captured from a process still running the
+   old version of a hot-reloaded actor is matched against the new
+   version's lines: if methods were added or moved, that frame can name
+   the wrong method until the process picks up the new code. And a
+   `uses:`-flattened method whose protocol source the compilation was not
+   given (a dependency checkout that did not carry it) has no row, and
+   its frames carry no file, so they render as `Class>>dispatch`; a
+   protocol declared in the same file as its user needs no source and
+   keeps its row and its `file:line`.
 2. **Names resolve through the runtime class table**, not the ADR 0119
    registry (which is compile-time only and stays the resolver for
    compiler diagnostics). When a module cannot be resolved the frame

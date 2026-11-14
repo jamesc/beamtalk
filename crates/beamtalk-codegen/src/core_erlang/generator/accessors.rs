@@ -752,7 +752,6 @@ impl CoreErlangGenerator {
         }
         let class_name = self.class_identity()?.class_name();
         let origin = self.flattened_method_origin(selector)?;
-        let origin = &origin;
         // A provision from the stdlib's own protocol (BT-3915) maps through
         // the stdlib file — never through a same-named carried protocol.
         if self
@@ -760,11 +759,23 @@ impl CoreErlangGenerator {
             .contains(&(EcoString::from(class_name), origin.clone()))
         {
             return beamtalk_core::semantic_analysis::stdlib_protocols::stdlib_protocol_source(
-                origin,
+                &origin,
             )
             .cloned();
         }
-        self.protocol_sources.get(origin).cloned()
+        self.protocol_sources.get(&origin).cloned()
+    }
+
+    /// Whether `selector` on the current class is a `uses:`-flattened
+    /// provision whose spans point into a file this compilation does not have:
+    /// it has an origin, that protocol is not declared in the module being
+    /// compiled (whose spans are offsets into the module's own text), and no
+    /// protocol source was supplied for it. Lines mapped through the user's
+    /// text for such a method would be made up.
+    pub(in crate::core_erlang) fn flattened_method_lacks_source(&self, selector: &str) -> bool {
+        self.flattened_method_origin(selector)
+            .is_some_and(|origin| !self.local_protocol_names.contains(&origin))
+            && self.flattened_method_source(selector, false).is_none()
     }
 
     /// Converts a byte-offset `Span` to a 1-based line number.

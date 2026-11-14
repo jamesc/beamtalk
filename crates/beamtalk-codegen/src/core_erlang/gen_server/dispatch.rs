@@ -161,7 +161,7 @@ impl CoreErlangGenerator {
                     {
                         push(path, method.span.line_number(&protocol.text), selector);
                     }
-                } else if self.flattened_method_origin(&selector).is_some() {
+                } else if self.flattened_method_lacks_source(&selector) {
                     // A flattened provision whose protocol source is not
                     // available: its span is an offset into a file we do not
                     // have, so mapping it through the user's text would put a

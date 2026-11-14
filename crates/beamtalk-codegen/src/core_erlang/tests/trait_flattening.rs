@@ -318,6 +318,47 @@ fn flattened_provision_without_protocol_source_has_no_method_lines_row() {
     );
 }
 
+/// BT-4817: a protocol declared in the *same file* as the class that uses it
+/// needs no `protocol_sources` entry (the compiler port never passes one for a
+/// REPL/workspace load): its spans are real offsets into the user's own text.
+/// Its provisions keep their `file:line` annotation and get a selector row.
+#[test]
+fn same_file_protocol_provision_keeps_its_file_and_gets_a_method_lines_row() {
+    const SRC: &str = concat!(
+        "Protocol define: Greetable\n",
+        "  greet -> String => 1 printString\n\n",
+        "Actor subclass: Greeter\n",
+        "  uses: Greetable\n",
+        "  bump => 1\n",
+    );
+    let module = parse_fixture(SRC);
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("greeter")
+            .with_source(SRC)
+            .with_source_path_opt(Some("greeter.bt")),
+    )
+    .expect("codegen should succeed");
+    let clause = code
+        .split("<'greet'> when 'true' ->")
+        .nth(1)
+        .and_then(|rest| rest.split("<OtherSelector>").next())
+        .unwrap_or_else(|| panic!("expected a greet clause, got:\n{code}"));
+    assert!(
+        clause.contains("{'file', \"greeter.bt\"}"),
+        "a same-file provision keeps its file annotation, got:\n{clause}"
+    );
+    let table = code
+        .split("'__beamtalk_method_lines'/0 = fun")
+        .nth(1)
+        .and_then(|rest| rest.split("'has_method'/1 = fun").next())
+        .unwrap_or_else(|| panic!("expected a method-lines table, got:\n{code}"));
+    assert!(
+        table.contains("'greet'") && table.contains("'bump'"),
+        "a same-file provision has a row, got:\n{table}"
+    );
+}
+
 /// Counterpart: without the protocol's source (a dependency checkout the
 /// build did not carry, say) codegen falls back to the pre-BT-3625
 /// behaviour rather than failing — no protocol path appears.
