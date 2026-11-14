@@ -152,8 +152,33 @@ pub fn clause<'a>(
     body: Document<'a>,
     layout: Layout,
 ) -> Document<'a> {
+    clause_with_head(angle(patterns), guard, body, layout)
+}
+
+/// [`clause`] for a single pattern written without the angle brackets:
+/// `'true' when 'true' -> body`.
+///
+/// Core Erlang accepts both spellings; some historical emission sites use the
+/// bare one, and migrating them with [`clause`] would change the generated
+/// text. Prefer [`clause`] in new code.
+#[must_use]
+pub fn clause_bare<'a>(
+    pattern: Document<'a>,
+    guard: Option<Document<'a>>,
+    body: Document<'a>,
+    layout: Layout,
+) -> Document<'a> {
+    clause_with_head(pattern, guard, body, layout)
+}
+
+fn clause_with_head<'a>(
+    pattern_head: Document<'a>,
+    guard: Option<Document<'a>>,
+    body: Document<'a>,
+    layout: Layout,
+) -> Document<'a> {
     let head = docvec![
-        angle(patterns),
+        pattern_head,
         " when ",
         guard.unwrap_or_else(|| leaf::atom("true")),
         " ->",
@@ -306,6 +331,12 @@ mod tests {
             doc.to_pretty_string(),
             "case M of\n    <'a'> when 'true' ->\n        A\n    <'b'> when G ->\n        B\nend"
         );
+    }
+
+    #[test]
+    fn bare_clause_has_no_angle_brackets() {
+        let doc = clause_bare(leaf::atom("true"), None, v("A"), Layout::Flat);
+        assert_eq!(doc.to_pretty_string(), "'true' when 'true' -> A");
     }
 
     #[test]

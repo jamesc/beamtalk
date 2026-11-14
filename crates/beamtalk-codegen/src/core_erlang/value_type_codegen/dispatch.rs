@@ -21,9 +21,35 @@ fn var(name: &str) -> Document<'static> {
     leaf::var(name.to_string())
 }
 
+/// `{'tag', value, state}` — a `dispatch/4` answer tuple.
+fn answer(tag: &str, value: Document<'static>, state: Document<'static>) -> Document<'static> {
+    docvec!["{", leaf::atom(tag), ", ", value, ", ", state, "}"]
+}
+
+/// `{'reply', value, state}` — a `dispatch/4` answer carrying a new state.
+fn reply_with(value: Document<'static>, state: Document<'static>) -> Document<'static> {
+    answer("reply", value, state)
+}
+
 /// `{'reply', value, State}` — a `dispatch/4` answer that leaves the state as is.
 fn reply(value: Document<'static>) -> Document<'static> {
-    docvec!["{", leaf::atom("reply"), ", ", value, ", State}"]
+    reply_with(value, var("State"))
+}
+
+/// `{'error', value, State}` — a `dispatch/4` answer that raises `value`.
+fn error_reply(value: Document<'static>) -> Document<'static> {
+    answer("error", value, var("State"))
+}
+
+/// `[Head|Tail]` — a list pattern; `tail` of `None` is the wildcard `_`.
+fn cons_pat(head: &str, tail: Option<&str>) -> Document<'static> {
+    docvec![
+        "[",
+        var(head),
+        "|",
+        tail.map_or(Document::Str("_"), var),
+        "]"
+    ]
 }
 
 /// The nine hard-coded `dispatch/3` reflection arms of a primitive value type,
@@ -521,11 +547,10 @@ impl CoreErlangGenerator {
         };
         // A `case Args of` whose arms are the argument-shape alternatives.
         let args_case = |arms: Vec<Document<'static>>| case_of(var("Args"), arms, Layout::Block);
-        let pat = |text: &'static str| Document::Str(text);
         let bad_args =
             |name: &str, body: Document<'static>| clause([var(name)], None, body, Layout::Block);
-        let single_arg = |head: &'static str, guard: Option<Document<'static>>, body| {
-            clause([pat(head)], guard, body, Layout::Block)
+        let single_arg = |head: Document<'static>, guard: Option<Document<'static>>, body| {
+            clause([head], guard, body, Layout::Block)
         };
         let let_ = |name: &str, value: Document<'static>, body: Document<'static>| {
             let_in(docvec!["<", var(name), ">"], value, body, Layout::Block)
@@ -554,17 +579,11 @@ impl CoreErlangGenerator {
                             clause(
                                 [docvec!["{", leaf::atom("error"), ", ", var(err_v), "}"]],
                                 None,
-                                docvec![
-                                    "{",
-                                    leaf::atom("error"),
-                                    ", ",
-                                    form::call(
-                                        "beamtalk_exception_handler",
-                                        "ensure_wrapped",
-                                        [var(err_v)]
-                                    ),
-                                    ", State}",
-                                ],
+                                error_reply(form::call(
+                                    "beamtalk_exception_handler",
+                                    "ensure_wrapped",
+                                    [var(err_v)],
+                                )),
                                 Layout::Block,
                             ),
                             clause([var(other_v)], None, var(other_v), Layout::Block),
@@ -583,7 +602,7 @@ impl CoreErlangGenerator {
                 "respondsTo:",
                 args_case(vec![
                     single_arg(
-                        "[RtSel4|_]",
+                        cons_pat("RtSel4", None),
                         Some(form::call("erlang", "is_atom", [var("RtSel4")])),
                         let_(
                             "RtClass4",
@@ -612,7 +631,7 @@ impl CoreErlangGenerator {
                 "fieldAt:",
                 args_case(vec![
                     single_arg(
-                        "[IvaName4|_]",
+                        cons_pat("IvaName4", None),
                         None,
                         reply(form::call(
                             "beamtalk_reflection",
@@ -628,13 +647,13 @@ impl CoreErlangGenerator {
                 "fieldAt:put:",
                 args_case(vec![
                     single_arg(
-                        "[IvapName4|IvapRest4]",
+                        cons_pat("IvapName4", Some("IvapRest4")),
                         None,
                         case_of(
                             var("IvapRest4"),
                             [
                                 single_arg(
-                                    "[IvapVal4|_]",
+                                    cons_pat("IvapVal4", None),
                                     None,
                                     let_(
                                         "IvapTuple4",
@@ -657,11 +676,10 @@ impl CoreErlangGenerator {
                                                     "element",
                                                     [leaf::int_lit(2), var("IvapTuple4")],
                                                 ),
-                                                docvec![
-                                                    "{",
-                                                    leaf::atom("reply"),
-                                                    ", IvapResult4, IvapNewState4}",
-                                                ],
+                                                reply_with(
+                                                    var("IvapResult4"),
+                                                    var("IvapNewState4"),
+                                                ),
                                             ),
                                         ),
                                     ),
@@ -679,7 +697,7 @@ impl CoreErlangGenerator {
                 "hasField:",
                 args_case(vec![
                     single_arg(
-                        "[HfName4|_]",
+                        cons_pat("HfName4", None),
                         None,
                         reply(form::call(
                             "beamtalk_reflection",
@@ -695,7 +713,7 @@ impl CoreErlangGenerator {
                 "clearField:",
                 args_case(vec![
                     single_arg(
-                        "[ClfName4|_]",
+                        cons_pat("ClfName4", None),
                         None,
                         let_(
                             "ClfNewState4",
@@ -704,7 +722,7 @@ impl CoreErlangGenerator {
                                 "clear_field",
                                 [var("ClfName4"), var("State")],
                             ),
-                            docvec!["{", leaf::atom("reply"), ", Self, ClfNewState4}"],
+                            reply_with(var("Self"), var("ClfNewState4")),
                         ),
                     ),
                     bad_args("_ClfBadArgs", self.arity_error_fragment("clearField:", 1)),
@@ -736,7 +754,7 @@ impl CoreErlangGenerator {
                 "perform:",
                 args_case(vec![
                     single_arg(
-                        "[PerfSel4|_]",
+                        cons_pat("PerfSel4", None),
                         Some(form::call("erlang", "is_atom", [var("PerfSel4")])),
                         lookup_arm(
                             "PerfSel4",
@@ -758,13 +776,13 @@ impl CoreErlangGenerator {
                 "perform:withArguments:",
                 args_case(vec![
                     single_arg(
-                        "[PwaSel4|PwaRest4]",
+                        cons_pat("PwaSel4", Some("PwaRest4")),
                         Some(form::call("erlang", "is_atom", [var("PwaSel4")])),
                         case_of(
                             var("PwaRest4"),
                             [
                                 single_arg(
-                                    "[PwaArgs4|_]",
+                                    cons_pat("PwaArgs4", None),
                                     Some(form::call("erlang", "is_list", [var("PwaArgs4")])),
                                     lookup_arm(
                                         "PwaSel4",
@@ -835,22 +853,16 @@ impl CoreErlangGenerator {
         let wrap_error = let_in(
             docvec!["<", var("D4Built"), ">"],
             form::primop("build_stacktrace", [var("D4Stack")]),
-            docvec![
-                "{",
-                leaf::atom("error"),
-                ", ",
-                form::call(
-                    "beamtalk_exception_handler",
-                    "ensure_wrapped",
-                    [
-                        leaf::atom("error"),
-                        var("D4Error"),
-                        var("D4Built"),
-                        Document::Str("~{}~"),
-                    ],
-                ),
-                ", State}",
-            ],
+            error_reply(form::call(
+                "beamtalk_exception_handler",
+                "ensure_wrapped",
+                [
+                    leaf::atom("error"),
+                    var("D4Error"),
+                    var("D4Built"),
+                    Document::Str("~{}~"),
+                ],
+            )),
             Layout::Block,
         );
         let handler = case_of(

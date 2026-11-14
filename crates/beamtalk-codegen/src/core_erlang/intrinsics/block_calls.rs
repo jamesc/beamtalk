@@ -18,6 +18,36 @@ use super::{
 
 use beamtalk_cerl_doc::form::{self, Layout, let_in};
 
+/// Which clause spelling a call site historically emitted: `<'true'> when 'true' -> …`
+/// or `'true' when 'true' -> …`. The two are the same Core Erlang but not the same
+/// text, and the output is kept byte-identical.
+#[derive(Clone, Copy)]
+enum ClauseSpelling {
+    Bare,
+    Bracketed,
+}
+
+/// `case call 'erlang':'is_function'(args) of 'true' -> on_true 'false' -> on_false end`.
+fn is_function_case(
+    args: impl IntoIterator<Item = Document<'static>>,
+    on_true: Document<'static>,
+    on_false: Document<'static>,
+    spelling: ClauseSpelling,
+) -> Document<'static> {
+    let arm = |pattern: &str, body| {
+        let pattern = leaf::atom(pattern);
+        match spelling {
+            ClauseSpelling::Bracketed => form::clause([pattern], None, body, Layout::Flat),
+            ClauseSpelling::Bare => form::clause_bare(pattern, None, body, Layout::Flat),
+        }
+    };
+    form::case_of(
+        form::call("erlang", "is_function", args),
+        [arm("true", on_true), arm("false", on_false)],
+        Layout::Flat,
+    )
+}
+
 impl CoreErlangGenerator {
     /// Tries to generate code for Block evaluation and loop intrinsics.
     ///
@@ -217,27 +247,27 @@ impl CoreErlangGenerator {
                 ),
                 at,
             );
-            let call_doc = docvec![
-                "let ",
+            let call_doc = let_in(
                 leaf::var(recv_var.clone()),
-                " = ",
                 recv_doc,
-                " in case call 'erlang':'is_function'(",
-                leaf::var(recv_var.clone()),
-                ", 0) of 'true' when 'true' -> ",
-                apply_doc,
-                " 'false' when 'true' -> case call 'erlang':'is_function'(",
-                leaf::var(recv_var.clone()),
-                ", 1) of 'true' when 'true' -> ",
-                stateful_branch,
-                " 'false' when 'true' -> case call 'erlang':'is_function'(",
-                leaf::var(recv_var),
-                ") of 'true' when 'true' -> ",
-                badarity_apply_doc,
-                " 'false' when 'true' -> ",
-                send_doc,
-                " end end end",
-            ];
+                is_function_case(
+                    [leaf::var(recv_var.clone()), leaf::int_lit(0)],
+                    apply_doc,
+                    is_function_case(
+                        [leaf::var(recv_var.clone()), leaf::int_lit(1)],
+                        stateful_branch,
+                        is_function_case(
+                            [leaf::var(recv_var)],
+                            badarity_apply_doc,
+                            send_doc,
+                            ClauseSpelling::Bare,
+                        ),
+                        ClauseSpelling::Bare,
+                    ),
+                    ClauseSpelling::Bare,
+                ),
+                Layout::Flat,
+            );
             seq.close(self, call_doc, "ValRes")
         };
         Ok(Some(doc))
@@ -349,17 +379,12 @@ impl CoreErlangGenerator {
             let fun_var = self.fresh_temp_var("Fun");
             let recv_code = self.expression_doc(receiver)?;
             let args_code = self.expression_doc(args_expr)?;
-            let doc = docvec![
-                "let ",
+            let doc = let_in(
                 leaf::var(fun_var.clone()),
-                " = ",
                 recv_code,
-                " in call 'erlang':'apply'(",
-                leaf::var(fun_var),
-                ", ",
-                args_code,
-                ")",
-            ];
+                form::call("erlang", "apply", [leaf::var(fun_var), args_code]),
+                Layout::Flat,
+            );
             return Ok(Some(doc));
         }
         // The non-fun fallback is a dynamic site (BT-4596).
@@ -734,13 +759,12 @@ impl CoreErlangGenerator {
         // This preserves evaluation order: `let _Fun = recv in [hoisted args] apply _Fun (args)`.
         let recv_code = self.expression_doc(receiver)?;
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len() + 2);
-        parts.push(docvec![
-            "let ",
+        parts.push(let_in(
             leaf::var(fun_var.clone()),
-            " = ",
             recv_code,
-            " in ",
-        ]);
+            Document::Nil,
+            Layout::Flat,
+        ));
         let mut hoisted = Vec::new();
         let arg_docs = self.generate_cascade_args(arguments, &mut hoisted)?;
         if !hoisted.is_empty() {
@@ -796,14 +820,12 @@ impl CoreErlangGenerator {
             ],
             block.span,
         );
-        Ok(docvec![
-            "let ",
+        Ok(let_in(
             leaf::var(fun_var),
-            " = fun (",
-            join(params, &Document::Str(", ")),
-            ") -> 'nil' in ",
+            docvec!["fun (", join(params, &Document::Str(", ")), ") -> 'nil'"],
             apply_doc,
-        ])
+            Layout::Flat,
+        ))
     }
 
     /// Returns true if `expr` is a compile-time Erlang FFI proxy expression.
@@ -977,27 +999,28 @@ impl CoreErlangGenerator {
             at,
         );
 
-        let case_doc = docvec![
-            "case call 'erlang':'is_function'(",
-            leaf::var(recv_var.clone()),
-            ", ",
-            leaf::int_lit(i64::try_from(arity).unwrap_or(i64::MAX)),
-            ") of 'true' when 'true' -> ",
+        let case_doc = is_function_case(
+            [
+                leaf::var(recv_var.clone()),
+                leaf::int_lit(i64::try_from(arity).unwrap_or(i64::MAX)),
+            ],
             apply_doc.clone(),
-            " 'false' when 'true' -> case call 'erlang':'is_function'(",
-            leaf::var(recv_var.clone()),
-            ", ",
-            leaf::int_lit(i64::try_from(arity.saturating_add(1)).unwrap_or(i64::MAX)),
-            ") of 'true' when 'true' -> ",
-            stateful_branch,
-            " 'false' when 'true' -> case call 'erlang':'is_function'(",
-            leaf::var(recv_var),
-            ") of 'true' when 'true' -> ",
-            apply_doc,
-            " 'false' when 'true' -> ",
-            send_doc,
-            " end end end",
-        ];
+            is_function_case(
+                [
+                    leaf::var(recv_var.clone()),
+                    leaf::int_lit(i64::try_from(arity.saturating_add(1)).unwrap_or(i64::MAX)),
+                ],
+                stateful_branch,
+                is_function_case(
+                    [leaf::var(recv_var)],
+                    apply_doc,
+                    send_doc,
+                    ClauseSpelling::Bare,
+                ),
+                ClauseSpelling::Bare,
+            ),
+            ClauseSpelling::Bare,
+        );
 
         // ADR 0118 phase 5b: `parts` is already a self-contained
         // `let ... in` prefix sequence regardless of whether any receiver/
@@ -1052,15 +1075,16 @@ impl CoreErlangGenerator {
             return tuple_doc;
         }
         let tuple_var = self.fresh_temp_var("T2SubTuple");
-        docvec![
-            "let ",
+        let_in(
             leaf::var(tuple_var.clone()),
-            " = ",
             tuple_doc,
-            " in call 'erlang':'element'(1, ",
-            leaf::var(tuple_var),
-            ")",
-        ]
+            form::call(
+                "erlang",
+                "element",
+                [leaf::int_lit(1), leaf::var(tuple_var)],
+            ),
+            Layout::Flat,
+        )
     }
 
     /// Generates a Tier 2 stateful block value call (ADR 0041 Phase 0).
@@ -1101,15 +1125,12 @@ impl CoreErlangGenerator {
             docvec!["apply ", leaf::var(fun_var.clone()), " (", args_doc, ")"],
             receiver.span(),
         );
-        let doc = docvec![
-            "let ",
+        Ok(let_in(
             leaf::var(fun_var),
-            " = ",
             recv_code,
-            " in ",
-            apply_doc
-        ];
-        Ok(doc)
+            apply_doc,
+            Layout::Flat,
+        ))
     }
 
     /// Generates the fallback method body for `blockValue`/`blockValue1`/
@@ -1183,37 +1204,37 @@ impl CoreErlangGenerator {
             super::super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(
                 class_name,
             );
-        let placeholder_branch = docvec![
-            "call ",
+        let placeholder_branch = form::call_atoms(
             leaf::atom(runtime_module),
-            ":'dispatch'(",
-            leaf::atom(intrinsic_name),
-            ", [",
-            params_doc.clone(),
-            "], ",
-            Document::Str(self_var),
-            ")",
-        ];
+            leaf::atom("dispatch"),
+            [
+                leaf::atom(intrinsic_name),
+                docvec!["[", params_doc.clone(), "]"],
+                Document::Str(self_var),
+            ],
+        );
 
-        docvec![
-            "case call 'erlang':'is_function'(",
-            Document::Str(self_var),
-            ", ",
-            leaf::int_lit(i64::try_from(arity).unwrap_or(i64::MAX)),
-            ") of <'true'> when 'true' -> call 'erlang':'apply'(",
-            Document::Str(self_var),
-            ", [",
-            params_doc,
-            "]) <'false'> when 'true' -> case call 'erlang':'is_function'(",
-            Document::Str(self_var),
-            ", ",
-            leaf::int_lit(i64::try_from(arity + 1).unwrap_or(i64::MAX)),
-            ") of <'true'> when 'true' -> ",
-            stateful_branch,
-            " <'false'> when 'true' -> ",
-            placeholder_branch,
-            " end end",
-        ]
+        is_function_case(
+            [
+                Document::Str(self_var),
+                leaf::int_lit(i64::try_from(arity).unwrap_or(i64::MAX)),
+            ],
+            form::call(
+                "erlang",
+                "apply",
+                [Document::Str(self_var), docvec!["[", params_doc, "]"]],
+            ),
+            is_function_case(
+                [
+                    Document::Str(self_var),
+                    leaf::int_lit(i64::try_from(arity + 1).unwrap_or(i64::MAX)),
+                ],
+                stateful_branch,
+                placeholder_branch,
+                ClauseSpelling::Bracketed,
+            ),
+            ClauseSpelling::Bracketed,
+        )
     }
 
     /// Shared `#beamtalk_error{kind = stateful_block_dispatch}` construction used
@@ -1245,9 +1266,7 @@ impl CoreErlangGenerator {
                 leaf::binary_lit(hint_text),
                 Document::Str(" "),
             ),
-            "call 'beamtalk_error':'raise'(",
-            leaf::var(error_hint),
-            ")",
+            form::call("beamtalk_error", "raise", [leaf::var(error_hint)]),
         ]
     }
 
@@ -1298,17 +1317,15 @@ impl CoreErlangGenerator {
             "Wrong argument count, or the block captures mutable state and must be invoked directly instead of via perform:/dynamic dispatch",
         );
 
-        docvec![
-            "case call 'erlang':'is_function'(",
-            leaf::var(block_param.to_string()),
-            ", ",
-            leaf::int_lit(i64::try_from(pure_arity + 1).unwrap_or(i64::MAX)),
-            ") of <'true'> when 'true' -> ",
+        is_function_case(
+            [
+                leaf::var(block_param.to_string()),
+                leaf::int_lit(i64::try_from(pure_arity + 1).unwrap_or(i64::MAX)),
+            ],
             stateful_branch,
-            " <'false'> when 'true' -> ",
             tier1_doc,
-            " end",
-        ]
+            ClauseSpelling::Bracketed,
+        )
     }
 
     /// Generates a runtime `erlang:is_function/1` guard for
@@ -1359,15 +1376,12 @@ impl CoreErlangGenerator {
             ),
             at,
         );
-        let case_doc = docvec![
-            "case call 'erlang':'is_function'(",
-            leaf::var(recv_var),
-            ") of 'true' when 'true' -> ",
+        let case_doc = is_function_case(
+            [leaf::var(recv_var)],
             apply_doc,
-            " 'false' when 'true' -> ",
             send_doc,
-            " end",
-        ];
+            ClauseSpelling::Bare,
+        );
 
         parts.push(case_doc);
 
@@ -1402,27 +1416,31 @@ impl CoreErlangGenerator {
         let tier1_arity_var = self.fresh_temp_var("ArgsLen");
         let tier2_arity_var = self.fresh_temp_var("ArgsLenPlusOne");
 
-        let preamble = docvec![
-            "let ",
+        let preamble = let_in(
             leaf::var(fun_var.clone()),
-            " = ",
             recv_code,
-            " in let ",
-            leaf::var(args_var.clone()),
-            " = ",
-            args_code,
-            " in let ",
-            leaf::var(tier1_arity_var.clone()),
-            " = call 'erlang':'length'(",
-            leaf::var(args_var.clone()),
-            ") in let ",
-            leaf::var(tier2_arity_var.clone()),
-            " = call 'erlang':'+'(",
-            leaf::var(tier1_arity_var.clone()),
-            ", ",
-            leaf::int_lit(1),
-            ") in ",
-        ];
+            let_in(
+                leaf::var(args_var.clone()),
+                args_code,
+                let_in(
+                    leaf::var(tier1_arity_var.clone()),
+                    form::call("erlang", "length", [leaf::var(args_var.clone())]),
+                    let_in(
+                        leaf::var(tier2_arity_var.clone()),
+                        form::call(
+                            "erlang",
+                            "+",
+                            [leaf::var(tier1_arity_var.clone()), leaf::int_lit(1)],
+                        ),
+                        Document::Nil,
+                        Layout::Flat,
+                    ),
+                    Layout::Flat,
+                ),
+                Layout::Flat,
+            ),
+            Layout::Flat,
+        );
 
         // BT-4356: each control-transferring node carries the send's line.
         let at = receiver.span();
@@ -1464,27 +1482,20 @@ impl CoreErlangGenerator {
             ),
             at,
         );
-        let case_doc = docvec![
-            "case call 'erlang':'is_function'(",
-            leaf::var(fun_var.clone()),
-            ", ",
-            leaf::var(tier1_arity_var),
-            ") of 'true' when 'true' -> {",
-            tier1_apply,
-            ", ",
-            leaf::var(current_state.clone()),
-            "} 'false' when 'true' -> case call 'erlang':'is_function'(",
-            leaf::var(fun_var),
-            ", ",
-            leaf::var(tier2_arity_var),
-            ") of 'true' when 'true' -> ",
-            tier2_apply,
-            " 'false' when 'true' -> {",
-            send_doc,
-            ", ",
-            leaf::var(current_state),
-            "} end end",
-        ];
+        let result_pair = |result: Document<'static>, state: String| {
+            docvec!["{", result, ", ", leaf::var(state), "}"]
+        };
+        let case_doc = is_function_case(
+            [leaf::var(fun_var.clone()), leaf::var(tier1_arity_var)],
+            result_pair(tier1_apply, current_state.clone()),
+            is_function_case(
+                [leaf::var(fun_var), leaf::var(tier2_arity_var)],
+                tier2_apply,
+                result_pair(send_doc, current_state),
+                ClauseSpelling::Bare,
+            ),
+            ClauseSpelling::Bare,
+        );
 
         Ok(docvec![preamble, case_doc])
     }
@@ -1512,21 +1523,21 @@ impl CoreErlangGenerator {
                     let value_doc = self.threaded_value_doc(&tv.value);
                     arg_bindings.push(docvec![
                         prelude_doc,
-                        "let ",
-                        leaf::var(arg_var.clone()),
-                        " = ",
-                        value_doc,
-                        " in ",
+                        let_in(
+                            leaf::var(arg_var.clone()),
+                            value_doc,
+                            Document::Nil,
+                            Layout::Flat,
+                        ),
                     ]);
                 } else {
                     let arg_doc = self.expression_doc(&arguments[i])?;
-                    arg_bindings.push(docvec![
-                        "let ",
+                    arg_bindings.push(let_in(
                         leaf::var(arg_var.clone()),
-                        " = ",
                         arg_doc,
-                        " in ",
-                    ]);
+                        Document::Nil,
+                        Layout::Flat,
+                    ));
                 }
                 self.bind_var(&param.name, &arg_var);
             }
@@ -1583,22 +1594,19 @@ impl CoreErlangGenerator {
                         let val_doc = self.expression_doc(value)?;
                         if is_last {
                             // Last assignment: bind AND return the new value
-                            parts.push(docvec![
-                                "let ",
+                            parts.push(let_in(
                                 leaf::var(core_var.clone()),
-                                " = ",
                                 val_doc,
-                                " in ",
                                 leaf::var(core_var.clone()),
-                            ]);
+                                Layout::Flat,
+                            ));
                         } else {
-                            parts.push(docvec![
-                                "let ",
+                            parts.push(let_in(
                                 leaf::var(core_var.clone()),
-                                " = ",
                                 val_doc,
-                                " in ",
-                            ]);
+                                Document::Nil,
+                                Layout::Flat,
+                            ));
                         }
                         // Bind in the OUTER scope so subsequent reads see the update
                         self.bind_var(&id.name, &core_var);
@@ -1662,7 +1670,7 @@ impl CoreErlangGenerator {
         parts.extend(arg_bindings);
         // Seed StateAcc from outer state
         parts.push(let_in(
-            Document::Str("StateAcc"),
+            leaf::var("StateAcc"),
             leaf::var(outer_state),
             Document::Nil,
             Layout::Flat,
