@@ -113,14 +113,14 @@ TestCase subclass: StackFrameTest
     self assert: (raw includesSubstring: "/")
     self deny: (self.frame printString includesSubstring: raw)
 
-  testIsHiddenAnswersBoolean =>
-    self deny: self.frame isHidden
+  testIsHiddenAnswersBoolean => self deny: self.frame isHidden
 
   testFullStackTraceKeepsEveryFrameAndFlagsHidden =>
-    result := [1 / 0] on: Exception do: [:e |
-      e fullStackTrace size >= e stackTrace size]
+    result := [
+      1 / 0
+    ] on: Exception do: [:e | e fullStackTrace size >= e stackTrace size]
     self assert: result
-    hiddenShown := [1 / 0] on: Exception do: [:e |
-      e stackTrace anySatisfy: [:f | f isHidden]]
+    hiddenShown := [
+      1 / 0
+    ] on: Exception do: [:e | e stackTrace anySatisfy: [:f | f isHidden]]
     self deny: hiddenShown
-
