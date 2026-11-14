@@ -199,10 +199,29 @@ encode_error(Reason, Msg, FormatError, Output, Warnings, Metadata) ->
     Message = FormatError(Reason),
     Base = base_response(Msg),
     Full0 = Base#{<<"error">> => Message, <<"status">> => [<<"done">>, <<"error">>]},
-    Full = maps:merge(Full0, Metadata),
+    Full = maps:merge(maybe_add_frames(Full0, Reason), Metadata),
     iolist_to_binary(
         json:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
     ).
+
+-doc """
+Add the exception's complete frame list as `frames` (ADR 0139, decision 4):
+one `beamtalk_stack_frame:structured_frame/1` map per frame, display string and
+raw MFA together, hidden frames flagged rather than removed. Each client picks
+the form it shows. Errors without a captured stacktrace add nothing.
+""".
+-spec maybe_add_frames(map(), term()) -> map().
+maybe_add_frames(Response, {eval_error, _Class, ExObj}) when is_map(ExObj) ->
+    try beamtalk_exception_handler:frames(ExObj) of
+        [] ->
+            Response;
+        Frames ->
+            Response#{<<"frames">> => [beamtalk_stack_frame:structured_frame(F) || F <- Frames]}
+    catch
+        _:_ -> Response
+    end;
+maybe_add_frames(Response, _Reason) ->
+    Response.
 
 -doc "Encode a status-only response (e.g., for clear, close).".
 -spec encode_status(atom(), protocol_msg(), fun((term()) -> term())) -> binary().

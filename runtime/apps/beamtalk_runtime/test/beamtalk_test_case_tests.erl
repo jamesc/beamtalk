@@ -332,7 +332,8 @@ format_stacktrace_full_traces_keeps_all_frames_test() ->
         application:unset_env(beamtalk_stdlib, full_traces)
     end.
 
-%% BT-4355: structured frames match the rendered lines and carry no MFA.
+%% BT-4355: structured frames match the rendered lines. BT-4819: they also
+%% carry the raw MFA and hidden flag under `structured` (both forms).
 stack_frames_match_rendered_text_test() ->
     Frames = [
         {'bt@user@A', 'm1', 0, [{file, "a.bt"}, {line, 1}]},
@@ -351,9 +352,15 @@ stack_frames_match_rendered_text_test() ->
     ?assertEqual(true, maps:get(block, F2)),
     ?assertEqual(<<"m4">>, maps:get(selector, F3)),
     ?assertEqual(
-        [block, class, class_side, file, kind, line, repeat, selector],
+        [block, class, class_side, file, kind, line, repeat, selector, structured],
         lists:sort(maps:keys(F1))
     ),
+    #{structured := S1} = F1,
+    ?assertEqual('bt@user@A', maps:get(<<"module">>, S1)),
+    ?assertEqual(m1, maps:get(<<"function">>, S1)),
+    ?assertEqual(0, maps:get(<<"arity">>, S1)),
+    ?assertEqual(false, maps:get(<<"hidden">>, S1)),
+    ?assertEqual(<<"bt@user@A>>m1 (a.bt:1)">>, maps:get(<<"display">>, S1)),
     %% Each structured frame's selector and line appear in the rendered text.
     Text = beamtalk_test_case:format_stacktrace(Frames),
     lists:foreach(

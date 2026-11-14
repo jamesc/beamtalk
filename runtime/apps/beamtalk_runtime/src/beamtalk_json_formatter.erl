@@ -364,17 +364,17 @@ append_extra_meta(Meta, Fields) ->
 -doc """
 Format an extra metadata value for JSON output.
 
-Stacktraces get special formatting: Erlang stacktrace lists are converted
-to human-readable frames via `beamtalk_stack_frame`. Non-list stacktraces
+Stacktraces get special formatting: Erlang stacktrace lists become a JSON
+array of structured frames (`beamtalk_stack_frame:structured_frame/1`: display
+string, raw module/function/arity, file, line, `hidden`). Non-list stacktraces
 (e.g., tuples from Core Erlang catch) are scanned for beamtalk errors.
 """.
--spec format_extra_value(atom() | binary(), term()) -> binary().
+-spec format_extra_value(atom() | binary(), term()) -> binary() | [map()].
 format_extra_value(stacktrace, Stack) when is_list(Stack) ->
-    %% Standard Erlang stacktrace — convert to human-readable frames
+    %% Standard Erlang stacktrace: one structured frame per entry, carrying the
+    %% display string and the raw MFA (ADR 0139, decision 4), hidden ones flagged.
     try
-        Frames = beamtalk_stack_frame:wrap(Stack),
-        Lines = [format_stack_frame(F) || F <- Frames],
-        safe_to_binary(lists:join($\n, Lines))
+        beamtalk_stack_frame:structured_frames(Stack)
     catch
         _:_ ->
             %% Fallback if wrap fails
@@ -400,14 +400,6 @@ format_extra_value(_Key, Value) when is_pid(Value) ->
     list_to_binary(pid_to_list(Value));
 format_extra_value(_Key, Value) ->
     safe_to_binary(io_lib:format("~tp", [Value])).
-
--doc """
-Format a single StackFrame tagged map as an indented log line. Delegates to
-`beamtalk_stack_frame:format_frame/1`, the one frame renderer.
-""".
--spec format_stack_frame(map()) -> iolist().
-format_stack_frame(Frame) ->
-    ["  ", beamtalk_stack_frame:format_frame(Frame)].
 
 -doc """
 Convert a metadata key to a binary.  Keys are usually atoms, but

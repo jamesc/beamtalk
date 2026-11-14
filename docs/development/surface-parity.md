@@ -331,6 +331,29 @@ Some behaviours are not discrete *ops* but **display contracts** that every
 surface inherits. They are recorded here because their output must stay
 consistent wherever a Beamtalk value is rendered as text.
 
+### Structured stack frames (ADR 0139, decision 4)
+
+Raw output is chosen by whoever consumes it, so every structured frame carries
+both forms. One definition, `beamtalk_stack_frame:structured_frame/1`; the key
+set is pinned by `tests/repl-protocol/frame_fields.json`, which the Erlang
+EUnit suite and the Rust `StackFrameInfo` test both check.
+
+| Field | Meaning |
+|-------|---------|
+| `display` | The shared renderer's text (`Counter>>increment (counter.bt:12)`) |
+| `module`, `function`, `arity` | The raw MFA; `null` when the frame has none |
+| `file`, `line` | Display path and line; `null` when unknown |
+| `hidden` | `true` when the default visibility classification hides the frame; hidden frames stay in the list |
+
+| Surface | Where the frames appear |
+|---------|-------------------------|
+| REPL protocol | `frames` on an `eval` error response: the complete list, innermost first, hidden frames flagged. Absent when no stacktrace was captured. |
+| MCP | `evaluate` error results carry the same list as `structuredContent.frames`; the text content is unchanged. |
+| LSP | `surface-specific`: no LSP payload carries a stack trace today, so there is nothing to pass through. |
+| JSON logs | The `stacktrace` field is an array of these frames (was a newline-joined string); the raw `mfa` field is unchanged. |
+| `beamtalk test` JSON | Each failing test's `frames` entries add `display`, `module`, `function`, `arity` and `hidden` to their existing keys; they stay aligned with the `at` lines, so hidden frames appear only under `--full-traces`. |
+| Beamtalk | `StackFrame>>rawMfa`, `StackFrame>>isHidden`; `Exception>>fullStackTrace` lists every frame. `printString` never depends on any of it. |
+
 ### Object string representation (`printString` / `displayString`)
 
 ADR 0094 defines a two-protocol model that governs how any value renders as
