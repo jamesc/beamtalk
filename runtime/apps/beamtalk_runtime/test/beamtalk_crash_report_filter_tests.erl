@@ -28,8 +28,8 @@ crash_report_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->
         [
             {"gen_server terminate names Class>>selector", fun gen_server_terminate/0},
-            {"actor crash in handleInfo: names Class>>handleInfo:",
-                fun handle_info_names_selector/0},
+            {"proc_lib keyword-selector frame (quoted atom) is renamed",
+                fun proc_lib_keyword_selector/0},
             {"proc_lib crash renders initial_call and stacktrace", fun proc_lib_crash/0},
             {"supervisor child report renders mfargs", fun supervisor_child/0},
             {"raw MFA stays in the report term", fun raw_stays_in_report/0},
@@ -74,14 +74,15 @@ load_crasher() ->
     Src =
         "-module('bt@bt4820pkg@bt4820_crasher').\n"
         "-export([init/1, handle_call/3, handle_cast/2, handle_info/2, 'handleInfo:'/2,\n"
-        " start_link/0, crash/0]).\n"
+        " start_link/0, crash/0, 'at:put:'/0]).\n"
         "init(S) -> {ok, S}.\n"
         "handle_call(_, _, S) -> {reply, ok, S}.\n"
         "handle_cast(_, S) -> {noreply, S}.\n"
         "handle_info(M, S) -> 'handleInfo:'(M, S).\n"
         "'handleInfo:'(_M, _S) -> erlang:error(boom).\n"
         "start_link() -> gen_server:start_link('bt@bt4820pkg@bt4820_crasher', #{}, []).\n"
-        "crash() -> erlang:error(boom).\n",
+        "crash() -> erlang:error(boom).\n"
+        "'at:put:'() -> erlang:error(boom).\n",
     {ok, Toks, _} = erl_scan:string(Src),
     Forms = parse_forms(Toks, []),
     {ok, ?MOD, Bin} = compile:forms(Forms, [binary]),
@@ -109,8 +110,16 @@ gen_server_terminate() ->
     ?assertNotEqual(nomatch, binary:match(Text, <<"Bt4820Crasher>>handleInfo:">>)),
     ?assertEqual(nomatch, binary:match(Text, ?RAW)).
 
-handle_info_names_selector() ->
-    gen_server_terminate().
+proc_lib_keyword_selector() ->
+    drain(),
+    _ = proc_lib:spawn(?MOD, 'at:put:', []),
+    Event = await(fun
+        ({proc_lib, crash}) -> true;
+        (_) -> false
+    end),
+    Text = format(Event),
+    ?assertNotEqual(nomatch, binary:match(Text, <<"Bt4820Crasher>>at:put:">>)),
+    ?assertEqual(nomatch, binary:match(Text, ?RAW)).
 
 proc_lib_crash() ->
     drain(),
@@ -194,17 +203,13 @@ await(Match) ->
     receive
         {captured, #{msg := {report, #{label := L}}} = E} ->
             case Match(L) of
-                true -> apply_filter(E);
+                true -> E;
                 false -> await(Match)
             end;
         {captured, _} ->
             await(Match)
     after 5000 -> error(no_report)
     end.
-
-%% The primary filter runs before handlers; `logger:add_handler` capture sees
-%% the filtered event already.
-apply_filter(E) -> E.
 
 drain() ->
     catch unregister(bt4820_test),

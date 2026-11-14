@@ -197,6 +197,8 @@ wrap_cb(Orig, Label, Rendered) when is_function(Orig, 2) ->
         format(fun(R) -> Orig(R, Opts) end, Label, Rendered, Report)
     end.
 
+%% A `/1` callback's result is formatted here, so logger's `depth` option no
+%% longer applies to it (the OTP reports in scope use `/2` callbacks).
 %% Format `Report` with the original callback after naming the initial call
 %% and offender, then rename the stacktrace frames in the text. On any error
 %% the untranslated original output is used.
@@ -247,18 +249,48 @@ rename_mfa_item(Key, M, F, A, Item, Rendered) ->
 %% A frame prints as `M:F/A` (erl_error), `M:F(Args)` (erl_error with
 %% arguments) or `{M,F,A,Location}` (a reason printed as a term, which is what
 %% `gen_server` does for a reason that is not a `{Class, Reason, Stack}`).
+%% Known limit: this works on the text of the whole report, so a frame-shaped
+%% string inside `state` or `last_message` would be renamed too.
 -spec rename_frames(binary(), map()) -> binary().
 rename_frames(Text, Rendered) ->
     maps:fold(
         fun({M, F, A} = Mfa, Name, Acc) ->
-            Raw = beamtalk_stack_frame:raw_mfa(Mfa),
-            Acc1 = binary:replace(Acc, Raw, Name, [global]),
-            Prefix = unicode:characters_to_binary(io_lib:format("~ts:~ts(", [M, F])),
-            Acc2 = binary:replace(Acc1, Prefix, <<Name/binary, "(">>, [global]),
+            %% erl_error writes atoms with `~tw` (quoted when needed, as for
+            %% every keyword or operator selector: `'at:put:'/3`); the raw
+            %% spelling is unquoted. Replace both.
+            Spellings = lists:usort([
+                fmt("~ts:~ts/~B", [M, F, A]),
+                fmt("~tw:~tw/~B", [M, F, A]),
+                beamtalk_stack_frame:raw_mfa(Mfa)
+            ]),
+            Acc1 = lists:foldl(
+                fun(Spelling, T) -> replace_literal(T, Spelling, Name, <<"(?![0-9])">>) end,
+                Acc,
+                Spellings
+            ),
+            Acc2 = lists:foldl(
+                fun(Prefix, T) -> replace_literal(T, Prefix, <<Name/binary, "(">>, <<>>) end,
+                Acc1,
+                lists:usort([fmt("~ts:~ts(", [M, F]), fmt("~tw:~tw(", [M, F])])
+            ),
             rename_tuple_frame(Acc2, M, F, A, Name)
         end,
         Text,
         Rendered
+    ).
+
+-spec fmt(string(), list()) -> binary().
+fmt(Format, Args) ->
+    unicode:characters_to_binary(io_lib:format(Format, Args)).
+
+%% Replace every occurrence of `Literal` (not a regex) followed by `Lookahead`.
+-spec replace_literal(binary(), binary(), binary(), binary()) -> binary().
+replace_literal(Text, Literal, Replacement, Lookahead) ->
+    re:replace(
+        Text,
+        [re:replace(Literal, "[^A-Za-z0-9_]", "\\\\&", [global, {return, binary}]), Lookahead],
+        re:replace(Replacement, "[\\\\&]", "\\\\&", [global, {return, binary}]),
+        [global, {return, binary}, unicode]
     ).
 
 -spec rename_tuple_frame(binary(), atom(), atom(), arity(), binary()) -> binary().
