@@ -215,7 +215,16 @@ rows() ->
             "capped (maxChildren: 8) DynamicSupervisor startChild + terminateChild / max_children: 8",
             2000, 'cappedPoolStartTerminate:pool:', bt_capped_pool, [
                 {pool_start_terminate, ex_capped_pool}
-            ]}
+            ]},
+        {"16a", machinery,
+            "async actor start: spawnMonitoredAsync + continueWith: #run + stopWith: + DOWN / spawn_monitor",
+            2000, 'asyncStartRun:', none, [{spawn_monitor_exit, none}]},
+        {"16b", machinery,
+            "as 16a, spawnMonitoredAsyncWith: / spawn_monitor", 2000, 'asyncStartRunWith:', none, [
+                {spawn_monitor_exit, none}
+            ]},
+        {"16c", machinery, "plain Actor spawn + stop / GenServer.start + stop", 2000, 'spawnStop:',
+            none, [{gen_start_stop, none}]}
     ].
 
 %%====================================================================
@@ -616,6 +625,9 @@ compiles_to("12a") -> "typed receiver (BT-4127): is_map + tag guard, erlang:wher
 compiles_to("12b") -> "class ref built per call (whereis_class + module_name_safe) + send(P, 'isKindOf:') -> direct objectIsKindOf/2 call (no FFI proxy, BT-4410): one memoised {is_kind_of, C, B} lookup (BT-4221)";
 compiles_to("12c") -> "as 12b, but the String literal bakes its module (whereis only, no module_name_safe, BT-4411) and String:dispatch/3 takes the memoised inherited_target verdict {value, Object, ...} straight to Object:dispatch/3 (BT-4260; no per-level extensions walk)";
 compiles_to("15a") -> "DynamicSupervisor:startChild -> beamtalk_supervisor:startChild (pool class + maxChildren read from the supervisor dictionary, supervisor:start_child, SupervisionChildAdded/ActorSpawned announcements skipped when no system-bus subscription can match (no matching subscriber)) + terminateChild";
+compiles_to("16a") -> "VbRunner spawnMonitoredAsync -> beamtalk_actor_ffi:doSpawnMonitoredAsync (spawn_opt monitor, enter_loop, initialize, handle_continue #run, stopWith:); the caller waits for the DOWN (BT-4845)";
+compiles_to("16b") -> "as 16a through spawnMonitoredAsyncWith:";
+compiles_to("16c") -> "VbCounter spawn (synchronous start, init ack) + stop";
 compiles_to("15b") -> "as 15a, with the atomic maxChildren cap: capacity token, monitor and slot release per child";
 compiles_to("13a") ->
     "direct erlang:phash2(A) in a try (BT-4485), behind an is_number/is_atom/is_pid argument guard: the spec proves the Integer result needs no coercion; errors go to ffi_call_raised/8";

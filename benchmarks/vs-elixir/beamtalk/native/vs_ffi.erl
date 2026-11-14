@@ -12,7 +12,18 @@
 
 -module(vs_ffi).
 
--export([ffi_ok/0]).
+-export([ffi_ok/0, await_down/1]).
 
 -spec ffi_ok() -> ok.
 ffi_ok() -> ok.
+
+%% Rows 16a-16c (BT-4845): wait for the `'DOWN'` of a monitor the calling
+%% process owns; answers 1 for a `normal` exit and 0 otherwise (an integer, so
+%% the loop's result is live). The benchmark loop is the caller,
+%% so the monitor `spawnMonitoredAsync` makes lands in its own mailbox.
+-spec await_down(reference()) -> 0 | 1.
+await_down(Ref) ->
+    receive
+        {'DOWN', Ref, process, _Pid, normal} -> 1;
+        {'DOWN', Ref, process, _Pid, _Reason} -> 0
+    end.

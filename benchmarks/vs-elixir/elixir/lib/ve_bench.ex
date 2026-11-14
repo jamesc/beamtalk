@@ -120,6 +120,36 @@ defmodule VeBench do
 
   defp pool_loop(_i, _n, pool), do: DynamicSupervisor.count_children(pool).active
 
+  # === 16. Actor start-up (BT-4845) ===
+
+  # spawn_monitor of a process that returns at once, then wait for its DOWN:
+  # the floor under 16a and 16b.
+  def spawn_monitor_exit(n, _ctx), do: spawn_monitor_loop(1, n, 0)
+
+  defp spawn_monitor_loop(i, n, _last) when i <= n do
+    {_pid, ref} = spawn_monitor(fn -> :ok end)
+
+    reason =
+      receive do
+        {:DOWN, ^ref, :process, _, r} -> r
+      end
+
+    spawn_monitor_loop(i + 1, n, if(reason == :normal, do: 1, else: 0))
+  end
+
+  defp spawn_monitor_loop(_i, _n, last), do: last
+
+  # GenServer.start + GenServer.stop of the Counter: the floor under 16c.
+  def gen_start_stop(n, _ctx), do: gen_start_stop_loop(1, n)
+
+  defp gen_start_stop_loop(i, n) when i <= n do
+    {:ok, pid} = GenServer.start(Counter, 0)
+    :ok = GenServer.stop(pid)
+    gen_start_stop_loop(i + 1, n)
+  end
+
+  defp gen_start_stop_loop(_i, _n), do: 1
+
   # === 7. GenServer ===
 
   defbench(:gen_call, pid, do: GenServer.call(pid, :count))
