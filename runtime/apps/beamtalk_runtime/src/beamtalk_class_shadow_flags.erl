@@ -36,6 +36,9 @@ hierarchy walk is always correct); `runtime_fun` writers set the flag *before* m
 shadow visible and clear it only *after* the gate is closed; `extension`
 transitions are serialized per tag under a lock in `beamtalk_extensions`
 (an unlocked erase-then-recheck could leave the flag false beside a visible row).
+BT-4808: the `runtime_fun` and `class_vars` flags hold their writer's pid (`set/3`)
+rather than `true`, so the removal of a dead class erases them only while they
+still name it (`clear_if_owner/3`); `extension` flags stay `true`.
 Concurrency: the `runtime_fun` flag is unlocked and relies on a single writer
 per class. All its writers (`insert`, `set_runtime_class_methods`,
 `reset_runtime_class_methods`, `delete` in `beamtalk_class_metadata`) run inside
@@ -266,7 +269,9 @@ actual transitions write (set when unset, erase when set); both are rare
 
 -export([
     set/2,
+    set/3,
     clear/2,
+    clear_if_owner/3,
     is_set/2,
     is_shadowed/2,
     direct_call_ok/2,
@@ -329,14 +334,27 @@ call this from inside `with_tag_lock/2`.
 """.
 -spec set(kind(), atom()) -> ok.
 set(Kind, Name) ->
+    set(Kind, Name, true).
+
+-doc """
+`set/2` for a flag whose writer is a class process (BT-4808): the raw flag
+holds the writer's pid instead of `true`, so a dead class's removal can erase
+the flag only while it still names that dead owner (`clear_if_owner/3`) and
+never a rebuilt class's. Every reader tests "set" as "not `false`", so the
+read side costs the same one `persistent_term` read. No-op when the flag
+already holds `Value`; a different value (a rebuilt class over a dead owner's)
+is replaced under the same per-tag lock.
+""".
+-spec set(kind(), atom(), true | pid()) -> ok.
+set(Kind, Name, Value) ->
     Key = key(Kind, Name),
     case persistent_term:get(Key, false) of
-        true ->
+        Value ->
             ok;
-        false ->
+        _ ->
             Tag = class_tag(Kind, Name),
             with_tag_lock(Tag, fun() ->
-                persistent_term:put(Key, true),
+                persistent_term:put(Key, Value),
                 erase_direct_flag(Tag)
             end)
     end.
@@ -506,13 +524,13 @@ false before the caller publishes it; dropping it lets the next send re-derive
 """.
 -spec set_class_vars(atom(), boolean()) -> ok.
 set_class_vars(ClassName, true) ->
-    set(class_vars, ClassName);
+    set(class_vars, ClassName, self());
 set_class_vars(ClassName, false) ->
     Key = key(class_vars, ClassName),
     case persistent_term:get(Key, false) of
         false ->
             ok;
-        true ->
+        _ ->
             Tag = class_tag(class_vars, ClassName),
             with_tag_lock(Tag, fun() ->
                 _ = persistent_term:erase(Key),
@@ -567,17 +585,46 @@ tag_lock_key(Tag) ->
 clear(Kind, Name) ->
     Key = key(Kind, Name),
     case persistent_term:get(Key, false) of
-        true ->
-            _ = persistent_term:erase(Key),
-            ok;
         false ->
+            ok;
+        _ ->
+            _ = persistent_term:erase(Key),
+            ok
+    end.
+
+-doc """
+BT-4808: clear the `Kind` flag for `Name` only while it still names `Owner`,
+the (dead) class process that raised it, and erase the class's derived
+direct-call flag with it. A flag a rebuilt class raised under the same name
+holds that class's pid and is left alone. The compare and the erase run under
+the per-tag lock every `set/3` takes, so a rebuild's raise is either ordered
+before the compare (and kept) or after the erase (and unaffected). No lock is
+taken when the flag does not name `Owner`: only `Owner` raises a flag
+carrying its pid, and it is dead.
+""".
+-spec clear_if_owner(kind(), atom(), pid()) -> ok.
+clear_if_owner(Kind, Name, Owner) when is_pid(Owner) ->
+    Key = key(Kind, Name),
+    case persistent_term:get(Key, false) of
+        Owner ->
+            Tag = class_tag(Kind, Name),
+            with_tag_lock(Tag, fun() ->
+                case persistent_term:get(Key, false) of
+                    Owner ->
+                        _ = persistent_term:erase(Key),
+                        erase_direct_flag(Tag);
+                    _ ->
+                        ok
+                end
+            end);
+        _ ->
             ok
     end.
 
 -doc "Read one flag.".
 -spec is_set(kind(), atom()) -> boolean().
 is_set(Kind, Name) ->
-    persistent_term:get(key(Kind, Name), false).
+    persistent_term:get(key(Kind, Name), false) =/= false.
 
 -doc """
 True when a class-side extension under `ClassTag` or a runtime class-method fun

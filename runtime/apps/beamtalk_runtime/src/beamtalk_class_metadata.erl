@@ -167,17 +167,19 @@ a table deleted between an existence check and the op (teardown/shutdown).
 
 -define(TABLE, beamtalk_class_metadata).
 %% ADR 0084: sibling table holding runtime-installed class-method funs,
-%% keyed by {DefiningClass, Selector}. The metadata row's
+%% `{{DefiningClass, Selector}, Info, Owner}` (BT-4808: `Owner` is the class
+%% process that installed it, so a dead class's removal deletes only its own). The metadata row's
 %% `has_runtime_class_methods` flag gates reads on this table so compile-time-only
 %% classes pay nothing on the dispatch hot path.
 -define(FUN_TABLE, beamtalk_class_method_funs).
 %% Reverse-edge index for match_subclasses/1 — a `bag` of
-%% {Superclass, ClassName} rows, keyed on Superclass. See moduledoc "Reverse
-%% subclass index".
+%% `{Superclass, ClassName, Owner}` rows, keyed on Superclass (BT-4808: `Owner`
+%% is the class process that wrote the edge). See moduledoc "Reverse subclass
+%% index".
 -define(SUBCLASS_INDEX, beamtalk_class_subclass_index).
 %% BT-3832: per-method records (info / source / signature / doc) behind
 %% `CompiledMethod` lookups, an `ordered_set` keyed `{ClassName, Side,
-%% Selector}` so one method is a single-key read (never a copy of the whole
+%% Selector}` (value `{Key, Record, Owner}`, BT-4808) so one method is a single-key read (never a copy of the whole
 %% class's method map) and one class's rows are a bound-prefix range.
 -define(METHOD_RECORDS, beamtalk_class_method_records).
 
@@ -435,13 +437,13 @@ insert(Name, Module, Selectors, Superclass, IsAbstract) ->
     OldSuperclass = field(Name, #class_metadata.superclass),
     try
         ets:insert(?TABLE, Row),
-        sync_subclass_index(Name, OldSuperclass, Superclass)
+        claim_subclass_edge(Name, OldSuperclass, Superclass)
     catch
         error:badarg ->
             %% Table vanished between new/0 and ets:insert/2 — recreate and retry once.
             new(),
             ets:insert(?TABLE, Row),
-            sync_subclass_index(Name, OldSuperclass, Superclass)
+            claim_subclass_edge(Name, OldSuperclass, Superclass)
     end,
     %% BT-3669: a full-row write resets has_runtime_class_methods to false;
     %% clear the shadow flag only AFTER the gate is closed (a stale true is safe).
@@ -531,20 +533,23 @@ lookup_owner(Name) ->
     end.
 
 -doc """
-BT-4794: remove `Name`'s metadata row and its dependents only if the row still
-names `Owner`, the (dead) class process seen by the caller's re-check.
+BT-4794 / BT-4808: remove `Name`'s metadata row and its dependents only while
+they still belong to `Owner`, the (dead) class process seen by the caller's
+re-check.
 
-The claim is one atomic `ets:select_delete/2` on the row's owner, so a class
-rebuilt under the same name between the caller's re-check and this call (its
-`insert/5` replaces the row and records its own pid) is left intact. Returns
-`true` when the row and its dependents were removed, `false` when the row
-already names another owner or is gone (nothing is touched), and `superseded`
-when the claim was won but a rebuild wrote a new row before the dependents were
-all dropped (the rest is left to the rebuilt class). The dependents
-(class-method funs, method records, flags, subclass edge) are only dropped
-after a won claim.
+The row claim is one atomic `ets:select_delete/2` on the row's owner. Every
+dependent carries its writer's pid and is deleted by an atomic delete that
+matches it (`drop_dependents/2`, `finish_removal/3`): class-method funs,
+method records and the subclass edge by ETS match, the `runtime_fun` and
+`class_vars` flags by `beamtalk_class_shadow_flags:clear_if_owner/3`. A class
+rebuilt under the same name at any point of the teardown replaces the row and
+stamps its own funs, records, flags and edge with its own pid, so none of its
+entries can be matched, and no re-check between steps (or lock on
+registration) is needed. Returns `true` when the claim was won (the dependents
+Owner wrote are gone) and `false` when the row names another owner or is gone
+(nothing is touched).
 """.
--spec delete_if_owner(class_name(), pid()) -> boolean() | superseded.
+-spec delete_if_owner(class_name(), pid()) -> boolean().
 delete_if_owner(Name, Owner) when is_pid(Owner) ->
     OldSuperclass = field(Name, #class_metadata.superclass),
     %% A match head with every other field a wildcard (built as a tuple: a
@@ -562,78 +567,42 @@ delete_if_owner(Name, Owner) when is_pid(Owner) ->
         end,
     case Claimed of
         true ->
-            %% The row is already gone; drop what hangs off it (the same steps
-            %% `delete/1` runs before the row delete, then its tail). A class
-            %% rebuilt under the name after the claim writes a new row and then
-            %% seeds its own funs/records, and these steps are keyed by name
-            %% only, so a new row is looked for before each step and the rest
-            %% abandoned once one appears (`superseded`). That narrows, but
-            %% cannot close, the window inside a single step.
-            Steps = [
-                fun() -> delete_class_method_funs(Name) end,
-                fun() -> delete_method_records(Name) end,
-                fun() -> beamtalk_class_shadow_flags:clear(runtime_fun, Name) end,
-                fun() -> beamtalk_class_shadow_flags:set_class_vars(Name, false) end,
-                fun() -> finish_removal(Name, OldSuperclass) end
-            ],
-            run_unless_superseded(Name, OldSuperclass, Steps);
+            %% The row is already gone; drop what Owner hung off it (the same
+            %% steps `delete/1` runs before the row delete, then its tail).
+            drop_dependents(Name, Owner),
+            finish_removal(Name, OldSuperclass, Owner),
+            true;
         false ->
             false
     end.
 
--spec run_unless_superseded(class_name(), superclass() | undefined, [fun(() -> term())]) ->
-    true | superseded.
-run_unless_superseded(Name, OldSuperclass, []) ->
-    %% One last look after the final step: a rebuild that landed during it
-    %% (e.g. a same-superclass rebuild whose edge `finish_removal/2` just
-    %% dropped) is repaired by `drop_superseded_leftovers/2`.
-    case lookup_owner(Name) of
-        {ok, _NewOwner} ->
-            drop_superseded_leftovers(Name, OldSuperclass),
-            superseded;
-        not_found ->
-            true
-    end;
-run_unless_superseded(Name, OldSuperclass, [Step | Rest]) ->
-    case lookup_owner(Name) of
-        {ok, _NewOwner} ->
-            drop_superseded_leftovers(Name, OldSuperclass),
-            superseded;
-        not_found ->
-            _ = Step(),
-            run_unless_superseded(Name, OldSuperclass, Rest)
-    end.
+%% Whose dependents a teardown drops: every class's (`'_'`, a live class
+%% removing itself, whose own entries are the only ones that can exist) or
+%% only those a given dead class process wrote (BT-4808).
+-type owner_scope() :: '_' | pid().
 
-%% A rebuild's `insert/5` read the already-claimed row's superclass as
-%% `undefined`, so it never dropped the claimed row's `{OldSuperclass, Name}`
-%% edge: drop it here unless the rebuild kept the same superclass (then the
-%% edge is the rebuild's own). The descendants' derived flags are erased too,
-%% as `finish_removal/2` would have.
--spec drop_superseded_leftovers(class_name(), superclass() | undefined) -> ok.
-drop_superseded_leftovers(Name, OldSuperclass) ->
-    case field(Name, #class_metadata.superclass) of
-        %% Same superclass: the edge is the rebuild's own; restore it in case
-        %% the teardown's `finish_removal/2` just dropped it.
-        OldSuperclass when OldSuperclass =/= undefined -> insert_subclass_edge(OldSuperclass, Name);
-        _ when OldSuperclass =:= undefined -> ok;
-        _ -> delete_subclass_edge(OldSuperclass, Name)
+-spec drop_dependents(class_name(), owner_scope()) -> ok.
+drop_dependents(Name, Owner) ->
+    case Owner of
+        '_' ->
+            beamtalk_class_shadow_flags:clear(runtime_fun, Name),
+            %% BT-4299: a removed class keeps no class-variable input and no
+            %% derived direct-call flag (a later class of the same name
+            %% re-derives both).
+            beamtalk_class_shadow_flags:set_class_vars(Name, false);
+        _ ->
+            beamtalk_class_shadow_flags:clear_if_owner(runtime_fun, Name, Owner),
+            beamtalk_class_shadow_flags:clear_if_owner(class_vars, Name, Owner)
     end,
-    beamtalk_class_shadow_flags:invalidate(Name),
-    beamtalk_class_derived_cache:invalidate(),
-    ok.
+    drop_class_method_funs(Name, Owner),
+    drop_method_records(Name, Owner).
 
 -spec delete_row_and_dependents(class_name()) -> ok.
 delete_row_and_dependents(Name) ->
     %% Drop any runtime class-method funs alongside the metadata row so
     %% a class that is removed (or whose process terminates) leaves no stale
     %% dispatch entries behind.
-    delete_class_method_funs(Name),
-    delete_method_records(Name),
-    beamtalk_class_shadow_flags:clear(runtime_fun, Name),
-    %% BT-4299: a removed class keeps no class-variable input and no derived
-    %% direct-call flag (a later class of the same name re-derives both). The
-    %% flags are erased below, once the row is gone.
-    beamtalk_class_shadow_flags:set_class_vars(Name, false),
+    drop_dependents(Name, '_'),
     %% Read the superclass before the row disappears, so the reverse
     %% edge {Superclass, Name} can be dropped from the subclass index too —
     %% otherwise Name would linger forever as a phantom subclass of its old
@@ -646,15 +615,15 @@ delete_row_and_dependents(Name) ->
     catch
         error:badarg -> ok
     end,
-    finish_removal(Name, OldSuperclass).
+    finish_removal(Name, OldSuperclass, '_').
 
-%% The row of `Name` is gone: drop its subclass edge, then its derived flags.
--spec finish_removal(class_name(), superclass() | undefined) -> ok.
-finish_removal(Name, OldSuperclass) ->
-    try
-        sync_subclass_index(Name, OldSuperclass, undefined)
-    catch
-        error:badarg -> ok
+%% The row of `Name` is gone: drop its subclass edge (the one `Owner` wrote, or
+%% any), then its derived flags.
+-spec finish_removal(class_name(), superclass() | undefined, owner_scope()) -> ok.
+finish_removal(Name, OldSuperclass, Owner) ->
+    case OldSuperclass of
+        undefined -> ok;
+        _ -> delete_subclass_edge(OldSuperclass, Name, Owner)
     end,
     %% BT-4299 / BT-4301: erase the class's derived flag and its descendants'
     %% only now that the row is gone. Their derived values read this row
@@ -663,7 +632,8 @@ finish_removal(Name, OldSuperclass) ->
     %% chain is unresolvable and re-derives fail closed. The edges keyed on
     %% Name (its children) survive the row, so the descendants are still
     %% found; each erase takes its tag lock, so an install in flight that read
-    %% the old row is waited for and its value removed.
+    %% the old row is waited for and its value removed. (A class rebuilt under
+    %% the name in the meantime only loses derived values, which re-derive.)
     beamtalk_class_shadow_flags:invalidate(Name),
     %% BT-4064: a removed class must not keep resolving through the cache.
     beamtalk_class_derived_cache:invalidate(),
@@ -855,11 +825,11 @@ write_method_records(Name, Side, Records) ->
     try
         ets:insert(
             ?METHOD_RECORDS,
-            [{{Name, Side, Sel}, Rec} || Sel := Rec <- Records]
+            [{{Name, Side, Sel}, Rec, self()} || Sel := Rec <- Records]
         ),
         Stale = [
             Sel
-         || [Sel] <- ets:match(?METHOD_RECORDS, {{Name, Side, '$1'}, '_'}),
+         || [Sel] <- ets:match(?METHOD_RECORDS, {{Name, Side, '$1'}, '_', '_'}),
             not is_map_key(Sel, Records)
         ],
         lists:foreach(fun(Sel) -> ets:delete(?METHOD_RECORDS, {Name, Side, Sel}) end, Stale),
@@ -871,7 +841,7 @@ write_method_records(Name, Side, Records) ->
             try
                 ets:insert(
                     ?METHOD_RECORDS,
-                    [{{Name, Side, Sel}, Rec} || Sel := Rec <- Records]
+                    [{{Name, Side, Sel}, Rec, self()} || Sel := Rec <- Records]
                 ),
                 ok
             catch
@@ -883,7 +853,7 @@ write_method_records(Name, Side, Records) ->
 -spec lookup_method_record(class_name(), side(), selector()) -> {ok, method_record()} | not_found.
 lookup_method_record(Name, Side, Selector) ->
     try ets:lookup(?METHOD_RECORDS, {Name, Side, Selector}) of
-        [{_, Record}] -> {ok, Record};
+        [{_, Record, _Owner}] -> {ok, Record};
         [] -> not_found
     catch
         error:badarg -> not_found
@@ -895,16 +865,16 @@ lookup_method_records(Name, Side) ->
     try
         maps:from_list([
             {Sel, Rec}
-         || [Sel, Rec] <- ets:match(?METHOD_RECORDS, {{Name, Side, '$1'}, '$2'})
+         || [Sel, Rec] <- ets:match(?METHOD_RECORDS, {{Name, Side, '$1'}, '$2', '_'})
         ])
     catch
         error:badarg -> #{}
     end.
 
--spec delete_method_records(class_name()) -> ok.
-delete_method_records(Name) ->
+-spec drop_method_records(class_name(), owner_scope()) -> ok.
+drop_method_records(Name, Owner) ->
     try
-        ets:match_delete(?METHOD_RECORDS, {{Name, '_', '_'}, '_'}),
+        ets:match_delete(?METHOD_RECORDS, {{Name, '_', '_'}, '_', Owner}),
         ok
     catch
         error:badarg -> ok
@@ -1245,7 +1215,12 @@ match_subclasses(Name) ->
             [];
         _ ->
             try
-                [ClassName || {_Superclass, ClassName} <- ets:lookup(?SUBCLASS_INDEX, Name)]
+                %% A class rebuilt over a dead owner's not-yet-removed edge has
+                %% two (one per owner) until the removal drops the old one.
+                lists:uniq([
+                    ClassName
+                 || {_Superclass, ClassName, _Owner} <- ets:lookup(?SUBCLASS_INDEX, Name)
+                ])
             catch
                 error:badarg -> []
             end
@@ -1345,14 +1320,15 @@ gate without the fun present.
 -spec put_class_method_fun(class_name(), selector(), class_method_fun_info()) -> ok.
 put_class_method_fun(Name, Selector, Info) ->
     new(),
-    Key = {Name, Selector},
+    %% BT-4808: stamped with the installing class process, like the row.
+    Entry = {{Name, Selector}, Info, self()},
     try
-        ets:insert(?FUN_TABLE, {Key, Info}),
+        ets:insert(?FUN_TABLE, Entry),
         ok
     catch
         error:badarg ->
             new(),
-            ets:insert(?FUN_TABLE, {Key, Info}),
+            ets:insert(?FUN_TABLE, Entry),
             ok
     end.
 
@@ -1865,7 +1841,7 @@ lookup_class_method_fun(Name, Selector) ->
             error;
         true ->
             try ets:lookup(?FUN_TABLE, {Name, Selector}) of
-                [{_, Info}] -> {ok, Info};
+                [{_, Info, _Owner}] -> {ok, Info};
                 [] -> error
             catch
                 error:badarg -> error
@@ -1880,12 +1856,16 @@ reload, so memory-only runtime methods do not survive a recompile (ADR 0082).
 """.
 -spec delete_class_method_funs(class_name()) -> ok.
 delete_class_method_funs(Name) ->
+    drop_class_method_funs(Name, '_').
+
+-spec drop_class_method_funs(class_name(), owner_scope()) -> ok.
+drop_class_method_funs(Name, Owner) ->
     case ets:info(?FUN_TABLE) of
         undefined ->
             ok;
         _ ->
             try
-                ets:match_delete(?FUN_TABLE, {{Name, '_'}, '_'}),
+                ets:match_delete(?FUN_TABLE, {{Name, '_'}, '_', Owner}),
                 ok
             catch
                 error:badarg -> ok
@@ -1957,7 +1937,7 @@ Leaves `module` and `superclass` untouched. A no-op if the row is absent.
 set_runtime_class_methods(Name, Selectors) ->
     new(),
     %% BT-3669: raise the compiled-fast-path shadow flag before the gate opens.
-    beamtalk_class_shadow_flags:set(runtime_fun, Name),
+    beamtalk_class_shadow_flags:set(runtime_fun, Name, self()),
     try
         ets:update_element(?TABLE, Name, [
             {#class_metadata.selectors, Selectors},
@@ -2017,29 +1997,65 @@ reset_runtime_class_methods(Name) ->
 sync_subclass_index(_Name, Same, Same) ->
     ok;
 sync_subclass_index(Name, OldSuperclass, NewSuperclass) ->
-    case OldSuperclass of
-        undefined -> ok;
-        _ -> delete_subclass_edge(OldSuperclass, Name)
-    end,
+    %% The edge keeps the row's owner (this runs on an existing row, from the
+    %% class process that wrote it).
+    Owner = field(Name, #class_metadata.owner),
     case NewSuperclass of
         undefined -> ok;
-        _ -> insert_subclass_edge(NewSuperclass, Name)
+        _ -> insert_subclass_edge(NewSuperclass, Name, Owner)
+    end,
+    case OldSuperclass of
+        undefined -> ok;
+        _ -> delete_subclass_edge(OldSuperclass, Name, '_')
     end,
     ok.
 
--spec insert_subclass_edge(superclass(), class_name()) -> ok.
-insert_subclass_edge(Superclass, Name) ->
+%% `insert/5` replaced (or created) the row: the caller owns the edge, whatever
+%% the previous row's superclass was. A same-superclass rebuild over a not-yet-
+%% removed dead owner's row restamps the edge instead of leaving it to the
+%% removal that will no longer claim the row. The new edge is written before
+%% the old one is dropped, so a reader never sees a gap.
+-spec claim_subclass_edge(class_name(), superclass() | undefined, superclass() | undefined) -> ok.
+claim_subclass_edge(Name, OldSuperclass, NewSuperclass) ->
+    Self = self(),
+    case NewSuperclass of
+        undefined -> ok;
+        _ -> insert_subclass_edge(NewSuperclass, Name, Self)
+    end,
+    case OldSuperclass of
+        undefined ->
+            ok;
+        NewSuperclass ->
+            delete_subclass_edges_not_owned_by(OldSuperclass, Name, Self);
+        _ ->
+            delete_subclass_edge(OldSuperclass, Name, '_')
+    end,
+    ok.
+
+-spec insert_subclass_edge(superclass(), class_name(), pid() | undefined) -> ok.
+insert_subclass_edge(Superclass, Name, Owner) ->
     try
-        ets:insert(?SUBCLASS_INDEX, {Superclass, Name}),
+        ets:insert(?SUBCLASS_INDEX, {Superclass, Name, Owner}),
         ok
     catch
         error:badarg -> ok
     end.
 
--spec delete_subclass_edge(superclass(), class_name()) -> ok.
-delete_subclass_edge(Superclass, Name) ->
+-spec delete_subclass_edge(superclass(), class_name(), owner_scope()) -> ok.
+delete_subclass_edge(Superclass, Name, Owner) ->
     try
-        ets:delete_object(?SUBCLASS_INDEX, {Superclass, Name}),
+        ets:match_delete(?SUBCLASS_INDEX, {Superclass, Name, Owner}),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-spec delete_subclass_edges_not_owned_by(superclass(), class_name(), pid()) -> ok.
+delete_subclass_edges_not_owned_by(Superclass, Name, Owner) ->
+    try
+        ets:select_delete(?SUBCLASS_INDEX, [
+            {{Superclass, Name, '$1'}, [{'=/=', '$1', {const, Owner}}], [true]}
+        ]),
         ok
     catch
         error:badarg -> ok
