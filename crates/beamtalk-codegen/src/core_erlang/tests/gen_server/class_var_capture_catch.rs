@@ -233,6 +233,10 @@ fn assert_catch_boundary_order(text: &str, expected_catches: usize) {
             !before.ends_with("CastBuiltStack = ")
                 && !before.ends_with("InfoBuiltStack = ")
                 && !before.ends_with("<D4Built> = ")
+                // BT-4850: the self-send error clause and `handle_call`'s error arm
+                // build a caught raw trace; they are not `on:do:` catches.
+                && !before.ends_with("ReplyBuilt = ")
+                && !before.rsplit("let ").next().is_some_and(|v| v.starts_with("_SDErrorBuilt@"))
         })
         .collect();
     assert_eq!(anchors.len(), expected_catches, "{text}");

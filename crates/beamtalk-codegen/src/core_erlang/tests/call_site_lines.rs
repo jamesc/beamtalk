@@ -624,6 +624,10 @@ fn a_self_send_annotates_its_dispatch_and_error_calls_bt_4850() {
     ));
     // `self setup` is on line 8 of the source.
     assert_every_node_annotated(&code, "call _ClassMod", 8);
-    assert_every_node_annotated(&code, "call 'beamtalk_exception_handler':'reraise'(_SDErrorType", 8);
+    assert_every_node_annotated(
+        &code,
+        "call 'beamtalk_exception_handler':'reraise'(_SDErrorType",
+        8,
+    );
     assert_every_node_annotated(&code, "call 'beamtalk_error':'raise'(_SDErrorPlain", 8);
 }
