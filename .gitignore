@@ -41,6 +41,8 @@
 lcov.info
 /coverage/
 /tarpaulin-report.html
+/erlang-coverage-reports/
+/rust-coverage-reports/
 *.dSYM/
 
 # MacOS
