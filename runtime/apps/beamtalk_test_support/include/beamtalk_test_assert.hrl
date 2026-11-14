@@ -11,10 +11,15 @@
 -ifndef(BEAMTALK_TEST_ASSERT_HRL).
 -define(BEAMTALK_TEST_ASSERT_HRL, true).
 
-%% Expr raises `#{error := #beamtalk_error{kind, class, selector}}`.
+%% Expr raises a wrapped Exception
+%% `#{'$beamtalk_class' := _, error := #beamtalk_error{kind, class, selector}}`
+%% (a bare `#{error := ...}` map does not match).
 -define(assertBtError(Kind, Class, Selector, Expr),
     ?assertError(
-        #{error := #beamtalk_error{kind = Kind, class = Class, selector = Selector}},
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = Kind, class = Class, selector = Selector}
+        },
         Expr
     )
 ).
@@ -25,6 +30,54 @@
 ).
 -define(assertBtError(Kind, Expr),
     ?assertBtError(Kind, _, _, Expr)
+).
+
+%% As `?assertBtError/4`, and the raised map's `'$beamtalk_class'` (the exception
+%% class tag, e.g. 'RuntimeError') must equal ExcClass. Use `_` for a wildcard field.
+-define(assertBtErrorTagged(ExcClass, Kind, Class, Selector, Expr),
+    ?assertError(
+        #{
+            '$beamtalk_class' := ExcClass,
+            error := #beamtalk_error{kind = Kind, class = Class, selector = Selector}
+        },
+        Expr
+    )
+).
+
+%% As `?assertBtError/4`, and the error's `details` must also match Details.
+-define(assertBtErrorDetails(Kind, Class, Selector, Details, Expr),
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = Kind, class = Class, selector = Selector, details = Details
+            }
+        },
+        Expr
+    )
+).
+
+%% Expr returns a Beamtalk `Result` object that is an error
+%% (`isOk := false`) whose `errReason` is a wrapped Exception
+%% `#{'$beamtalk_class' := _, error := #beamtalk_error{kind, class, selector}}`.
+-define(assertBtResultObjError(Kind, Class, Selector, Expr),
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'Result',
+            'isOk' := false,
+            'errReason' := #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{kind = Kind, class = Class, selector = Selector}
+            }
+        },
+        Expr
+    )
+).
+-define(assertBtResultObjError(Kind, Class, Expr),
+    ?assertBtResultObjError(Kind, Class, _, Expr)
+).
+-define(assertBtResultObjError(Kind, Expr),
+    ?assertBtResultObjError(Kind, _, _, Expr)
 ).
 
 %% Expr returns `{error, #beamtalk_error{kind, class, selector}}` (Result-wrapped).

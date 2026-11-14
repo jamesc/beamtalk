@@ -8,6 +8,7 @@
 -moduledoc "Unit tests for beamtalk_stdlib module.".
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%% ============================================================================
@@ -414,12 +415,8 @@ dispatch_unknown_selector_test_() ->
     ]}.
 
 dispatch_unknown_selector_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = does_not_understand, class = 'Beamtalk'}
-        },
-        beamtalk_stdlib:dispatch(nonExistentMethod, [], 'Beamtalk')
+    ?assertBtError(
+        does_not_understand, 'Beamtalk', beamtalk_stdlib:dispatch(nonExistentMethod, [], 'Beamtalk')
     ).
 
 %%% ============================================================================

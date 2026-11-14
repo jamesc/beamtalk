@@ -102,15 +102,7 @@ lookup_for_threading_non_map_receivers_test() ->
     end).
 
 assert_type_error(Class, Fun) ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = type_error, class = Class, selector = 'at:ifAbsent:'
-            }
-        },
-        Fun()
-    ).
+    ?assertBtError(type_error, Class, 'at:ifAbsent:', Fun()).
 
 %%% ============================================================================
 %%% do/2
@@ -288,11 +280,9 @@ dictionary_responds_to_test() ->
 
 dictionary_does_not_understand_test() ->
     beamtalk_extensions:init(),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = does_not_understand, class = 'Dictionary'}
-        },
+    ?assertBtError(
+        does_not_understand,
+        'Dictionary',
         'bt@stdlib@dictionary':dispatch('nonExistent', [], #{a => 1})
     ).
 

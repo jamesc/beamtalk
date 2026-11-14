@@ -48,14 +48,7 @@ parse_type_error_test() ->
 
 parse_invalid_json_test() ->
     R = beamtalk_json:'parse:'(<<"{invalid">>),
-    ?assertMatch(
-        #{
-            '$beamtalk_class' := 'Result',
-            'isOk' := false,
-            'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}}
-        },
-        R
-    ).
+    ?assertBtResultObjError(parse_error, R).
 
 %%% ============================================================================
 %%% parse:/1 — additional coverage
@@ -115,14 +108,7 @@ parse_empty_array_test() ->
 
 parse_unexpected_end_test() ->
     R = beamtalk_json:'parse:'(<<"[1,2,">>),
-    ?assertMatch(
-        #{
-            '$beamtalk_class' := 'Result',
-            'isOk' := false,
-            'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}}
-        },
-        R
-    ).
+    ?assertBtResultObjError(parse_error, R).
 
 %%% ============================================================================
 %%% generate:/1
@@ -407,25 +393,11 @@ prettify_term_empty_object_test() ->
 parse_unexpected_sequence_test() ->
     %% Lone garbage tokens raise {unexpected_sequence, _} from json:decode
     R = beamtalk_json:'parse:'(<<"xyz">>),
-    ?assertMatch(
-        #{
-            '$beamtalk_class' := 'Result',
-            'isOk' := false,
-            'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}}
-        },
-        R
-    ).
+    ?assertBtResultObjError(parse_error, R).
 
 parse_trailing_garbage_test() ->
     R = beamtalk_json:'parse:'(<<"{\"a\":1}junk">>),
-    ?assertMatch(
-        #{
-            '$beamtalk_class' := 'Result',
-            'isOk' := false,
-            'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}}
-        },
-        R
-    ).
+    ?assertBtResultObjError(parse_error, R).
 
 %%% ============================================================================
 %%% Additional coverage — generate/prettyPrint error paths
@@ -533,11 +505,4 @@ parse_invalid_utf8_input_answers_result_error_test() ->
     %% OTP rejects the bad byte before normalization; still Result error:.
     %% (Byte 255 as an explicit segment: never valid UTF-8.)
     R = beamtalk_json:'parse:'(<<"\"abc", 255, "def\"">>),
-    ?assertMatch(
-        #{
-            '$beamtalk_class' := 'Result',
-            'isOk' := false,
-            'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = parse_error}}
-        },
-        R
-    ).
+    ?assertBtResultObjError(parse_error, R).

@@ -240,15 +240,11 @@ test_resolve_spawn_module_actor_got_supervisor() ->
     with_spawn_kind_classes(fun() ->
         lists:foreach(
             fun(Class) ->
-                ?assertError(
-                    #{
-                        error := #beamtalk_error{
-                            kind = instantiation_error,
-                            class = Class,
-                            selector = spawn,
-                            details = #{expected_kind := actor, actual_kind := supervisor}
-                        }
-                    },
+                ?assertBtErrorDetails(
+                    instantiation_error,
+                    Class,
+                    spawn,
+                    #{expected_kind := actor, actual_kind := supervisor},
                     resolve_spawn(Class, spawn, actor)
                 )
             end,
@@ -258,15 +254,11 @@ test_resolve_spawn_module_actor_got_supervisor() ->
 
 test_resolve_spawn_module_supervisor_got_actor() ->
     with_spawn_kind_classes(fun() ->
-        ?assertError(
-            #{
-                error := #beamtalk_error{
-                    kind = instantiation_error,
-                    class = 'Bt4404Actor',
-                    selector = 'spawnWith:',
-                    details = #{expected_kind := supervisor, actual_kind := actor}
-                }
-            },
+        ?assertBtErrorDetails(
+            instantiation_error,
+            'Bt4404Actor',
+            'spawnWith:',
+            #{expected_kind := supervisor, actual_kind := actor},
             resolve_spawn('Bt4404Actor', 'spawnWith:', supervisor)
         )
     end).
@@ -274,14 +266,7 @@ test_resolve_spawn_module_supervisor_got_actor() ->
 test_resolve_spawn_module_not_spawnable() ->
     with_spawn_kind_classes(fun() ->
         [
-            ?assertError(
-                #{
-                    error := #beamtalk_error{
-                        kind = does_not_understand, class = Class, selector = spawn
-                    }
-                },
-                resolve_spawn(Class, spawn, Kind)
-            )
+            ?assertBtError(does_not_understand, Class, spawn, resolve_spawn(Class, spawn, Kind))
          || Class <- ['Bt4404Value', 'Bt4404Object'], Kind <- [actor, supervisor]
         ]
     end).
@@ -290,22 +275,18 @@ test_resolve_spawn_module_deep_chain() ->
     with_spawn_kind_classes(fun() ->
         ?assertEqual(bt4404_leaf_mod, resolve_spawn('Bt4404Leaf', spawn, actor)),
         ?assertEqual(bt4404_sup_leaf_mod, resolve_spawn('Bt4404SupLeaf', spawn, supervisor)),
-        ?assertError(
-            #{
-                error := #beamtalk_error{
-                    kind = instantiation_error,
-                    details = #{expected_kind := supervisor, actual_kind := actor}
-                }
-            },
+        ?assertBtErrorDetails(
+            instantiation_error,
+            _,
+            _,
+            #{expected_kind := supervisor, actual_kind := actor},
             resolve_spawn('Bt4404Leaf', spawn, supervisor)
         ),
-        ?assertError(
-            #{
-                error := #beamtalk_error{
-                    kind = instantiation_error,
-                    details = #{expected_kind := actor, actual_kind := supervisor}
-                }
-            },
+        ?assertBtErrorDetails(
+            instantiation_error,
+            _,
+            _,
+            #{expected_kind := actor, actual_kind := supervisor},
             resolve_spawn('Bt4404SupLeaf', spawn, actor)
         )
     end).
@@ -361,22 +342,16 @@ test_handle_spawn_not_spawnable_abstract() ->
 
 test_class_self_spawn_not_spawnable() ->
     with_spawn_kind_classes(fun() ->
-        ?assertError(
-            #{
-                error := #beamtalk_error{
-                    kind = does_not_understand, class = 'Bt4404Value', selector = spawn
-                }
-            },
+        ?assertBtError(
+            does_not_understand,
+            'Bt4404Value',
+            spawn,
             beamtalk_class_instantiation:class_self_spawn('Bt4404Value', bt4404_value_mod, [])
         ),
-        ?assertError(
-            #{
-                error := #beamtalk_error{
-                    kind = does_not_understand,
-                    class = 'Bt4404Object',
-                    selector = 'spawnMonitoredWith:'
-                }
-            },
+        ?assertBtError(
+            does_not_understand,
+            'Bt4404Object',
+            'spawnMonitoredWith:',
             beamtalk_class_instantiation:class_self_spawn_monitored(
                 'Bt4404Object', bt4404_object_mod, false, [#{}]
             )
@@ -396,12 +371,10 @@ test_handle_spawn_incomplete_chain() ->
 test_resolve_spawn_module_metadata_miss() ->
     lists:foreach(
         fun(Kind) ->
-            ?assertError(
-                #{
-                    error := #beamtalk_error{
-                        kind = class_not_found, class = 'Bt4404NeverRegistered', selector = spawn
-                    }
-                },
+            ?assertBtError(
+                class_not_found,
+                'Bt4404NeverRegistered',
+                spawn,
                 resolve_spawn('Bt4404NeverRegistered', spawn, Kind)
             )
         end,
@@ -1158,10 +1131,7 @@ test_declared_fields_memoised() ->
         true = ets:delete(beamtalk_class_metadata, Parent),
         ?assertEqual(Args, check_new(Child, Args)),
         beamtalk_class_derived_cache:invalidate(),
-        ?assertError(
-            #{error := #beamtalk_error{kind = unknown_field, details = #{key := a}}},
-            check_new(Child, Args)
-        )
+        ?assertBtErrorDetails(unknown_field, _, _, #{key := a}, check_new(Child, Args))
     after
         delete_classes([Child, Parent])
     end.
@@ -1176,18 +1146,12 @@ test_declared_fields_put_reflection_invalidates() ->
     register_ivar_class(Child, Parent, [b]),
     try
         ?assertEqual(#{a => 1}, check_new(Child, #{a => 1})),
-        ?assertError(
-            #{error := #beamtalk_error{kind = unknown_field, details = #{key := c}}},
-            check_new(Child, #{c => 1})
-        ),
+        ?assertBtErrorDetails(unknown_field, _, _, #{key := c}, check_new(Child, #{c => 1})),
         ok = beamtalk_class_metadata:put_reflection(Parent, reflection([a, c])),
         ?assertEqual(#{c => 1}, check_new(Child, #{c => 1})),
         %% And the other direction: a removed field stops being accepted.
         ok = beamtalk_class_metadata:put_reflection(Parent, reflection([c])),
-        ?assertError(
-            #{error := #beamtalk_error{kind = unknown_field, details = #{key := a}}},
-            check_new(Child, #{a => 1})
-        )
+        ?assertBtErrorDetails(unknown_field, _, _, #{key := a}, check_new(Child, #{a => 1}))
     after
         delete_classes([Child, Parent])
     end.
@@ -1205,10 +1169,7 @@ test_declared_fields_reparent_invalidates() ->
         ?assertEqual(#{a => 1}, check_new(Child, #{a => 1})),
         ok = beamtalk_class_metadata:merge_identity(Child, undefined, undefined, NewParent, false),
         ?assertEqual(#{z => 1}, check_new(Child, #{z => 1})),
-        ?assertError(
-            #{error := #beamtalk_error{kind = unknown_field, details = #{key := a}}},
-            check_new(Child, #{a => 1})
-        )
+        ?assertBtErrorDetails(unknown_field, _, _, #{key := a}, check_new(Child, #{a => 1}))
     after
         delete_classes([Child, NewParent, OldParent])
     end.
@@ -1226,10 +1187,7 @@ test_declared_fields_fallback_not_cached() ->
         ?assertEqual(#{x => 1}, Check(#{x => 0}, #{x => 1})),
         ?assertEqual([], ets:lookup(beamtalk_class_derived_cache, {declared_fields, Child})),
         ?assertEqual(#{y => 1}, Check(#{y => 0}, #{y => 1})),
-        ?assertError(
-            #{error := #beamtalk_error{kind = unknown_field, details = #{key := x}}},
-            Check(#{y => 0}, #{x => 1})
-        )
+        ?assertBtErrorDetails(unknown_field, _, _, #{key := x}, Check(#{y => 0}, #{x => 1}))
     after
         delete_classes([Child])
     end.
@@ -1246,10 +1204,7 @@ test_declared_fields_ignore_stale_meta() ->
     ok = beamtalk_class_metadata:put_reflection(Class, reflection([x])),
     try
         ?assertEqual(#{x => 1}, check_new(Class, #{x => 1})),
-        ?assertError(
-            #{error := #beamtalk_error{kind = unknown_field, details = #{key := y}}},
-            check_new(Class, #{y => 1})
-        )
+        ?assertBtErrorDetails(unknown_field, _, _, #{key := y}, check_new(Class, #{y => 1}))
     after
         delete_classes([Class]),
         _ = code:purge(Module),

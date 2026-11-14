@@ -210,12 +210,10 @@ ffi_sites_in_integer_arity_test() ->
     ?assert(is_list(Result)).
 
 ffi_sites_in_rejects_bad_args_test() ->
-    ?assertError(
-        #{
-            error := #beamtalk_error{
-                kind = type_error, selector = 'ffiSitesIn:module:function:arity:'
-            }
-        },
+    ?assertBtError(
+        type_error,
+        _,
+        'ffiSitesIn:module:function:arity:',
         beamtalk_interface:ffiSitesIn(<<"x">>, <<"lists">>, <<"reverse">>, -1)
     ).
 

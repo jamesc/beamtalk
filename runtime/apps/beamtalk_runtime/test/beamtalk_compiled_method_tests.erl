@@ -9,6 +9,7 @@ Unit tests for beamtalk_compiled_method_ops module.
 Tests dispatch, introspection, and error handling for CompiledMethod objects.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%====================================================================
@@ -132,11 +133,9 @@ has_method_unknown_test() ->
 
 unknown_selector_raises_error_test() ->
     Method = test_method(),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = does_not_understand, class = 'CompiledMethod'}
-        },
+    ?assertBtError(
+        does_not_understand,
+        'CompiledMethod',
         beamtalk_compiled_method_ops:dispatch('nonexistent', [], Method)
     ).
 

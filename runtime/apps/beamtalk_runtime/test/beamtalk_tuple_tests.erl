@@ -11,6 +11,7 @@ Tests the runtime helper module that provides complex Tuple operations
 (from lib/tuple.bt) delegates these methods to beamtalk_tuple.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%% ============================================================================
@@ -24,45 +25,15 @@ at_valid_index_test() ->
     ?assertEqual(42, beamtalk_tuple:at({ok, 42}, 2)).
 
 at_out_of_bounds_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}
-        },
-        beamtalk_tuple:at({a, b}, 0)
-    ),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}
-        },
-        beamtalk_tuple:at({a, b}, 3)
-    ),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}
-        },
-        beamtalk_tuple:at({a, b}, -1)
-    ).
+    ?assertBtError(does_not_understand, 'Tuple', 'at:', beamtalk_tuple:at({a, b}, 0)),
+    ?assertBtError(does_not_understand, 'Tuple', 'at:', beamtalk_tuple:at({a, b}, 3)),
+    ?assertBtError(does_not_understand, 'Tuple', 'at:', beamtalk_tuple:at({a, b}, -1)).
 
 at_empty_tuple_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}
-        },
-        beamtalk_tuple:at({}, 1)
-    ).
+    ?assertBtError(does_not_understand, 'Tuple', 'at:', beamtalk_tuple:at({}, 1)).
 
 at_non_integer_index_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Tuple', selector = 'at:'}
-        },
-        beamtalk_tuple:at({a, b}, foo)
-    ).
+    ?assertBtError(type_error, 'Tuple', 'at:', beamtalk_tuple:at({a, b}, foo)).
 
 %%% ============================================================================
 %%% as_string/1 Tests
@@ -90,12 +61,8 @@ dispatch_at_test() ->
     ?assertEqual(b, 'bt@stdlib@tuple':dispatch('at:', [2], {a, b, c})).
 
 dispatch_at_out_of_bounds_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = does_not_understand, class = 'Tuple', selector = 'at:'}
-        },
-        'bt@stdlib@tuple':dispatch('at:', [0], {a, b})
+    ?assertBtError(
+        does_not_understand, 'Tuple', 'at:', 'bt@stdlib@tuple':dispatch('at:', [0], {a, b})
     ).
 
 dispatch_is_ok_test() ->
@@ -110,13 +77,7 @@ dispatch_is_error_test() ->
 dispatch_unwrap_test() ->
     ?assertEqual(42, 'bt@stdlib@tuple':dispatch('unwrap', [], {ok, 42})),
     %% {error, Reason} now raises user_error (pure BT via self error:)
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = user_error, class = 'Tuple'}
-        },
-        'bt@stdlib@tuple':dispatch('unwrap', [], {error, reason})
-    ).
+    ?assertBtError(user_error, 'Tuple', 'bt@stdlib@tuple':dispatch('unwrap', [], {error, reason})).
 
 dispatch_unwrap_or_test() ->
     ?assertEqual(42, 'bt@stdlib@tuple':dispatch('unwrapOr:', [default], {ok, 42})),
@@ -137,13 +98,7 @@ dispatch_unwrap_or_else_test() ->
 
 dispatch_unwrap_invalid_pattern_test() ->
     %% Non-ok/error tuples now raise user_error (pure BT via self error:)
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = user_error, class = 'Tuple'}
-        },
-        'bt@stdlib@tuple':dispatch('unwrap', [], {a, b})
-    ).
+    ?assertBtError(user_error, 'Tuple', 'bt@stdlib@tuple':dispatch('unwrap', [], {a, b})).
 
 %%% ============================================================================
 %%% beamtalk_primitive:send integration tests

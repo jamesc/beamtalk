@@ -949,14 +949,11 @@ new_with_non_map_raises_type_error_test_() ->
                 %% a singly-wrapped Exception with type_error kind.
                 %% The '$beamtalk_class' key uses := (match) to verify
                 %% the error is a proper Exception map, not double-wrapped.
-                ?assertError(
-                    #{
-                        '$beamtalk_class' := 'TypeError',
-                        error := #beamtalk_error{
-                            kind = type_error,
-                            selector = 'new:'
-                        }
-                    },
+                ?assertBtErrorTagged(
+                    'TypeError',
+                    type_error,
+                    _,
+                    'new:',
                     beamtalk_object_class:class_send(ClassPid, 'new:', [42])
                 ),
 
@@ -1436,38 +1433,25 @@ beamtalk_class_dispatch detects this upfront and raises a structured error.
 """.
 class_method_self_call_new_colon_test() ->
     %% Use self() as ClassPid — triggers the ClassPid =:= self() guard.
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = instantiation_error, selector = 'new:'}
-        },
-        beamtalk_class_dispatch:class_send(self(), 'new:', [#{}])
+    ?assertBtError(
+        instantiation_error, _, 'new:', beamtalk_class_dispatch:class_send(self(), 'new:', [#{}])
     ).
 
 class_method_self_call_new_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = instantiation_error, selector = 'new'}
-        },
-        beamtalk_class_dispatch:class_send(self(), 'new', [])
+    ?assertBtError(
+        instantiation_error, _, 'new', beamtalk_class_dispatch:class_send(self(), 'new', [])
     ).
 
 class_method_self_call_spawn_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = instantiation_error, selector = spawn}
-        },
-        beamtalk_class_dispatch:class_send(self(), spawn, [])
+    ?assertBtError(
+        instantiation_error, _, spawn, beamtalk_class_dispatch:class_send(self(), spawn, [])
     ).
 
 class_method_self_call_spawn_with_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = instantiation_error, selector = 'spawnWith:'}
-        },
+    ?assertBtError(
+        instantiation_error,
+        _,
+        'spawnWith:',
         beamtalk_class_dispatch:class_send(self(), 'spawnWith:', [#{}])
     ).
 
@@ -1798,15 +1782,11 @@ test_put_class_method_accepts_n_plus_1() ->
 
 test_put_class_method_rejects_n_plus_2() ->
     Pid = pcm_class('BT3708PcmOld'),
-    ?assertError(
-        #{
-            error := #beamtalk_error{
-                kind = arity_mismatch,
-                class = 'BT3708PcmOld',
-                selector = 'at:put:',
-                details = #{expected := 3, actual := 4}
-            }
-        },
+    ?assertBtErrorDetails(
+        arity_mismatch,
+        'BT3708PcmOld',
+        'at:put:',
+        #{expected := 3, actual := 4},
         beamtalk_object_class:put_class_method(Pid, 'at:put:', fun(_, _, _, _) -> ok end)
     ),
     ?assertBtError(

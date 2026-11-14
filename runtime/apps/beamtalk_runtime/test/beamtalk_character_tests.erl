@@ -14,6 +14,7 @@ that can't be easily reached from Beamtalk stdlib tests:
 - value/1 error path
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%% ============================================================================
@@ -194,35 +195,11 @@ value_valid_test() ->
     ?assertEqual(16#10FFFF, beamtalk_character:value(16#10FFFF)).
 
 value_surrogate_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Character', selector = 'value:'}
-        },
-        beamtalk_character:value(16#D800)
-    ),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Character', selector = 'value:'}
-        },
-        beamtalk_character:value(16#DFFF)
-    ).
+    ?assertBtError(type_error, 'Character', 'value:', beamtalk_character:value(16#D800)),
+    ?assertBtError(type_error, 'Character', 'value:', beamtalk_character:value(16#DFFF)).
 
 value_negative_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Character', selector = 'value:'}
-        },
-        beamtalk_character:value(-1)
-    ).
+    ?assertBtError(type_error, 'Character', 'value:', beamtalk_character:value(-1)).
 
 value_out_of_range_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Character', selector = 'value:'}
-        },
-        beamtalk_character:value(16#110000)
-    ).
+    ?assertBtError(type_error, 'Character', 'value:', beamtalk_character:value(16#110000)).

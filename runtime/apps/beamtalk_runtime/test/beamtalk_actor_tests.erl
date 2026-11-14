@@ -5070,8 +5070,10 @@ bt3958_raising_runtime_continuation_step_raises_test() ->
     unlink(Actor),
     State = sys:get_state(Actor),
     gen_server:stop(Actor),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{selector = throwError}},
+    ?assertBtError(
+        _,
+        _,
+        throwError,
         beamtalk_actor:handle_continue(
             {'$bt_continue', [{throwError, []}, {normalMethod, []}]}, State
         )

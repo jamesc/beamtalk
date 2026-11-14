@@ -37,6 +37,7 @@ actor's own generated `safe_dispatch/3` catch, not only the hand-written
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%====================================================================
@@ -187,13 +188,11 @@ remote_code_mismatch_undef_compiled(PeerNode) ->
     Fun = ModName:make_block(),
     Pid = spawn_remote(PeerNode, 'WireBlockActor'),
     try
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{
-                    kind = remote_code_mismatch, class = 'Block', details = #{module := ModName}
-                }
-            },
+        ?assertBtErrorDetails(
+            remote_code_mismatch,
+            'Block',
+            _,
+            #{module := ModName},
             beamtalk_actor:sync_send(Pid, 'invokeBlockWith:', [Fun])
         )
     after
@@ -213,13 +212,11 @@ remote_code_mismatch_badfun_compiled(PeerNode) ->
     ),
     Pid = spawn_remote(PeerNode, 'WireBlockActor'),
     try
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{
-                    kind = remote_code_mismatch, class = 'Block', details = #{module := ModName}
-                }
-            },
+        ?assertBtErrorDetails(
+            remote_code_mismatch,
+            'Block',
+            _,
+            #{module := ModName},
             beamtalk_actor:sync_send(Pid, 'invokeBlockWith:', [Fun])
         )
     after
@@ -280,13 +277,7 @@ handle_scoped_reply_raises_not_serialisable(PeerNode) ->
         %% EncErr}} on the wire — which decodes and unwraps back to the
         %% plain tuple {error, EncErr} as a *successful* method return
         %% value instead of raising.
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{kind = not_serialisable}
-            },
-            beamtalk_actor:sync_send(Pid, makeHandle, [])
-        )
+        ?assertBtError(not_serialisable, beamtalk_actor:sync_send(Pid, makeHandle, []))
     after
         rpc:call(PeerNode, gen_server, stop, [Pid])
     end.

@@ -16,6 +16,7 @@ Tests cover:
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -270,13 +271,7 @@ set_responds_to_test() ->
 set_does_not_understand_test() ->
     beamtalk_extensions:init(),
     Set = beamtalk_set:from_list([1, 2]),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = does_not_understand, class = 'Set'}
-        },
-        'bt@stdlib@set':dispatch('nonExistent', [], Set)
-    ).
+    ?assertBtError(does_not_understand, 'Set', 'bt@stdlib@set':dispatch('nonExistent', [], Set)).
 
 %%% ============================================================================
 %%% Runtime Dispatch Integration (beamtalk_primitive)
@@ -309,63 +304,27 @@ primitive_print_string_empty_test() ->
 %%% ============================================================================
 
 from_list_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'fromList:'}
-        },
-        beamtalk_set:from_list(42)
-    ).
+    ?assertBtError(type_error, 'Set', 'fromList:', beamtalk_set:from_list(42)).
 
 union_type_error_test() ->
     Set = beamtalk_set:from_list([1, 2]),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'union:'}
-        },
-        beamtalk_set:union(Set, not_a_set)
-    ).
+    ?assertBtError(type_error, 'Set', 'union:', beamtalk_set:union(Set, not_a_set)).
 
 intersection_type_error_test() ->
     Set = beamtalk_set:from_list([1, 2]),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'intersection:'}
-        },
-        beamtalk_set:intersection(Set, 42)
-    ).
+    ?assertBtError(type_error, 'Set', 'intersection:', beamtalk_set:intersection(Set, 42)).
 
 difference_type_error_test() ->
     Set = beamtalk_set:from_list([1, 2]),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'difference:'}
-        },
-        beamtalk_set:difference(Set, 42)
-    ).
+    ?assertBtError(type_error, 'Set', 'difference:', beamtalk_set:difference(Set, 42)).
 
 is_subset_of_type_error_test() ->
     Set = beamtalk_set:from_list([1, 2]),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'isSubsetOf:'}
-        },
-        beamtalk_set:is_subset_of(Set, 42)
-    ).
+    ?assertBtError(type_error, 'Set', 'isSubsetOf:', beamtalk_set:is_subset_of(Set, 42)).
 
 do_type_error_test() ->
     Set = beamtalk_set:from_list([1]),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'Set', selector = 'do:'}
-        },
-        beamtalk_set:do(Set, not_a_function)
-    ).
+    ?assertBtError(type_error, 'Set', 'do:', beamtalk_set:do(Set, not_a_function)).
 
 %%% ============================================================================
 %%% Merge-based set operations, mixed `==` runs

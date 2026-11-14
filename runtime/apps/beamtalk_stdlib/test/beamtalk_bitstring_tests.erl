@@ -77,13 +77,7 @@ display_string_receiver_type_error_test() ->
 reflection_on_a_bitstring_test() ->
     ?assertEqual([], beamtalk_reflection:field_names(<<2:3>>)),
     ?assertEqual(false, beamtalk_reflection:has_field(x, <<2:3>>)),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = immutable_value, class = 'Bitstring'}
-        },
-        beamtalk_reflection:read_field(x, <<2:3>>)
-    ),
+    ?assertBtError(immutable_value, 'Bitstring', beamtalk_reflection:read_field(x, <<2:3>>)),
     ?assertBtError(immutable_value, beamtalk_reflection:write_field(x, 1, <<2:3>>)),
     ?assertBtError(immutable_value, beamtalk_reflection:clear_field(x, <<2:3>>)),
     ?assertEqual(<<"<<2:3>>">>, beamtalk_reflection:inspect_string(<<2:3>>)).

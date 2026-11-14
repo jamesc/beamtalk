@@ -68,14 +68,8 @@ shared_exit_from_actor_raises_program_exit_outside_entry_test_() ->
         fun() ->
             Old = beamtalk_actor_state:install(#{}),
             try
-                ?assertError(
-                    #{
-                        error := #beamtalk_error{
-                            kind = program_exit_outside_entry,
-                            details = #{status := 4}
-                        }
-                    },
-                    beamtalk_program:'exit:'(4)
+                ?assertBtErrorDetails(
+                    program_exit_outside_entry, _, _, #{status := 4}, beamtalk_program:'exit:'(4)
                 )
             after
                 beamtalk_actor_state:uninstall(Old)

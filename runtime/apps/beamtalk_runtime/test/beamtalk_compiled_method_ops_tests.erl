@@ -13,6 +13,7 @@ and does_not_understand error. Complements beamtalk_compiled_method_tests
 by directly exercising the ops module for doc dispatch and edge cases.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%====================================================================
@@ -120,10 +121,8 @@ has_method_false_for_unknown_test() ->
 %%====================================================================
 
 unknown_selector_raises_dnu_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = does_not_understand, class = 'CompiledMethod'}
-        },
+    ?assertBtError(
+        does_not_understand,
+        'CompiledMethod',
         beamtalk_compiled_method_ops:dispatch('unknown', [], test_method())
     ).

@@ -39,8 +39,6 @@ Tests:
 setup() ->
     %% Ensure pg is started (required by class registry)
     beamtalk_test_boot:registry(),
-    %% Ensure the ETS hierarchy table exists
-    beamtalk_test_boot:registry(),
     %% Track class names created during each test for cleanup
     [].
 

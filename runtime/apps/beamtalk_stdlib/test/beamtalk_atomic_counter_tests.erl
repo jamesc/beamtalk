@@ -88,25 +88,15 @@ new_already_exists_test() ->
     end),
     ets:new(bt_ac_test_dup, [set, named_table, public]),
     try
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{kind = already_exists, class = 'AtomicCounter'}
-            },
-            beamtalk_atomic_counter:'new:'(bt_ac_test_dup)
+        ?assertBtError(
+            already_exists, 'AtomicCounter', beamtalk_atomic_counter:'new:'(bt_ac_test_dup)
         )
     after
         ets:delete(bt_ac_test_dup)
     end.
 
 new_type_error_not_atom_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:'new:'(<<"not_an_atom">>)
-    ).
+    ?assertBtError(type_error, 'AtomicCounter', beamtalk_atomic_counter:'new:'(<<"not_an_atom">>)).
 
 %%% ============================================================================
 %%% named:/1
@@ -131,21 +121,13 @@ named_success_test() ->
     end.
 
 named_not_found_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = not_found, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:'named:'(bt_ac_test_no_such_xyz)
+    ?assertBtError(
+        not_found, 'AtomicCounter', beamtalk_atomic_counter:'named:'(bt_ac_test_no_such_xyz)
     ).
 
 named_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:'named:'(<<"not_an_atom">>)
+    ?assertBtError(
+        type_error, 'AtomicCounter', beamtalk_atomic_counter:'named:'(<<"not_an_atom">>)
     ).
 
 %%% ============================================================================
@@ -160,13 +142,7 @@ increment_returns_new_value_test() ->
     end).
 
 increment_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:increment(not_a_counter)
-    ).
+    ?assertBtError(type_error, 'AtomicCounter', beamtalk_atomic_counter:increment(not_a_counter)).
 
 %%% ============================================================================
 %%% incrementBy/2
@@ -179,23 +155,13 @@ incrementBy_returns_new_value_test() ->
     end).
 
 incrementBy_type_error_receiver_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:incrementBy(not_a_counter, 5)
+    ?assertBtError(
+        type_error, 'AtomicCounter', beamtalk_atomic_counter:incrementBy(not_a_counter, 5)
     ).
 
 incrementBy_type_error_non_integer_test() ->
     with_counter(bt_ac_test_incrby_type, fun(C) ->
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{kind = type_error, class = 'AtomicCounter'}
-            },
-            beamtalk_atomic_counter:incrementBy(C, 1.5)
-        )
+        ?assertBtError(type_error, 'AtomicCounter', beamtalk_atomic_counter:incrementBy(C, 1.5))
     end).
 
 incrementBy_malformed_receiver_is_receiver_error_test() ->
@@ -225,13 +191,7 @@ decrement_returns_new_value_test() ->
     end).
 
 decrement_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:decrement(not_a_counter)
-    ).
+    ?assertBtError(type_error, 'AtomicCounter', beamtalk_atomic_counter:decrement(not_a_counter)).
 
 %%% ============================================================================
 %%% decrementBy/2
@@ -244,23 +204,13 @@ decrementBy_returns_new_value_test() ->
     end).
 
 decrementBy_type_error_receiver_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:decrementBy(not_a_counter, 3)
+    ?assertBtError(
+        type_error, 'AtomicCounter', beamtalk_atomic_counter:decrementBy(not_a_counter, 3)
     ).
 
 decrementBy_type_error_non_integer_test() ->
     with_counter(bt_ac_test_decrby_type, fun(C) ->
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{kind = type_error, class = 'AtomicCounter'}
-            },
-            beamtalk_atomic_counter:decrementBy(C, 1.5)
-        )
+        ?assertBtError(type_error, 'AtomicCounter', beamtalk_atomic_counter:decrementBy(C, 1.5))
     end).
 
 decrementBy_malformed_receiver_is_receiver_error_test() ->
@@ -291,13 +241,7 @@ value_returns_current_test() ->
     end).
 
 value_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:value(not_a_counter)
-    ).
+    ?assertBtError(type_error, 'AtomicCounter', beamtalk_atomic_counter:value(not_a_counter)).
 
 %%% ============================================================================
 %%% reset/1
@@ -311,13 +255,7 @@ reset_sets_to_zero_test() ->
     end).
 
 reset_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:reset(not_a_counter)
-    ).
+    ?assertBtError(type_error, 'AtomicCounter', beamtalk_atomic_counter:reset(not_a_counter)).
 
 %%% ============================================================================
 %%% delete/1
@@ -334,13 +272,7 @@ delete_destroys_table_test() ->
     ?assertEqual(undefined, ets:whereis(bt_ac_test_delete)).
 
 delete_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:delete(not_a_counter)
-    ).
+    ?assertBtError(type_error, 'AtomicCounter', beamtalk_atomic_counter:delete(not_a_counter)).
 
 delete_stale_counter_test() ->
     (try
@@ -351,13 +283,7 @@ delete_stale_counter_test() ->
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_delete_stale),
     beamtalk_atomic_counter:delete(C),
     %% Second delete: table is gone — must raise stale_counter, not permission_error.
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = stale_counter, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:delete(C)
-    ).
+    ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:delete(C)).
 
 %%% ============================================================================
 %%% FFI shims: new/1, named/1
@@ -406,13 +332,7 @@ stale_counter_increment_test() ->
     end),
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_incr),
     beamtalk_atomic_counter:delete(C),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = stale_counter, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:increment(C)
-    ).
+    ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:increment(C)).
 
 stale_counter_value_test() ->
     (try
@@ -422,13 +342,7 @@ stale_counter_value_test() ->
     end),
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_value),
     ets:delete(bt_ac_test_stale_value),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = stale_counter, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:value(C)
-    ).
+    ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:value(C)).
 
 stale_counter_decrement_test() ->
     (try
@@ -438,13 +352,7 @@ stale_counter_decrement_test() ->
     end),
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_decr),
     beamtalk_atomic_counter:delete(C),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = stale_counter, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:decrement(C)
-    ).
+    ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:decrement(C)).
 
 stale_counter_incrementBy_test() ->
     (try
@@ -454,13 +362,7 @@ stale_counter_incrementBy_test() ->
     end),
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_incrby),
     beamtalk_atomic_counter:delete(C),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = stale_counter, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:incrementBy(C, 1)
-    ).
+    ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:incrementBy(C, 1)).
 
 stale_counter_decrementBy_test() ->
     (try
@@ -470,13 +372,7 @@ stale_counter_decrementBy_test() ->
     end),
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_decrby),
     beamtalk_atomic_counter:delete(C),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = stale_counter, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:decrementBy(C, 1)
-    ).
+    ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:decrementBy(C, 1)).
 
 stale_counter_reset_test() ->
     (try
@@ -486,13 +382,7 @@ stale_counter_reset_test() ->
     end),
     C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_reset),
     beamtalk_atomic_counter:delete(C),
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = stale_counter, class = 'AtomicCounter'}
-        },
-        beamtalk_atomic_counter:reset(C)
-    ).
+    ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:reset(C)).
 
 %%% ============================================================================
 %%% Concurrent increment test
