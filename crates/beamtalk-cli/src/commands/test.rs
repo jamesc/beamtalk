@@ -1856,7 +1856,7 @@ fn compile_single_test_file(
         .wrap_err_with(|| format!("Failed to compile test file '{test_file}'"))?;
         pending_test_cores.push(core_file);
 
-        // EUnit wrappers are not generated; beamtalk_test_runner:run_all/1
+        // EUnit wrappers are not generated; beamtalk_test_runner:run_classes/2
         // handles test discovery and execution directly in the Erlang runtime.
         pipeline.compiled_tests.push(CompiledTest {
             source_file: test_file.to_path_buf(),
@@ -2137,7 +2137,7 @@ fn summary_line(
 
 /// Phase 4: Aggregate and report test results.
 ///
-/// Displays results from `beamtalk_test_runner:run_all/1` with
+/// Displays results from `beamtalk_test_runner:run_classes/2` with
 /// Beamtalk class names (not Erlang module names) and per-class summary.
 /// Also reports native `EUnit` test results when present.
 fn report_results(
@@ -2506,7 +2506,7 @@ mod tests {
     }
 
     // test_generate_eunit_wrapper_simple no longer applies — EUnit wrappers are no longer generated.
-    // Test discovery and execution now use beamtalk_test_runner:run_all/1 directly.
+    // Test discovery and execution now use beamtalk_test_runner:run_classes/2 directly.
 
     #[test]
     fn test_collect_beam_module_names() {

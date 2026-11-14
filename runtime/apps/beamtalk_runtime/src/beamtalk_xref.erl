@@ -672,8 +672,9 @@ The descendant half was a full-table `ets:match/2` per node in the subtree
 (O(N²) in loaded-class count for a root-class change, ~500 µs at the
 109-class stdlib scale measured in spike §2) until
 `beamtalk_class_metadata:match_subclasses/1` gained a reverse-edge index
-(`beamtalk_class_subclass_index`, a `bag` keyed on superclass): now one
-indexed `ets:lookup/2` per node, so the closure's scan count no longer
+(`beamtalk_class_subclass_index`, an `ordered_set` keyed on
+`{Superclass, Class}`): now one
+bound-prefix `ets:select/2` per node, so the closure's scan count no longer
 tracks loaded-class count.
 """.
 -spec hierarchy_related_classes(class_name()) -> sets:set(class_name()).

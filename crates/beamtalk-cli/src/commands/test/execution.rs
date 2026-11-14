@@ -168,6 +168,31 @@ fn build_load_command(pipeline: &TestPipeline) -> Result<String> {
     ))
 }
 
+/// Write the classes under test to a terms file and return the `Classes`
+/// binding for the eval command (BT-4832).
+///
+/// `beamtalk test` runs only the test classes it compiled from the requested
+/// files, not every loaded `TestCase` subclass: the sample classes in
+/// `stdlib/test/fixtures` are loaded for tests that drive them directly and
+/// must not be counted in totals that list no per-class line for them. A file
+/// is used (like [`build_load_command`]) to keep the `-eval` argument short.
+fn build_class_list_command(pipeline: &TestPipeline) -> Result<String> {
+    let mut contents = String::new();
+    for compiled in &pipeline.compiled_tests {
+        contents.push('\'');
+        contents.push_str(&escape_atom_chars(&compiled.test_class.class_name));
+        contents.push_str("'.\n");
+    }
+    let list_path = pipeline.build_dir.join("bunit_test_classes.terms");
+    fs::write(&list_path, contents)
+        .into_diagnostic()
+        .wrap_err("Failed to write BUnit test class list")?;
+    let list_path_str = util::to_forward_slash(list_path.as_str());
+    Ok(format!(
+        "{{ok, TestClasses}} = file:consult(\"{list_path_str}\"), "
+    ))
+}
+
 /// Build a BEAM command (`erl -noshell`) with `-pa` paths for the build dir,
 /// package ebin dirs, and runtime paths, then appends the `-eval` command.
 ///
@@ -318,6 +343,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
 
     let load_cmd = build_load_command(pipeline)?;
+    let class_list_cmd = build_class_list_command(pipeline)?;
 
     // ADR 0072: Start hex dep OTP applications before tests
     let hex_deps_start_cmd =
@@ -347,7 +373,8 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
          {root_package_start}\
          {hex_deps_start_cmd}\
          {load_cmd}\
-         Result = beamtalk_test_runner:run_all({jobs}), \
+         {class_list_cmd}\
+         Result = beamtalk_test_runner:run_classes(TestClasses, {jobs}), \
          JSON = beamtalk_test_runner:result_to_json(Result), \
          io:format(\"~s~n\", [JSON]), \
          {cover_epilogue}\
