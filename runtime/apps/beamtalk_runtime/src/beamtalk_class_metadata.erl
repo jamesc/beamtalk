@@ -48,8 +48,8 @@ absence of the others.
 
 `match_subclasses/1` is answered from a second table,
 `beamtalk_class_subclass_index` — a `bag` of `{Superclass, ClassName, Owner}`
-edges (`Owner`: the class process that wrote it, BT-4808), keyed on `Superclass` — instead of an `ets:match/2` scan of every row in
-`?TABLE`. A `bag` table (many rows per key) cannot share `?TABLE`'s `set`
+edges (`Owner`: the class process that wrote it, BT-4808), keyed on
+`Superclass` — instead of an `ets:match/2` scan of every row in `?TABLE`. A `bag` table (many rows per key) cannot share `?TABLE`'s `set`
 semantics, so this is a genuine second table rather than a field on the
 existing row; the "second table" it replaces is only the mental model of a
 "seventh, independently-lifecycled table" that the original consolidation weighed against — this
@@ -169,8 +169,8 @@ a table deleted between an existence check and the op (teardown/shutdown).
 -define(TABLE, beamtalk_class_metadata).
 %% ADR 0084: sibling table holding runtime-installed class-method funs,
 %% `{{DefiningClass, Selector}, Info, Owner}` (BT-4808: `Owner` is the class
-%% process that installed it, so a dead class's removal deletes only its own). The metadata row's
-%% `has_runtime_class_methods` flag gates reads on this table so compile-time-only
+%% process that installed it, so a dead class's removal deletes only its own).
+%% The metadata row's `has_runtime_class_methods` flag gates reads on this table so compile-time-only
 %% classes pay nothing on the dispatch hot path.
 -define(FUN_TABLE, beamtalk_class_method_funs).
 %% Reverse-edge index for match_subclasses/1 — a `bag` of
@@ -180,8 +180,8 @@ a table deleted between an existence check and the op (teardown/shutdown).
 -define(SUBCLASS_INDEX, beamtalk_class_subclass_index).
 %% BT-3832: per-method records (info / source / signature / doc) behind
 %% `CompiledMethod` lookups, an `ordered_set` keyed `{ClassName, Side,
-%% Selector}` (value `{Key, Record, Owner}`, BT-4808) so one method is a single-key read (never a copy of the whole
-%% class's method map) and one class's rows are a bound-prefix range.
+%% Selector}` (value `{Key, Record, Owner}`, BT-4808) so one method is a
+%% single-key read (never a copy of the whole class's method map) and one class's rows are a bound-prefix range.
 -define(METHOD_RECORDS, beamtalk_class_method_records).
 
 -type class_name() :: atom().
@@ -1989,7 +1989,7 @@ reset_runtime_class_methods(Name) ->
 %% Internal
 %%====================================================================
 
-%% Reconcile the {Superclass, ClassName} reverse-edge index with a
+%% Reconcile the {Superclass, ClassName, Owner} reverse-edge index with a
 %% row write that set Name's superclass to NewSuperclass, given the value it
 %% held immediately before (OldSuperclass, `undefined` if there was no prior
 %% row or the field was never written). A no-op when the value didn't change

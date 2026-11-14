@@ -42,7 +42,9 @@ still name it (`clear_if_owner/3`); `extension` flags stay `true`.
 Concurrency: the `runtime_fun` flag is unlocked and relies on a single writer
 per class. All its writers (`insert`, `set_runtime_class_methods`,
 `reset_runtime_class_methods`, `delete` in `beamtalk_class_metadata`) run inside
-the class's own `beamtalk_object_class` gen_server, so they never interleave. A
+the class's own `beamtalk_object_class` gen_server, so they never interleave
+(the one cross-process writer, a dead class's removal, only erases that dead
+owner's own value, under the tag lock: `clear_if_owner/3`). A
 future writer outside the class process would need a lock: e.g. a `set` racing
 a `reset` could have the reset close the gate and then clear the flag just after
 the set raised it (or vice versa), leaving the flag false while the gate is open.
