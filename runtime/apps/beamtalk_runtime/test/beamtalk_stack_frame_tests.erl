@@ -604,7 +604,8 @@ visibility_raising_otp_frame_shown_plumbing_hidden_test() ->
     ?assertEqual([{lists, foldl}], shown(Stack)),
     %% Only the innermost frame counts as the raising one.
     ?assertEqual([{gen_server, try_handle_call}], shown(tl(Stack))),
-    ?assertEqual([], shown(tl(tl(Stack)) -- [{gen_server, handle_msg, 6, []}])).
+    %% With a runtime internal innermost, nothing of the OTP plumbing is listed.
+    ?assertEqual([], shown([{beamtalk_error, raise, 1, []} | tl(Stack)])).
 
 %% `beamtalk_*` runtime internals are hidden, the raising one included.
 visibility_runtime_internal_hidden_test() ->
