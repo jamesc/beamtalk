@@ -267,6 +267,18 @@ install_beamtalk() {
             fi
             ;;
     esac
+
+    write_build_marker
+}
+
+# Record which rolling build is installed (BT-4813) so scripts/refresh-edge.sh
+# can tell whether the published edge release is newer. Only edge and nightly
+# are rolling; a pinned version never goes stale. The checksum is the one
+# verify_checksum just matched against the archive.
+write_build_marker() {
+    if [ "${EDGE}" != "1" ] && [ "${NIGHTLY}" != "1" ]; then return; fi
+    if [ -z "${EXPECTED:-}" ]; then return; fi
+    printf '%s  %s\n' "${EXPECTED}" "${ARCHIVE_NAME}" > "${PREFIX}/.beamtalk-build.sha256"
 }
 
 # ─── Configure PATH ─────────────────────────────────────────────────────

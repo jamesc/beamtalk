@@ -23,6 +23,40 @@ generated file copied in from a skills repo at runtime — it is gitignored
 and not part of this repository. Environment setup that should ship with
 the Beamtalk repo belongs in `worktree-init.sh` instead.
 
+## The edge compiler in cloud sessions (BT-4813)
+
+Cloud sessions for Beamtalk and the satellite libraries use the **edge**
+compiler (the build of the latest `main` commit, published as the rolling
+`edge` release) installed in `/usr/local/bin`. The environment's setup script
+installs it once (`scripts/setup-cloud.sh`, then
+`install.sh --edge --prefix /usr/local`), and the environment caches that
+result — new sessions do **not** rerun the setup script, so the cached build
+goes stale within a day.
+
+To keep it current, the `SessionStart` hook runs `scripts/refresh-edge.sh`
+(cloud sessions only). It fetches the release's small `.sha256` asset (one
+request, well under two seconds), compares it with the marker
+`<prefix>/.beamtalk-build.sha256` that `install.sh` writes on every `--edge`
+and `--nightly` install, and reinstalls only when they differ. An environment
+with no marker is treated as stale once. It prints one line, for example
+`beamtalk edge 78b4b5df659f (published ...): refreshed (was no marker)`, and
+never fails the session: no network, a missing release, a failed download or
+a read-only prefix print a warning and leave the installed build in place.
+
+Force a refresh by removing the marker and rerunning the script, or by running
+the installer directly:
+
+```bash
+rm /usr/local/.beamtalk-build.sha256 && scripts/refresh-edge.sh
+# or
+curl -fsSL https://raw.githubusercontent.com/jamesc/beamtalk/main/scripts/install.sh | sh -s -- --edge --prefix /usr/local
+```
+
+The script also runs from a pipe
+(`curl -fsSL .../scripts/refresh-edge.sh | bash`), which is how satellite
+repositories fetch it from `main` in their own `SessionStart` hook. Its decision
+logic is tested by `just test-refresh-edge`.
+
 ## OTP type-spec cache warming (BT-2471)
 
 `worktree-init.sh` also kicks off warming the shared, OTP-version-keyed FFI
