@@ -871,6 +871,22 @@ error_head(Class, Reason) ->
     <<ClassBin/binary, ": ", ReasonBin/binary>>.
 
 -doc """
+The stack a failed test reports (BT-4850): the exception's raise-site stack when it
+carries one (an actor or class process raised it), followed by the test module's own
+frames from the catch stack, so the report shows both where the error was raised
+and which line of the test made the call. Without a carried stack it is the catch
+stack as before.
+""".
+-spec failure_stacktrace(atom(), term(), list()) -> list().
+failure_stacktrace(Module, Reason, CatchStacktrace) ->
+    case beamtalk_exception_handler:raise_site_stacktrace(Reason, CatchStacktrace) of
+        CatchStacktrace ->
+            CatchStacktrace;
+        Carried ->
+            Carried ++ [Frame || {M, _, _, _} = Frame <- CatchStacktrace, M =:= Module]
+    end.
+
+-doc """
 Build a failed-test result from the message `Head` (no stacktrace) and the
 stack: the message with its `at` lines, plus the structured frames, both
 rendered from the single entry list of `build_trace/3` (BT-4402), so
@@ -1114,21 +1130,14 @@ run_test_method(_ClassName, Module, MethodName, FlatMethods, SuiteFixture) ->
                     test_failure_untraced(
                         MethodName, beamtalk_text:to_binary(FailMsg), Module, TestST
                     );
-                error:TestReason:TestST ->
+                TestClass:TestReason:TestST ->
                     %% BT-4850: an error raised in an actor or a class process keeps
                     %% that process's stack; show it, as `beamtalk run` does.
                     test_failure(
                         MethodName,
-                        error_head(error, TestReason),
-                        Module,
-                        beamtalk_exception_handler:raise_site_stacktrace(TestReason, TestST)
-                    );
-                TestClass:TestReason:TestST ->
-                    test_failure(
-                        MethodName,
                         error_head(TestClass, TestReason),
                         Module,
-                        beamtalk_exception_handler:raise_site_stacktrace(TestReason, TestST)
+                        failure_stacktrace(Module, TestReason, TestST)
                     )
             after
                 case HasTearDown of
