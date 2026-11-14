@@ -38,6 +38,27 @@ TestCase subclass: CallNodeLineTest
     x := n ** "a"
     x + 1
 
+  // BT-4851: `++` lowering — `string_to_binary` fails on a non-String operand.
+  concatLiteral: n =>
+    x := "a" ++ n
+    x size
+
+  concatDynamic: a with: n =>
+    x := a ++ n
+    x size
+
+  // BT-4851: an inline `Erlang ...` call in non-tail position.
+  inlineNonTail: n =>
+    x := Erlang erlang abs: n
+    x + 1
+
+  // Typed arguments let codegen emit the direct `try call 'M':'F'` form
+  // (BT-4485) instead of the proxy; `ffi_direct_call.rs` pins that this exact
+  // send takes it.
+  inlineDirect: s :: String =>
+    x := Erlang erlang binary_to_integer: s
+    x + 1
+
   testIfNotNilFrameReportsItsLine =>
     trace := [
       self notNil: 1 block: [:x | x / 0]
@@ -78,4 +99,33 @@ TestCase subclass: CallNodeLineTest
     trace := [self power: 1] on: Exception do: [:e | e stackTrace]
     frame := self frameFor: #power: in: trace
     self assert: frame line equals: 38
+    self assert: (frame file endsWith: "call_node_line_test.bt")
+
+  testConcatLiteralFrameReportsItsLine =>
+    trace := [self concatLiteral: 1] on: Exception do: [:e | e stackTrace]
+    frame := self frameFor: #concatLiteral: in: trace
+    self assert: frame line equals: 43
+    self assert: (frame file endsWith: "call_node_line_test.bt")
+
+  testConcatDynamicFrameReportsItsLine =>
+    trace := [
+      self concatDynamic: "a" with: 1
+    ] on: Exception do: [:e | e stackTrace]
+    frame := self frameFor: #concatDynamic:with: in: trace
+    self assert: frame line equals: 47
+    self assert: (frame file endsWith: "call_node_line_test.bt")
+
+  testInlineErlangNonTailFrameReportsItsLine =>
+    trace := [self inlineNonTail: "a"] on: Exception do: [:e | e stackTrace]
+    frame := self frameFor: #inlineNonTail: in: trace
+    self assert: frame line equals: 52
+    self assert: (frame file endsWith: "call_node_line_test.bt")
+
+  // BT-4851: the BT-4485 direct `try call 'M':'F'` form (typed argument) also
+  // reports the send's line. A tail-position `Erlang ...` call is not tested:
+  // a tail call leaves no frame for the method, so there is no line to report.
+  testInlineErlangDirectFrameReportsItsLine =>
+    trace := [self inlineDirect: "a"] on: Exception do: [:e | e stackTrace]
+    frame := self frameFor: #inlineDirect: in: trace
+    self assert: frame line equals: 59
     self assert: (frame file endsWith: "call_node_line_test.bt")
