@@ -319,8 +319,8 @@ Uses explicit mfa from log event metadata. Does not infer mfa from OTP
 report fields — registered names belong in the "name" field, not "mfa".
 """.
 -spec format_mfa(term(), map()) -> binary() | undefined.
-format_mfa(_Msg, #{mfa := {M, F, A}}) ->
-    beamtalk_error:chars_to_binary(io_lib:format("~ts:~ts/~B", [M, F, A]));
+format_mfa(_Msg, #{mfa := {M, F, A} = Mfa}) when is_atom(M), is_atom(F), is_integer(A) ->
+    beamtalk_stack_frame:raw_mfa(Mfa);
 format_mfa(_Msg, _Meta) ->
     undefined.
 
@@ -401,27 +401,13 @@ format_extra_value(_Key, Value) when is_pid(Value) ->
 format_extra_value(_Key, Value) ->
     safe_to_binary(io_lib:format("~tp", [Value])).
 
--doc "Format a single StackFrame tagged map as a concise string.".
+-doc """
+Format a single StackFrame tagged map as an indented log line. Delegates to
+`beamtalk_stack_frame:format_frame/1`, the one frame renderer.
+""".
 -spec format_stack_frame(map()) -> iolist().
-format_stack_frame(#{class_name := ClassName, function := Function, arity := Arity} = Frame) ->
-    ClassPart =
-        case ClassName of
-            nil -> <<"?">>;
-            _ -> atom_to_binary(ClassName, utf8)
-        end,
-    FunPart =
-        case Function of
-            undefined -> <<"?">>;
-            _ -> atom_to_binary(Function, utf8)
-        end,
-    Location =
-        case Frame of
-            #{file := File, line := Line} when File =/= nil, Line =/= nil ->
-                io_lib:format(" (~ts:~B)", [File, Line]);
-            _ ->
-                ""
-        end,
-    io_lib:format("  ~ts>>~ts/~B~ts", [ClassPart, FunPart, Arity, Location]).
+format_stack_frame(Frame) ->
+    ["  ", beamtalk_stack_frame:format_frame(Frame)].
 
 -doc """
 Convert a metadata key to a binary.  Keys are usually atoms, but

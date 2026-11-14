@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Build script to inject `BEAMTALK_VERSION` from the workspace VERSION file.
+//! Build script to inject `BEAMTALK_VERSION` and `BEAMTALK_BUILD_ID` from the workspace VERSION file.
 
 use std::env;
 use std::path::Path;

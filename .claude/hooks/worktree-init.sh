@@ -279,6 +279,19 @@ if (( _HAS_AUTH_PROXY || _IN_CLOUD_SANDBOX )); then
   fi
 fi
 
+# --- BT-4813: refresh the installed edge compiler (cloud sessions only) ---
+# The cloud environment caches its setup script, so the edge compiler in
+# /usr/local goes stale. refresh-edge.sh compares the published edge release's
+# checksum with the marker install.sh left under the prefix: one small request
+# (<2s) when current, a reinstall only when they differ. It prints one status
+# line and never fails — warnings only, installed build left in place.
+if [[ "${CLAUDE_CODE_REMOTE:-}" == "true" ]]; then
+  _REFRESH_EDGE="${CLAUDE_PROJECT_DIR:-${PWD}}/scripts/refresh-edge.sh"
+  if [[ -f "${_REFRESH_EDGE}" ]]; then
+    timeout 330 bash "${_REFRESH_EDGE}" || echo "Warning: refresh-edge.sh failed — keeping the installed edge build."
+  fi
+fi
+
 # --- BT-2471: warm the shared OTP type-spec cache in the background ---
 # Remote (Claude-Code-on-the-web) containers are cloned fresh and reclaimed
 # after inactivity, so the shared, OTP-version-keyed FFI type-spec cache

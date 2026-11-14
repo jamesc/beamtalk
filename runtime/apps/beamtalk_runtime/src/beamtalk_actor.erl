@@ -354,6 +354,7 @@ handle_getValue([], State) ->
 -export([intrinsic_selector/1, request_continuation/4]).
 %% BT-4525: the self-dispatch unwrap, driven directly on a `$bt_nlr` result.
 -export([unwrap_dispatch_result/1]).
+-export([format_method_error_message/5]).
 -endif.
 
 %% BT-3967 / BT-3968: deferred pending actions. Every gen_server callback
@@ -4539,29 +4540,49 @@ method_error_kind(_Class, _Reason) -> runtime_error.
 format_method_error_message(ClassName, Selector, error, function_clause, [{M, F, A, Loc} | _]) ->
     beamtalk_error:chars_to_binary(
         io_lib:format(
-            "No matching clause in ~ts>>~ts (called ~ts:~ts/~ts~ts)",
-            [ClassName, Selector, M, F, format_arity(A), format_location(Loc)]
+            "No matching clause in ~ts>>~ts (called ~ts~ts)",
+            [
+                ClassName,
+                Selector,
+                beamtalk_stack_frame:render_mfa({M, F, mfa_arity(A)}),
+                format_location(Loc)
+            ]
         )
     );
 format_method_error_message(ClassName, Selector, error, badarg, [{M, F, A, Loc} | _]) ->
     beamtalk_error:chars_to_binary(
         io_lib:format(
-            "Bad argument in ~ts>>~ts (called ~ts:~ts/~ts~ts)",
-            [ClassName, Selector, M, F, format_arity(A), format_location(Loc)]
+            "Bad argument in ~ts>>~ts (called ~ts~ts)",
+            [
+                ClassName,
+                Selector,
+                beamtalk_stack_frame:render_mfa({M, F, mfa_arity(A)}),
+                format_location(Loc)
+            ]
         )
     );
 format_method_error_message(ClassName, Selector, error, undef, [{M, F, A, Loc} | _]) ->
     beamtalk_error:chars_to_binary(
         io_lib:format(
-            "Undefined function in ~ts>>~ts (called ~ts:~ts/~ts~ts)",
-            [ClassName, Selector, M, F, format_arity(A), format_location(Loc)]
+            "Undefined function in ~ts>>~ts (called ~ts~ts)",
+            [
+                ClassName,
+                Selector,
+                beamtalk_stack_frame:render_mfa({M, F, mfa_arity(A)}),
+                format_location(Loc)
+            ]
         )
     );
 format_method_error_message(ClassName, Selector, error, badarith, [{M, F, A, Loc} | _]) ->
     beamtalk_error:chars_to_binary(
         io_lib:format(
-            "Arithmetic error in ~ts>>~ts (called ~ts:~ts/~ts~ts)",
-            [ClassName, Selector, M, F, format_arity(A), format_location(Loc)]
+            "Arithmetic error in ~ts>>~ts (called ~ts~ts)",
+            [
+                ClassName,
+                Selector,
+                beamtalk_stack_frame:render_mfa({M, F, mfa_arity(A)}),
+                format_location(Loc)
+            ]
         )
     );
 format_method_error_message(ClassName, Selector, Class, Reason, _Stacktrace) ->
@@ -4572,8 +4593,8 @@ format_method_error_message(ClassName, Selector, Class, Reason, _Stacktrace) ->
         )
     ).
 
-format_arity(A) when is_list(A) -> integer_to_list(length(A));
-format_arity(A) when is_integer(A) -> integer_to_list(A).
+mfa_arity(A) when is_list(A) -> length(A);
+mfa_arity(A) when is_integer(A) -> A.
 
 format_location(Loc) when is_list(Loc) ->
     case proplists:get_value(line, Loc) of

@@ -1531,6 +1531,10 @@ call_rename_class(
 ) ->
     OldRegName = beamtalk_class_registry:registry_name(OldName),
     NewRegName = beamtalk_class_registry:registry_name(NewName),
+    %% BT-4808: read the facts that move with the class while `OldName` is
+    %% still this process's. After the unregister below a class registered
+    %% under `OldName` would answer these reads with its own row.
+    Facts = renamed_class_facts(OldName),
     true = erlang:unregister(OldRegName),
     %% TOCTOU guard (review feedback on PR #3523): `rename/2`'s own
     %% `erlang:whereis/1` check happens before this call is even sent, so a
@@ -1557,34 +1561,21 @@ call_rename_class(
                 reflection_view(State#class_state{name = NewName})
             ),
             beamtalk_class_metadata:put_direct_constructors(
-                NewName, beamtalk_class_metadata:lookup_direct_constructors(OldName)
+                NewName, maps:get(direct_constructors, Facts)
             ),
             %% BT-4409: the per-class `new:` fact moves too.
             beamtalk_class_metadata:put_defines_user_class_new1(
-                NewName,
-                case beamtalk_class_metadata:lookup_defines_user_class_new1(OldName) of
-                    unknown -> undefined;
-                    Defines -> Defines
-                end
+                NewName, maps:get(defines_new1, Facts)
             ),
             beamtalk_class_metadata:put_defines_user_class_new0(
-                NewName,
-                case beamtalk_class_metadata:lookup_defines_user_class_new0(OldName) of
-                    unknown -> undefined;
-                    DefinesNew0 -> DefinesNew0
-                end
+                NewName, maps:get(defines_new0, Facts)
             ),
             %% BT-4299: the class-variable fact and process-bound list move too.
             beamtalk_class_metadata:put_class_variables(
-                NewName,
-                beamtalk_class_metadata:lookup_has_class_variables(OldName) =/= false
+                NewName, maps:get(has_class_variables, Facts)
             ),
             beamtalk_class_metadata:put_process_bound_selectors(
-                NewName,
-                case beamtalk_class_metadata:lookup_process_bound_selectors(OldName) of
-                    {ok, ProcessBound} -> ProcessBound;
-                    unknown -> undefined
-                end
+                NewName, maps:get(process_bound_selectors, Facts)
             ),
             beamtalk_class_registry:record_class_pid(self(), NewName),
             %% BT-4552: kept dead incarnations follow the rename, so a class
@@ -1592,7 +1583,9 @@ call_rename_class(
             %% left naming `OldName` for a later, unrelated class of that name.
             beamtalk_class_registry:rename_class_pids(OldName, NewName),
             beamtalk_class_registry:record_loaded_class(NewName, self()),
-            beamtalk_class_metadata:delete(OldName),
+            %% BT-4808: only this class's own row and dependents; a class that
+            %% registered `OldName` since the unregister keeps its own.
+            _ = beamtalk_class_metadata:delete_if_owner(OldName, self()),
             _ = beamtalk_class_registry:forget_loaded_class(OldName, self()),
             beamtalk_class_monitor:unwatch(OldName),
             beamtalk_class_monitor:watch(NewName, self()),
@@ -1610,6 +1603,31 @@ call_rename_class(
             true = erlang:register(OldRegName, self()),
             {reply, {error, {already_registered, NewName}}, State}
     end.
+
+%% The class-metadata facts a rename copies from `OldName` to `NewName`, read
+%% before the old registered name is released (BT-4808).
+-spec renamed_class_facts(class_name()) -> #{atom() => term()}.
+renamed_class_facts(OldName) ->
+    #{
+        direct_constructors => beamtalk_class_metadata:lookup_direct_constructors(OldName),
+        defines_new1 =>
+            case beamtalk_class_metadata:lookup_defines_user_class_new1(OldName) of
+                unknown -> undefined;
+                Defines -> Defines
+            end,
+        defines_new0 =>
+            case beamtalk_class_metadata:lookup_defines_user_class_new0(OldName) of
+                unknown -> undefined;
+                DefinesNew0 -> DefinesNew0
+            end,
+        has_class_variables =>
+            beamtalk_class_metadata:lookup_has_class_variables(OldName) =/= false,
+        process_bound_selectors =>
+            case beamtalk_class_metadata:lookup_process_bound_selectors(OldName) of
+                {ok, ProcessBound} -> ProcessBound;
+                unknown -> undefined
+            end
+    }.
 
 -spec call_put_method(selector(), fun(), binary(), #class_state{}) ->
     {reply, ok, #class_state{}}.
@@ -2000,13 +2018,16 @@ remove_dead_class_registration(ClassName, Module) ->
 -spec remove_claimed_dead_class(class_name(), module(), pid()) -> ok | {alive, pid()}.
 remove_claimed_dead_class(ClassName, Module, Owner) ->
     case beamtalk_class_metadata:delete_if_owner(ClassName, Owner) of
-        Lost when Lost =:= false; Lost =:= superseded ->
-            %% The row names another owner, or a rebuild wrote one mid-teardown:
-            %% the class was rebuilt after the re-check. Leave it registered and
-            %% announce nothing. The dead pid's index rows are kept: a holder of
-            %% the old class object recovers through the reverse-index row
-            %% (BT-4552), exactly as after `restart_compiled_class/4`; the
-            %% stale loaded-class/backing rows are filtered by liveness.
+        false ->
+            %% The row names another owner (the class was rebuilt after the
+            %% re-check), or is already gone (another teardown won; the dead
+            %% owner's own dependents are dropped either way). Leave any
+            %% rebuilt class registered and announce nothing: the `ClassRemoved`
+            %% announcement belongs to the teardown that won the claim. The dead
+            %% pid's index rows are kept: a holder of the old class object
+            %% recovers through the reverse-index row (BT-4552), exactly as
+            %% after `restart_compiled_class/4`; the stale loaded-class/backing
+            %% rows are filtered by liveness.
             case beamtalk_class_registry:whereis_class(ClassName) of
                 NewPid when is_pid(NewPid) -> {alive, NewPid};
                 undefined -> ok
@@ -2058,12 +2079,13 @@ remove_registration(ClassName, ForgetPidRows) ->
 
 -spec teardown_registration(class_name(), fun((pid()) -> term())) -> ok.
 teardown_registration(ClassName, ForgetPidRows) ->
-    %% Single metadata row → single delete; it also drops the class-method
-    %% funs. Wrapped in try/catch to be safe during node shutdown when
-    %% ETS/pg may be gone.
+    %% Single metadata row → single owner-scoped delete (BT-4808: never a
+    %% rebuilt class's row); it also drops this process's class-method funs,
+    %% method records, flags and subclass edge. Wrapped in try/catch to be
+    %% safe during node shutdown when ETS/pg may be gone.
     _ =
         (try
-            beamtalk_class_metadata:delete(ClassName)
+            beamtalk_class_metadata:delete_if_owner(ClassName, self())
         catch
             _:_ -> ok
         end),

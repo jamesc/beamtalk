@@ -499,7 +499,8 @@ decode_beam_error(Other) ->
 -doc """
 Format a BEAM stacktrace for display in test failure messages.
 
-Filters out internal test runner and OTP frames; shows up to 3 user frames
+Hides the frames `beamtalk_stack_frame:classify_frames/1` hides (OTP plumbing,
+generated callbacks, runtime internals); shows up to 3 of the rest
 (all of them with `beamtalk test --full-traces`).
 The innermost non-stdlib frame whose source file and line are readable (else
 the innermost readable stdlib frame) is followed by a source snippet
@@ -547,14 +548,26 @@ readable, as `{Index, Snippet}` (1-based entry index), or `none` (BT-4358).
 A user (non-`bt@stdlib@`) entry is preferred over a stdlib one, so a failure
 raised inside a stdlib method shows the user's calling line rather than
 stdlib internals; a stdlib entry is used only when no user entry is
-readable (BT-4388).
+readable (BT-4388). An Erlang entry (BT-4818) is used only when no Beamtalk
+entry is readable.
 """.
 -spec first_snippet([trace_entry()]) -> {pos_integer(), binary()} | none.
 first_snippet(Entries) ->
     Indexed = lists:zip(lists:seq(1, length(Entries)), Entries),
-    {Stdlib, User} = lists:partition(fun({_, {_, _, _, _, IsStdlib}}) -> IsStdlib end, Indexed),
-    case first_readable(User) of
-        none -> first_readable(Stdlib);
+    {Beamtalk, Erlang} = lists:partition(
+        fun({_, {_, #{kind := Kind}, _, _, _}}) -> Kind =/= erlang end, Indexed
+    ),
+    {Stdlib, User} = lists:partition(fun({_, {_, _, _, _, IsStdlib}}) -> IsStdlib end, Beamtalk),
+    %% Erlang frames (a raising OTP or hex-dependency frame) come last: their
+    %% source is not what the user can act on while a `.bt` line is readable.
+    first_readable_of([User, Stdlib, Erlang]).
+
+-spec first_readable_of([[{pos_integer(), trace_entry()}]]) -> {pos_integer(), binary()} | none.
+first_readable_of([]) ->
+    none;
+first_readable_of([Group | Rest]) ->
+    case first_readable(Group) of
+        none -> first_readable_of(Rest);
         Found -> Found
     end.
 
@@ -700,15 +713,27 @@ where Line is the rendered text of the frame.
 """.
 -spec trace_entries(list()) -> [trace_entry()].
 trace_entries(Frames) ->
-    collapse_repeats(frame_entries(select_frames(filter_stackframes(Frames)))).
+    collapse_repeats([wrapped_entry(W) || W <- select_frames(shown_frames(Frames))]).
 
--spec frame_entries(list()) -> [trace_entry()].
-frame_entries(Frames) ->
-    [frame_entry(F) || F <- Frames].
+-doc """
+The wrapped frames this surface lists: those `beamtalk_stack_frame:classify_frames/1`
+shows by default, or every frame with `--full-traces`. One `wrap/1` for the whole
+stack shares the class-table fold and the loaded-module scan across frames.
+""".
+-spec shown_frames(list()) -> [map()].
+shown_frames(Frames) ->
+    Wrapped = beamtalk_stack_frame:wrap(Frames),
+    case full_traces() of
+        true -> Wrapped;
+        false -> beamtalk_stack_frame:visible_frames(Wrapped)
+    end.
 
 -spec frame_entry(term()) -> trace_entry().
 frame_entry(Frame) ->
-    Wrapped = beamtalk_stack_frame:wrap_frame(Frame),
+    wrapped_entry(beamtalk_stack_frame:wrap_frame(Frame)).
+
+-spec wrapped_entry(map()) -> trace_entry().
+wrapped_entry(Wrapped) ->
     {
         beamtalk_stack_frame:format_frame(Wrapped),
         beamtalk_stack_frame:frame_parts(Wrapped),
@@ -730,9 +755,12 @@ any other frame, from an empty location, so it gets the same
 """.
 -spec build_trace(atom(), atom(), list()) -> {[trace_entry()], [trace_entry()]}.
 build_trace(Module, MethodName, Stacktrace) ->
-    Relevant = select_frames(filter_stackframes(Stacktrace)),
+    Relevant = select_frames(shown_frames(Stacktrace)),
     HasTestFrame = lists:any(
-        fun({Mod, Fun, _Arity, _Loc}) -> Mod =:= Module andalso Fun =:= MethodName end,
+        fun(W) ->
+            maps:get(module, W, undefined) =:= Module andalso
+                maps:get(function, W, undefined) =:= MethodName
+        end,
         Relevant
     ),
     Synthetic =
@@ -740,7 +768,7 @@ build_trace(Module, MethodName, Stacktrace) ->
             true -> [];
             false -> [frame_entry({Module, MethodName, 0, []})]
         end,
-    {collapse_repeats(frame_entries(Relevant)), Synthetic}.
+    {collapse_repeats([wrapped_entry(W) || W <- Relevant]), Synthetic}.
 
 -spec entry_line(trace_entry()) -> binary().
 entry_line({Line, _Parts, 1, _Src, _Std}) ->
@@ -771,24 +799,6 @@ is_stdlib_module(Module) when is_atom(Module) ->
     lists:prefix("bt@stdlib@", atom_to_list(Module));
 is_stdlib_module(_) ->
     false.
-
--doc "Filter stacktrace frames, removing internal test runner and OTP frames.".
--spec filter_stackframes(list()) -> list().
-filter_stackframes(Frames) ->
-    lists:filter(
-        fun
-            ({Mod, _Fun, _Arity, _Loc}) ->
-                %% Only show Beamtalk user and stdlib code frames (bt@* modules).
-                %% Internal runtime, OTP, and test infrastructure frames are noise —
-                %% the error message from #beamtalk_error{} already carries the
-                %% class, selector, and details.
-                ModStr = atom_to_list(Mod),
-                lists:prefix("bt@", ModStr);
-            (_) ->
-                false
-        end,
-        Frames
-    ).
 
 -doc """
 Select up to 3 representative frames from a filtered stacktrace.

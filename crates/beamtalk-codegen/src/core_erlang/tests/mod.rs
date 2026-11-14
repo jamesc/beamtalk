@@ -348,6 +348,7 @@ mod constant_class_methods;
 mod control_flow;
 mod cross_file_abstract;
 mod dispatch;
+mod duplicate_methods;
 mod dynamic_site_report;
 mod ensure_relay_corpus;
 mod evaluated_block_arg_local_producer;

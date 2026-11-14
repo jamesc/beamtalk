@@ -765,7 +765,11 @@ ensure_wrapped(_Type, #beamtalk_error{} = Error, Stacktrace) ->
     Wrapped = wrap(Error),
     Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error};
 ensure_wrapped(error, undef, Stacktrace) ->
-    Message =
+    %% A Beamtalk class is shown as `Class>>selector`; foreign Erlang stays
+    %% `module:function/arity` (ADR 0139). Any compiled Beamtalk module also
+    %% carries the raw MFA in `details`: for one that is not a registered
+    %% class it usually means a compiler bug, and the raw name is the diagnosis.
+    {Message, Details} =
         case Stacktrace of
             [{Mod, Fun, ArgsOrArity, _} | _] ->
                 Arity =
@@ -774,11 +778,15 @@ ensure_wrapped(error, undef, Stacktrace) ->
                         is_integer(ArgsOrArity) -> ArgsOrArity;
                         true -> 0
                     end,
-                beamtalk_error:chars_to_binary(
-                    io_lib:format("Undefined function: ~tp:~tp/~tp", [Mod, Fun, Arity])
-                );
+                Mfa = {Mod, Fun, Arity},
+                Rendered = beamtalk_stack_frame:render_mfa(Mfa),
+                Msg = <<"Undefined function: ", Rendered/binary>>,
+                case beamtalk_module_name:is_compiled_beamtalk_module(Mod) of
+                    true -> {Msg, #{reason => undef, mfa => beamtalk_stack_frame:raw_mfa(Mfa)}};
+                    false -> {Msg, #{reason => undef}}
+                end;
             _ ->
-                <<"Undefined function">>
+                {<<"Undefined function">>, #{reason => undef}}
         end,
     GenError = #beamtalk_error{
         kind = runtime_error,
@@ -788,7 +796,7 @@ ensure_wrapped(error, undef, Stacktrace) ->
         hint = beamtalk_primitive:string_from_binary(
             <<"Check that the module is loaded and the function exists">>
         ),
-        details = #{reason => undef}
+        details = Details
     },
     Wrapped = #{'$beamtalk_class' => kind_to_class(runtime_error), error => GenError},
     Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error};
@@ -929,7 +937,9 @@ dispatch('printString', [], #{error := Error}) ->
 dispatch('stackTrace', [], Self) ->
     %% `[]` when no stacktrace was captured (e.g. a signal-time error without
     %% a catch).
-    frames(Self);
+    %% Default visibility (ADR 0139): hidden frames are collapsed, not dropped;
+    %% `frames/1` answers the full ordered list.
+    beamtalk_stack_frame:visible_frames(frames(Self));
 dispatch('class', [], #{'$beamtalk_class' := Class}) ->
     Class;
 dispatch('signal', [], Self) ->

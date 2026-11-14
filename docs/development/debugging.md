@@ -58,10 +58,13 @@ with no backing file falls back to a bare line number, no file).
 
 ## Reading Beamtalk Stack Traces
 
-Test failures and `Exception>>stackTrace` show Beamtalk-level frames only.
-Both go through one renderer, `beamtalk_stack_frame:format_frame/1`, so the
-same frame prints the same way in both places. Raw Erlang
-`module:function/arity` text is never emitted, and arity is never shown.
+Test failures, `Exception>>stackTrace` and JSON log stacktraces all go
+through one renderer, `beamtalk_stack_frame:format_frame/1` (ADR 0139: hide
+what the compiler made up, show what a person named), so the same frame
+prints the same way everywhere. A bare `{Module, Function, Arity}` is
+rendered by `beamtalk_stack_frame:render_mfa/1` in the same notation;
+`beamtalk_stack_frame:raw_mfa/1` is the one raw `module:function/arity`
+formatter, used for the machine-readable `mfa` log field and process stats.
 
 A default test failure (3 frames, see below):
 
@@ -69,21 +72,56 @@ A default test failure (3 frames, see below):
 FAIL testParse
   Expected 3, got 4
   at Parser>>readToken (parser.bt:42)
-  at Parser>>parse: [block] (parser.bt:31)
+  at [] in Parser>>parse: (parser.bt:31)
   at ParserTest>>testParse (parser_test.bt:12)
 ```
 
+### Frame visibility
+
+One classifier, `beamtalk_stack_frame:classify_frames/1`, decides which frames
+a surface lists by default (ADR 0139: show what a person named). Test failure
+output and `Exception>>stackTrace` use it; hidden frames are collapsed, not
+dropped, so `beamtalk_exception_handler:frames/1` and `--full-traces` still
+carry the whole ordered trace (every wrapped frame has a `visible` flag).
+
+| Frame | Default |
+|---|---|
+| Beamtalk method or block | shown |
+| Erlang module a Beamtalk package declares (`native/*.erl` of the project or a dependency) | shown |
+| The frame that raised (innermost), when it is other Erlang code (OTP, hex dependency) | shown, so the trace says where it failed |
+| Other OTP and hex-dependency frames (`gen_server`, `proc_lib`, `lists` internals) | hidden |
+| Generated callbacks of a Beamtalk actor module, by name and arity (`init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`, `handle_continue/2`, `terminate/2`, `code_change/3`, `safe_dispatch/3,4`); a value class's own `init` or `terminate` method stays | hidden |
+| `beamtalk_*` runtime internals | hidden |
+
+"Belongs to a Beamtalk package" is read from the generated
+`{native_modules, [...]}` key of each loaded package application (ADR 0072),
+through `beamtalk_package:declared_native_modules/0`; there is no second module
+list. The check reads the loaded applications of the node running it, so it
+sees the code of the node that raised.
+
 ### Frame format
 
-Each frame is `Class>>selector [block] (file:line)`:
+| Frame | Rendered as |
+|---|---|
+| Instance method | `Counter>>increment (counter.bt:12)` |
+| Class-side method | `Counter class>>new (counter.bt:3)` (no `class_` prefix) |
+| Block | `[] in Counter>>increment (counter.bt:14)` |
+| Erlang code (any module that is not a Beamtalk class) | `lists:foldl/3 (lists.erl:2471)` |
+| A `bt@...` module the class table cannot resolve | `bt@user@Hpack>>class_encode:headers:table: (hpack.bt:40)` |
 
 - **Order is innermost-first.** The first line is where the error was raised;
   each following line is its caller; the last is the outermost caller (for a
   test failure, the test method).
-- **Class** is the Beamtalk class that owns the frame. If the module is not
-  mapped to a class, the module name is shown instead; `?` if neither is known.
-- **`[block]`** marks a compiler-lifted block (a closure body or loop body)
-  inside the named method, so `Parser>>parse: [block]` means "inside a block
+- **Class** is resolved through the runtime class table
+  (`beamtalk_class_registry`); nothing is guessed from the module name. A
+  `bt@...` module whose class is not loaded shows the raw module name (and
+  its raw function name). A class name is package-qualified (`json@Parser`)
+  only when two loaded class modules share the name. A same-named module with no registered class counts too, since the class table holds one row per name and cannot see it.
+- **Erlang frames** are written `module:function/arity` as recorded, never
+  as `Module>>function`. Which ones are listed is decided by
+  [Frame visibility](#frame-visibility).
+- **`[] in`** marks a compiler-lifted block (a closure body or loop body)
+  inside the named method, so `[] in Parser>>parse:` means "inside a block
   in `parse:`", not a separate method.
 - **File** comes from the frame itself, falling back to the module's
   `beamtalk_source` attribute (via `beamtalk_reflection:source_file_from_module/1`).
@@ -99,15 +137,15 @@ Each frame is `Class>>selector [block] (file:line)`:
 
 ### Test failure traces
 
-Test failure output filters out runtime, OTP and test-runner frames and keeps
-only Beamtalk user and stdlib frames, then applies these rules:
+Test failure output lists the frames `beamtalk_stack_frame:classify_frames/1`
+shows (below), then applies these rules:
 
 - **Default cap of 3 frames.** If more than 3 frames remain, the output keeps
   the 2 innermost frames (the error site) plus the outermost frame (the test
   method), so the caller's file and line are never truncated away. Frames in
   between are dropped. With 3 or fewer, all are shown.
-- **`beamtalk test --full-traces`** disables the cap and prints the complete
-  filtered trace. Filtering of internal frames still applies.
+- **`beamtalk test --full-traces`** disables the cap and the visibility
+  filter: every frame of the trace is printed.
 - **Repeats are collapsed.** Adjacent identical lines are merged, with a
   trailing `[xN]` after the whole line, e.g. a recursive send whose frames
   render identically:
@@ -144,10 +182,31 @@ supported interface.
 ```
 
 `printString` on a `StackFrame` uses the same renderer, so it shows the same
-`Class>>selector [block] (file:line)` text as test failures. `stackTrace`
+`Class>>selector (file:line)` text as test failures. `stackTrace`
 returns every frame the VM recorded; Beamtalk neither caps nor collapses it
 (the VM's own stacktrace depth limit still applies). REPL-evaluated
 code with no backing file shows no file in its frames.
+
+### Reading a crash report (BT-4820)
+
+An actor that crashes (a failed `initialize`, or an error in a `!` cast,
+`handleInfo:` or a continuation; ADR 0134) is reported by OTP: a
+`gen_server` terminate report, a `proc_lib` crash report, and a supervisor
+`child_terminated` report. `beamtalk_crash_report_filter` (a logger primary
+filter installed when the runtime starts) shows Beamtalk names in their text:
+`Counter>>handleInfo:` instead of `bt@pkg@counter:'handleInfo:'/2`. It
+translates stacktrace frames, `initial_call` and the supervisor offender's
+`mfargs`. State, last message, mailbox and dictionary are printed as terms,
+and a report it does not recognise is printed unchanged.
+
+The report term itself is unchanged, so fields the JSON formatter and
+`ws_log_handler` read from it (`reason`, `initial_call`) still carry the raw
+`module:function/arity`; text built through the report callback (the JSON
+`message`) shows the Beamtalk names. To see raw names
+in text, `logger:remove_primary_filter(beamtalk_crash_report_filter)`. If the
+filter hits an unexpected report shape it logs one warning
+(`crash_report_translation_failed`), prints that report untranslated, and
+stays installed.
 
 ## Test Failures
 

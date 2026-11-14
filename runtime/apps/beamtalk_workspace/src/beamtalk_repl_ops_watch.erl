@@ -108,8 +108,8 @@ dead_stats(PidBin) ->
 -spec format_mfa(undefined | {atom(), atom(), arity()}) -> binary() | nil.
 format_mfa(undefined) ->
     nil;
-format_mfa({M, F, A}) when is_atom(M), is_atom(F), is_integer(A) ->
-    beamtalk_error:chars_to_binary(io_lib:format("~ts:~ts/~B", [M, F, A]));
+format_mfa({M, F, A} = Mfa) when is_atom(M), is_atom(F), is_integer(A) ->
+    beamtalk_stack_frame:raw_mfa(Mfa);
 format_mfa(_) ->
     nil.
 

@@ -527,14 +527,19 @@ serialize_test_result(#{name := Name, status := Status} = Test) ->
 
 -doc """
 Serialize one structured stack frame (BT-4355): Beamtalk terms only —
-`class`, `selector`, `block`, `file` (null when unknown), `line` (null when
-unknown) and `repeat`. No Erlang module/function/arity is ever emitted.
+`class`, `selector`, `class_side` (the text's `Class class>>selector`),
+`kind` (`beamtalk`, or `unresolved` for a `bt@...` module the class table
+cannot resolve, whose `class` is then the raw module), `block`, `file` (null
+when unknown), `line` (null when unknown) and `repeat`. No Erlang
+module/function/arity is ever emitted for a Beamtalk frame.
 """.
 -spec serialize_frame(map()) -> map().
 serialize_frame(#{class := Class, selector := Selector, block := Block} = Frame) ->
     #{
         <<"class">> => ensure_utf8(Class),
         <<"selector">> => ensure_utf8(Selector),
+        <<"class_side">> => maps:get(class_side, Frame, false),
+        <<"kind">> => atom_to_binary(maps:get(kind, Frame, beamtalk), utf8),
         <<"block">> => Block,
         <<"file">> => null_if_nil(maps:get(file, Frame, nil)),
         <<"line">> => null_if_nil(maps:get(line, Frame, nil)),

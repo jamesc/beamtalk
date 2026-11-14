@@ -61,6 +61,28 @@ pub enum CodeGenError {
         span: Option<Span>,
     },
 
+    /// BT-4811: a class defines the same selector twice (class body plus
+    /// same-file extension, or repeated definitions). Semantic analysis
+    /// reports this as an error, so a front end that honours its diagnostics
+    /// never reaches codegen with it. Codegen would otherwise emit two
+    /// `'name'/N` function definitions in one Core Erlang module, which
+    /// `erlc` rejects with an internal error in `beam_ssa_throw`.
+    #[error(
+        "duplicate {side} method `{selector}` in class `{class}`: defined more than once, \
+         so the generated module would define one function twice{}",
+        DisplayOptionalSpan(.span)
+    )]
+    DuplicateMethod {
+        /// The defining class name.
+        class: String,
+        /// The duplicated selector.
+        selector: String,
+        /// `"instance"` or `"class"`.
+        side: &'static str,
+        /// Span of the second definition.
+        span: Option<Span>,
+    },
+
     /// Internal code generation error.
     #[error("code generation error: {0}")]
     Internal(String),

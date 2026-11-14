@@ -303,6 +303,39 @@ Then, in order:
 5. Crash-report hook, as scoped by spike 2.
 6. The CI check of decision 8.
 
+### Spike 2 outcome: crash-report scope (BT-4820, 2026-11-14)
+
+Decided in `beamtalk_crash_report_filter`. Checked on OTP 27 and 28 (the
+supported window, ADR 0125); CI runs the EUnit suite on every OTP in it.
+
+| Report | Fields with compiler-made names | Translated | Left as terms |
+|---|---|---|---|
+| `gen_server` terminate | `reason` (stacktrace frames; printed as `M:F/A` when the reason is `{Class, Reason, Stack}`, as `{M,F,A,Loc}` terms otherwise) | stacktrace frames in `reason` | `state`, `last_message`, `log`, `client_info` |
+| `proc_lib` crash | `initial_call`; `error_info` stacktrace | both | `messages`, `dictionary`, linked-process info |
+| supervisor `child_terminated` / `start_error` | `offender` `mfargs`/`mfa`; `reason` stacktrace | both | `pid`, `name`, `restart_type`, `shutdown`, ... |
+
+* **Translated**: stacktrace frames, `initial_call`, and the offender's
+  `mfargs`, all through `beamtalk_stack_frame` (`render_mfas/1`: the class
+  table is read once per report, in the filter, not per frame).
+* **Left as terms**: everything in process state or messages (out of scope);
+  anything not recognised passes through unchanged.
+* **Mechanism: a logger primary filter that swaps the event's `report_cb`**
+  for a wrapper that formats the translated report with the original
+  callback. Not a formatter wrapper: there are several handlers (console,
+  transcript, file, `ws_log_handler`), and one filter covers all of them
+  without each being reconfigured. It does not rewrite the report term, so
+  the report *term* stays raw, so fields that structured consumers read from
+  it (`beamtalk_json_formatter` `reason`/`initial_call`, `ws_log_handler`)
+  keep the raw MFA; text produced through `report_cb` (the JSON `message`,
+  the workspace log text) is translated. Rewriting the term was rejected: `erl_error` crashes on a stack it
+  does not recognise, and machine consumers would lose the raw name.
+* **Failure contract**: the filter never raises (OTP silently removes a
+  filter that crashes). A failure is caught, the event passes on
+  untranslated, and one warning is logged; the wrapper falls back to the
+  original callback if formatting fails at format time.
+* **Reversible**: the whole feature is one `install/0` call at runtime
+  start; removing it restores raw crash reports.
+
 Suites: EUnit for the renderer and frame table; codegen snapshots for
 the table; re-blessed goldens for every changed message; a btscript E2E
 for an actor error and for the REPL raw toggle. Effort: M–L, plus the

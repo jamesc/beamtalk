@@ -272,7 +272,7 @@ These CLI subcommands are build/tooling commands that operate offline (no worksp
 | `deps add` | -- | -- | `surface-specific: package management`. With none of `--path`/`--git` given, `NAME` resolves through the package registry (`deps::registry`, BT-2978) — pinned to `--version` if given, else the latest published release (BT-2979) — then flows through the same git-dependency machinery a `--git` dependency uses. |
 | `deps list` | -- | -- | `surface-specific: package management`. A registry dependency's row shows its resolved git URL/tag/commit provenance alongside the requested version, matching a `--git` dependency's row (BT-2979). |
 | `deps update` | -- | -- | `surface-specific: package management`. For a registry dependency, refreshes the registry index and re-resolves the already-pinned version to a fresh commit SHA (a moved tag or corrected index entry) — the pinned version itself only changes via a `beamtalk.toml` edit (BT-2979). For native dependencies, clears their `beamtalk.lock` entries so the next build re-resolves them; `deps update <name>` unlocks one native package, direct or transitive, and removes its checkout (BT-4566). |
-| `version` | -- | -- | `surface-specific: package release workflow` (BT-2980). Shows, sets, or bumps the `version` field in `beamtalk.toml` via a surgical text edit (same approach as `deps add`'s manifest write) — no workspace, offline. Distinct from clap's own `--version`/`-V` flag on the top-level `beamtalk` binary. |
+| `version` | -- | -- | `surface-specific: package release workflow` (BT-2980). Shows, sets, or bumps the `version` field in `beamtalk.toml` via a surgical text edit (same approach as `deps add`'s manifest write) — no workspace, offline. Distinct from clap's own `--version`/`-V` flag on the top-level `beamtalk` binary, which prints the build identity (`BEAMTALK_BUILD_ID`, BT-4812) — the same string the REPL banner, LSP `serverInfo.version` and MCP server-info version show. |
 | `publish` | -- | -- | `surface-specific: package release workflow` (BT-2980). Tags and pushes a release, then updates the package registry index (`deps::registry`, BT-2978) — network/git side-effecting, CLI-only; there is no REPL/MCP/LSP analogue for authoring a registry release. |
 | `generate native` | -- | -- | `surface-specific: code generation` |
 | `generate stubs` | -- | -- | `surface-specific: code generation` |
@@ -346,6 +346,15 @@ text across surfaces:
   processes, bare `ClassName` for plain objects. The old `a ClassName` article
   form is gone. This is **not surface-specific** — REPL, logs, and tooling must
   show the same text for the same value.
+- Crash reports (BT-4820, ADR 0139): the OTP crash report of a crashing actor
+  shows `Class>>selector` instead of `bt@pkg@mod:fn/arity` for stacktrace
+  frames, `initial_call` and a supervisor's child `mfargs`. This is **not
+  surface-specific**: the text of every log surface (console and file
+  handlers, the JSON formatter's `message`, the `subscribe-logs` stream)
+  comes through the report callback that `beamtalk_crash_report_filter`
+  wraps, so they all show the translated names. The report term stays raw, so
+  fields the JSON formatter and `ws_log_handler` read from it (`reason`,
+  `initial_call`) keep the raw `module:function/arity`.
 - A declared `late` slot (ADR 0124) that has not been assigned renders as
   `<unassigned>` rather than being omitted, e.g.
   `CodexClient(proc: <unassigned>, nextId: 1)` — matching the inspector's
