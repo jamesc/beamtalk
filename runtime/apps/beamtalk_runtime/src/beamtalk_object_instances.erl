@@ -371,10 +371,10 @@ sync_class_index() ->
 Drop index rows whose pid is not in `InBag`, a snapshot of the class table's
 pids.
 
-The tables are public, so the snapshot can be stale by the time this runs: a
-pid written after it was taken has an index row the snapshot does not know.
-A candidate is therefore dropped only if the live class table has no row for
-it either (the class-table row is always written before the index row).
+This server is the only writer through the API, so the snapshot is normally
+exact. The live re-check only guards rows written straight into the public
+tables from outside the API after the snapshot was taken: a candidate is
+dropped only if the live class table has no row for it either.
 """.
 -spec drop_stale_index_rows(#{pid() => true}) -> ok.
 drop_stale_index_rows(InBag) ->

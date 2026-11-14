@@ -827,10 +827,10 @@ unregister_right_after_register_wins_test_() ->
         ]
     end}.
 
-%% BT-4845 review: sync_class_index/0 runs in a restarted registry while
-%% spawners keep writing the public tables. A pid registered after the bag
-%% snapshot was taken (so absent from it) must keep its index row; one with no
-%% bag row at all is still dropped.
+%% BT-4845 review: drop_stale_index_rows/1 re-checks the live class table, so a
+%% pid whose class-table row was written after the snapshot was taken (so
+%% absent from it) keeps its index row; one with no class-table row at all is
+%% still dropped.
 sync_stale_pass_keeps_rows_registered_after_the_snapshot_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
