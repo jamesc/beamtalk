@@ -183,14 +183,15 @@ impl FoldOp<'_> {
     }
 
     /// The seed of each leading slot (`inject:into:` seeds its own).
-    fn slot_inits(&self) -> &'static [&'static str] {
+    fn slot_inits(&self) -> Vec<Document<'static>> {
+        let empty_list = || Document::Str("[]");
         match self {
-            Self::Collect | Self::Select | Self::Reject | Self::FlatMap => &["[]"],
-            Self::Count => &["0"],
-            Self::TakeWhile | Self::DropWhile => &["[]", "'true'"],
-            Self::Partition => &["[]", "[]"],
-            Self::GroupBy => &["~{}~"],
-            Self::Inject { .. } => &[],
+            Self::Collect | Self::Select | Self::Reject | Self::FlatMap => vec![empty_list()],
+            Self::Count => vec![leaf::int_lit(0)],
+            Self::TakeWhile | Self::DropWhile => vec![empty_list(), leaf::atom("true")],
+            Self::Partition => vec![empty_list(), empty_list()],
+            Self::GroupBy => vec![Document::Str("~{}~")],
+            Self::Inject { .. } => vec![],
         }
     }
 
@@ -533,7 +534,7 @@ impl CoreErlangGenerator {
         // The seed of each leading slot, in order.
         let slot_inits: Vec<Document<'static>> = match &init {
             Some((v, _)) => vec![leaf::var(v.clone())],
-            None => op.slot_inits().iter().map(|i| Document::Str(i)).collect(),
+            None => op.slot_inits(),
         };
         // `let Slot = element(i, Acc) in ...` for each leading slot.
         let slot_bindings = Document::Vec(
