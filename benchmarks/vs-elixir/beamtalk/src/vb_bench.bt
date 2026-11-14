@@ -347,6 +347,17 @@ sealed Object subclass: VbBench
       ]
     last
 
+  // 16d: concurrent. 100 actors started back to back, then all DOWNs awaited;
+  // one operation is the whole batch of 100.
+  class asyncStartBatch: n :: Integer -> Integer =>
+    last := 0
+    n
+      timesRepeat: [
+        refs := (1 to: 100) collect: [:i | (VbRunner spawnMonitoredAsync) at: 2]
+        last := Erlang vs_ffi await_downs: refs
+      ]
+    last
+
   // === 8. Errors ===
   class onDoNoRaise: n :: Integer -> Integer =>
     last := 0

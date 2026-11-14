@@ -224,7 +224,10 @@ rows() ->
                 {spawn_monitor_exit, none}
             ]},
         {"16c", machinery, "plain Actor spawn + stop / GenServer.start + stop", 2000, 'spawnStop:',
-            none, [{gen_start_stop, none}]}
+            none, [{gen_start_stop, none}]},
+        {"16d", machinery,
+            "100 async actor starts in flight, then all DOWNs / 100 spawn_monitors", 100,
+            'asyncStartBatch:', none, [{spawn_monitor_batch, none}]}
     ].
 
 %%====================================================================
@@ -627,6 +630,7 @@ compiles_to("12c") -> "as 12b, but the String literal bakes its module (whereis 
 compiles_to("15a") -> "DynamicSupervisor:startChild -> beamtalk_supervisor:startChild (pool class + maxChildren read from the supervisor dictionary, supervisor:start_child, SupervisionChildAdded/ActorSpawned announcements skipped when no system-bus subscription can match (no matching subscriber)) + terminateChild";
 compiles_to("16a") -> "VbRunner spawnMonitoredAsync -> beamtalk_actor_ffi:doSpawnMonitoredAsync (spawn_opt monitor, enter_loop, initialize, handle_continue #run, stopWith:); the caller waits for the DOWN (BT-4845)";
 compiles_to("16b") -> "as 16a through spawnMonitoredAsyncWith:";
+compiles_to("16d") -> "as 16a, but 100 actors are started before any DOWN is awaited (one operation is the batch)";
 compiles_to("16c") -> "VbCounter spawn (synchronous start, init ack) + stop";
 compiles_to("15b") -> "as 15a, with the atomic maxChildren cap: capacity token, monitor and slot release per child";
 compiles_to("13a") ->

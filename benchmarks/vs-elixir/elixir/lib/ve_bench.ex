@@ -139,6 +139,24 @@ defmodule VeBench do
 
   defp spawn_monitor_loop(_i, _n, last), do: last
 
+  # 100 spawn_monitors back to back, then all DOWNs: the floor under 16d.
+  def spawn_monitor_batch(n, _ctx), do: spawn_batch_loop(1, n, 0)
+
+  defp spawn_batch_loop(i, n, _last) when i <= n do
+    refs = for _ <- 1..100, do: elem(spawn_monitor(fn -> :ok end), 1)
+
+    done =
+      Enum.reduce(refs, 0, fn ref, acc ->
+        receive do
+          {:DOWN, ^ref, :process, _, :normal} -> acc + 1
+        end
+      end)
+
+    spawn_batch_loop(i + 1, n, done)
+  end
+
+  defp spawn_batch_loop(_i, _n, last), do: last
+
   # GenServer.start + GenServer.stop of the Counter: the floor under 16c.
   def gen_start_stop(n, _ctx), do: gen_start_stop_loop(1, n)
 

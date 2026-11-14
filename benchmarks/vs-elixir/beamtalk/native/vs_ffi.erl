@@ -12,7 +12,7 @@
 
 -module(vs_ffi).
 
--export([ffi_ok/0, await_down/1]).
+-export([ffi_ok/0, await_down/1, await_downs/1]).
 
 -spec ffi_ok() -> ok.
 ffi_ok() -> ok.
@@ -27,3 +27,8 @@ await_down(Ref) ->
         {'DOWN', Ref, process, _Pid, normal} -> 1;
         {'DOWN', Ref, process, _Pid, _Reason} -> 0
     end.
+
+%% Row 16d: wait for every monitor in a list (the actors run concurrently);
+%% answers how many exited `normal`.
+-spec await_downs([reference()]) -> non_neg_integer().
+await_downs(Refs) -> lists:sum([await_down(R) || R <- Refs]).
