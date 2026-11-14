@@ -1,7 +1,7 @@
 # ADR 0119: Class-Name↔Module-Name Resolution Registry
 
 ## Status
-Accepted (2026-09-05)
+Implemented (2026-09-06) — Epic BT-3434 (BT-3435/BT-3436/BT-3437) and follow-up BT-3441 Done (accepted 2026-09-05); the ADR 0114 live-rename invalidation open question remains unresolved
 
 ## Context
 

@@ -1,7 +1,7 @@
 # ADR 0075: Erlang FFI Type Definitions
 
 ## Status
-Implemented (Phase 1, 2026-04-02; Phase 2 deferred)
+Implemented (2026-09-03) — all four phases: Phase 1 auto-extract + typed completions (2026-04-02), Phases 3–4 `beamtalk generate` CLI and FFI hover/signature help/`:help Erlang` (2026-04-04), Phase 2 `declare native:` stubs with the full resolution chain (BT-1846/BT-1847 2026-09-02, BT-3394 2026-09-03). Curated OTP stubs (BT-1848) canceled — the distribution tier ships empty.
 
 ## Context
 
@@ -816,7 +816,7 @@ No existing behavior changes. This is purely additive:
 
 **Epic:** BT-1839
 **Issues:** BT-1840, BT-1841, BT-1842, BT-1843, BT-1844, BT-1845, BT-1846, BT-1847, BT-1848, BT-1849, BT-1850, BT-1851, BT-1852, BT-1853, BT-3394
-**Status:** Phase 1 Complete. Phase 2's full resolution-chain plumbing (all five layers: project-local, package-bundled, distribution, auto-extracted, dynamic) is Done — BT-1847 shipped layer 1, BT-3394 wired layers 2–3. Layer 3 has no curated content yet: BT-1848 was canceled, so distribution stubs discovery/merge is exercised only by tests until curated OTP stubs are (re)scoped. Phase 3 (CLI `generate` command) and Phase 4 (advanced LSP/REPL integration) remain Planned.
+**Status:** Done (epic closed 2026-04-04; Phase 2 completed 2026-09-03). Phases 0, 1, 3 and 4 are Done. Phase 2's full resolution-chain plumbing (all five layers: project-local, package-bundled, distribution, auto-extracted, dynamic) is Done — BT-1847 shipped layer 1, BT-3394 wired layers 2–3. Layer 3 has no curated content yet: BT-1848 was canceled, so distribution stubs discovery/merge is exercised only by tests until curated OTP stubs are (re)scoped.
 
 | Phase | Issue | Title | Size | Status |
 |-------|-------|-------|------|--------|
@@ -830,11 +830,11 @@ No existing behavior changes. This is purely additive:
 | 2 | BT-1847 | Build: Stub resolution chain (layer 1, project-local) | S | Done |
 | 2 | BT-3394 | Build: Package-bundled + distribution stub tiers (layers 2–3) | M | Done |
 | 2 | BT-1848 | Curate initial OTP stubs (10 modules) | M | Canceled |
-| 3 | BT-1849 | CLI: Create `beamtalk generate` subcommand group | M | Planned |
-| 3 | BT-1850 | CLI: Implement `beamtalk generate stubs` | M | Planned |
-| 4 | BT-1851 | Runtime: `beamtalk_native_docs` EEP-48 reader | S | Planned |
-| 4 | BT-1852 | REPL: `:help Erlang <module>` + tab completion | M | Planned |
-| 4 | BT-1853 | LSP: Hover, signature help, go-to-definition for FFI | M | Planned |
+| 3 | BT-1849 | CLI: Create `beamtalk generate` subcommand group | M | Done |
+| 3 | BT-1850 | CLI: Implement `beamtalk generate stubs` | M | Done |
+| 4 | BT-1851 | Runtime: `beamtalk_native_docs` EEP-48 reader | S | Done |
+| 4 | BT-1852 | REPL: `:help Erlang <module>` + tab completion | M | Done |
+| 4 | BT-1853 | LSP: Hover, signature help, go-to-definition for FFI | M | Done |
 
 ## References
 - Related issues: BT-1823, BT-1838 (ok/error → Result conversion — future ADR)

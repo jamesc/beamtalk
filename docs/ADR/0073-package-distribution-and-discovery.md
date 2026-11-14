@@ -1,7 +1,7 @@
 # ADR 0073: Package Distribution and Discovery
 
 ## Status
-Implemented (Phase 1, 2026-03-31). Phase 2 implemented in simplified form, 2026-07-26 — the design that shipped differs from the Phase 2 design this ADR originally specified; see "Amendment (2026-07-26)" below. The original Phase 2 design (hex-compatible static registry, PubGrub) is retained in the Decision section for reference but is **not** what was built — treat it as a possible future direction, not the current plan.
+Implemented (2026-07-27) — Phase 1 git distribution 2026-03-31 (BT-1739); Phase 2 registry shipped in simplified form 2026-07-26, epic BT-2977 closed 2026-07-27 (registry follow-ups Done, including locked-SHA enforcement on fresh clones, BT-2992). Phase 3 (hex.pm publishing) not started. The Phase 2 that shipped differs from the Phase 2 design this ADR originally specified; see "Amendment (2026-07-26)" below. The original Phase 2 design (hex-compatible static registry, PubGrub) is retained in the Decision section for reference but is **not** what was built — treat it as a possible future direction, not the current plan.
 
 ## Amendment (2026-07-26): Phase 2 Shipped in Simplified Form
 
@@ -27,7 +27,7 @@ A registry dependency resolves through the index into a `(git url, tag)` pair th
 
 ### What this defers or leaves open
 
-- **No integrity checksum on the fetched content.** The lockfile pins a git commit SHA, but nothing yet *enforces* that a fresh clone of a dependency actually lands on that recorded SHA before it is compiled and used — see BT-2992. The original Phase 2 design's `checksum = "sha256:..."` on a hex tarball would have closed this gap structurally (the tarball itself is hashed and verified); the shipped design has no equivalent yet. This is the most concrete cost of the simpler design and the most likely near-term follow-up.
+- **No integrity checksum on the fetched content.** The lockfile pins a git commit SHA, but nothing yet *enforces* that a fresh clone of a dependency actually lands on that recorded SHA before it is compiled and used — see BT-2992. The original Phase 2 design's `checksum = "sha256:..."` on a hex tarball would have closed this gap structurally (the tarball itself is hashed and verified); the shipped design has no equivalent yet. This is the most concrete cost of the simpler design and the most likely near-term follow-up. *(Partly resolved 2026-07-26 by BT-2992: a fresh clone is now checked against the locked commit SHA. There is still no content checksum independent of git.)*
 - **Whether version ranges are ever supported is now an open question, not a settled plan.** The original Phase 2 committed to `~> 0.1`-style ranges via PubGrub. Nothing in the shipped design blocks introducing that later — a version-range string is a natural extension of the existing `name = "X.Y.Z"` manifest position — but it is speculative future work, not a phase already decided on. Track separately if/when it becomes worth doing.
 - **Migration path to a hex-compatible registry: not dropped, but not planned.** The rest of "Phase 2: Hex-Compatible Registry" below (protobuf index, signing, tarballs, PubGrub) remains a *possible* future direction if the ecosystem grows enough to need version-range solving or tamper-evident distribution (many packages, external maintainers, native hex-dep version conflicts becoming frequent — see the "Native dep version conflicts" paragraph below, which is unaffected by this amendment and still describes the current `[native.dependencies]`/rebar3 behaviour). The migration would be additive, not a rewrite: the current TOML-index format already tolerates unknown keys, so a `checksum` or `yanked` field could be added to `packages/<name>.toml` without breaking older `beamtalk` binaries reading it, and a PubGrub-based resolver could be introduced behind the same `name = "X.Y.Z"` manifest syntax by generalising it to accept ranges. What is genuinely open is whether that migration is ever worth doing, not whether it is possible.
 - **`beamtalk package retire`/`unretire` and native-registry sharing (`[repos]`) were not built.** A published version cannot currently be marked bad; the only recourse is publishing a new version and telling consumers not to use the old one out of band.
@@ -454,7 +454,7 @@ Use `__beamtalk_meta/0` function exports as the sole source of API metadata. MCP
 - Phase 2 (original design — not what shipped) would have required ~600 lines of Rust tooling and registry hosting infrastructure
 - Phase 3 depends on hex.pm accepting `build_tools = ["beamtalk"]` — third-party dependency, though low-risk
 - Remote package search is not possible until a custom search index is built (deferred)
-- **(Shipped, 2026-07-26)** No integrity checksum on fetched dependency content — the locked git commit SHA is not currently enforced on a fresh clone (BT-2992), a gap the original Phase 2 tarball checksum would have closed
+- **(Shipped, 2026-07-26)** No integrity checksum on fetched dependency content — the locked git commit SHA is not currently enforced on a fresh clone (BT-2992), a gap the original Phase 2 tarball checksum would have closed *(locked-SHA enforcement since added by BT-2992, Done 2026-07-26)*
 - **(Shipped, 2026-07-26)** No version-range support of any kind — every registry dependency pins one exact version; whether ranges are ever added is an open question, not a planned phase
 - **(Shipped, 2026-07-26)** A future move to a hex-compatible registry is a real lockfile migration, not a superset: today's lockfile records a commit SHA per registry dependency, not a package checksum, so adopting the original Phase 2 lockfile shape (`source`, `registry`, `checksum`) would be a third lockfile entry kind to support or migrate, alongside plain-git and today's registry-git entries
 
@@ -538,8 +538,8 @@ Each phase adds new capabilities. The tooling is backwards-compatible, but **con
 
 **Epic:** BT-2977 (library registry — Phase 2, shipped in simplified form; see "Amendment (2026-07-26)" above)
 **Issues:** BT-2978 (registry-dependency resolution), BT-2979 (`deps add`/`list`/`update` registry support), BT-2980 (`beamtalk version`/`beamtalk publish`), BT-2981 (docs), BT-2995 (this amendment)
-**Follow-up:** BT-2992 (enforce the locked SHA on a fresh dependency clone — the integrity gap noted above)
-**Status:** Implemented (simplified Phase 2)
+**Follow-up:** BT-2992 (enforce the locked SHA on a fresh dependency clone — the integrity gap noted above) — Done 2026-07-26; further follow-ups BT-2993, BT-2994, BT-2996, BT-3000, BT-3002, BT-3009 Done (BT-3001 duplicate)
+**Status:** Implemented (simplified Phase 2; epic Done 2026-07-27)
 
 ## References
 - Related issues: BT-1721 (MCP discovery), BT-1727 (private hex repo setup), BT-1728 (repo field in native deps), BT-1729 (publish first-party packages)

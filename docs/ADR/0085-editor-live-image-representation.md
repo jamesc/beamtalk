@@ -1,7 +1,15 @@
 # ADR 0085: Editor Live-Image Representation
 
 ## Status
-Proposed (2026-05-24)
+Superseded by [ADR 0096](0096-system-browser-data-source.md) and the LiveView IDE (ADR 0017 Phase 3) (2026-11-14). Proposed 2026-05-24; never accepted or implemented.
+
+The live-image browse/edit role this ADR proposed for VS Code was delivered in
+the LiveView IDE instead (ADR 0017 Phase 3, ADR 0096 System Browser). None of
+the VS Code surfaces here were built: there is no `beamtalk-live://` content
+provider, no `beamtalk-image:/` `FileSystemProvider`, and no
+`aClass sourceString` accessor. Later documents that cite this ADR as the
+"read-surface" (ADR 0091, ADR 0096; BT-2408) are describing the role the
+LiveView op layer now fills.
 
 ## Context
 

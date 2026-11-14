@@ -1,6 +1,9 @@
 # ADR 0137: Actor Closures See the Actor's Live State
 
 ## Status
+Implemented (2026-10-26) — all phases done under epic BT-4006 (Phases 0–4:
+BT-4007, BT-4008, BT-4020, BT-4009, BT-4010, BT-4011; follow-ups BT-4121,
+BT-4122); the BT-4279 fast-path amendment landed 2026-11-04.
 Accepted (2026-10-20); Proposed 2026-10-20; Amended 2026-10-21 (self-send
 exception after Phase 0, BT-4007; snapshot away and simple `call_foreign/3`
 after review); Amended 2026-10-26 (stateless loops bracket the
@@ -15,8 +18,9 @@ Amends ADR 0133 (an escaping block may assign `self.field`) and ADR 0041 (an
 actor's closures no longer capture `State`). ADR 0130 is the precedent and is
 unchanged. ADR 0131, ADR 0118 and the locals half of ADR 0133 are unchanged.
 
-Tracking: BT-3996. Epic: BT-4006. Decision gate: BT-3950. Phase 0 (BT-4007,
-#4478) and Phase 1 (BT-4008, #4472) are done. The mechanism, verifier rules,
+Tracking: BT-3996. Epic: BT-4006 (done 2026-10-26). Decision gate: BT-3950.
+Phase 0 (BT-4007, #4478), Phase 1 (BT-4008, #4472), Phase 2a (BT-4020),
+Phase 2b (BT-4009), Phase 3 (BT-4010) and Phase 4 (BT-4011) are done. The mechanism, verifier rules,
 measurements and phase detail are in the design note
 [Actor State Cell](../development/actor-state-cell.md).
 
@@ -392,7 +396,7 @@ Detail per phase is in the design note.
   checks.
 - **Phase 1 (M, done: BT-4008, #4472).** `beamtalk_actor_state` and the
   callback wrappers.
-- **Phase 2a (L, BT-4009).** `call_foreign/3`, `SyncedCall` and the verifier,
+- **Phase 2a (L, done: BT-4020).** `call_foreign/3`, `SyncedCall` and the verifier,
   driven to zero misses over every corpus before 2b starts.
 - **Phase 2b (L, done: BT-4009).** Closures on the cell, `ensure:`/`on:do:`/`^`
   stores, `no_user_code` marks, the native audit, and a generated BEAM-run corpus
@@ -414,9 +418,9 @@ Detail per phase is in the design note.
   away super running one of the host's blocks). The shapes the surviving
   validator rows still reject are not in the
   corpus; those rows go in Phase 3.
-- **Phase 3 (M).** Delete the rejections and guards; update the language
+- **Phase 3 (M, done: BT-4010).** Delete the rejections and guards; update the language
   guide.
-- **Phase 4 (S).** The `actor-state-abroad` lint and the amendment notes in
+- **Phase 4 (S, done: BT-4011).** The `actor-state-abroad` lint and the amendment notes in
   ADR 0133 and ADR 0041.
 
 #4452, #4455 and #4463 landed as stopgaps because each removed a silent wrong
