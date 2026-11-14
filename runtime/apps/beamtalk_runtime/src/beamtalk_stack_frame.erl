@@ -22,9 +22,38 @@ StackFrame objects are value types (tagged maps) with fields:
   arity => non_neg_integer(),% Function arity
   file => binary() | nil,    % Source file path
   line => non_neg_integer() | nil, % Source line number
-  class_name => atom() | nil % Beamtalk class name (if mappable)
+  class_name => atom() | nil, % Beamtalk class name (if the runtime class table knows the module)
+  package => binary() | nil   % package qualifier, set only when two loaded classes share the name
 }
 ```
+
+## The shared renderer (ADR 0139, "hide what the compiler made up")
+
+This module is the one place a frame or a bare MFA is turned into text. Every
+human-facing surface (`Exception>>stackTrace`, test failure output, JSON logs,
+the workspace log stream, process stats) calls these; none keeps its own.
+
+| Entry point | Answers |
+|---|---|
+| `format_frame/1` | one frame: `Counter>>increment (counter.bt:12)` |
+| `render_mfa/1` | a bare `{M, F, A}`, same notation, no location |
+| `raw_mfa/1` | a bare `{M, F, A}` as `module:function/arity`, always raw (machine-readable log fields) |
+| `frame_parts/1` | the structured pieces `format_frame/1` is built from |
+
+Frame table (the first column is what the frame is, not what it is called):
+
+| Frame | Rendered as |
+|---|---|
+| Instance method | `Counter>>increment (counter.bt:12)` |
+| Class-side method | `Counter class>>new (counter.bt:3)` (no `class_` prefix) |
+| Block | `[] in Counter>>increment (counter.bt:14)` |
+| Erlang code (any module that is not a Beamtalk class) | `lists:foldl/3 (lists.erl:2471)` |
+| A `bt@...` module the class table cannot resolve | `bt@user@Hpack>>class_encode:headers:table:`: the raw module, nothing guessed |
+
+Names resolve through the runtime class table
+(`beamtalk_class_registry:module_to_class_map/0`); there is no string-guessing
+fallback. A class name is package-qualified (`json@Parser`) only when two
+loaded classes share it. Which frames are listed is not decided here.
 """.
 
 -export([
@@ -34,6 +63,8 @@ StackFrame objects are value types (tagged maps) with fields:
     module_to_class/1,
     wrap_frame/1,
     format_frame/1,
+    render_mfa/1,
+    raw_mfa/1,
     frame_parts/1,
     frame_source_path/1
 ]).
@@ -64,7 +95,8 @@ behind `e stackTrace`). So class names are resolved at read time.
 -spec wrap(list()) -> list().
 wrap(Stacktrace) when is_list(Stacktrace) ->
     ModuleToClass = beamtalk_class_registry:module_to_class_map(),
-    [wrap_frame(Frame, ModuleToClass) || Frame <- Stacktrace];
+    Shared = shared_class_segments(Stacktrace, ModuleToClass),
+    [wrap_frame(Frame, ModuleToClass, Shared) || Frame <- Stacktrace];
 wrap(_) ->
     [].
 
@@ -74,14 +106,12 @@ resolving its class with a single registry lookup. Used by paths that render
 one frame at a time (test failure output) so they share `format_frame/1`.
 """.
 -spec wrap_frame(term()) -> map().
-wrap_frame({Module, _, _, _} = Frame) when is_atom(Module) ->
-    wrap_frame(Frame, #{Module => module_to_class(Module)});
-wrap_frame(Other) ->
-    wrap_frame(Other, #{}).
+wrap_frame(Frame) ->
+    ModuleToClass = beamtalk_class_registry:module_to_class_map(),
+    wrap_frame(Frame, ModuleToClass, shared_class_segments([Frame], ModuleToClass)).
 
--doc "Convert a single Erlang stacktrace entry to a StackFrame tagged map.".
--spec wrap_frame(term(), #{atom() => atom()}) -> map().
-wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass) ->
+-spec wrap_frame(term(), #{atom() => atom()}, #{binary() => true}) -> map().
+wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass, Shared) ->
     Arity =
         case is_list(ArityOrArgs) of
             true -> length(ArityOrArgs);
@@ -108,9 +138,10 @@ wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass) ->
         arity => Arity,
         file => File,
         line => Line,
-        class_name => ClassName
+        class_name => ClassName,
+        package => package_qualifier(Module, ClassName, Shared)
     };
-wrap_frame(_Other, _ModuleToClass) ->
+wrap_frame(_Other, _ModuleToClass, _Shared) ->
     #{
         '$beamtalk_class' => 'StackFrame',
         module => undefined,
@@ -118,101 +149,106 @@ wrap_frame(_Other, _ModuleToClass) ->
         arity => 0,
         file => nil,
         line => nil,
-        class_name => nil
+        class_name => nil,
+        package => nil
     }.
 
 -doc """
 Resolve `Module` to a class name using a pre-built module→class map (from
-`beamtalk_class_registry:module_to_class_map/0`), falling back to the string
-heuristic — the batched counterpart to `module_to_class/1`'s single-module
-registry lookup, used by `wrap/1` to avoid re-scanning the class registry
-per frame.
+`beamtalk_class_registry:module_to_class_map/0`) — the batched counterpart to
+`module_to_class/1`'s single-module registry lookup, used by `wrap/1` to avoid
+re-scanning the class registry per frame. A miss is `nil`; nothing is guessed.
 """.
 -spec resolve_class_name(atom(), #{atom() => atom()}) -> atom() | 'nil'.
 resolve_class_name(Module, ModuleToClass) when is_atom(Module) ->
-    case maps:find(Module, ModuleToClass) of
-        {ok, ClassName} ->
-            ClassName;
-        error ->
-            module_to_class_heuristic(Module)
-    end;
+    maps:get(Module, ModuleToClass, nil);
 resolve_class_name(_, _ModuleToClass) ->
     nil.
 
 -doc """
-Map Erlang module name to Beamtalk class name.
+The class-name segments (the last `@`-separated segment of a `bt@...` module)
+carried by more than one loaded class module, as `#{Segment => true}`. Empty
+unless some frame resolved to a class in a package, so a trace of plain
+Erlang or unpackaged frames never scans the loaded modules.
+""".
+-spec shared_class_segments(list(), #{atom() => atom()}) -> #{binary() => true}.
+shared_class_segments(Frames, ModuleToClass) ->
+    Packaged = lists:any(
+        fun
+            ({Module, _, _, _}) when is_atom(Module) ->
+                maps:is_key(Module, ModuleToClass) andalso
+                    beamtalk_module_name:package_of(Module) =/= undefined;
+            (_) ->
+                false
+        end,
+        Frames
+    ),
+    case Packaged of
+        false ->
+            #{};
+        true ->
+            Counts = lists:foldl(
+                fun({Loaded, _}, Acc) ->
+                    case class_segment(Loaded) of
+                        undefined -> Acc;
+                        Seg -> Acc#{Seg => maps:get(Seg, Acc, 0) + 1}
+                    end
+                end,
+                #{},
+                code:all_loaded()
+            ),
+            maps:filter(fun(_, N) -> N > 1 end, Counts)
+    end.
 
-Resolves via the class metadata table first
-(`beamtalk_class_registry:class_name_for_module/1` — no live process needed),
-which is authoritative — it reads each class's actual registered name rather
-than guessing one from its module name, so it can't mis-capitalize
-acronym-cased classes the way the string heuristic below provably does
-(`bt@stdlib@beamerror` → `'BEAMError'` via the metadata table, vs. the
-heuristic's lossy `'Beamerror'`). Falls back to the heuristic only when the
-module isn't a registered class at all — no class was ever registered for
-it, or the metadata table doesn't exist yet (early boot or unit tests), or
-it's an Erlang module that was never a Beamtalk class. Unlike an earlier
-version of this lookup, resolution does not depend on the class's gen_server
-process currently being alive — the metadata table is written at
-registration time and persists independently of process liveness.
+-spec class_segment(atom()) -> binary() | undefined.
+class_segment(Module) ->
+    case binary:split(atom_to_binary(Module, utf8), <<"@">>, [global]) of
+        [<<"bt">>, _ | _] = Parts -> lists:last(Parts);
+        _ -> undefined
+    end.
 
-`class_name_for_module/1` rebuilds the whole module→class map (a full ETS
-scan via `module_to_class_map/0`) on every call — it is not an O(1) lookup.
-Resolving a single module here is fine, but a caller resolving many modules
-should build the map once with `module_to_class_map/0` and look each one up
-in the result, exactly as `wrap/1` below does for a stacktrace.
+%% The package qualifier for a resolved class, only when another loaded class
+%% module shares its name (ADR 0139 decision 2).
+-spec package_qualifier(term(), atom() | nil, #{binary() => true}) -> binary() | nil.
+package_qualifier(Module, ClassName, Shared) when
+    is_atom(Module), ClassName =/= nil, map_size(Shared) > 0
+->
+    case {beamtalk_module_name:package_of(Module), class_segment(Module)} of
+        {Pkg, Seg} when Pkg =/= undefined, Seg =/= undefined ->
+            case maps:is_key(Seg, Shared) of
+                true -> Pkg;
+                false -> nil
+            end;
+        _ ->
+            nil
+    end;
+package_qualifier(_Module, _ClassName, _Shared) ->
+    nil.
 
-Compiled module naming conventions the heuristic fallback handles:
-  - 'counter' → 'Counter' (user classes)
-  - 'bt@stdlib@integer' → 'Integer' (stdlib classes)
-  - 'bt@integer' → 'Integer' (stdlib alt format)
-  - 'beamtalk_integer' → 'Integer' (runtime primitives)
-  - Other modules → nil (not a Beamtalk class)
+-doc """
+Map an Erlang module name to its Beamtalk class name through the runtime class
+table (`beamtalk_class_registry:class_name_for_module/1`, ETS only, no live
+process needed). Authoritative: it reads each class's registered name, so
+acronym-cased classes (`bt@stdlib@beamerror` is `'BEAMError'`) resolve
+correctly.
+
+A module the table does not know answers `nil`: an Erlang module that was never
+a Beamtalk class, a `bt@...` module whose class is not loaded, or a table that
+does not exist yet (early boot). The renderer never guesses a class name from
+the module name (ADR 0139 decision 2).
+
+`class_name_for_module/1` scans the whole table on every call. A caller
+resolving many modules should build the map once with
+`beamtalk_class_registry:module_to_class_map/0`, as `wrap/1` does.
 """.
 -spec module_to_class(atom()) -> atom() | 'nil'.
 module_to_class(Module) when is_atom(Module) ->
     case beamtalk_class_registry:class_name_for_module(Module) of
-        {ok, ClassName} ->
-            ClassName;
-        not_found ->
-            module_to_class_heuristic(Module)
+        {ok, ClassName} -> ClassName;
+        not_found -> nil
     end;
 module_to_class(_) ->
     nil.
-
--doc """
-Lossy snake_case→CamelCase fallback for `module_to_class/1`, used only when
-the module isn't found in the class metadata table — see that function's doc
-for why this alone is not authoritative.
-""".
--spec module_to_class_heuristic(atom()) -> atom() | 'nil'.
-module_to_class_heuristic(Module) ->
-    ModStr = atom_to_list(Module),
-    case ModStr of
-        "bt@" ++ Rest ->
-            %% bt@stdlib@integer, bt@exdura@workflow_engine, bt@counter
-            %% Take the segment after the last '@' for the class name.
-            Parts = string:split(Rest, "@", all),
-            beamtalk_module_name:snake_to_class(lists:last(Parts));
-        "beamtalk_" ++ Rest ->
-            %% Runtime primitive modules like beamtalk_integer, beamtalk_string
-            beamtalk_module_name:snake_to_class(Rest);
-        _ ->
-            %% Could be a user class compiled as snake_case module that just
-            %% isn't registered under this exact module (already ruled out
-            %% by the registry lookup above) — only trust the guess if a
-            %% class by that guessed name is registered at all.
-            ClassName = beamtalk_module_name:snake_to_class(ModStr),
-            case ClassName of
-                nil ->
-                    nil;
-                _ ->
-                    case beamtalk_class_registry:whereis_class(ClassName) of
-                        undefined -> nil;
-                        _ -> ClassName
-                    end
-            end
-    end.
 
 -doc "Dispatch a message to a StackFrame object.".
 -spec dispatch(atom(), list(), map()) -> term().
@@ -267,28 +303,21 @@ has_method(_) -> false.
 
 -doc """
 Format a StackFrame as a human-readable string. This is the single renderer
-for every trace display: `Exception>>stackTrace` (`printString`) and test
-failure output (`beamtalk_test_case:format_stacktrace/1`).
+for every trace display: `Exception>>stackTrace` (`printString`), test
+failure output (`beamtalk_test_case:format_stacktrace/1`) and JSON log
+stacktraces (`beamtalk_json_formatter`).
 
-Shape: `Class>>selector [block] (file:line)`.
-  - Class: the Beamtalk class, else the module name, else `?`.
-  - Selector: compiler-lifted funs (`'-sel/N-fun-M-'`, `-anonymous-`, loops
-    `'-sel/N-name/K-M-'`) render as `sel [block]`. Arity and fun index are
-    never shown; raw Erlang `module:function/arity` is never emitted.
-  - Location: the frame's file, else the module's `beamtalk_source`
-    attribute. Stdlib modules (`bt@stdlib@*`) show the basename only; other
-    absolute paths are made relative to CWD (basename if outside it). The
-    line is omitted when unknown or 0; no file means no location part.
+See the module doc for the frame table. In short: `Class>>selector`,
+`Class class>>selector`, `[] in Class>>selector` for a block, and
+`module:function/arity` for Erlang code. The location is the frame's file,
+else the module's `beamtalk_source` attribute. Stdlib modules (`bt@stdlib@*`)
+show the basename only; other absolute paths are made relative to CWD
+(basename if outside it). The line is omitted when unknown or 0; no file means
+no location part.
 """.
 -spec format_frame(map()) -> binary().
 format_frame(Frame) ->
-    #{class := ClassPart, selector := Selector, block := IsBlock, file := File, line := Line} =
-        frame_parts(Frame),
-    FunPart =
-        case IsBlock of
-            true -> <<Selector/binary, " [block]">>;
-            false -> Selector
-        end,
+    #{file := File, line := Line} = Parts = frame_parts(Frame),
     LocationPart =
         case File of
             nil ->
@@ -299,36 +328,75 @@ format_frame(Frame) ->
                     _ -> <<" (", File/binary, ":", (integer_to_binary(Line))/binary, ")">>
                 end
         end,
-    <<ClassPart/binary, ">>", FunPart/binary, LocationPart/binary>>.
+    <<(head(Parts))/binary, LocationPart/binary>>.
 
 -doc """
-The Beamtalk-term parts of a frame, as displayed by `format_frame/1` (which is
-built on this, so the text and structured forms cannot drift; BT-4355):
-`class` (class, else module name, else `?`), `selector` (without the
-` [block]` marker), `block` (true for compiler-lifted funs), `file` (the
-display path, `nil` when unknown) and `line` (`nil` when unknown or 0).
-Never carries an Erlang function name with arity.
+Render a bare `{Module, Function, Arity}` for a human, in the same notation as
+`format_frame/1` and resolved through the same class table: a Beamtalk class
+method is `Class>>selector` (`Class class>>selector` class-side), any other
+Erlang function is `module:function/arity`. No location. Used where only an
+MFA is known (a process's current function, an error message naming a call).
+Machine-readable fields use `raw_mfa/1` instead.
+""".
+-spec render_mfa({atom(), atom(), arity()}) -> binary().
+render_mfa({Module, Function, Arity} = _Mfa) when
+    is_atom(Module), is_atom(Function), is_integer(Arity)
+->
+    head(frame_parts(wrap_frame({Module, Function, Arity, []}))).
+
+-doc """
+A bare `{Module, Function, Arity}` as the raw `module:function/arity` binary.
+The one machine-readable MFA formatter (log `mfa` fields, process stats): it
+never resolves a class or hides a compiler-made name.
+""".
+-spec raw_mfa({atom(), atom(), arity()}) -> binary().
+raw_mfa({Module, Function, Arity}) when is_atom(Module), is_atom(Function), is_integer(Arity) ->
+    beamtalk_error:chars_to_binary(io_lib:format("~ts:~ts/~B", [Module, Function, Arity])).
+
+%% The location-free text of a frame, built from `frame_parts/1`.
+-spec head(map()) -> binary().
+head(#{kind := erlang, class := Module, selector := Function, arity := Arity}) ->
+    <<Module/binary, ":", Function/binary, "/", (integer_to_binary(Arity))/binary>>;
+head(#{class := Class, selector := Selector, block := IsBlock, class_side := ClassSide}) ->
+    Owner =
+        case ClassSide of
+            true -> <<Class/binary, " class">>;
+            false -> Class
+        end,
+    Prefix =
+        case IsBlock of
+            true -> <<"[] in ">>;
+            false -> <<>>
+        end,
+    <<Prefix/binary, Owner/binary, ">>", Selector/binary>>.
+
+-doc """
+The parts of a frame, as displayed by `format_frame/1` (which is built on
+this, so the text and structured forms cannot drift; BT-4355):
+`kind` (`beamtalk` for a resolved class, `unresolved` for a `bt@...` module
+the class table cannot resolve, `erlang` for any other module, `unknown` when
+the frame has no module), `class` (the class, package-qualified only when two
+loaded classes share the name; else the raw module name; `?` when unknown),
+`selector` (the user-visible selector, without the `class_` prefix and the
+block marker), `class_side`, `block` (true for compiler-lifted funs), `file`
+(the display path, `nil` when unknown) and `line` (`nil` when unknown or 0).
+An `erlang` frame also carries `arity`, and its `class` is the module and
+`selector` the function, exactly as recorded.
 """.
 -spec frame_parts(map()) ->
     #{
+        kind := beamtalk | unresolved | erlang | unknown,
         class := binary(),
         selector := binary(),
+        class_side := boolean(),
         block := boolean(),
         file := binary() | nil,
-        line := pos_integer() | nil
+        line := pos_integer() | nil,
+        arity => non_neg_integer()
     }.
 frame_parts(#{module := Module, function := Function} = Frame) ->
-    ClassPart =
-        case maps:get(class_name, Frame, nil) of
-            nil when is_atom(Module), Module =/= undefined -> atom_to_binary(Module, utf8);
-            nil -> <<"?">>;
-            ClassName -> atom_to_binary(ClassName, utf8)
-        end,
-    {Selector, IsBlock} =
-        case Function of
-            undefined -> {<<"?">>, false};
-            _ -> fun_name_parts(Function)
-        end,
+    ClassName = maps:get(class_name, Frame, nil),
+    Kind = frame_kind(Module, ClassName),
     Line =
         case maps:get(line, Frame, nil) of
             L when is_integer(L), L > 0 -> L;
@@ -339,7 +407,59 @@ frame_parts(#{module := Module, function := Function} = Frame) ->
             nil -> nil;
             Path -> unicode:characters_to_binary(format_file_path(Module, Path))
         end,
-    #{class => ClassPart, selector => Selector, block => IsBlock, file => File, line => Line}.
+    Base = #{kind => Kind, file => File, line => Line},
+    case Kind of
+        erlang ->
+            Base#{
+                class => atom_to_binary(Module, utf8),
+                selector => atom_to_binary(Function, utf8),
+                class_side => false,
+                block => false,
+                arity => maps:get(arity, Frame, 0)
+            };
+        _ ->
+            {Name, IsBlock} =
+                case Function of
+                    undefined -> {<<"?">>, false};
+                    _ -> fun_name_parts(Function)
+                end,
+            {Selector, ClassSide} =
+                case Kind of
+                    beamtalk -> strip_class_side(Name);
+                    _ -> {Name, false}
+                end,
+            Base#{
+                class => class_part(Kind, Module, ClassName, maps:get(package, Frame, nil)),
+                selector => Selector,
+                class_side => ClassSide,
+                block => IsBlock
+            }
+    end.
+
+-spec frame_kind(term(), atom() | nil) -> beamtalk | unresolved | erlang | unknown.
+frame_kind(Module, _) when Module =:= undefined; not is_atom(Module) -> unknown;
+frame_kind(_Module, ClassName) when ClassName =/= nil -> beamtalk;
+frame_kind(Module, nil) ->
+    case beamtalk_module_name:is_compiled_beamtalk_module(Module) of
+        true -> unresolved;
+        false -> erlang
+    end.
+
+-spec class_part(beamtalk | unresolved | unknown, atom(), atom() | nil, binary() | nil) -> binary().
+class_part(beamtalk, _Module, ClassName, nil) ->
+    atom_to_binary(ClassName, utf8);
+class_part(beamtalk, _Module, ClassName, Package) ->
+    <<Package/binary, "@", (atom_to_binary(ClassName, utf8))/binary>>;
+class_part(unresolved, Module, _ClassName, _Package) ->
+    atom_to_binary(Module, utf8);
+class_part(unknown, _Module, _ClassName, _Package) ->
+    <<"?">>.
+
+%% A class-side method is compiled as `class_<selector>`; the prefix is the
+%% compiler's, so it is dropped once the owning class is known.
+-spec strip_class_side(binary()) -> {binary(), boolean()}.
+strip_class_side(<<"class_", Selector/binary>>) when Selector =/= <<>> -> {Selector, true};
+strip_class_side(Name) -> {Name, false}.
 
 -doc """
 Source file for a frame as an unabbreviated path (not the display form that

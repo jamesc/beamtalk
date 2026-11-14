@@ -287,10 +287,8 @@ format_selector(_) ->
     undefined.
 
 -spec format_mfa(map()) -> binary() | undefined.
-format_mfa(#{mfa := {M, F, A}}) when is_atom(M), is_atom(F), is_integer(A) ->
-    beamtalk_error:chars_to_binary(
-        io_lib:format("~ts:~ts/~B", [atom_to_list(M), atom_to_list(F), A])
-    );
+format_mfa(#{mfa := {M, F, A} = Mfa}) when is_atom(M), is_atom(F), is_integer(A) ->
+    beamtalk_stack_frame:raw_mfa(Mfa);
 format_mfa(_) ->
     undefined.
 
