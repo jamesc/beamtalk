@@ -53,6 +53,15 @@ MARKER="${PREFIX}/.beamtalk-build.sha256"
 
 warn() { echo "refresh-edge: warning: $*" >&2; }
 
+# The installed binary's own identity (BT-4812: `beamtalk 0.4.0-edge+<sha7> (<date>)`),
+# appended to the status line when the binary exists and answers.
+build_identity() {
+  local v
+  v="$(timeout 5 "${PREFIX}/bin/beamtalk" --version 2>/dev/null | head -n 1)" || return 0
+  [ -n "${v}" ] && printf ' [%s]' "${v}"
+  return 0
+}
+
 # The edge release is built for linux-x86_64 only.
 case "$(uname -s)-$(uname -m)" in
   Linux-x86_64|Linux-amd64) ;;
@@ -85,7 +94,7 @@ LOCAL_SUM=""
 [ -r "${MARKER}" ] && LOCAL_SUM="$(awk 'NR==1 {print $1}' "${MARKER}" 2>/dev/null)"
 
 if [ "${LOCAL_SUM}" = "${REMOTE_SUM}" ]; then
-  echo "beamtalk edge ${REMOTE_SUM:0:12} (published ${PUBLISHED}): current, not refreshed"
+  echo "beamtalk edge ${REMOTE_SUM:0:12} (published ${PUBLISHED}): current, not refreshed$(build_identity)"
   exit 0
 fi
 
@@ -112,5 +121,5 @@ NOW_SUM=""
 if [ "${NOW_SUM}" != "${REMOTE_SUM}" ]; then
   warn "reinstalled, but the marker does not match the release (an older install.sh?); it will retry next session"
 fi
-echo "beamtalk edge ${REMOTE_SUM:0:12} (published ${PUBLISHED}): refreshed (was ${WAS})"
+echo "beamtalk edge ${REMOTE_SUM:0:12} (published ${PUBLISHED}): refreshed (was ${WAS})$(build_identity)"
 exit 0
