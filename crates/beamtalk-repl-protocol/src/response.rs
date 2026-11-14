@@ -338,6 +338,26 @@ pub fn render_raw_frames(frames: &[StackFrameInfo]) -> Vec<String> {
         .collect()
 }
 
+/// What a REPL client prints after an error reply that carries frames
+/// (`:raw-mfa`, ADR 0139 decision 4): with the session's raw option on, the
+/// complete stack as [`render_raw_frames`] lists it; off, a one-line notice that
+/// the frames were left out and how to see them. Empty when there are no
+/// frames. The one definition, shared by `beamtalk repl` and the REPL-protocol
+/// test client, so neither can drift from the other.
+#[must_use]
+pub fn render_repl_error_frames(frames: &[StackFrameInfo], raw_mfa: bool) -> Vec<String> {
+    if raw_mfa {
+        return render_raw_frames(frames);
+    }
+    // The default display lists no frames, so every one of them is left out.
+    let n = frames.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let noun = if n == 1 { "frame" } else { "frames" };
+    vec![format!("({n} {noun} hidden; :raw-mfa shows all)")]
+}
+
 /// One compilation warning with its optional hint (`warning_details` entry).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Warning {
@@ -454,6 +474,39 @@ mod tests {
                 "  at ?",
             ]
         );
+    }
+
+    #[test]
+    fn repl_error_frames_list_everything_raw_or_name_the_switch() {
+        let frame = |display: &str, module: &str| StackFrameInfo {
+            display: display.to_string(),
+            module: Some(module.to_string()),
+            function: Some("f".to_string()),
+            arity: 1,
+            file: None,
+            line: None,
+            hidden: false,
+        };
+        let frames = vec![
+            frame("Counter>>f", "bt@counter"),
+            frame("lists:f/1", "lists"),
+        ];
+        // Raw on: the same listing as `--raw-mfa`.
+        assert_eq!(
+            render_repl_error_frames(&frames, true),
+            render_raw_frames(&frames)
+        );
+        // Raw off: one notice, pluralised, and nothing for an empty stack.
+        assert_eq!(
+            render_repl_error_frames(&frames, false),
+            vec!["(2 frames hidden; :raw-mfa shows all)"]
+        );
+        assert_eq!(
+            render_repl_error_frames(&frames[..1], false),
+            vec!["(1 frame hidden; :raw-mfa shows all)"]
+        );
+        assert!(render_repl_error_frames(&[], false).is_empty());
+        assert!(render_repl_error_frames(&[], true).is_empty());
     }
 
     #[test]

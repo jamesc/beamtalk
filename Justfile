@@ -936,7 +936,7 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules test-lint-stamp test-refresh-edge
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names test-lint-stamp test-refresh-edge
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -1020,6 +1020,24 @@ lint-nlr-tuple-matches:
 [windows]
 lint-nlr-tuple-matches:
     @echo "lint-nlr-tuple-matches: skipped on Windows (covered by Linux CI)"
+
+# Guard (BT-4822, ADR 0139 decision 8): user-facing output (non-codegen snapshots,
+# `// =>` expectations in tests, prose message strings in the runtime and the
+# user-facing Rust crates) must not contain a compiler-made name: `bt@`, a
+# `class_`-prefixed function name, `dispatch/4`, `safe_dispatch`, `-fun-N-`.
+# The pattern list is scripts/ci/compiler-made-name-patterns.txt (also read by
+# `has_raw_mfa/1` in beamtalk_test_case_tests.erl); raw-mode fixtures are
+# exempt via scripts/ci/compiler-made-names-allowlist.txt, one reason each.
+# To clear a failure: reword to the display name (`Class>>sel`, `Class class>>sel`).
+# Unix-only (bash); Linux CI covers it.
+[unix]
+lint-compiler-made-names:
+    @bash scripts/ci/lint-compiler-made-names.sh --self-test
+    @bash scripts/ci/lint-compiler-made-names.sh
+
+[windows]
+lint-compiler-made-names:
+    @echo "lint-compiler-made-names: skipped on Windows (covered by Linux CI)"
 
 # Guard (BT-4671): every Erlang module name under runtime/apps/*/{src,test} is
 # unique — the BEAM loads one module per name, so a second copy's tests silently

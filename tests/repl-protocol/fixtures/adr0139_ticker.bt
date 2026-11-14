@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0139 / BT-4822 fixture: an actor whose method raises, for the frame-rendering
+// REPL-protocol test (adr0139_frames.btscript).
+Actor subclass: Adr0139Ticker
+  boom =>
+    x := self missingSelector.
+    x isNil
+
+  trace => [self boom] on: Error do: [:e | e stackTrace collect: [:f | f printString]]
