@@ -36,7 +36,7 @@ immediate `halt_node/1`.
     mark_stop_requested/1
 ]).
 -ifdef(TEST).
--export([clear_stop_requested/0, raw_trace/2]).
+-export([clear_stop_requested/0, raw_trace/3]).
 -endif.
 
 -define(STOP_KEY, {?MODULE, stop_requested}).
@@ -58,11 +58,12 @@ dispatch(ClassPid, Selector, Args) ->
 -doc """
 `dispatch/3` with render options (`beamtalk run --raw-mfa`, ADR 0139 decision 4).
 
-`#{raw_mfa => true}` follows an uncaught error's message with the complete
-stack, hidden frames included, each frame as its display name beside its raw
-`module:function/arity`. The option is an argument, chosen by the one client
-that consumes the output; nothing is written to the application environment.
-Without it the output is exactly `dispatch/3`'s.
+An uncaught error's message is followed by its visible stack frames (display
+form), with a `(N frames hidden; --raw-mfa shows all)` line when some are left
+out. `#{raw_mfa => true}` lists the complete stack instead, hidden frames
+included, each frame as its display name beside its raw `module:function/arity`.
+The option is an argument, chosen by the one client that consumes the output;
+nothing is written to the application environment.
 """.
 -spec dispatch(pid(), atom(), list(), map()) -> no_return().
 dispatch(ClassPid, Selector, Args, Opts) ->
@@ -98,7 +99,7 @@ dispatch(ClassPid, Selector, Args, Opts) ->
                     %% The raw listing is extra output: written on its own, so
                     %% a failure rendering it can never suppress the error.
                     try
-                        io:put_chars(standard_error, raw_trace(Opts, Stacktrace))
+                        io:put_chars(standard_error, raw_trace(Opts, Reason, Stacktrace))
                     catch
                         _:_ -> ok
                     end;
@@ -109,16 +110,49 @@ dispatch(ClassPid, Selector, Args, Opts) ->
     end.
 
 -doc """
-The `--raw-mfa` stack listing for an uncaught error: one `  at ` line per frame
-(the whole stack, hidden frames included), or nothing without the option.
+The stack listing that follows an uncaught error's message: one `  at ` line
+per frame. Frames come from the exception itself when it is a wrapped
+exception carrying its raise-site stack (`beamtalk_exception_handler:frames/1`),
+else from the stack of the catch.
+
+By default only the visible frames (display form, ADR 0139) are listed, with a
+`(N frames hidden; --raw-mfa shows all)` line when some were left out and the
+caller passed a `raw_mfa` option (it has the switch), as `beamtalk test`
+prints. With `raw_mfa => true` the whole stack is listed, hidden frames
+included, each beside its raw `module:function/arity`.
 """.
--spec raw_trace(map(), list()) -> iodata().
-raw_trace(#{raw_mfa := true}, Stacktrace) when is_list(Stacktrace) ->
-    [
-        ["  at ", beamtalk_stack_frame:format_frame_raw(F), $\n]
-     || F <- beamtalk_stack_frame:wrap(Stacktrace)
-    ];
-raw_trace(_Opts, _Stacktrace) ->
+-spec raw_trace(map(), term(), list()) -> iodata().
+raw_trace(Opts, Reason, Stacktrace) when is_list(Stacktrace) ->
+    Frames = trace_frames(Reason, Stacktrace),
+    case Opts of
+        #{raw_mfa := true} ->
+            [["  at ", beamtalk_stack_frame:format_frame_raw(F), $\n] || F <- Frames];
+        _ ->
+            Visible = beamtalk_stack_frame:visible_frames(Frames),
+            [
+                [["  at ", beamtalk_stack_frame:format_frame(F), $\n] || F <- Visible],
+                hidden_note(Opts, length(Frames) - length(Visible))
+            ]
+    end.
+
+%% The exception's own frames when it carries a raise-site stack, else the
+%% catch stack (a bare Erlang reason has no other).
+-spec trace_frames(term(), list()) -> [map()].
+trace_frames(#{'$beamtalk_class' := _} = Exception, Stacktrace) ->
+    case beamtalk_exception_handler:frames(Exception) of
+        [] -> beamtalk_stack_frame:wrap(Stacktrace);
+        Frames -> Frames
+    end;
+trace_frames(_Reason, Stacktrace) ->
+    beamtalk_stack_frame:wrap(Stacktrace).
+
+%% The notice names `--raw-mfa`, so it is printed only for a consumer that has the
+%% switch: `beamtalk run` passes `raw_mfa` explicitly (true or false). A built
+%% escript calls `dispatch/3` without it and gets the frames but no hint.
+-spec hidden_note(map(), non_neg_integer()) -> iodata().
+hidden_note(#{raw_mfa := _}, N) when N > 0 ->
+    ["  ", beamtalk_stack_frame:hidden_note(N), $\n];
+hidden_note(_Opts, _N) ->
     [].
 
 -doc """

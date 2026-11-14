@@ -1650,3 +1650,18 @@ bs_fail_other_badarg_is_unchanged_test() ->
 
 %% Hide a literal from the compiler's constant checks.
 id(X) -> X.
+
+%% BT-4837: a rejected future carries the callee's raise-site stack; awaiting it
+%% from another process keeps that stack rather than the awaiter's.
+ensure_wrapped_keeps_the_stack_of_a_rejected_future_test() ->
+    Raise = [{maps, get, 2, []}],
+    Await = [{beamtalk_future, await, 1, []}],
+    Rejected = (make_test_exception())#{raw_stacktrace => Raise},
+    Wrapped = beamtalk_exception_handler:ensure_wrapped(
+        throw, {future_rejected, Rejected}, Await
+    ),
+    ?assertEqual(Raise, maps:get(raw_stacktrace, Wrapped)),
+    Fresh = beamtalk_exception_handler:ensure_wrapped(
+        throw, {future_rejected, beamtalk_error:new(type_error, 'Object')}, Await
+    ),
+    ?assertEqual(Await, maps:get(raw_stacktrace, Fresh)).

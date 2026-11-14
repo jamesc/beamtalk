@@ -6,7 +6,7 @@
 Actor subclass: Adr0139Ticker
 
   boom =>
-    x := self missingSelector
+    x := Erlang maps get: #missing from: (Dictionary new)
     x isNil
 
   trace =>

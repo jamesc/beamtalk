@@ -11,6 +11,8 @@
 
 // @load tests/repl-protocol/fixtures/adr0139_ticker.bt
 // @load tests/repl-protocol/fixtures/adr0139_hpack.bt
+// @load tests/repl-protocol/fixtures/adr0139_provision.bt
+// @load tests/repl-protocol/fixtures/adr0139_provision_actor.bt
 
 // ===========================================================================
 // ACTOR FRAME: named by its class, never by the dispatch plumbing
@@ -19,17 +21,32 @@
 t := Adr0139Ticker spawn
 // => _
 
-(t trace first) includesSubstring: "Adr0139Ticker>>"
+(t trace) anySatisfy: [:f | f includesSubstring: "Adr0139Ticker>>boom ("]
 // => true
 
-(t trace first) includesSubstring: "bt@"
+// BT-4837: the frame is located by its selector and line, not `dispatch`.
+(t trace) anySatisfy: [:f | f includesSubstring: "adr0139_ticker.bt:"]
+// => true
+
+(t trace) anySatisfy: [:f | f includesSubstring: "bt@"]
 // => false
 
-(t trace first) includesSubstring: "safe_dispatch"
+(t trace) anySatisfy: [:f | f includesSubstring: "safe_dispatch"]
 // => false
 
-(t trace first) includesSubstring: "dispatch/4"
+(t trace) anySatisfy: [:f | f includesSubstring: "dispatch/4"]
 // => false
+
+// ===========================================================================
+// ACTOR FRAME FROM A PROTOCOL IN ANOTHER FILE (BT-4828, BT-4837): the method the
+// actor gets from a protocol is located in the protocol's file, not the actor's
+// ===========================================================================
+
+p := Adr0139ProvisionActor spawn
+// => _
+
+(p traceP) anySatisfy: [:f | f includesSubstring: "Adr0139ProvisionActor>>boomP (tests/repl-protocol/fixtures/adr0139_provision.bt:"]
+// => true
 
 // ===========================================================================
 // CLASS-SIDE FRAME: `Class class>>selector`, no `class_` prefix

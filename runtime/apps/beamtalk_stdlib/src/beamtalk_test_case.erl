@@ -901,15 +901,7 @@ hidden_note(NotShown) when NotShown > 0 ->
     %% the MCP `test` tool and the IDE get no flag they cannot pass.
     case application:get_env(beamtalk_stdlib, raw_mfa) of
         {ok, false} ->
-            iolist_to_binary([
-                "\n  (",
-                integer_to_binary(NotShown),
-                case NotShown of
-                    1 -> " frame hidden";
-                    _ -> " frames hidden"
-                end,
-                "; --raw-mfa shows all)"
-            ]);
+            <<"\n  ", (beamtalk_stack_frame:hidden_note(NotShown))/binary>>;
         _ ->
             <<>>
     end;

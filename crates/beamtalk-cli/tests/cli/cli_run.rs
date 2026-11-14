@@ -449,7 +449,7 @@ fn dependency_own_stdlib_named_protocol_is_compiled_and_runs_bt_3915() {
 
 /// BT-4821: `beamtalk run --raw-mfa` follows an uncaught error with the whole
 /// stack, each frame's display name beside its raw MFA; the default output
-/// is the message alone.
+/// lists only the visible frames and names the switch.
 #[test]
 fn run_raw_mfa_lists_frames_with_raw_mfa_bt_4821() {
     let project = cli_common::fixture_project();
@@ -470,7 +470,7 @@ fn run_raw_mfa_lists_frames_with_raw_mfa_bt_4821() {
         .assert()
         .failure()
         .stderr(contains("bt4821 boom"))
-        .stderr(contains("  at ").not());
+        .stderr(contains("[beamtalk_script_harness:").not());
 
     cli_common::beamtalk_run()
         .current_dir(project.path())
@@ -491,4 +491,109 @@ fn run_raw_mfa_rejects_service_mode_bt_4821() {
         .assert()
         .failure()
         .stderr(contains("`--raw-mfa` applies to script mode"));
+}
+
+fn write_run_fixture(project: &std::path::Path, name: &str, source: &str) {
+    std::fs::write(
+        project.join(format!("src/{name}.bt")),
+        format!(
+            "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\n{source}"
+        ),
+    )
+    .unwrap();
+}
+
+/// BT-4835: an uncaught error from `beamtalk run` lists the frames of where it
+/// was raised: the visible ones by default, every one under `--raw-mfa`.
+#[test]
+fn run_lists_the_raise_site_frames_bt_4835() {
+    let project = cli_common::fixture_project();
+    write_run_fixture(
+        project.path(),
+        "Main",
+        "Object subclass: Main\n\n  class run =>\n    x := 1 / 0.\n    x\n",
+    );
+
+    cli_common::beamtalk_run()
+        .current_dir(project.path())
+        .args(["Main", "run"])
+        .assert()
+        .failure()
+        .stderr(contains("  at Main class>>run (src/Main.bt:"))
+        .stderr(contains("--raw-mfa shows all)"))
+        .stderr(contains("bt@").not())
+        .stderr(contains("beamtalk_script_harness").not());
+
+    cli_common::beamtalk_run()
+        .current_dir(project.path())
+        .args(["Main", "run", "--raw-mfa"])
+        .assert()
+        .failure()
+        .stderr(contains("  at Main class>>run (src/Main.bt:"))
+        .stderr(contains("--raw-mfa shows all)").not());
+}
+
+/// BT-4829: a class with class variables runs its class methods in the class
+/// process; the frames from there cross the relay, so the trace still names the
+/// method, under the default output and `--raw-mfa`.
+#[test]
+fn run_shows_class_process_frames_bt_4829() {
+    let project = cli_common::fixture_project();
+    write_run_fixture(
+        project.path(),
+        "Counter",
+        "Object subclass: Counter\n  classState: n = 0\n\n  class run =>\n    x := 1 / 0.\n    x\n",
+    );
+
+    for extra in [&[][..], &["--raw-mfa"][..]] {
+        cli_common::beamtalk_run()
+            .current_dir(project.path())
+            .args(["Counter", "run"])
+            .args(extra)
+            .assert()
+            .failure()
+            .stderr(contains("  at Counter class>>run (src/Counter.bt:"));
+    }
+}
+
+/// BT-4835: `run --connect` prints the same frames as script mode: the visible
+/// ones by default (with the hidden-frames notice), everything under `--raw-mfa`.
+#[test]
+#[ignore = "requires beamtalk binary and erlang runtime (boots a live workspace, slow)"]
+fn run_connected_lists_the_raise_site_frames_bt_4835() {
+    let project = cli_common::fixture_project();
+    write_run_fixture(
+        project.path(),
+        "Main",
+        "Object subclass: Main\n\n  class run =>\n    x := 1 / 0.\n    x\n",
+    );
+    let _guard = WorkspaceStopGuard {
+        project_dir: project.path().to_path_buf(),
+    };
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("repl")
+        .write_stdin("exit\n")
+        .timeout(std::time::Duration::from_mins(2))
+        .assert()
+        .success();
+
+    cli_common::beamtalk_run()
+        .current_dir(project.path())
+        .args(["Main", "run", "--connect"])
+        .timeout(std::time::Duration::from_mins(1))
+        .assert()
+        .failure()
+        .stderr(contains("  at Main class>>run (src/Main.bt:"))
+        .stderr(contains("--raw-mfa shows all)"))
+        .stderr(contains("bt@").not());
+
+    cli_common::beamtalk_run()
+        .current_dir(project.path())
+        .args(["Main", "run", "--connect", "--raw-mfa"])
+        .timeout(std::time::Duration::from_mins(1))
+        .assert()
+        .failure()
+        .stderr(contains("  at Main class>>run (src/Main.bt:"))
+        .stderr(contains("--raw-mfa shows all)").not());
 }
