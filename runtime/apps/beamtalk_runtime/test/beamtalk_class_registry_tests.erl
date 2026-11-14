@@ -2664,6 +2664,62 @@ bt4808_delete_if_owner_without_row_drops_own_dependents_test() ->
     ?assertNot(lists:member(Name, beamtalk_class_metadata:match_subclasses('Object'))),
     gen_server:stop(Pid).
 
+%% `call_rename_class` copies the class-variable fact (and the rest) from the
+%% old name. A class registered under the old name between the unregister and
+%% the copy must not supply them. The interloper is created while the renaming
+%% class is parked at `sync_identity` (just after the old name is released):
+%% the facts have to come from the renaming class itself.
+bt4808_rename_copies_its_own_facts_not_a_same_name_class_test() ->
+    Old = 'BT4808RenameOld',
+    New = 'BT4808RenameNew',
+    Pid = bt4808_builder_class(Old, 'Object', false),
+    ok = beamtalk_class_monitor:unwatch(Old),
+    ?assertEqual(false, beamtalk_class_metadata:lookup_has_class_variables(Old)),
+    Test = self(),
+    ok = meck:new(beamtalk_class_publish, [passthrough, no_link]),
+    ok = meck:expect(beamtalk_class_publish, sync_identity, fun(N, M, S, A, C, Mode) ->
+        case N =:= New andalso self() =:= Pid of
+            true ->
+                Test ! {bt4808_parked, self()},
+                receive
+                    bt4808_go -> ok
+                after 5000 -> error(not_released)
+                end;
+            false ->
+                ok
+        end,
+        meck:passthrough([N, M, S, A, C, Mode])
+    end),
+    try
+        Renamer = spawn_link(fun() ->
+            Test ! {bt4808_renamed, beamtalk_object_class:rename(Old, New)}
+        end),
+        Parked =
+            receive
+                {bt4808_parked, P} -> P
+            after 5000 -> error(rename_not_parked)
+            end,
+        %% The old name is free now: a class with class variables takes it.
+        Interloper = bt4808_builder_class(Old, 'Object', true),
+        ok = beamtalk_class_monitor:unwatch(Old),
+        ?assertEqual(true, beamtalk_class_metadata:lookup_has_class_variables(Old)),
+        Parked ! bt4808_go,
+        receive
+            {bt4808_renamed, Result} -> ?assertEqual({ok, Pid}, Result)
+        after 5000 -> error(rename_not_finished)
+        end,
+        ?assertEqual(false, beamtalk_class_metadata:lookup_has_class_variables(New)),
+        ?assertNot(beamtalk_class_shadow_flags:is_set(class_vars, New)),
+        %% And the same-name class keeps its own row and fact.
+        ?assertEqual({ok, Interloper}, beamtalk_class_metadata:lookup_owner(Old)),
+        ?assertEqual(true, beamtalk_class_metadata:lookup_has_class_variables(Old)),
+        _ = Renamer,
+        ok = gen_server:stop(Interloper),
+        ok = gen_server:stop(Pid)
+    after
+        meck:unload(beamtalk_class_publish)
+    end.
+
 bt4808_builder_class(Name, Super, HasClassVars) ->
     beamtalk_class_registry:ensure_pg_started(),
     beamtalk_class_registry:ensure_hierarchy_table(),
