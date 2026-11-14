@@ -942,6 +942,12 @@ impl CoreErlangGenerator {
     /// the `do:` tail: the open let-chain inside a direct-params loop, else
     /// the closed repack ([`ThreadingPlan::closed_fold_tail_doc`]). A
     /// dictionary fold carries no value-type `Self` slot.
+    ///
+    /// Only the dictionary folds use it so far: list `do:` (`basic_ops.rs`)
+    /// still carries its own copy of this skeleton, because it also needs the
+    /// safe-list prefix and the value-type `Self` slot ([`FoldFamilySlots`]).
+    /// A `DoSource::List` variant would retire that copy, and with it the
+    /// second place that sets `direct_params_do_open_chain`.
     #[allow(clippy::too_many_lines)]
     pub(in crate::core_erlang::control_flow) fn generate_do_fold_with_mutations(
         &mut self,
