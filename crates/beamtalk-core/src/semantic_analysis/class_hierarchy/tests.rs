@@ -2766,7 +2766,6 @@ fn single_extension_index(
     side: crate::compilation::extension_index::MethodSide,
     selector: &str,
     file: &str,
-    arity: usize,
     param_types: Vec<Option<ecow::EcoString>>,
     return_type: Option<&str>,
 ) -> crate::compilation::extension_index::ExtensionIndex {
@@ -2785,7 +2784,7 @@ fn single_extension_index(
             span: test_span(),
             type_info: ExtensionTypeInfo {
                 answers_receiver: false,
-                arity,
+                arity: param_types.len(),
                 param_types,
                 return_type: return_type.map(Into::into),
             },
@@ -2803,7 +2802,6 @@ fn register_extensions_adds_instance_method() {
         MethodSide::Instance,
         "shout",
         "String+Shout.bt",
-        0,
         vec![],
         Some("String"),
     );
@@ -2825,7 +2823,6 @@ fn register_extensions_adds_class_method() {
         MethodSide::Class,
         "fromJson:",
         "String+JSON.bt",
-        1,
         vec![Some("String".into())],
         Some("String"),
     );
@@ -2845,7 +2842,6 @@ fn register_extensions_unannotated_uses_dynamic() {
         MethodSide::Instance,
         "shuffle",
         "Array+Shuffle.bt",
-        0,
         vec![],
         None,
     );
@@ -2864,7 +2860,6 @@ fn register_extensions_skips_unknown_class() {
         MethodSide::Instance,
         "doStuff",
         "Nonexistent+Stuff.bt",
-        0,
         vec![],
         None,
     );
@@ -2883,7 +2878,6 @@ fn register_extensions_does_not_override_existing_method() {
         MethodSide::Instance,
         "size",
         "String+Size.bt",
-        0,
         vec![],
         Some("Integer"),
     );
@@ -2905,7 +2899,6 @@ fn register_extensions_resolves_selector() {
         MethodSide::Instance,
         "toJson",
         "String+JSON.bt",
-        0,
         vec![],
         Some("String"),
     );
