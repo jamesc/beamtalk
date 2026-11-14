@@ -27,9 +27,12 @@ guard on a comparison against a declared parameter (`x > 0 ifTrue: [^self
 one]` with `x :: Integer`, BT-4823), where the comparison answers a Boolean
 while the declaration holds and only a receiver that broke it reaches this
 module. There the block may hold any statements before the `^`, and they run
-after the receiver's own `ifTrue:` has unwound, like `v`. That is the one
-difference from the guard as written, and it shows only for a receiver that
-broke its declaration, defines its own `>` and answers a non-Boolean.
+after the receiver's own `ifTrue:` has unwound, like `v`. So nothing that
+`ifTrue:` puts around its call to the block wraps them any more: an
+`ensure:` cleanup runs before them instead of after, an `on:do:` handler no
+longer catches an error they raise, and for an actor receiver they run in the
+caller's process. This shows only for a receiver that broke its declaration,
+defines its own `>` and answers a non-Boolean.
 """.
 
 -include("beamtalk.hrl").
