@@ -542,7 +542,7 @@ fn beamtalk_module_result_stays_on_proxy() {
 
 /// BT-4851: `stdlib/test/call_node_line_test.bt`'s `inlineDirect:` relies on
 /// this exact send taking the BT-4485 direct `try call` form; if the proofs
-/// stop holding it silently falls back to the proxy and that BUnit case would
+/// stop holding it silently falls back to the proxy and that `BUnit` case would
 /// no longer cover the direct path.
 #[test]
 fn string_arg_binary_to_integer_is_direct() {
