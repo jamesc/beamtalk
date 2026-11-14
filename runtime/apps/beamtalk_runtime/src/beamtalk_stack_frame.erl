@@ -236,7 +236,8 @@ frame_verdict(#{module := Module, function := Function} = Frame, Raising, Native
             end
     end;
 frame_verdict(_, _, _) ->
-    hidden.
+    %% Not a wrapped frame (nothing to classify by): never hide what we cannot read.
+    shown.
 
 -spec runtime_internal(atom()) -> boolean().
 runtime_internal(Module) ->
