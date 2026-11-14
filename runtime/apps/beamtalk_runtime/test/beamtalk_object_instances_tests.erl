@@ -780,7 +780,14 @@ register_is_visible_on_return_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
             ?_test(begin
-                Pids = [spawn(fun() -> receive stop -> ok end end) || _ <- lists:seq(1, 50)],
+                Pids = [
+                    spawn(fun() ->
+                        receive
+                            stop -> ok
+                        end
+                    end)
+                 || _ <- lists:seq(1, 50)
+                ],
                 lists:foreach(
                     fun(P) ->
                         ok = beamtalk_object_instances:register('Counter', P),
@@ -804,7 +811,11 @@ unregister_right_after_register_wins_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
             ?_test(begin
-                P = spawn(fun() -> receive stop -> ok end end),
+                P = spawn(fun() ->
+                    receive
+                        stop -> ok
+                    end
+                end),
                 ok = beamtalk_object_instances:register('Counter', P),
                 ok = beamtalk_object_instances:unregister('Counter', P),
                 %% Flush the server's mailbox: the cast was queued first.
