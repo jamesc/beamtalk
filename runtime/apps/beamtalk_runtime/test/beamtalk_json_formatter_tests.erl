@@ -506,8 +506,10 @@ format_non_list_stacktrace_test() ->
         }
     },
     Decoded = decode_event(Event),
-    StackBin = maps:get(<<"stacktrace">>, Decoded),
-    ?assert(is_binary(StackBin)).
+    %% Always an array of frame objects, even for a shape that is not a stack.
+    [Frame] = maps:get(<<"stacktrace">>, Decoded),
+    ?assert(is_binary(maps:get(<<"display">>, Frame))),
+    ?assertEqual(null, maps:get(<<"module">>, Frame)).
 
 format_application_controller_domain_inference_test() ->
     Report = #{label => {application_controller, progress}},
@@ -645,7 +647,7 @@ format_non_list_stacktrace_with_bt_error_test() ->
         }
     },
     Decoded = decode_event(Event),
-    StackBin = maps:get(<<"stacktrace">>, Decoded),
+    [#{<<"display">> := StackBin}] = maps:get(<<"stacktrace">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(StackBin, <<"MyClass does not understand">>)),
     %% The BtError branch in format_extra_value/2 appends "\n  raw: <term>" after
     %% the error message. Asserting the "raw:" marker proves this branch was taken

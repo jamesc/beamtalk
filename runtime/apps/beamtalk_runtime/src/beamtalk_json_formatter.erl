@@ -378,18 +378,19 @@ format_extra_value(stacktrace, Stack) when is_list(Stack) ->
     catch
         _:_ ->
             %% Fallback if wrap fails
-            Formatted = lists:join($\n, [io_lib:format("  ~tp", [Frame]) || Frame <- Stack]),
-            safe_to_binary(Formatted)
+            [raw_frame(Frame) || Frame <- Stack]
     end;
 format_extra_value(stacktrace, Stack) ->
     %% Non-list stacktrace (e.g., tuple from Core Erlang catch).
     %% Try to extract a beamtalk error for a useful message, then append raw term.
-    case try_format_bt_error(Stack) of
-        undefined ->
-            safe_to_binary(io_lib:format("~tp", [Stack]));
-        ErrorMsg ->
-            safe_to_binary(io_lib:format("~ts\n  raw: ~tp", [ErrorMsg, Stack]))
-    end;
+    Text =
+        case try_format_bt_error(Stack) of
+            undefined ->
+                safe_to_binary(io_lib:format("~tp", [Stack]));
+            ErrorMsg ->
+                safe_to_binary(io_lib:format("~ts\n  raw: ~tp", [ErrorMsg, Stack]))
+        end,
+    [raw_text_frame(Text)];
 format_extra_value(_Key, Value) when is_binary(Value) ->
     Value;
 format_extra_value(_Key, Value) when is_atom(Value) ->
@@ -400,6 +401,24 @@ format_extra_value(_Key, Value) when is_pid(Value) ->
     list_to_binary(pid_to_list(Value));
 format_extra_value(_Key, Value) ->
     safe_to_binary(io_lib:format("~tp", [Value])).
+
+%% The `stacktrace` field is always an array of frame objects. A frame the
+%% renderer could not take apart (fallback shapes) carries only `display`.
+-spec raw_frame(term()) -> map().
+raw_frame(Frame) ->
+    raw_text_frame(safe_to_binary(io_lib:format("~tp", [Frame]))).
+
+-spec raw_text_frame(binary()) -> map().
+raw_text_frame(Text) ->
+    #{
+        <<"display">> => Text,
+        <<"module">> => null,
+        <<"function">> => null,
+        <<"arity">> => null,
+        <<"file">> => null,
+        <<"line">> => null,
+        <<"hidden">> => false
+    }.
 
 -doc """
 Convert a metadata key to a binary.  Keys are usually atoms, but

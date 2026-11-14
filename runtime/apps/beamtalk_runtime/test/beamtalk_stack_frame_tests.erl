@@ -763,8 +763,8 @@ structured_frame_carries_display_and_raw_mfa_test() ->
     ]),
     S = beamtalk_stack_frame:structured_frame(Frame),
     ?assertEqual(<<"lists:foldl/3 (lists.erl:2471)">>, maps:get(<<"display">>, S)),
-    ?assertEqual(lists, maps:get(<<"module">>, S)),
-    ?assertEqual(foldl, maps:get(<<"function">>, S)),
+    ?assertEqual(<<"lists">>, maps:get(<<"module">>, S)),
+    ?assertEqual(<<"foldl">>, maps:get(<<"function">>, S)),
     ?assertEqual(3, maps:get(<<"arity">>, S)),
     ?assertEqual(2471, maps:get(<<"line">>, S)),
     ?assertEqual(false, maps:get(<<"hidden">>, S)).
@@ -783,10 +783,13 @@ structured_frames_keep_hidden_frames_flagged_test() ->
         1, length(beamtalk_stack_frame:visible_frames(beamtalk_stack_frame:wrap(Stack)))
     ).
 
-structured_frame_coerces_non_utf8_to_valid_utf8_test() ->
-    [Frame] = beamtalk_stack_frame:wrap([{lists, foldl, 3, [{file, [255, $a, $.]}, {line, 1}]}]),
+%% A method named like a JSON literal must not become one on the wire.
+structured_frame_function_named_like_json_literal_test() ->
+    [Frame] = beamtalk_stack_frame:wrap([{'bt@user@x', true, 1, []}]),
     S = beamtalk_stack_frame:structured_frame(Frame),
-    ?assert(is_binary(iolist_to_binary(json:encode(S)))).
+    ?assertEqual(<<"true">>, maps:get(<<"function">>, S)),
+    Decoded = json:decode(iolist_to_binary(json:encode(S))),
+    ?assertEqual(<<"true">>, maps:get(<<"function">>, Decoded)).
 
 structured_frame_unknown_module_is_null_test() ->
     [Frame] = beamtalk_stack_frame:wrap([not_a_frame]),

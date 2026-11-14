@@ -356,8 +356,8 @@ stack_frames_match_rendered_text_test() ->
         lists:sort(maps:keys(F1))
     ),
     #{structured := S1} = F1,
-    ?assertEqual('bt@user@A', maps:get(<<"module">>, S1)),
-    ?assertEqual(m1, maps:get(<<"function">>, S1)),
+    ?assertEqual(<<"bt@user@A">>, maps:get(<<"module">>, S1)),
+    ?assertEqual(<<"m1">>, maps:get(<<"function">>, S1)),
     ?assertEqual(0, maps:get(<<"arity">>, S1)),
     ?assertEqual(false, maps:get(<<"hidden">>, S1)),
     ?assertEqual(<<"bt@user@A>>m1 (a.bt:1)">>, maps:get(<<"display">>, S1)),

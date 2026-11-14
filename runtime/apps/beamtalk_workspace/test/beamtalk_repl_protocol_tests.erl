@@ -136,8 +136,7 @@ frames_metadata_carries_structured_frames_test() ->
     ExObj = beamtalk_exception_handler:ensure_wrapped(error, badarg, Stack),
     #{<<"frames">> := [First, Second]} =
         beamtalk_repl_protocol:frames_metadata({eval_error, error, ExObj}),
-    %% Atoms until `json:encode` (see the WebSocket test for the wire form).
-    ?assertEqual(lists, maps:get(<<"module">>, First)),
+    ?assertEqual(<<"lists">>, maps:get(<<"module">>, First)),
     ?assertEqual(<<"lists:foldl/3 (lists.erl:2471)">>, maps:get(<<"display">>, First)),
     ?assertEqual(false, maps:get(<<"hidden">>, First)),
     ?assertEqual(true, maps:get(<<"hidden">>, Second)),

@@ -690,9 +690,10 @@ One map per rendered line, innermost first: `class`, `selector`, `block`
 (compiler-lifted block marker), `file` (display path or `nil`), `line` (`nil`
 when unknown) and `repeat` (adjacent identical frames collapsed into this one,
 the `[xN]` marker; the entry keeps the first collapsed frame's raw MFA, so
-repeats whose lifted-fun names differ name only one of them), plus `structured`, the `beamtalk_stack_frame:structured_frame/1`
-map carrying the display string, raw module/function/arity and `hidden` flag
-(ADR 0139, decision 4). Built from the same selection and
+repeats whose lifted-fun names differ name only one of them), plus `structured`,
+the `beamtalk_stack_frame:structured_frame/1` map carrying the display string, raw module/function/arity and `hidden` flag
+(ADR 0139, decision 4). The synthetic test-method entry has no real stack
+frame: its raw MFA is the test method's own. Built from the same selection and
 `beamtalk_stack_frame:frame_parts/1` as the text, so the two cannot disagree.
 """.
 -spec stack_frames(list()) -> [map()].
