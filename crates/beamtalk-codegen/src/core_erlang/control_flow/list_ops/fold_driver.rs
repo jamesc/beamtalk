@@ -14,8 +14,9 @@
 //!    [`CoreErlangGenerator::lower_map_fold_body`]);
 //! 4. emit the fold call, the result extraction and an op-specific epilogue.
 //!
-//! This module owns steps 1–3 for every op, and step 4 for every writing fold
-//! through [`CoreErlangGenerator::generate_fold_with_mutations`], whose
+//! This module owns steps 1–3 for every op, and step 4 for the folds `FoldOp`
+//! names today (collect, select, reject, count, flatMap, takeWhile, dropWhile,
+//! partition, groupBy, inject:into:) through [`CoreErlangGenerator::generate_fold_with_mutations`], whose
 //! per-op [`FoldOp`] spec supplies the label, body kind, leading accumulator
 //! slots and post-fold epilogue.
 
@@ -467,8 +468,9 @@ impl CoreErlangGenerator {
         Ok(lowered?.0)
     }
 
-    /// The one stateful `lists:foldl` lowering every writing list fold goes
-    /// through (BT-4807): the driver owns the tuple-accumulator versus
+    /// The one stateful `lists:foldl` lowering the folds `FoldOp` names (collect,
+    /// select, reject, count, flatMap, takeWhile, dropWhile, partition, groupBy,
+    /// inject:into:) go through (BT-4807): the driver owns the tuple-accumulator versus
     /// `StateAcc`-map choice, the lambda prologue, the fold call and the
     /// state extraction; [`FoldOp`] supplies the leading accumulator slots,
     /// the body kind and the post-fold epilogue.
