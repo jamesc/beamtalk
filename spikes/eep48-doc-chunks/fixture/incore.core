@@ -1,0 +1,12 @@
+%% PROTOTYPE fixture (BT-4852, ADR 0149): doc attributes written directly in Core Erlang.
+module 'incore' ['inc'/1, 'module_info'/0, 'module_info'/1]
+    attributes ['moduledoc' = ["Module doc from a Core attribute."],
+                'doc' = ["Adds one."]]
+'inc'/1 =
+    ( fun (_0) -> call 'erlang':'+'(_0, 1)
+      -| [{'function',{'inc',1}}] )
+'module_info'/0 =
+    fun () -> call 'erlang':'get_module_info'('incore')
+'module_info'/1 =
+    fun (_0) -> call 'erlang':'get_module_info'('incore', _0)
+end

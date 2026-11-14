@@ -1,0 +1,7 @@
+_out/
+exdoc/deps/
+exdoc/_build/
+exdoc/mix.lock
+exdoc/doc_*/
+erl_crash.dump
+!fixture/*.core

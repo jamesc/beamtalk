@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A tally actor.
+Actor subclass: Tally
+  state: total = 0
+
+  /// Add `n` to the running total.
+  add: n :: Integer => self.total := self.total + n
+
+  /// The running total.
+  total => self.total

@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A counter value.
+///
+/// ## Examples
+/// ```beamtalk
+/// (Counter startingAt: 1) increment
+/// ```
+Value subclass: Counter
+  field: count = 0
+
+  /// Add one and return the new counter.
+  increment => Counter startingAt: self count + 1
+
+  /// Add `n` to the counter.
+  add: n :: Integer -> Counter => Counter startingAt: self count + n
+
+  /// Combine two counters.
+  + other :: Counter -> Counter => Counter startingAt: self count + other count
+
+  /// Make a counter starting at `n`.
+  class startingAt: n :: Integer -> Counter => Counter new: #{#count => n}
