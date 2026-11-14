@@ -168,15 +168,40 @@ Semantics of `checkedAs: C`:
 
 - **Built-in class** (`Integer`, `String`, `Symbol`, …): the inline
   `routing::type_test(C)` test, the one `match:` arms use.
-- **User class:** the tag check the typed-send guard uses, with the
-  `isKindOf:` hierarchy path as the fallback so a subclass instance passes.
+- **Any other class (user class, actor, supervisor):** exactly the test a
+  `c :: C` match arm compiles to, from the one renderer in
+  `patterns::type_tests`, which already handles tagged maps, actor
+  `{beamtalk_object, ...}` tuples and supervisor tuples, with the hierarchy
+  check as fallback so a subclass instance passes. Not "the typed-send tag
+  check", which only matches tagged maps. (Behaviour for a dead pid or a class
+  removed/redefined after compile is an open question below.)
+- **`String` vs `Binary`:** a `String` is the tagged tuple and a bare binary is
+  `Binary`. Text from stock Erlang modules and decoded JSON is a raw binary, so
+  `checkedAs: String` would raise on exactly the FFI boundaries this form
+  targets; see Open Questions.
 - **Union:** the test of any member. **Alias:** expands first (ADR 0108).
 - **Parametric, shape, protocol, type variable:** only the outer class is
   tested (`List`, `Dictionary`). A protocol or type variable is a compile
-  error ("cannot be checked at run time"), not a silent pass.
+  error ("cannot be checked at run time"), not a silent pass. A shape is
+  proposed to behave as its outer class and answer that class, **not**
+  `Known(shape)`: ADR 0147 says shapes are not a way to validate external
+  data, and an `is_map` test also admits tagged Value objects. (Open question
+  whether a shape argument should instead be a compile error.)
+- **Form:** `asType:` is a codegen special form with no runtime method
+  (`dispatch_codegen/mod.rs`), so `checkedAs:` cannot be "a plain message"
+  with an argument evaluated at run time: `Integer | Nil` and `List(Integer)`
+  are type syntax, not expressions. It is the same kind of special form,
+  requiring a literal class/type argument (anything else is a compile error);
+  `perform: #checkedAs:` is not supported. Whether to also add a real
+  `Object>>checkedAs:` for dynamic class arguments is an open question, and
+  ADR 0025's "runtime dispatch is the contract" favours it.
 - **On mismatch:** `#beamtalk_error{kind = type_error}` raised at the cast
-  expression, naming the expected class, the actual class and the source
-  position. No change to the structured-error shape.
+  expression. The record has no position field, so the expected class, actual
+  class and source position go in `details` (new keys to be named at
+  implementation). Note the kinds now in play: part 1 raises
+  `does_not_understand`, raw arithmetic `type_error` (from `badarith`),
+  and `pattern_mismatch` exists for failed match arms; the implementation
+  must pick one cast-failure kind deliberately.
 
 ```
 > (#{#max => "ten"} at: #max) checkedAs: Integer
@@ -297,7 +322,8 @@ Estimates, not measurements:
 ## User Impact
 
 - **Newcomer:** annotations behave as annotations: they never change an
-  answer (part 1 restores that). The wrong-cast error, when asked for, names
+  answer when the typed value is the receiver (part 1 restores that); the
+  argument position keeps the documented term-order fallback (BT-3928). The wrong-cast error, when asked for, names
   the types and the line.
 - **Smalltalk developer:** `x checkedAs: Integer` reads like `assert:`-plus-
   cast; the message form needs no new syntax.
@@ -347,6 +373,19 @@ explicit form delivers the same diagnostics site by site.
 ### Explicit checked form (`checkedAs:`)
 Adopted as part 2.
 
+### Checked narrowing with existing `match:` (not in the draft)
+`x match: [n :: Integer -> n; _ -> self error: ...]` already narrows with a
+run-time check and needs no new selector. Weakness: verbose, and the `_` arm
+is easy to omit or fill with a silent default. A stdlib helper built on
+`match:` would give `checkedAs:`'s call-site brevity without a new special
+form. Added at review; the owner should weigh it against part 2.
+
+### Ship part 1 only, defer part 2 (not in the draft)
+With BT-4823 landing, the measured cast population (3 stdlib `String` casts,
+0 in examples, actor casts in tests) shows no built-in-typed cast that needs a
+checked form. Deferring part 2 until the satellite counts exist costs nothing
+now and avoids adding a selector with unspecified actor/`String` semantics.
+
 ## Recommendation, and what would change it
 
 Adopt part 1 first; it is the real fix and does not depend on any decision
@@ -368,7 +407,11 @@ counts show casts concentrated in code that already validates its input.
 ## Consequences
 
 ### Positive
-- The silent wrong answer is closed for every route, not only casts.
+- The silent wrong answer is closed for every route *into the receiver*, not
+  only casts. The argument side stays open by decision (BT-3928): `10 < n`
+  with `n :: Integer` holding `nil` is still a bare `erlang:'<'` and answers
+  `true`, and a literal receiver is never guarded. The evidence test does not
+  cover this reversed form; BT-4823 should pin it as intended behaviour.
 - ADR 0025's "never results" rule becomes true for comparisons.
 - Explicit checked casts exist for the boundaries that need them, at no
   migration cost.
@@ -377,8 +420,15 @@ counts show casts concentrated in code that already validates its input.
 - Typed-parameter comparisons gain ~1 ns (estimate).
 - Arithmetic on a lying typed parameter still reports `type_error` and cannot
   reach a user-defined `+`.
-- The comparison guard admits strings (`is_binary`), so `"abc" > 10` still
-  answers by term order, in untyped code as well. Part 1 does not change that.
+- The comparison guard's `is_binary` admits a bare `Binary`, not a tagged
+  `String` (`{beamtalk_string, Bin}`, `routing` `StringTag`). A `String`
+  receiver therefore already dispatches (term-compares, one hop slower, per the
+  comment in `operators.rs`), and `"abc" > 10` still answers by term order, in
+  untyped code as well. Part 1 does not change that.
+- A `:: String` parameter or field is in `COMPARABLE_TYPES` and is bare today,
+  so under part 1 it moves to the guarded dispatch path: more than the ~1 ns
+  an `Integer` receiver pays. BT-4823's benchmark must include a `String`
+  comparison row (reviewer finding; not in the original estimate).
 - Two unchecked-cast spellings remain (`::` local, `asType:`) beside one
   checked one.
 
@@ -403,9 +453,17 @@ counts show casts concentrated in code that already validates its input.
 - Should BT-4823 also cover `=`/`~=`, `max:`/`min:` and `between:and:` on a
   typed receiver, if they can answer wrongly? BT-4823 asks for this to be
   checked; record the finding here once known.
-- Does the `String` tag test in `routing::type_test` match what an FFI result
-  holds before coercion (relevant to row 13b)? Check before any implicit
-  guard on FFI-fed locals.
+- `String` vs raw binary: a reviewer reading `erlang_proxy` found only
+  charlists are converted to `String`; other FFI/decoded text stays a raw
+  `Binary`. So the `String` tag test does **not** match FFI results before
+  coercion, and row 13b's `s :: String := Erlang erlang integer_to_binary: a`
+  is itself a wrong cast. Does `checkedAs: String` accept a `Binary`, and does
+  the implicit-guard question change? (Needs the owner; not resolved here.)
+- `checkedAs:` on a dead pid, or a class removed/redefined after compile
+  (ADR 0025 Amendment §2 caveats): raise, or fall back to the name-only test?
+- Tooling the draft omits: `type-coverage` must count `checkedAs:` as checked
+  rather than narrowing, the `narrowing-cast` lint must skip it, and the LSP
+  quick fix needs an owner. Add to Implementation once part 2 is accepted.
 
 ## Implementation
 
