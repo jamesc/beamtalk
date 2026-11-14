@@ -22,8 +22,12 @@ TestCase subclass: TypedComparisonReceiverTest
     self should: [self.probe intGt: self wrong] raise: #does_not_understand
     self should: [self.probe intLe: self wrong] raise: #does_not_understand
     self should: [self.probe intGe: self wrong] raise: #does_not_understand
-    self should: [self.probe intGt: (#{#v => true} at: #v)] raise: #does_not_understand
-    self should: [self.probe intLt: (#{#v => true} at: #v)] raise: #does_not_understand
+    self should: [
+      self.probe intGt: (#{#v => true} at: #v)
+    ] raise: #does_not_understand
+    self should: [
+      self.probe intLt: (#{#v => true} at: #v)
+    ] raise: #does_not_understand
 
   testRightKindInIntegerParamStillAnswers =>
     self assert: (self.probe intLt: 3)
@@ -60,7 +64,9 @@ TestCase subclass: TypedComparisonReceiverTest
   testStringParamHoldingANumberDoesNotTermOrder =>
     // A number is a wrong kind for `:: String`; it must not be ordered as
     // a binary would be, so it dispatches (and raises).
-    self should: [self.probe stringLt: (#{#v => 5} at: #v)] raise: #does_not_understand
+    self should: [
+      self.probe stringLt: (#{#v => 5} at: #v)
+    ] raise: #does_not_understand
 
   testWrongKindInTypedFieldRaisesForEveryOperator =>
     bad := TypedComparisonProbe new: #{#limit => self wrong}
@@ -77,11 +83,19 @@ TestCase subclass: TypedComparisonReceiverTest
     self assert: twelve fieldGe
 
   testOtherFieldKinds =>
-    bad := TypedComparisonProbe new: #{#ratio => self wrong, #label => self wrong, #either => self wrong}
+    bad := TypedComparisonProbe new: #{
+      #ratio => self wrong,
+      #label => self wrong,
+      #either => self wrong
+    }
     self should: [bad floatFieldGt] raise: #does_not_understand
     self should: [bad stringFieldLt] raise: #does_not_understand
     self should: [bad unionFieldGt] raise: #does_not_understand
-    good := TypedComparisonProbe new: #{#ratio => 2.5, #label => "a", #either => 11}
+    good := TypedComparisonProbe new: #{
+      #ratio => 2.5,
+      #label => "a",
+      #either => 11
+    }
     self assert: good floatFieldGt
     self assert: good stringFieldLt
     self assert: good unionFieldGt

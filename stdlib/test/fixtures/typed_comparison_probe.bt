@@ -13,18 +13,27 @@ typed Value subclass: TypedComparisonProbe
   field: either :: Integer | Float = 0
 
   intLt: n :: Integer -> Object => n < 10
+
   intGt: n :: Integer -> Object => n > 10
+
   intLe: n :: Integer -> Object => n <= 10
+
   intGe: n :: Integer -> Object => n >= 10
 
   floatLt: n :: Float -> Object => n < 1.5
+
   floatGt: n :: Float -> Object => n > 1.5
+
   numberLe: n :: Number -> Object => n <= 10
+
   numberGe: n :: Number -> Object => n >= 10
 
   charLt: c :: Character -> Object => c < $m
+
   charGe: c :: Character -> Object => c >= $m
+
   stringLt: s :: String -> Object => s < "m"
+
   stringGt: s :: String -> Object => s > "m"
 
   /// A typed local is guarded already; kept as the contrast case.
@@ -33,15 +42,22 @@ typed Value subclass: TypedComparisonProbe
     n > 10
 
   fieldLt -> Object => self.limit < 10
+
   fieldGt -> Object => self.limit > 10
+
   fieldLe -> Object => self.limit <= 10
+
   fieldGe -> Object => self.limit >= 10
+
   floatFieldGt -> Object => self.ratio > 1.5
+
   stringFieldLt -> Object => self.label < "m"
+
   unionFieldGt -> Object => self.either > 10
 
   /// A proven receiver (a literal) stays on the bare BIF whatever the argument.
   literalLtArg: other -> Object => 5 < other
+
   /// The argument is unchecked (BT-3928): a typed receiver with a wrong-kind
   /// argument still term-orders.
   intLtArg: n :: Integer other: other -> Object => n < other
