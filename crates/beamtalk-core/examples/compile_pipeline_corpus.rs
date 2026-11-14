@@ -13,6 +13,13 @@
 //! / `core_lint` unbound-var failures surface, without putting BEAM in the
 //! libFuzzer hot loop.
 //!
+//! Inputs the real build pipeline would refuse are skipped too (and counted
+//! as skipped): any parse, same-file-fold or analysis error. The fold
+//! (`fold_same_file_extensions`) runs first, as in
+//! `analyse_source_with_bindings`, so e.g. a method defined in a class body
+//! and again by a same-file extension is reported as a duplicate instead of
+//! reaching codegen (BT-4811: `erlc` ICEs on two definitions of one function).
+//!
 //! A `generate_module` `Err` is not reported here: arbitrary corpus growth
 //! (fuzzer-discovered inputs especially) is expected to fail analysis or
 //! codegen far more often than it succeeds, and that is not this tool's
@@ -32,8 +39,9 @@
 //! ```
 
 use beamtalk_codegen::core_erlang::{CodegenOptions, generate_module};
+use beamtalk_core::compilation::fold_same_file_extensions;
 use beamtalk_core::semantic_analysis::{analyse, lower_analysed_module_for_codegen};
-use beamtalk_core::source_analysis::{lex_with_eof, parse};
+use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -93,8 +101,19 @@ fn main() {
             };
 
             let tokens = lex_with_eof(&source);
-            let (mut module, _diagnostics) = parse(tokens);
+            let (mut module, mut diagnostics) = parse(tokens);
+            // Same pre-analysis step `beamtalk build` runs
+            // (`analyse_source_with_bindings`): one compilation unit per class.
+            diagnostics.extend(fold_same_file_extensions(&mut module));
             let analysis = analyse(&module);
+            diagnostics.extend(analysis.diagnostics.iter().cloned());
+            // The real pipeline refuses to compile an input that reports an
+            // error, so it never reaches codegen there; skip it here too.
+            if let Some(err) = diagnostics.iter().find(|d| d.severity == Severity::Error) {
+                eprintln!("skipping {}: {}", path.display(), err.message);
+                skipped += 1;
+                continue;
+            }
             lower_analysed_module_for_codegen(&mut module, &analysis);
             let options = CodegenOptions::new(&module_name).with_analysis(analysis);
 
