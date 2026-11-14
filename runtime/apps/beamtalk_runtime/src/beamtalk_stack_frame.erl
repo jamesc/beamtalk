@@ -134,11 +134,17 @@ one frame at a time (test failure output) so they share `format_frame/1`.
 """.
 -spec wrap_frame(term()) -> map().
 wrap_frame(Frame) ->
-    ModuleToClass = beamtalk_class_registry:module_to_class_map(),
-    Wrapped = wrap_frame(Frame, ModuleToClass, shared_class_segments([Frame], ModuleToClass)),
+    Wrapped = wrap_unclassified(Frame),
     %% Alone, the frame is the innermost one, so it is judged as the raising frame.
     [{Verdict, _}] = classify_frames([Wrapped]),
     Wrapped#{visible => Verdict =:= shown}.
+
+%% One frame wrapped without a visibility verdict, for callers that only render
+%% it (`render_mfa/1`): classifying reads every loaded application's env.
+-spec wrap_unclassified(term()) -> map().
+wrap_unclassified(Frame) ->
+    ModuleToClass = beamtalk_class_registry:module_to_class_map(),
+    wrap_frame(Frame, ModuleToClass, shared_class_segments([Frame], ModuleToClass)).
 
 -spec wrap_frame(term(), #{atom() => atom()}, #{binary() => true}) -> map().
 wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass, Shared) ->
@@ -514,7 +520,7 @@ Machine-readable fields use `raw_mfa/1` instead.
 render_mfa({Module, Function, Arity} = _Mfa) when
     is_atom(Module), is_atom(Function), is_integer(Arity)
 ->
-    head(frame_parts(wrap_frame({Module, Function, Arity, []}))).
+    head(frame_parts(wrap_unclassified({Module, Function, Arity, []}))).
 
 -doc """
 A bare `{Module, Function, Arity}` as the raw `module:function/arity` binary.
