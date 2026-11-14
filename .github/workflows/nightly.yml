@@ -23,9 +23,19 @@ on:
     # 6am UTC daily (10pm PT, 7am CET)
     - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      bench_only:
+        description: 'Run only the vs-elixir bench job (skips the platform tests and dist builds)'
+        type: boolean
+        default: false
+      baseline_branch:
+        description: 'vs-elixir bench: take the baseline from the last night of this branch (default: the branch being run)'
+        type: string
+        default: ''
 
 concurrency:
-  group: ${{ github.workflow }}
+  # Per ref: a branch dispatch must not cancel main's nightly (or the reverse).
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -53,7 +63,10 @@ jobs:
       - name: Check for commits in last 24h
         id: check
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ inputs.bench_only }}" = "true" ]; then
+            # Only the bench job runs (its own `if` accepts bench_only).
+            echo "has_commits=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "has_commits=true" >> "$GITHUB_OUTPUT"
           elif git log --since="24 hours ago" --oneline | head -1 | grep -q .; then
             echo "has_commits=true" >> "$GITHUB_OUTPUT"
@@ -381,6 +394,123 @@ jobs:
             ${{ steps.package.outputs.archive }}
             ${{ steps.package.outputs.archive }}.sha256
           retention-days: 7
+
+  # ─── vs-elixir actor rows: time compared with the previous night (BT-4844) ─
+  # Runs rows 7a-7d and 16a-16d of benchmarks/vs-elixir, stores the result as
+  # an artifact only when the check passes, and fails when a row's Beamtalk
+  # ns/op is more than 25% above the last stored night of the same branch.
+  # See benchmarks/vs-elixir/README.md § Nightly subset.
+  vs-elixir-bench:
+    needs: check-activity
+    if: needs.check-activity.outputs.has_commits == 'true' || inputs.bench_only
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read   # list and download the previous night's artifact
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BENCH_ROWS: 7a,7b,7c,7d,16a,16b,16c,16d
+      BENCH_ROUNDS: '5'
+      THRESHOLD_PCT: '25'
+      ARTIFACT_NAME: vs-elixir-nightly
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      # Erlang, Elixir and rebar3 all come from .tool-versions (the bench
+      # compares against the Elixir the repo pins).
+      - name: Install Erlang/OTP and Elixir
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: profile-${{ hashFiles('Cargo.toml') }}
+
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**') }}
+          restore-keys: |
+            nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+
+      - name: Install beamtalk into dist/
+        run: just install dist
+
+      - name: Install Hex and Rebar for the Elixir side
+        run: mix local.hex --force && mix local.rebar --force
+
+      - name: Run the actor rows
+        run: |
+          mkdir -p bench-out
+          benchmarks/vs-elixir/run.sh bench "$BENCH_ROUNDS" "$BENCH_ROWS" | tee bench-out/report.md
+          python3 scripts/ci/vs_elixir_nightly.py parse bench-out/report.md \
+            --out bench-out/results.json \
+            --meta "sha=$(git rev-parse --short HEAD)" "date=$(date -u +%Y-%m-%d)" "ref=$GITHUB_REF_NAME"
+
+      - name: Fetch the previous night's results
+        id: baseline
+        env:
+          BASELINE_BRANCH: ${{ inputs.baseline_branch || github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Newest unexpired artifact of that name uploaded from a run on the
+          # baseline branch. Artifacts exist only for passing nights.
+          run_id="$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/artifacts" \
+            -f name="$ARTIFACT_NAME" -f per_page=100 \
+            --jq "[.artifacts[] | select(.expired == false and .workflow_run.head_branch == \"$BASELINE_BRANCH\")] | first | .workflow_run.id // empty")"
+          if [ -z "$run_id" ]; then
+            echo "No earlier results for branch $BASELINE_BRANCH: first run."
+            exit 0
+          fi
+          mkdir -p bench-baseline
+          gh run download "$run_id" --repo "$GITHUB_REPOSITORY" -n "$ARTIFACT_NAME" -D bench-baseline
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "Baseline: run $run_id"
+
+      - name: Compare with the previous night
+        run: |
+          args=(bench-out/results.json --threshold "$THRESHOLD_PCT" --summary "$GITHUB_STEP_SUMMARY")
+          if [ -f bench-baseline/results.json ]; then
+            args+=(--baseline bench-baseline/results.json)
+          fi
+          python3 scripts/ci/vs_elixir_nightly.py compare "${args[@]}"
+
+      # Only reached when the comparison passed, so a regressed night never
+      # becomes the next baseline.
+      - name: Store tonight's results
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: bench-out/results.json
+          retention-days: 30
+
+      - name: Keep the full report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: vs-elixir-nightly-report
+          path: bench-out/report.md
+          retention-days: 14
+          if-no-files-found: ignore
 
   # ─── Publish nightly release ────────────────────────────────────────
   publish-nightly:

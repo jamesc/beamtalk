@@ -936,7 +936,7 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names test-lint-stamp test-refresh-edge
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names test-lint-stamp test-refresh-edge test-vs-elixir-nightly
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -960,6 +960,11 @@ test-refresh-edge:
 [windows]
 test-refresh-edge:
     @echo "test-refresh-edge: skipped on Windows (covered by Linux CI)"
+
+# Test (BT-4844): the parser and the 25% time gate of the nightly vs-elixir
+# subset (scripts/ci/vs_elixir_nightly.py).
+test-vs-elixir-nightly:
+    @cd scripts/ci && python3 -m unittest -q test_vs_elixir_nightly
 
 # Lint: reject non-ASCII inside Erlang binary literals that lack /utf8 (BT-3026).
 # Binary literals are bytes, so `<<"—">>` truncates U+2014 to 0x14 (a DC4 control
