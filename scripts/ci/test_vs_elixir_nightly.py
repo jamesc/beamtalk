@@ -107,6 +107,13 @@ class Compare(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("REGRESSED", s)
 
+    def test_negligible_control_is_not_gated(self):
+        cur = results(**{"7a": 1000.0})
+        cur["rows"]["7a"]["ex_ns"] = 0.1
+        code, s = self.run_cmp(cur, results(**{"7a": 100.0}))
+        self.assertEqual(code, 0)
+        self.assertIn("no control", s)
+
     def test_baseline_row_missing_tonight_fails(self):
         code, s = self.run_cmp(results(**{"7a": 100.0}), results(**{"7a": 100.0, "7b": 100.0}))
         self.assertEqual(code, 1)

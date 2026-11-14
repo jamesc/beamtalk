@@ -53,7 +53,9 @@ def rel(r):
     rounds. Shared runners vary by tens of percent from night to night
     (identical code measured -30% and +56% on the Elixir side alone), and that
     variation moves both sides; the ratio cancels it."""
-    return r["bt_ns"] / r["ex_ns"] if r.get("ex_ns", 0) > 0 else r["bt_ns"]
+    ex = r.get("ex_ns", 0)
+    # Under 0.5 ns net the control is noise (the harness prints "-" for it too).
+    return r["bt_ns"] / ex if ex >= 0.5 else None
 
 
 def pct(cur, base):
@@ -87,8 +89,11 @@ def compare(current, baseline, threshold):
         if b is None:
             delta, verdict = None, "new" if baseline else "no baseline"
         else:
-            delta = pct(rel(c), rel(b))
-            if delta is not None and delta > threshold:
+            rc, rb = rel(c), rel(b)
+            delta = pct(rc, rb) if rc is not None and rb is not None else None
+            if delta is None:
+                verdict = "no control"
+            elif delta > threshold:
                 verdict = "**REGRESSED**"
                 regressed.append(rid)
             else:

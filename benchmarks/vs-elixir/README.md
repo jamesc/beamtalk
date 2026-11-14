@@ -54,8 +54,9 @@ with the previous night. Nothing else in this directory changes.
 | First run | no earlier artifact: the table shows the current figures, the check passes and the night becomes the baseline |
 | Output | a before/after table in the job summary on every run; the full report is the `vs-elixir-nightly-report` artifact |
 
-The 25% is a starting point; the fast rows are short, so tune `THRESHOLD_PCT` (or the rows) once a week of nightlies shows the
-spread; the summary shows raw ns and the Elixir control beside the gated ratio.
+The 25% is a starting point; the fast rows are short, so tune
+`THRESHOLD_PCT` (or the rows) once a week of nightlies shows the spread.
+A row whose Elixir control is under 0.5 ns net is shown but not gated. The summary shows raw ns and the Elixir control beside the gated ratio.
 
 To try it on a branch: run the Nightly workflow with `workflow_dispatch`,
 `bench_only` set (skips the macOS, Windows and dist jobs). The first dispatch
