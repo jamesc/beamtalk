@@ -872,6 +872,22 @@ actor_selector_test_() ->
                         render({?ACTOR_MOD, dispatch, 4, [{file, "other.bt"}, {line, 14}]})
                     )
                 end},
+                {"class-side method named dispatch keeps its name", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817 class>>dispatch (counter.bt:17)">>,
+                        render({?ACTOR_MOD, class_dispatch, 4, loc(17)})
+                    ),
+                    ?assertEqual(
+                        <<"[] in Ticker4817 class>>dispatch (counter.bt:17)">>,
+                        render({?ACTOR_MOD, '-class_dispatch/4-fun-0-', 1, loc(17)})
+                    )
+                end},
+                {"dispatch/3 is not the actor dispatch", fun() ->
+                    ?assertEqual(
+                        <<"Ticker4817>>dispatch (counter.bt:17)">>,
+                        render({?ACTOR_MOD, dispatch, 3, loc(17)})
+                    )
+                end},
                 {"other functions are untouched", fun() ->
                     ?assertEqual(
                         <<"Ticker4817>>init (counter.bt:20)">>,

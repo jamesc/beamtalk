@@ -627,9 +627,15 @@ frame_parts(#{module := Module, function := Function} = Frame) ->
                 end,
             Base#{
                 class => class_part(Kind, Module, ClassName, maps:get(package, Frame, nil)),
-                selector => actor_selector(
-                    Kind, Module, Selector, Line, maps:get(file, Frame, nil)
-                ),
+                selector =>
+                    case ClassSide orelse not (IsBlock orelse maps:get(arity, Frame, 0) =:= 4) of
+                        true ->
+                            Selector;
+                        false ->
+                            actor_selector(
+                                Kind, Module, Selector, Line, maps:get(file, Frame, nil)
+                            )
+                    end,
                 class_side => ClassSide,
                 block => IsBlock
             }
@@ -643,6 +649,11 @@ frame_parts(#{module := Module, function := Function} = Frame) ->
 %% the row of the frame's own file with the greatest StartLine =< the frame's
 %% line. No line, no file, a file the table does not list, no table (older
 %% `.beam`) or a line before the first method leaves `dispatch` as it was.
+%% Only instance-side `dispatch/4` frames (and blocks lifted out of them) are
+%% looked up: the table holds instance methods, so a class-side method that is
+%% itself named `dispatch`, or another arity (`dispatch/3`), keeps its own name.
+%% Two methods starting on one source line cannot be told apart by line; the
+%% later one is named.
 -spec actor_selector(
     beamtalk | unresolved | unknown, atom(), binary(), pos_integer() | nil, binary() | nil
 ) -> binary().
