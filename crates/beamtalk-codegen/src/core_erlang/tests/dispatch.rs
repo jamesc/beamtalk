@@ -3032,7 +3032,7 @@ fn test_handle_call_error_arm_builds_the_caught_stack_bt_4850() {
     let code = codegen_source(src);
     assert!(
         regex::Regex::new(
-            r"let BuiltError = case Error of <\{ReplyType, ReplyReason, ReplyRaw\}> when 'true' -> let ReplyBuilt = primop 'build_stacktrace'\(ReplyRaw\) in \{ReplyType, ReplyReason, ReplyBuilt\} <ReplyOther> when 'true' -> ReplyOther end in"
+            r"let BuiltError = case Error of <\{ReplyType, ReplyReason, ReplyRaw\}> when 'true' -> let ReplyBuilt = call 'beamtalk_exception_handler':'capture_stacktrace'\(primop 'build_stacktrace'\(ReplyRaw\)\) in \{ReplyType, ReplyReason, ReplyBuilt\} <ReplyOther> when 'true' -> ReplyOther end in"
         )
         .unwrap()
         .is_match(&code),

@@ -1698,3 +1698,12 @@ raise_site_stacktrace_prefers_the_carried_stack_test() ->
     Empty = (make_test_exception())#{raw_stacktrace => []},
     ?assertEqual(Catch, beamtalk_exception_handler:raise_site_stacktrace(Empty, Catch)),
     ?assertEqual(Catch, beamtalk_exception_handler:raise_site_stacktrace(not_found, Catch)).
+
+%% BT-4850: the stack an actor replies with has its frame arguments reduced to an
+%% arity, so no argument term is shipped to the caller.
+capture_stacktrace_drops_frame_arguments_test() ->
+    Args = [self(), fun() -> ok end],
+    ?assertEqual(
+        [{m, f, 2, [{line, 3}]}],
+        beamtalk_exception_handler:capture_stacktrace([{m, f, Args, [{line, 3}]}])
+    ).

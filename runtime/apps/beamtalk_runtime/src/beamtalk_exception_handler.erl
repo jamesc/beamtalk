@@ -57,6 +57,7 @@ helpers called by that generated code: `wrap/1` and `matches_class/2`.
     reraise/3,
     reraise/4,
     raise_site_stacktrace/2,
+    capture_stacktrace/1,
     matches_class/2,
     dispatch/3,
     frames/1,

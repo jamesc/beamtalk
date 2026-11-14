@@ -127,7 +127,14 @@ pub(super) fn build_caught_triple_doc(error: Document<'static>, prefix: &str) ->
                 Some(leaf::atom("true")),
                 form::let_in(
                     built_v.clone(),
-                    form::primop("build_stacktrace", [raw_v]),
+                    // Built first (the primop must run in the catching process), then
+                    // reduced: a `function_clause`/`undef` top frame holds its argument
+                    // list, which must not be shipped to the caller.
+                    form::call(
+                        "beamtalk_exception_handler",
+                        "capture_stacktrace",
+                        [form::primop("build_stacktrace", [raw_v])],
+                    ),
                     docvec!["{", type_v, ", ", reason_v, ", ", built_v, "}"],
                     Layout::Flat,
                 ),
