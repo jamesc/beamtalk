@@ -115,8 +115,8 @@ Erlang modules. Tests that run compiled Beamtalk (the stdlib classes
 `bt@stdlib@*`) need `just build-stdlib` first. Without it
 `fold_acc_shape_agreement` (`beamtalk-codegen`) used to fail with hundreds of
 `undef`/`class_not_found` lines; it now falls back to compile-only, and fails
-loudly under `BEAMTALK_REQUIRE_RUNTIME=1` (which CI sets). Run `just
-build-stdlib` before `cargo test -p beamtalk-codegen` or `just test-runtime`.
+loudly when `BEAMTALK_REQUIRE_RUNTIME` is set to any value, even `0` (the
+corpus CI workflow sets it). Run `just build-stdlib` before `cargo test -p beamtalk-codegen` or `just test-runtime`.
 
 ### `rebar3 xref`
 
