@@ -501,7 +501,8 @@ Format a BEAM stacktrace for display in test failure messages.
 
 Hides the frames `beamtalk_stack_frame:classify_frames/1` hides (OTP plumbing,
 generated callbacks, runtime internals); shows up to 3 of the rest
-(all of them with `beamtalk test --full-traces`).
+(all of them, hidden ones included and each with its raw MFA, with
+`beamtalk test --raw-mfa`).
 The innermost non-stdlib frame whose source file and line are readable (else
 the innermost readable stdlib frame) is followed by a source snippet
 (BT-4358, BT-4388); snippet lines are context, not extra frames.
@@ -702,13 +703,16 @@ stack_frames(Frames) ->
 -endif.
 
 -doc """
-Whether the full filtered trace (not the 3-frame default) is wanted.
-Set by `beamtalk test --full-traces` through the `beamtalk_stdlib`
-application environment, so it reaches test worker processes.
+Whether raw output is wanted (`beamtalk test --raw-mfa`, ADR 0139 decision 4):
+every frame, hidden ones included, each with its raw MFA beside the display name.
+`beamtalk test` runs on a node of its own with one consumer (the CLI), so the
+option travels through the `beamtalk_stdlib` application environment to reach
+the test worker processes. It is the only transport: a workspace node, which
+serves many clients, never reads or writes it.
 """.
--spec full_traces() -> boolean().
-full_traces() ->
-    application:get_env(beamtalk_stdlib, full_traces, false) =:= true.
+-spec raw_mfa() -> boolean().
+raw_mfa() ->
+    application:get_env(beamtalk_stdlib, raw_mfa, false) =:= true.
 
 -doc """
 Filtered, selected and repeat-collapsed frames as `{Line, Parts, Count}`,
@@ -720,13 +724,13 @@ trace_entries(Frames) ->
 
 -doc """
 The wrapped frames this surface lists: those `beamtalk_stack_frame:classify_frames/1`
-shows by default, or every frame with `--full-traces`. One `wrap/1` for the whole
+shows by default, or every frame with `--raw-mfa`. One `wrap/1` for the whole
 stack shares the class-table fold and the loaded-module scan across frames.
 """.
 -spec shown_frames(list()) -> [map()].
 shown_frames(Frames) ->
     Wrapped = beamtalk_stack_frame:wrap(Frames),
-    case full_traces() of
+    case raw_mfa() of
         true -> Wrapped;
         false -> beamtalk_stack_frame:visible_frames(Wrapped)
     end.
@@ -738,7 +742,10 @@ frame_entry(Frame) ->
 -spec wrapped_entry(map()) -> trace_entry().
 wrapped_entry(Wrapped) ->
     {
-        beamtalk_stack_frame:format_frame(Wrapped),
+        case raw_mfa() of
+            true -> beamtalk_stack_frame:format_frame_raw(Wrapped);
+            false -> beamtalk_stack_frame:format_frame(Wrapped)
+        end,
         (beamtalk_stack_frame:frame_parts(Wrapped))#{
             structured => beamtalk_stack_frame:structured_frame(Wrapped)
         },
@@ -812,11 +819,11 @@ When 3 or fewer frames exist, return all of them. When more than 3,
 keep the 2 innermost (error site) plus the outermost (test method)
 so the caller's file/line info is preserved rather than being truncated
 and replaced by a synthetic frame from build_trace/3.
-With `--full-traces` (`full_traces/0`) every filtered frame is kept.
+With `--raw-mfa` (`raw_mfa/0`) every frame is kept.
 """.
 -spec select_frames(list()) -> list().
 select_frames(Frames) ->
-    select_frames(Frames, full_traces()).
+    select_frames(Frames, raw_mfa()).
 
 -spec select_frames(list(), boolean()) -> list().
 select_frames(Frames, true) ->
@@ -858,10 +865,41 @@ rendered from the single entry list of `build_trace/3` (BT-4402), so
 test_failure(MethodName, Head, Module, Stacktrace) ->
     {Real, Synthetic} = build_trace(Module, MethodName, Stacktrace),
     Entries = Real ++ Synthetic,
-    {fail, MethodName, <<Head/binary, (render_at(Entries))/binary>>, [
+    Note = hidden_note(Stacktrace),
+    {fail, MethodName, <<Head/binary, (render_at(Entries))/binary, Note/binary>>, [
         entry_frame(E)
      || E <- Entries
     ]}.
+
+-doc """
+The trailing line that names the `--raw-mfa` switch when the default output
+left frames out: `\n  (N frames hidden; --raw-mfa shows all)`, empty when
+nothing is hidden or `--raw-mfa` is on. It does not start with `  at `, so the
+i-th `at` line still pairs with `frames[i]`.
+""".
+-spec hidden_note(list()) -> binary().
+hidden_note(Stacktrace) ->
+    case raw_mfa() of
+        true ->
+            <<>>;
+        false ->
+            Total = length(Stacktrace),
+            Shown = length(select_frames(shown_frames(Stacktrace))),
+            case Total - Shown of
+                N when N > 0 ->
+                    iolist_to_binary([
+                        "\n  (",
+                        integer_to_binary(N),
+                        case N of
+                            1 -> " frame hidden";
+                            _ -> " frames hidden"
+                        end,
+                        "; --raw-mfa shows all)"
+                    ]);
+                _ ->
+                    <<>>
+            end
+    end.
 
 -doc """
 Like `test_failure/4` for failures whose message carries no rendered

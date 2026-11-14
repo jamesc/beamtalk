@@ -536,3 +536,68 @@ fn test_scoped_run_with_load_directive_into_fixtures_bt_4723() {
         .stdout(contains("1 passed"))
         .stdout(contains("0 failed"));
 }
+
+/// A failing test whose stack is deeper than the default 3 frames.
+fn write_deep_failure(project: &std::path::Path) {
+    std::fs::write(
+        project.join("test/DeepFailTest.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         TestCase subclass: DeepFailTest\n\
+         \n\
+         \x20\x20testDeep => #(1, 2, 3) do: [:each | Error signal: \"deep boom\"]\n",
+    )
+    .unwrap();
+}
+
+/// BT-4821: `--raw-mfa` lists each frame with its raw `module:function/arity`
+/// beside the display name; the default output has none and names the switch
+/// when frames were left out. (Failure details go to stderr.)
+#[test]
+fn test_raw_mfa_shows_raw_frames_bt_4821() {
+    let project = cli_common::fixture_project();
+    write_deep_failure(project.path());
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet"])
+        .assert()
+        .failure()
+        .stderr(contains("deep boom"))
+        .stderr(contains("  [bt@").not())
+        .stderr(contains("frames hidden; --raw-mfa shows all)"));
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet", "--raw-mfa"])
+        .assert()
+        .failure()
+        .stderr(contains("deep boom"))
+        .stderr(contains("[bt@deep_fail_test:testDeep/1]"))
+        .stderr(contains("[beamtalk_test_case:run_test_method/5]"))
+        .stderr(contains("--raw-mfa shows all").not());
+}
+
+/// BT-4821: `--full-traces` still works as a hidden alias and says it is deprecated.
+#[test]
+fn test_full_traces_is_a_deprecated_alias_for_raw_mfa_bt_4821() {
+    let project = cli_common::fixture_project();
+    write_deep_failure(project.path());
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet", "--full-traces"])
+        .assert()
+        .failure()
+        .stderr(contains("`--full-traces` is deprecated; use `--raw-mfa`"))
+        .stderr(contains("[bt@deep_fail_test:testDeep/1]"));
+
+    // The alias is hidden from help; the new flag is documented.
+    cli_common::beamtalk()
+        .args(["test", "--help"])
+        .assert()
+        .success()
+        .stdout(contains("--raw-mfa"))
+        .stdout(contains("--full-traces").not());
+}

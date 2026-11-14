@@ -67,6 +67,8 @@ Every generated project includes a `Justfile` with these targets:
 | `publish` | `git push origin --tags` | Push release tags |
 | `run` | `beamtalk run` | Run the application (**`--app` only**) |
 
+**`beamtalk run --raw-mfa`** (script and `--connect` modes) follows an uncaught error's message with the complete stack, one `  at Class>>selector (file:line)  [module:function/arity]` line per frame, hidden frames included. Without it the output is the message alone. It is rejected for service mode (`beamtalk run .`).
+
 **`beamtalk run` output routing:** Status and progress lines (`Building...`, `Running ClassName>>selector...`, `Connecting to workspace...`, and service mode's `Started <app> v<version> / Supervisor / REPL port` banner) are written to **stderr** in all three run modes — script, connected, and service (`beamtalk run .`). Stdout carries only the dispatched program's own output, keeping it clean for piped/programmatic consumers (`beamtalk run MyApp run | head`). `beamtalk build --escript` follows the same convention for its `Building...` line.
 
 ## Build System
@@ -633,6 +635,7 @@ The setting persists across restarts.
 |---------|-------------|
 | `:interrupt` / `:int` | Cancel a running evaluation (out-of-band interrupt over a separate connection) |
 | `:clear` | Clear all variable bindings |
+| `:raw-mfa [on\|off]` | Per-session: list every stack frame of an error (hidden ones too) with its raw `module:function/arity`; bare `:raw-mfa` toggles. Affects only this session |
 | `:exit` / `:quit` / `:q` | Exit the REPL (Ctrl+D also works) |
 
 **`:clear`** removes all session-local variable bindings:
@@ -1107,7 +1110,8 @@ By default, `beamtalk test` runs test classes concurrently using the BEAM schedu
 beamtalk test              # Auto parallelism (default)
 beamtalk test --jobs 4     # Up to 4 classes concurrently
 beamtalk test -j 1         # Sequential (backward-compatible)
-beamtalk test --full-traces  # Show full filtered stack traces (no 3-frame cap)
+beamtalk test --raw-mfa    # Every stack frame per failure (hidden ones too), raw module:function/arity beside each name
+# `--full-traces` still works but is deprecated: it is a hidden alias of `--raw-mfa`
 ```
 
 From code: `TestRunner runAll: 0` (auto), `TestRunner runAll: 4` (bounded), `TestRunner runAll` (sequential).

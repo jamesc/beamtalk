@@ -825,3 +825,18 @@ print_string_independent_of_hidden_flag_test() ->
     Shown = beamtalk_stack_frame:dispatch('printString', [], Frame#{visible => true}),
     Hidden = beamtalk_stack_frame:dispatch('printString', [], Frame#{visible => false}),
     ?assertEqual(Shown, Hidden).
+
+%%% BT-4821: format_frame_raw/1 puts the raw MFA beside the display name.
+format_frame_raw_appends_raw_mfa_test() ->
+    Frame = make_test_frame(),
+    Display = beamtalk_stack_frame:format_frame(Frame),
+    ?assertEqual(
+        <<Display/binary, "  [beamtalk_integer:+/2]">>,
+        beamtalk_stack_frame:format_frame_raw(Frame)
+    ).
+
+format_frame_raw_without_module_is_display_only_test() ->
+    Frame = (make_test_frame())#{module => undefined},
+    ?assertEqual(
+        beamtalk_stack_frame:format_frame(Frame), beamtalk_stack_frame:format_frame_raw(Frame)
+    ).

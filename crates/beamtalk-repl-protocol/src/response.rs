@@ -313,6 +313,34 @@ impl StackFrameInfo {
             self.arity
         ))
     }
+
+    /// The raw-output line for this frame: the display name with the raw MFA
+    /// beside it, `Counter>>increment (counter.bt:12)  [bt@counter:increment/1]`
+    /// (the text the Erlang `beamtalk_stack_frame:format_frame_raw/1` renders).
+    /// A frame with no raw MFA shows the display name alone.
+    #[must_use]
+    pub fn display_raw(&self) -> String {
+        match self.raw_mfa() {
+            Some(raw) => format!("{}  [{raw}]", self.display),
+            None => self.display.clone(),
+        }
+    }
+}
+
+/// How many frames of an error reply the default output leaves out.
+#[must_use]
+pub fn hidden_frame_count(frames: &[StackFrameInfo]) -> usize {
+    frames.iter().filter(|f| f.hidden).count()
+}
+
+/// The `--raw-mfa` listing of an error reply's complete stack: one `  at ` line
+/// per frame, hidden ones included. Empty when the reply carries no frames.
+#[must_use]
+pub fn render_raw_frames(frames: &[StackFrameInfo]) -> Vec<String> {
+    frames
+        .iter()
+        .map(|f| format!("  at {}", f.display_raw()))
+        .collect()
 }
 
 /// One compilation warning with its optional hint (`warning_details` entry).
@@ -410,6 +438,28 @@ mod tests {
         assert!(!frames[0].hidden);
         assert!(frames[1].hidden, "hidden frames are kept, flagged");
         assert_eq!(frames[1].line, None);
+    }
+
+    #[test]
+    fn raw_rendering_puts_the_raw_mfa_beside_the_display_name() {
+        let json = r#"{"error":"boom","status":["done","error"],"frames":[
+            {"display":"Counter>>increment (counter.bt:12)","module":"bt@counter","function":"increment","arity":1,"file":"counter.bt","line":12,"hidden":false},
+            {"display":"gen_server:loop/7","module":"gen_server","function":"loop","arity":7,"file":null,"line":null,"hidden":true},
+            {"display":"?","module":null,"function":null,"arity":0,"file":null,"line":null,"hidden":true}
+        ]}"#;
+        let frames = serde_json::from_str::<ReplResponse>(json)
+            .expect("decodes")
+            .frames
+            .expect("frames");
+        assert_eq!(
+            render_raw_frames(&frames),
+            vec![
+                "  at Counter>>increment (counter.bt:12)  [bt@counter:increment/1]",
+                "  at gen_server:loop/7  [gen_server:loop/7]",
+                "  at ?",
+            ]
+        );
+        assert_eq!(hidden_frame_count(&frames), 2);
     }
 
     #[test]

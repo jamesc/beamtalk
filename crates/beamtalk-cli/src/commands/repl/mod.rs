@@ -634,7 +634,7 @@ mod timeout_warning_tests {
 /// Convenience wrapper used by several REPL command handlers.
 fn eval_and_display(client: &mut ReplClient, expr: &str) {
     match client.eval(expr) {
-        Ok(response) => display_eval_response(&response),
+        Ok(response) => display_eval_response(&response, client.raw_mfa()),
         Err(e) => eprintln!("Error: {e}"),
     }
 }
@@ -651,7 +651,7 @@ fn eval_with_reconnect(
     interrupted.store(false, Ordering::SeqCst);
     match client.eval_interruptible(accumulated, interrupted) {
         Ok(response) => {
-            display_eval_response(&response);
+            display_eval_response(&response, client.raw_mfa());
             false
         }
         Err(e) => {
@@ -691,7 +691,7 @@ fn attempt_reconnect_and_retry(
             interrupted.store(false, Ordering::SeqCst);
             match client.eval_interruptible(accumulated, interrupted) {
                 Ok(response) => {
-                    display_eval_response(&response);
+                    display_eval_response(&response, client.raw_mfa());
                     false
                 }
                 Err(e2) => {
@@ -710,7 +710,11 @@ fn attempt_reconnect_and_retry(
 }
 
 /// Display the output, warnings, errors, and value from an eval response.
-fn display_eval_response(response: &ReplResponse) {
+///
+/// `raw_mfa` is the session's `:raw-mfa` render option (BT-4821): an error
+/// reply is followed by its complete stack, each frame's display name beside
+/// its raw MFA. Without it, a reply that has hidden frames names the switch.
+fn display_eval_response(response: &ReplResponse, raw_mfa: bool) {
     // Print captured stdout before value/error
     if let Some(ref output) = response.output
         && !output.is_empty()
@@ -739,6 +743,19 @@ fn display_eval_response(response: &ReplResponse) {
                 eprintln!("{msg}");
             } else {
                 eprintln!("{}", format_error(msg));
+                if let Some(frames) = &response.frames {
+                    if raw_mfa {
+                        for line in beamtalk_repl_protocol::render_raw_frames(frames) {
+                            eprintln!("{line}");
+                        }
+                    } else {
+                        let hidden = beamtalk_repl_protocol::hidden_frame_count(frames);
+                        if hidden > 0 {
+                            let noun = if hidden == 1 { "frame" } else { "frames" };
+                            eprintln!("({hidden} {noun} hidden; :raw-mfa shows all)");
+                        }
+                    }
+                }
             }
         }
     } else if let Some(ref value) = response.value {

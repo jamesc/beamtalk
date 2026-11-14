@@ -308,8 +308,9 @@ format_stacktrace_selects_first_two_plus_last_test() ->
     ?assertEqual(nomatch, binary:match(Result, <<"m3">>)),
     ?assertNotEqual(nomatch, binary:match(Result, <<"m4">>)).
 
-%% BT-4355: --full-traces keeps every filtered frame (same per-frame format).
-format_stacktrace_full_traces_keeps_all_frames_test() ->
+%% BT-4355 / BT-4821: --raw-mfa keeps every frame, each with its raw MFA beside
+%% the display name; the default lines are a prefix of the raw ones.
+format_stacktrace_raw_mfa_keeps_all_frames_test() ->
     Frames = [
         {'bt@user@A', m1, 0, [{file, "a.bt"}, {line, 1}]},
         {'bt@user@A', m2, 0, [{file, "a.bt"}, {line, 2}]},
@@ -317,19 +318,44 @@ format_stacktrace_full_traces_keeps_all_frames_test() ->
         {'bt@user@A', m4, 0, [{file, "a.bt"}, {line, 4}]}
     ],
     Default = beamtalk_test_case:format_stacktrace(Frames),
-    application:set_env(beamtalk_stdlib, full_traces, true),
+    application:set_env(beamtalk_stdlib, raw_mfa, true),
     try
-        Full = beamtalk_test_case:format_stacktrace(Frames),
-        ?assertNotEqual(nomatch, binary:match(Full, <<"m3">>)),
-        ?assertEqual(4, length(binary:matches(Full, <<"\n  at ">>))),
+        Raw = beamtalk_test_case:format_stacktrace(Frames),
+        ?assertNotEqual(nomatch, binary:match(Raw, <<"m3">>)),
+        ?assertEqual(4, length(binary:matches(Raw, <<"\n  at ">>))),
         ?assertEqual(3, length(binary:matches(Default, <<"\n  at ">>))),
-        %% Every default line appears verbatim in the full trace.
+        ?assertNotEqual(nomatch, binary:match(Raw, <<"[bt@user@A:m3/0]">>)),
+        ?assertEqual(nomatch, binary:match(Default, <<"bt@user@A:m1/0">>)),
         [_ | DefaultLines] = binary:split(Default, <<"\n  at ">>, [global]),
         lists:foreach(
-            fun(L) -> ?assertNotEqual(nomatch, binary:match(Full, L)) end, DefaultLines
+            fun(L) -> ?assertNotEqual(nomatch, binary:match(Raw, L)) end, DefaultLines
         )
     after
-        application:unset_env(beamtalk_stdlib, full_traces)
+        application:unset_env(beamtalk_stdlib, raw_mfa)
+    end.
+
+%% BT-4821: a failure whose default trace left frames out names the switch once.
+test_failure_names_raw_mfa_when_frames_are_hidden_test() ->
+    Frames = [
+        {'bt@user@A', m1, 0, [{file, "a.bt"}, {line, 1}]},
+        {'bt@user@A', m2, 0, [{file, "a.bt"}, {line, 2}]},
+        {'bt@user@A', m3, 0, [{file, "a.bt"}, {line, 3}]},
+        {'bt@user@A', m4, 0, [{file, "a.bt"}, {line, 4}]}
+    ],
+    {fail, m4, Msg, _} = beamtalk_test_case:test_failure(m4, <<"boom">>, 'bt@user@A', Frames),
+    ?assertNotEqual(nomatch, binary:match(Msg, <<"\n  (1 frame hidden; --raw-mfa shows all)">>)),
+    {fail, m1, Quiet, _} = beamtalk_test_case:test_failure(
+        m1, <<"boom">>, 'bt@user@A', [hd(Frames)]
+    ),
+    ?assertEqual(nomatch, binary:match(Quiet, <<"--raw-mfa">>)),
+    application:set_env(beamtalk_stdlib, raw_mfa, true),
+    try
+        {fail, m4, RawMsg, _} = beamtalk_test_case:test_failure(
+            m4, <<"boom">>, 'bt@user@A', Frames
+        ),
+        ?assertEqual(nomatch, binary:match(RawMsg, <<"hidden">>))
+    after
+        application:unset_env(beamtalk_stdlib, raw_mfa)
     end.
 
 %% BT-4355: structured frames match the rendered lines. BT-4819: they also

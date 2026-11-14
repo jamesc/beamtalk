@@ -27,6 +27,7 @@ immediate `halt_node/1`.
 
 -export([
     dispatch/3,
+    dispatch/4,
     stop_node/1,
     halt_node/1,
     halt_unless_stopping/1,
@@ -35,7 +36,7 @@ immediate `halt_node/1`.
     mark_stop_requested/1
 ]).
 -ifdef(TEST).
--export([clear_stop_requested/0]).
+-export([clear_stop_requested/0, raw_trace/2]).
 -endif.
 
 -define(STOP_KEY, {?MODULE, stop_requested}).
@@ -52,6 +53,19 @@ and halts `1`, and `Program exit: N` stops the node gracefully with status `N`.
 """.
 -spec dispatch(pid(), atom(), list()) -> no_return().
 dispatch(ClassPid, Selector, Args) ->
+    dispatch(ClassPid, Selector, Args, #{}).
+
+-doc """
+`dispatch/3` with render options (`beamtalk run --raw-mfa`, ADR 0139 decision 4).
+
+`#{raw_mfa => true}` follows an uncaught error's message with the complete
+stack, hidden frames included, each frame as its display name beside its raw
+`module:function/arity`. The option is an argument, chosen by the one client
+that consumes the output; nothing is written to the application environment.
+Without it the output is exactly `dispatch/3`'s.
+""".
+-spec dispatch(pid(), atom(), list(), map()) -> no_return().
+dispatch(ClassPid, Selector, Args, Opts) ->
     try beamtalk_class_dispatch:class_send(ClassPid, Selector, Args) of
         _Result -> halt_unless_stopping(0)
     catch
@@ -76,7 +90,12 @@ dispatch(ClassPid, Selector, Args) ->
                 none ->
                     try
                         io:put_chars(
-                            standard_error, [beamtalk_error:format_safe(Reason, Stacktrace), $\n]
+                            standard_error,
+                            [
+                                beamtalk_error:format_safe(Reason, Stacktrace),
+                                $\n,
+                                raw_trace(Opts, Stacktrace)
+                            ]
                         )
                     catch
                         _:_ -> ok
@@ -86,6 +105,19 @@ dispatch(ClassPid, Selector, Args) ->
             end,
             halt_unless_stopping(1)
     end.
+
+-doc """
+The `--raw-mfa` stack listing for an uncaught error: one `  at ` line per frame
+(the whole stack, hidden frames included), or nothing without the option.
+""".
+-spec raw_trace(map(), list()) -> iodata().
+raw_trace(#{raw_mfa := true}, Stacktrace) when is_list(Stacktrace) ->
+    [
+        ["  at ", beamtalk_stack_frame:format_frame_raw(F), $\n]
+     || F <- beamtalk_stack_frame:wrap(Stacktrace)
+    ];
+raw_trace(_Opts, _Stacktrace) ->
+    [].
 
 -doc """
 Stop the node gracefully with exit status `Code` (`Program exit:` where the
