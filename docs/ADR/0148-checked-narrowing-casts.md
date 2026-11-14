@@ -3,6 +3,32 @@
 ## Status
 Proposed (2026-11-14). Draft for owner review; not accepted. Tracking: BT-4772.
 
+### Scope amendment (2026-11-14): part 1 is being done as BT-4823
+
+The owner fast-tracked part 1 as a separate bug, **BT-4823** ("Typed comparison
+fast path answers wrong when the declared type is violated"), implemented ahead
+of this ADR. Consequences for this document:
+
+- **Part 1 is no longer a decision of this ADR.** It is kept below as the
+  rationale and the record of what BT-4823 must do. The decision left open here
+  is **part 2 (explicit checked cast) and part 3 (no implicit guard on `::`
+  locals)**.
+- BT-4823's scope is narrower than part 1's wording: **receiver side only**.
+  The comparison *argument* stays unchecked by decision (BT-3928, 2026-10-19):
+  `5 < nil` still answers `true`, with the static warning and the documented
+  term-order fallback. Part 1 never proposed otherwise; this note makes it
+  explicit.
+- BT-4823 must be benchmarked, and adds the row this ADR called 11e. The ~1 ns
+  figures below are estimates until that PR reports a measurement; **replace
+  them with its numbers** when it merges.
+- The evidence test `stdlib/test/narrowing_cast_wrong_value_test.bt` pins
+  today's wrong answers. It **will need flipping** when BT-4823 merges: the
+  `...AnswersSilently` tests for `<`, `>` and the field case (and
+  `testSameWrongAnswerWithoutAnyCast`) must expect `does_not_understand`.
+  BT-4823's description tells its author to flag this so this branch can be
+  rebased; whoever merges first updates the test. The cast-local and
+  arithmetic tests do not change.
+
 ## Context
 
 ### Problem statement
@@ -102,15 +128,21 @@ receiver raises.
 ## Decision
 
 Two parts, in this order. Part 1 is independent of part 2 and is the actual
-fix for the silent wrong answer.
+fix for the silent wrong answer. **Part 1 is implemented as BT-4823 (see the
+scope amendment above); the open decision is part 2.**
 
-### 1. Make the comparison fast path obey "never results"
+### 1. Make the comparison fast path obey "never results" (BT-4823)
 
 Drop the bare-BIF path for `<`, `>`, `<=`, `>=` on a typed parameter or field.
 Every comparison whose receiver is not a numeric/string literal (or `self` in
 a numeric class) takes the existing inline `OperatorGuard::Comparison` test
 (`is_number or is_binary`). `nil > 10` then raises `does_not_understand` for a
-typed parameter exactly as it does for an untyped one.
+typed parameter exactly as it does for an untyped one. Only the *receiver* is
+tested; the argument stays unchecked (BT-3928), so `5 < nil` is still `true`.
+Only declared types are guarded: a receiver whose kind the compiler proves (a
+literal, integer arithmetic) keeps the bare BIF. Annotated *locals* already take
+the guard today (the evidence table), so the sites that change are typed
+parameters and typed fields.
 
 Arithmetic keeps its bare path: its BIF raises, so a lying annotation fails
 loudly, and row 11b keeps its zero-guard fast path. It still reports
@@ -225,8 +257,11 @@ Rows that depend on a trusted declared type: **only 11b** (and the guarded
 typed-send rows 1a and 14a, which already stand behind a guard and are
 unaffected). Row 13b is the only vs-elixir row containing a narrowing cast, so
 it is the only row an implicit `::` guard would slow. No row measures a
-comparison on a typed parameter, so part 1 has no row today; add **11e**
-(`a < 1`, `a :: Integer`) with it.
+comparison on a typed parameter, so part 1 has no row today; BT-4823 adds **11e**
+(`a < 1`, `a :: Integer`). BT-3928 rejected an *argument* check partly because
+the stdlib sort and `max:` hot paths compare typed values with no benchmark to
+measure the cost; BT-4823 adds a *receiver* branch on those same paths, so its
+before/after numbers for them, not the 11b/11c delta, are the figure to trust.
 
 Estimates, not measurements:
 
@@ -251,9 +286,9 @@ Estimates, not measurements:
   `asType:`. Runtime validation lives in separate libraries (zod, typeguard).
 - **Gleam:** no casts; untyped data goes through decoders. The nearest thing
   to ADR 0147's boundary validator.
-- **Erlang/Elixir:** specs are not enforced; function-head guards are. A
-  typed parameter that is trusted *without* a guard is stricter-than-OTP
-  behaviour with weaker safety, which part 1 corrects.
+- **Erlang/Elixir:** specs are not enforced; function-head guards are. In OTP
+  a wrong value reaching `when is_integer(N)` fails the clause; trusting a
+  declared type with no guard is *less* safe than that, which part 1 corrects.
 - **Racket (contracts):** checked at module boundaries, with real cost for
   higher-order values. The warning against checking generic arguments.
 - **Pharo/Squeak:** untyped; `assert:` is the idiom. `checkedAs:` is the typed
@@ -348,7 +383,7 @@ counts show casts concentrated in code that already validates its input.
   checked one.
 
 ### Neutral
-- Row 11b is unchanged; a new 11e row would record the part 1 cost.
+- Row 11b is unchanged; BT-4823 adds an 11e row that records the part 1 cost.
 
 ## Open Questions
 
@@ -356,16 +391,28 @@ counts show casts concentrated in code that already validates its input.
 - Should arithmetic on trusted parameters also take the guard, to make
   "never results" literally true (gives up row 11b's 0.23 ns)? This ADR keeps
   the bare path because its failure is loud.
+- What does `checkedAs:` test for an **actor** class? `routing::type_test`
+  returns `None` for actors and user classes, and the measured casts in
+  `stdlib/test` and `tests/` are almost all `:: SomeActor from Object`. The
+  semantics above only specify built-in and tagged user classes. This must be
+  settled before part 2 is accepted.
+- Does part 2 have demonstrated demand? The measured casts are 3 `String`
+  casts in stdlib, 0 in examples and actor casts in tests; no built-in-typed
+  cast needs a checked form today. The owner may prefer to accept BT-4823,
+  keep the lint, and defer part 2 until the satellite counts exist.
+- Should BT-4823 also cover `=`/`~=`, `max:`/`min:` and `between:and:` on a
+  typed receiver, if they can answer wrongly? BT-4823 asks for this to be
+  checked; record the finding here once known.
 - Does the `String` tag test in `routing::type_test` match what an FFI result
   holds before coercion (relevant to row 13b)? Check before any implicit
   guard on FFI-fed locals.
 
 ## Implementation
 
-Not started, and no implementation issues are filed until this ADR is
+Part 1 is BT-4823 (in progress, separate PR). Part 2 is not started, and no implementation issues are filed until this ADR is
 accepted.
 
-Part 1 touches `receiver_is_statically_comparable` / `operator_guard`
+Part 1 (BT-4823, not this ADR's work) touches `receiver_is_statically_comparable` / `operator_guard`
 (`core_erlang/operators.rs`) and the comparison half of `field_types.rs`
 (`BareOperator::Comparison`, `trusted_param_types` for comparisons); it flips
 the pinned assertions in `narrowing_cast_wrong_value_test.bt`. Part 2 touches
@@ -376,12 +423,13 @@ renderer (one rendering, no copy), the `narrowing-cast` lint hint, and
 
 ## Migration Path
 
-Part 1: one release note; no source change expected. Part 2: none.
+Part 1 (BT-4823): one release note; no source change expected. Part 2: none.
 
 ## References
 - Related issues: BT-4772 (this ADR), BT-4719 (visibility), BT-2015 (accepting
   narrowing silently), BT-4796, BT-4788, BT-4769 (`isKindOf:` fast paths),
-  BT-4736 (option aliases to shapes), BT-3921 / BT-3924 / BT-3925 (trusted
+  BT-4736 (option aliases to shapes), BT-4823 (part 1 fix), BT-3928
+  (comparison argument stays unchecked), BT-3921 / BT-3924 / BT-3925 (trusted
   operator types), BT-1944 (erasure test)
 - Related ADRs: ADR 0025 (gradual typing; `asType:`; Amendment BT-4118),
   ADR 0108 (aliases), ADR 0116 (operator guards), ADR 0147 (map-shape types),
