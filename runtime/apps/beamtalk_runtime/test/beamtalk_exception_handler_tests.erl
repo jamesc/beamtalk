@@ -1665,3 +1665,36 @@ ensure_wrapped_keeps_the_stack_of_a_rejected_future_test() ->
         throw, {future_rejected, beamtalk_error:new(type_error, 'Object')}, Await
     ),
     ?assertEqual(Await, maps:get(raw_stacktrace, Fresh)).
+
+%% BT-4850: an exception that carries an empty stack (a self-send error wrapped by
+%% `beamtalk_error:raise/1`) takes the catch stack at the next `reraise/4`; one
+%% that carries a stack keeps it.
+ensure_wrapped_context_backfills_an_empty_stack_test() ->
+    Raise = [{maps, get, 2, []}],
+    Catch = [{beamtalk_actor, sync_call, 5, []}],
+    Ctx = #{selector => inner, class => 'Counter'},
+    Empty = (make_test_exception())#{raw_stacktrace => []},
+    ?assertEqual(
+        Catch,
+        maps:get(
+            raw_stacktrace, beamtalk_exception_handler:ensure_wrapped(error, Empty, Catch, Ctx)
+        )
+    ),
+    Carries = (make_test_exception())#{raw_stacktrace => Raise},
+    ?assertEqual(
+        Raise,
+        maps:get(
+            raw_stacktrace, beamtalk_exception_handler:ensure_wrapped(error, Carries, Catch, Ctx)
+        )
+    ).
+
+%% BT-4850: `beamtalk run` and `beamtalk test` show the stack an exception carries
+%% from where it was raised, else the stack of the catch.
+raise_site_stacktrace_prefers_the_carried_stack_test() ->
+    Raise = [{maps, get, 2, []}],
+    Catch = [{beamtalk_actor, sync_call, 5, []}],
+    Carries = (make_test_exception())#{raw_stacktrace => Raise},
+    ?assertEqual(Raise, beamtalk_exception_handler:raise_site_stacktrace(Carries, Catch)),
+    Empty = (make_test_exception())#{raw_stacktrace => []},
+    ?assertEqual(Catch, beamtalk_exception_handler:raise_site_stacktrace(Empty, Catch)),
+    ?assertEqual(Catch, beamtalk_exception_handler:raise_site_stacktrace(not_found, Catch)).

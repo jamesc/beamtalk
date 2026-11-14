@@ -16,6 +16,7 @@ use crate::core_erlang::{CodeGenContext, CoreErlangGenerator, Result};
 
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, MessageSelector};
 use beamtalk_core::source_analysis::Span;
@@ -153,6 +154,29 @@ impl CoreErlangGenerator {
                 "}",
             ]
         };
+        // BT-4850: the re-raise and raise calls carry the send's line, so the
+        // frame of the method that sent the message reads `Class>>selector
+        // (file.bt:N)` and not a line-less `dispatch`.
+        // The caught trace is raw; `reraise` can only keep the frames of a built one.
+        let built_var = self.fresh_var(&format!("{var_prefix}Built"));
+        let reraise_call = self.annotate_current_send_call(docvec![
+            "call 'beamtalk_exception_handler':'reraise'(",
+            leaf::var(type_var.clone()),
+            ", ",
+            leaf::var(reason_var.clone()),
+            ", ",
+            leaf::var(built_var.clone()),
+            ", ~{'selector' => ",
+            leaf::atom(selector_atom.to_string()),
+            ", 'class' => ",
+            leaf::var(class_var.clone()),
+            "}~)",
+        ]);
+        let raise_call = self.annotate_current_send_call(docvec![
+            "call 'beamtalk_error':'raise'(",
+            leaf::var(plain_error_var.clone()),
+            ")",
+        ]);
         docvec![
             "<{'error', ",
             nlr_tuple_doc(),
@@ -160,30 +184,23 @@ impl CoreErlangGenerator {
             nlr_tuple_doc(),
             ") ",
             "<{'error', {",
-            leaf::var(type_var.clone()),
-            ", ",
-            leaf::var(reason_var.clone()),
-            ", ",
-            leaf::var(stack_var.clone()),
-            "}, _}> when 'true' -> let ",
-            leaf::var(class_var.clone()),
-            " = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in ",
-            "call 'beamtalk_exception_handler':'reraise'(",
             leaf::var(type_var),
             ", ",
             leaf::var(reason_var),
             ", ",
-            leaf::var(stack_var),
-            ", ~{'selector' => ",
-            leaf::atom(selector_atom.to_string()),
-            ", 'class' => ",
+            leaf::var(stack_var.clone()),
+            "}, _}> when 'true' -> let ",
+            leaf::var(built_var),
+            " = ",
+            form::primop("build_stacktrace", [leaf::var(stack_var)]),
+            " in let ",
             leaf::var(class_var),
-            "}~) ",
-            "<{'error', ",
-            leaf::var(plain_error_var.clone()),
-            ", _}> when 'true' -> call 'beamtalk_error':'raise'(",
+            " = call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'()) in ",
+            reraise_call,
+            " <{'error', ",
             leaf::var(plain_error_var),
-            ")",
+            ", _}> when 'true' -> ",
+            raise_call,
             no_match_fallback,
             " ",
         ]
@@ -707,20 +724,10 @@ impl CoreErlangGenerator {
         let selector = selector_atom.into();
         // The args are bound once so the two arms below do not duplicate (and
         // re-evaluate) the argument expressions.
-        docvec![
-            "let ",
-            leaf::var(args_var.clone()),
-            " = [",
-            args_doc,
-            "] in let ",
-            leaf::var(class_mod_var.clone()),
-            " = call 'maps':'get'('__class_mod__', ",
-            leaf::var(state_var.clone()),
-            ", ",
-            leaf::atom(self.module_name.clone()),
-            ") in case call 'erlang':'function_exported'(",
-            leaf::var(class_mod_var.clone()),
-            ", 'safe_dispatch', 4) of <'true'> when 'true' -> call ",
+        // BT-4850: both calls carry the send's line, so the frame of the sending
+        // method has a location.
+        let call4 = self.annotate_current_send_call(docvec![
+            "call ",
             leaf::var(class_mod_var.clone()),
             ":'safe_dispatch'(",
             leaf::atom(selector.clone()),
@@ -732,15 +739,37 @@ impl CoreErlangGenerator {
             leaf::var("Self"),
             ", ",
             leaf::var(state_var.clone()),
-            ") <_> when 'true' -> call ",
-            leaf::var(class_mod_var),
+            ")",
+        ]);
+        let call3 = self.annotate_current_send_call(docvec![
+            "call ",
+            leaf::var(class_mod_var.clone()),
             ":'safe_dispatch'(",
             leaf::atom(selector),
             ", ",
-            leaf::var(args_var),
+            leaf::var(args_var.clone()),
             ", ",
+            leaf::var(state_var.clone()),
+            ")",
+        ]);
+        docvec![
+            "let ",
+            leaf::var(args_var),
+            " = [",
+            args_doc,
+            "] in let ",
+            leaf::var(class_mod_var.clone()),
+            " = call 'maps':'get'('__class_mod__', ",
             leaf::var(state_var),
-            ") end"
+            ", ",
+            leaf::atom(self.module_name.clone()),
+            ") in case call 'erlang':'function_exported'(",
+            leaf::var(class_mod_var),
+            ", 'safe_dispatch', 4) of <'true'> when 'true' -> ",
+            call4,
+            " <_> when 'true' -> ",
+            call3,
+            " end"
         ]
     }
 }

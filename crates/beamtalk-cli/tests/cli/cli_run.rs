@@ -556,6 +556,140 @@ fn run_shows_class_process_frames_bt_4829() {
     }
 }
 
+/// BT-4850: a does-not-understand raised inside an actor method renders the
+/// actor's frames as `Class>>selector (file.bt:N)`, for the raising method and
+/// the actor method that called it, never as `Class>>dispatch`.
+#[test]
+fn run_names_actor_frames_for_a_dnu_in_an_actor_method_bt_4850() {
+    let project = cli_common::fixture_project();
+    write_run_fixture(
+        project.path(),
+        "DnuActor",
+        "Actor subclass: DnuActor\n\n  outer =>\n    x := self inner.\n    x\n\n  inner =>\n    self noSuchThing.\n    1\n",
+    );
+    write_run_fixture(
+        project.path(),
+        "Main",
+        "Object subclass: Main\n\n  class run =>\n    a := DnuActor spawn.\n    x := a outer.\n    x\n",
+    );
+
+    // `--raw-mfa` lists the raw MFA beside each name, so only the default output
+    // is free of compiler-made names.
+    for (extra, raw) in [(&[][..], false), (&["--raw-mfa"][..], true)] {
+        let assert = cli_common::beamtalk_run()
+            .current_dir(project.path())
+            .args(["Main", "run"])
+            .args(extra)
+            .assert()
+            .failure()
+            .stderr(contains("DnuActor does not understand 'noSuchThing'"))
+            .stderr(contains("  at DnuActor>>inner (src/DnuActor.bt:11)"))
+            .stderr(contains("  at DnuActor>>outer (src/DnuActor.bt:7)"))
+            .stderr(contains("  at DnuActor>>dispatch").not());
+        if !raw {
+            assert.stderr(contains("bt@").not());
+        }
+    }
+}
+
+/// Writes a package-native Erlang module whose `inner/1` fails with the bare reason
+/// `not_found`, and a class whose class methods reach it (and raise bare
+/// `throw`/`exit` reasons), for the bare-reason frame tests.
+fn write_bare_reason_fixture(project: &std::path::Path) {
+    std::fs::create_dir_all(project.join("native")).unwrap();
+    std::fs::write(
+        project.join("native/my_native.erl"),
+        "%% Copyright 2026 James Casey\n\
+         %% SPDX-License-Identifier: Apache-2.0\n\
+         -module(my_native).\n\
+         -moduledoc \"Fixture native module for the BT-4850 tests.\".\n\
+         -export([outer/1]).\n\
+         -doc \"Fails with a bare reason one frame down.\".\n\
+         outer(X) ->\n\
+         \x20\x20\x20\x20Y = inner(X),\n\
+         \x20\x20\x20\x20{ok, Y}.\n\
+         %% Two clauses, so the call in `outer/1` stays a real frame.\n\
+         inner([]) -> erlang:error(not_found);\n\
+         inner([H | _]) -> H.\n",
+    )
+    .unwrap();
+    write_run_fixture(
+        project,
+        "Bare",
+        "Object subclass: Bare\n\n  class viaNative =>\n    x := Erlang my_native outer: (List new).\n    x\n\n  class viaThrow =>\n    x := Erlang erlang throw: #bare_throw.\n    x\n",
+    );
+}
+
+/// BT-4850: a class method that fails with a bare Erlang `error(not_found)` (not a
+/// Beamtalk error) shows the Erlang frames that raised it, `module:function/arity
+/// (file:line)`, under the default output and `--raw-mfa`.
+#[test]
+fn run_shows_frames_for_a_bare_erlang_reason_bt_4850() {
+    let project = cli_common::fixture_project();
+    write_bare_reason_fixture(project.path());
+
+    for extra in [&[][..], &["--raw-mfa"][..]] {
+        cli_common::beamtalk_run()
+            .current_dir(project.path())
+            .args(["Bare", "viaNative"])
+            .args(extra)
+            .assert()
+            .failure()
+            .stderr(contains("not_found"))
+            .stderr(contains("  at my_native:inner/1 (native/my_native.erl:11)"))
+            .stderr(contains("  at my_native:outer/1 (native/my_native.erl:8)"));
+    }
+    // A bare `throw` carries only the catch stack: its frames are listed, not dropped.
+    cli_common::beamtalk_run()
+        .current_dir(project.path())
+        .args(["Bare", "viaThrow"])
+        .assert()
+        .failure()
+        .stderr(contains("bare_throw"))
+        .stderr(contains("frames hidden; --raw-mfa shows all)"));
+}
+
+/// BT-4850: `run --connect` prints the same frames as script mode for a bare Erlang
+/// reason: the native module's frames by default, and the catch stack's hidden-frames
+/// notice for a reason with no frame of its own.
+#[test]
+#[ignore = "requires beamtalk binary and erlang runtime (boots a live workspace, slow)"]
+fn run_connected_matches_script_mode_for_bare_reasons_bt_4850() {
+    let project = cli_common::fixture_project();
+    write_bare_reason_fixture(project.path());
+    let _guard = WorkspaceStopGuard {
+        project_dir: project.path().to_path_buf(),
+    };
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("repl")
+        .write_stdin("exit\n")
+        .timeout(std::time::Duration::from_mins(2))
+        .assert()
+        .success();
+
+    for extra in [&[][..], &["--connect"][..]] {
+        cli_common::beamtalk_run()
+            .current_dir(project.path())
+            .args(["Bare", "viaNative"])
+            .args(extra)
+            .timeout(std::time::Duration::from_mins(1))
+            .assert()
+            .failure()
+            .stderr(contains("  at my_native:inner/1 (native/my_native.erl:11)"))
+            .stderr(contains("  at my_native:outer/1 (native/my_native.erl:8)"));
+        cli_common::beamtalk_run()
+            .current_dir(project.path())
+            .args(["Bare", "viaThrow"])
+            .args(extra)
+            .timeout(std::time::Duration::from_mins(1))
+            .assert()
+            .failure()
+            .stderr(contains("bare_throw"))
+            .stderr(contains("frames hidden; --raw-mfa shows all)"));
+    }
+}
+
 /// BT-4835: `run --connect` prints the same frames as script mode: the visible
 /// ones by default (with the hidden-frames notice), everything under `--raw-mfa`.
 #[test]
