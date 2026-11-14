@@ -5,7 +5,7 @@
 
 use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
-use super::fold_driver::AccumulateOp;
+use super::fold_driver::FoldOp;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -105,10 +105,10 @@ impl CoreErlangGenerator {
         negate: bool,
     ) -> Result<Document<'static>> {
         let op = if negate {
-            AccumulateOp::Reject
+            FoldOp::Reject
         } else {
-            AccumulateOp::Select
+            FoldOp::Select
         };
-        self.generate_accumulate_fold_with_mutations(receiver, body, op)
+        self.generate_fold_with_mutations(receiver, body, op)
     }
 }
