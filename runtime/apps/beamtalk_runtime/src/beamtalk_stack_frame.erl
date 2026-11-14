@@ -64,6 +64,7 @@ loaded class modules share it. Which frames are listed is not decided here.
     wrap_frame/1,
     format_frame/1,
     render_mfa/1,
+    render_mfas/1,
     raw_mfa/1,
     frame_parts/1,
     frame_source_path/1
@@ -376,6 +377,22 @@ never resolves a class or hides a compiler-made name.
 -spec raw_mfa({atom(), atom(), arity()}) -> binary().
 raw_mfa({Module, Function, Arity}) when is_atom(Module), is_atom(Function), is_integer(Arity) ->
     beamtalk_error:chars_to_binary(io_lib:format("~ts:~ts/~B", [Module, Function, Arity])).
+
+-doc """
+`render_mfa/1` for many MFAs at once, resolving the class table a single time
+(`beamtalk_class_registry:module_to_class_map/0`) instead of once per MFA.
+Answers a map from each distinct input MFA to its rendered text. Used by the
+crash-report hook, which renders every frame of one report together.
+""".
+-spec render_mfas([{atom(), atom(), arity()}]) -> #{{atom(), atom(), arity()} => binary()}.
+render_mfas(Mfas) when is_list(Mfas) ->
+    ModuleToClass = beamtalk_class_registry:module_to_class_map(),
+    Frames = [{M, F, A, []} || {M, F, A} <- Mfas, is_atom(M), is_atom(F), is_integer(A)],
+    Shared = shared_class_segments(Frames, ModuleToClass),
+    maps:from_list([
+        {{M, F, A}, head(frame_parts(wrap_frame(Frame, ModuleToClass, Shared)))}
+     || {M, F, A, _} = Frame <- Frames
+    ]).
 
 %% The location-free text of a frame, built from `frame_parts/1`.
 -spec head(map()) -> binary().

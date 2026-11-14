@@ -88,6 +88,9 @@ start(_StartType, _StartArgs) ->
     %% which do not go through an actor's format_status/1.
     ok = beamtalk_actor_redaction:install_crash_report_filter(),
 
+    %% BT-4820: show Beamtalk names (Class>>selector) in crash reports.
+    ok = beamtalk_crash_report_filter:install(),
+
     %% Start the runtime supervisor tree (which starts beamtalk_bootstrap, beamtalk_stdlib,
     %% and beamtalk_object_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)
     case beamtalk_runtime_sup:start_link() of
