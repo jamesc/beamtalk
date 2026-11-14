@@ -302,17 +302,17 @@ format_includes_stacktrace_metadata_test() ->
         }
     },
     Decoded = decode_event(Event),
-    StackBin = maps:get(<<"stacktrace">>, Decoded),
-    ?assert(is_binary(StackBin)),
-    ?assert(binary:match(StackBin, <<"my_mod">>) =/= nomatch).
+    [Frame] = maps:get(<<"stacktrace">>, Decoded),
+    ?assertEqual(<<"my_mod">>, maps:get(<<"module">>, Frame)).
 
-%% BT-4815: the JSON stacktrace uses the shared frame renderer, so an Erlang
-%% frame is `module:function/arity` and a block is `[] in ...`; the raw `mfa`
-%% log field is unchanged.
-format_stacktrace_uses_shared_frame_renderer_test() ->
+%% BT-4815 / BT-4819: the JSON stacktrace uses the shared frame renderer and
+%% carries both forms per frame (display string plus raw module, function and
+%% arity); the raw `mfa` log field is unchanged.
+format_stacktrace_carries_both_forms_test() ->
     Stack = [
         {lists, foldl, 3, [{file, "lists.erl"}, {line, 2471}]},
-        {'bt@user@bt4815_json_miss', '-run/0-fun-0-', 1, [{file, "a.bt"}, {line, 9}]}
+        {'bt@user@bt4815_json_miss', '-run/0-fun-0-', 1, [{file, "a.bt"}, {line, 9}]},
+        {gen_server, try_handle_call, 4, [{file, "gen_server.erl"}, {line, 1}]}
     ],
     Event = #{
         level => error,
@@ -324,10 +324,19 @@ format_stacktrace_uses_shared_frame_renderer_test() ->
         }
     },
     Decoded = decode_event(Event),
+    [First, Second, Third] = maps:get(<<"stacktrace">>, Decoded),
+    ?assertEqual(<<"lists:foldl/3 (lists.erl:2471)">>, maps:get(<<"display">>, First)),
+    ?assertEqual(<<"lists">>, maps:get(<<"module">>, First)),
+    ?assertEqual(<<"foldl">>, maps:get(<<"function">>, First)),
+    ?assertEqual(3, maps:get(<<"arity">>, First)),
     ?assertEqual(
-        <<"  lists:foldl/3 (lists.erl:2471)\n  [] in bt@user@bt4815_json_miss>>run (a.bt:9)">>,
-        maps:get(<<"stacktrace">>, Decoded)
+        <<"[] in bt@user@bt4815_json_miss>>run (a.bt:9)">>, maps:get(<<"display">>, Second)
     ),
+    %% the raw module survives a class-table miss
+    ?assertEqual(<<"bt@user@bt4815_json_miss">>, maps:get(<<"module">>, Second)),
+    ?assertEqual(<<"-run/0-fun-0-">>, maps:get(<<"function">>, Second)),
+    %% hidden frames are present, flagged
+    ?assertEqual(true, maps:get(<<"hidden">>, Third)),
     ?assertEqual(<<"lists:foldl/3">>, maps:get(<<"mfa">>, Decoded)).
 
 format_handles_unicode_format_args_test() ->
@@ -497,8 +506,11 @@ format_non_list_stacktrace_test() ->
         }
     },
     Decoded = decode_event(Event),
-    StackBin = maps:get(<<"stacktrace">>, Decoded),
-    ?assert(is_binary(StackBin)).
+    %% Always an array of frame objects, even for a shape that is not a stack.
+    [Frame] = maps:get(<<"stacktrace">>, Decoded),
+    ?assert(is_binary(maps:get(<<"display">>, Frame))),
+    ?assertEqual(null, maps:get(<<"module">>, Frame)),
+    ?assertEqual(0, maps:get(<<"arity">>, Frame)).
 
 format_application_controller_domain_inference_test() ->
     Report = #{label => {application_controller, progress}},
@@ -636,7 +648,7 @@ format_non_list_stacktrace_with_bt_error_test() ->
         }
     },
     Decoded = decode_event(Event),
-    StackBin = maps:get(<<"stacktrace">>, Decoded),
+    [#{<<"display">> := StackBin}] = maps:get(<<"stacktrace">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(StackBin, <<"MyClass does not understand">>)),
     %% The BtError branch in format_extra_value/2 appends "\n  raw: <term>" after
     %% the error message. Asserting the "raw:" marker proves this branch was taken

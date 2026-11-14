@@ -22,6 +22,10 @@ TestResult is a tagged map:
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
+%% Keys of `beamtalk_stack_frame:structured_frame/1` a test frame adds to its own
+%% (`file` and `line` it already has, from the same frame parts).
+-define(RAW_FRAME_KEYS, [<<"display">>, <<"module">>, <<"function">>, <<"arity">>, <<"hidden">>]).
+
 -export([
     %% TestRunner class-side primitives
     run_all/0,
@@ -530,12 +534,14 @@ Serialize one structured stack frame (BT-4355): Beamtalk terms only —
 `class`, `selector`, `class_side` (the text's `Class class>>selector`),
 `kind` (`beamtalk`, or `unresolved` for a `bt@...` module the class table
 cannot resolve, whose `class` is then the raw module), `block`, `file` (null
-when unknown), `line` (null when unknown) and `repeat`. No Erlang
-module/function/arity is ever emitted for a Beamtalk frame.
+when unknown), `line` (null when unknown) and `repeat`. Since ADR 0139
+(decision 4) a frame also carries both forms: `display`, the raw `module`,
+`function` and `arity`, and the `hidden` flag, all from
+`beamtalk_stack_frame:structured_frame/1`.
 """.
 -spec serialize_frame(map()) -> map().
 serialize_frame(#{class := Class, selector := Selector, block := Block} = Frame) ->
-    #{
+    Base = #{
         <<"class">> => ensure_utf8(Class),
         <<"selector">> => ensure_utf8(Selector),
         <<"class_side">> => maps:get(class_side, Frame, false),
@@ -544,7 +550,9 @@ serialize_frame(#{class := Class, selector := Selector, block := Block} = Frame)
         <<"file">> => null_if_nil(maps:get(file, Frame, nil)),
         <<"line">> => null_if_nil(maps:get(line, Frame, nil)),
         <<"repeat">> => maps:get(repeat, Frame, 1)
-    }.
+    },
+    Frame1 = maps:get(structured, Frame, #{}),
+    maps:merge(Base, maps:with(?RAW_FRAME_KEYS, Frame1)).
 
 -spec null_if_nil(term()) -> term().
 null_if_nil(nil) -> null;

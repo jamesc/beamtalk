@@ -7,6 +7,13 @@
 /// Only available post-exception (via `Exception>>stackTrace`), not during
 /// live execution (BEAM doesn't expose thisContext).
 ///
+/// `printString` always renders the display name (`Counter>>increment`),
+/// whatever the caller wants; it never depends on a flag or setting. The raw
+/// Erlang form is a separate question: `rawMfa` answers `module:function/arity`
+/// and `isHidden` says whether `Exception>>stackTrace` leaves the frame out by
+/// default (`Exception>>fullStackTrace` lists every frame, hidden ones
+/// included). ADR 0139, decision 4.
+///
 /// ## Examples
 /// ```beamtalk
 /// [1 / 0] on: Exception do: [:e |
@@ -74,6 +81,24 @@ typed Value subclass: StackFrame
   /// frame file   // => "counter.bt"
   /// ```
   file -> String | Nil => @primitive
+
+  /// Return the raw Erlang `module:function/arity` as a string, or nil when
+  /// the frame has none. The display name (`printString`) is unaffected.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// frame rawMfa   // => "lists:foldl/3"
+  /// ```
+  rawMfa -> String | Nil => @primitive
+
+  /// Return true when `Exception>>stackTrace` leaves this frame out by
+  /// default (OTP plumbing, generated callbacks, runtime internals).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// frame isHidden   // => false
+  /// ```
+  isHidden -> Boolean => @primitive
 
   // === Printing ===
 

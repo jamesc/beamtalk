@@ -34,4 +34,6 @@ pub mod test_versions;
 pub mod ws_client;
 
 pub use request::{RequestBuilder, next_msg_id};
-pub use response::{ActorInfo, ClassInfo, ModuleInfo, ReplResponse, SessionInfo, Warning};
+pub use response::{
+    ActorInfo, ClassInfo, ModuleInfo, ReplResponse, SessionInfo, StackFrameInfo, Warning,
+};

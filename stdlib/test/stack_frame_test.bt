@@ -103,3 +103,24 @@ TestCase subclass: StackFrameTest
 
   testStackFrameFileMatchesSourcePosition =>
     self assert: (self.frame file endsWith: "stack_frame_test.bt")
+
+  // BT-4819 (ADR 0139, decision 4): the raw MFA is an accessor; printString
+  // never shows it.
+  testRawMfaIsModuleFunctionArity =>
+    raw := self.frame rawMfa
+    self assert: (raw isKindOf: String)
+    self assert: (raw includesSubstring: ":")
+    self assert: (raw includesSubstring: "/")
+    self deny: (self.frame printString includesSubstring: raw)
+
+  testIsHiddenAnswersBoolean => self deny: self.frame isHidden
+
+  testFullStackTraceKeepsEveryFrameAndFlagsHidden =>
+    result := [
+      1 / 0
+    ] on: Exception do: [:e | e fullStackTrace size >= e stackTrace size]
+    self assert: result
+    hiddenShown := [
+      1 / 0
+    ] on: Exception do: [:e | e stackTrace anySatisfy: [:f | f isHidden]]
+    self deny: hiddenShown

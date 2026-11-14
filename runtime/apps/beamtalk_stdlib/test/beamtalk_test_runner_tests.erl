@@ -342,7 +342,16 @@ result_to_json_includes_structured_frames_test() ->
         block => true,
         file => nil,
         line => nil,
-        repeat => 2
+        repeat => 2,
+        structured => #{
+            <<"display">> => <<"[] in A class>>m1">>,
+            <<"module">> => 'bt@user@A',
+            <<"function">> => '-class_m1/0-fun-0-',
+            <<"arity">> => 1,
+            <<"file">> => null,
+            <<"line">> => null,
+            <<"hidden">> => false
+        }
     },
     Result = make_result(1, 0, 1, 0, 0.5, [
         #{
@@ -365,7 +374,12 @@ result_to_json_includes_structured_frames_test() ->
             <<"block">> => true,
             <<"file">> => null,
             <<"line">> => null,
-            <<"repeat">> => 2
+            <<"repeat">> => 2,
+            <<"display">> => <<"[] in A class>>m1">>,
+            <<"module">> => <<"bt@user@A">>,
+            <<"function">> => <<"-class_m1/0-fun-0-">>,
+            <<"arity">> => 1,
+            <<"hidden">> => false
         },
         F
     ).

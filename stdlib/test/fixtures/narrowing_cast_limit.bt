@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4772: a typed field that receives a value from a wrong narrowing cast
+// (see narrowing_cast_probe.bt).
+
+typed Value subclass: NarrowingCastLimit
+  field: limit :: Integer
+
+  isOverTen -> Object => self.limit > 10

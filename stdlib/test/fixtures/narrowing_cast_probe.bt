@@ -1,0 +1,59 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4772: probes for what a WRONG narrowing local annotation does.
+// `v :: Integer := opts at: #v` is accepted silently (BT-2015) and nothing
+// checks it at run time; each probe feeds it a value that is not an Integer.
+
+typed Value subclass: NarrowingCastProbe
+
+  /// Local narrowing cast, then arithmetic on the local.
+  localAdd: opts :: Dictionary -> Object =>
+    n :: Integer := opts at: #v
+    n + 1
+
+  /// Local narrowing cast, then an ordering comparison on the local.
+  localLess: opts :: Dictionary -> Object =>
+    n :: Integer := opts at: #v
+    n < 10
+
+  /// Local narrowing cast, then `>` on the local.
+  localGreater: opts :: Dictionary -> Object =>
+    n :: Integer := opts at: #v
+    n > 10
+
+  /// The cast value flows into a typed parameter, whose declared type
+  /// codegen trusts for the comparison.
+  paramLess: n :: Integer -> Object => n < 10
+
+  castThenParamLess: opts :: Dictionary -> Object =>
+    n :: Integer := opts at: #v
+    self paramLess: n
+
+  /// Same for arithmetic.
+  paramAdd: n :: Integer -> Object => n + 1
+
+  castThenParamAdd: opts :: Dictionary -> Object =>
+    n :: Integer := opts at: #v
+    self paramAdd: n
+
+  /// Local narrowing cast to Boolean, then a conditional on the local.
+  localCond: opts :: Dictionary -> Object =>
+    b :: Boolean := opts at: #v
+    b ifTrue: ["yes"] ifFalse: ["no"]
+
+  /// Local narrowing cast, then equality.
+  localEq: opts :: Dictionary -> Object =>
+    n :: Integer := opts at: #v
+    n =:= 5
+
+  paramGreater: n :: Integer -> Object => n > 10
+
+  castThenParamGreater: opts :: Dictionary -> Object =>
+    n :: Integer := opts at: #v
+    self paramGreater: n
+
+  /// The cast value is stored in a typed field, then compared there.
+  castThenField: opts :: Dictionary -> Object =>
+    n :: Integer := opts at: #v
+    (NarrowingCastLimit new: #{#limit => n}) isOverTen

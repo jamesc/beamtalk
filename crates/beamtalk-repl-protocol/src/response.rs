@@ -74,6 +74,16 @@ pub struct ReplResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 
+    /// The raised exception's complete stack, innermost first (error
+    /// responses, ADR 0139 decision 4). Every frame carries both forms and a
+    /// `hidden` flag; hidden frames are present, not removed.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_frames_leniently",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub frames: Option<Vec<StackFrameInfo>>,
+
     // --- Session / bindings ---
     /// Variable bindings map (bindings op).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -260,6 +270,51 @@ impl ReplResponse {
     }
 }
 
+/// `frames` is diagnostic data: an off-shape frame must not stop the primary
+/// error from decoding, so any decode failure yields `None`.
+fn deserialize_frames_leniently<'de, D>(d: D) -> Result<Option<Vec<StackFrameInfo>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(value.and_then(|v| serde_json::from_value(v).ok()))
+}
+
+/// One structured stack frame (ADR 0139, decision 4): the display string and
+/// the raw MFA side by side. The key set is pinned to
+/// `tests/repl-protocol/frame_fields.json`, which the Erlang
+/// `beamtalk_stack_frame:structured_frame/1` is checked against too.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct StackFrameInfo {
+    /// The shared renderer's text, e.g. `Counter>>increment (counter.bt:12)`.
+    pub display: String,
+    /// Raw Erlang module, `None` when the frame has none.
+    pub module: Option<String>,
+    /// Raw Erlang function, `None` when the frame has none.
+    pub function: Option<String>,
+    /// Raw arity.
+    pub arity: u32,
+    /// Display path of the source file, when known.
+    pub file: Option<String>,
+    /// Source line, when known.
+    pub line: Option<u32>,
+    /// `true` when the frame is collapsed out of default traces.
+    pub hidden: bool,
+}
+
+impl StackFrameInfo {
+    /// The raw `module:function/arity`, when the frame has a module and function.
+    #[must_use]
+    pub fn raw_mfa(&self) -> Option<String> {
+        Some(format!(
+            "{}:{}/{}",
+            self.module.as_deref()?,
+            self.function.as_deref()?,
+            self.arity
+        ))
+    }
+}
+
 /// One compilation warning with its optional hint (`warning_details` entry).
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Warning {
@@ -335,6 +390,71 @@ mod tests {
         assert!(!resp.is_error());
         assert_eq!(resp.value_string(), "42");
         assert_eq!(resp.id.as_deref(), Some("msg-001"));
+    }
+
+    #[test]
+    fn error_response_decodes_frames_with_both_forms() {
+        let json = r#"{"error":"boom","status":["done","error"],"frames":[
+            {"display":"Counter>>increment (counter.bt:12)","module":"bt@counter",
+             "function":"increment","arity":2,"file":"counter.bt","line":12,"hidden":false},
+            {"display":"gen_server:try_handle_call/4","module":"gen_server",
+             "function":"try_handle_call","arity":4,"file":null,"line":null,"hidden":true}]}"#;
+        let resp: ReplResponse = serde_json::from_str(json).unwrap();
+        let frames = resp.frames.expect("frames");
+        assert_eq!(frames.len(), 2);
+        assert_eq!(frames[0].display, "Counter>>increment (counter.bt:12)");
+        assert_eq!(
+            frames[0].raw_mfa().as_deref(),
+            Some("bt@counter:increment/2")
+        );
+        assert!(!frames[0].hidden);
+        assert!(frames[1].hidden, "hidden frames are kept, flagged");
+        assert_eq!(frames[1].line, None);
+    }
+
+    #[test]
+    fn off_shape_frames_do_not_lose_the_error() {
+        let json = r#"{"error":"boom","status":["done","error"],"frames":[{"display":7}]}"#;
+        let resp: ReplResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.error.as_deref(), Some("boom"));
+        assert!(resp.frames.is_none());
+    }
+
+    #[test]
+    fn error_response_without_frames_decodes() {
+        let resp: ReplResponse =
+            serde_json::from_str(r#"{"error":"x","status":["done","error"]}"#).unwrap();
+        assert!(resp.frames.is_none());
+    }
+
+    /// The Rust frame type and `beamtalk_stack_frame:structured_frame/1` agree
+    /// on the key set through `tests/repl-protocol/frame_fields.json`.
+    #[test]
+    fn stack_frame_info_keys_match_shared_fixture() {
+        let path = beamtalk_workspace::cargo_workspace_root!()
+            .join("tests/repl-protocol/frame_fields.json");
+        let raw = std::fs::read_to_string(&path).expect("read frame_fields.json");
+        let fixture: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let mut expected: Vec<String> = fixture["frame_fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_owned())
+            .collect();
+        expected.sort();
+        let frame = StackFrameInfo {
+            display: "x".into(),
+            module: None,
+            function: None,
+            arity: 0,
+            file: None,
+            line: None,
+            hidden: false,
+        };
+        let value = serde_json::to_value(&frame).unwrap();
+        let mut actual: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+        actual.sort();
+        assert_eq!(actual, expected);
     }
 
     #[test]

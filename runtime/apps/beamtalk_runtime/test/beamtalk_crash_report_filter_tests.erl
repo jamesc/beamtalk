@@ -49,12 +49,19 @@ setup() ->
         superclass => none, methods => #{}, class_methods => #{}, module => ?MOD
     }),
     ok = logger:add_handler(?HANDLER, ?MODULE, #{level => all}),
+    %% Only remove the filter in cleanup if this setup is the one that added it.
+    #{filters := Before} = logger:get_primary_config(),
+    Installed = not lists:keymember(beamtalk_crash_report_filter, 1, Before),
     ok = beamtalk_crash_report_filter:install(),
     process_flag(trap_exit, true),
-    ok.
+    Installed.
 
-cleanup(_) ->
-    _ = logger:remove_primary_filter(beamtalk_crash_report_filter),
+cleanup(Installed) ->
+    _ =
+        case Installed of
+            true -> logger:remove_primary_filter(beamtalk_crash_report_filter);
+            false -> ok
+        end,
     _ = logger:remove_handler(?HANDLER),
     beamtalk_test_class:stop_graceful('Bt4820Crasher'),
     code:purge(?MOD),
@@ -184,18 +191,18 @@ passthrough() ->
 
 repl_eval_frame() ->
     Cb = fun(R) -> {"~tp", [R]} end,
-    Frame = {beamtalk_repl_eval_4820, 'doit', 0, []},
-    Event = #{
-        msg => {report, #{label => {gen_server, terminate}, reason => {boom, [Frame]}}},
-        meta => #{report_cb => Cb}
+    Mfa = {beamtalk_repl_eval_4820, 'doit', 0},
+    Report = #{
+        label => {gen_server, terminate}, reason => {boom, [erlang:append_element(Mfa, [])]}
     },
-    ?assertMatch(
-        #{meta := #{report_cb := _}},
-        beamtalk_crash_report_filter:filter(Event, [])
-    ),
+    Event = #{msg => {report, Report}, meta => #{report_cb => Cb}},
+    #{meta := #{report_cb := NewCb}} = beamtalk_crash_report_filter:filter(Event, []),
+    {"~ts", [Text]} = NewCb(Report),
+    Printed = unicode:characters_to_binary(Text),
     ?assertNotEqual(
-        Cb, maps:get(report_cb, maps:get(meta, beamtalk_crash_report_filter:filter(Event, [])))
-    ).
+        nomatch, binary:match(Printed, beamtalk_stack_frame:render_mfa(Mfa))
+    ),
+    ?assertEqual(nomatch, binary:match(Printed, <<"beamtalk_repl_eval_4820:doit/0">>)).
 
 malformed_report() ->
     drain(),

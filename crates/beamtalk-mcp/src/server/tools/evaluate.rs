@@ -64,7 +64,16 @@ impl BeamtalkMcp {
                 MCP_OUTPUT_MODE,
             ))];
             parts.extend(warning_blocks(&response));
-            return Ok(CallToolResult::error(parts));
+            let mut result = CallToolResult::error(parts);
+            // ADR 0139, decision 4: the complete frame list, both forms per
+            // frame and hidden ones flagged, as structured content. The text
+            // above is unchanged; a client picks the form it wants.
+            if let Some(frames) = response.frames.as_ref()
+                && let Ok(value) = serde_json::to_value(frames)
+            {
+                result.structured_content = Some(serde_json::json!({ "frames": value }));
+            }
+            return Ok(result);
         }
 
         let warnings: Vec<ContentBlock> = warning_blocks(&response).collect();
