@@ -25,7 +25,8 @@
 # The installer is not trusted on TLS alone: the edge workflow publishes
 # `install.sh` and `install.sh.sha256` as edge release assets, and the
 # download is checked against that checksum (the way install.sh checks the
-# tarball) before it runs. A mismatch warns and keeps the installed build.
+# tarball) before it runs. Both come from the same release, so this catches a
+# corrupted download, not a compromised release. A mismatch warns and keeps the installed build.
 # The reinstall runs under an exclusive `flock` on `<prefix>/.beamtalk-refresh.lock`;
 # a session that cannot get the lock skips with a status line.
 #

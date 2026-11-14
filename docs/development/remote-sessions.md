@@ -40,7 +40,8 @@ request, well under two seconds), compares it with the marker
 and `--nightly` install, and reinstalls only when they differ. The installer it runs is the `install.sh`
 asset published on the edge release (same commit as the tarball); the download
 is checked against the published `install.sh.sha256` first, and a mismatch
-warns and keeps the installed build. The reinstall holds an exclusive `flock`
+warns and keeps the installed build. Both files come from the same release over TLS, so this
+guards against a corrupted or truncated download, not a compromised release. The reinstall holds an exclusive `flock`
 on `<prefix>/.beamtalk-refresh.lock`, so sessions starting together do not
 install into the same prefix at once: the loser prints a `skipped, another
 session is refreshing` status line. An environment
