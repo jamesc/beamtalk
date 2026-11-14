@@ -291,13 +291,14 @@ generated_callback(_, _, _) ->
 %% enclosing function's arity in its name.
 -spec callback_name_arity(atom(), arity()) -> {binary(), non_neg_integer()}.
 callback_name_arity(Function, Arity) ->
-    case
-        re:run(atom_to_list(Function), "^-(.+?)/([0-9]+)-", [
-            {capture, all_but_first, list}, unicode
-        ])
-    of
-        {match, [Name, A]} -> {unicode:characters_to_binary(Name), list_to_integer(A)};
-        nomatch -> {unicode:characters_to_binary(atom_to_list(Function)), Arity}
+    case atom_to_list(Function) of
+        [$- | _] = Chars ->
+            case re:run(Chars, "^-(.+?)/([0-9]+)-", [{capture, all_but_first, list}, unicode]) of
+                {match, [Name, A]} -> {unicode:characters_to_binary(Name), list_to_integer(A)};
+                nomatch -> {unicode:characters_to_binary(Chars), Arity}
+            end;
+        Chars ->
+            {unicode:characters_to_binary(Chars), Arity}
     end.
 
 -doc """
