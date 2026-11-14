@@ -1,9 +1,9 @@
 # ADR 0100: Open-World Diagnostic Policy for Unresolved Selectors and Classes
 
 ## Status
-Accepted (2026-07-10; proposed 2026-06-27)
+Implemented (2026-11-10) — all three rules shipped on every surface; WS3 landed via BT-4608/BT-4611 (accepted 2026-07-10; proposed 2026-06-27)
 
-**Implementation status (2026-07-12):** all three rules are implemented.
+**Implementation status (2026-11-10):** all three rules are implemented.
 Rule 1 and Rule 3 landed via BT-2793. Rule 2 landed via BT-2796 (WS2:
 `KnowledgeScope` completeness contract + parse-error guard), BT-2795 (WS1:
 project-wide extension visibility), and BT-2794 (pre-WS3 dependency guard) —

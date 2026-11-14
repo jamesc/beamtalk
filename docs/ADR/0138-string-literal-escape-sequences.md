@@ -1,7 +1,7 @@
 # ADR 0138: String Literal Escape Sequences
 
 ## Status
-Accepted (2026-10-25)
+Implemented (2026-10-26) — epic BT-4162 done (BT-4163 lexer + migration, BT-4164 printString/unparser + conformance corpus, BT-4165 docs + E2E). Accepted (2026-10-25)
 
 ## Context
 
@@ -394,7 +394,7 @@ before upgrading catalina, buccaneer, http/yaml/collections, exdura.
 
 **Epic:** BT-4162
 **Issues:** BT-4163, BT-4164, BT-4165
-**Status:** Planned
+**Status:** Done (2026-10-26) — BT-4163, BT-4164, BT-4165 all Done
 
 ## References
 

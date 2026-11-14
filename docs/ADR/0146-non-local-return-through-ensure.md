@@ -1,7 +1,7 @@
 # ADR 0146: A `^` Commits the Actor's Cell, Not a Copy
 
 ## Status
-Accepted (2026-11-07); proposed 2026-11-06. Tracking: BT-4505.
+Implemented (2026-11-11) — epic BT-4533 done: BT-4534, BT-4532, BT-4535 (fixes BT-4459), BT-4536 (relay and stamp deleted), BT-4660 (`nlr_state/2` alias removed). Accepted (2026-11-07); proposed 2026-11-06. Tracking: BT-4505.
 
 Builds on ADR 0137 (the actor-state cell) and ADR 0142 (where class methods
 run). Amends ADR 0041: for an actor, the state a `^` throw carries is no

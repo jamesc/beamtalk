@@ -1,7 +1,7 @@
 # ADR 0114: Class and Method Rename in the Live Workspace
 
 ## Status
-Accepted (2026-08-25)
+Implemented (2026-08-26) — all five phases landed under Epic BT-3267 (accepted 2026-08-25); follow-ups BT-3283, BT-3284, BT-3285 also Done
 
 ## Context
 
@@ -383,8 +383,8 @@ Total: ~L across 5 phases. Phase 1 (the validation spike) is the load-bearing ri
 ## Implementation Tracking
 
 **Epic:** BT-3267
-**Issues:** BT-3268, BT-3269, BT-3270, BT-3278, BT-3271, BT-3272, BT-3279, BT-3273, BT-3274, BT-3275, BT-3276, BT-3277
-**Status:** Planned
+**Issues:** BT-3268, BT-3269, BT-3270, BT-3278, BT-3271, BT-3272, BT-3279, BT-3273, BT-3274, BT-3275, BT-3276, BT-3277 (follow-ups: BT-3283, BT-3284, BT-3285)
+**Status:** Complete — all issues Done (epic BT-3267 closed 2026-08-26; last follow-up BT-3285 closed 2026-08-26)
 
 ## References
 - Related issues: BT-3204 (this ADR), BT-2192 (ADR 0113 — the split predecessor, owns `confirmDestructive`/two-phase-flush/undo this ADR extends), BT-2191 / BT-3183 (ADR 0112 — method-level removal, the primitive-design template), BT-3105 / BT-3107 (single-class teardown / metadata-write paths this ADR's implementation plan reuses)

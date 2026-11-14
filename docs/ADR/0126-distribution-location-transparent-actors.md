@@ -1,23 +1,26 @@
 # ADR 0126: Distribution and Location-Transparent Actors
 
 ## Status
-Accepted (2026-09-22). The Phase 0.5 wire-check spike (BT-3579; see
+Implemented (2026-09-24) — accepted 2026-09-22; Phases 0–7 shipped under Epic BT-3577 (all done); the BT-3633 `Node` introspection amendment landed 2026-09-29.
+
+The Phase 0.5 wire-check spike (BT-3579; see
 Implementation and the Amendment section) confirmed four of this ADR's five
 load-bearing runtime assumptions (with API corrections) and found one
 (non-local return across a remote block invocation, §5.5) did not hold at
-the time. That gap was fixed as BT-3582 (done), and Phases 1–7 are now
-filed against the corrected ADR as BT-3598–BT-3605 under Epic BT-3577.
+the time. That gap was fixed as BT-3582 (done), and Phases 1–7 were then
+implemented against the corrected ADR as BT-3598–BT-3605 under Epic BT-3577.
 
 ## Implementation Tracking
 
 **Epic:** BT-3577
 **Issues:** BT-3578 (Phase 0, done), BT-3579 (Phase 0.5 spike, done — see
 Amendment), BT-3582 (the NLR-relay bug the spike found, done), BT-3598
-(Phase 1), BT-3599 (Phase 2), BT-3600 (Phase 3a — wire codec), BT-3601
-(Phase 3b — wire integration), BT-3602 (Phase 4, blocked on BT-3575's
-`Beamtalk shapeManifest`), BT-3603 (Phase 5), BT-3604 (Phase 6), BT-3605
-(Phase 7 — tooling, docs, e2e).
-**Status:** Planned
+(Phase 1, done), BT-3599 (Phase 2, done), BT-3600 (Phase 3a — wire codec,
+done), BT-3601 (Phase 3b — wire integration, done), BT-3613 (Phase 3c —
+codegen wire-tag decode, done), BT-3602 (Phase 4, done; BT-3575's
+`Beamtalk shapeManifest` landed first), BT-3603 (Phase 5, done), BT-3604
+(Phase 6, done), BT-3605 (Phase 7 — tooling, docs, e2e, done).
+**Status:** Implemented (2026-09-24) — Epic BT-3577 done
 
 ## Context
 

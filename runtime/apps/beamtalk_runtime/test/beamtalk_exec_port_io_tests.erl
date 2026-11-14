@@ -98,11 +98,7 @@ find_in_project_no_cargo_toml_returns_error_test() ->
     %% TmpDirStr never reaches the repo's Cargo.toml.
     {ok, Cwd} = file:get_cwd(),
     Unique = erlang:unique_integer([positive, monotonic]),
-    SysTmp =
-        case os:type() of
-            {win32, _} -> os:getenv("TEMP", "C:\\Temp");
-            _ -> "/tmp"
-        end,
+    SysTmp = binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
     TmpDirStr = lists:flatten(filename:join(SysTmp, io_lib:format("bt_no_cargo_~p", [Unique]))),
     ok = file:make_dir(TmpDirStr),
     ExeName =

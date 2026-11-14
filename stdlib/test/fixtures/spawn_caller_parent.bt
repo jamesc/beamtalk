@@ -1,0 +1,53 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4781 fixture: an actor that spawns SpawnedCallerActor from inside its
+// own message handlers (so it is mid-dispatch when it spawns). See
+// stdlib/test/actor_spawn_call_back_test.bt.
+
+Actor subclass: SpawnCallerParent
+  state: child = nil
+
+  ping => #pong
+
+  child => self.child
+
+  // The handler returns right after the spawn; the child calls back later.
+  spawnAsync: useContinue =>
+    self.child := (SpawnedCallerActor spawnMonitoredAsyncWith: #{
+      #parent => self,
+      #useContinue => useContinue
+    }) at: 1
+    nil
+
+  spawnPlain: useContinue =>
+    self.child := SpawnedCallerActor spawnWith: #{
+      #parent => self,
+      #useContinue => useContinue
+    }
+    nil
+
+  // Still inside this handler (not waiting on the child) while the child calls.
+  spawnAsyncAndStay =>
+    self.child := (SpawnedCallerActor spawnMonitoredAsyncWith: #{
+      #parent => self,
+      #useContinue => true
+    }) at: 1
+    Timer sleep: 300
+    #stayed
+
+  // A genuine cycle: this handler synchronously calls the child, which calls
+  // back to this actor while it is in the call chain.
+  spawnAsyncThenCallChild =>
+    self.child := (SpawnedCallerActor spawnMonitoredAsyncWith: #{
+      #parent => self,
+      #useContinue => false
+    }) at: 1
+    [self.child relayPing] on: Exception do: [:e | e kind]
+
+  // The callee side of a sync call from the child: an `isKindOf:` check and a
+  // `::`-typed parameter on the calling actor, which is in the call chain.
+  checkKind: who => who isKindOf: SpawnedCallerActor
+
+  checkTyped: who :: SpawnedCallerActor =>
+    who isNil ifTrue: [#nil] ifFalse: [#typed]

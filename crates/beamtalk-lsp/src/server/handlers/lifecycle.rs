@@ -20,7 +20,7 @@ use tower_lsp::lsp_types::{
     CompletionOptions, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, ExecuteCommandOptions,
     FoldingRangeProviderCapability, HoverProviderCapability, ImplementationProviderCapability,
-    InitializeParams, InitializeResult, InitializedParams, OneOf, ServerCapabilities,
+    InitializeParams, InitializeResult, InitializedParams, OneOf, ServerCapabilities, ServerInfo,
     SignatureHelpOptions, TextDocumentSyncCapability, TextDocumentSyncKind,
     TextDocumentSyncOptions, TextDocumentSyncSaveOptions, WorkDoneProgressOptions,
 };
@@ -147,7 +147,10 @@ impl Backend {
                 )),
                 ..Default::default()
             },
-            ..Default::default()
+            server_info: Some(ServerInfo {
+                name: "beamtalk-lsp".to_string(),
+                version: Some(beamtalk_repl_protocol::handshake::build_id().to_string()),
+            }),
         })
     }
 

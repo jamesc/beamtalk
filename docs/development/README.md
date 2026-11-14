@@ -35,6 +35,7 @@ This directory contains documentation for **contributors and AI agents** working
 | [Remote Access](remote-access.md) | Tailscale, reverse proxy (Caddy/nginx), SSH tunneling for remote REPL access |
 | [Remote Session Setup](remote-sessions.md) | What the `SessionStart` hook does in Claude-Code-on-the-web sandboxes (toolchain bootstrap, hex bridge, OTP type-spec cache warming) |
 | [Debugging](debugging.md) | Step-by-step debugging for compiler, runtime, and test failures |
+| [Upstream Reports](upstream-reports/) | Reproducers and drafted reports for OTP/upstream bugs we have hit (owner files them) |
 
 ### Related Documentation
 

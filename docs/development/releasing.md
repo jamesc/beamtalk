@@ -9,6 +9,7 @@ How the version flows at build time:
 - **Rust:** `build.rs` reads `VERSION` + git state → `BEAMTALK_VERSION` compile-time env var.
 - **Erlang:** `.app.src` files use `{vsn, {cmd, "escript ../../../scripts/version.escript"}}`.
 - **LiveView IDE (Elixir):** `editors/liveview/mix.exs` reads `VERSION` at compile time, so the `bt_attach` release/Docker tag tracks the toolchain version (BT-2514). It ships on its own release lane (BT-2512), not the core bundle.
+- **Build identity (BT-4812):** the same `build.rs` also emits `BEAMTALK_BUILD_ID`, the display string behind `--version`, the REPL banner, and the LSP/MCP server info. A tagged release prints `0.4.0`; edge and nightly builds print `0.4.0-edge+<sha> (<date>)` / `0.4.0-nightly+<sha> (<date>)` (`edge.yml` and `nightly.yml` set `BEAMTALK_BUILD_CHANNEL`); a local checkout prints `0.4.0-dev+<sha> (<date>)`, with `.dirty` after the sha when tracked files have uncommitted changes; a build with no git metadata prints the plain version. `BEAMTALK_BUILD_COMMIT` supplies the commit when there is no `.git`. It is display-only: compare `BEAMTALK_VERSION`, never `BEAMTALK_BUILD_ID`.
 - **Dev builds** (not on a git tag): version becomes `0.3.0-dev+<short sha>`.
 - **Release builds** (on a git tag): version is the clean `0.3.0`.
 

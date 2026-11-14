@@ -671,7 +671,8 @@ fn kill_all_children(children: &ChildMap) {
 #[derive(Debug, Parser)]
 #[command(
     name = "beamtalk-exec",
-    about = "Beamtalk subprocess management port (ADR 0051)"
+    about = "Beamtalk subprocess management port (ADR 0051)",
+    version = env!("BEAMTALK_BUILD_ID")
 )]
 struct Cli {
     /// Increase logging verbosity (-v: debug, -vv+: trace)

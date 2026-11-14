@@ -4,6 +4,7 @@
 //! Unit tests for `block_facts`, split by analysis.
 
 mod escape;
+mod helpers;
 mod mutation;
 mod producers;
 

@@ -2602,3 +2602,39 @@ bt4770_delegate_map_args_match_native_call_test_() ->
             end}
          || {M, F, A} <- Inline
         ].
+
+%%% ============================================================================
+%%% selector_to_function/1 — cross-language conformance
+%%% ============================================================================
+
+%% Single source of truth: the shared JSON corpus also read by the Rust-side
+%% `canonical_function_name_conformance_fixtures` test in
+%% `crates/beamtalk-core/src/semantic_analysis/type_checker/native_types.rs`.
+%% To add or change a case, edit the JSON only — both sides pick it up.
+selector_to_function_conformance_test_() ->
+    Cases = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "canonical_function_name_conformance.json"
+    ]),
+    ?assertNotEqual([], Cases),
+    [
+        begin
+            #{<<"selector">> := SelectorBin, <<"expected">> := ExpectedBin} = Case,
+            Selector = binary_to_atom(SelectorBin, utf8),
+            Expected = unicode:characters_to_list(ExpectedBin),
+            {unicode:characters_to_list(SelectorBin), fun() ->
+                Got = selector_result_to_string(
+                    beamtalk_erlang_proxy:selector_to_function(Selector)
+                ),
+                ?assertEqual(Expected, Got)
+            end}
+        end
+     || Case <- Cases
+    ].
+
+selector_result_to_string({ok, Atom}) -> unicode:characters_to_list(atom_to_binary(Atom, utf8));
+selector_result_to_string({error, Bin}) -> unicode:characters_to_list(Bin).

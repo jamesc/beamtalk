@@ -42,7 +42,8 @@ use workspace::{parse_repl_port, parse_workspace_id};
 #[derive(Parser, Debug)]
 #[command(
     name = "beamtalk-mcp",
-    about = "MCP server for beamtalk REPL — agent interaction with live objects"
+    about = "MCP server for beamtalk REPL — agent interaction with live objects",
+    version = beamtalk_repl_protocol::handshake::build_id()
 )]
 struct Args {
     /// Increase logging verbosity (-v: debug, -vv+: trace)
