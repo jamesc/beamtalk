@@ -744,6 +744,22 @@ source_snippet_caps_reads_and_line_length_test() ->
         ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 300001))
     end).
 
+%% BT-4818: a readable raising Erlang frame (OTP, hex dependency) is listed but
+%% the snippet stays on the user's `.bt` line.
+format_stacktrace_snippet_prefers_beamtalk_frame_test() ->
+    with_snippet_file(<<"erl one\nerl two\n">>, fun(ErlPath) ->
+        with_snippet_file(<<"a\nb := x parse\nc\n">>, fun(BtPath) ->
+            Frames = [
+                {jsx, decode, 1, [{file, binary_to_list(ErlPath)}, {line, 2}]},
+                {'bt@user@A', parse, 0, [{file, binary_to_list(BtPath)}, {line, 2}]}
+            ],
+            Text = beamtalk_test_case:format_stacktrace(Frames),
+            ?assertNotEqual(nomatch, binary:match(Text, <<"jsx:decode/1">>)),
+            ?assertNotEqual(nomatch, binary:match(Text, <<"> 2 | b := x parse">>)),
+            ?assertEqual(nomatch, binary:match(Text, <<"erl two">>))
+        end)
+    end).
+
 format_stacktrace_adds_snippet_for_readable_file_test() ->
     with_snippet_file(<<"a\nb := x at: 1\nc\nd\n">>, fun(Path) ->
         Frames = [

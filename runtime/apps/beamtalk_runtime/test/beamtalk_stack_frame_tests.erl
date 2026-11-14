@@ -615,19 +615,78 @@ visibility_runtime_internal_hidden_test() ->
     ],
     ?assertEqual([], shown(Stack)).
 
-%% Generated callbacks of a Beamtalk module are hidden; its methods and blocks are not.
-visibility_generated_callbacks_hidden_test() ->
-    Stack = [
-        {'bt@bt4818@counter', 'increment', 1, []},
-        {'bt@bt4818@counter', '-increment/1-fun-0-', 2, []},
-        {'bt@bt4818@counter', safe_dispatch, 3, []},
-        {'bt@bt4818@counter', handle_call, 3, []},
-        {'bt@bt4818@counter', handle_info, 2, []},
-        {'bt@bt4818@counter', init, 1, []}
+%% Compile and load a module from source text, for frames that need a real module.
+load_module(Name, Source) ->
+    {ok, Tokens, _} = erl_scan:string(Source),
+    Forms = [
+        begin
+            {ok, F} = erl_parse:parse_form(T),
+            F
+        end
+     || T <- split_forms(Tokens)
     ],
-    ?assertEqual(
-        [{'bt@bt4818@counter', 'increment'}, {'bt@bt4818@counter', '-increment/1-fun-0-'}],
-        shown(Stack)
+    {ok, Name, Bin} = compile:forms(Forms),
+    {module, Name} = code:load_binary(Name, "bt4818.erl", Bin),
+    ok.
+
+split_forms(Tokens) ->
+    split_forms(Tokens, [], []).
+split_forms([], [], Acc) ->
+    lists:reverse(Acc);
+split_forms([{dot, _} = D | Rest], Cur, Acc) ->
+    split_forms(Rest, [], [lists:reverse([D | Cur]) | Acc]);
+split_forms([T | Rest], Cur, Acc) ->
+    split_forms(Rest, [T | Cur], Acc).
+
+%% Generated callbacks of a Beamtalk actor module are hidden, by name and arity;
+%% its methods and blocks are not. A value class's own `init`/`terminate`
+%% method (a module with no `handle_call/3`) stays.
+visibility_generated_callbacks_hidden_test() ->
+    Actor = 'bt@bt4818@counter',
+    Value = 'bt@bt4818@point',
+    ok = load_module(
+        Actor,
+        "-module('bt@bt4818@counter'). -export([handle_call/3]). handle_call(_, _, S) -> S."
+    ),
+    ok = load_module(Value, "-module('bt@bt4818@point'). -export([init/1]). init(S) -> S."),
+    try
+        Stack = [
+            {Actor, 'increment', 1, []},
+            {Actor, '-increment/1-fun-0-', 2, []},
+            {Actor, safe_dispatch, 3, []},
+            {Actor, safe_dispatch, 4, []},
+            {Actor, handle_call, 3, []},
+            {Actor, '-handle_call/3-fun-0-', 1, []},
+            {Actor, handle_info, 2, []},
+            {Actor, init, 1, []},
+            %% Same name, other arity: a method the user wrote.
+            {Actor, init, 2, []},
+            {Value, init, 1, []},
+            {Value, '-init/1-fun-0-', 0, []}
+        ],
+        ?assertEqual(
+            [
+                {Actor, 'increment'},
+                {Actor, '-increment/1-fun-0-'},
+                {Actor, init},
+                {Value, init},
+                {Value, '-init/1-fun-0-'}
+            ],
+            shown(Stack)
+        )
+    after
+        [unload_module(M) || M <- [Actor, Value]]
+    end.
+
+%% A malformed entry wraps to a placeholder frame; it is not hidden.
+visibility_unreadable_frame_shown_test() ->
+    ?assertEqual([{undefined, undefined}], shown([not_a_frame])).
+
+%% A frame wrapped alone carries the verdict too (the map shape is the same).
+visibility_wrap_frame_stamps_visible_test() ->
+    ?assertMatch(#{visible := true}, beamtalk_stack_frame:wrap_frame({lists, map, 2, []})),
+    ?assertMatch(
+        #{visible := false}, beamtalk_stack_frame:wrap_frame({beamtalk_error, raise, 1, []})
     ).
 
 %% The unfiltered list stays whole and ordered; `wrap/1` only stamps a verdict.
@@ -635,12 +694,12 @@ visibility_full_list_is_kept_test() ->
     Stack = [
         {lists, foldl, 3, []},
         {gen_server, handle_msg, 6, []},
-        {'bt@bt4818@counter', handle_call, 3, []}
+        {'bt@bt4818@counter', increment, 1, []}
     ],
     Wrapped = beamtalk_stack_frame:wrap(Stack),
     ?assertEqual([lists, gen_server, 'bt@bt4818@counter'], [M || #{module := M} <- Wrapped]),
-    ?assertEqual([true, false, false], [V || #{visible := V} <- Wrapped]),
+    ?assertEqual([true, false, true], [V || #{visible := V} <- Wrapped]),
     ?assertEqual(
-        [shown, hidden, hidden],
+        [shown, hidden, shown],
         [V || {V, _} <- beamtalk_stack_frame:classify_frames(Wrapped)]
     ).

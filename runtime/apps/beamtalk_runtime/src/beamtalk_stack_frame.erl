@@ -24,7 +24,7 @@ StackFrame objects are value types (tagged maps) with fields:
   line => non_neg_integer() | nil, % Source line number
   class_name => atom() | nil, % Beamtalk class name (if the runtime class table knows the module)
   package => binary() | nil,  % package qualifier, set only when two loaded class modules share the name
-  visible => boolean()        % set by wrap/1 from classify_frames/1: shown by default?
+  visible => boolean()        % set by wrap/1 and wrap_frame/1 from classify_frames/1: shown by default?
 }
 ```
 
@@ -62,7 +62,7 @@ ordered list.
 | Frame | Default |
 |---|---|
 | Beamtalk method or block (resolved class, or a `bt@...` module the table cannot resolve) | shown |
-| Generated callback in a Beamtalk module (`init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`, `terminate/2`, `code_change/3`, `safe_dispatch`) | hidden |
+| Generated callback of a Beamtalk actor module, by name and arity (`init/1`, `handle_call/3`, `handle_cast/2`, `handle_info/2`, `terminate/2`, `code_change/3`, `safe_dispatch/3,4`) | hidden |
 | Erlang module a Beamtalk package declares (`beamtalk_package:declared_native_modules/0`, the `native_modules` app env, ADR 0072) | shown |
 | The frame that raised (innermost), other Erlang code (OTP, hex dependency) | shown |
 | Any other OTP or hex-dependency frame | hidden |
@@ -135,7 +135,10 @@ one frame at a time (test failure output) so they share `format_frame/1`.
 -spec wrap_frame(term()) -> map().
 wrap_frame(Frame) ->
     ModuleToClass = beamtalk_class_registry:module_to_class_map(),
-    wrap_frame(Frame, ModuleToClass, shared_class_segments([Frame], ModuleToClass)).
+    Wrapped = wrap_frame(Frame, ModuleToClass, shared_class_segments([Frame], ModuleToClass)),
+    %% Alone, the frame is the innermost one, so it is judged as the raising frame.
+    [{Verdict, _}] = classify_frames([Wrapped]),
+    Wrapped#{visible => Verdict =:= shown}.
 
 -spec wrap_frame(term(), #{atom() => atom()}, #{binary() => true}) -> map().
 wrap_frame({Module, Function, ArityOrArgs, Location}, ModuleToClass, Shared) ->
@@ -204,7 +207,15 @@ classify_frames([Frame | Rest], Raising, Natives) ->
 -doc "The frames of a wrapped stacktrace that are shown by default, in order.".
 -spec visible_frames([map()]) -> [map()].
 visible_frames(Frames) ->
-    [Frame || {shown, Frame} <- classify_frames(Frames)].
+    case
+        lists:all(
+            fun(F) -> is_map(F) andalso is_boolean(maps:get(visible, F, undefined)) end, Frames
+        )
+    of
+        %% `wrap/1` already stamped the verdict: no second classification.
+        true -> [F || #{visible := true} = F <- Frames];
+        false -> [Frame || {shown, Frame} <- classify_frames(Frames)]
+    end.
 
 -spec is_plain_erlang_frame(map()) -> boolean().
 is_plain_erlang_frame(#{module := Module} = Frame) ->
@@ -216,7 +227,8 @@ is_plain_erlang_frame(_) ->
 frame_verdict(#{module := Module, function := Function} = Frame, Raising, Natives) ->
     case frame_kind(Module, maps:get(class_name, Frame, nil)) of
         unknown ->
-            hidden;
+            %% A malformed entry wraps to a placeholder frame: nothing to hide it by.
+            shown;
         erlang ->
             %% A package's own module wins over the `beamtalk_` prefix: packages
             %% are told to prefix their native modules with their name.
@@ -230,7 +242,7 @@ frame_verdict(#{module := Module, function := Function} = Frame, Raising, Native
                     end
             end;
         _Beamtalk ->
-            case generated_callback(Function) of
+            case generated_callback(Module, Function, maps:get(arity, Frame, undefined)) of
                 true -> hidden;
                 false -> shown
             end
@@ -243,22 +255,46 @@ frame_verdict(_, _, _) ->
 runtime_internal(Module) ->
     lists:prefix("beamtalk_", atom_to_list(Module)).
 
-%% Callbacks the compiler generates for every actor module; the user wrote none
-%% of them. Matched by name (lifted funs of them included).
--spec generated_callback(atom()) -> boolean().
-generated_callback(Function) when is_atom(Function) ->
-    {Name, _IsBlock} = fun_name_parts(Function),
-    lists:member(Name, [
-        <<"init">>,
-        <<"handle_call">>,
-        <<"handle_cast">>,
-        <<"handle_info">>,
-        <<"terminate">>,
-        <<"code_change">>,
-        <<"safe_dispatch">>
-    ]);
-generated_callback(_) ->
+%% Callbacks the compiler generates for every actor module, with their
+%% arities; the user wrote none of them. A value-type method may share a name
+%% (`init`, `terminate`), so a frame is a generated callback only when its
+%% name and arity match AND its module is an actor (it exports `handle_call/3`).
+%% A block lifted from a callback is named `-name/Arity-fun-N-`.
+-define(GENERATED_CALLBACKS, [
+    {<<"init">>, [1]},
+    {<<"handle_call">>, [3]},
+    {<<"handle_cast">>, [2]},
+    {<<"handle_info">>, [2]},
+    {<<"terminate">>, [2]},
+    {<<"code_change">>, [3]},
+    {<<"safe_dispatch">>, [3, 4]}
+]).
+
+-spec generated_callback(atom(), atom(), term()) -> boolean().
+generated_callback(Module, Function, Arity) when is_atom(Function), is_integer(Arity) ->
+    {Name, FunArity} = callback_name_arity(Function, Arity),
+    case lists:keyfind(Name, 1, ?GENERATED_CALLBACKS) of
+        {Name, Arities} ->
+            lists:member(FunArity, Arities) andalso
+                erlang:function_exported(Module, handle_call, 3);
+        false ->
+            false
+    end;
+generated_callback(_, _, _) ->
     false.
+
+%% The name and arity a frame's function stands for: a lifted fun carries the
+%% enclosing function's arity in its name.
+-spec callback_name_arity(atom(), arity()) -> {binary(), non_neg_integer()}.
+callback_name_arity(Function, Arity) ->
+    case
+        re:run(atom_to_list(Function), "^-(.+?)/([0-9]+)-", [
+            {capture, all_but_first, list}, unicode
+        ])
+    of
+        {match, [Name, A]} -> {unicode:characters_to_binary(Name), list_to_integer(A)};
+        nomatch -> {unicode:characters_to_binary(atom_to_list(Function)), Arity}
+    end.
 
 -doc """
 Resolve `Module` to a class name using a pre-built module→class map (from

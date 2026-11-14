@@ -548,14 +548,26 @@ readable, as `{Index, Snippet}` (1-based entry index), or `none` (BT-4358).
 A user (non-`bt@stdlib@`) entry is preferred over a stdlib one, so a failure
 raised inside a stdlib method shows the user's calling line rather than
 stdlib internals; a stdlib entry is used only when no user entry is
-readable (BT-4388).
+readable (BT-4388). An Erlang entry (BT-4818) is used only when no Beamtalk
+entry is readable.
 """.
 -spec first_snippet([trace_entry()]) -> {pos_integer(), binary()} | none.
 first_snippet(Entries) ->
     Indexed = lists:zip(lists:seq(1, length(Entries)), Entries),
-    {Stdlib, User} = lists:partition(fun({_, {_, _, _, _, IsStdlib}}) -> IsStdlib end, Indexed),
-    case first_readable(User) of
-        none -> first_readable(Stdlib);
+    {Beamtalk, Erlang} = lists:partition(
+        fun({_, {_, #{kind := Kind}, _, _, _}}) -> Kind =/= erlang end, Indexed
+    ),
+    {Stdlib, User} = lists:partition(fun({_, {_, _, _, _, IsStdlib}}) -> IsStdlib end, Beamtalk),
+    %% Erlang frames (a raising OTP or hex-dependency frame) come last: their
+    %% source is not what the user can act on while a `.bt` line is readable.
+    first_readable_of([User, Stdlib, Erlang]).
+
+-spec first_readable_of([[{pos_integer(), trace_entry()}]]) -> {pos_integer(), binary()} | none.
+first_readable_of([]) ->
+    none;
+first_readable_of([Group | Rest]) ->
+    case first_readable(Group) of
+        none -> first_readable_of(Rest);
         Found -> Found
     end.
 
