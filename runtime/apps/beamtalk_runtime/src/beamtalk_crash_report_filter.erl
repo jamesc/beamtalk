@@ -205,6 +205,7 @@ wrap_cb(Orig, Label, Rendered) when is_function(Orig, 2) ->
 -spec format(fun((term()) -> unicode:chardata()), term(), map(), term()) ->
     unicode:chardata().
 format(Call, Label, Rendered, Report) ->
+    %% bt-catcher-audit: not-applicable-no-block - Call is an OTP report_cb, never a Beamtalk block
     try
         Text = unicode:characters_to_binary(Call(rename_terms(Label, Report, Rendered))),
         true = is_binary(Text),
