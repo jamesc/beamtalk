@@ -93,6 +93,16 @@ TestCase subclass: TypedComparisonReceiverTest
     self assert: good stringFieldLt
     self assert: good unionFieldGt
 
+  testTwoKindUnionFieldIsTestedForBothKinds =>
+    // `Integer | String`: the guard is `is_number or is_binary`, so either
+    // member answers and anything else raises.
+    bad := TypedComparisonProbe new: #{#mixed => self wrong}
+    self should: [bad mixedFieldLt] raise: #does_not_understand
+    self assert: (TypedComparisonProbe new: #{#mixed => 5}) mixedFieldLt
+    // A String receiver orders against the Integer argument by term order
+    // (the argument is unchecked, BT-3928): numbers sort before binaries.
+    self deny: (TypedComparisonProbe new: #{#mixed => "abc"}) mixedFieldLt
+
   testTypedLocalStillRaises =>
     self should: [self.probe localGt: self wrong] raise: #does_not_understand
     self assert: (self.probe localGt: 11)

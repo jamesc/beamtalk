@@ -729,7 +729,9 @@ fn guard_shape(expr: &Expression, rw: &Rewriter) -> Option<GuardShape> {
 /// `c ifFalse: [^v]` decided by `beamtalk_guard_return`: with an effect-free
 /// `v` on any receiver, or any block ending in `^` when `declared` (below).
 /// These are the only Boolean guards on a receiver that is not a Boolean by
-/// construction the rewrite keeps exact.
+/// construction the rewrite keeps exact, except that `declared` accepts a
+/// small, documented difference for a receiver that broke its declaration
+/// (see `beamtalk_guard_return`'s moduledoc).
 ///
 /// `declared` is a receiver that answers a Boolean while a parameter's
 /// declared type holds ([`Rewriter::is_declared_boolean`], BT-4823). Then the

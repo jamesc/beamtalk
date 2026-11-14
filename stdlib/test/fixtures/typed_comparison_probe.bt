@@ -11,6 +11,7 @@ Value subclass: TypedComparisonProbe
   field: ratio :: Float = 0.0
   field: label :: String = ""
   field: either :: Integer | Float = 0
+  field: mixed :: Integer | String = 0
 
   intLt: n :: Integer -> Boolean => n < 10
 
@@ -54,6 +55,8 @@ Value subclass: TypedComparisonProbe
   stringFieldLt -> Boolean => self.label < "m"
 
   unionFieldGt -> Boolean => self.either > 10
+
+  mixedFieldLt -> Boolean => self.mixed < 10
 
   /// A proven receiver (a literal) stays on the bare BIF whatever the argument.
   literalLtArg: other -> Boolean => 5 < other

@@ -881,6 +881,40 @@ fn test_comparison_declared_param_gets_a_kind_test() {
 }
 
 #[test]
+fn test_comparison_declared_union_field_gets_an_or_of_its_kind_tests() {
+    // BT-4823: a `Nil`-free union of comparable types is tested for exactly
+    // its members: `or` of the two type tests, never the general guard's pair.
+    let core = crate::core_erlang::tests::codegen(
+        "Value subclass: Holder\n  field: a :: Integer | String = 0\n  \
+         field: b :: Character | String = \"\"\n  field: c :: Integer | Float = 0\n  \
+         ltA: q => self.a < q\n  ltB: q => self.b < q\n  ltC: q => self.c < q\n",
+    );
+    assert!(
+        method_body_contains(
+            &core,
+            "ltA:",
+            "call 'erlang':'or'(call 'erlang':'is_number'("
+        ) && method_body_contains(&core, "ltA:", "call 'erlang':'is_binary'("),
+        "Integer | String tests is_number or is_binary:\n{core}"
+    );
+    assert!(
+        method_body_contains(
+            &core,
+            "ltB:",
+            "call 'erlang':'or'(call 'erlang':'is_integer'("
+        ) && method_body_contains(&core, "ltB:", "call 'erlang':'is_binary'(")
+            && !method_body_contains(&core, "ltB:", "is_number"),
+        "Character | String tests is_integer or is_binary, never is_number:\n{core}"
+    );
+    assert!(
+        method_body_contains(&core, "ltC:", "call 'erlang':'is_number'(")
+            && !method_body_contains(&core, "ltC:", "'or'(")
+            && !method_body_contains(&core, "ltC:", "is_binary"),
+        "Integer | Float collapses to one is_number:\n{core}"
+    );
+}
+
+#[test]
 fn test_comparison_guard_for_unknown_receiver() {
     use beamtalk_core::ast::Identifier;
     let mut generator = CoreErlangGenerator::new("test");
