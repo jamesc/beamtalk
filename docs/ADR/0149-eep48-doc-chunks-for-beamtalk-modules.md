@@ -1,11 +1,19 @@
 # ADR 0149: EEP-48 Doc Chunks for Beamtalk Modules
 
 ## Status
-Proposed (2026-11-14). Tracking: BT-4852 (research spike).
+**Deferred (2026-11-14).** Tracking: BT-4852 (research spike).
+
+The maintainer deferred this ADR on 2026-11-14; the decision reached this
+spike through the session coordinating it. The reason: no consumer has asked
+for Beamtalk docs from Erlang or Elixir, and ADR 0033 stays the source of
+truth. What would bring it back: real demand for `h/1`, IEx `h` or
+`code:get_doc/1` on Beamtalk packages. If that appears, Design B (the opt-in
+`doc/chunks` side files) is the preferred starting point, and Design A's
+carrier costs are recorded below.
 
 This ADR is the output of a spike. It records what was measured, sets out two
-workable designs, and recommends one. The choice is the maintainer's. Nothing
-is implemented. The prototypes are in
+workable designs, and recommends one. Nothing is implemented. The experiments,
+designs and findings are kept as the record. The prototypes are in
 [`spikes/eep48-doc-chunks/`](../../spikes/eep48-doc-chunks/README.md).
 
 Revised once after review (2026-11-14). The first draft recommended the
