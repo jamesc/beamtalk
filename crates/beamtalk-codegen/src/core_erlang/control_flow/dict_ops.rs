@@ -11,11 +11,8 @@
 
 use super::super::intrinsics::validate_block_arity_exact;
 use super::super::{CoreErlangGenerator, Result};
-use super::list_ops::fold_driver::FoldParams;
-use super::{BodyKind, ListOpKind, ThreadingPlan};
+use super::list_ops::fold_driver::DoSource;
 use beamtalk_cerl_doc::Document;
-use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
 
 impl CoreErlangGenerator {
@@ -45,138 +42,12 @@ impl CoreErlangGenerator {
     }
 
     /// Generates stateful `dictionary do:` using `lists:foldl` over `maps:values`.
-    #[allow(clippy::too_many_lines)]
     pub(in crate::core_erlang) fn generate_dict_do_with_mutations(
         &mut self,
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        // A dictionary fold carries no value-type `Self` slot.
-        let (plan, discard) = self.begin_fold_plan(body, ListOpKind::Do, None, false, true)?;
-
-        let dict_var = self.fresh_temp_var("temp");
-        let recv_code = self.expression_doc(receiver)?;
-        let values_var = self.fresh_temp_var("temp");
-        let lambda_var = self.fresh_temp_var("temp");
-        let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
-        let item_var = Self::to_core_erlang_var(item_param);
-
-        if plan.use_tuple_acc {
-            let init_tuple_doc = plan.initial_vars_tuple_doc(self);
-            // BT-4178: a fresh accumulator name that cannot shadow an
-            // enclosing `StateAcc` map the body reads.
-            let acc_var = self.fresh_temp_var("AccSt");
-
-            let mut docs: Vec<Document<'static>> = Vec::new();
-            docs.push(docvec![
-                "let ",
-                leaf::var(dict_var.clone()),
-                " = ",
-                recv_code,
-                " in let ",
-                leaf::var(values_var.clone()),
-                " = call 'maps':'values'(",
-                leaf::var(dict_var),
-                ") in let ",
-                leaf::var(lambda_var.clone()),
-                " = fun (",
-                leaf::var(item_var.clone()),
-                ", ",
-                leaf::var(acc_var.clone()),
-                ") -> ",
-            ]);
-
-            let lowered = self.lower_tuple_fold_body(
-                body,
-                &plan,
-                &BodyKind::FoldlDo,
-                &item_var,
-                &acc_var,
-                0,
-            )?;
-            docs.push(lowered.body_doc);
-            let guarded_op_bracket = lowered.guarded_op_bracket;
-            docs.insert(0, lowered.prestore);
-
-            let fold_result = self.fresh_temp_var("FoldResult");
-            let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
-            let result_doc = if self.loop_mode.in_direct_params_loop {
-                // see the identical branch in
-                // `control_flow/list_ops/basic_ops.rs`'s `do:` — same shape here for a
-                // dictionary iteration: multiple rebound accumulator vars, no single
-                // "result" value, so signal open-with-no-value rather than naming one.
-                self.loop_mode.direct_params_do_open_chain = true;
-                docvec![
-                    ThreadingPlan::foldl_call_doc(
-                        &lambda_var,
-                        init_tuple_doc,
-                        &values_var,
-                        &fold_result
-                    ),
-                    extract_doc,
-                ]
-            } else {
-                let tail =
-                    plan.closed_fold_tail_doc(self, extract_doc, guarded_op_bracket, discard);
-                docvec![
-                    ThreadingPlan::foldl_call_doc(
-                        &lambda_var,
-                        init_tuple_doc,
-                        &values_var,
-                        &fold_result
-                    ),
-                    tail,
-                ]
-            };
-            docs.push(result_doc);
-            return Ok(Document::Vec(docs));
-        }
-
-        // Map-accumulator path (field mutations or complex control flow present).
-        let (pack_doc, init_state) = plan.generate_pack_prefix(self);
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
-        docs.push(pack_doc);
-        docs.push(docvec![
-            "let ",
-            leaf::var(dict_var.clone()),
-            " = ",
-            recv_code,
-            " in let ",
-            leaf::var(values_var.clone()),
-            " = call 'maps':'values'(",
-            leaf::var(dict_var),
-            ") in let ",
-            leaf::var(lambda_var.clone()),
-            " = fun (",
-            leaf::var(item_var.clone()),
-            ", ",
-            leaf::var("StateAcc"),
-            ") -> ",
-        ]);
-
-        docs.push(self.lower_map_fold_body(
-            body,
-            &plan,
-            &BodyKind::FoldlDo,
-            &item_var,
-            "StateAcc",
-            0,
-        )?);
-
-        let fold_result = self.fresh_temp_var("FoldResult");
-        let mut post_docs: Vec<Document<'static>> = vec![ThreadingPlan::foldl_call_doc(
-            &lambda_var,
-            leaf::var(init_state),
-            &values_var,
-            &fold_result,
-        )];
-        post_docs.push(plan.generate_extract_suffix_doc(&fold_result, self));
-
-        post_docs.push(docvec!["{'nil', ", leaf::var(fold_result), "}",]);
-        docs.push(Document::Vec(post_docs));
-
-        Ok(Document::Vec(docs))
+        self.generate_do_fold_with_mutations(receiver, body, DoSource::DictValues)
     }
 
     /// Generates code for `dictionary doWithKey:` iteration with state threading.
@@ -209,206 +80,16 @@ impl CoreErlangGenerator {
         Ok(Document::Nil)
     }
 
-    /// The `{K, V}` pairs of the dictionary bound to `dict_var` that the keyed
-    /// fold iterates: `maps:to_list/1` for a map literal, the receiver guard
-    /// `beamtalk_map:pairs_for_threading/2` otherwise (it answers an untagged
-    /// map's pairs and raises a structured `type_error` for `Ets`, a value-type
-    /// instance, a user class or a non-map, instead of walking the wrong
-    /// entries; the keyed counterpart of `lookup_for_threading/3`, BT-3841).
-    fn keyed_pairs_doc(
-        dict_var: &str,
-        literal_receiver: bool,
-        selector: &str,
-    ) -> Document<'static> {
-        if literal_receiver {
-            docvec![
-                "call 'maps':'to_list'(",
-                leaf::var(dict_var.to_string()),
-                ")"
-            ]
-        } else {
-            docvec![
-                "call 'beamtalk_map':'pairs_for_threading'(",
-                leaf::var(dict_var.to_string()),
-                ", ",
-                leaf::atom(selector.to_string()),
-                ")"
-            ]
-        }
-    }
-
-    /// Generates stateful `dictionary doWithKey:` using `lists:foldl` over `maps:to_list`.
-    ///
-    /// The foldl lambda receives `{K, V}` tuples. We destructure these inside the
-    /// lambda body by extracting element(1, Pair) and element(2, Pair).
-    #[allow(clippy::too_many_lines, clippy::similar_names)]
+    /// Generates stateful `dictionary doWithKey:` using `lists:foldl` over the
+    /// dictionary's `{K, V}` pairs; the lambda destructures each pair into the
+    /// key and value parameters.
     pub(in crate::core_erlang) fn generate_dict_do_with_key_mutations(
         &mut self,
         receiver: &Expression,
         body: &Block,
         selector: &str,
     ) -> Result<Document<'static>> {
-        // A dictionary fold carries no value-type `Self` slot.
-        let (plan, discard) = self.begin_fold_plan(body, ListOpKind::Do, None, false, true)?;
-
-        let dict_var = self.fresh_temp_var("temp");
-        let recv_code = self.expression_doc(receiver)?;
-        let pairs_var = self.fresh_temp_var("temp");
-        let lambda_var = self.fresh_temp_var("temp");
-        let pair_var = self.fresh_temp_var("Pair");
-        // The fold is inlined for a `Dictionary` only. A map literal is one; any
-        // other receiver goes through the runtime guard (`Ets`, a value-type
-        // instance or a user class defining the selector would run its own
-        // method, which the inline fold must not replace). A receiver core
-        // knows is not a `Dictionary` never gets here (the Phase 0 / §6 check
-        // keeps its error).
-        let literal_receiver = matches!(receiver, Expression::MapLiteral { .. });
-
-        // Get parameter names for key and value
-        let key_param = body.parameters.first().map_or("_", |p| p.name.as_str());
-        let val_param = body.parameters.get(1).map_or("_", |p| p.name.as_str());
-        let key_var = Self::to_core_erlang_var(key_param);
-        let val_var = Self::to_core_erlang_var(val_param);
-
-        if plan.use_tuple_acc {
-            let init_tuple_doc = plan.initial_vars_tuple_doc(self);
-            // BT-4178: a fresh accumulator name that cannot shadow an
-            // enclosing `StateAcc` map the body reads.
-            let acc_var = self.fresh_temp_var("AccSt");
-
-            let mut docs: Vec<Document<'static>> = Vec::new();
-            docs.push(docvec![
-                "let ",
-                leaf::var(dict_var.clone()),
-                " = ",
-                recv_code,
-                " in let ",
-                leaf::var(pairs_var.clone()),
-                " = ",
-                Self::keyed_pairs_doc(&dict_var, literal_receiver, selector),
-                " in let ",
-                leaf::var(lambda_var.clone()),
-                " = fun (",
-                leaf::var(pair_var.clone()),
-                ", ",
-                leaf::var(acc_var.clone()),
-                ") -> let ",
-                leaf::var(key_var.clone()),
-                " = call 'erlang':'element'(1, ",
-                leaf::var(pair_var.clone()),
-                ") in let ",
-                leaf::var(val_var.clone()),
-                " = call 'erlang':'element'(2, ",
-                leaf::var(pair_var),
-                ") in ",
-            ]);
-
-            let lowered = self.lower_tuple_fold_body(
-                body,
-                &plan,
-                &BodyKind::FoldlDo,
-                FoldParams::Pair {
-                    first: &key_var,
-                    second: &val_var,
-                },
-                &acc_var,
-                0,
-            )?;
-            docs.push(lowered.body_doc);
-            let guarded_op_bracket = lowered.guarded_op_bracket;
-            docs.insert(0, lowered.prestore);
-
-            let fold_result = self.fresh_temp_var("FoldResult");
-            let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
-            let result_doc = if self.loop_mode.in_direct_params_loop {
-                // see the identical branch in
-                // `control_flow/list_ops/basic_ops.rs`'s `do:` — same shape here for a
-                // dictionary iteration: multiple rebound accumulator vars, no single
-                // "result" value, so signal open-with-no-value rather than naming one.
-                self.loop_mode.direct_params_do_open_chain = true;
-                docvec![
-                    ThreadingPlan::foldl_call_doc(
-                        &lambda_var,
-                        init_tuple_doc,
-                        &pairs_var,
-                        &fold_result
-                    ),
-                    extract_doc,
-                ]
-            } else {
-                let tail =
-                    plan.closed_fold_tail_doc(self, extract_doc, guarded_op_bracket, discard);
-                docvec![
-                    ThreadingPlan::foldl_call_doc(
-                        &lambda_var,
-                        init_tuple_doc,
-                        &pairs_var,
-                        &fold_result
-                    ),
-                    tail,
-                ]
-            };
-            docs.push(result_doc);
-            return Ok(Document::Vec(docs));
-        }
-
-        // Map-accumulator path (field mutations or complex control flow present).
-        let (pack_doc, init_state) = plan.generate_pack_prefix(self);
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
-        docs.push(pack_doc);
-        docs.push(docvec![
-            "let ",
-            leaf::var(dict_var.clone()),
-            " = ",
-            recv_code,
-            " in let ",
-            leaf::var(pairs_var.clone()),
-            " = ",
-            Self::keyed_pairs_doc(&dict_var, literal_receiver, selector),
-            " in let ",
-            leaf::var(lambda_var.clone()),
-            " = fun (",
-            leaf::var(pair_var.clone()),
-            ", ",
-            leaf::var("StateAcc"),
-            ") -> ",
-            "let ",
-            leaf::var(key_var.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(pair_var.clone()),
-            ") in let ",
-            leaf::var(val_var.clone()),
-            " = call 'erlang':'element'(2, ",
-            leaf::var(pair_var),
-            ") in ",
-        ]);
-
-        docs.push(self.lower_map_fold_body(
-            body,
-            &plan,
-            &BodyKind::FoldlDo,
-            FoldParams::Pair {
-                first: &key_var,
-                second: &val_var,
-            },
-            "StateAcc",
-            0,
-        )?);
-
-        let fold_result = self.fresh_temp_var("FoldResult");
-        let mut post_docs: Vec<Document<'static>> = vec![ThreadingPlan::foldl_call_doc(
-            &lambda_var,
-            leaf::var(init_state),
-            &pairs_var,
-            &fold_result,
-        )];
-        post_docs.push(plan.generate_extract_suffix_doc(&fold_result, self));
-
-        post_docs.push(docvec!["{'nil', ", leaf::var(fold_result), "}",]);
-        docs.push(Document::Vec(post_docs));
-
-        Ok(Document::Vec(docs))
+        self.generate_do_fold_with_mutations(receiver, body, DoSource::DictPairs { selector })
     }
 }
 
