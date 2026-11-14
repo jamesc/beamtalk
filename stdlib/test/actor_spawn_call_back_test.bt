@@ -1,0 +1,76 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4781: an actor spawned by another actor (while the spawner is mid-handler)
+// makes a sync call back to the spawner. The spawned actor starts with an empty
+// call chain, so this must not raise `deadlock_detected`, with or without a
+// `continueWith:` step, async or plain spawn. A true call cycle (the spawner is
+// itself blocked in a sync call to the child) must still be detected.
+//
+// Fixtures: stdlib/test/fixtures/spawn_caller_parent.bt
+//           stdlib/test/fixtures/spawned_caller_actor.bt
+
+TestCase subclass: ActorSpawnCallBackTest
+
+  // Poll the child's `outcome` until the continuation has recorded one.
+  waitOutcome: child =>
+    200 timesRepeat: [child outcome isNil ifTrue: [Timer sleep: 10]]
+    child outcome
+
+  testAsyncSpawnWithContinueCallsBackIdleParent =>
+    parent := SpawnCallerParent spawn
+    parent spawnAsync: true
+    self assert: (self waitOutcome: parent child) equals: #pong
+    parent stop
+
+  testAsyncSpawnWithContinueCallsBackIdleParentRepeatedly =>
+    parent := SpawnCallerParent spawn
+    10
+      timesRepeat: [
+        parent spawnAsync: true
+        self assert: (self waitOutcome: parent child) equals: #pong
+      ]
+    parent stop
+
+  testPlainSpawnWithContinueCallsBackIdleParent =>
+    parent := SpawnCallerParent spawn
+    parent spawnPlain: true
+    self assert: (self waitOutcome: parent child) equals: #pong
+    parent stop
+
+  testAsyncSpawnWithoutContinueCallsBackIdleParent =>
+    parent := SpawnCallerParent spawn
+    parent spawnAsync: false
+    self assert: (parent child relayPing) equals: #pong
+    parent stop
+
+  // The parent is still in its handler (sleeping, not waiting on the child):
+  // the child's call queues behind it and is answered afterwards.
+  testChildCallWhileParentStillInHandlerIsNotADeadlock =>
+    parent := SpawnCallerParent spawn
+    self assert: parent spawnAsyncAndStay equals: #stayed
+    self assert: (self waitOutcome: parent child) equals: #pong
+    parent stop
+
+  // The parent blocks in a sync call to the child, which calls the parent back.
+  testGenuineCycleStillRaisesDeadlockDetected =>
+    parent := SpawnCallerParent spawn
+    self assert: parent spawnAsyncThenCallChild equals: #deadlock_detected
+    parent stop
+
+  // The caller is in the call chain while the callee type-checks it.
+  testCalleeIsKindOfOnCallingActor =>
+    parent := SpawnCallerParent spawn
+    parent spawnAsync: false
+    child := parent child
+    child runKind
+    self assert: child outcome equals: true
+    parent stop
+
+  testCalleeTypedParameterOnCallingActor =>
+    parent := SpawnCallerParent spawn
+    parent spawnAsync: false
+    child := parent child
+    child runTyped
+    self assert: child outcome equals: #typed
+    parent stop
