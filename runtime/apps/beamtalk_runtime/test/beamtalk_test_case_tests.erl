@@ -969,6 +969,13 @@ failure_stacktrace_appends_the_test_frames_once_test() ->
         InProcess,
         beamtalk_test_case:failure_stacktrace('bt@user@t', Ex(InProcess), Catch)
     ),
+    %% Taken in the test process, with the test frame at the raise line rather than
+    %% the re-raise line: still not repeated.
+    OtherLine = [{beamtalk_erlang_proxy, apply, 6, []}, {'bt@user@t', testBoom, 0, [{line, 7}]}],
+    ?assertEqual(
+        OtherLine,
+        beamtalk_test_case:failure_stacktrace('bt@user@t', Ex(OtherLine), Catch)
+    ),
     %% An actor ran a block defined in the test method: its fun frame is in the
     %% carried stack, but the test method's own frame is not, so it is appended.
     Block = [{maps, get, 2, []}, {'bt@user@t', '-testBoom/0-fun-0-', 1, [{line, 8}]}],

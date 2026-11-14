@@ -889,7 +889,22 @@ failure_stacktrace(Module, Reason, CatchStacktrace) ->
             %% A block defined in the test method but run by an actor also puts a
             %% test-module frame in the carried stack, so compare the frames themselves.
             TestFrames = [Frame || {M, _, _, _} = Frame <- CatchStacktrace, M =:= Module],
-            case TestFrames =/= [] andalso lists:member(hd(TestFrames), Carried) of
+            %% The lines can differ (the raise and the re-raise are different calls),
+            %% so match the function, not the location.
+            HasTestFrame =
+                case TestFrames of
+                    [{_, TF, TA, _} | _] ->
+                        lists:any(
+                            fun
+                                ({M, F, A, _}) -> {M, F, A} =:= {Module, TF, TA};
+                                (_) -> false
+                            end,
+                            Carried
+                        );
+                    [] ->
+                        false
+                end,
+            case HasTestFrame of
                 true -> Carried;
                 false -> Carried ++ TestFrames
             end
