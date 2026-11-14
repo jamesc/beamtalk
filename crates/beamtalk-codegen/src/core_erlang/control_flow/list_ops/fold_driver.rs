@@ -177,8 +177,6 @@ pub(in crate::core_erlang::control_flow) enum FoldOp<'a> {
     },
 }
 
-/// The post-fold result of a [`FoldOp`]: the `let` chain ending in `" in "`
-/// and the variable holding the op's result value.
 /// How the fold closes after its epilogue bindings.
 enum EpilogueTail {
     /// `{Result, State}`.
@@ -188,6 +186,8 @@ enum EpilogueTail {
     IfNone(Document<'static>),
 }
 
+/// The post-fold result of a [`FoldOp`]: the `let` chain ending in `" in "`
+/// and the variable holding the op's result value.
 struct Epilogue {
     bindings: Document<'static>,
     result: Document<'static>,
