@@ -1394,77 +1394,6 @@ sync_message_to_dead_actor_returns_error_test() ->
 %%% register_spawned callback tests
 %%% ===========================================================================
 
-register_spawned_returns_ok_when_no_callback_configured_test() ->
-    %% Clear any existing callback config
-    application:unset_env(beamtalk_runtime, actor_spawn_callback),
-
-    FakePid = spawn(fun() ->
-        receive
-            _ -> ok
-        end
-    end),
-    Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
-    ?assertEqual(ok, Result),
-
-    exit(FakePid, kill).
-
-register_spawned_returns_error_when_callback_undef_test() ->
-    %% Clear first in case a previous test leaked (assertion failure before cleanup)
-    application:unset_env(beamtalk_runtime, actor_spawn_callback),
-    %% Set callback to a module that doesn't implement on_actor_spawned/4
-    application:set_env(beamtalk_runtime, actor_spawn_callback, nonexistent_callback_mod),
-
-    FakePid = spawn(fun() ->
-        receive
-            _ -> ok
-        end
-    end),
-    Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
-    ?assertMatch({error, {callback_undef, nonexistent_callback_mod}}, Result),
-
-    exit(FakePid, kill),
-    application:unset_env(beamtalk_runtime, actor_spawn_callback).
-
-register_spawned_returns_error_when_callback_crashes_test() ->
-    application:unset_env(beamtalk_runtime, actor_spawn_callback),
-    application:set_env(
-        beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests_crash_callback
-    ),
-
-    %% Ensure crash callback module exists
-    ok = ensure_crash_callback_module(),
-
-    FakePid = spawn(fun() ->
-        receive
-            _ -> ok
-        end
-    end),
-    Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
-    ?assertMatch({error, {error, deliberate_crash}}, Result),
-
-    exit(FakePid, kill),
-    application:unset_env(beamtalk_runtime, actor_spawn_callback).
-
-register_spawned_surfaces_callback_error_result_test() ->
-    %% Test that {error, _} from on_actor_spawned is returned, not swallowed
-    application:unset_env(beamtalk_runtime, actor_spawn_callback),
-    application:set_env(
-        beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests_error_callback
-    ),
-
-    ok = ensure_error_callback_module(),
-
-    FakePid = spawn(fun() ->
-        receive
-            _ -> ok
-        end
-    end),
-    Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
-    ?assertEqual({error, {registry_failed, registry_not_running}}, Result),
-
-    exit(FakePid, kill),
-    application:unset_env(beamtalk_runtime, actor_spawn_callback).
-
 %%% ===========================================================================
 %%% register_spawned/4 Callback Integration Tests (from main)
 %%% ===========================================================================
@@ -1503,21 +1432,36 @@ register_spawned_invokes_callback_when_env_set_test() ->
         end
     end.
 
-register_spawned_noop_when_env_unset_test() ->
-    %% Ensure no callback env is set
-    application:unset_env(beamtalk_runtime, actor_spawn_callback),
-
-    ActorPid = spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end),
-    try
-        %% Should return ok without error
-        ?assertEqual(ok, beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter))
-    after
-        exit(ActorPid, kill)
-    end.
+register_spawned_without_callback_returns_ok_test_() ->
+    %% BT-4806: the former register_spawned_{returns_ok_when_no_callback_configured,
+    %% noop_when_env_unset}_test pair. With no actor_spawn_callback configured,
+    %% register_spawned/4 is a no-op that answers ok.
+    %% {Label, RegistryIsActor, Class, Module}: the first test passed the same fake pid as
+    %% registry and actor, the second the test process as the registry.
+    [
+        {Label, fun() ->
+            application:unset_env(beamtalk_runtime, actor_spawn_callback),
+            ActorPid = spawn(fun() ->
+                receive
+                    stop -> ok
+                end
+            end),
+            Registry =
+                case RegistryIsActor of
+                    true -> ActorPid;
+                    false -> self()
+                end,
+            try
+                ?assertEqual(ok, beamtalk_actor:register_spawned(Registry, ActorPid, Class, Mod))
+            after
+                exit(ActorPid, kill)
+            end
+        end}
+     || {Label, RegistryIsActor, Class, Mod} <- [
+            {"no callback configured", true, 'Test', test_mod},
+            {"callback env unset", false, 'Counter', test_counter}
+        ]
+    ].
 
 register_spawned_callback_failure_test_() ->
     %% BT-4679: the former register_spawned_returns_error_on_{undef_callback,
@@ -1539,11 +1483,28 @@ register_spawned_callback_failure_test_() ->
             {"callback raising a generic error", test_spawn_callback_generic_error, fun
                 ({error, _}) -> true;
                 (_) -> false
+            end},
+            %% BT-4806: the former register_spawned_{returns_error_when_callback_undef,
+            %% returns_error_when_callback_crashes,surfaces_callback_error_result} tests.
+            {"callback module that does not exist", nonexistent_callback_mod, fun
+                ({error, {callback_undef, nonexistent_callback_mod}}) -> true;
+                (_) -> false
+            end},
+            {"callback calling erlang:error/1", beamtalk_actor_tests_crash_callback, fun
+                ({error, {error, deliberate_crash}}) -> true;
+                (_) -> false
+            end},
+            %% An {error, _} result from on_actor_spawned is returned, not swallowed.
+            {"callback answering {error, _}", beamtalk_actor_tests_error_callback, fun
+                ({error, {registry_failed, registry_not_running}}) -> true;
+                (_) -> false
             end}
         ]
     ].
 
 register_spawned_callback_failure_case(CallbackMod, Matches) ->
+    ok = ensure_crash_callback_module(),
+    ok = ensure_error_callback_module(),
     application:set_env(beamtalk_runtime, actor_spawn_callback, CallbackMod),
     ActorPid = spawn(fun() ->
         receive
@@ -1604,16 +1565,21 @@ ensure_error_callback_module() ->
 %%% Actor Lifecycle Tests (async_send/sync_send wrappers)
 %%% ============================================================================
 
-async_send_lifecycle_test_() ->
+lifecycle_test_() ->
     %% BT-4679: the former async_send_{is_alive,stop,kill}_{live,dead}_actor tests.
+    %% BT-4806: the former sync_send_{is_alive,stop,stop_dead_actor,kill_live_actor,kill_dead_actor}
+    %% tests are the same rows over sync_send/3, so each row runs in both modes.
     %% {Label, Start, Liveness, Selector, Expected, After}: `Start` is start_link, or
     %% start so a kill does not propagate to the test process; `After` is `stop` (clean up
     %% the live actor), `dead` (wait for the actor to exit, then it must be gone: stop can
     %% resolve before exit completes), `dead_now` (it must already be gone, no wait: kill
     %% returns ok only once the process is confirmed dead) or `none`.
     [
-        {Label, fun() -> async_send_lifecycle_case(Start, Liveness, Selector, Expected, After) end}
-     || {Label, Start, Liveness, Selector, Expected, After} <- [
+        {lists:flatten(io_lib:format("~s: ~s", [Mode, Label])), fun() ->
+            lifecycle_case(Mode, Start, Liveness, Selector, Expected, After)
+        end}
+     || Mode <- [async_send, sync_send],
+        {Label, Start, Liveness, Selector, Expected, After} <- [
             {"isAlive on a live actor", start_link, live, isAlive, true, stop},
             {"isAlive on a dead actor", start_link, dead, isAlive, false, none},
             {"stop on a live actor", start_link, live, stop, ok, dead},
@@ -1626,7 +1592,7 @@ async_send_lifecycle_test_() ->
         ]
     ].
 
-async_send_lifecycle_case(Start, Liveness, Selector, Expected, After) ->
+lifecycle_case(Mode, Start, Liveness, Selector, Expected, After) ->
     {ok, Counter} = test_counter:Start(0),
     case Liveness of
         live ->
@@ -1635,9 +1601,16 @@ async_send_lifecycle_case(Start, Liveness, Selector, Expected, After) ->
             gen_server:stop(Counter),
             beamtalk_test_wait:dead(Counter)
     end,
-    Future = beamtalk_future:new(),
-    beamtalk_actor:async_send(Counter, Selector, [], Future),
-    ?assertEqual(Expected, beamtalk_future:await(Future)),
+    Result =
+        case Mode of
+            async_send ->
+                Future = beamtalk_future:new(),
+                beamtalk_actor:async_send(Counter, Selector, [], Future),
+                beamtalk_future:await(Future);
+            sync_send ->
+                beamtalk_actor:sync_send(Counter, Selector, [])
+        end,
+    ?assertEqual(Expected, Result),
     case After of
         stop ->
             gen_server:stop(Counter);
@@ -1688,37 +1661,45 @@ make_self_creates_object_ref_test() ->
 %%% sync_send Tests
 %%% ============================================================================
 
-sync_send_is_alive_test() ->
-    {ok, Counter} = test_counter:start_link(0),
-    ?assertEqual(true, beamtalk_actor:sync_send(Counter, isAlive, [])),
-    gen_server:stop(Counter),
-    beamtalk_test_wait:dead(Counter),
-    ?assertEqual(false, beamtalk_actor:sync_send(Counter, isAlive, [])).
-
-sync_send_stop_test() ->
-    {ok, Counter} = test_counter:start_link(0),
-    ?assertEqual(ok, beamtalk_actor:sync_send(Counter, stop, [])),
-    beamtalk_test_wait:dead(Counter),
-    ?assertNot(is_process_alive(Counter)).
-
-sync_send_stop_dead_actor_test() ->
-    {ok, Counter} = test_counter:start_link(0),
-    gen_server:stop(Counter),
-    beamtalk_test_wait:dead(Counter),
-    ?assertEqual(ok, beamtalk_actor:sync_send(Counter, stop, [])).
-
 sync_send_monitor_test() ->
     {ok, Counter} = test_counter:start_link(0),
     Ref = beamtalk_actor:sync_send(Counter, monitor, []),
     ?assert(is_reference(Ref)),
     gen_server:stop(Counter).
 
-sync_send_to_dead_actor_test() ->
-    %% sync_send to a dead actor raises an actor_dead exception (not returns error tuple).
-    {ok, Counter} = test_counter:start_link(0),
-    gen_server:stop(Counter),
-    beamtalk_test_wait:dead(Counter),
-    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [])).
+%% BT-4806: the former sync_send{,_4}_{to_dead_actor,dead_actor,to_normal_exit_actor,
+%% to_killed_actor,to_shutdown_actor}* tests. sync_send to an actor that is gone raises an
+%% actor_dead exception (it does not return an error tuple), whichever way the actor went
+%% away and whether or not an explicit timeout is given. `Start` uses start (not start_link)
+%% where the exit would otherwise propagate to the test process.
+%% {Label, Start, WayGone, ExtraArgs}: ExtraArgs is [] for sync_send/3 or [Timeout].
+sync_send_to_gone_actor_raises_actor_dead_test_() ->
+    Linked = fun() -> test_counter:start_link(0) end,
+    Unlinked = fun() -> test_counter:start(0) end,
+    Plain = fun() -> gen_server:start(test_counter, 0, []) end,
+    Stop = fun(C) -> gen_server:stop(C) end,
+    [
+        {Label, fun() ->
+            {ok, Counter} = StartFun(),
+            WayGone(Counter),
+            beamtalk_test_wait:dead(Counter),
+            ?assertBtError(
+                actor_dead, apply(beamtalk_actor, sync_send, [Counter, getValue, []] ++ Extra)
+            )
+        end}
+     || {Label, StartFun, WayGone, Extra} <- [
+            {"/3: stopped", Linked, Stop, []},
+            {"/4: stopped", Linked, Stop, [5000]},
+            {"/3: stopped with normal", Plain, fun(C) -> gen_server:stop(C, normal, 1000) end,
+                []},
+            {"/3: killed", Unlinked, fun(C) -> exit(C, kill) end, []},
+            {"/3: stopped with shutdown", Plain, fun(C) -> gen_server:stop(C, shutdown, 1000) end,
+                []},
+            {"/4: stopped with normal (noproc catch)", Plain,
+                fun(C) -> gen_server:stop(C, normal, 1000) end, [1000]},
+            {"/4: killed (catch-all exit branch)", Unlinked, fun(C) -> exit(C, kill) end, [1000]}
+        ]
+    ].
 
 %%% ============================================================================
 %%% sync_send/4 (explicit timeout) tests
@@ -1743,12 +1724,6 @@ sync_send_4_infinity_timeout_test() ->
     Result = beamtalk_actor:sync_send(Counter, 'slowGet:', [50], infinity),
     ?assertEqual(42, Result),
     gen_server:stop(Counter).
-
-sync_send_4_dead_actor_test() ->
-    {ok, Counter} = test_counter:start_link(0),
-    gen_server:stop(Counter),
-    beamtalk_test_wait:dead(Counter),
-    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [], 5000)).
 
 %%% ============================================================================
 %%% cast_send/3 and fire-and-forget handle_cast wire format tests
@@ -1835,21 +1810,6 @@ handle_cast_fire_and_forget_unknown_selector_crashes_actor_test() ->
 %%% Regression tests for kill semantics (race-condition fix)
 %%% These guard against the bug where exit(Pid, kill) + immediate ok
 %%% meant is_process_alive could still return true on the next call.
-
-sync_send_kill_live_actor_returns_ok_and_actor_is_dead_test() ->
-    {ok, Counter} = test_counter:start(0),
-    Result = beamtalk_actor:sync_send(Counter, kill, []),
-    %% kill must return ok only once the process is confirmed dead
-    ?assertEqual(ok, Result),
-    ?assertNot(is_process_alive(Counter)).
-
-sync_send_kill_dead_actor_returns_ok_test() ->
-    {ok, Counter} = test_counter:start(0),
-    gen_server:stop(Counter),
-    beamtalk_test_wait:dead(Counter),
-    Result = beamtalk_actor:sync_send(Counter, kill, []),
-    %% Killing an already-dead process is idempotent
-    ?assertEqual(ok, Result).
 
 async_send_kill_isAlive_false_immediately_after_test() ->
     %% This is the exact sequence that was flaky before the fix.
@@ -2130,42 +2090,6 @@ safe_spawn_failing_initialize_with_ack_reports_real_reason_test_() ->
 
 %%% BT-4104: safe_spawn_monitored/2
 
-safe_spawn_monitored_fast_normal_exit_reports_normal_test_() ->
-    %% The issue repro: an actor that stops with `normal` straight after
-    %% `initialize`. The monitor is created with the process, so its DOWN
-    %% always carries `normal` — never the `noproc` a monitor taken after
-    %% the start reports when the actor is already gone.
-    {timeout, 60, fun() ->
-        Reasons = [
-            begin
-                {ok, {Pid, MonRef}} =
-                    beamtalk_actor:safe_spawn_monitored(
-                        test_init_ack_actor, #{mode => exit_normal}
-                    ),
-                receive
-                    {'DOWN', MonRef, process, Pid, Reason} -> Reason
-                after 5000 -> no_down
-                end
-            end
-         || _ <- lists:seq(1, 200)
-        ],
-        ?assertEqual([normal], lists:usort(Reasons)),
-        ?assertEqual(no_stray_ack, stray_ack())
-    end}.
-
-safe_spawn_monitored_fast_abnormal_exit_reports_real_reason_test() ->
-    logger:set_primary_config(level, none),
-    try
-        {ok, {Pid, MonRef}} =
-            beamtalk_actor:safe_spawn_monitored(test_init_ack_actor, #{mode => stop_continue}),
-        receive
-            {'DOWN', MonRef, process, Pid, Reason} -> ?assertEqual(bad_config, Reason)
-        after 5000 -> error(no_down)
-        end
-    after
-        logger:set_primary_config(level, all)
-    end.
-
 safe_spawn_monitored_live_actor_keeps_monitor_and_no_link_test() ->
     {ok, {Pid, MonRef}} = beamtalk_actor:safe_spawn_monitored(test_counter, #{init_count => 0}),
     ?assert(is_process_alive(Pid)),
@@ -2192,28 +2116,6 @@ safe_spawn_monitored_ignores_supervisor_spawn_context_test() ->
         gen_server:stop(Pid)
     after
         erase(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY)
-    end.
-
-safe_spawn_monitored_failing_initialize_cleans_up_test() ->
-    %% A failing `initialize` reports its real reason, kills nothing else,
-    %% and leaves no monitor, DOWN or initialize ack behind.
-    logger:set_primary_config(level, none),
-    flush_downs(),
-    try
-        {monitors, Before} = process_info(self(), monitors),
-        ?assertEqual(
-            {error, {error, function_clause}},
-            beamtalk_actor:safe_spawn_monitored(test_init_ack_actor, #{mode => crash})
-        ),
-        {monitors, After} = process_info(self(), monitors),
-        ?assertEqual(Before, After),
-        ?assertEqual(no_stray_ack, stray_ack()),
-        receive
-            {'DOWN', _, process, _, _} = Down -> error({stray_down, Down})
-        after 50 -> ok
-        end
-    after
-        logger:set_primary_config(level, all)
     end.
 
 %%% BT-4477: safe_spawn_monitored_async/2
@@ -2281,70 +2183,104 @@ safe_spawn_monitored_async_honours_init_actions_test() ->
     after 5000 -> error(no_down)
     end.
 
-safe_spawn_monitored_async_init_stop_delivers_down_with_reason_test() ->
-    %% `{stop, Reason}` from `init/1` cannot be raised to the caller: the pair
-    %% still comes back and the monitor's DOWN carries `Reason` — never `noproc`.
-    {ok, {Pid, MonRef}} = beamtalk_actor:safe_spawn_monitored_async(
-        test_async_init_actor, #{mode => stop}
-    ),
-    receive
-        {'DOWN', MonRef, process, Pid, Reason} -> ?assertEqual(init_refused, Reason)
-    after 5000 -> error(no_down)
-    end,
-    ?assertEqual(no_stray_ack, stray_ack()).
-
-safe_spawn_monitored_async_init_ignore_exits_normal_test() ->
-    {ok, {Pid, MonRef}} = beamtalk_actor:safe_spawn_monitored_async(
-        test_async_init_actor, #{mode => ignore}
-    ),
-    receive
-        {'DOWN', MonRef, process, Pid, Reason} -> ?assertEqual(normal, Reason)
-    after 5000 -> error(no_down)
-    end.
-
-safe_spawn_monitored_async_bad_init_return_and_crash_deliver_down_test() ->
-    logger:set_primary_config(level, none),
-    try
-        {ok, {P1, R1}} = beamtalk_actor:safe_spawn_monitored_async(
-            test_async_init_actor, #{mode => bad_return}
-        ),
-        receive
-            {'DOWN', R1, process, P1, Reason1} ->
-                ?assertEqual({bad_return_value, not_a_valid_init_result}, Reason1)
-        after 5000 -> error(no_down)
-        end,
-        {ok, {P2, R2}} = beamtalk_actor:safe_spawn_monitored_async(
-            test_async_init_actor, #{mode => crash}
-        ),
-        receive
-            {'DOWN', R2, process, P2, Reason2} ->
-                ?assertMatch({boom, _Stacktrace}, Reason2)
-        after 5000 -> error(no_down)
-        end
-    after
-        logger:set_primary_config(level, all)
-    end.
-
-safe_spawn_monitored_async_fast_exit_reports_real_reason_test_() ->
-    %% As safe_spawn_monitored/2 (BT-4104): the monitor exists from the
-    %% process's first instant, so a short-lived actor reports `normal`.
-    {timeout, 60, fun() ->
-        Reasons = [
-            begin
-                {ok, {Pid, MonRef}} =
-                    beamtalk_actor:safe_spawn_monitored_async(
-                        test_init_ack_actor, #{mode => exit_normal}
-                    ),
-                receive
-                    {'DOWN', MonRef, process, Pid, Reason} -> Reason
-                after 5000 -> no_down
+%% BT-4806: the former safe_spawn_monitored_fast_abnormal_exit_reports_real_reason and
+%% safe_spawn_monitored_async_{init_stop_delivers_down_with_reason,init_ignore_exits_normal,
+%% bad_init_return_and_crash_deliver_down} tests. A monitored start whose actor fails to come
+%% up cannot raise to the caller: the pair still comes back and the monitor's DOWN carries
+%% the real stop reason, never `noproc`. {Label, SpawnFun, Module, Args, ReasonMatcher}.
+safe_spawn_monitored_down_reason_test_() ->
+    [
+        {Label, fun() ->
+            logger:set_primary_config(level, none),
+            try
+                {ok, {Pid, MonRef}} = beamtalk_actor:SpawnFun(Module, Args),
+                Reason =
+                    receive
+                        {'DOWN', MonRef, process, Pid, R} -> R
+                    after 5000 -> no_down
+                    end,
+                case Matches(Reason) of
+                    true -> ok;
+                    false -> error({unexpected_down_reason, Label, Reason})
                 end
+            after
+                logger:set_primary_config(level, all)
             end
-         || _ <- lists:seq(1, 200)
-        ],
-        ?assertEqual([normal], lists:usort(Reasons)),
-        ?assertEqual(no_stray_ack, stray_ack())
-    end}.
+        end}
+     || {Label, SpawnFun, Module, Args, Matches} <- [
+            {"monitored: stop after initialize reports bad_config", safe_spawn_monitored,
+                test_init_ack_actor, #{mode => stop_continue}, fun(R) -> R =:= bad_config end},
+            {"async: {stop, Reason} from init/1", safe_spawn_monitored_async,
+                test_async_init_actor, #{mode => stop}, fun(R) -> R =:= init_refused end},
+            {"async: init/1 answering ignore exits normal", safe_spawn_monitored_async,
+                test_async_init_actor, #{mode => ignore}, fun(R) -> R =:= normal end},
+            {"async: init/1 answering a bad return", safe_spawn_monitored_async,
+                test_async_init_actor, #{mode => bad_return}, fun(R) ->
+                    R =:= {bad_return_value, not_a_valid_init_result}
+                end},
+            {"async: init/1 crashing", safe_spawn_monitored_async, test_async_init_actor,
+                #{mode => crash}, fun
+                    ({boom, _Stacktrace}) -> true;
+                    (_) -> false
+                end}
+        ]
+    ].
+
+%% BT-4806: the former safe_spawn_monitored_fast_normal_exit_reports_normal and
+%% safe_spawn_monitored_async_fast_exit_reports_real_reason tests (the same repro through both
+%% spawn functions). An actor that stops with `normal` straight after `initialize`: the monitor
+%% is created with the process, so its DOWN always carries `normal` - never the `noproc` a
+%% monitor taken after the start reports when the actor is already gone.
+safe_spawn_monitored_fast_exit_reports_normal_test_() ->
+    [
+        {atom_to_list(SpawnFun), {timeout, 60, fun() ->
+            Reasons = [
+                begin
+                    {ok, {Pid, MonRef}} =
+                        beamtalk_actor:SpawnFun(test_init_ack_actor, #{mode => exit_normal}),
+                    receive
+                        {'DOWN', MonRef, process, Pid, Reason} -> Reason
+                    after 5000 -> no_down
+                    end
+                end
+             || _ <- lists:seq(1, 200)
+            ],
+            ?assertEqual([normal], lists:usort(Reasons)),
+            ?assertEqual(no_stray_ack, stray_ack())
+        end}}
+     || SpawnFun <- [safe_spawn_monitored, safe_spawn_monitored_async]
+    ].
+
+%% BT-4806: the former safe_spawn_monitored_{failing_initialize_cleans_up,
+%% initialize_timeout_kills_and_cleans_up} tests. A failing `initialize` reports its real
+%% reason, kills nothing else, and leaves no monitor, DOWN or initialize ack behind.
+%% {Label, Args, ExpectedResult}.
+safe_spawn_monitored_failed_start_cleans_up_test_() ->
+    [
+        {Label, {timeout, 30, fun() ->
+            logger:set_primary_config(level, none),
+            flush_downs(),
+            try
+                {monitors, Before} = process_info(self(), monitors),
+                ?assertEqual(
+                    Expected, beamtalk_actor:safe_spawn_monitored(test_init_ack_actor, Args)
+                ),
+                {monitors, After} = process_info(self(), monitors),
+                ?assertEqual(Before, After),
+                ?assertEqual(no_stray_ack, stray_ack()),
+                receive
+                    {'DOWN', _, process, _, _} = Down -> error({stray_down, Down})
+                after 50 -> ok
+                end
+            after
+                logger:set_primary_config(level, all)
+            end
+        end}}
+     || {Label, Args, Expected} <- [
+            {"initialize crashes", #{mode => crash}, {error, {error, function_clause}}},
+            {"initialize times out", #{mode => slow_initialize, delay => 7000}, {error, timeout}}
+        ]
+    ].
 
 %% Drop DOWN messages left in this (shared) eunit process by earlier tests, so
 %% a "no stray DOWN" assertion only sees messages from its own spawn.
@@ -2353,24 +2289,6 @@ flush_downs() ->
         {'DOWN', _, process, _, _} -> flush_downs()
     after 0 -> ok
     end.
-
-safe_spawn_monitored_initialize_timeout_kills_and_cleans_up_test_() ->
-    {timeout, 30, fun() ->
-        {monitors, Before} = process_info(self(), monitors),
-        ?assertEqual(
-            {error, timeout},
-            beamtalk_actor:safe_spawn_monitored(
-                test_init_ack_actor, #{mode => slow_initialize, delay => 7000}
-            )
-        ),
-        {monitors, After} = process_info(self(), monitors),
-        ?assertEqual(Before, After),
-        ?assertEqual(no_stray_ack, stray_ack()),
-        receive
-            {'DOWN', _, process, _, _} = Down -> error({stray_down, Down})
-        after 50 -> ok
-        end
-    end}.
 
 safe_spawn_fallback_strips_ack_target_from_merged_state_test() ->
     %% An init/1 that merges its start args into its state without
@@ -3036,14 +2954,6 @@ code_change_preserves_state_unit_test() ->
 %%% sync_send/3 exit catch-all paths
 %%% ============================================================================
 
-sync_send_to_shutdown_actor_raises_actor_dead_test() ->
-    %% When an actor stops with shutdown reason during a call, we get actor_dead
-    %% Use start (not start_link) so the test process isn't killed by the shutdown EXIT.
-    {ok, Counter} = gen_server:start(test_counter, 0, []),
-    gen_server:stop(Counter, shutdown, 1000),
-    beamtalk_test_wait:dead(Counter),
-    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [])).
-
 %%% ============================================================================
 %%% lookup_class returns unknown for non-actor pids
 %%% ============================================================================
@@ -3704,21 +3614,6 @@ maybe_execute_telemetry_with_empty_metadata_test() ->
 
 %%% sync_send_remote error paths (exit reasons)
 
-sync_send_to_normal_exit_actor_raises_actor_dead_test() ->
-    %% When actor stops with `normal`, sync_send should surface actor_dead.
-    {ok, Counter} = gen_server:start(test_counter, 0, []),
-    gen_server:stop(Counter, normal, 1000),
-    beamtalk_test_wait:dead(Counter),
-    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [])).
-
-sync_send_to_killed_actor_raises_actor_dead_test() ->
-    %% When actor is killed, sync_send should surface actor_dead (covers the
-    %% catch-all `exit:{_Reason, _}` branch in sync_send_remote).
-    {ok, Counter} = test_counter:start(0),
-    exit(Counter, kill),
-    beamtalk_test_wait:dead(Counter),
-    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [])).
-
 sync_send_timeout_raises_timeout_error_test() ->
     %% When the actor takes longer than the configured timeout to reply,
     %% sync_send/4 should surface a timeout error (covers exit:{timeout, _}
@@ -3947,20 +3842,6 @@ terminate_with_state_without_class_test() ->
     ?assertEqual(ok, beamtalk_actor:terminate(normal, StateNoClass)).
 
 %%% sync_send/4 exit paths
-
-sync_send_4_to_dead_actor_raises_actor_dead_test() ->
-    %% Covers the exit:{noproc, _} catch in sync_send/4 (line 828-829).
-    {ok, Counter} = gen_server:start(test_counter, 0, []),
-    gen_server:stop(Counter, normal, 1000),
-    beamtalk_test_wait:dead(Counter),
-    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [], 1000)).
-
-sync_send_4_to_killed_actor_raises_actor_dead_test() ->
-    %% Covers the exit:{_Reason, _} catch-all branch (line 836-837).
-    {ok, Counter} = test_counter:start(0),
-    exit(Counter, kill),
-    beamtalk_test_wait:dead(Counter),
-    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [], 1000)).
 
 sync_send_4_with_infinity_timeout_succeeds_test() ->
     %% Covers the Timeout =:= infinity guard branch.
