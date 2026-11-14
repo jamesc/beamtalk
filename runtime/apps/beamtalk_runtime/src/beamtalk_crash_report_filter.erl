@@ -102,7 +102,7 @@ translate(#{msg := {report, #{label := Label} = Report}, meta := Meta} = Event) 
                     Mfas = [
                         Mfa
                      || {M, _, _} = Mfa <- lists:usort(report_mfas(Label, Report)),
-                        is_beamtalk_module(M)
+                        beamtalk_module_name:is_compiled_beamtalk_module(M)
                     ],
                     %% Nothing Beamtalk in the report: skip the class-table read.
                     Rendered =
@@ -122,13 +122,6 @@ translate(#{msg := {report, #{label := Label} = Report}, meta := Meta} = Event) 
     end;
 translate(_Event) ->
     ignore.
-
--spec is_beamtalk_module(atom()) -> boolean().
-is_beamtalk_module(Module) ->
-    case atom_to_binary(Module) of
-        <<"bt@", _/binary>> -> true;
-        _ -> false
-    end.
 
 -spec recognised(term()) -> boolean().
 recognised({gen_server, terminate}) -> true;

@@ -33,6 +33,8 @@ crash_report_test_() ->
             {"proc_lib crash renders initial_call and stacktrace", fun proc_lib_crash/0},
             {"supervisor child report renders mfargs", fun supervisor_child/0},
             {"raw MFA stays in the report term", fun raw_stays_in_report/0},
+            {"REPL eval frames are translated like the renderer treats them",
+                fun repl_eval_frame/0},
             {"unrecognised reports pass through", fun passthrough/0},
             {"malformed report: warn, untranslated, hook still installed", fun malformed_report/0}
         ]
@@ -179,6 +181,21 @@ passthrough() ->
         ignore, beamtalk_crash_report_filter:filter(#{msg => {string, "x"}, meta => #{}}, [])
     ),
     ?assertEqual(ignore, beamtalk_crash_report_filter:filter(garbage, [])).
+
+repl_eval_frame() ->
+    Cb = fun(R) -> {"~tp", [R]} end,
+    Frame = {beamtalk_repl_eval_4820, 'doit', 0, []},
+    Event = #{
+        msg => {report, #{label => {gen_server, terminate}, reason => {boom, [Frame]}}},
+        meta => #{report_cb => Cb}
+    },
+    ?assertMatch(
+        #{meta := #{report_cb := _}},
+        beamtalk_crash_report_filter:filter(Event, [])
+    ),
+    ?assertNotEqual(
+        Cb, maps:get(report_cb, maps:get(meta, beamtalk_crash_report_filter:filter(Event, [])))
+    ).
 
 malformed_report() ->
     drain(),
