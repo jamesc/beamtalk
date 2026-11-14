@@ -273,6 +273,31 @@ fn flattened_provision_from_pathless_protocol_never_carries_the_users_file() {
     );
 }
 
+/// BT-4817: a flattened provision whose protocol source is not available has a
+/// span that is an offset into a file we do not have; mapping it through the
+/// user's text would put a made-up line under the user's own file in the
+/// stack-frame selector table. It gets no row; the actor's own method does.
+#[test]
+fn flattened_provision_without_protocol_source_has_no_method_lines_row() {
+    use std::fmt::Write as _;
+    // Long enough that the protocol offset of `describe` falls inside it,
+    // so the bug (a made-up row) cannot hide behind an out-of-range offset.
+    let mut actor = String::from("Actor subclass: Report\n  uses: Describable\n\n  bump => 1\n");
+    for i in 0..12 {
+        writeln!(actor, "  bump{i} => {i}").unwrap();
+    }
+    let code = generate_cross_file(&actor, DESCRIBABLE_FILE, "pkg/describable.bt", false);
+    let table = code
+        .split("'__beamtalk_method_lines'/0 = fun")
+        .nth(1)
+        .and_then(|rest| rest.split("'has_method'/1 = fun").next())
+        .unwrap_or_else(|| panic!("expected a method-lines table, got:\n{code}"));
+    assert!(
+        table.contains("'bump'") && !table.contains("'describe'"),
+        "own method only, no row for the flattened `describe`, got:\n{table}"
+    );
+}
+
 /// Counterpart: without the protocol's source (a dependency checkout the
 /// build did not carry, say) codegen falls back to the pre-BT-3625
 /// behaviour rather than failing — no protocol path appears.

@@ -651,7 +651,9 @@ frame_parts(#{module := Module, function := Function} = Frame) ->
 %% `.beam`) or a line before the first method leaves `dispatch` as it was.
 %% Only instance-side `dispatch/4` frames (and blocks lifted out of them) are
 %% looked up: the table holds instance methods, so a class-side method that is
-%% itself named `dispatch`, or another arity (`dispatch/3`), keeps its own name.
+%% itself named `dispatch`, or another arity (`dispatch/3`), keeps its own name
+%% (for a block the parent's arity is not known, so a block lifted out of
+%% `dispatch/3` is still looked up).
 %% Two methods starting on one source line cannot be told apart by line; the
 %% later one is named.
 -spec actor_selector(

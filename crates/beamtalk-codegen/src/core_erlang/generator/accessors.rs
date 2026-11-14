@@ -712,6 +712,26 @@ impl CoreErlangGenerator {
         );
     }
 
+    /// The protocol a `uses:`-flattened method on the current class came from
+    /// (`MethodInfo::origin`, stamped by `trait_expansion::apply_origins`), or
+    /// `None` when `selector` is not a flattened provision. Says nothing about
+    /// whether that protocol's *source* is available; see
+    /// [`Self::flattened_method_source`].
+    pub(in crate::core_erlang) fn flattened_method_origin(
+        &self,
+        selector: &str,
+    ) -> Option<EcoString> {
+        let class_name = self.class_identity()?.class_name();
+        self.class_hierarchy
+            .as_ref()?
+            .get_class(class_name)?
+            .methods
+            .iter()
+            .find(|m| m.selector.as_str() == selector)?
+            .origin
+            .clone()
+    }
+
     /// The protocol source a `uses:`-flattened method must be mapped through
     /// (ADR 0127 §3, "Source locations"), or `None` when `selector` on the
     /// current class is not a flattened provision (or its protocol's source
@@ -731,15 +751,8 @@ impl CoreErlangGenerator {
             return None;
         }
         let class_name = self.class_identity()?.class_name();
-        let origin = self
-            .class_hierarchy
-            .as_ref()?
-            .get_class(class_name)?
-            .methods
-            .iter()
-            .find(|m| m.selector.as_str() == selector)?
-            .origin
-            .as_ref()?;
+        let origin = self.flattened_method_origin(selector)?;
+        let origin = &origin;
         // A provision from the stdlib's own protocol (BT-3915) maps through
         // the stdlib file — never through a same-named carried protocol.
         if self
