@@ -627,7 +627,9 @@ frame_parts(#{module := Module, function := Function} = Frame) ->
                 end,
             Base#{
                 class => class_part(Kind, Module, ClassName, maps:get(package, Frame, nil)),
-                selector => actor_selector(Kind, Module, Selector, Line, maps:get(file, Frame, nil)),
+                selector => actor_selector(
+                    Kind, Module, Selector, Line, maps:get(file, Frame, nil)
+                ),
                 class_side => ClassSide,
                 block => IsBlock
             }
