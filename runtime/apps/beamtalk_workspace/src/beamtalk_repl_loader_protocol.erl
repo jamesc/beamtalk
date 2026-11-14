@@ -136,8 +136,18 @@ reload_protocol_fanout(
                 beamtalk_workspace_meta:all_protocol_sources(),
                 build_protocol_sources_map(ProtocolAtoms, Source)
             ),
+            %% BT-4828: this reload's protocol(s) live at `Path`; every other
+            %% tracked protocol keeps the path it was loaded from.
+            ProtocolSourcePaths = maps:merge(
+                beamtalk_workspace_meta:all_protocol_source_paths(),
+                maps:from_list([
+                    {atom_to_binary(ProtocolAtom, utf8), Path}
+                 || ProtocolAtom <- ProtocolAtoms
+                ])
+            ),
+            FanoutOpts = BatchOpts#{protocol_source_paths => ProtocolSourcePaths},
             warn_skipped_fanout_users(ProtocolAtoms, SkippedNameBins),
-            case compile_fanout_users(TargetAtoms, ProtocolSources, BatchOpts) of
+            case compile_fanout_users(TargetAtoms, ProtocolSources, FanoutOpts) of
                 {ok, CompiledUsers} ->
                     install_protocol_fanout(ProtocolResult, Path, Source, CompiledUsers);
                 {error, Failures} ->
@@ -306,7 +316,7 @@ install_protocol_fanout(
             %% Now that the NEW protocol module is actually live, this
             %% reload's own edit becomes the tracked source for any LATER
             %% cross-file `uses:` — see `track_protocol_source/2`'s doc.
-            beamtalk_repl_loader:track_protocol_source(ProtocolInfo, Source),
+            beamtalk_repl_loader:track_protocol_source(ProtocolInfo, Source, Path),
             ProtocolInstalled = {protocol, Path, ProtocolClassNames},
             case install_fanout_users(CompiledUsers, [ProtocolInstalled]) of
                 {ok, InstalledRev} ->
@@ -379,7 +389,7 @@ rollback_one_install({protocol, Path, _ClassNames}, OldProtocolSources) ->
                         of
                             {ok, _} ->
                                 beamtalk_repl_loader:track_protocol_source(
-                                    OldProtocolInfo, OldSource
+                                    OldProtocolInfo, OldSource, Path
                                 );
                             {error, Reason} ->
                                 log_rollback_failure(protocol, Reason)
