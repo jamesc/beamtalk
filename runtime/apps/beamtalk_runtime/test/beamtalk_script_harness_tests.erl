@@ -84,18 +84,38 @@ entry_completion_defers_to_requested_stop_test_() ->
         end
     end}.
 
-%%% BT-4821: `--raw-mfa` lists every frame with its raw MFA; the default adds nothing.
+%%% BT-4821: `--raw-mfa` lists every frame with its raw MFA.
 raw_trace_lists_every_frame_with_raw_mfa_test() ->
     Stack = [
         {'bt@user@A', m1, 0, [{file, "a.bt"}, {line, 1}]},
         {gen_server, loop, 7, [{file, "gen_server.erl"}, {line, 2}]}
     ],
-    Out = iolist_to_binary(beamtalk_script_harness:raw_trace(#{raw_mfa => true}, Stack)),
+    Out = iolist_to_binary(beamtalk_script_harness:raw_trace(#{raw_mfa => true}, boom, Stack)),
     ?assertEqual(2, length(binary:matches(Out, <<"  at ">>))),
     ?assertNotEqual(nomatch, binary:match(Out, <<"[bt@user@A:m1/0]">>)),
     ?assertNotEqual(nomatch, binary:match(Out, <<"[gen_server:loop/7]">>)).
 
-raw_trace_is_empty_by_default_test() ->
-    Stack = [{'bt@user@A', m1, 0, []}],
-    ?assertEqual([], beamtalk_script_harness:raw_trace(#{}, Stack)),
-    ?assertEqual([], beamtalk_script_harness:raw_trace(#{raw_mfa => false}, Stack)).
+%%% BT-4835: the default lists the visible frames and names what it left out.
+raw_trace_default_lists_visible_frames_and_notice_test() ->
+    Stack = [
+        {maps, get, 2, [{file, "maps.erl"}, {line, 1}]},
+        {gen_server, loop, 7, [{file, "gen_server.erl"}, {line, 2}]}
+    ],
+    Out = iolist_to_binary(beamtalk_script_harness:raw_trace(#{}, boom, Stack)),
+    ?assertNotEqual(nomatch, binary:match(Out, <<"  at maps:get/2">>)),
+    ?assertEqual(nomatch, binary:match(Out, <<"gen_server">>)),
+    ?assertNotEqual(nomatch, binary:match(Out, <<"(1 frame hidden; --raw-mfa shows all)">>)),
+    ?assertEqual(
+        Out, iolist_to_binary(beamtalk_script_harness:raw_trace(#{raw_mfa => false}, boom, Stack))
+    ).
+
+%%% BT-4835: a wrapped exception's own (raise-site) frames win over the catch stack.
+raw_trace_prefers_the_exceptions_own_frames_test() ->
+    Raise = [{maps, get, 2, [{file, "maps.erl"}, {line, 1}]}],
+    Catch = [{beamtalk_script_harness, dispatch, 4, []}],
+    Exc = (beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'Object')))#{
+        raw_stacktrace => Raise
+    },
+    Out = iolist_to_binary(beamtalk_script_harness:raw_trace(#{raw_mfa => true}, Exc, Catch)),
+    ?assertNotEqual(nomatch, binary:match(Out, <<"[maps:get/2]">>)),
+    ?assertEqual(nomatch, binary:match(Out, <<"dispatch/4">>)).

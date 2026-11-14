@@ -737,11 +737,25 @@ catch made a raise far more expensive than it needed to be.
 """.
 -spec ensure_wrapped(term(), list()) -> map().
 ensure_wrapped(#{'$beamtalk_class' := _} = Already, Stacktrace) ->
-    %% Drop a legacy `stacktrace` key so the map keeps one stacktrace source.
-    maps:remove(stacktrace, Already#{raw_stacktrace => capture_stacktrace(Stacktrace)});
+    keep_innermost_stacktrace(Already, Stacktrace);
 ensure_wrapped(Other, Stacktrace) ->
     Wrapped = wrap_with_stacktrace(Other, Stacktrace),
     Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace)}.
+
+-doc """
+An already-wrapped exception keeps the stacktrace it carries: that one was
+taken where the exception was raised, and a later catch (dispatch, a
+`sync_call` relay, a reraise) sees only its own, shallower stack. The catch
+stack backfills an exception that carries none (BT-4837). The cost is one map
+lookup on the error path; the success path is untouched.
+""".
+-spec keep_innermost_stacktrace(map(), list()) -> map().
+keep_innermost_stacktrace(#{raw_stacktrace := _} = Already, _Stacktrace) ->
+    maps:remove(stacktrace, Already);
+keep_innermost_stacktrace(#{stacktrace := _} = Already, _Stacktrace) ->
+    Already;
+keep_innermost_stacktrace(Already, Stacktrace) ->
+    Already#{raw_stacktrace => capture_stacktrace(Stacktrace)}.
 
 -doc """
 Idempotent exception wrapper with Erlang exception type.
@@ -757,10 +771,7 @@ ExitError/ThrowError classes are used instead of RuntimeError.
 %% generic exit/throw clauses below); every branch that substitutes a Beamtalk
 %% exception for the caught term re-raises that exception as an `error`.
 ensure_wrapped(_Type, #{'$beamtalk_class' := _} = Already, Stacktrace) ->
-    %% Drop a legacy `stacktrace` key so the map keeps one stacktrace source.
-    maps:remove(stacktrace, Already#{
-        raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error
-    });
+    (keep_innermost_stacktrace(Already, Stacktrace))#{erlang_class => error};
 ensure_wrapped(_Type, #beamtalk_error{} = Error, Stacktrace) ->
     Wrapped = wrap(Error),
     Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error};

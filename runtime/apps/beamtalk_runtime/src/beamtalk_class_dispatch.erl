@@ -1890,11 +1890,22 @@ keeps its `{error, Nlr}` shape so the `?IS_NLR` re-throw in
     | {nlr_relay, term(), list()}
     | {error, #beamtalk_error{} | undef_in_body | {raised, atom(), term(), list()}}
 ) -> {ok, term()} | {error, term()}.
-outcome_reply({ok, _} = Reply) -> Reply;
-outcome_reply({nlr_relay, Nlr, _ST}) -> {error, Nlr};
-outcome_reply({error, #beamtalk_error{}} = Reply) -> Reply;
-outcome_reply({error, undef_in_body}) -> {error, undef};
-outcome_reply({error, {raised, _ErrClass, Error, _ST}}) -> {error, Error}.
+outcome_reply({ok, _} = Reply) ->
+    Reply;
+outcome_reply({nlr_relay, Nlr, _ST}) ->
+    {error, Nlr};
+outcome_reply({error, #beamtalk_error{}} = Reply) ->
+    Reply;
+outcome_reply({error, undef_in_body}) ->
+    {error, undef};
+%% An `error` carries the class process's own stacktrace across the relay inside
+%% the wrapped exception (`raw_stacktrace`), so the caller's trace shows where
+%% it happened (BT-4829); an exception that already has one keeps it. `exit` and
+%% `throw` keep their raw reason, which the caller wraps as before.
+outcome_reply({error, {raised, error, Error, ST}}) ->
+    {error, beamtalk_exception_handler:ensure_wrapped(error, Error, ST)};
+outcome_reply({error, {raised, _ErrClass, Error, _ST}}) ->
+    {error, Error}.
 
 %% ADR 0110: `{nlr_relay, Nlr, ST}` is a foreign `^` (non-local
 %% return) relaying out of the class method — the relayed NLR tuple plus its

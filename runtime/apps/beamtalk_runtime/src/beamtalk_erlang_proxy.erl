@@ -1079,7 +1079,10 @@ raise_wrapped_error(Kind, ErlangError, Module, FunName, OrigSelector, Context, S
         Error1,
         erlang_error_hint(Module, FunName, ErlangError)
     ),
-    beamtalk_error:raise(
+    %% Raise with the caught stack (as `raise_generic_error/6` does), so the
+    %% Erlang frame that failed is the exception's own raise site (BT-4838);
+    %% `beamtalk_error:raise/1` would start a fresh stack here.
+    Wrapped = beamtalk_exception_handler:wrap(
         beamtalk_error:with_details(
             Error2,
             #{
@@ -1087,7 +1090,8 @@ raise_wrapped_error(Kind, ErlangError, Module, FunName, OrigSelector, Context, S
                 erlang_stacktrace => Stack
             }
         )
-    ).
+    ),
+    erlang:raise(error, Wrapped, Stack).
 
 -doc """
 Coerce all binary values in a list to charlists.

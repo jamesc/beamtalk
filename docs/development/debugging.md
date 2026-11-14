@@ -241,10 +241,10 @@ print.
 | Where | Switch | Effect |
 |---|---|---|
 | `beamtalk test` | `--raw-mfa` | every frame per failure, raw MFA beside the display name; `frames` in the result JSON include hidden frames too |
-| `beamtalk run Class sel` | `--raw-mfa` | an uncaught error is followed by the whole stack in the same format (`--connect` renders the reply's `frames` client-side) |
+| `beamtalk run Class sel` | `--raw-mfa` | an uncaught error is followed by its visible frames (display form, `(N frames hidden; --raw-mfa shows all)` when some are left out); `--raw-mfa` lists the whole stack in the raw format (`--connect` renders the reply's `frames` client-side) |
 | REPL | `:raw-mfa [on\|off]` (bare toggles) | this session only: an error is followed by every frame; without it, an error reply that carries frames ends with `(N frames hidden; :raw-mfa shows all)` |
 
-`run --raw-mfa` lists the stack the caller caught. For an entry that runs in a class process (its class or an ancestor declares class variables, ADR 0142) the relay re-raises with the caller's stacktrace, so the listing shows the dispatch frames rather than the class-method frames.
+`run` lists the frames of the exception itself, taken where it was raised, not the stack of the catch that reported it. An error keeps its innermost stack across every later catch, reraise and process hop (an actor's `sync_call` reply, a class-process relay under ADR 0142), so an entry that runs in a class process still shows its class-method frames.
 
 The REPL toggle is a render option of the attached client. It is not sent to
 the node, so a second session on the same workspace is unchanged, and no
