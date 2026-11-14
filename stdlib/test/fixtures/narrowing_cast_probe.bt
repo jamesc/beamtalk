@@ -22,8 +22,8 @@ typed Value subclass: NarrowingCastProbe
     n :: Integer := opts at: #v
     n > 10
 
-  /// The cast value flows into a typed parameter, whose declared type
-  /// codegen trusts for the comparison.
+  /// The cast value flows into a typed parameter. Its declared type is not
+  /// proof, so codegen kind-tests the comparison's receiver (BT-4823).
   paramLess: n :: Integer -> Object => n < 10
 
   castThenParamLess: opts :: Dictionary -> Object =>
