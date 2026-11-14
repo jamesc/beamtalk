@@ -414,7 +414,7 @@ raw_text_frame(Text) ->
         <<"display">> => Text,
         <<"module">> => null,
         <<"function">> => null,
-        <<"arity">> => null,
+        <<"arity">> => 0,
         <<"file">> => null,
         <<"line">> => null,
         <<"hidden">> => false

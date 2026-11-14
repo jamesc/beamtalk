@@ -341,7 +341,7 @@ EUnit suite and the Rust `StackFrameInfo` test both check.
 | Field | Meaning |
 |-------|---------|
 | `display` | The shared renderer's text (`Counter>>increment (counter.bt:12)`) |
-| `module`, `function`, `arity` | The raw MFA; `null` when the frame has none |
+| `module`, `function`, `arity` | The raw MFA; `module` and `function` are `null` and `arity` is `0` when the frame has none |
 | `file`, `line` | Display path and line; `null` when unknown |
 | `hidden` | `true` when the default visibility classification hides the frame; hidden frames stay in the list |
 

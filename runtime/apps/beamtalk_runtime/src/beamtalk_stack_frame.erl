@@ -53,7 +53,7 @@ protocol error payload, the JSON log `stacktrace` field and the test runner's
 | Key | Value |
 |---|---|
 | `display` | the `format_frame/1` text |
-| `module`, `function`, `arity` | the raw MFA (`null` when the frame has none) |
+| `module`, `function`, `arity` | the raw MFA (`module` and `function` are `null` and `arity` is `0` when the frame has none) |
 | `file`, `line` | display path and line (`null` when unknown) |
 | `hidden` | `true` when `classify_frames/1` hides the frame by default |
 

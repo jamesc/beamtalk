@@ -215,9 +215,13 @@ as `encode_error` metadata. Errors without a captured stacktrace add nothing.
 """.
 -spec frames_metadata(term()) -> map().
 frames_metadata({eval_error, _Class, ExObj}) when is_map(ExObj) ->
-    try beamtalk_exception_handler:frames(ExObj) of
+    %% The whole build is protected: a frame that cannot be rendered must cost
+    %% the `frames`, never the error response.
+    try
+        [beamtalk_stack_frame:structured_frame(F) || F <- beamtalk_exception_handler:frames(ExObj)]
+    of
         [] -> #{};
-        Frames -> #{<<"frames">> => [beamtalk_stack_frame:structured_frame(F) || F <- Frames]}
+        Frames -> #{<<"frames">> => Frames}
     catch
         _:_ -> #{}
     end;

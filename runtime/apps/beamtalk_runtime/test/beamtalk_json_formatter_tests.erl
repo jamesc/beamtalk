@@ -509,7 +509,8 @@ format_non_list_stacktrace_test() ->
     %% Always an array of frame objects, even for a shape that is not a stack.
     [Frame] = maps:get(<<"stacktrace">>, Decoded),
     ?assert(is_binary(maps:get(<<"display">>, Frame))),
-    ?assertEqual(null, maps:get(<<"module">>, Frame)).
+    ?assertEqual(null, maps:get(<<"module">>, Frame)),
+    ?assertEqual(0, maps:get(<<"arity">>, Frame)).
 
 format_application_controller_domain_inference_test() ->
     Report = #{label => {application_controller, progress}},
