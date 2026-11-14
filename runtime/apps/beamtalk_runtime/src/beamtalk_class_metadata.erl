@@ -47,10 +47,16 @@ absence of the others.
 ## Reverse subclass index
 
 `match_subclasses/1` is answered from a second table,
-`beamtalk_class_subclass_index` — a `bag` of `{Superclass, ClassName, Owner}`
-edges (`Owner`: the class process that wrote it, BT-4808), keyed on
-`Superclass` — instead of an `ets:match/2` scan of every row in `?TABLE`. A
-`bag` table (many rows per key) cannot share `?TABLE`'s `set` semantics, so
+`beamtalk_class_subclass_index` — an `ordered_set` of
+`{{Superclass, ClassName}, Owner}` edges (`Owner`: the class process that wrote
+it, BT-4808), keyed on `{Superclass, ClassName}` — instead of an `ets:match/2`
+scan of every row in `?TABLE`. Keying on the pair (BT-4840) makes an edge
+insert/delete O(log N) however many subclasses a hot superclass such as
+`Object` has (a `bag` insert compares against every object under the key), and
+a subclass query a bound-prefix range read of one superclass's edges. One row
+per `{Superclass, ClassName}` means a rebuilt class restamps the edge's owner
+in place; the previous owner's owner-scoped removal then no longer matches it.
+It cannot share `?TABLE`'s `set` semantics, so
 this is a genuine second table rather than a field on the existing row; the
 "second table" it replaces is only the mental model of a "seventh,
 independently-lifecycled table" that the original consolidation weighed
@@ -174,7 +180,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
 %% The metadata row's `has_runtime_class_methods` flag gates reads on this
 %% table so compile-time-only classes pay nothing on the dispatch hot path.
 -define(FUN_TABLE, beamtalk_class_method_funs).
-%% Reverse-edge index for match_subclasses/1 — a `bag` of
+%% Reverse-edge index for match_subclasses/1 — an `ordered_set` of
 %% `{Superclass, ClassName, Owner}` rows, keyed on Superclass (BT-4808: `Owner`
 %% is the class process that wrote the edge). See moduledoc "Reverse subclass
 %% index".
@@ -365,10 +371,12 @@ new() ->
         named_table,
         {read_concurrency, true}
     ]),
-    %% Reverse-edge index, {Superclass, ClassName, Owner} rows, default
-    %% keypos 1 (Superclass). `bag` because a superclass has many subclasses.
+    %% Reverse-edge index, {{Superclass, ClassName}, Owner} rows (BT-4840).
+    %% `ordered_set` keyed on the pair: insert/delete are O(log N) regardless of
+    %% a superclass's subclass count, and a Superclass-prefix select reads just
+    %% that superclass's edges.
     ensure_table(?SUBCLASS_INDEX, [
-        bag,
+        ordered_set,
         public,
         named_table,
         {read_concurrency, true}
@@ -1231,7 +1239,7 @@ lookup_is_abstract(Name) ->
 -doc """
 Return all class names whose direct superclass is `Name`.
 
-An indexed `ets:lookup/2` on the `beamtalk_class_subclass_index`
+A bound-prefix `ets:select/2` on the `beamtalk_class_subclass_index`
 reverse-edge table, not a full-table scan of `?TABLE` — O(subclass count)
 instead of O(loaded-class count). Returns `[]` if the index table does not
 exist (mirrors the old table-absent contract, now against the table this
@@ -1244,12 +1252,10 @@ match_subclasses(Name) ->
             [];
         _ ->
             try
-                %% A class rebuilt over a dead owner's not-yet-removed edge has
-                %% two (one per owner) until the removal drops the old one.
-                lists:uniq([
-                    ClassName
-                 || {_Superclass, ClassName, _Owner} <- ets:lookup(?SUBCLASS_INDEX, Name)
-                ])
+                %% One edge per {Superclass, ClassName}: a class rebuilt over a
+                %% dead owner's not-yet-removed edge restamps it, so the result
+                %% is duplicate-free by construction.
+                ets:select(?SUBCLASS_INDEX, [{{{Name, '$1'}, '_'}, [], ['$1']}])
             catch
                 error:badarg -> []
             end
@@ -2075,7 +2081,7 @@ drop_entries_not_owned_by(Name, Owner) ->
 -spec insert_subclass_edge(superclass(), class_name(), pid() | undefined) -> ok.
 insert_subclass_edge(Superclass, Name, Owner) ->
     try
-        ets:insert(?SUBCLASS_INDEX, {Superclass, Name, Owner}),
+        ets:insert(?SUBCLASS_INDEX, {{Superclass, Name}, Owner}),
         ok
     catch
         error:badarg -> ok
@@ -2084,7 +2090,11 @@ insert_subclass_edge(Superclass, Name, Owner) ->
 -spec delete_subclass_edge(superclass(), class_name(), owner_scope()) -> ok.
 delete_subclass_edge(Superclass, Name, Owner) ->
     try
-        ets:match_delete(?SUBCLASS_INDEX, {Superclass, Name, Owner}),
+        case {Superclass, Owner} of
+            {'_', _} -> ets:match_delete(?SUBCLASS_INDEX, {{Superclass, Name}, Owner});
+            {_, '_'} -> ets:delete(?SUBCLASS_INDEX, {Superclass, Name});
+            _ -> ets:match_delete(?SUBCLASS_INDEX, {{Superclass, Name}, Owner})
+        end,
         ok
     catch
         error:badarg -> ok
@@ -2094,7 +2104,7 @@ delete_subclass_edge(Superclass, Name, Owner) ->
 delete_subclass_edges_not_owned_by(Superclass, Name, Owner) ->
     try
         ets:select_delete(?SUBCLASS_INDEX, [
-            {{Superclass, Name, '$1'}, [{'=/=', '$1', {const, Owner}}], [true]}
+            {{{Superclass, Name}, '$1'}, [{'=/=', '$1', {const, Owner}}], [true]}
         ]),
         ok
     catch
