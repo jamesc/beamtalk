@@ -130,6 +130,8 @@ mkdir -p "$T/fakebin"
 cat > "$T/fakebin/curl" <<'FAKE'
 #!/bin/sh
 echo "$*" >> "$CURL_LOG"
+# Never touch the network: fail any https fetch after logging it.
+case "$*" in *https://*) exit 22 ;; esac
 exec "$REAL_CURL" "$@"
 FAKE
 chmod +x "$T/fakebin/curl"
