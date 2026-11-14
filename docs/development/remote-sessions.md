@@ -116,7 +116,8 @@ Erlang modules. Tests that run compiled Beamtalk (the stdlib classes
 `fold_acc_shape_agreement` (`beamtalk-codegen`) used to fail with hundreds of
 `undef`/`class_not_found` lines; it now falls back to compile-only, and fails
 loudly when `BEAMTALK_REQUIRE_RUNTIME` is set to any value, even `0` (the
-corpus CI workflow sets it). Run `just build-stdlib` before `cargo test -p beamtalk-codegen` or `just test-runtime`.
+corpus CI workflow sets it). Run `just build-stdlib` before
+`cargo test -p beamtalk-codegen` or `just test-runtime`.
 
 ### `rebar3 xref`
 
