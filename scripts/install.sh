@@ -311,6 +311,24 @@ configure_path() {
     echo "Or run:  echo 'export PATH=\"${BIN_DIR}:\${PATH}\"' >> ${PROFILE}"
 }
 
+# ─── Report build identity ──────────────────────────────────────────────
+
+# After an --edge/--nightly install, print what was actually installed:
+# those channels are rolling, so the version number alone doesn't say which
+# commit you got (BT-4812). Informational only — never fails the install.
+print_build_identity() {
+    if [ "${EDGE}" != "1" ] && [ "${NIGHTLY}" != "1" ]; then
+        return 0
+    fi
+    # `beamtalk --version` prints `beamtalk <build id>`; Windows .exe installs
+    # are not runnable from this shell, so fall back silently.
+    IDENTITY=$("${PREFIX}/bin/beamtalk" --version 2>/dev/null) || IDENTITY=""
+    if [ -n "${IDENTITY}" ]; then
+        echo ""
+        echo "  Build:   ${IDENTITY}"
+    fi
+}
+
 # ─── Main ────────────────────────────────────────────────────────────────
 
 main() {
@@ -339,6 +357,8 @@ main() {
     echo "  LSP:     ${PREFIX}/bin/beamtalk-lsp"
     echo "  MCP:     ${PREFIX}/bin/beamtalk-mcp"
     echo "  Runtime: ${PREFIX}/lib/beamtalk/lib/"
+
+    print_build_identity
 
     configure_path
 }

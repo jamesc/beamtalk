@@ -21,7 +21,7 @@ use std::sync::Arc;
 use rmcp::{
     ServerHandler,
     handler::server::router::tool::ToolRouter,
-    model::{CallToolResult, ContentBlock, ServerCapabilities, ServerConfig},
+    model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig},
     tool_handler,
 };
 
@@ -197,6 +197,10 @@ impl ServerHandler for BeamtalkMcp {
     /// Return server metadata and capabilities advertised to MCP clients.
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new(
+                "beamtalk-mcp",
+                beamtalk_repl_protocol::handshake::build_id(),
+            ))
             .with_instructions(
                 "Beamtalk MCP server — interact with live beamtalk objects through the REPL. \
                  Use 'evaluate' to run beamtalk expressions, 'load_project' to load all files \

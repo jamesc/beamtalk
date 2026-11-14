@@ -28,6 +28,7 @@ use tracing_subscriber::{self, EnvFilter};
 #[command(
     name = "beamtalk-lsp",
     about = "Beamtalk Language Server",
+    version = beamtalk_repl_protocol::handshake::build_id(),
     long_about = None
 )]
 struct Cli {

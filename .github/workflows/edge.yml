@@ -44,6 +44,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Names the channel in `beamtalk --version` (BT-4812).
+  BEAMTALK_BUILD_CHANNEL: edge
 
 jobs:
   edge:

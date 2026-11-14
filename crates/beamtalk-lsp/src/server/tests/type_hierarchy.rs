@@ -29,6 +29,24 @@ async fn initialize_advertises_implementation_provider() {
     );
 }
 
+/// BT-4812: `initialize` reports the build identity as `serverInfo.version`.
+#[tokio::test]
+async fn initialize_reports_build_id_as_server_version() {
+    let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+    let backend: &Backend = service.inner();
+    let info = backend
+        .initialize(InitializeParams::default())
+        .await
+        .expect("initialize ok")
+        .server_info
+        .expect("server_info advertised");
+    assert_eq!(info.name, "beamtalk-lsp");
+    assert_eq!(
+        info.version.as_deref(),
+        Some(beamtalk_repl_protocol::handshake::build_id())
+    );
+}
+
 /// AST-fallback path of `goto_implementation`. The runtime
 /// flag defaults to off in tests (no `initialize` with
 /// `delegateToRuntime`), so this exercises the cold-file walker via
