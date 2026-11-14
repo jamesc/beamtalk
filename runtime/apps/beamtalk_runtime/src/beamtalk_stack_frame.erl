@@ -227,8 +227,9 @@ is_plain_erlang_frame(_) ->
 frame_verdict(#{module := Module, function := Function} = Frame, Raising, Natives) ->
     case frame_kind(Module, maps:get(class_name, Frame, nil)) of
         unknown ->
-            %% A malformed entry wraps to a placeholder frame: nothing to hide it by.
-            shown;
+            %% A malformed entry wraps to a `?>>?` placeholder: nothing a person
+            %% named. Hidden here, still in the full list.
+            hidden;
         erlang ->
             %% A package's own module wins over the `beamtalk_` prefix: packages
             %% are told to prefix their native modules with their name.
@@ -248,7 +249,7 @@ frame_verdict(#{module := Module, function := Function} = Frame, Raising, Native
             end
     end;
 frame_verdict(_, _, _) ->
-    %% Not a wrapped frame (nothing to classify by): never hide what we cannot read.
+    %% Not a wrapped frame (a legacy object with no `module`): nothing to classify by, keep it.
     shown.
 
 -spec runtime_internal(atom()) -> boolean().
@@ -275,6 +276,9 @@ generated_callback(Module, Function, Arity) when is_atom(Function), is_integer(A
     {Name, FunArity} = callback_name_arity(Function, Arity),
     case lists:keyfind(Name, 1, ?GENERATED_CALLBACKS) of
         {Name, Arities} ->
+            %% `function_exported/3` is false for a module not loaded on this node;
+            %% that only shows more frames. Do not "fix" it with `code:ensure_loaded`
+            %% inside exception reading: classify on the node that raised.
             lists:member(FunArity, Arities) andalso
                 erlang:function_exported(Module, handle_call, 3);
         false ->

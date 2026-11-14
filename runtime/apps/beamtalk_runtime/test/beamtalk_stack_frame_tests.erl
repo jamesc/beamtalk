@@ -678,9 +678,11 @@ visibility_generated_callbacks_hidden_test() ->
         [unload_module(M) || M <- [Actor, Value]]
     end.
 
-%% A malformed entry wraps to a placeholder frame; it is not hidden.
-visibility_unreadable_frame_shown_test() ->
-    ?assertEqual([{undefined, undefined}], shown([not_a_frame])).
+%% A malformed entry wraps to a placeholder frame; it is hidden by default but
+%% stays in the full list.
+visibility_malformed_frame_hidden_test() ->
+    ?assertEqual([], shown([not_a_frame])),
+    ?assertEqual(1, length(beamtalk_stack_frame:wrap([not_a_frame]))).
 
 %% A frame wrapped alone carries the verdict too (the map shape is the same).
 visibility_wrap_frame_stamps_visible_test() ->
