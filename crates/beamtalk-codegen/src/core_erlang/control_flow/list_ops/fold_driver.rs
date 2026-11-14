@@ -515,6 +515,18 @@ fn tuple_init_doc(
     Document::Vec(docs)
 }
 
+/// Where a `do:`-style fold iterates (BT-4807): a fold with no leading
+/// accumulator slots, whose accumulator is the threaded state itself and whose
+/// answer is `nil`.
+#[derive(Clone, Copy)]
+pub(in crate::core_erlang::control_flow) enum DoSource<'a> {
+    /// `dict do:` over `maps:values/1`.
+    DictValues,
+    /// `dict doWithKey:` over the `{K, V}` pairs; `selector` names the
+    /// receiver guard of a non-literal receiver.
+    DictPairs { selector: &'a str },
+}
+
 /// Whether the fold selector `label` threads a value-type `Self` through its
 /// accumulator ([`SELF_THREADING_FOLDS`]); every other fold rejects a field
 /// write in its body.
@@ -922,6 +934,191 @@ impl CoreErlangGenerator {
             no_match_fallback,
             " end",
         ])
+    }
+
+    /// Stateful dictionary `do:` / `doWithKey:` over `lists:foldl` (BT-4807).
+    ///
+    /// The driver owns the tuple-accumulator versus `StateAcc`-map choice and
+    /// the `do:` tail: the open let-chain inside a direct-params loop, else
+    /// the closed repack ([`ThreadingPlan::closed_fold_tail_doc`]). A
+    /// dictionary fold carries no value-type `Self` slot.
+    ///
+    /// Only the dictionary folds use it so far: list `do:` (`basic_ops.rs`)
+    /// still carries its own copy of this skeleton, because it also needs the
+    /// safe-list prefix and the value-type `Self` slot ([`FoldFamilySlots`]).
+    /// A `DoSource::List` variant would retire that copy, and with it the
+    /// second place that sets `direct_params_do_open_chain`.
+    #[allow(clippy::too_many_lines)]
+    pub(in crate::core_erlang::control_flow) fn generate_do_fold_with_mutations(
+        &mut self,
+        receiver: &Expression,
+        body: &Block,
+        source: DoSource<'_>,
+    ) -> Result<Document<'static>> {
+        let (plan, discard) = self.begin_fold_plan(body, ListOpKind::Do, None, false, true)?;
+
+        let dict_var = self.fresh_temp_var("temp");
+        let recv_code = self.expression_doc(receiver)?;
+        let iter_var = self.fresh_temp_var("temp");
+        let lambda_var = self.fresh_temp_var("temp");
+        let (iter_doc, lambda_param, key_val) = match source {
+            DoSource::DictValues => {
+                let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
+                (
+                    docvec!["call 'maps':'values'(", leaf::var(dict_var.clone()), ")"],
+                    Self::to_core_erlang_var(item_param),
+                    None,
+                )
+            }
+            DoSource::DictPairs { selector } => {
+                let pair_var = self.fresh_temp_var("Pair");
+                // The fold is inlined for a `Dictionary` only. A map literal is
+                // one; any other receiver goes through the runtime guard (`Ets`,
+                // a value-type instance or a user class defining the selector
+                // would run its own method, which the inline fold must not
+                // replace). A receiver core knows is not a `Dictionary` never
+                // gets here (the Phase 0 / §6 check keeps its error).
+                let literal_receiver = matches!(receiver, Expression::MapLiteral { .. });
+                let key_param = body.parameters.first().map_or("_", |p| p.name.as_str());
+                let val_param = body.parameters.get(1).map_or("_", |p| p.name.as_str());
+                (
+                    Self::keyed_pairs_doc(&dict_var, literal_receiver, selector),
+                    pair_var,
+                    Some((
+                        Self::to_core_erlang_var(key_param),
+                        Self::to_core_erlang_var(val_param),
+                    )),
+                )
+            }
+        };
+        let params = match &key_val {
+            Some((key, val)) => FoldParams::Pair {
+                first: key,
+                second: val,
+            },
+            None => FoldParams::Item(&lambda_param),
+        };
+        // `let Dict = <recv> in let Iter = <iter> in let Lambda = fun (X, Acc) ->`,
+        // then (for the keyed fold) the pair destructured into key and value.
+        let prefix = |acc: Document<'static>| -> Document<'static> {
+            let destructure = match &key_val {
+                Some((key, val)) => docvec![
+                    "let ",
+                    leaf::var(key.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    leaf::var(lambda_param.clone()),
+                    ") in let ",
+                    leaf::var(val.clone()),
+                    " = call 'erlang':'element'(2, ",
+                    leaf::var(lambda_param.clone()),
+                    ") in ",
+                ],
+                None => Document::Nil,
+            };
+            docvec![
+                "let ",
+                leaf::var(dict_var.clone()),
+                " = ",
+                recv_code.clone(),
+                " in let ",
+                leaf::var(iter_var.clone()),
+                " = ",
+                iter_doc.clone(),
+                " in let ",
+                leaf::var(lambda_var.clone()),
+                " = fun (",
+                leaf::var(lambda_param.clone()),
+                ", ",
+                acc,
+                ") -> ",
+                destructure,
+            ]
+        };
+
+        if plan.use_tuple_acc {
+            let init_tuple_doc = plan.initial_vars_tuple_doc(self);
+            // BT-4178: a fresh accumulator name that cannot shadow an
+            // enclosing `StateAcc` map the body reads.
+            let acc_var = self.fresh_temp_var("AccSt");
+
+            let mut docs: Vec<Document<'static>> = vec![prefix(leaf::var(acc_var.clone()))];
+            let lowered =
+                self.lower_tuple_fold_body(body, &plan, &BodyKind::FoldlDo, params, &acc_var, 0)?;
+            docs.push(lowered.body_doc);
+            docs.insert(0, lowered.prestore);
+
+            let fold_result = self.fresh_temp_var("FoldResult");
+            let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
+            let tail = if self.loop_mode.in_direct_params_loop {
+                // See the identical branch in `basic_ops.rs`'s `do:`: multiple
+                // rebound accumulator vars, no single "result" value, so signal
+                // open-with-no-value rather than naming one.
+                self.loop_mode.direct_params_do_open_chain = true;
+                extract_doc
+            } else {
+                plan.closed_fold_tail_doc(self, extract_doc, lowered.guarded_op_bracket, discard)
+            };
+            docs.push(docvec![
+                ThreadingPlan::foldl_call_doc(&lambda_var, init_tuple_doc, &iter_var, &fold_result),
+                tail,
+            ]);
+            return Ok(Document::Vec(docs));
+        }
+
+        // Map-accumulator path (field mutations or complex control flow present).
+        let (pack_doc, init_state) = plan.generate_pack_prefix(self);
+        let mut docs: Vec<Document<'static>> = vec![pack_doc, prefix(leaf::var("StateAcc"))];
+        docs.push(self.lower_map_fold_body(
+            body,
+            &plan,
+            &BodyKind::FoldlDo,
+            params,
+            "StateAcc",
+            0,
+        )?);
+
+        let fold_result = self.fresh_temp_var("FoldResult");
+        docs.push(docvec![
+            ThreadingPlan::foldl_call_doc(
+                &lambda_var,
+                leaf::var(init_state),
+                &iter_var,
+                &fold_result
+            ),
+            plan.generate_extract_suffix_doc(&fold_result, self),
+            "{'nil', ",
+            leaf::var(fold_result),
+            "}",
+        ]);
+        Ok(Document::Vec(docs))
+    }
+
+    /// The `{K, V}` pairs of the dictionary bound to `dict_var` that the keyed
+    /// fold iterates: `maps:to_list/1` for a map literal, the receiver guard
+    /// `beamtalk_map:pairs_for_threading/2` otherwise (it answers an untagged
+    /// map's pairs and raises a structured `type_error` for `Ets`, a value-type
+    /// instance, a user class or a non-map, instead of walking the wrong
+    /// entries; the keyed counterpart of `lookup_for_threading/3`, BT-3841).
+    fn keyed_pairs_doc(
+        dict_var: &str,
+        literal_receiver: bool,
+        selector: &str,
+    ) -> Document<'static> {
+        if literal_receiver {
+            docvec![
+                "call 'maps':'to_list'(",
+                leaf::var(dict_var.to_string()),
+                ")"
+            ]
+        } else {
+            docvec![
+                "call 'beamtalk_map':'pairs_for_threading'(",
+                leaf::var(dict_var.to_string()),
+                ", ",
+                leaf::atom(selector.to_string()),
+                ")"
+            ]
+        }
     }
 }
 
