@@ -1764,8 +1764,8 @@ setup_app() ->
     ensure_xref_running(),
     ensure_pg_running(),
     register_stub_classes(),
-    %% Give registration a beat to land in pg.
-    timer:sleep(200),
+    %% Wait for registration to land in pg.
+    ok = beamtalk_test_wait:until(fun() -> beamtalk_class_registry:live_class_entries() =/= [] end),
     ok.
 
 ensure_xref_running() ->

@@ -324,6 +324,7 @@ deliberate_stop_test_() ->
                 {ok, Pid} = beamtalk_object_class:start('SupTest3236D', minimal_class_info()),
                 gen_server:stop(Pid),
                 %% Give the monitor time to (wrongly) act, then assert it didn't.
+                %% sleep: asserts nothing happens within a window (class 4)
                 timer:sleep(300),
                 ?assertEqual(undefined, beamtalk_class_registry:whereis_class('SupTest3236D'))
             end}

@@ -262,14 +262,15 @@ start_peer(NamePrefix, Opts) ->
 -doc "Ping `Node` until it answers `pong` or `Attempts` are used up (BT-3933).".
 -spec await_ping(node(), non_neg_integer()) -> pong | pang.
 await_ping(Node, Attempts) ->
-    case net_adm:ping(Node) of
-        pong ->
-            pong;
-        pang when Attempts =< 1 ->
-            pang;
-        pang ->
-            timer:sleep(?PING_INTERVAL_MS),
-            await_ping(Node, Attempts - 1)
+    try
+        beamtalk_test_wait:until(
+            fun() -> net_adm:ping(Node) =:= pong end,
+            max(0, Attempts - 1) * ?PING_INTERVAL_MS,
+            ?PING_INTERVAL_MS
+        ),
+        pong
+    catch
+        error:{wait_timeout, _} -> pang
     end.
 
 -doc """

@@ -70,8 +70,10 @@ actor_termination_auto_unregisters_test() ->
     %% Kill the actor
     gen_server:stop(ActorPid),
 
-    %% Give monitor time to process DOWN message
-    timer:sleep(50),
+    %% Wait for the registry to process the monitor's DOWN message
+    ok = beamtalk_test_wait:until(fun() ->
+        beamtalk_repl_actors:get_actor(RegistryPid, ActorPid) =:= {error, not_found}
+    end),
 
     %% Verify it's automatically unregistered
     ?assertEqual({error, not_found}, beamtalk_repl_actors:get_actor(RegistryPid, ActorPid)),
@@ -133,8 +135,8 @@ kill_actor_terminates_actor_test() ->
     OldTrapExit = process_flag(trap_exit, true),
     ok = beamtalk_repl_actors:kill_actor(RegistryPid, ActorPid),
 
-    %% Give time for termination
-    timer:sleep(50),
+    %% Wait for termination
+    ok = beamtalk_test_wait:dead(ActorPid),
 
     %% Verify actor is dead
     ?assertNot(is_process_alive(ActorPid)),
@@ -182,6 +184,7 @@ registry_termination_leaves_actors_alive_test() ->
     %% Stop registry
     gen_server:stop(RegistryPid),
 
+    %% sleep: asserts nothing happens within a window (class 4)
     timer:sleep(100),
 
     %% Actors are owned by their supervisors, not by the registry

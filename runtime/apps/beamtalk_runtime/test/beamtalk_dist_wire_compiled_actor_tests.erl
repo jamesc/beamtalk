@@ -242,7 +242,7 @@ deferred_reply_to_remote_caller_is_wire_encoded(PeerNode) ->
         ok = beamtalk_actor:replyErrorToDeferred(Handle, boom),
         {ok, EncValue} = beamtalk_wire:encode(42),
         EncError = beamtalk_actor:encode_reply_for({Remote, Tag}, 'replyError:', boom),
-        Messages = remote_messages(PeerNode, Remote, 2, 50),
+        Messages = remote_messages(PeerNode, Remote, 2),
         ?assertEqual(
             [{Tag, {ok, EncValue}}, {Tag, {error, EncError}}],
             Messages
@@ -251,15 +251,17 @@ deferred_reply_to_remote_caller_is_wire_encoded(PeerNode) ->
         exit(Remote, kill)
     end.
 
-remote_messages(PeerNode, Pid, Count, Retries) ->
-    {messages, Msgs} = rpc:call(PeerNode, erlang, process_info, [Pid, messages]),
-    case length(Msgs) >= Count orelse Retries =:= 0 of
-        true ->
-            Msgs;
-        false ->
-            timer:sleep(20),
-            remote_messages(PeerNode, Pid, Count, Retries - 1)
-    end.
+remote_messages(PeerNode, Pid, Count) ->
+    Fetch = fun() -> rpc:call(PeerNode, erlang, process_info, [Pid, messages]) end,
+    ok = beamtalk_test_wait:until(
+        fun() ->
+            {messages, Msgs} = Fetch(),
+            length(Msgs) >= Count
+        end,
+        1000
+    ),
+    {messages, Msgs} = Fetch(),
+    Msgs.
 
 %%====================================================================
 %% Encode-failure reply contract (ADR 0126 §5.1) against a compiled

@@ -243,6 +243,8 @@ watch_dedup_test_() ->
                         end)
                     ),
                     %% Give a wrongly-duplicated second 'DOWN' time to arrive.
+                    %% sleep: asserts nothing more happens within a window (class 4)
+                    %% sleep: asserts nothing happens within a window (class 4)
                     timer:sleep(200),
                     ?assertEqual(
                         1, meck:num_calls(beamtalk_class_registry, restart_class, ['DedupClass'])

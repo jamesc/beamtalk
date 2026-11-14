@@ -29,6 +29,7 @@ handle_call(_Request, _From, State) -> {reply, ok, State}.
 
 handle_cast(_Request, State) -> {noreply, State}.
 
+%% sleep: simulates slow shutdown (class 2)
 terminate(_Reason, SleepMs) -> timer:sleep(SleepMs).
 
 start(SleepMs) ->
@@ -66,6 +67,7 @@ short_waits_time_out_cleanly_test_() ->
         ],
         ?assertEqual([], [O || O <- Outcomes, O =/= {exit, timeout}]),
         %% A leaked monitor's 'DOWN' would arrive once each process is killed.
+        %% sleep: asserts nothing arrives within a window (class 4)
         timer:sleep(50),
         ?assertEqual([], stray_downs())
     end}.

@@ -158,25 +158,19 @@ named_spawn_without_unlink(PeerNode) ->
     %% instantaneously — up to 2s total, generous for a loaded CI runner,
     %% since a false "still alive" here would misreport the finding, not
     %% just flake a green test.
-    Alive = wait_until_settled(
-        fun() -> rpc:call(PeerNode, erlang, is_process_alive, [Pid]) end, 80
-    ),
+    IsAlive = fun() -> rpc:call(PeerNode, erlang, is_process_alive, [Pid]) end,
+    Alive =
+        try
+            ok = beamtalk_test_wait:until(fun() -> IsAlive() =:= false end, 2000),
+            false
+        catch
+            error:{wait_timeout, _} -> IsAlive()
+        end,
     %% Record the finding either way; see the ADR amendment for the
     %% narrative. If this ever flips to `true` on some OTP/platform
     %% combination, that is itself the finding — fail loudly rather than
     %% silently accept either outcome.
     ?assertEqual(false, Alive).
-
-wait_until_settled(Fun, 0) ->
-    Fun();
-wait_until_settled(Fun, Retries) ->
-    case Fun() of
-        false ->
-            false;
-        true ->
-            timer:sleep(25),
-            wait_until_settled(Fun, Retries - 1)
-    end.
 
 %%====================================================================
 %% (b) Block code-version mismatch is identifiable (ADR 0126 §5.5)

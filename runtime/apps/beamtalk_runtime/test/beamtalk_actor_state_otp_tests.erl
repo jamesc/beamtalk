@@ -215,7 +215,7 @@ crash_restart_takes_the_cell_and_restarts_with_init_state_test() ->
         catch
             _:_ -> ok
         end,
-        Pid2 = wait_for_restart(Sup, Pid, 100),
+        Pid2 = wait_for_restart(Sup, Pid),
         %% A restarted process is a new pid with init's state and no cell.
         ?assertNotEqual(Pid, Pid2),
         ?assertEqual(#{x => init}, sys:get_state(Pid2)),
@@ -232,22 +232,29 @@ crash_restart_takes_the_cell_and_restarts_with_init_state_test() ->
         exit(Sup, shutdown)
     end.
 
-wait_for_restart(_Sup, _Old, 0) ->
-    erlang:error(no_restart);
-wait_for_restart(Sup, Old, N) ->
+wait_for_restart(Sup, Old) ->
+    ok = beamtalk_test_wait:until(fun() -> restarted_child(Sup, Old) =/= undefined end),
+    restarted_child(Sup, Old).
+
+restarted_child(Sup, Old) ->
     case supervisor:which_children(Sup) of
-        [{probe, P, _, _}] when is_pid(P), P =/= Old ->
-            P;
-        _ ->
-            timer:sleep(20),
-            wait_for_restart(Sup, Old, N - 1)
+        [{probe, P, _, _}] when is_pid(P), P =/= Old -> P;
+        _ -> undefined
     end.
 
 hibernate_wakes_with_state_and_no_cell_test() ->
     Pid = start(#{x => 0}),
     ok = gen_server:call(Pid, hibernate_after_write),
     %% Hibernation happens after the cell is erased.
-    timer:sleep(50),
+    ok = beamtalk_test_wait:until(fun() ->
+        %% A hibernated gen_server parks in gen_server:loop_hibernate/4 (OTP 28);
+        %% older releases report erlang:hibernate/3.
+        case process_info(Pid, current_function) of
+            {current_function, {gen_server, loop_hibernate, _}} -> true;
+            {current_function, {erlang, hibernate, _}} -> true;
+            _ -> false
+        end
+    end),
     ?assertEqual(false, dictionary_has_cell(Pid)),
     ?assertEqual(#{x => 3}, sys:get_state(Pid)),
     %% And the process wakes and keeps working.

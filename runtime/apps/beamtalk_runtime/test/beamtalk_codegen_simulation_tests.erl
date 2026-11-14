@@ -348,15 +348,19 @@ async_await_on_pending_future_blocks_test() ->
     end),
 
     %% Wait for the awaiter to signal it's ready
-    receive
-        {ready, _} -> ok
-    after 1000 ->
-        % Timeout - spawned process didn't start
-        ?assert(false)
-    end,
+    AwaiterPid =
+        receive
+            {ready, P} -> P
+        after 1000 ->
+            % Timeout - spawned process didn't start
+            ?assert(false)
+        end,
 
-    %% Give a moment for the await to register with the future
-    timer:sleep(100),
+    %% Wait for the await to register with the future: the awaiter is blocked
+    %% in its receive, and the future has consumed the {await, ...} message.
+    {beamtalk_future, FuturePid} = Future,
+    ok = beamtalk_test_wait:idle(AwaiterPid),
+    ok = beamtalk_test_wait:idle(FuturePid),
 
     %% Now send the async message to resolve the future
     gen_server:cast(Actor, {increment, [], Future}),
@@ -569,7 +573,7 @@ async_multiple_awaits_same_future_test() ->
         fun(N) ->
             spawn(fun() ->
                 % Signal ready to await
-                Parent ! {ready, N},
+                Parent ! {ready, N, self()},
                 Result = beamtalk_future:await(Future, 2000),
                 Parent ! {waiter, N, Result}
             end)
@@ -578,19 +582,20 @@ async_multiple_awaits_same_future_test() ->
     ),
 
     %% Wait for all waiters to signal they're ready
-    lists:foreach(
-        fun(_) ->
-            receive
-                {ready, _} -> ok
-            after 1000 ->
-                ?assert(false)
-            end
-        end,
-        [1, 2, 3]
-    ),
+    AwaiterPids = [
+        receive
+            {ready, _, Pid} -> Pid
+        after 1000 ->
+            ?assert(false)
+        end
+     || _ <- [1, 2, 3]
+    ],
 
-    %% Give a moment for all awaits to register
-    timer:sleep(100),
+    %% Wait for all awaits to register with the future: every awaiter is
+    %% blocked in its receive and the future has consumed their messages.
+    {beamtalk_future, FuturePid} = Future,
+    [ok = beamtalk_test_wait:idle(P) || P <- AwaiterPids],
+    ok = beamtalk_test_wait:idle(FuturePid),
 
     %% Send the async message
     gen_server:cast(Actor, {increment, [], Future}),

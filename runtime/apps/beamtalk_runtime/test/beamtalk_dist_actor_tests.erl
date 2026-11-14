@@ -95,21 +95,13 @@ sync_send_to_peer_actor_returns_value(PeerNode) ->
         %% raised badarg for a remote pid — this would crash, not return 10.
         ?assertEqual(10, beamtalk_actor:sync_send(RemotePid, getValue, [])),
         ok = beamtalk_actor:cast_send(RemotePid, increment, []),
-        %% cast is fire-and-forget; poll briefly rather than a fixed sleep.
-        ?assertEqual(11, wait_for_value(RemotePid, 11, 20))
+        %% cast is fire-and-forget; wait for the increment to land.
+        ok = beamtalk_test_wait:until(
+            fun() -> beamtalk_actor:sync_send(RemotePid, getValue, []) =:= 11 end, 1000
+        ),
+        ?assertEqual(11, beamtalk_actor:sync_send(RemotePid, getValue, []))
     after
         rpc:call(PeerNode, gen_server, stop, [RemotePid])
-    end.
-
-wait_for_value(RemotePid, Expected, Retries) ->
-    case beamtalk_actor:sync_send(RemotePid, getValue, []) of
-        Expected ->
-            Expected;
-        Other when Retries =< 0 ->
-            Other;
-        _ ->
-            timer:sleep(50),
-            wait_for_value(RemotePid, Expected, Retries - 1)
     end.
 
 %%====================================================================
@@ -120,11 +112,13 @@ sync_send_to_dead_remote_pid_raises_actor_dead(PeerNode) ->
     {ok, RemotePid} = rpc:call(PeerNode, test_counter, start, [0]),
     ?assert(is_pid(RemotePid)),
     ok = rpc:call(PeerNode, gen_server, stop, [RemotePid]),
-    %% Give the peer a moment to actually reap the process before we probe
-    %% it — gen_server:stop/1 is synchronous on the peer, but the rpc reply
+    %% Wait for the peer to actually reap the process before we probe it —
+    %% gen_server:stop/1 is synchronous on the peer, but the rpc reply
     %% racing the process table update is not something we want to also
     %% be testing here.
-    timer:sleep(50),
+    ok = beamtalk_test_wait:until(fun() ->
+        rpc:call(PeerNode, erlang, is_process_alive, [RemotePid]) =:= false
+    end),
     ?assertBtError(actor_dead, beamtalk_actor:sync_send(RemotePid, getValue, [])).
 
 %%====================================================================
@@ -222,6 +216,7 @@ node_down_on_killed_peer_test_() ->
                 %% partition happens, mirroring a real mid-call node loss
                 %% rather than a pre-emptively-dead node.
                 spawn(fun() ->
+                    %% sleep: lands the partition mid-slowGet in the helper (class 2)
                     timer:sleep(300),
                     beamtalk_dist_test_helper:stop_peer(Peer)
                 end),

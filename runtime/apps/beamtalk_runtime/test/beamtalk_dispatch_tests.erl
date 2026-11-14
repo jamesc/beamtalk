@@ -1867,6 +1867,7 @@ test_kill_budget_exhausted_flushes_cache() ->
         %% Restarts land in milliseconds, so 300ms of continued absence
         %% proves give-up rather than a slow restart.
         defmethod_await_gone('Counter'),
+        %% sleep: asserts nothing happens within a window (class 4)
         timer:sleep(300),
         ?assertEqual(undefined, beamtalk_class_registry:whereis_class('Counter')),
         ?assertEqual(
@@ -2041,31 +2042,18 @@ defmethod_stop_quietly(ClassName) ->
 
 defmethod_kill_wait_new(ClassName, OldPid) ->
     exit(OldPid, kill),
-    defmethod_kill_wait_new_loop(ClassName, OldPid, 500).
-
-defmethod_kill_wait_new_loop(_ClassName, _OldPid, 0) ->
-    erlang:error(defmethod_restart_timeout);
-defmethod_kill_wait_new_loop(ClassName, OldPid, N) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        NewPid when is_pid(NewPid), NewPid =/= OldPid -> NewPid;
-        _ ->
-            timer:sleep(10),
-            defmethod_kill_wait_new_loop(ClassName, OldPid, N - 1)
-    end.
+    ok = beamtalk_test_wait:until(fun() ->
+        case beamtalk_class_registry:whereis_class(ClassName) of
+            NewPid when is_pid(NewPid), NewPid =/= OldPid -> true;
+            _ -> false
+        end
+    end),
+    beamtalk_class_registry:whereis_class(ClassName).
 
 defmethod_await_gone(ClassName) ->
-    defmethod_await_gone(ClassName, 500).
-
-defmethod_await_gone(_ClassName, 0) ->
-    erlang:error(defmethod_still_registered);
-defmethod_await_gone(ClassName, N) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            ok;
-        _ ->
-            timer:sleep(10),
-            defmethod_await_gone(ClassName, N - 1)
-    end.
+    beamtalk_test_wait:until(fun() ->
+        beamtalk_class_registry:whereis_class(ClassName) =:= undefined
+    end).
 
 %% A `super` send warms the entry keyed by the class the walk starts at —
 %% the same entry a direct send to that class would use — and warms

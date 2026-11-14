@@ -103,6 +103,7 @@ handle_test_make_self([], State) ->
 %% Slow method that sleeps for the given milliseconds before returning.
 %% Used to test timeout behavior.
 'handle_slowGet:'([SleepMs], State) ->
+    %% sleep: simulates slow work (class 2)
     timer:sleep(SleepMs),
     Value = maps:get(value, State),
     {reply, Value, State}.

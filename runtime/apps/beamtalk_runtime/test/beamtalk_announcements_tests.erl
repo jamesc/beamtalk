@@ -687,6 +687,7 @@ announce_and_wait_timeout_test_() ->
                     Sub = spawn_idle(),
                     try
                         %% A handler that sleeps far longer than the timeout.
+                        %% sleep: simulates a wedged handler (class 2)
                         Wedged = fun(_E) -> timer:sleep(60000) end,
                         {ok, _} = beamtalk_announcements:subscribe('SlowEvent', Sub, Wedged, false),
                         Start = erlang:monotonic_time(millisecond),
@@ -710,12 +711,14 @@ announce_and_wait_timeout_test_() ->
                     Sub = spawn_idle(),
                     try
                         %% Sleeps past the 50ms timeout, then completes (sends its ack).
+                        %% sleep: simulates a slow handler (class 2)
                         Lagging = fun(_E) -> timer:sleep(150) end,
                         {ok, _} = beamtalk_announcements:subscribe('LagEvent', Sub, Lagging, false),
                         ?assertEqual(
                             ok, beamtalk_announcements:announceAndWait('LagEvent', e, 50)
                         ),
                         %% Give the lagging handler time to finish and (try to) ack.
+                        %% sleep: asserts nothing arrives within a window (class 4)
                         timer:sleep(300),
                         %% No stale ack message of any shape lingers in this mailbox.
                         receive

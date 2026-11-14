@@ -17,6 +17,7 @@ init([]) ->
 handle_call({echo, Value}, _From, State) ->
     {reply, {ok, Value}, State};
 handle_call({sleep, Ms}, _From, State) ->
+    %% sleep: simulates a slow call (class 2)
     timer:sleep(Ms),
     {reply, {ok, slept}, State};
 handle_call(_Request, _From, State) ->

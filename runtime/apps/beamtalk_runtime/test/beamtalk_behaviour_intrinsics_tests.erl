@@ -1594,6 +1594,7 @@ class_remove_from_system_waits_for_busy_class_test_() ->
                     spawn(fun() ->
                         true = erlang:suspend_process(Pid),
                         Self ! suspended,
+                        %% sleep: holds the class process busy (class 2)
                         timer:sleep(6000),
                         erlang:resume_process(Pid)
                     end),
@@ -2903,11 +2904,12 @@ object_class_rename_toctou_through_public_api_test_() ->
         end),
         %% `Pid` is suspended, so the spawned call's `whereis/1` pre-check
         %% (unaffected by suspension — a registry lookup, not a message to
-        %% `Pid`) has already run and it is now blocked inside
-        %% `gen_server:call/2` well before this sleep matters; this margin
-        %% just guards against the spawned process not yet having been
-        %% scheduled at all.
-        timer:sleep(50),
+        %% `Pid`) has already run once its `gen_server:call/2` request sits in
+        %% the suspended `Pid`'s mailbox; wait for exactly that.
+        ok = beamtalk_test_wait:until(fun() ->
+            {message_queue_len, N} = process_info(Pid, message_queue_len),
+            N >= 1
+        end),
         {_ExistingObj, _ExistingPid} = register_class(
             'BT3278RenamePublicApiExisting', #{}, #{}
         ),

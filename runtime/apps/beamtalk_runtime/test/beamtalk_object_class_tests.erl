@@ -228,6 +228,7 @@ stopped_watched_class_is_not_resurrected_test_() ->
                     beamtalk_test_class_teardown:stop_pg_class_processes(),
                     ?assertNot(is_process_alive(Pid)),
                     %% Give an (erroneous) eager restart ample time to land.
+                    %% sleep: asserts nothing happens within a window (class 4)
                     timer:sleep(200),
                     ?assertEqual(undefined, whereis(beamtalk_class_BT3810GuardClass))
                 after
@@ -716,7 +717,7 @@ handle_info_unknown_test_() ->
                 {ok, ClassPid} = beamtalk_object_class:start_link('InfoTestClass', ClassInfo),
 
                 ClassPid ! random_info_message,
-                timer:sleep(50),
+                ok = beamtalk_test_wait:sync(ClassPid),
                 ?assert(is_process_alive(ClassPid))
             end)
         ]
@@ -2273,8 +2274,8 @@ handle_info_returns_noreply_test_() ->
                 {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
                 %% Send arbitrary info message — should be ignored
                 Pid ! {some_random_message, 42},
-                %% Process should still be alive
-                timer:sleep(50),
+                %% Process should still be alive once it has handled the message
+                ok = beamtalk_test_wait:sync(Pid),
                 ?assert(is_process_alive(Pid))
             end)
         ]

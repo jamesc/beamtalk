@@ -283,6 +283,7 @@ netsplit_heal_resolves_conflict(Peer, PeerNode) ->
     %% start-time markers) so the two registrants' ages are unambiguously
     %% ordered — this is not a tight race, just avoiding same-microsecond
     %% ties on a fast host.
+    %% sleep: waits for a clock tick between registrants (class 3)
     timer:sleep(50),
 
     %% Register the YOUNGER registrant here, on the origin node. Same
