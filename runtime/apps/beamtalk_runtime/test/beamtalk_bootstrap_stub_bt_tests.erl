@@ -79,7 +79,7 @@ superclass(Class, Super) ->
 %%% ============================================================================
 
 %% Per stub: the class name reported in errors, selectors answered by a reply
-%% (`{Selector, Reply}`), selectors that must raise does_not_understand
+%% (`{Selector, Reply, State}`), selectors that must raise does_not_understand
 %% (`{Selector, Args, State}`), and the selectors has_method/1 is checked on.
 dispatch_stubs() ->
     [
