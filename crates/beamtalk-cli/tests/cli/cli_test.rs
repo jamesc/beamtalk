@@ -661,7 +661,7 @@ fn test_native_badarg_frames_show_in_default_trace_bt_4838() {
         .stderr(contains("beamtalk_erlang_proxy:").not());
 }
 
-/// BT-4850: a TestCase that calls an actor which raises shows the actor's
+/// BT-4850: a `TestCase` that calls an actor which raises shows the actor's
 /// raise-site frames (`Class>>selector (file.bt:N)`), as `beamtalk run` does, then
 /// the test method; no compiler-made name appears. Covers an Erlang failure and a
 /// does-not-understand raised inside the actor.
