@@ -540,14 +540,12 @@ fn build_script_eval_cmd(
     // BT-4821: `--raw-mfa` is a render option handed to the harness as an
     // argument. This node has one consumer, and nothing is written to the
     // application environment.
-    let dispatch_call = if raw_mfa {
-        format!(
-            "beamtalk_script_harness:dispatch(ClassPid, {selector_atom}, {dispatch_args}, \
-             #{{raw_mfa => true}})"
-        )
-    } else {
-        format!("beamtalk_script_harness:dispatch(ClassPid, {selector_atom}, {dispatch_args})")
-    };
+    // `run` always passes its option, so the hidden-frames notice (which names
+    // `--raw-mfa`) is printed here and not for an escript's `dispatch/3`.
+    let dispatch_call = format!(
+        "beamtalk_script_harness:dispatch(ClassPid, {selector_atom}, {dispatch_args}, \
+         #{{raw_mfa => {raw_mfa}}})"
+    );
 
     format!(
         "{hex_deps_start}\
@@ -1128,7 +1126,9 @@ mod tests {
         // harness (ADR 0099 §3); the eval routes through it instead of an inline
         // class_send + halt(0).
         assert!(
-            cmd.contains("beamtalk_script_harness:dispatch(ClassPid, 'run', [])"),
+            cmd.contains(
+                "beamtalk_script_harness:dispatch(ClassPid, 'run', [], #{raw_mfa => false})"
+            ),
             "Eval should dispatch via the run harness: {cmd}"
         );
         assert!(
@@ -1299,7 +1299,7 @@ mod tests {
         assert!(
             cmd.contains(
                 "beamtalk_script_harness:dispatch(ClassPid, 'main:', \
-                 [[<<65, 108, 105, 99, 101>>, <<66, 111, 98>>]])"
+                 [[<<65, 108, 105, 99, 101>>, <<66, 111, 98>>]], #{raw_mfa => false})"
             ),
             "Keyword entry should receive argv as one List(String): {cmd}"
         );
@@ -1319,7 +1319,9 @@ mod tests {
             false,
         );
         assert!(
-            cmd.contains("beamtalk_script_harness:dispatch(ClassPid, 'main:', [[]])"),
+            cmd.contains(
+                "beamtalk_script_harness:dispatch(ClassPid, 'main:', [[]], #{raw_mfa => false})"
+            ),
             "Empty argv should be a one-element dispatch list holding []: {cmd}"
         );
     }

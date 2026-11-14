@@ -101,13 +101,23 @@ raw_trace_default_lists_visible_frames_and_notice_test() ->
         {maps, get, 2, [{file, "maps.erl"}, {line, 1}]},
         {gen_server, loop, 7, [{file, "gen_server.erl"}, {line, 2}]}
     ],
-    Out = iolist_to_binary(beamtalk_script_harness:raw_trace(#{}, boom, Stack)),
+    Out = iolist_to_binary(
+        beamtalk_script_harness:raw_trace(#{raw_mfa => false}, boom, Stack)
+    ),
     ?assertNotEqual(nomatch, binary:match(Out, <<"  at maps:get/2">>)),
     ?assertEqual(nomatch, binary:match(Out, <<"gen_server">>)),
-    ?assertNotEqual(nomatch, binary:match(Out, <<"(1 frame hidden; --raw-mfa shows all)">>)),
-    ?assertEqual(
-        Out, iolist_to_binary(beamtalk_script_harness:raw_trace(#{raw_mfa => false}, boom, Stack))
-    ).
+    ?assertNotEqual(nomatch, binary:match(Out, <<"(1 frame hidden; --raw-mfa shows all)">>)).
+
+%%% BT-4835: a caller with no `--raw-mfa` switch (a built escript calls dispatch/3)
+%%% gets the frames but not a hint pointing at it.
+raw_trace_without_the_option_has_no_hint_test() ->
+    Stack = [
+        {maps, get, 2, [{file, "maps.erl"}, {line, 1}]},
+        {gen_server, loop, 7, [{file, "gen_server.erl"}, {line, 2}]}
+    ],
+    Out = iolist_to_binary(beamtalk_script_harness:raw_trace(#{}, boom, Stack)),
+    ?assertNotEqual(nomatch, binary:match(Out, <<"  at maps:get/2">>)),
+    ?assertEqual(nomatch, binary:match(Out, <<"--raw-mfa">>)).
 
 %%% BT-4835: a wrapped exception's own (raise-site) frames win over the catch stack.
 raw_trace_prefers_the_exceptions_own_frames_test() ->

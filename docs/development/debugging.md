@@ -246,6 +246,10 @@ print.
 
 `run` lists the frames of the exception itself, taken where it was raised, not the stack of the catch that reported it. An error keeps its innermost stack across every later catch, reraise and process hop (an actor's `sync_call` reply, a class-process relay under ADR 0142), so an entry that runs in a class process still shows its class-method frames.
 
+The trade-off: an error that comes back from another process (an actor reply, a class-process relay) carries the callee's stack, and the frames of the caller that was waiting are not appended. `e stackTrace` after `[anActor boom] on: Error do: [...]` therefore lists the actor's frames, not the line that sent the message. `beamtalk test` still ends a failure with the test method's own line, since the runner adds it itself. Joining the two stacks (a "via" segment) is not done.
+
+A built escript (`beamtalk build --escript`) prints the visible frames after an uncaught error but not the `--raw-mfa` hint, since it has no such switch.
+
 The REPL toggle is a render option of the attached client. It is not sent to
 the node, so a second session on the same workspace is unchanged, and no
 application env or `persistent_term` is written. `beamtalk test` runs on a
