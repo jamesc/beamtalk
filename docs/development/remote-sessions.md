@@ -50,6 +50,17 @@ with no marker is treated as stale once. It prints one line, for example
 never fails the session: no network, a missing release, a failed download or
 a read-only prefix print a warning and leave the installed build in place.
 
+The hook kills the script at 360s, so its own limits are budgeted to stay well
+under that (BT-4841): checksum fetch 10s, `install.sh` fetch 20s, its checksum
+10s, the install itself `timeout -k 5 240`, and the 5s `--version` probe, a
+worst case of 290s (`just test-refresh-edge` asserts the sum stays under 300s).
+The small fetches are size-capped (`--max-filesize`), the `Last-Modified` value
+is stripped of control characters before it reaches the status line, and a
+symlinked `<prefix>/.beamtalk-refresh.lock` is refused instead of written
+through. `install.sh` extracts into the prefix in place and writes the marker
+last, so an install that is interrupted leaves the old marker and is retried at
+the next session start; it is self-healing, not atomic.
+
 Force a refresh by removing the marker and rerunning the script, or by running
 the installer directly:
 

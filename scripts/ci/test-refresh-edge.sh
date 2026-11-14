@@ -142,6 +142,75 @@ check "override scope: base-url fetch has no --proto" "$(grep "release/beamtalk-
 check "override scope: installer fetches keep --proto =https" "$(grep 'install.sh' "$T/curl.log" | grep -q -- "--proto =https"; echo $?)"
 check "override scope: installer fetched from the https release url" "$(grep -q 'https://github.com/jamesc/beamtalk/releases/download/edge/install.sh ' "$T/curl.log" || grep -q 'edge/install.sh$' "$T/curl.log"; echo $?)"
 
+# --- BT-4841 ---
+
+# size caps: an oversized checksum asset is refused (warn, exit 0, no install)
+mkdir -p "$T/huge"
+head -c 20000 /dev/zero | tr '\0' 'a' > "$T/huge/$ASSET.sha256"
+run_case huge "$OLD" BEAMTALK_EDGE_BASE_URL="file://$T/huge"
+check "oversized checksum asset: exit 0, no install, warns" "$([ "$RC" -eq 0 ] && [ "$CALLS" -eq 0 ] && grep -q 'could not read' "$T/huge.err"; echo $?)"
+
+# size caps + timeout budget, observed through fake curl and timeout wrappers
+mkdir -p "$T/budgetbin"
+cat > "$T/budgetbin/curl" <<'FAKE'
+#!/bin/sh
+echo "$*" >> "$CURL_LOG"
+exec "$REAL_CURL" "$@"
+FAKE
+cat > "$T/budgetbin/timeout" <<'FAKE'
+#!/bin/sh
+echo "$*" >> "$TIMEOUT_LOG"
+exec "$REAL_TIMEOUT" "$@"
+FAKE
+chmod +x "$T/budgetbin/curl" "$T/budgetbin/timeout"
+: > "$T/curl2.log"; : > "$T/timeout.log"
+run_case budget "$OLD" BEAMTALK_INSTALLER= BEAMTALK_INSTALLER_URL="file://$T/release/install.sh" \
+  PATH="$T/budgetbin:$PATH" REAL_CURL="$REAL_CURL" REAL_TIMEOUT="$(command -v timeout)" \
+  CURL_LOG="$T/curl2.log" TIMEOUT_LOG="$T/timeout.log"
+check "budget: reinstall ran" "$([ "$RC" -eq 0 ] && [ "$CALLS" -eq 1 ]; echo $?)"
+check "size caps: every small fetch has --max-filesize" \
+  "$([ "$(wc -l < "$T/curl2.log")" -eq 3 ] && ! grep -qv -- '--max-filesize' "$T/curl2.log"; echo $?)"
+check "install timeout is 240s with a kill grace" "$(grep -q -- '^-k 5 240 sh ' "$T/timeout.log"; echo $?)"
+# Worst-case sum of the script's own time limits stays well under the hook's 360s.
+secs() { sed -n "s/^$1=\([0-9][0-9]*\)\$/\1/p" "$SCRIPT"; }
+# shellcheck disable=SC2016  # the pattern matches the literal ${PREFIX} in the script
+build_identity_max="$(sed -n 's/.*timeout \([0-9][0-9]*\) "\${PREFIX}\/bin\/beamtalk".*/\1/p' "$SCRIPT")"
+budget=$(( 2 * $(secs SMALL_FETCH_MAX_TIME) + $(secs INSTALLER_FETCH_MAX_TIME) + $(secs INSTALL_TIMEOUT) \
+  + $(secs INSTALL_KILL_GRACE) + build_identity_max ))
+echo "worst-case budget: ${budget}s"
+check "worst-case budget is under 300s (hook limit 360s)" "$([ "$budget" -gt 0 ] && [ "$budget" -lt 300 ]; echo $?)"
+
+# Last-Modified is stripped of control characters before the status line
+cat > "$T/fakebin/curl-hdr" <<'FAKE'
+#!/bin/sh
+hdr=""; out=""
+while [ $# -gt 0 ]; do
+  case "$1" in -D) hdr="$2"; shift ;; -o) out="$2"; shift ;; esac
+  shift
+done
+printf '%s  %s\n' "$FAKE_SUM" "beamtalk-edge-linux-x86_64.tar.gz" > "$out"
+printf 'HTTP/1.1 200 OK\r\nLast-Modified: Sat, 14 Nov\033[31m 2026\007 17:24:27 GMT\r\n\r\n' > "$hdr"
+FAKE
+mkdir -p "$T/hdrbin"
+cp "$T/fakebin/curl-hdr" "$T/hdrbin/curl"; chmod +x "$T/hdrbin/curl"
+run_case hdr "$NEW" PATH="$T/hdrbin:$PATH"
+check "Last-Modified: control characters stripped, still one line" \
+  "$([ "$RC" -eq 0 ] && [ "$(wc -l <<<"$OUT")" -eq 1 ] && ! printf '%s' "$OUT" | LC_ALL=C grep -q '[[:cntrl:]]' && [[ "$OUT" == *"published Sat, 14 Nov[31m 2026 17:24:27 GMT"* ]]; echo $?)"
+
+# empty-array expansion: no bare "${ARR[@]}" of the possibly-empty proto arrays (bash < 4.4 + set -u)
+check "proto arrays expand with the empty-safe form" \
+  "$(! grep -nE '"\$\{(BASE|INSTALLER)_PROTO\[@\]\}"' "$SCRIPT" | grep -v -F '+"' | grep -q .; echo $?)"
+check "proto arrays are used with \${arr[@]+...}" "$([ "$(grep -c '_PROTO\[@\]+"' "$SCRIPT")" -eq 3 ]; echo $?)"
+
+# a symlinked lock file is refused, not written through
+P="$T/symlock"; mkdir -p "$P"
+printf 'victim' > "$T/victim"; ln -s "$T/victim" "$P/.beamtalk-refresh.lock"
+RC=0
+OUT="$(env BEAMTALK_PREFIX="$P" BEAMTALK_EDGE_BASE_URL="file://$T/release" \
+  BEAMTALK_INSTALLER="$T/install.sh" FAKE_SUM="$NEW" bash "$SCRIPT" 2>"$T/symlock.err")" || RC=$?
+check "symlinked lock: exit 0, warns, installer not run, target untouched" \
+  "$([ "$RC" -eq 0 ] && grep -q 'symlink' "$T/symlock.err" && [ ! -f "$P/installer-calls" ] && [ "$(cat "$T/victim")" = victim ]; echo $?)"
+
 if [ "$failures" -gt 0 ]; then
   echo "❌ test-refresh-edge: $failures case(s) failed" >&2
   exit 1
