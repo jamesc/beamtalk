@@ -78,7 +78,24 @@ The instance will be automatically unregistered when the process terminates.
 """.
 -spec register(class_name(), pid()) -> ok.
 register(Class, Pid) when is_atom(Class), is_pid(Pid) ->
-    gen_server:call(?MODULE, {register, Class, Pid}).
+    %% BT-4845: no round trip to the registry process. Every actor start used
+    %% to `gen_server:call` this singleton from the spawner, so concurrent
+    %% starts queued on one process (and each spawner slept and woke around
+    %% the call). The tables are public: write the rows here, so
+    %% `all/1` and `class_of/1` see the actor as soon as `register/2`
+    %% returns, exactly as with the call, and cast only the monitor, which
+    %% the server owns. The rows go in before the cast, so the server's
+    %% cleanup (a `'DOWN'`, even an immediate `noproc` one for an actor that
+    %% already exited) always follows the insert and removes it.
+    try
+        true = ets:insert(?INSTANCE_CLASS, {Pid, Class}),
+        true = ets:insert(?INSTANCE_REGISTRY, {Class, Pid}),
+        gen_server:cast(?MODULE, {monitor, Class, Pid})
+    catch
+        %% Tables missing (registry not running, or lost with its heir):
+        %% take the old path, which fails the way it always did.
+        error:badarg -> gen_server:call(?MODULE, {register, Class, Pid})
+    end.
 
 -doc "Manually unregister an instance of a class.".
 -spec unregister(class_name(), pid()) -> ok.
@@ -182,12 +199,31 @@ handle_call({unregister, Class, Pid}, _From, State) ->
             ets:delete_object(?INSTANCE_CLASS, {Pid, Class}),
             {reply, ok, State#state{monitors = NewMonitors}};
         error ->
-            %% Not registered, but that's ok
+            %% Not monitored (yet): `register/2` writes the rows before its
+            %% monitor cast arrives (BT-4845), so drop them here too.
+            ets:delete_object(?INSTANCE_REGISTRY, {Class, Pid}),
+            ets:delete_object(?INSTANCE_CLASS, {Pid, Class}),
             {reply, ok, State}
     end;
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
+handle_cast({monitor, Class, Pid}, State) ->
+    %% BT-4845: the monitor half of `register/2`. Skipped when the row is
+    %% already gone (an `unregister/2` that ran first) or already monitored.
+    Key = {Class, Pid},
+    case maps:is_key(Key, State#state.monitors) of
+        true ->
+            {noreply, State};
+        false ->
+            case ets:match_object(?INSTANCE_REGISTRY, {Class, Pid}) of
+                [] ->
+                    {noreply, State};
+                _ ->
+                    Ref = erlang:monitor(process, Pid),
+                    {noreply, State#state{monitors = maps:put(Key, Ref, State#state.monitors)}}
+            end
+    end;
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
