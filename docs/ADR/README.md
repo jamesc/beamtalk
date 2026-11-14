@@ -174,6 +174,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0145](0145-cascade-pipeline-semantics.md) | Cascade Semantics for Immutable Values — Keep `;` Fan-Out, Add a `\|>` Pipeline | Accepted | 2026-11-06 |
 | [0146](0146-non-local-return-through-ensure.md) | A `^` Commits the Actor's Cell, Not a Copy | Accepted | 2026-11-06 |
 | [0147](0147-map-shape-types.md) | Map-Shape Types for Keyed Dictionaries | Implemented | 2026-11-11 |
+| [0148](0148-checked-narrowing-casts.md) | Checked Narrowing Casts and the Trusted-Type Comparison Hole | Proposed | 2026-11-14 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
