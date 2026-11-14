@@ -207,7 +207,7 @@ apply when a case is unclear.
    the wrong method until the process picks up the new code. And a
    `uses:`-flattened method whose protocol source the compilation was not
    given (a dependency checkout that did not carry it) has no row, and
-   its frames carry no file, so they render as `Class>>dispatch`; a
+   its frames carry no file or line, so they render as `Class>>dispatch`; a
    protocol declared in the same file as its user needs no source and
    keeps its row and its `file:line`.
 2. **Names resolve through the runtime class table**, not the ADR 0119

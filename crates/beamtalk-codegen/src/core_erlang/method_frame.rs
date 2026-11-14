@@ -159,8 +159,8 @@ impl<'a> MethodFrame<'a> {
         {
             // Flattened, but its protocol's source is not available: the spans
             // are offsets into a file we do not have, so any line mapped
-            // through the user's text is made up. Annotate bare (no file) and
-            // let location labels read `offset N`, rather than stamp the
+            // through the user's text is made up. Emit no line annotations
+            // (and let location labels read `offset N`) rather than stamp the
             // user's file with a made-up line.
             Some((generator.source_text.take(), generator.source_path.take()))
         } else {
