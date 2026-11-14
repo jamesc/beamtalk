@@ -30,7 +30,10 @@ The filter does not touch the report. It replaces the event's `report_cb`
 with a wrapper that formats the *translated* report with the original
 callback. The report term stays raw, so structured consumers
 (`beamtalk_json_formatter`, `ws_log_handler`) keep the compiler names (the
-raw MFA), and a formatter that does not use `report_cb` is unaffected. The
+raw MFA), and a formatter that does not use `report_cb` is unaffected.
+Text a consumer builds by calling `report_cb` (the JSON `message` and the
+workspace log stream's text) is translated; fields taken from the report term
+(`reason`, `initial_call`, ...) keep the raw name. The
 module→class map is built once per report, in the filter (not per frame,
 not at format time).
 
@@ -95,8 +98,17 @@ translate(#{msg := {report, #{label := Label} = Report}, meta := Meta} = Event) 
                 undefined ->
                     ignore;
                 OrigCb ->
-                    Mfas = lists:usort(report_mfas(Label, Report)),
-                    Rendered = beamtalk_stack_frame:render_mfas(Mfas),
+                    Mfas = [
+                        Mfa
+                     || {M, _, _} = Mfa <- lists:usort(report_mfas(Label, Report)),
+                        is_beamtalk_module(M)
+                    ],
+                    %% Nothing Beamtalk in the report: skip the class-table read.
+                    Rendered =
+                        case Mfas of
+                            [] -> #{};
+                            _ -> beamtalk_stack_frame:render_mfas(Mfas)
+                        end,
                     Changed = maps:filter(
                         fun(Mfa, Text) -> Text =/= beamtalk_stack_frame:raw_mfa(Mfa) end,
                         Rendered
@@ -109,6 +121,13 @@ translate(#{msg := {report, #{label := Label} = Report}, meta := Meta} = Event) 
     end;
 translate(_Event) ->
     ignore.
+
+-spec is_beamtalk_module(atom()) -> boolean().
+is_beamtalk_module(Module) ->
+    case atom_to_binary(Module) of
+        <<"bt@", _/binary>> -> true;
+        _ -> false
+    end.
 
 -spec recognised(term()) -> boolean().
 recognised({gen_server, terminate}) -> true;

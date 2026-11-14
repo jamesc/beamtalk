@@ -324,8 +324,10 @@ supported window, ADR 0125); CI runs the EUnit suite on every OTP in it.
   callback. Not a formatter wrapper: there are several handlers (console,
   transcript, file, `ws_log_handler`), and one filter covers all of them
   without each being reconfigured. It does not rewrite the report term, so
-  structured consumers (`beamtalk_json_formatter`, `ws_log_handler`) keep the
-  raw MFA. Rewriting the term was rejected: `erl_error` crashes on a stack it
+  the report *term* stays raw, so fields that structured consumers read from
+  it (`beamtalk_json_formatter` `reason`/`initial_call`, `ws_log_handler`)
+  keep the raw MFA; text produced through `report_cb` (the JSON `message`,
+  the workspace log text) is translated. Rewriting the term was rejected: `erl_error` crashes on a stack it
   does not recognise, and machine consumers would lose the raw name.
 * **Failure contract**: the filter never raises (OTP silently removes a
   filter that crashes). A failure is caught, the event passes on

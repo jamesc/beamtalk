@@ -175,8 +175,10 @@ translates stacktrace frames, `initial_call` and the supervisor offender's
 `mfargs`. State, last message, mailbox and dictionary are printed as terms,
 and a report it does not recognise is printed unchanged.
 
-The report term itself is unchanged, so the JSON formatter and
-`ws_log_handler` still carry the raw `module:function/arity`. To see raw names
+The report term itself is unchanged, so fields the JSON formatter and
+`ws_log_handler` read from it (`reason`, `initial_call`) still carry the raw
+`module:function/arity`; text built through the report callback (the JSON
+`message`) shows the Beamtalk names. To see raw names
 in text, `logger:remove_primary_filter(beamtalk_crash_report_filter)`. If the
 filter hits an unexpected report shape it logs one warning
 (`crash_report_translation_failed`), prints that report untranslated, and
