@@ -149,7 +149,7 @@ impl CoreErlangGenerator {
              'format_status'/1, '__beamtalk_secrets'/0, 'dispatch'/4",
             dispatch_3_export,
             ", 'safe_dispatch'/3, 'safe_dispatch'/4, \
-             'method_table'/0, 'has_method'/1, 'class_name'/0, \
+             'method_table'/0, '__beamtalk_method_lines'/0, 'has_method'/1, 'class_name'/0, \
              'spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_monitored'/1, \
              'spawn_monitored_async'/0, 'spawn_monitored_async'/1, \
              'new'/0, 'new'/1, 'superclass'/0",
@@ -337,6 +337,7 @@ impl CoreErlangGenerator {
             push_fn(self.generate_primitive_dispatch_3_doc())?;
         }
         push_fn(self.generate_method_table(module)?)?;
+        push_fn(self.generate_method_lines(module)?)?;
         // has_method/1 — no trailing newline needed
         docs.push(self.generate_has_method(module)?);
 

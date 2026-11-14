@@ -66,7 +66,8 @@ loaded class modules share it. Which frames are listed is not decided here.
     render_mfa/1,
     raw_mfa/1,
     frame_parts/1,
-    frame_source_path/1
+    frame_source_path/1,
+    lookup_method_line/2
 ]).
 
 -doc """
@@ -454,10 +455,58 @@ frame_parts(#{module := Module, function := Function} = Frame) ->
                 end,
             Base#{
                 class => class_part(Kind, Module, ClassName, maps:get(package, Frame, nil)),
-                selector => Selector,
+                selector => actor_selector(Kind, Module, Selector, Line),
                 class_side => ClassSide,
                 block => IsBlock
             }
+    end.
+
+%% Actor methods are clauses of one `dispatch/4`, so the MFA of a frame inside
+%% one reads `dispatch`. The compiler emits `__beamtalk_method_lines/0`, a tuple
+%% of `{StartLine, Selector}` sorted by line; the method is the entry with the
+%% greatest StartLine =< the frame's line. No line, no table (older `.beam`) or
+%% a line before the first method leaves `dispatch` as it was.
+-spec actor_selector(beamtalk | unresolved | unknown, atom(), binary(), pos_integer() | nil) ->
+    binary().
+actor_selector(beamtalk, Module, <<"dispatch">>, Line) when is_integer(Line) ->
+    case method_lines(Module) of
+        {} ->
+            <<"dispatch">>;
+        Table ->
+            case lookup_method_line(Table, Line) of
+                {ok, Selector} -> atom_to_binary(Selector, utf8);
+                not_found -> <<"dispatch">>
+            end
+    end;
+actor_selector(_Kind, _Module, Selector, _Line) ->
+    Selector.
+
+-spec method_lines(atom()) -> tuple().
+method_lines(Module) ->
+    case erlang:function_exported(Module, '__beamtalk_method_lines', 0) of
+        true -> Module:'__beamtalk_method_lines'();
+        false -> {}
+    end.
+
+-doc """
+Find the method containing `Line` in a `__beamtalk_method_lines/0` table: the
+entry with the greatest `StartLine =< Line`, by binary search over the tuple
+(`element/2` is O(1) and copies nothing).
+""".
+-spec lookup_method_line(tuple(), integer()) -> {ok, atom()} | not_found.
+lookup_method_line(Table, Line) ->
+    search_method_lines(Table, Line, 1, tuple_size(Table), not_found).
+
+-spec search_method_lines(tuple(), integer(), pos_integer(), non_neg_integer(), term()) ->
+    {ok, atom()} | not_found.
+search_method_lines(_Table, _Line, Lo, Hi, Best) when Lo > Hi ->
+    Best;
+search_method_lines(Table, Line, Lo, Hi, Best) ->
+    Mid = (Lo + Hi) div 2,
+    {Start, Selector} = element(Mid, Table),
+    case Start =< Line of
+        true -> search_method_lines(Table, Line, Mid + 1, Hi, {ok, Selector});
+        false -> search_method_lines(Table, Line, Lo, Mid - 1, Best)
     end.
 
 -spec frame_kind(term(), atom() | nil) -> beamtalk | unresolved | erlang | unknown.
