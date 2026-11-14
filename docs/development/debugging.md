@@ -163,6 +163,25 @@ returns every frame the VM recorded; Beamtalk neither caps nor collapses it
 (the VM's own stacktrace depth limit still applies). REPL-evaluated
 code with no backing file shows no file in its frames.
 
+### Reading a crash report (BT-4820)
+
+An actor that crashes (a failed `initialize`, or an error in a `!` cast,
+`handleInfo:` or a continuation; ADR 0134) is reported by OTP: a
+`gen_server` terminate report, a `proc_lib` crash report, and a supervisor
+`child_terminated` report. `beamtalk_crash_report_filter` (a logger primary
+filter installed when the runtime starts) shows Beamtalk names in their text:
+`Counter>>handleInfo:` instead of `bt@pkg@counter:'handleInfo:'/2`. It
+translates stacktrace frames, `initial_call` and the supervisor offender's
+`mfargs`. State, last message, mailbox and dictionary are printed as terms,
+and a report it does not recognise is printed unchanged.
+
+The report term itself is unchanged, so the JSON formatter and
+`ws_log_handler` still carry the raw `module:function/arity`. To see raw names
+in text, `logger:remove_primary_filter(beamtalk_crash_report_filter)`. If the
+filter hits an unexpected report shape it logs one warning
+(`crash_report_translation_failed`), prints that report untranslated, and
+stays installed.
+
 ## Test Failures
 
 ```bash
