@@ -90,13 +90,15 @@ dispatch(ClassPid, Selector, Args, Opts) ->
                 none ->
                     try
                         io:put_chars(
-                            standard_error,
-                            [
-                                beamtalk_error:format_safe(Reason, Stacktrace),
-                                $\n,
-                                raw_trace(Opts, Stacktrace)
-                            ]
+                            standard_error, [beamtalk_error:format_safe(Reason, Stacktrace), $\n]
                         )
+                    catch
+                        _:_ -> ok
+                    end,
+                    %% The raw listing is extra output: written on its own, so
+                    %% a failure rendering it can never suppress the error.
+                    try
+                        io:put_chars(standard_error, raw_trace(Opts, Stacktrace))
                     catch
                         _:_ -> ok
                     end;

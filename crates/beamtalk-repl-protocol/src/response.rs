@@ -316,7 +316,8 @@ impl StackFrameInfo {
 
     /// The raw-output line for this frame: the display name with the raw MFA
     /// beside it, `Counter>>increment (counter.bt:12)  [bt@counter:increment/1]`
-    /// (the text the Erlang `beamtalk_stack_frame:format_frame_raw/1` renders).
+    /// (the text the Erlang `beamtalk_stack_frame:format_frame_raw/1` renders;
+    /// both are checked against `tests/repl-protocol/raw_frame_lines.json`).
     /// A frame with no raw MFA shows the display name alone.
     #[must_use]
     pub fn display_raw(&self) -> String {
@@ -468,6 +469,30 @@ mod tests {
         let resp: ReplResponse =
             serde_json::from_str(r#"{"error":"x","status":["done","error"]}"#).unwrap();
         assert!(resp.frames.is_none());
+    }
+
+    /// `display_raw` and `beamtalk_stack_frame:format_frame_raw/1` render the
+    /// same lines, through `tests/repl-protocol/raw_frame_lines.json`.
+    #[test]
+    fn display_raw_matches_shared_fixture() {
+        let path = beamtalk_workspace::cargo_workspace_root!()
+            .join("tests/repl-protocol/raw_frame_lines.json");
+        let raw = std::fs::read_to_string(&path).expect("read raw_frame_lines.json");
+        let fixture: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let frame = StackFrameInfo {
+                display: case["display"].as_str().unwrap().into(),
+                module: Some(case["module"].as_str().unwrap().into()),
+                function: Some(case["function"].as_str().unwrap().into()),
+                arity: u32::try_from(case["arity"].as_u64().unwrap()).unwrap(),
+                file: None,
+                line: None,
+                hidden: false,
+            };
+            assert_eq!(frame.display_raw(), case["raw_line"].as_str().unwrap());
+        }
     }
 
     /// The Rust frame type and `beamtalk_stack_frame:structured_frame/1` agree
