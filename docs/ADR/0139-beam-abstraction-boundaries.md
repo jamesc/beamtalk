@@ -3,7 +3,7 @@
 ## Status
 Accepted (2026-10-26). Amended 2026-10-26 (post-acceptance lead review): raw-mode flag renamed, frame semantics and printString rule decided, tuple scope clamped, `error_info` mechanism specified, crash-report hook and 0028 verdict scoped into Phase 1 — see "Amendment (2026-10-26)" below.
 
-Progress (2026-11-14): none of the four phase epics has been filed. Phase 1 is partly built by adjacent work: a shared frame renderer (`beamtalk_stack_frame:format_frame/1`; BT-4353/BT-4357) serves test failures and `StackFrame>>printString`, sends are line-annotated (BT-3127, extended by BT-4356), and Erlang reasons are classified by `beamtalk_exception_handler:wrap_raw/2`. Not built: `--raw-mfa`, the crash-report logger hook, selector recovery for actor frames, rules for class-side and non-Beamtalk frames, removal of raw MFA from error messages and FFI diagnostics, the ADR 0028 verdict. The Phase 3 binaries row is settled by epic BT-4170 (done 2026-10-28; ADR 0140, which proposed flipping it, was rejected). All seven cited issues are done.
+Progress (2026-11-14): Phase 1 is partly built by adjacent work: a shared frame renderer (`beamtalk_stack_frame:format_frame/1`; BT-4353/BT-4357) serves test failures and `StackFrame>>printString`, sends are line-annotated (BT-3127, extended by BT-4356), and Erlang reasons are classified by `beamtalk_exception_handler:wrap_raw/2`. Not built: `--raw-mfa`, the crash-report logger hook, selector recovery for actor frames, rules for class-side and non-Beamtalk frames, removal of raw MFA from error messages and FFI diagnostics, the ADR 0028 verdict. The Phase 3 binaries row is settled by epic BT-4170 (done 2026-10-28; ADR 0140, which proposed flipping it, was rejected). All seven cited issues are done. Implementation is planned as epic BT-4814 (see Implementation Tracking).
 
 Amended 2026-11-14 (after review): the rule is restated as "hide what the compiler made up; show what a person named", the five blocking questions from the review are decided, and the plan is cut to one phase with two spikes — see "Amendment (2026-11-14)" below. Where the amendment and older text disagree, the amendment wins.
 
@@ -545,6 +545,26 @@ touches the REPL or CLI surface (Phase 1 and 2 do).
   `--raw-mfa`.
 - Downstream packages: display-only changes; no API breaks intended. Any
   phase that breaks an API states it in its own epic.
+
+## Implementation Tracking
+
+**Epic:** [BT-4814](https://linear.app/beamtalk/issue/BT-4814) — Names and error rendering: hide compiler-made names
+**Status:** Planned (2026-11-14)
+
+| Phase | Issue | Title | Size | Blocked by |
+|-------|-------|-------|------|------------|
+| 1 Foundation | BT-4815 | One frame renderer with the frame table (class-side, block and Erlang frames) | M | — |
+| 2 Core | BT-4817 | Actor frames name their selector: line→selector table (carries spike 1 measurements) | M | BT-4815 |
+| 2 Core | BT-4818 | Frame visibility: package native Erlang and the raising frame shown, OTP and generated frames hidden | M | BT-4815 |
+| 2 Core | BT-4816 | Remove compiler-made names from error messages | S | — |
+| 2 Core | BT-4819 | Structured frames carry both forms and the full frame list | M | BT-4815, BT-4818 |
+| 3 Integration | BT-4821 | Per-client raw output: `--raw-mfa` on run/test, REPL session toggle | M | BT-4819 |
+| 3 Integration | BT-4820 | Crash reports through the frame renderer (carries spike 2 scope decision) | M | BT-4815 |
+| 4 Validation | BT-4822 | CI check, end-to-end btscript, docs, ADR to Implemented | M | BT-4816, BT-4817, BT-4818, BT-4820, BT-4821 |
+
+The two spikes named in the amendment's plan are folded into BT-4817 and
+BT-4820 as acceptance criteria: their measurements and scope decision are
+recorded back in this ADR.
 
 ## References
 
