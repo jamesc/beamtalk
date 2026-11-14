@@ -206,10 +206,17 @@ apply when a case is unclear.
    version's lines: if methods were added or moved, that frame can name
    the wrong method until the process picks up the new code. And a
    `uses:`-flattened method whose protocol source the compilation was not
-   given (a dependency checkout that did not carry it) has no row, and
-   its frames carry no file or line, so they render as `Class>>dispatch`; a
+   given has no row, and its frames carry no file or line, so they render
+   as `Class>>dispatch`. That is the common case in the REPL and workspace
+   loads, not only for a dependency checkout that did not carry the
+   protocol: the compiler port is sent each protocol's text by name, with
+   no file path, and does not pass protocol sources to codegen, so every
+   provision an actor gets from a protocol in *another* file renders this
+   way there (`beamtalk build`, the LSP and lint do pass them). A
    protocol declared in the same file as its user needs no source and
-   keeps its row and its `file:line`.
+   keeps its row and its `file:line`. Having the port pass the
+   workspace's protocol sources, with paths, would close the gap; it is
+   not part of this change.
 2. **Names resolve through the runtime class table**, not the ADR 0119
    registry (which is compile-time only and stays the resolver for
    compiler diagnostics). When a module cannot be resolved the frame

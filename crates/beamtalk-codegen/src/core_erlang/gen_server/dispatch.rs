@@ -15,8 +15,19 @@ use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{Block, Expression, MethodKind, Module};
+use beamtalk_core::source_analysis::Span;
 
-/// Collects all primary method names and arities from a module.
+/// A primary method of a module: its selector, arity and source span, and
+/// whether it is a class-definition method (a script `name := [block]` method
+/// is not).
+struct PrimaryMethod {
+    name: String,
+    arity: usize,
+    span: Span,
+    in_class: bool,
+}
+
+/// Collects all primary methods from a module.
 ///
 /// Walks two sources in order:
 /// 1. Expression-based script/workspace methods — top-level `name := [block]`
@@ -26,10 +37,11 @@ use beamtalk_core::ast::{Block, Expression, MethodKind, Module};
 /// 2. Class definition primary methods — `MethodKind::Primary` entries from
 ///    every class in the module.
 ///
-/// Both `generate_method_table` and `generate_has_method` share this traversal;
-/// the comment above lives here in one place rather than being duplicated.
-fn collect_primary_method_names_and_arities(module: &Module) -> Vec<(String, usize)> {
-    let mut methods: Vec<(String, usize)> = module
+/// `generate_method_table`, `generate_has_method` and
+/// `generate_method_lines` share this traversal, so they cannot disagree
+/// about which methods exist.
+fn collect_primary_methods(module: &Module) -> Vec<PrimaryMethod> {
+    let mut methods: Vec<PrimaryMethod> = module
         .expressions
         .iter()
         .filter_map(|stmt| {
@@ -37,7 +49,12 @@ fn collect_primary_method_names_and_arities(module: &Module) -> Vec<(String, usi
                 && let (Expression::Identifier(id), Expression::Block(block)) =
                     (target.as_ref(), value.as_ref())
             {
-                return Some((id.name.to_string(), block.arity()));
+                return Some(PrimaryMethod {
+                    name: id.name.to_string(),
+                    arity: block.arity(),
+                    span: stmt.expression.span(),
+                    in_class: false,
+                });
             }
             None
         })
@@ -45,11 +62,24 @@ fn collect_primary_method_names_and_arities(module: &Module) -> Vec<(String, usi
     for class in &module.classes {
         for method in &class.methods {
             if method.kind == MethodKind::Primary {
-                methods.push((method.selector.name().to_string(), method.selector.arity()));
+                methods.push(PrimaryMethod {
+                    name: method.selector.name().to_string(),
+                    arity: method.selector.arity(),
+                    span: method.span,
+                    in_class: true,
+                });
             }
         }
     }
     methods
+}
+
+/// Primary method names and arities of a module (see [`collect_primary_methods`]).
+fn collect_primary_method_names_and_arities(module: &Module) -> Vec<(String, usize)> {
+    collect_primary_methods(module)
+        .into_iter()
+        .map(|m| (m.name, m.arity))
+        .collect()
 }
 
 impl CoreErlangGenerator {
@@ -138,39 +168,28 @@ impl CoreErlangGenerator {
             }
         };
         let own_path = self.source_path.as_deref();
-        for stmt in &module.expressions {
-            if let Expression::Assignment { target, value, .. } = &stmt.expression
-                && let (Expression::Identifier(id), Expression::Block(_)) =
-                    (target.as_ref(), value.as_ref())
-                && let Some(path) = own_path
-                && let Some(line) = self.span_to_line(stmt.expression.span())
-            {
-                push(path, line, id.name.to_string());
-            }
-        }
-        for class in &module.classes {
-            for method in &class.methods {
-                if method.kind != MethodKind::Primary {
-                    continue;
-                }
-                let selector = method.selector.name().to_string();
-                if let Some(protocol) = self.flattened_method_source(&selector, false) {
-                    // Spans are offsets into the protocol's file.
-                    if let Some(path) = protocol.path.as_deref()
-                        && (method.span.start() as usize) <= protocol.text.len()
-                    {
-                        push(path, method.span.line_number(&protocol.text), selector);
-                    }
-                } else if self.flattened_method_lacks_source(&selector) {
-                    // A flattened provision whose protocol source is not
-                    // available: its span is an offset into a file we do not
-                    // have, so mapping it through the user's text would put a
-                    // made-up line under the user's file.
-                } else if let Some(path) = own_path
-                    && let Some(line) = self.span_to_line(method.span)
+        for method in collect_primary_methods(module) {
+            let selector = method.name;
+            let flattened = method
+                .in_class
+                .then(|| self.flattened_method_source(&selector, false))
+                .flatten();
+            if let Some(protocol) = flattened {
+                // Spans are offsets into the protocol's file.
+                if let Some(path) = protocol.path.as_deref()
+                    && (method.span.start() as usize) <= protocol.text.len()
                 {
-                    push(path, line, selector);
+                    push(path, method.span.line_number(&protocol.text), selector);
                 }
+            } else if method.in_class && self.flattened_method_lacks_source(&selector) {
+                // A flattened provision whose protocol source is not
+                // available: its span is an offset into a file we do not
+                // have, so mapping it through the user's text would put a
+                // made-up line under the user's file.
+            } else if let Some(path) = own_path
+                && let Some(line) = self.span_to_line(method.span)
+            {
+                push(path, line, selector);
             }
         }
 
