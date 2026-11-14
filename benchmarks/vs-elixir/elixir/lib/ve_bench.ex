@@ -148,7 +148,7 @@ defmodule VeBench do
     done =
       Enum.reduce(refs, 0, fn ref, acc ->
         receive do
-          {:DOWN, ^ref, :process, _, :normal} -> acc + 1
+          {:DOWN, ^ref, :process, _, reason} -> if(reason == :normal, do: acc + 1, else: acc)
         end
       end)
 

@@ -826,3 +826,34 @@ unregister_right_after_register_wins_test_() ->
             end)
         ]
     end}.
+
+%% BT-4845 review: sync_class_index/0 runs in a restarted registry while
+%% spawners keep writing the public tables. A pid registered after the bag
+%% snapshot was taken (so absent from it) must keep its index row; one with no
+%% bag row at all is still dropped.
+sync_stale_pass_keeps_rows_registered_after_the_snapshot_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Live = spawn(fun() ->
+                    receive
+                        stop -> ok
+                    end
+                end),
+                Orphan = spawn(fun() ->
+                    receive
+                        stop -> ok
+                    end
+                end),
+                ok = beamtalk_object_instances:register('Counter', Live),
+                %% An index row with no bag row: the real stale case.
+                true = ets:insert(beamtalk_instance_class, {Orphan, 'Counter'}),
+                %% Empty snapshot: both pids look stale to it.
+                ok = beamtalk_object_instances:drop_stale_index_rows(#{}),
+                ?assertEqual('Counter', beamtalk_object_instances:class_of(Live)),
+                ?assertEqual(undefined, beamtalk_object_instances:class_of(Orphan)),
+                Live ! stop,
+                Orphan ! stop
+            end)
+        ]
+    end}.

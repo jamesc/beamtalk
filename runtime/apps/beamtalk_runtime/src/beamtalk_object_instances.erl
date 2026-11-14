@@ -43,6 +43,10 @@ See also: docs/beamtalk-ddd-model.md "Instance Tracking"
     class_of/1
 ]).
 
+-ifdef(TEST).
+-export([drop_stale_index_rows/1]).
+-endif.
+
 %% gen_server callbacks
 -export([
     init/1,
@@ -88,8 +92,11 @@ register(Class, Pid) when is_atom(Class), is_pid(Pid) ->
     %% cleanup (a `'DOWN'`, even an immediate `noproc` one for an actor that
     %% already exited) always follows the insert and removes it.
     try
-        true = ets:insert(?INSTANCE_CLASS, {Pid, Class}),
+        %% The bag is the source of truth: write it first, so that a
+        %% concurrent `sync_class_index/0` (a restarted registry repairing the
+        %% index under the heir) that sees this index row also finds the bag row.
         true = ets:insert(?INSTANCE_REGISTRY, {Class, Pid}),
+        true = ets:insert(?INSTANCE_CLASS, {Pid, Class}),
         gen_server:cast(?MODULE, {monitor, Class, Pid})
     catch
         %% Tables missing (registry not running, or lost with its heir):
@@ -209,19 +216,20 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
 handle_cast({monitor, Class, Pid}, State) ->
-    %% BT-4845: the monitor half of `register/2`. Skipped when the row is
+    %% BT-4845: the monitor half of `register/2`. Skipped when the index row is
     %% already gone (an `unregister/2` that ran first) or already monitored.
     Key = {Class, Pid},
     case maps:is_key(Key, State#state.monitors) of
         true ->
             {noreply, State};
         false ->
-            case ets:match_object(?INSTANCE_REGISTRY, {Class, Pid}) of
-                [] ->
-                    {noreply, State};
-                _ ->
+            %% O(1) through the pid index (the bag would be walked per class).
+            case ets:lookup(?INSTANCE_CLASS, Pid) of
+                [{Pid, Class}] ->
                     Ref = erlang:monitor(process, Pid),
-                    {noreply, State#state{monitors = maps:put(Key, Ref, State#state.monitors)}}
+                    {noreply, State#state{monitors = maps:put(Key, Ref, State#state.monitors)}};
+                _ ->
+                    {noreply, State}
             end
     end;
 handle_cast(_Msg, State) ->
@@ -333,6 +341,19 @@ sync_class_index() ->
     Pairs = ets:tab2list(?INSTANCE_REGISTRY),
     true = ets:insert(?INSTANCE_CLASS, [{Pid, Class} || {Class, Pid} <- Pairs]),
     InBag = maps:from_list([{Pid, true} || {_, Pid} <- Pairs]),
+    drop_stale_index_rows(InBag).
+
+-doc """
+Drop index rows whose pid is not in `InBag`, a snapshot of the bag's pids.
+
+BT-4845: spawners write both tables directly, so the snapshot can be stale by
+the time this runs: a pid registered after it was taken has an index row the
+snapshot does not know. A candidate is therefore dropped only if the live bag
+has no row for it either. `register/2` writes the bag row before the index
+row, so an index row seen here always has its bag row already.
+""".
+-spec drop_stale_index_rows(#{pid() => true}) -> ok.
+drop_stale_index_rows(InBag) ->
     Stale = ets:foldl(
         fun({Pid, _Class}, Acc) ->
             case maps:is_key(Pid, InBag) of
@@ -343,4 +364,12 @@ sync_class_index() ->
         [],
         ?INSTANCE_CLASS
     ),
-    lists:foreach(fun(Pid) -> ets:delete(?INSTANCE_CLASS, Pid) end, Stale).
+    lists:foreach(
+        fun(Pid) ->
+            case ets:match(?INSTANCE_REGISTRY, {'_', Pid}) of
+                [] -> ets:delete(?INSTANCE_CLASS, Pid);
+                _ -> ok
+            end
+        end,
+        Stale
+    ).
