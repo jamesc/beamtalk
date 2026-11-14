@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4781 fixture: an actor spawned by SpawnCallerParent that makes a
+// synchronous call back to the parent that spawned it. With `useContinue` the
+// call is made from a `self continueWith: #run` step requested by
+// `initialize`. See stdlib/test/actor_spawn_call_back_test.bt.
+
+Actor subclass: SpawnedCallerActor
+  state: parent = nil
+  state: useContinue = false
+  state: outcome = nil
+
+  initialize => self.useContinue ifTrue: [self continueWith: #run]
+
+  // Sync call back to the parent; records the answer or the error kind.
+  run => self.outcome := [self.parent ping] on: Exception do: [:e | e kind]
+
+  // Sync call to the parent passing self, to be checked there.
+  runKind =>
+    self.outcome := [
+      self.parent checkKind: self
+    ] on: Exception do: [:e | e kind]
+
+  runTyped =>
+    self.outcome := [
+      self.parent checkTyped: self
+    ] on: Exception do: [:e | e kind]
+
+  outcome => self.outcome
+
+  // Called synchronously by the parent: the parent is then in the call chain.
+  relayPing => self.parent ping

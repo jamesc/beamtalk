@@ -636,9 +636,13 @@ frames_match_eager_wrap_test() ->
         beamtalk_stack_frame:wrap(Stacktrace),
         beamtalk_exception_handler:frames(Result)
     ),
+    %% `stackTrace` lists the frames shown by default; the rest stay in frames/1.
     ?assertEqual(
-        beamtalk_stack_frame:wrap(Stacktrace),
+        beamtalk_stack_frame:visible_frames(beamtalk_stack_frame:wrap(Stacktrace)),
         beamtalk_exception_handler:dispatch('stackTrace', [], Result)
+    ),
+    ?assertMatch(
+        [#{module := lists}], beamtalk_exception_handler:dispatch('stackTrace', [], Result)
     ).
 
 %% An exception built by an older node/code version carries StackFrame objects

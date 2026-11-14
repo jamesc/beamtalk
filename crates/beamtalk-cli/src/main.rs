@@ -21,7 +21,7 @@ mod paths;
 /// Beamtalk: A Smalltalk-inspired language for the BEAM VM
 #[derive(Debug, Parser)]
 #[command(name = "beamtalk")]
-#[command(version, about, long_about = None)]
+#[command(version = beamtalk_repl_protocol::handshake::build_id(), about, long_about = None)]
 struct Cli {
     /// Increase logging verbosity (-v: debug, -vv+: trace)
     #[arg(short, long, action = ArgAction::Count, global = true)]

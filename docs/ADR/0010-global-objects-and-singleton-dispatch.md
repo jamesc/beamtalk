@@ -1,11 +1,13 @@
 # ADR 0010: Global Objects and Singleton Dispatch
 
 ## Status
-Implemented (2026-02-15). Phase 1 gen_server deprecation in progress (BT-1093).
+Implemented (2026-02-15). Follow-on legacy gen_server removal (BT-1093) complete 2026-03-05 — callers switched (BT-1108), tests ported (BT-1109), `beamtalk_interface.erl` and `beamtalk_workspace_interface.erl` gen_servers deleted (BT-1110, BT-1111).
 
 > **Amended by [ADR 0142](0142-class-process-owns-only-class-state.md) (2026-10-30), class sends are no longer "zero overhead".** The "zero overhead on class method sends" claims below (Decision, Steelman counter, Consequences) describe the unguarded static calls of the time. A literal class send to a method the class itself defines now compiles to a *guarded* direct call: one `persistent_term` read (`beamtalk_class_shadow_flags:direct_call_ok/2`), an `erlang:function_exported/3` check and the class's pid for the real class reference, about 7 reductions (`benchmarks/vs-elixir/results/bench-bt4301.md`). Every other class send goes through `beamtalk_class_dispatch:class_send/3`, which runs the method in the caller when the class's chain has no class variables. The workspace-binding decision of this ADR is unaffected.
 
 ## Migration Status (BT-1093)
+
+**Outcome (2026-03-05): migration complete.** BT-1108, BT-1109, BT-1110 and BT-1111 are all Done. Both Phase 1 gen_server modules were deleted. (A `beamtalk_interface.erl` exists again in `beamtalk_stdlib` today, but it is the stateless method-implementation module for the `Beamtalk` sealed Object — no gen_server process — not the legacy gen_server.) The "Current state (2026-03-04)" snapshot below is kept for history.
 
 The ADR describes Phases 1–4 of the singleton dispatch implementation. All four phases are complete. A follow-on migration (tracked under BT-1093) is deprecating the **legacy gen_server implementations** (`beamtalk_interface.erl`, `beamtalk_workspace_interface.erl`) in favour of the **compiled Beamtalk dispatch path** (`beamtalk_interface_primitives.erl`, `beamtalk_workspace_interface_primitives.erl`).
 

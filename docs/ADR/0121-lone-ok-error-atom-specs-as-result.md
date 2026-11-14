@@ -1,7 +1,7 @@
 # ADR 0121: Lone `ok`/`error` Atom Return Specs Map to `Result` in FFI Type Inference
 
 ## Status
-Accepted (2026-09-14)
+Implemented (2026-09-15) — accepted 2026-09-14; `map_return_type/1` in the spec reader and `Actor>>unregisterName -> Result(Nil)` landed via BT-3498.
 
 ## Context
 

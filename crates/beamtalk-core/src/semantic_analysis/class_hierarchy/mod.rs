@@ -973,39 +973,32 @@ impl ClassHierarchy {
     }
     /// Check for duplicate methods within a list of methods.
     ///
-    /// Methods are considered duplicates based on their `(selector, kind)` tuple.
+    /// The duplicate rule itself is [`crate::ast::duplicate_methods`] (shared
+    /// with the codegen backstop).
     fn check_duplicate_methods(
         methods: &[crate::ast::MethodDefinition],
         class_name: &EcoString,
         is_class_method: bool,
         diagnostics: &mut Vec<Diagnostic>,
     ) {
-        use crate::ast::MethodKind;
-        let mut seen: HashMap<(EcoString, MethodKind), crate::source_analysis::Span> =
-            HashMap::new();
         let label = if is_class_method {
             "class method"
         } else {
             "method"
         };
-        for method in methods {
-            let selector = method.selector.name();
-            let key = (selector.clone(), method.kind);
-            if let Some(&first_span) = seen.get(&key) {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!("Duplicate {label} `{selector}` in class `{class_name}`"),
-                        method.span,
-                    )
-                    .with_hint(format!(
-                        "A {label} with this selector is already defined at offset {}",
-                        first_span.start()
-                    ))
-                    .with_category(DiagnosticCategory::Type),
-                );
-            } else {
-                seen.insert(key, method.span);
-            }
+        for dup in crate::ast::duplicate_methods(methods) {
+            let selector = dup.method.selector.name();
+            diagnostics.push(
+                Diagnostic::error(
+                    format!("Duplicate {label} `{selector}` in class `{class_name}`"),
+                    dup.method.span,
+                )
+                .with_hint(format!(
+                    "A {label} with this selector is already defined at offset {}",
+                    dup.first_span.start()
+                ))
+                .with_category(DiagnosticCategory::Type),
+            );
         }
     }
     /// Check whether a class is allowed to subclass its declared superclass.

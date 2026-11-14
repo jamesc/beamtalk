@@ -37,6 +37,7 @@ mod cli_run;
 mod cli_test;
 mod cli_test_metamorphic;
 mod cli_transcript;
+mod cli_version;
 mod cli_workspace;
 mod gen_native;
 mod native_type_extraction;

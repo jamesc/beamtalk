@@ -249,13 +249,26 @@ is_valid_setUp_result_actor_instance_test() ->
 format_stacktrace_empty_test() ->
     ?assertEqual(<<>>, beamtalk_test_case:format_stacktrace([])).
 
-%% Stacktrace with only non-bt@ frames returns empty binary.
+%% Only plumbing frames and no raising OTP frame: nothing is listed.
 format_stacktrace_no_relevant_frames_test() ->
     Frames = [
-        {erl_eval, expr, 3, [{file, "erl_eval.erl"}, {line, 100}]},
+        {beamtalk_dispatch, lookup, 3, [{file, "beamtalk_dispatch.erl"}, {line, 1}]},
         {gen_server, call, 2, [{file, "gen_server.erl"}, {line, 200}]}
     ],
     ?assertEqual(<<>>, beamtalk_test_case:format_stacktrace(Frames)).
+
+%% BT-4818: the raising frame is listed even when it is OTP code; the plumbing
+%% around it is not.
+format_stacktrace_shows_raising_otp_frame_test() ->
+    Frames = [
+        {lists, foldl, 3, [{file, "lists.erl"}, {line, 2471}]},
+        {gen_server, try_handle_call, 4, [{file, "gen_server.erl"}, {line, 1}]},
+        {proc_lib, init_p, 5, [{file, "proc_lib.erl"}, {line, 1}]}
+    ],
+    ?assertEqual(
+        <<"\n  at lists:foldl/3 (lists.erl:2471)">>,
+        beamtalk_test_case:format_stacktrace(Frames)
+    ).
 
 %% Multi-frame stacktrace preserves most-recent-first order (innermost first).
 %% BEAM stacktraces have the error location at the head — format_stacktrace
@@ -338,7 +351,7 @@ stack_frames_match_rendered_text_test() ->
     ?assertEqual(true, maps:get(block, F2)),
     ?assertEqual(<<"m4">>, maps:get(selector, F3)),
     ?assertEqual(
-        [block, class, file, line, repeat, selector],
+        [block, class, class_side, file, kind, line, repeat, selector],
         lists:sort(maps:keys(F1))
     ),
     %% Each structured frame's selector and line appear in the rendered text.
@@ -550,8 +563,9 @@ format_stacktrace_bare_location_unknown_source_test() ->
     ]),
     ?assertEqual(<<"\n  at bt@user@NoSuchTraceModule>>helper">>, Result).
 
-%% A block (lifted fun) renders distinctly from its enclosing method, with no
-%% arity / fun index leaking through.
+%% Registry miss (BT-4815): a `bt@...` module the class table cannot resolve
+%% shows the raw module and function; nothing is guessed, so the `class_`
+%% prefix stays too. The block is still marked, with no arity / fun index.
 format_stacktrace_block_distinct_from_method_test() ->
     Frames = [
         {'bt@user@Hpack', '-class_encode:headers:table:/4-fun-0-', 2, [
@@ -562,25 +576,58 @@ format_stacktrace_block_distinct_from_method_test() ->
     Result = beamtalk_test_case:format_stacktrace(Frames),
     ?assertEqual(
         <<
-            "\n  at bt@user@Hpack>>class_encode:headers:table: [block] (hpack.bt:40)"
+            "\n  at [] in bt@user@Hpack>>class_encode:headers:table: (hpack.bt:40)"
             "\n  at bt@user@Hpack>>class_encode:headers:table: (hpack.bt:40)"
         >>,
         Result
     ),
     ?assertNot(has_raw_mfa(Result)).
 
+%% Resolved class (BT-4815): the same class-side block frame, with the class in
+%% the runtime class table, renders as the ADR 0139 table says.
+format_stacktrace_class_side_block_resolved_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_test_boot:registry(),
+            beamtalk_test_class:start('Bt4815Hpack', #{
+                superclass => none,
+                methods => #{},
+                class_methods => #{},
+                module => 'bt@user@bt4815_hpack_resolved'
+            })
+        end,
+        fun(_Pid) -> beamtalk_test_class:stop_graceful('Bt4815Hpack') end, fun(_) ->
+            fun() ->
+                Frames = [
+                    {'bt@user@bt4815_hpack_resolved', '-class_encode:headers:table:/4-fun-0-', 2, [
+                        {file, "hpack.bt"}, {line, 40}
+                    ]},
+                    {'bt@user@bt4815_hpack_resolved', 'class_encode:headers:table:', 4, [
+                        {file, "hpack.bt"}, {line, 40}
+                    ]}
+                ],
+                ?assertEqual(
+                    <<
+                        "\n  at [] in Bt4815Hpack class>>encode:headers:table: (hpack.bt:40)"
+                        "\n  at Bt4815Hpack class>>encode:headers:table: (hpack.bt:40)"
+                    >>,
+                    beamtalk_test_case:format_stacktrace(Frames)
+                )
+            end
+        end}.
+
 %% Every lifted-fun naming form (lambda, Core Erlang anonymous, letrec loop)
-%% and selectors containing '/' decode to `selector [block]`.
+%% and selectors containing '/' decode to `[] in Owner>>selector`.
 format_stacktrace_block_name_forms_test() ->
     Render = fun(Fun) ->
         beamtalk_test_case:format_stacktrace([{'bt@user@A', Fun, 0, []}])
     end,
-    ?assertEqual(<<"\n  at A>>run [block]">>, Render('-run/0-fun-3-')),
-    ?assertEqual(<<"\n  at A>>run [block]">>, Render('-run/0-anonymous-1-')),
-    ?assertEqual(<<"\n  at A>>run [block]">>, Render('-run/0-loop/1-0-')),
-    ?assertEqual(<<"\n  at A>>/ [block]">>, Render('-//2-fun-0-')),
-    ?assertEqual(<<"\n  at A>>// [block]">>, Render('-///2-fun-0-')),
-    ?assertEqual(<<"\n  at A>>timesRepeat:">>, Render('timesRepeat:')).
+    ?assertEqual(<<"\n  at [] in bt@user@A>>run">>, Render('-run/0-fun-3-')),
+    ?assertEqual(<<"\n  at [] in bt@user@A>>run">>, Render('-run/0-anonymous-1-')),
+    ?assertEqual(<<"\n  at [] in bt@user@A>>run">>, Render('-run/0-loop/1-0-')),
+    ?assertEqual(<<"\n  at [] in bt@user@A>>/">>, Render('-//2-fun-0-')),
+    ?assertEqual(<<"\n  at [] in bt@user@A>>//">>, Render('-///2-fun-0-')),
+    ?assertEqual(<<"\n  at bt@user@A>>timesRepeat:">>, Render('timesRepeat:')).
 
 %% BT-4357: the test path and the Exception/StackFrame path print the same
 %% frame byte-identically (class, block marker, arity policy, file rules).
@@ -618,7 +665,7 @@ format_stacktrace_collapses_identical_adjacent_frames_test() ->
         {'bt@user@A', testLoop, 0, [{file, "a.bt"}, {line, 3}]}
     ],
     ?assertEqual(
-        <<"\n  at A>>timesRepeat: [x2]\n  at A>>testLoop (a.bt:3)">>,
+        <<"\n  at bt@user@A>>timesRepeat: [x2]\n  at bt@user@A>>testLoop (a.bt:3)">>,
         beamtalk_test_case:format_stacktrace(Frames)
     ).
 
@@ -695,6 +742,22 @@ source_snippet_caps_reads_and_line_length_test() ->
     Filler = binary:copy(<<"\n">>, 300000),
     with_snippet_file(<<Filler/binary, "late\n">>, fun(Path) ->
         ?assertEqual(none, beamtalk_test_case:source_snippet(Path, 300001))
+    end).
+
+%% BT-4818: a readable raising Erlang frame (OTP, hex dependency) is listed but
+%% the snippet stays on the user's `.bt` line.
+format_stacktrace_snippet_prefers_beamtalk_frame_test() ->
+    with_snippet_file(<<"erl one\nerl two\n">>, fun(ErlPath) ->
+        with_snippet_file(<<"a\nb := x parse\nc\n">>, fun(BtPath) ->
+            Frames = [
+                {jsx, decode, 1, [{file, binary_to_list(ErlPath)}, {line, 2}]},
+                {'bt@user@A', parse, 0, [{file, binary_to_list(BtPath)}, {line, 2}]}
+            ],
+            Text = beamtalk_test_case:format_stacktrace(Frames),
+            ?assertNotEqual(nomatch, binary:match(Text, <<"jsx:decode/1">>)),
+            ?assertNotEqual(nomatch, binary:match(Text, <<"> 2 | b := x parse">>)),
+            ?assertEqual(nomatch, binary:match(Text, <<"erl two">>))
+        end)
     end).
 
 format_stacktrace_adds_snippet_for_readable_file_test() ->

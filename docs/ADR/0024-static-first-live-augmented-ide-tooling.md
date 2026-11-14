@@ -1,7 +1,7 @@
 # ADR 0024: Static-First, Live-Augmented IDE Tooling
 
 ## Status
-Implemented (Phase 1, 2026-02-17)
+Implemented (Phase 1, 2026-02-17; BT-456 Done 2026-02-16). Phase 3 (standard LSP server) largely delivered outside this ADR's tracking — the `beamtalk-lsp` crate is a `tower-lsp` server (replacing the custom JSON-RPC daemon) with document/workspace symbols, code actions and signature help, used by the VS Code extension; LSP `textDocument/rename` and Neovim/Helix packaging are not done. Phase 2 (live workspace augmentation of LSP completions/hover) not started and untracked; later ADRs (0046, 0082, 0085) keep the LSP static-first and put live views on separate connections.
 
 ## Context
 
@@ -499,8 +499,8 @@ This ADR introduces new domain concepts that extend the **Language Service** bou
 | Phase | Epic/Issue | Status |
 |-------|-----------|--------|
 | Phase 1 | BT-456 (Epic: LSP Class System Integration) | ✅ Done |
-| Phase 2 | TBD (depends on ADR 0017 implementation) | Not started |
-| Phase 3 | TBD | Not started |
+| Phase 2 | TBD (ADR 0017 dependency is now met) | Not started |
+| Phase 3 | No dedicated issue — `crates/beamtalk-lsp` (`tower-lsp`) + `editors/vscode` | Largely done (outside this ADR's tracking; no LSP rename, no Neovim/Helix packaging) |
 
 ## References
 

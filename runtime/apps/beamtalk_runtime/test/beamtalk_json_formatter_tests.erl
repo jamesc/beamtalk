@@ -306,6 +306,30 @@ format_includes_stacktrace_metadata_test() ->
     ?assert(is_binary(StackBin)),
     ?assert(binary:match(StackBin, <<"my_mod">>) =/= nomatch).
 
+%% BT-4815: the JSON stacktrace uses the shared frame renderer, so an Erlang
+%% frame is `module:function/arity` and a block is `[] in ...`; the raw `mfa`
+%% log field is unchanged.
+format_stacktrace_uses_shared_frame_renderer_test() ->
+    Stack = [
+        {lists, foldl, 3, [{file, "lists.erl"}, {line, 2471}]},
+        {'bt@user@bt4815_json_miss', '-run/0-fun-0-', 1, [{file, "a.bt"}, {line, 9}]}
+    ],
+    Event = #{
+        level => error,
+        msg => {string, "crashed"},
+        meta => #{
+            time => erlang:system_time(microsecond),
+            mfa => {lists, foldl, 3},
+            stacktrace => Stack
+        }
+    },
+    Decoded = decode_event(Event),
+    ?assertEqual(
+        <<"  lists:foldl/3 (lists.erl:2471)\n  [] in bt@user@bt4815_json_miss>>run (a.bt:9)">>,
+        maps:get(<<"stacktrace">>, Decoded)
+    ),
+    ?assertEqual(<<"lists:foldl/3">>, maps:get(<<"mfa">>, Decoded)).
+
 format_handles_unicode_format_args_test() ->
     %% Unicode arrows (→) in format strings previously crashed iolist_to_binary
     Event = #{

@@ -111,6 +111,18 @@ fn runtime_ebins() -> Vec<PathBuf> {
     if stdlib.is_dir() {
         ebins.push(stdlib);
     }
+    // A bare `rebar3 compile` (or `rebar3 xref`) populates `_build` with the
+    // hand-written Erlang modules but not the compiled Beamtalk stdlib
+    // (`just build-stdlib`). Running against that half-built runtime makes
+    // every program fail `undef`/`class_not_found`, which the agreement check
+    // reports as BROKEN — a failure of the sandbox, not of codegen. Treat the
+    // runtime as built only once the stdlib classes are present.
+    if !ebins
+        .iter()
+        .any(|e| e.join("bt@stdlib@dictionary.beam").is_file())
+    {
+        return Vec::new();
+    }
     ebins
 }
 

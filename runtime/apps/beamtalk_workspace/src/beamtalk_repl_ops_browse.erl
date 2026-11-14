@@ -1093,11 +1093,9 @@ native_modules_of_package(PkgName) ->
 %% modules — which excludes the `bt@stdlib@*` class facades by construction.
 -spec package_native_modules(atom()) -> [atom()].
 package_native_modules(App) ->
-    case application:get_env(App, native_modules) of
-        {ok, Mods} when is_list(Mods) ->
-            [M || M <- Mods, is_atom(M)];
-        _ ->
-            stdlib_fallback_native_modules(App)
+    case beamtalk_package:native_modules_of_app(App) of
+        [] -> stdlib_fallback_native_modules(App);
+        Mods -> Mods
     end.
 
 %% Stdlib (and any package with no `native_modules` env): the OTP `modules` list

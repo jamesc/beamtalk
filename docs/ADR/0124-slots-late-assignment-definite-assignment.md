@@ -1,7 +1,7 @@
 # ADR 0124: Slots — Late Assignment and Definite Assignment
 
 ## Status
-Accepted (2026-09-18)
+Implemented (2026-09-22) — accepted 2026-09-18; Parts A and B shipped under Epic BT-3544 (all issues done). B7 (inspector `#lateSlot`) and B11 (`ClassBuilder` parity) remain unplanned future work by decision. Amended 2026-10-25 (BT-4061, done).
 
 Two parts, decided together because they are one rule seen from both sides.
 
@@ -1456,7 +1456,7 @@ A4 were folded into one issue (BT-3552), since the first check to emit the
 diagnostic category defines it.
 **Not planned:** B7 (inspector `#lateSlot`), B11 (`ClassBuilder` parity) —
 by decision, remain future work
-**Status:** Planned
+**Status:** Implemented (2026-09-22) — Epic BT-3544 and every issue above are Done; the BT-4061 amendment landed 2026-10-25
 
 ## References
 - Related issues: [BT-3525](https://linear.app/beamtalk/issue/BT-3525)

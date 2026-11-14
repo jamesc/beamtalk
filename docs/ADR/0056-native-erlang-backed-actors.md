@@ -1,7 +1,7 @@
 # ADR 0056: Native Erlang-Backed Actors — `native:` and `self delegate`
 
 ## Status
-Accepted (2026-03-07) — revised from initial `@native` annotation design. Phases 1–2 Implemented (compiler `native:` support + stdlib migration, BT-1204–BT-1215); Phase 3 tooling (`gen-native`, LSP go-to-implementation/mismatch detection) outstanding
+Implemented (2026-04-01) — accepted 2026-03-07, revised from initial `@native` annotation design. Epic BT-1203 Done: Phase 0 facade docs (BT-1204), Phase 1 compiler `native:` support (BT-1205–BT-1210), Phase 2 Subprocess/TranscriptStream migration (BT-1211, BT-1212; 2026-03-11), Phase 3 tooling — LSP go-to-implementation for `self delegate` (BT-1215, 2026-03-11) and the stub generator, shipped as `beamtalk generate native` (BT-1214, 2026-04-01). LSP selector/`handle_call` mismatch detection was not built and is not tracked.
 
 ## Context
 
@@ -704,7 +704,7 @@ Rejected because it conflates two different mechanisms (BIF-level primitives and
 
 ### Phase 0 — Hand-Written Facade (80% Solution, No Compiler Changes)
 
-**Status: partially complete.** `beamtalk_subprocess.erl` (hand-written gen_server), `subprocess.bt` (FFI stubs), and the `generated_builtins.rs` entry are already in place and all tests pass.
+**Status: Done (BT-1204, 2026-03-10).** `beamtalk_subprocess.erl` (hand-written gen_server), `subprocess.bt` (FFI stubs), and the `generated_builtins.rs` entry are already in place and all tests pass.
 
 The primary remaining Phase 0 deliverable is documentation: write and publish the facade shape (`spawn/1`, `has_method/1`, dispatch functions) as the library author protocol so external authors can hand-write their own facades today, before Phase 1 ships.
 

@@ -42,6 +42,8 @@ See also: docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
     classes/1,
     dependencies/1,
     find_app_for_package/1,
+    declared_native_modules/0,
+    native_modules_of_app/1,
     root_package/0,
     root_package_name/0,
     supervisorClass/1,
@@ -424,6 +426,41 @@ set_root_package(Name) when is_binary(Name) ->
 -spec set_ambiguous_root_package() -> ok.
 set_ambiguous_root_package() ->
     application:set_env(beamtalk_runtime, root_package, ambiguous).
+
+-doc """
+Every native Erlang module a loaded Beamtalk package declares it ships, as a
+set (`#{Module => true}`) (ADR 0072). The source is the generated
+`{native_modules, [...]}` app-env key of each loaded package application (the
+`native/*.erl` stems of the project and of its Beamtalk dependencies); no
+other module list is kept. An application without the key (stdlib, whose
+`beamtalk_*` backing modules are runtime internals) contributes nothing.
+Reads application env only: no process round trip, safe while an exception
+is being read.
+""".
+-spec declared_native_modules() -> #{atom() => true}.
+declared_native_modules() ->
+    %% No classes-or-aliases gate: a class-less native library still ships its
+    %% modules, and only a Beamtalk build writes the key.
+    lists:foldl(
+        fun({App, _Desc, _Vsn}, Acc) ->
+            lists:foldl(fun(M, A) -> A#{M => true} end, Acc, native_modules_of_app(App))
+        end,
+        #{},
+        application:loaded_applications()
+    ).
+
+-doc """
+The native Erlang modules one application declares in its generated
+`{native_modules, [...]}` env key (ADR 0072), `[]` when it has none. The one
+reader of that key: `declared_native_modules/0` and the System Browser's
+`browse-native-modules` both go through it.
+""".
+-spec native_modules_of_app(atom()) -> [atom()].
+native_modules_of_app(App) ->
+    case application:get_env(App, native_modules) of
+        {ok, Mods} when is_list(Mods) -> [M || M <- Mods, is_atom(M)];
+        _ -> []
+    end.
 
 -doc """
 Find the OTP application that hosts a given package name.

@@ -43,14 +43,14 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0014](0014-beamtalk-test-framework.md) | Beamtalk Test Framework — Native Unit Tests and CLI Integration Tests | Implemented | 2026-02-15 |
 | [0015](0015-repl-error-objects-and-exception-hierarchy.md) | Signal-Time Exception Objects and Error Class Hierarchy | Implemented | 2026-02-15 |
 | [0016](0016-unified-stdlib-module-naming.md) | Unified Stdlib Packaging and Module Naming | Implemented | 2026-02-10 |
-| [0017](0017-browser-connectivity-to-running-workspaces.md) | Browser Connectivity to Running Workspaces | Implemented (Phases 0–2) | 2026-02-17 |
+| [0017](0017-browser-connectivity-to-running-workspaces.md) | Browser Connectivity to Running Workspaces | Implemented (2026-06-07; Phase 3 LiveView IDE shipped, auth via 0091) | 2026-02-17 |
 | [0018](0018-document-tree-codegen.md) | Document Tree Code Generation (Wadler-Lindig Pretty Printer) | Implemented | 2026-02-15 |
 | [0019](0019-singleton-class-variables.md) | Singleton Access via Class Variables | Implemented | 2026-02-15 |
 | [0020](0020-connection-security.md) | Connection Security — mTLS, Proxies, and Network Overlays | Implemented | 2026-02-17 |
 | [0021](0021-streams-and-io-design.md) | Stream — Lazy Pipeline for Value-Side Data | Implemented (Revised) | 2026-02-15 |
 | [0022](0022-embedded-compiler-via-otp-port.md) | Embedded Compiler via OTP Port (with NIF option) | Implemented | 2026-02-15 |
 | [0023](0023-string-interpolation-and-binaries.md) | String Interpolation Syntax and Compilation | Implemented | 2026-02-17 |
-| [0024](0024-static-first-live-augmented-ide-tooling.md) | Static-First, Live-Augmented IDE Tooling | Implemented (Phase 1) | 2026-02-17 |
+| [0024](0024-static-first-live-augmented-ide-tooling.md) | Static-First, Live-Augmented IDE Tooling | Implemented (Phase 1; Phase 3 largely done, Phase 2 not started) | 2026-02-17 |
 | [0025](0025-gradual-typing-and-protocols.md) | Gradual Typing and Protocols | Implemented (Phases 1–2); Phase 3 shipped via ADR 0068 (amended 2026-10-29: guarded static dispatch) | 2026-02-15 |
 | [0026](0026-package-definition-and-project-manifest.md) | Package Definition and Project Manifest | Implemented | 2026-02-17 |
 | [0027](0027-cross-platform-support.md) | Cross-Platform Support | Implemented | 2026-02-17 |
@@ -82,7 +82,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0053](0053-double-colon-type-annotation-syntax.md) | Double-Colon Type Annotation Syntax | Implemented | 2026-03-05 |
 | [0054](0054-communication-protocols.md) | Communication Protocols | Accepted \| Implemented | 2026-03-05 |
 | [0055](0055-erlang-backed-class-authoring-protocol.md) | Erlang-Backed Class Authoring Protocol | Implemented | 2026-03-06 |
-| [0056](0056-native-erlang-backed-actors.md) | `@native` — Erlang-Backed Actors | Accepted (partial) | 2026-03-07 |
+| [0056](0056-native-erlang-backed-actors.md) | `@native` — Erlang-Backed Actors | Implemented (2026-04-01) | 2026-03-07 |
 | [0057](0057-authoritative-superclass-source.md) | Authoritative Superclass Source for Abstract Stdlib Classes | Implemented | 2026-03-07 |
 | [0058](0058-platform-security-model.md) | Platform Security Model | Accepted (policy) | 2026-03-07 |
 | [0059](0059-supervision-tree-syntax.md) | Supervision Tree Syntax | Implemented (extended and amended by 0135) | 2026-03-07 |
@@ -99,9 +99,9 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0070](0070-package-namespaces-and-dependencies.md) | Package Namespaces and Dependencies | Implemented | 2026-03-24 |
 | [0071](0071-class-visibility-internal-modifier.md) | Class Visibility — `internal` Modifier for Package-Scoped Access Control | Implemented | 2026-03-28 |
 | [0072](0072-user-erlang-sources-in-packages.md) | User Erlang Sources in Beamtalk Packages | Implemented | 2026-03-29 |
-| [0073](0073-package-distribution-and-discovery.md) | Package Distribution and Discovery | Implemented (Phase 1; Phase 2 implemented in simplified form, amended 2026-07-26) | 2026-03-31 |
+| [0073](0073-package-distribution-and-discovery.md) | Package Distribution and Discovery | Implemented (Phases 1–2, 2026-07-27; Phase 2 simplified; Phase 3 not started) | 2026-03-31 |
 | [0074](0074-deferred-metaprogramming.md) | Deferred Metaprogramming | Accepted (deferral) | 2026-04-01 |
-| [0075](0075-erlang-ffi-type-definitions.md) | Erlang FFI Type Definitions | Implemented (Phase 1; Phase 2 deferred) | 2026-04-02 |
+| [0075](0075-erlang-ffi-type-definitions.md) | Erlang FFI Type Definitions | Implemented (all phases, 2026-09-03) | 2026-04-02 |
 | [0076](0076-ok-error-tuple-to-result-at-ffi-boundary.md) | Convert Erlang ok/error Tuples to Result at FFI Boundary | Implemented | 2026-04-03 |
 | [0077](0077-type-coverage-visibility.md) | Type Coverage Visibility | Implemented | 2026-04-05 |
 | [0078](0078-actor-initialize-inheritance.md) | Actor Initialize Inheritance | Implemented | 2026-04-12 |
@@ -111,7 +111,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0082](0082-method-level-edit-save-and-changelog.md) | Method-Level Edit and Save in the Live Workspace | Implemented | 2026-05-17 |
 | [0083](0083-metaclass-aware-type-inference.md) | Metaclass-Aware Type Inference | Implemented | 2026-05-23 |
 | [0084](0084-class-side-runtime-method-fun-dispatch.md) | Class-Side Runtime Method Installation and Fun Dispatch | Implemented (amended by 0142, 2026-10-30) | 2026-05-24 |
-| [0085](0085-editor-live-image-representation.md) | Editor Live-Image Representation | Proposed | 2026-05-24 |
+| [0085](0085-editor-live-image-representation.md) | Editor Live-Image Representation | Superseded by [0096](0096-system-browser-data-source.md) (2026-11-14) | 2026-05-24 |
 | [0086](0086-string-subclass-of-binary.md) | Make String a Subclass of Binary | Implemented | 2026-03-21 |
 | [0087](0087-maintained-xref-index-for-system-navigation.md) | Maintained Selector→Sites Cross-Reference Index for SystemNavigation | Implemented | 2026-05-26 |
 | [0088](0088-direct-cerl-emission.md) | Direct Core Erlang AST Emission via ETF | Phases 1–4 Rejected; Wire Deferred | 2026-05-26 |
@@ -123,10 +123,10 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0094](0094-object-string-representation-protocols.md) | Object String Representation Protocols (printString / displayString / inspect) | Implemented | 2026-06-07 |
 | [0095](0095-rich-navigable-inspector.md) | Rich Navigable Inspector — Drillable, Live-Refreshing Object Views | Implemented | 2026-06-11 |
 | [0096](0096-system-browser-data-source.md) | System Browser Data Source — Class/Method Browse API for the LiveView IDE | Implemented (live-mode; cold-mode Phase 2 pending) | 2026-06-10 |
-| [0097](0097-desktop-attach-client-node-per-workspace.md) | Desktop Attach Client — One Front Node per Workspace | Accepted (in progress — verified on macOS, Linux/Windows pending) | 2026-06-13 |
+| [0097](0097-desktop-attach-client-node-per-workspace.md) | Desktop Attach Client — One Front Node per Workspace | Implemented (2026-09-24; Linux/Windows hands-on verification pending) | 2026-06-13 |
 | [0098](0098-build-artifact-provenance.md) | Build Artifact Provenance and Version-Based Staleness Invalidation | Implemented | 2026-06-23 |
 | [0099](0099-cli-application-story.md) | CLI Application Story — Console, Arguments, Exit, and Packaging | Implemented | 2026-06-26 |
-| [0100](0100-open-world-diagnostic-policy.md) | Open-World Diagnostic Policy for Unresolved Selectors and Classes | Implemented | 2026-06-27 |
+| [0100](0100-open-world-diagnostic-policy.md) | Open-World Diagnostic Policy for Unresolved Selectors and Classes | Implemented (2026-11-10) | 2026-06-27 |
 | [0101](0101-unified-erlang-interop-native-objects.md) | Unified Erlang Interop — `native:` for Stateless Objects, Wrap-by-Default FFI, Clean `@primitive`/`@intrinsic`/`native:` Split | Implemented | 2026-06-28 |
 | [0102](0102-set-theoretic-type-operators.md) | Set-Theoretic Type Operators (Intersection and Negation) for Narrowing and Atom Exhaustiveness | Implemented (Phases 1, 2, 4, 5; Phase 1b deferred) | 2026-07-06 |
 | [0103](0103-sendability-typing-from-class-kinds.md) | Sendability Typing from Class Kinds | Implemented (Phases 0–3) | 2026-07-05 |
@@ -140,39 +140,39 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0111](0111-lowered-ir-verifier-for-state-threading.md) | Mid-Level Lowered IR + Verifier for State Threading, Control Flow, and Non-Local Return | Implemented | 2026-08-11 |
 | [0112](0112-method-level-removal-language-primitive.md) | Method-Level Removal Language Primitive (`Behaviour removeSelector:`) | Implemented | 2026-08-15 |
 | [0113](0113-destructive-workspace-operations.md) | Destructive Workspace Operations — File Deletion in Flush | Implemented | 2026-08-18 |
-| [0114](0114-class-and-method-rename.md) | Class and Method Rename in the Live Workspace | Accepted | 2026-08-25 |
+| [0114](0114-class-and-method-rename.md) | Class and Method Rename in the Live Workspace | Implemented (2026-08-26) | 2026-08-25 |
 | [0115](0115-xref-receiver-type-key.md) | Receiver-Type Key for `senders_of/1` Lookup | Implemented | 2026-08-20 |
-| [0116](0116-number-on-the-left-arithmetic-coercion.md) | Double-Dispatch Coercion for Number-on-the-Left Arithmetic | Accepted | 2026-08-25 |
+| [0116](0116-number-on-the-left-arithmetic-coercion.md) | Double-Dispatch Coercion for Number-on-the-Left Arithmetic | Implemented (2026-08-25) | 2026-08-25 |
 | [0117](0117-beamtalk-core-crate-split.md) | Splitting `beamtalk-core` into Sub-Crates | Implemented | 2026-08-30 |
 | [0118](0118-expression-level-state-threading-preludes.md) | Expression-Level State Threading via ThreadedIr Preludes | Accepted | 2026-09-03 |
-| [0119](0119-class-module-name-resolution-registry.md) | Class-Name↔Module-Name Resolution Registry | Accepted | 2026-09-05 |
+| [0119](0119-class-module-name-resolution-registry.md) | Class-Name↔Module-Name Resolution Registry | Implemented (2026-09-06) | 2026-09-05 |
 | [0120](0120-value-type-self-threading-scope.md) | Value-Type `Self` Threading — Patch the Remaining Gaps, or Generalize `ThreadedIr`'s Storage Families? | Implemented | 2026-09-09 |
-| [0121](0121-lone-ok-error-atom-specs-as-result.md) | Lone `ok`/`error` Atom Return Specs Map to `Result` in FFI Type Inference | Accepted | 2026-09-14 |
+| [0121](0121-lone-ok-error-atom-specs-as-result.md) | Lone `ok`/`error` Atom Return Specs Map to `Result` in FFI Type Inference | Implemented (2026-09-15) | 2026-09-14 |
 | [0122](0122-threaded-ir-storage-family-generalization-scope.md) | Unify `ThreadedIr` Storage-Family Threading | Implemented | 2026-09-16 |
 | [0123](0123-versioned-state-migration.md) | Versioned State Migration as a Language Surface (`shapeVersion:` + `migrateFromVN:`) | Implemented | 2026-09-19 |
-| [0124](0124-slots-late-assignment-definite-assignment.md) | Slots — Late Assignment and Definite Assignment | Accepted | 2026-09-18 |
+| [0124](0124-slots-late-assignment-definite-assignment.md) | Slots — Late Assignment and Definite Assignment | Implemented (2026-09-22) | 2026-09-18 |
 | [0125](0125-otp-releases-and-upgrade-compatibility.md) | OTP Releases and Upgrade Compatibility | Implemented | 2026-09-24 |
-| [0126](0126-distribution-location-transparent-actors.md) | Distribution and Location-Transparent Actors | Accepted | 2026-09-22 |
-| [0127](0127-traits-for-behavioural-reuse.md) | Traits — Protocols with Provided Methods, Flattened into Users | Accepted | 2026-09-23 |
+| [0126](0126-distribution-location-transparent-actors.md) | Distribution and Location-Transparent Actors | Implemented (2026-09-24) | 2026-09-22 |
+| [0127](0127-traits-for-behavioural-reuse.md) | Traits — Protocols with Provided Methods, Flattened into Users | Implemented (v1, 2026-09-28; post-v1 items in BT-3595 backlog) | 2026-09-23 |
 | [0128](0128-opaque-callable-fold-threading-for-collection-homs.md) | Thread Captured-Local Block Accumulators Through Opaque Callable Forwarding to Stdlib Collection HOMs | Superseded by 0133 | 2026-09-23 |
-| [0129](0129-class-side-system-facades.md) | Replace Injected `Beamtalk`/`Workspace`/`Transcript` Bindings with Class-Side Facades | Accepted (amended by 0142, 2026-10-30) | 2026-09-25 |
+| [0129](0129-class-side-system-facades.md) | Replace Injected `Beamtalk`/`Workspace`/`Transcript` Bindings with Class-Side Facades | Implemented (2026-09-30; amended by 0142, 2026-10-30) | 2026-09-25 |
 | [0130](0130-class-variables-live-in-the-class-process.md) | Class Variables Live in the Class Process During an Invocation | Implemented (amended by 0142, 2026-10-30) | 2026-10-06 |
 | [0131](0131-outer-local-rebinds-as-threaded-value-preludes.md) | Outer-Local Rebinds as `ThreadedValue` Preludes in Every Context | Implemented | 2026-11-01 |
 | [0132](0132-callee-side-threaded-entry-points-for-higher-order-methods.md) | Callee-Side Threaded Entry Points for Higher-Order Methods | Superseded by 0133 | 2026-10-17 |
-| [0133](0133-scope-of-captured-variable-mutation-in-blocks.md) | Scope of Captured-Variable Mutation in Blocks | Accepted | 2026-10-18 |
+| [0133](0133-scope-of-captured-variable-mutation-in-blocks.md) | Scope of Captured-Variable Mutation in Blocks | Implemented (2026-11-03) | 2026-10-18 |
 | [0134](0134-errors-in-no-reply-handlers-crash-the-actor.md) | Errors in No-Reply Handlers Crash the Actor | Implemented | 2026-10-19 |
-| [0135](0135-supervisor-instances-and-start-arguments.md) | Supervisor Instances and Start Arguments | Accepted | 2026-10-20 |
+| [0135](0135-supervisor-instances-and-start-arguments.md) | Supervisor Instances and Start Arguments | Implemented (2026-10-21) | 2026-10-20 |
 | [0136](0136-tuple-literal-expressions.md) | Tuple Literal Expressions | Implemented | 2026-10-20 |
-| [0137](0137-actor-closures-see-live-state.md) | Actor Closures See the Actor's Live State | Accepted (amended by 0142, 2026-10-30) | 2026-10-20 |
-| [0138](0138-string-literal-escape-sequences.md) | String Literal Escape Sequences | Accepted | 2026-10-25 |
-| [0139](0139-beam-abstraction-boundaries.md) | BEAM Abstraction Boundaries — What Leaks and What Doesn't | Accepted (amended 2026-10-26: post-acceptance review fixes) | 2026-10-26 |
+| [0137](0137-actor-closures-see-live-state.md) | Actor Closures See the Actor's Live State | Implemented (2026-10-26; amended by 0142, 2026-10-30) | 2026-10-20 |
+| [0138](0138-string-literal-escape-sequences.md) | String Literal Escape Sequences | Implemented (2026-10-26) | 2026-10-25 |
+| [0139](0139-beam-abstraction-boundaries.md) | BEAM Abstraction Boundaries — What Leaks and What Doesn't | Accepted (amended 2026-10-26 and 2026-11-14: rule narrowed to compiler-made names; planned as epic BT-4814) | 2026-10-26 |
 | [0140](0140-text-default-binaries.md) | Text-Default Binaries — a String Is the Raw Binary, Binary Is Explicit | Rejected | 2026-10-28 |
 | [0141](0141-bitstring-sealed-class-for-unaligned-bitstrings.md) | Bitstring — a Sealed Class for Unaligned Bitstrings | Implemented | 2026-10-28 |
 | [0142](0142-class-process-owns-only-class-state.md) | The Class Process Only Owns Class State — Stateless Class Methods Run in the Caller | Implemented (2026-10-30) | 2026-10-29 |
 | [0143](0143-binary-construction-syntax.md) | Binary Construction Syntax — Reuse `<<...>>` in Expression Position | Accepted | 2026-11-01 |
 | [0144](0144-class-side-protocol-types.md) | Class-Side Protocol Types — `P class` Means "a Class Conforming to `P`" | Implemented | 2026-11-04 |
-| [0145](0145-cascade-pipeline-semantics.md) | Cascade Semantics for Immutable Values — Keep `;` Fan-Out, Add a `\|>` Pipeline | Accepted | 2026-11-06 |
-| [0146](0146-non-local-return-through-ensure.md) | A `^` Commits the Actor's Cell, Not a Copy | Accepted | 2026-11-06 |
+| [0145](0145-cascade-pipeline-semantics.md) | Cascade Semantics for Immutable Values — Keep `;` Fan-Out, Add a `\|>` Pipeline | Implemented (2026-11-10) | 2026-11-06 |
+| [0146](0146-non-local-return-through-ensure.md) | A `^` Commits the Actor's Cell, Not a Copy | Implemented (2026-11-11) | 2026-11-06 |
 | [0147](0147-map-shape-types.md) | Map-Shape Types for Keyed Dictionaries | Implemented | 2026-11-11 |
 | [0148](0148-checked-narrowing-casts.md) | Checked Narrowing Casts and the Trusted-Type Comparison Hole | Proposed | 2026-11-14 |
 

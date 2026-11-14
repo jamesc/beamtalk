@@ -371,9 +371,10 @@ fn parse_spec_map(map_str: &str) -> Option<(bool, FunctionSignature)> {
 
 /// Normalizes a function name from the spec reader to its canonical bare form.
 ///
-/// Mirrors `selector_to_function/1` in `beamtalk_erlang_proxy`:
-/// keyword selectors (`"readAll:"`, `"new:type:"`) → first keyword (`"readAll"`, `"new"`),
+/// Keyword selectors (`"readAll:"`, `"new:type:"`) → first keyword (`"readAll"`, `"new"`),
 /// unary selectors (`"reverse"`) → unchanged.
+/// Cross-language conformance with `selector_to_function/1` in `beamtalk_erlang_proxy`
+/// is enforced by `canonical_function_name_conformance.json` (read by both test suites).
 fn canonical_function_name(name: &str) -> String {
     match name.find(':') {
         Some(pos) => name[..pos].to_string(),
@@ -1014,6 +1015,30 @@ mod tests {
     #[test]
     fn canonical_name_multi_keyword_takes_first() {
         assert_eq!(canonical_function_name("new:type:"), "new");
+    }
+
+    #[test]
+    fn canonical_function_name_conformance_fixtures() {
+        // Single source of truth: the shared JSON corpus also read by the
+        // Erlang-side `selector_to_function_conformance_test_/0` in
+        // `beamtalk_erlang_proxy_tests`. To add or change a case, edit the
+        // JSON only — both sides pick it up automatically.
+        let path = beamtalk_workspace::cargo_workspace_root!().join(
+            "runtime/apps/beamtalk_runtime/test/fixtures/canonical_function_name_conformance.json",
+        );
+        let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {path:?}: {e}"));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("canonical_function_name_conformance.json is valid");
+        assert!(!cases.is_empty());
+        for case in &cases {
+            let selector = case["selector"].as_str().expect("case.selector");
+            let expected = case["expected"].as_str().expect("case.expected");
+            assert_eq!(
+                canonical_function_name(selector),
+                expected,
+                "canonical_function_name({selector:?}) mismatch"
+            );
+        }
     }
 
     #[test]

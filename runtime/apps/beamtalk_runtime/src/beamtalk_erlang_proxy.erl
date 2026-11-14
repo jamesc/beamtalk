@@ -54,6 +54,10 @@ See: ADR 0028 §1 (Module Proxy Pattern)
     new/1
 ]).
 
+-ifdef(TEST).
+-export([selector_to_function/1]).
+-endif.
+
 -include("beamtalk.hrl").
 
 %%% Error-reporting context for the unified apply path (ADR 0101 Part 2).
@@ -817,16 +821,15 @@ raise_function_or_arity_error(Module, FunName, Arity, OrigSelector, Exports) ->
                 })
             );
         _ ->
-            AritiesStr = lists:join(
-                <<", ">>,
-                [integer_to_binary(A) || A <- lists:sort(MatchingArities)]
-            ),
+            %% Arity is the point of this hint, so name the target raw
+            %% (`m:f/1, 2`), even when the target is a Beamtalk class module.
+            [First | Rest] = lists:sort(MatchingArities),
+            Existing = [
+                beamtalk_stack_frame:raw_mfa({Module, FunName, First})
+                | [[<<", ">>, integer_to_binary(A)] || A <- Rest]
+            ],
             Hint = iolist_to_binary([
-                atom_to_binary(Module, utf8),
-                <<":">>,
-                atom_to_binary(FunName, utf8),
-                <<"/">>,
-                iolist_to_binary(AritiesStr),
+                Existing,
                 <<" exists but was called with ">>,
                 integer_to_binary(Arity),
                 <<" arguments">>

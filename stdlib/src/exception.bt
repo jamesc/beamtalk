@@ -187,10 +187,14 @@ Object subclass: Exception
 
   // === Stack trace ===
 
-  /// Return the stack trace as a list of StackFrame objects.
+  /// Return the stack trace as a list of StackFrame objects, limited to the
+  /// frames shown by default (ADR 0139): Beamtalk methods and blocks, a
+  /// package's own native Erlang, and the frame that raised. OTP plumbing,
+  /// generated callbacks and runtime internals are collapsed out of this list.
   ///
   /// Only available when the exception was caught via `on:do:`.
-  /// Returns an empty list if no stacktrace was captured.
+  /// Returns an empty list if no stacktrace was captured, or if every
+  /// captured frame is hidden by default.
   ///
   /// ## Examples
   /// ```beamtalk

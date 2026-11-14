@@ -936,7 +936,7 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules test-lint-stamp
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules test-lint-stamp test-refresh-edge
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -950,6 +950,16 @@ test-lint-stamp:
 [windows]
 test-lint-stamp:
     @echo "test-lint-stamp: skipped on Windows (covered by Linux CI)"
+
+# Test (BT-4813): scripts/refresh-edge.sh reinstalls only when the published
+# edge checksum differs from the install marker, and never fails the session.
+[unix]
+test-refresh-edge:
+    @bash scripts/ci/test-refresh-edge.sh
+
+[windows]
+test-refresh-edge:
+    @echo "test-refresh-edge: skipped on Windows (covered by Linux CI)"
 
 # Lint: reject non-ASCII inside Erlang binary literals that lack /utf8 (BT-3026).
 # Binary literals are bytes, so `<<"—">>` truncates U+2014 to 0x14 (a DC4 control
@@ -1991,8 +2001,8 @@ test-runtime: build-stdlib
 [working-directory: 'runtime']
 test-runtime: build-stdlib
     @echo "🧪 Running Erlang runtime unit tests..."
-    @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $env:BEAMTALK_NO_FOREGROUND_PRUNE = "1"; $output = rebar3 eunit '--cover=false' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
-    @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $env:BEAMTALK_NO_FOREGROUND_PRUNE = "1"; $output = rebar3 eunit '--cover=false' '--dir=apps/beamtalk_stdlib/test' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
+    @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $env:BEAMTALK_NO_FOREGROUND_PRUNE = "1"; $output = rebar3 eunit '--cover=false' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; $output | bash ../scripts/ci/eunit-failure-summary.sh "EUnit runtime+workspace+compiler"; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
+    @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $env:BEAMTALK_NO_FOREGROUND_PRUNE = "1"; $output = rebar3 eunit '--cover=false' '--dir=apps/beamtalk_stdlib/test' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; $output | bash ../scripts/ci/eunit-failure-summary.sh "EUnit stdlib"; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
     @echo "✅ Runtime tests complete"
 
 # Run performance benchmarks (separate from unit tests, ~30s)
