@@ -311,6 +311,53 @@ sealed Object subclass: VbBench
       ]
     last + c count
 
+  // === 16. Actor start-up (BT-4845) ===
+  // 16a: the buccaneer stream shape. Start a monitored actor without waiting
+  // (`spawnMonitoredAsync`); its `initialize` requests `continueWith: #run`
+  // and `run` stops it. The caller waits for the DOWN, so each iteration is a
+  // whole start -> run -> exit cycle.
+  class asyncStartRun: n :: Integer -> Integer =>
+    last := 0
+    n
+      timesRepeat: [
+        pair := VbRunner spawnMonitoredAsync
+        last := Erlang vs_ffi await_down: (pair at: 2)
+      ]
+    last
+
+  // 16b: as 16a with the init-args form.
+  class asyncStartRunWith: n :: Integer -> Integer =>
+    last := 0
+    n
+      timesRepeat: [
+        pair := VbRunner spawnMonitoredAsyncWith: #{}
+        last := Erlang vs_ffi await_down: (pair at: 2)
+      ]
+    last
+
+  // 16c: plain `Actor spawn` (waits for the start), then stop (waits for
+  // the exit).
+  class spawnStop: n :: Integer -> Integer =>
+    last := 0
+    n
+      timesRepeat: [
+        a := VbCounter spawn
+        a stop
+        last := 1
+      ]
+    last
+
+  // 16d: concurrent. 100 actors started back to back, then all DOWNs awaited;
+  // one operation is the whole batch of 100.
+  class asyncStartBatch: n :: Integer -> Integer =>
+    last := 0
+    n
+      timesRepeat: [
+        refs := (1 to: 100) collect: [:i | (VbRunner spawnMonitoredAsync) at: 2]
+        last := Erlang vs_ffi await_downs: refs
+      ]
+    last
+
   // === 8. Errors ===
   class onDoNoRaise: n :: Integer -> Integer =>
     last := 0
