@@ -66,7 +66,8 @@ run_case stale "$OLD"
 check "stale: exit 0" "$RC"
 check "stale: installer ran once" "$([ "$CALLS" -eq 1 ]; echo $?)"
 check "stale: reports refreshed" "$([[ "$OUT" == *"refreshed (was ${OLD:0:12})"* ]]; echo $?)"
-check "stale: next run is current" "$(bash -c 'BEAMTALK_PREFIX="$1" BEAMTALK_EDGE_BASE_URL="file://$2/release" BEAMTALK_INSTALLER="$2/install.sh" bash "$3" | grep -q "current, not"' _ "$P" "$T" "$SCRIPT"; echo $?)"
+# shellcheck disable=SC2016  # the inner script is single-quoted on purpose
+check "stale: next run is current" "$(env -u CLAUDE_CODE_REMOTE bash -c 'BEAMTALK_PREFIX="$1" BEAMTALK_EDGE_BASE_URL="file://$2/release" BEAMTALK_INSTALLER="$2/install.sh" bash "$3" | grep -q "current, not"' _ "$P" "$T" "$SCRIPT"; echo $?)"
 
 # no marker (every pre-existing environment): stale once
 run_case nomarker -
@@ -173,10 +174,8 @@ check "size caps: every small fetch has --max-filesize" \
 check "install timeout is 240s with a kill grace" "$(grep -q -- '^-k 5 240 sh ' "$T/timeout.log"; echo $?)"
 # Worst-case sum of the script's own time limits stays well under the hook's 360s.
 secs() { sed -n "s/^$1=\([0-9][0-9]*\)\$/\1/p" "$SCRIPT"; }
-# shellcheck disable=SC2016  # the pattern matches the literal ${PREFIX} in the script
-build_identity_max="$(sed -n 's/.*timeout \([0-9][0-9]*\) "\${PREFIX}\/bin\/beamtalk".*/\1/p' "$SCRIPT")"
 budget=$(( 2 * $(secs SMALL_FETCH_MAX_TIME) + $(secs INSTALLER_FETCH_MAX_TIME) + $(secs INSTALL_TIMEOUT) \
-  + $(secs INSTALL_KILL_GRACE) + build_identity_max ))
+  + $(secs INSTALL_KILL_GRACE) + $(secs BUILD_IDENTITY_TIMEOUT) ))
 echo "worst-case budget: ${budget}s"
 check "worst-case budget is under 300s (hook limit 360s)" "$([ "$budget" -gt 0 ] && [ "$budget" -lt 300 ]; echo $?)"
 
@@ -223,19 +222,93 @@ OUT="$(env -u CLAUDE_CODE_REMOTE BEAMTALK_EDGE_BASE_URL="file://$T/release" BEAM
   FAKE_SUM="$NEW" bash "$SCRIPT" --prefix="$P" 2>"$T/eq.err")" || RC=$?
 check "--prefix=value: installs into that prefix" "$([ "$RC" -eq 0 ] && [ -f "$P/installer-calls" ]; echo $?)"
 
-# BEAMTALK_INSTALLER is refused in cloud sessions: the verified URL path is used
+# Fake curl for cloud-session cases: maps the https release URLs onto the local
+# fake release (dropping the --proto pins, which would refuse file://) and logs
+# the original arguments. Nothing touches the network.
+mkdir -p "$T/mapbin"
+cat > "$T/mapbin/curl" <<'FAKE'
+#!/bin/sh
+echo "$*" >> "$CURL_LOG"
+args=""
+for a in "$@"; do
+  case "$a" in
+    https://github.com/jamesc/beamtalk/releases/download/edge/*) a="file://$FAKE_RELEASE/${a##*/}" ;;
+    https://*) exit 22 ;;
+  esac
+  args="$args '$a'"
+done
+eval "set -- $args"
+# drop "--proto X" / "--proto-redir X" pairs
+out=""
+while [ $# -gt 0 ]; do
+  case "$1" in --proto|--proto-redir) shift 2; continue ;; esac
+  out="$out '$1'"; shift
+done
+eval "set -- $out"
+exec "$REAL_CURL" "$@"
+FAKE
+chmod +x "$T/mapbin/curl"
+
+# Cloud sessions ignore BEAMTALK_INSTALLER, BEAMTALK_INSTALLER_URL and BEAMTALK_EDGE_BASE_URL
+# (BT-4841, BT-4847): the verified https release URLs are used, with a warning each.
+: > "$T/curl3.log"
 run_case cloud "$OLD" CLAUDE_CODE_REMOTE=true BEAMTALK_INSTALLER="$T/fail-install.sh" \
-  BEAMTALK_INSTALLER_URL="file://$T/release/install.sh"
+  BEAMTALK_INSTALLER_URL="file://$T/tampered/install.sh" BEAMTALK_EDGE_BASE_URL="file://$T/nonexistent" \
+  PATH="$T/mapbin:$PATH" REAL_CURL="$REAL_CURL" CURL_LOG="$T/curl3.log" FAKE_RELEASE="$T/release"
 check "CLAUDE_CODE_REMOTE=true: local installer ignored, verified installer ran, warns" \
-  "$([ "$RC" -eq 0 ] && [ "$CALLS" -eq 1 ] && grep -q 'ignored in cloud sessions' "$T/cloud.err"; echo $?)"
+  "$([ "$RC" -eq 0 ] && [ "$CALLS" -eq 1 ] && grep -q 'BEAMTALK_INSTALLER is ignored in cloud sessions' "$T/cloud.err"; echo $?)"
+check "CLAUDE_CODE_REMOTE=true: URL overrides ignored with a warning each" \
+  "$(grep -q 'BEAMTALK_INSTALLER_URL is ignored' "$T/cloud.err" && grep -q 'BEAMTALK_EDGE_BASE_URL is ignored' "$T/cloud.err"; echo $?)"
+check "CLAUDE_CODE_REMOTE=true: every fetch went to the https release, none to file://" \
+  "$([ "$(wc -l < "$T/curl3.log")" -eq 3 ] && ! grep -q 'file://' "$T/curl3.log" && ! grep -qv 'https://github.com/jamesc/beamtalk/releases/download/edge/' "$T/curl3.log"; echo $?)"
+check "CLAUDE_CODE_REMOTE=true: fetches keep --proto =https" "$(! grep -qv -- '--proto =https --proto-redir =https' "$T/curl3.log"; echo $?)"
+# ...and outside cloud sessions the overrides still work (urlok / scope cases above), also with CLAUDE_CODE_REMOTE=false
+run_case notcloud "$OLD" CLAUDE_CODE_REMOTE=false BEAMTALK_INSTALLER= BEAMTALK_INSTALLER_URL="file://$T/release/install.sh"
+check "CLAUDE_CODE_REMOTE=false: URL overrides honoured, no warning" \
+  "$([ "$RC" -eq 0 ] && [ "$CALLS" -eq 1 ] && ! grep -q 'ignored' "$T/notcloud.err"; echo $?)"
 
 # marker mismatch after a reinstall is visible on stdout
 run_case mismatch "$OLD" FAKE_SUM="$OLD"
 check "marker mismatch: status line says unverified" \
   "$([ "$RC" -eq 0 ] && [[ "$OUT" == *"refreshed, but unverified (marker mismatch"* && "$(wc -l <<<"$OUT")" -eq 1 ]]; echo $?)"
 
+# an empty --prefix value is rejected up front, like a missing one
+for form in "--prefix=" "--prefix"; do
+  RC=0
+  if [ "$form" = "--prefix" ]; then set -- --prefix ""; else set -- "--prefix="; fi
+  OUT="$(env -u CLAUDE_CODE_REMOTE BEAMTALK_EDGE_BASE_URL="file://$T/release" BEAMTALK_INSTALLER="$T/install.sh" \
+    FAKE_SUM="$NEW" bash "$SCRIPT" "$@" 2>"$T/emptyprefix.err")" || RC=$?
+  check "empty '$form' value: exit 0, rejected up front, nothing fetched" \
+    "$([ "$RC" -eq 0 ] && [ -z "$OUT" ] && grep -q 'requires a value' "$T/emptyprefix.err"; echo $?)"
+done
+
+# curl exit 63 (--max-filesize) on install.sh gets its own warning, not the network one
+mkdir -p "$T/bigins"
+head -c 1100000 /dev/zero | tr '\0' '#' > "$T/bigins/install.sh"
+sha256sum "$T/bigins/install.sh" | awk '{print $1 "  install.sh"}' > "$T/bigins/install.sh.sha256"
+run_case bigins "$OLD" BEAMTALK_INSTALLER= BEAMTALK_INSTALLER_URL="file://$T/bigins/install.sh"
+check "oversized install.sh: exit 0, not run, size-cap warning (not the network one)" \
+  "$([ "$RC" -eq 0 ] && [ "$CALLS" -eq 0 ] && grep -q 'size cap' "$T/bigins.err" && ! grep -q 'could not download' "$T/bigins.err"; echo $?)"
+run_case nodl "$OLD" BEAMTALK_INSTALLER= BEAMTALK_INSTALLER_URL="file://$T/nonexistent/install.sh"
+check "missing install.sh: still the network warning" "$(grep -q 'could not download install.sh' "$T/nodl.err"; echo $?)"
+
+# the lock file is opened without truncating it (symlink swap cannot clobber a target)
+P="$T/locknotrunc"; mkdir -p "$P"; printf 'keep' > "$P/.beamtalk-refresh.lock"
+OUT="$(env -u CLAUDE_CODE_REMOTE BEAMTALK_PREFIX="$P" BEAMTALK_EDGE_BASE_URL="file://$T/release" \
+  BEAMTALK_INSTALLER="$T/install.sh" FAKE_SUM="$NEW" bash "$SCRIPT" 2>/dev/null)" || true
+check "lock file content is not truncated" "$([ "$(cat "$P/.beamtalk-refresh.lock")" = keep ] && [ -f "$P/installer-calls" ]; echo $?)"
+
+# runtime time-budget check: drifted constants warn and exit 0 without installing
+sed 's/^INSTALL_TIMEOUT=240$/INSTALL_TIMEOUT=300/' "$SCRIPT" > "$T/drifted.sh"
+P="$T/drift"; mkdir -p "$P"; RC=0
+OUT="$(env -u CLAUDE_CODE_REMOTE BEAMTALK_PREFIX="$P" BEAMTALK_EDGE_BASE_URL="file://$T/release" \
+  BEAMTALK_INSTALLER="$T/install.sh" FAKE_SUM="$NEW" bash "$T/drifted.sh" 2>"$T/drift.err")" || RC=$?
+check "time budget drift: exit 0, warns, nothing installed" \
+  "$([ "$RC" -eq 0 ] && grep -q 'time budget' "$T/drift.err" && [ ! -f "$P/installer-calls" ]; echo $?)"
+
 # the script carries a version line for drift checks
 check "version line present" "$(grep -q '^REFRESH_EDGE_VERSION=[0-9]' "$SCRIPT"; echo $?)"
+check "version is 3" "$(grep -q '^REFRESH_EDGE_VERSION=3$' "$SCRIPT"; echo $?)"
 
 if [ "$failures" -gt 0 ]; then
   echo "❌ test-refresh-edge: $failures case(s) failed" >&2
