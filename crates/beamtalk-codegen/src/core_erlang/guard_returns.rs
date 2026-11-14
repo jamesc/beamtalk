@@ -358,26 +358,7 @@ impl Rewriter {
         &self,
         expr: &'e Expression,
     ) -> Option<(&'e Expression, &'e Expression)> {
-        let Expression::MessageSend {
-            receiver,
-            selector: MessageSelector::Keyword(parts),
-            arguments,
-            is_cast: false,
-            ..
-        } = expr
-        else {
-            return None;
-        };
-        let ([part], [Expression::Block(block)]) = (parts.as_slice(), arguments.as_slice()) else {
-            return None;
-        };
-        if !matches!(part.keyword.as_str(), "and:" | "or:") || !block.parameters.is_empty() {
-            return None;
-        }
-        let [stmt] = block.body.as_slice() else {
-            return None;
-        };
-        let (first, second) = (receiver.as_ref(), &stmt.expression);
+        let (first, second) = and_or_operands(expr)?;
         let ok = |e: &Expression| self.is_boolean(e) || self.is_declared_boolean(e);
         (ok(first)
             && ok(second)
@@ -395,27 +376,8 @@ impl Rewriter {
         &self,
         expr: &'e Expression,
     ) -> Option<(&'e Expression, &'e Expression)> {
-        let Expression::MessageSend {
-            receiver,
-            selector: MessageSelector::Keyword(parts),
-            arguments,
-            is_cast: false,
-            ..
-        } = expr
-        else {
-            return None;
-        };
-        let ([part], [Expression::Block(block)]) = (parts.as_slice(), arguments.as_slice()) else {
-            return None;
-        };
-        if !matches!(part.keyword.as_str(), "and:" | "or:") || !block.parameters.is_empty() {
-            return None;
-        }
-        let [stmt] = block.body.as_slice() else {
-            return None;
-        };
-        (self.is_boolean(receiver) && self.is_boolean(&stmt.expression))
-            .then_some((receiver.as_ref(), &stmt.expression))
+        let (first, second) = and_or_operands(expr)?;
+        (self.is_boolean(first) && self.is_boolean(second)).then_some((first, second))
     }
 
     /// The left operand of `expr` when it is a comparison (`< > <= >=`)
@@ -609,6 +571,33 @@ fn with_body(mut block: Block, body: Vec<ExpressionStatement>) -> Block {
 
 fn selector_of(parts: &[KeywordPart]) -> String {
     parts.iter().map(|p| p.keyword.as_str()).collect()
+}
+
+/// The receiver and block value of `expr` when it is `a and: [b]` /
+/// `a or: [b]` with a literal one-statement block: the one shape both
+/// [`Rewriter::short_circuit_operands`] and
+/// [`Rewriter::short_circuit_declared_operands`] decide a condition on.
+fn and_or_operands(expr: &Expression) -> Option<(&Expression, &Expression)> {
+    let Expression::MessageSend {
+        receiver,
+        selector: MessageSelector::Keyword(parts),
+        arguments,
+        is_cast: false,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    let ([part], [Expression::Block(block)]) = (parts.as_slice(), arguments.as_slice()) else {
+        return None;
+    };
+    if !matches!(part.keyword.as_str(), "and:" | "or:") || !block.parameters.is_empty() {
+        return None;
+    }
+    let [stmt] = block.body.as_slice() else {
+        return None;
+    };
+    Some((receiver.as_ref(), &stmt.expression))
 }
 
 /// Whether `parts`/`arguments` name an inlined `ifTrue:`/`ifNil:`-family

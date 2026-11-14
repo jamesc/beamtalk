@@ -57,27 +57,67 @@ pub(in crate::core_erlang) const NUMERIC_TYPES: &[&str] = &["Integer", "Float", 
 /// `Dynamic` argument or an FFI result can still put `nil` in an
 /// `:: Integer` parameter, and Erlang's `<` would then term-order it
 /// silently (`nil > 10` → `true`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+///
+/// Never empty: the fields are private and only [`Self::of_type_name`] and
+/// [`Self::of_declared_type`] build a value, so [`Self::type_tests`] always
+/// has a test to emit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) struct ComparisonKinds {
     /// `Integer`, `Float` or `Number`: tested with `is_number`.
-    pub(in crate::core_erlang) number: bool,
+    number: bool,
     /// `Character` (a codepoint integer at runtime): tested with `is_integer`.
-    pub(in crate::core_erlang) character: bool,
+    character: bool,
     /// `String` (a binary at runtime): tested with `is_binary`.
-    pub(in crate::core_erlang) string: bool,
+    string: bool,
 }
 
 impl ComparisonKinds {
-    /// The kind of a builtin comparable type name (`Integer`, `Float`, `Number`, `Character`, `String`).
+    /// The kind of a builtin comparable type name (a [`NUMERIC_TYPES`] name,
+    /// `Character` or `String`).
     pub(in crate::core_erlang) fn of_type_name(name: &str) -> Option<Self> {
-        let mut kinds = Self::default();
-        match name {
-            "Integer" | "Float" | "Number" => kinds.number = true,
-            "Character" => kinds.character = true,
-            "String" => kinds.string = true,
-            _ => return None,
+        let none = Self {
+            number: false,
+            character: false,
+            string: false,
+        };
+        if NUMERIC_TYPES.contains(&name) {
+            Some(Self {
+                number: true,
+                ..none
+            })
+        } else if name == "Character" {
+            Some(Self {
+                character: true,
+                ..none
+            })
+        } else if name == "String" {
+            Some(Self {
+                string: true,
+                ..none
+            })
+        } else {
+            None
         }
-        Some(kinds)
+    }
+
+    /// The `erlang` type-test BIFs that together accept exactly these kinds:
+    /// the first, and a second to `or` with it when a `String` is also held.
+    /// `is_number` covers a `Character`'s `is_integer`, so a numeric
+    /// declaration needs no separate codepoint test.
+    pub(in crate::core_erlang) fn type_tests(self) -> (&'static str, Option<&'static str>) {
+        let numeric = if self.number {
+            Some("is_number")
+        } else if self.character {
+            Some("is_integer")
+        } else {
+            None
+        };
+        let string = self.string.then_some("is_binary");
+        match (numeric, string) {
+            (Some(first), second) => (first, second),
+            (None, Some(only)) => (only, None),
+            (None, None) => unreachable!("a ComparisonKinds always holds a kind"),
+        }
     }
 
     fn union(self, other: Self) -> Self {
@@ -97,11 +137,12 @@ impl ComparisonKinds {
                 if members.iter().any(is_nil_type) {
                     return None;
                 }
-                let mut kinds = Self::default();
+                let mut kinds: Option<Self> = None;
                 for member in members {
-                    kinds = kinds.union(Self::of_declared_type(member)?);
+                    let member = Self::of_declared_type(member)?;
+                    kinds = Some(kinds.map_or(member, |k| k.union(member)));
                 }
-                (!members.is_empty()).then_some(kinds)
+                kinds
             }
             _ => None,
         }

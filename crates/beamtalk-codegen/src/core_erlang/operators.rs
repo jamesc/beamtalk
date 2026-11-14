@@ -9,6 +9,7 @@ use super::field_types::ComparisonKinds;
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf::{atom, var};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::source_analysis::Span;
@@ -50,45 +51,19 @@ impl OperatorGuard {
     ///   a `Symbol` reaches `Symbol>><`, and objects reach their overload
     ///   (`Money>><`).
     fn predicate_doc(self, subject: &str) -> Document<'static> {
-        let type_test = |bif: &'static str| {
-            docvec![
-                "call 'erlang':'",
-                Document::Str(bif),
-                "'(",
-                var(subject.to_string()),
-                ")",
-            ]
+        let test = |bif: &'static str| form::call("erlang", bif, [var(subject.to_string())]);
+        let either = |first: Document<'static>, second: Document<'static>| {
+            form::call("erlang", "or", [first, second])
         };
         match self {
-            Self::Arithmetic => type_test("is_number"),
-            Self::Comparison => docvec![
-                "call 'erlang':'or'(",
-                type_test("is_number"),
-                ", ",
-                type_test("is_binary"),
-                ")",
-            ],
+            Self::Arithmetic => test("is_number"),
+            Self::Comparison => either(test("is_number"), test("is_binary")),
             Self::DeclaredComparison(kinds) => {
-                // `is_number` covers `is_integer`, so a numeric declaration
-                // needs no separate codepoint test.
-                let mut tests = Vec::new();
-                if kinds.number {
-                    tests.push(type_test("is_number"));
-                } else if kinds.character {
-                    tests.push(type_test("is_integer"));
+                let (first, second) = kinds.type_tests();
+                match second {
+                    Some(second) => either(test(first), test(second)),
+                    None => test(first),
                 }
-                if kinds.string {
-                    tests.push(type_test("is_binary"));
-                }
-                debug_assert!(
-                    !tests.is_empty(),
-                    "a DeclaredComparison guard is built from a non-empty ComparisonKinds"
-                );
-                let mut tests = tests.into_iter();
-                let first = tests.next().unwrap_or_else(|| type_test("is_number"));
-                tests.fold(first, |acc, next| {
-                    docvec!["call 'erlang':'or'(", acc, ", ", next, ")"]
-                })
             }
         }
     }
