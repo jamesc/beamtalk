@@ -268,7 +268,8 @@ impl CoreErlangGenerator {
             // AGENTS.md: Core Erlang fragments MUST use Document/docvec!, never
             // format!(). erlang_op is one of the static literals in the match
             // arms above, so Document::Str is safe.
-            docvec![
+            // BT-4836: annotate the BIF node (see `guarded_op_doc`).
+            self.annotate_current_send_call(docvec![
                 "call 'erlang':'",
                 Document::Str(erlang_op),
                 "'(",
@@ -276,7 +277,7 @@ impl CoreErlangGenerator {
                 ", ",
                 right_code,
                 ")",
-            ]
+            ])
         };
 
         Ok(self.close_prelude(&preamble, call_doc, "BinOp"))
@@ -484,7 +485,10 @@ impl CoreErlangGenerator {
         let left_var = self.fresh_temp_var("BinLeft");
         let right_var = self.fresh_temp_var("BinRight");
 
-        let bare_bif = docvec![
+        // BT-4836: the BIF node itself carries the send's line — the OTP
+        // compiler takes a BIF failure's frame location from the `call`
+        // node, never from an annotation on an enclosing `let`/`case`.
+        let bare_bif = self.annotate_current_send_call(docvec![
             "call 'erlang':'",
             Document::Str(erlang_op),
             "'(",
@@ -492,7 +496,7 @@ impl CoreErlangGenerator {
             ", ",
             var(right_var.clone()),
             ")",
-        ];
+        ]);
         // ADR 0116: see this function's doc comment — the arithmetic
         // guard's bare-BIF branch becomes the coercion `try`/`catch` when the
         // right operand's type is genuinely unknown; every other case (the
@@ -686,14 +690,20 @@ impl CoreErlangGenerator {
         // see this function's doc comment and `case_clause_fallback`'s own.
         let inner_no_match = self.case_clause_fallback("BinCoerceNoMatch");
 
-        docvec![
-            "try call 'erlang':'",
+        // BT-4836: the guarded BIF inside the `try` carries the send's line.
+        let guarded_bif = self.annotate_current_send_call(docvec![
+            "call 'erlang':'",
             Document::Str(erlang_op),
             "'(",
             left_doc.clone(),
             ", ",
             right_doc.clone(),
-            ") of <",
+            ")",
+        ]);
+        docvec![
+            "try ",
+            guarded_bif,
+            " of <",
             var(try_result_var.clone()),
             "> -> ",
             var(try_result_var),
@@ -787,13 +797,20 @@ impl CoreErlangGenerator {
         let (preamble, mut docs) = self.thread_subexprs(&exprs, "PowOp")?;
         let right_code = docs.pop().expect("right operand");
         let left_code = docs.pop().expect("left operand");
-        let call_doc = docvec![
-            "call 'erlang':'round'(call 'math':'pow'(call 'erlang':'float'(",
-            left_code,
-            "), call 'erlang':'float'(",
-            right_code,
-            ")))",
-        ];
+        // BT-4836: annotate the call nodes that can raise (`float/1` on a
+        // non-number, `math:pow` overflow).
+        let float_left =
+            self.annotate_current_send_call(docvec!["call 'erlang':'float'(", left_code, ")"]);
+        let float_right =
+            self.annotate_current_send_call(docvec!["call 'erlang':'float'(", right_code, ")"]);
+        let pow = self.annotate_current_send_call(docvec![
+            "call 'math':'pow'(",
+            float_left,
+            ", ",
+            float_right,
+            ")"
+        ]);
+        let call_doc = self.annotate_current_send_call(docvec!["call 'erlang':'round'(", pow, ")"]);
         Ok(self.close_prelude(&preamble, call_doc, "PowRes"))
     }
 

@@ -748,3 +748,112 @@ code_change_callback_test_() ->
             end)
         ]
     end}.
+
+%%====================================================================
+%% BT-4845: register/2 writes the rows in the caller, casts only the monitor
+%%====================================================================
+
+%% An actor that has already exited when it is registered (the buccaneer
+%% stream shape: `continueWith: #run` then `stopWith:`) must not leave a row
+%% behind: the monitor cast arrives after the insert, gets an immediate
+%% `noproc` DOWN, and the server removes the rows.
+register_of_already_dead_pid_leaves_no_rows_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                {Pid, Ref} = spawn_monitor(fun() -> ok end),
+                receive
+                    {'DOWN', Ref, process, Pid, _} -> ok
+                end,
+                ok = beamtalk_object_instances:register('Counter', Pid),
+                ok = beamtalk_test_wait:until(fun() ->
+                    ets:lookup(beamtalk_instance_registry, 'Counter') =:= [] andalso
+                        beamtalk_object_instances:class_of(Pid) =:= undefined
+                end)
+            end)
+        ]
+    end}.
+
+%% Both lookups see a live instance the moment register/2 returns, with no
+%% wait for the server to process anything.
+register_is_visible_on_return_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Pids = [
+                    spawn(fun() ->
+                        receive
+                            stop -> ok
+                        end
+                    end)
+                 || _ <- lists:seq(1, 50)
+                ],
+                lists:foreach(
+                    fun(P) ->
+                        ok = beamtalk_object_instances:register('Counter', P),
+                        ?assertEqual('Counter', beamtalk_object_instances:class_of(P)),
+                        ?assert(lists:member(P, beamtalk_object_instances:all('Counter')))
+                    end,
+                    Pids
+                ),
+                ?assertEqual(50, beamtalk_object_instances:count('Counter')),
+                [P ! stop || P <- Pids],
+                ok = beamtalk_test_wait:until(fun() ->
+                    beamtalk_object_instances:all('Counter') =:= []
+                end)
+            end)
+        ]
+    end}.
+
+%% unregister/2 right after register/2 removes the rows even if the server has
+%% not yet handled the monitor cast, and the late cast does not bring them back.
+unregister_right_after_register_wins_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                P = spawn(fun() ->
+                    receive
+                        stop -> ok
+                    end
+                end),
+                ok = beamtalk_object_instances:register('Counter', P),
+                ok = beamtalk_object_instances:unregister('Counter', P),
+                %% Flush the server's mailbox: the cast was queued first.
+                _ = sys:get_state(beamtalk_object_instances),
+                ?assertEqual([], ets:lookup(beamtalk_instance_registry, 'Counter')),
+                ?assertEqual(undefined, beamtalk_object_instances:class_of(P)),
+                P ! stop
+            end)
+        ]
+    end}.
+
+%% BT-4845 review: sync_class_index/0 runs in a restarted registry while
+%% spawners keep writing the public tables. A pid registered after the bag
+%% snapshot was taken (so absent from it) must keep its index row; one with no
+%% bag row at all is still dropped.
+sync_stale_pass_keeps_rows_registered_after_the_snapshot_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                Live = spawn(fun() ->
+                    receive
+                        stop -> ok
+                    end
+                end),
+                Orphan = spawn(fun() ->
+                    receive
+                        stop -> ok
+                    end
+                end),
+                ok = beamtalk_object_instances:register('Counter', Live),
+                %% An index row with no bag row: the real stale case.
+                true = ets:insert(beamtalk_instance_class, {Orphan, 'Counter'}),
+                %% Empty snapshot: both pids look stale to it.
+                ok = beamtalk_object_instances:drop_stale_index_rows(#{}),
+                ?assertEqual('Counter', beamtalk_object_instances:class_of(Live)),
+                ?assertEqual(undefined, beamtalk_object_instances:class_of(Orphan)),
+                Live ! stop,
+                Orphan ! stop
+            end)
+        ]
+    end}.

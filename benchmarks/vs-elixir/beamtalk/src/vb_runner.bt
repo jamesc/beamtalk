@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4845: the actor start-up fixture for rows 16a-16c. It does what a
+// buccaneer HTTP/2 stream does: `initialize` asks for a `continueWith:` step,
+// the step stops the actor. It is never sent a message.
+Actor subclass: VbRunner
+  initialize -> Nil =>
+    self continueWith: #run
+    nil
+
+  run -> Nil =>
+    self stopWith: #normal
+    nil

@@ -43,6 +43,10 @@ See also: docs/beamtalk-ddd-model.md "Instance Tracking"
     class_of/1
 ]).
 
+-ifdef(TEST).
+-export([drop_stale_index_rows/1]).
+-endif.
+
 %% gen_server callbacks
 -export([
     init/1,
@@ -78,7 +82,27 @@ The instance will be automatically unregistered when the process terminates.
 """.
 -spec register(class_name(), pid()) -> ok.
 register(Class, Pid) when is_atom(Class), is_pid(Pid) ->
-    gen_server:call(?MODULE, {register, Class, Pid}).
+    %% BT-4845: no round trip to the registry process. Every actor start used
+    %% to `gen_server:call` this singleton from the spawner, so concurrent
+    %% starts queued on one process (and each spawner slept and woke around
+    %% the call). The tables are public: write the rows here, so
+    %% `all/1` and `class_of/1` see the actor as soon as `register/2`
+    %% returns, exactly as with the call, and cast only the monitor, which
+    %% the server owns. The rows go in before the cast, so the server's
+    %% cleanup (a `'DOWN'`, even an immediate `noproc` one for an actor that
+    %% already exited) always follows the insert and removes it.
+    try
+        %% The bag is the source of truth: write it first, so that a
+        %% concurrent `sync_class_index/0` (a restarted registry repairing the
+        %% index under the heir) that sees this index row also finds the bag row.
+        true = ets:insert(?INSTANCE_REGISTRY, {Class, Pid}),
+        true = ets:insert(?INSTANCE_CLASS, {Pid, Class}),
+        gen_server:cast(?MODULE, {monitor, Class, Pid})
+    catch
+        %% Tables missing (registry not running, or lost with its heir):
+        %% take the old path, which fails the way it always did.
+        error:badarg -> gen_server:call(?MODULE, {register, Class, Pid})
+    end.
 
 -doc "Manually unregister an instance of a class.".
 -spec unregister(class_name(), pid()) -> ok.
@@ -182,20 +206,48 @@ handle_call({unregister, Class, Pid}, _From, State) ->
             ets:delete_object(?INSTANCE_CLASS, {Pid, Class}),
             {reply, ok, State#state{monitors = NewMonitors}};
         error ->
-            %% Not registered, but that's ok
+            %% Not monitored (yet): `register/2` writes the rows before its
+            %% monitor cast arrives (BT-4845), so drop them here too.
+            ets:delete_object(?INSTANCE_REGISTRY, {Class, Pid}),
+            ets:delete_object(?INSTANCE_CLASS, {Pid, Class}),
             {reply, ok, State}
     end;
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
+handle_cast({monitor, Class, Pid}, State) ->
+    %% BT-4845: the monitor half of `register/2`. Skipped when the index row is
+    %% already gone (an `unregister/2` that ran first) or already monitored.
+    Key = {Class, Pid},
+    case maps:is_key(Key, State#state.monitors) of
+        true ->
+            {noreply, State};
+        false ->
+            %% O(1) through the pid index (the bag would be walked per class).
+            case ets:lookup(?INSTANCE_CLASS, Pid) of
+                [{Pid, Class}] ->
+                    Ref = erlang:monitor(process, Pid),
+                    {noreply, State#state{monitors = maps:put(Key, Ref, State#state.monitors)}};
+                _ ->
+                    {noreply, State}
+            end
+    end;
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     %% Find which classes this Pid was registered under
     %% This is more efficient than scanning all monitors when there are many instances
-    Matches = ets:match(?INSTANCE_REGISTRY, {'$1', Pid}),
-    Classes = [Class || [Class] <- Matches],
+    %% BT-4845: the pid-keyed index answers in O(1) (a pid is registered under
+    %% one class, see class_of/1). The bag can only be searched by value, a scan
+    %% of the whole registry per exit, which kept up only because the
+    %% synchronous `register/2` once held spawners to the server's pace; the
+    %% scan stays as the fallback for a pid the index does not know.
+    Classes =
+        case ets:lookup(?INSTANCE_CLASS, Pid) of
+            [{_, Class}] -> [Class];
+            [] -> [C || [C] <- ets:match(?INSTANCE_REGISTRY, {'$1', Pid})]
+        end,
 
     %% Remove from ETS
     ets:delete(?INSTANCE_CLASS, Pid),
@@ -289,6 +341,19 @@ sync_class_index() ->
     Pairs = ets:tab2list(?INSTANCE_REGISTRY),
     true = ets:insert(?INSTANCE_CLASS, [{Pid, Class} || {Class, Pid} <- Pairs]),
     InBag = maps:from_list([{Pid, true} || {_, Pid} <- Pairs]),
+    drop_stale_index_rows(InBag).
+
+-doc """
+Drop index rows whose pid is not in `InBag`, a snapshot of the bag's pids.
+
+BT-4845: spawners write both tables directly, so the snapshot can be stale by
+the time this runs: a pid registered after it was taken has an index row the
+snapshot does not know. A candidate is therefore dropped only if the live bag
+has no row for it either. `register/2` writes the bag row before the index
+row, so an index row seen here always has its bag row already.
+""".
+-spec drop_stale_index_rows(#{pid() => true}) -> ok.
+drop_stale_index_rows(InBag) ->
     Stale = ets:foldl(
         fun({Pid, _Class}, Acc) ->
             case maps:is_key(Pid, InBag) of
@@ -299,4 +364,12 @@ sync_class_index() ->
         [],
         ?INSTANCE_CLASS
     ),
-    lists:foreach(fun(Pid) -> ets:delete(?INSTANCE_CLASS, Pid) end, Stale).
+    lists:foreach(
+        fun(Pid) ->
+            case ets:match(?INSTANCE_REGISTRY, {'_', Pid}) of
+                [] -> ets:delete(?INSTANCE_CLASS, Pid);
+                _ -> ok
+            end
+        end,
+        Stale
+    ).
