@@ -48,6 +48,7 @@ Part of ADR 0014: BUnit — Beamtalk Test Framework (Phase 2).
 -export([
     format_stacktrace/1,
     stack_frames/1,
+    failure_stacktrace/3,
     source_snippet/2,
     test_failure/4,
     test_failure_untraced/4
@@ -883,7 +884,12 @@ failure_stacktrace(Module, Reason, CatchStacktrace) ->
         CatchStacktrace ->
             CatchStacktrace;
         Carried ->
-            Carried ++ [Frame || {M, _, _, _} = Frame <- CatchStacktrace, M =:= Module]
+            %% A stack taken in the test process itself (an FFI error wrapped by the
+            %% proxy, an `ensure:` reraise) already holds the test method's frames.
+            case lists:keymember(Module, 1, Carried) of
+                true -> Carried;
+                false -> Carried ++ [Frame || {M, _, _, _} = Frame <- CatchStacktrace, M =:= Module]
+            end
     end.
 
 -doc """
