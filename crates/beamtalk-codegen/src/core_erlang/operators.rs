@@ -814,6 +814,34 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&preamble, call_doc, "PowRes"))
     }
 
+    /// BT-4851: `string_from_binary(iolist_to_binary([string_to_binary(L),
+    /// string_to_binary(R)]))`, with the send's line on each call that can
+    /// raise. Shared by the literal-string and runtime-dispatch arms.
+    fn string_concat_doc(
+        &self,
+        left: Document<'static>,
+        right: Document<'static>,
+    ) -> Document<'static> {
+        let l = self.annotate_current_send_call(docvec![
+            "call 'beamtalk_primitive':'string_to_binary'(",
+            left,
+            ")"
+        ]);
+        let r = self.annotate_current_send_call(docvec![
+            "call 'beamtalk_primitive':'string_to_binary'(",
+            right,
+            ")"
+        ]);
+        let io = self.annotate_current_send_call(docvec![
+            "call 'erlang':'iolist_to_binary'([",
+            l,
+            ", ",
+            r,
+            "])"
+        ]);
+        docvec!["call 'beamtalk_primitive':'string_from_binary'(", io, ")"]
+    }
+
     /// Generates `++` concatenation with runtime type dispatch.
     ///
     /// Lists use `erlang:'++'`, strings use `iolist_to_binary`.
@@ -844,23 +872,21 @@ impl CoreErlangGenerator {
         // BT-4173: `String` is the tagged term `{beamtalk_string, Bin}`.
         // Unwrap both operands to bytes, concatenate, and re-tag the result.
         // (Raw binaries are valid iodata, so no `binary_to_list` is needed.)
+        // BT-4851: the calls that can raise (`string_to_binary` on a non-String
+        // operand, `iolist_to_binary`) carry the send's line; the OTP compiler
+        // takes a frame's location from the failing `call` node (BT-4836).
         let call_doc = if is_list {
             // List concatenation: erlang:'++'
             docvec!["call 'erlang':'++'(", left_code, ", ", right_code, ")",]
         } else if is_string {
             // String concatenation: iolist_to_binary
-            docvec![
-                "call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'iolist_to_binary'([call 'beamtalk_primitive':'string_to_binary'(",
-                left_code,
-                "), call 'beamtalk_primitive':'string_to_binary'(",
-                right_code,
-                ")]))",
-            ]
+            self.string_concat_doc(left_code, right_code)
         } else {
             // Runtime dispatch: check is_list at runtime.
             // AGENTS.md: built entirely with Document/docvec!, no format!().
             let left_var = self.fresh_temp_var("ConcatLeft");
             let right_var = self.fresh_temp_var("ConcatRight");
+            let string_arm = self.string_concat_doc(var(left_var.clone()), var(right_var.clone()));
             docvec![
                 "let ",
                 var(left_var.clone()),
@@ -873,15 +899,12 @@ impl CoreErlangGenerator {
                 " in case call 'erlang':'is_list'(",
                 var(left_var.clone()),
                 ") of <'true'> when 'true' -> call 'erlang':'++'(",
-                var(left_var.clone()),
-                ", ",
-                var(right_var.clone()),
-                ") <'false'> when 'true' -> \
-                   call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'iolist_to_binary'([call 'beamtalk_primitive':'string_to_binary'(",
                 var(left_var),
-                "), call 'beamtalk_primitive':'string_to_binary'(",
+                ", ",
                 var(right_var),
-                ")])) end",
+                ") <'false'> when 'true' -> ",
+                string_arm,
+                " end",
             ]
         };
 
