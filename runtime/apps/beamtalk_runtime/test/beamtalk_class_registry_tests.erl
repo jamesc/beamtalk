@@ -2256,7 +2256,7 @@ bt4646_assert_removed(Name, Pid) ->
     ?assertNot(lists:member(Name, beamtalk_class_registry:all_classes())),
     ?assertNot(sets:is_element(Name, beamtalk_class_registry:loaded_class_names())),
     ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(Pid)),
-    ?assertEqual([], ets:match_object(beamtalk_class_method_funs, {{Name, '_'}, '_'})).
+    ?assertEqual([], ets:match_object(beamtalk_class_method_funs, {{Name, '_'}, '_', '_'})).
 
 bt4646_await_down(Pid, MRef) ->
     receive
@@ -2394,17 +2394,18 @@ bt4794_rebuild_during_removal_stays_registered_test() ->
 bt4794_rebuild_before_owner_read_stays_registered_test() ->
     bt4794_rebuild_at(beamtalk_class_metadata, lookup_owner, before_call).
 
-%% The rebuild lands after the claim was won, mid-teardown of the dependents.
+%% The rebuild lands after the claim was won, before any dependent is dropped
+%% (the flag step is the first one).
 bt4794_rebuild_after_claim_stays_registered_test() ->
-    bt4794_rebuild_at(beamtalk_class_shadow_flags, clear, after_call).
+    bt4794_rebuild_at(beamtalk_class_shadow_flags, clear_if_owner, before_call).
 
 %% The rebuild uses another superclass: the claimed row's old subclass edge
 %% must not outlive the superseded teardown.
 bt4794_rebuild_after_claim_other_superclass_drops_old_edge_test() ->
-    bt4794_rebuild_at(beamtalk_class_shadow_flags, clear, after_call, 'Value'),
+    bt4794_rebuild_at(beamtalk_class_shadow_flags, clear_if_owner, before_call, 'Value'),
     ?assertNot(
         lists:member(
-            'BT4794Rebuilt_clear_after_call_Value',
+            'BT4794Rebuilt_clear_if_owner_before_call_Value',
             beamtalk_class_metadata:match_subclasses('Object')
         )
     ).
@@ -2437,7 +2438,8 @@ bt4794_rebuild_at(Mod, Fun, When, Super) ->
         Hook = fun(Args) ->
             Fire =
                 self() =:= Test andalso hd(Args) =/= undefined andalso
-                    (Mod =/= beamtalk_class_shadow_flags orelse Args =:= [runtime_fun, Name]) andalso
+                    (Mod =/= beamtalk_class_shadow_flags orelse
+                        (hd(Args) =:= runtime_fun andalso hd(tl(Args)) =:= Name)) andalso
                     (Mod =/= beamtalk_class_metadata orelse Args =:= [Name]) andalso
                     (get({bt4794_fired, Name}) =:= undefined),
             case Fire andalso When =:= before_call of
@@ -2461,7 +2463,7 @@ bt4794_rebuild_at(Mod, Fun, When, Super) ->
             beamtalk_class_metadata ->
                 ok = meck:expect(Mod, Fun, fun(N) -> Hook([N]) end);
             beamtalk_class_shadow_flags ->
-                ok = meck:expect(Mod, Fun, fun(T, N) -> Hook([T, N]) end)
+                ok = meck:expect(Mod, Fun, fun(T, N, O) -> Hook([T, N, O]) end)
         end,
         try
             Result = beamtalk_class_registry:restart_class(Name),
@@ -2482,6 +2484,207 @@ bt4794_rebuild_at(Mod, Fun, When, Super) ->
             meck:unload(Mod)
         end
     end).
+
+%%% BT-4808: the dependents of the claimed row carry the owner pid, so a class
+%%% rebuilt under the same name inside a cleanup step keeps its funs, method
+%%% records, flags and subclass edge.
+
+%% The rebuild is injected at the first dependent step of the teardown (the
+%% flag step runs first), i.e. after the row claim and before every delete of
+%% a fun, method record, flag and edge: each of those deletes then runs against
+%% the rebuilt class's entries and must leave them.
+bt4808_rebuild_inside_cleanup_keeps_dependents_test() ->
+    bt4808_rebuild_inside_cleanup('BT4808Inside', 'Object', true).
+
+%% Same, rebuilt under another superclass: the old edge goes, the new stays.
+bt4808_rebuild_inside_cleanup_other_superclass_test() ->
+    bt4808_rebuild_inside_cleanup('BT4808InsideValue', 'Value', true).
+
+%% Rebuilt without class variables over a class that declared some: the dead
+%% owner's `class_vars` flag goes, nothing of the rebuild's is touched.
+bt4808_rebuild_inside_cleanup_without_class_vars_test() ->
+    bt4808_rebuild_inside_cleanup('BT4808InsideNoCv', 'Object', false).
+
+bt4808_rebuild_inside_cleanup(Name, Super, RebuildHasClassVars) ->
+    bt4646_with_announce_spy(Name, fun() ->
+        OldPid = bt4808_builder_class(Name, 'Object', true),
+        ?assert(beamtalk_class_shadow_flags:is_set(class_vars, Name)),
+        ok = beamtalk_class_monitor:unwatch(Name),
+        MRef = monitor(process, OldPid),
+        exit(OldPid, kill),
+        bt4646_await_down(OldPid, MRef),
+        Test = self(),
+        Mod = beamtalk_class_shadow_flags,
+        ok = meck:new(Mod, [passthrough, no_link]),
+        ok = meck:expect(Mod, clear_if_owner, fun(Kind, N, Owner) ->
+            case self() =:= Test andalso Kind =:= runtime_fun andalso N =:= Name of
+                true ->
+                    case get({bt4808_fired, Name}) of
+                        undefined ->
+                            put({bt4808_fired, Name}, true),
+                            NewPid = bt4808_builder_class(Name, Super, RebuildHasClassVars),
+                            ok = beamtalk_class_monitor:unwatch(Name),
+                            Test ! {bt4808_rebuilt, NewPid};
+                        _ ->
+                            ok
+                    end;
+                false ->
+                    ok
+            end,
+            meck:passthrough([Kind, N, Owner])
+        end),
+        try
+            Result = beamtalk_class_registry:restart_class(Name),
+            NewPid =
+                receive
+                    {bt4808_rebuilt, P} -> P
+                after 0 -> error(rebuild_not_injected)
+                end,
+            ?assertEqual({ok, NewPid}, Result),
+            bt4808_assert_dependents_intact(Name, Super, NewPid, RebuildHasClassVars),
+            ok = gen_server:stop(NewPid)
+        after
+            meck:unload(Mod)
+        end
+    end).
+
+bt4808_assert_dependents_intact(Name, Super, NewPid, HasClassVars) ->
+    ?assertEqual({ok, NewPid}, beamtalk_class_metadata:lookup_owner(Name)),
+    ?assert(beamtalk_class_metadata:has_runtime_class_methods(Name)),
+    ?assertMatch({ok, _}, beamtalk_class_metadata:lookup_class_method_fun(Name, make)),
+    ?assertMatch({ok, _}, beamtalk_class_metadata:lookup_method_record(Name, instance, ping)),
+    ?assertMatch({ok, _}, beamtalk_class_metadata:lookup_method_record(Name, class, make)),
+    ?assert(beamtalk_class_shadow_flags:is_set(runtime_fun, Name)),
+    ?assertEqual(HasClassVars, beamtalk_class_shadow_flags:is_set(class_vars, Name)),
+    ?assertEqual([Name], [N || N <- beamtalk_class_metadata:match_subclasses(Super), N =:= Name]),
+    %% The superclass the rebuild left has no edge from the dead class.
+    case Super of
+        'Object' ->
+            ok;
+        _ ->
+            ?assertNot(lists:member(Name, beamtalk_class_metadata:match_subclasses('Object')))
+    end.
+
+%% A class that dies and is rebuilt before the removal runs (the claim is lost)
+%% has the dead owner's leftovers restamped or replaced, never deleted.
+bt4808_claim_lost_leaves_rebuilt_dependents_test() ->
+    Name = 'BT4808ClaimLost',
+    OldPid = bt4808_builder_class(Name, 'Object', true),
+    ok = beamtalk_class_monitor:unwatch(Name),
+    MRef = monitor(process, OldPid),
+    exit(OldPid, kill),
+    bt4646_await_down(OldPid, MRef),
+    NewPid = bt4808_builder_class(Name, 'Object', true),
+    ok = beamtalk_class_monitor:unwatch(Name),
+    ?assertNot(beamtalk_class_metadata:delete_if_owner(Name, OldPid)),
+    bt4808_assert_dependents_intact(Name, 'Object', NewPid, true),
+    %% One edge, not one per owner.
+    ?assertEqual(
+        1, length([N || N <- beamtalk_class_metadata:match_subclasses('Object'), N =:= Name])
+    ),
+    ok = gen_server:stop(NewPid).
+
+%% The flag step compares and erases under the tag lock `set/3` takes. Hold it,
+%% queue the dead owner's clear behind it, and let the rebuild's raise land
+%% (as `set/3` does, under the lock) before the clear gets its turn: the clear
+%% must re-read under the lock and keep the rebuilt class's flag.
+bt4808_flag_clear_rechecks_under_the_tag_lock_test() ->
+    Name = 'BT4808FlagRace',
+    Tag = beamtalk_class_registry:class_object_tag(Name),
+    Dead = spawn(fun() -> ok end),
+    beamtalk_test_wait:dead(Dead),
+    Live = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    Key = {beamtalk_class_shadow, runtime_fun, Name},
+    persistent_term:put(Key, Dead),
+    Test = self(),
+    try
+        beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() ->
+            Clearer = spawn_link(fun() ->
+                ok = beamtalk_class_shadow_flags:clear_if_owner(runtime_fun, Name, Dead),
+                Test ! bt4808_cleared
+            end),
+            %% The clearer saw its owner in the flag and now waits for the lock.
+            beamtalk_test_wait:until(fun() ->
+                lists:member(
+                    Clearer,
+                    beamtalk_fifo_lock:queue({beamtalk_class_shadow_flags, direct_flag, Tag})
+                )
+            end),
+            persistent_term:put(Key, Live)
+        end),
+        receive
+            bt4808_cleared -> ok
+        after 5000 -> error(clear_not_finished)
+        end,
+        ?assertEqual(Live, persistent_term:get(Key, false)),
+        %% And the dead owner's own flag is erased.
+        persistent_term:put(Key, Dead),
+        ok = beamtalk_class_shadow_flags:clear_if_owner(runtime_fun, Name, Dead),
+        ?assertNot(beamtalk_class_shadow_flags:is_set(runtime_fun, Name))
+    after
+        persistent_term:erase(Key),
+        Live ! stop
+    end.
+
+%% A rebuild that wins the claim race drops the dead owner's funs and method
+%% records it does not redefine (a later removal only matches its own).
+bt4808_rebuild_drops_dead_owners_leftover_entries_test() ->
+    Name = 'BT4808Orphans',
+    Dead = spawn(fun() ->
+        ok = beamtalk_class_metadata:insert(Name, undefined, [], 'Object', false),
+        beamtalk_class_metadata:put_class_method_fun(Name, gone, #{
+            block => fun() -> ok end, arity => 0
+        }),
+        beamtalk_class_metadata:put_method_records(Name, class, #{
+            gone => #{info => #{}, source => <<>>, signature => none, doc => none}
+        })
+    end),
+    beamtalk_test_wait:dead(Dead),
+    ?assertMatch({ok, _}, beamtalk_class_metadata:lookup_method_record(Name, class, gone)),
+    ok = beamtalk_class_metadata:insert(Name, undefined, [], 'Object', false),
+    ?assertEqual([], ets:match_object(beamtalk_class_method_funs, {{Name, '_'}, '_', '_'})),
+    ?assertEqual(not_found, beamtalk_class_metadata:lookup_method_record(Name, class, gone)),
+    true = beamtalk_class_metadata:delete_if_owner(Name, self()).
+
+%% A class tearing itself down whose row is already gone still drops what it
+%% stamped (funs, records, flags, edge); a row naming another owner is left.
+bt4808_delete_if_owner_without_row_drops_own_dependents_test() ->
+    Name = 'BT4808NoRow',
+    Pid = bt4808_builder_class(Name, 'Object', true),
+    ok = beamtalk_class_monitor:unwatch(Name),
+    true = ets:delete(beamtalk_class_metadata, Name),
+    ?assertNot(beamtalk_class_metadata:delete_if_owner(Name, Pid)),
+    ?assertEqual([], ets:match_object(beamtalk_class_method_funs, {{Name, '_'}, '_', '_'})),
+    ?assertNot(beamtalk_class_shadow_flags:is_set(runtime_fun, Name)),
+    ?assertNot(beamtalk_class_shadow_flags:is_set(class_vars, Name)),
+    ?assertNot(lists:member(Name, beamtalk_class_metadata:match_subclasses('Object'))),
+    gen_server:stop(Pid).
+
+bt4808_builder_class(Name, Super, HasClassVars) ->
+    beamtalk_class_registry:ensure_pg_started(),
+    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_registry:ensure_pid_table(),
+    InstFun = fun(Self, _Args, State) -> {reply, inst_ok, State, Self} end,
+    ClassFun = fun(_ClassSelf) -> class_ok end,
+    ClassState =
+        case HasClassVars of
+            true -> #{count => 0};
+            false -> #{}
+        end,
+    {ok, Pid} = beamtalk_class_builder:register(#{
+        className => Name,
+        superclassRef => Super,
+        fieldSpecs => #{},
+        methodSpecs => #{ping => InstFun},
+        classMethods => #{make => ClassFun},
+        classState => ClassState
+    }),
+    Pid.
 
 bt4794_delete_if_owner_only_deletes_matching_owner_test() ->
     Name = 'BT4794DeleteIfOwner',
