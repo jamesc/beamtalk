@@ -51,9 +51,12 @@ See: ADR 0028 §1 (Module Proxy Pattern)
     has_method/1,
     native_call/4,
     native_call/5,
-    new/1,
-    selector_to_function/1
+    new/1
 ]).
+
+-ifdef(TEST).
+-export([selector_to_function/1]).
+-endif.
 
 -include("beamtalk.hrl").
 

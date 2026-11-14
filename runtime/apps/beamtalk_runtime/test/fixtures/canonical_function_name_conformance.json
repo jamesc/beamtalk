@@ -10,5 +10,7 @@
   {"selector": "at:put:",        "expected": "at"},
   {"selector": "copyFrom:to:",   "expected": "copyFrom"},
   {"selector": "a:b:c:d:",       "expected": "a"},
-  {"selector": ":",              "expected": ""}
+  {"selector": ":",              "expected": ""},
+  {"selector": "größe:von:",     "expected": "größe"},
+  {"selector": "größe",          "expected": "größe"}
 ]
