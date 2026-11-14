@@ -66,6 +66,7 @@ fn main() {
 
     let mut written = 0usize;
     let mut skipped = 0usize;
+    let mut skipped_invalid = 0usize;
     // Disambiguates module names derived from file stems that collide
     // across input dirs (e.g. a fuzzer-grown corpus dir alongside the seed
     // corpus): first occurrence keeps the bare name, later ones get a
@@ -111,7 +112,7 @@ fn main() {
             // error, so it never reaches codegen there; skip it here too.
             if let Some(err) = diagnostics.iter().find(|d| d.severity == Severity::Error) {
                 eprintln!("skipping {}: {}", path.display(), err.message);
-                skipped += 1;
+                skipped_invalid += 1;
                 continue;
             }
             lower_analysed_module_for_codegen(&mut module, &analysis);
@@ -129,7 +130,10 @@ fn main() {
     }
 
     println!("Wrote {written} .core file(s) to {}", out_dir.display());
-    println!("Skipped {skipped} input(s) that did not codegen cleanly (expected — see moduledoc).");
+    println!(
+        "Skipped {skipped_invalid} input(s) with parse/analysis errors (the real pipeline refuses them) \
+         and {skipped} that did not codegen cleanly (expected — see moduledoc)."
+    );
 }
 
 fn is_beamtalk_source(path: &Path) -> bool {

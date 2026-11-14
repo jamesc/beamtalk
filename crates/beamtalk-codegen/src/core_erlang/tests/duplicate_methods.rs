@@ -60,37 +60,32 @@ fn distinct_selectors_and_sides_still_generate() {
     generate_module(&module, CodegenOptions::new("ok")).expect("no duplicate, codegen succeeds");
 }
 
-/// The two nightly `corpus-through-erlc` failures: each whole `.btscript` is
-/// one module that redefines a class method. After the build pipeline's
-/// same-file fold, analysis reports an error (so the corpus generator skips the
-/// input) and codegen refuses it by name.
+/// The shape of the two nightly `corpus-through-erlc` failures
+/// (`class_builder_capstone`, `late_slots`): a REPL-style script that redefines
+/// a class method. After the build pipeline's same-file fold, analysis reports
+/// an error (so the corpus generator skips the input) and codegen refuses it by
+/// name.
 #[test]
-fn corpus_inputs_are_rejected_by_analysis_and_codegen() {
+fn redefined_class_method_is_rejected_by_analysis_and_codegen() {
     use beamtalk_core::compilation::fold_same_file_extensions;
     use beamtalk_core::semantic_analysis::analyse;
 
-    let root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/repl-protocol/cases");
-    for file in ["class_builder_capstone.btscript", "late_slots.btscript"] {
-        let src = std::fs::read_to_string(root.join(file)).expect("read corpus input");
-        let (mut module, mut diags) = parse(lex_with_eof(&src));
-        diags.extend(fold_same_file_extensions(&mut module));
-        let analysis = analyse(&module);
-        diags.extend(analysis.diagnostics.iter().cloned());
+    let src = "Actor subclass: Cap\n  class greeting => \"before\"\n\n\
+               Cap class >> greeting => \"after\"\n\
+               Cap class >> getCurrent => 1\n\
+               Cap class >> getCurrent => 2\n";
+    let (mut module, mut diags) = parse(lex_with_eof(src));
+    diags.extend(fold_same_file_extensions(&mut module));
+    diags.extend(analyse(&module).diagnostics.iter().cloned());
+    for selector in ["greeting", "getCurrent"] {
         assert!(
-            diags.iter().any(|d| d.severity == Severity::Error),
-            "{file}: expected an error diagnostic"
+            diags.iter().any(|d| d.severity == Severity::Error
+                && d.message
+                    .contains(&format!("Duplicate class method `{selector}`"))),
+            "analysis should name the duplicate `{selector}`: {diags:?}"
         );
-        if file == "late_slots.btscript" {
-            assert!(
-                diags
-                    .iter()
-                    .any(|d| d.message.contains("Duplicate class method `getCurrent`")),
-                "{file}: analysis should name the duplicate: {diags:?}"
-            );
-        }
-        let err = generate_module(&module, CodegenOptions::new("corpus_input"))
-            .expect_err("codegen must not emit a duplicate function");
-        assert!(err.to_string().contains("duplicate"), "{file}: {err}");
     }
+    let err = generate_module(&module, CodegenOptions::new("corpus_input"))
+        .expect_err("codegen must not emit a duplicate function");
+    assert!(err.to_string().contains("duplicate class method"), "{err}");
 }
