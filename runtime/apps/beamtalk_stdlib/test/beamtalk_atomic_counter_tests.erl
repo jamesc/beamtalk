@@ -168,15 +168,11 @@ incrementBy_malformed_receiver_is_receiver_error_test() ->
     %% A map tagged AtomicCounter but missing `table` is a bad receiver, not a bad argument.
     %% Must raise receiver type_error with hint about receiver, not argument.
     Malformed = #{'$beamtalk_class' => 'AtomicCounter'},
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = type_error,
-                class = 'AtomicCounter',
-                hint = {beamtalk_string, <<"Receiver must be an AtomicCounter instance">>}
-            }
-        },
+    ?assertBtErrorHint(
+        type_error,
+        'AtomicCounter',
+        _,
+        {beamtalk_string, <<"Receiver must be an AtomicCounter instance">>},
         beamtalk_atomic_counter:incrementBy(Malformed, 5)
     ).
 
@@ -217,15 +213,11 @@ decrementBy_malformed_receiver_is_receiver_error_test() ->
     %% A map tagged AtomicCounter but missing `table` is a bad receiver, not a bad argument.
     %% Must raise receiver type_error with hint about receiver, not argument.
     Malformed = #{'$beamtalk_class' => 'AtomicCounter'},
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = type_error,
-                class = 'AtomicCounter',
-                hint = {beamtalk_string, <<"Receiver must be an AtomicCounter instance">>}
-            }
-        },
+    ?assertBtErrorHint(
+        type_error,
+        'AtomicCounter',
+        _,
+        {beamtalk_string, <<"Receiver must be an AtomicCounter instance">>},
         beamtalk_atomic_counter:decrementBy(Malformed, 3)
     ).
 

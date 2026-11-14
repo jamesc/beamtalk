@@ -15,6 +15,7 @@ class-process path.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 -define(API, beamtalk_native_api).
@@ -122,7 +123,7 @@ native_api_test_() ->
             R = ?API:result_from_tuple({error, Err}),
             ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := false}, R),
             {error, Reason} = ?API:result_to_tuple(R),
-            ?assertMatch(#{error := #beamtalk_error{kind = io_error}}, Reason),
+            ?assertBtErrorValue(io_error, _, _, Reason),
             ?assertEqual(R, ?API:result_from_tuple(?API:result_to_tuple(R)))
         end},
         {"result_to_tuple rejects a non-Result", fun() ->

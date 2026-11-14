@@ -1109,10 +1109,12 @@ revert_no_active_entry_raises_state_error(_Ctx) ->
         selector => 'noSuchSelector'
     },
     [
-        ?_assertException(
-            error,
-            #{error := #beamtalk_error{kind = revert_not_possible, class = 'ChangeLog'}},
-            beamtalk_workspace_interface_primitives:changeLogRevert(Entry)
+        ?_test(
+            ?assertBtError(
+                revert_not_possible,
+                'ChangeLog',
+                beamtalk_workspace_interface_primitives:changeLogRevert(Entry)
+            )
         )
     ].
 
@@ -1121,10 +1123,10 @@ revert_no_active_entry_raises_state_error(_Ctx) ->
 revert_via_object_keyed_map(_Ctx) ->
     Entry = #{className => 'AlsoMissing', selector => 'gone'},
     [
-        ?_assertException(
-            error,
-            #{error := #beamtalk_error{kind = revert_not_possible}},
-            beamtalk_workspace_interface_primitives:changeLogRevert(Entry)
+        ?_test(
+            ?assertBtError(
+                revert_not_possible, beamtalk_workspace_interface_primitives:changeLogRevert(Entry)
+            )
         )
     ].
 

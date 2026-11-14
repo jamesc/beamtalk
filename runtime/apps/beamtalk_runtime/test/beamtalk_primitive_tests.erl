@@ -690,12 +690,11 @@ value_type_field_at_put_hint_matches_shared_fixture_test() ->
     Self = #{'$beamtalk_class' => 'MockVtIvarHint', x => 42},
     create_mock_value_type_module('bt@mock_vt_ivar_hint', 'MockVtIvarHint', []),
     try
-        ?assertError(
-            #{
-                error := #beamtalk_error{
-                    kind = immutable_value, hint = {beamtalk_string, Expected}
-                }
-            },
+        ?assertBtErrorHint(
+            immutable_value,
+            _,
+            _,
+            {beamtalk_string, Expected},
             beamtalk_primitive:send(Self, 'fieldAt:put:', [x, 99])
         )
     after

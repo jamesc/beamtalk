@@ -213,10 +213,7 @@ tls_distribution_is_off_in_tests_test() ->
 
 connect_off_host_without_tls_is_insecure_distribution_test() ->
     Result = beamtalk_node:connect(beamtalk_node:from_atom(?OFF_HOST_NODE)),
-    ?assertMatch(
-        #{isOk := false, errReason := #{error := #beamtalk_error{kind = insecure_distribution}}},
-        Result
-    ).
+    ?assertBtResultObjError(insecure_distribution, Result).
 
 ping_off_host_without_tls_is_false_test() ->
     ?assertNot(beamtalk_node:ping(beamtalk_node:from_atom(?OFF_HOST_NODE))).
@@ -237,10 +234,7 @@ shape_manifest_current_node_returns_ok_test() ->
 %% off-host without TLS → insecure_distribution, selector stamped as shapeManifest.
 shape_manifest_off_host_without_tls_is_insecure_distribution_test() ->
     Result = beamtalk_node:shapeManifest(beamtalk_node:from_atom(?OFF_HOST_NODE)),
-    ?assertMatch(
-        #{isOk := false, errReason := #{error := #beamtalk_error{kind = insecure_distribution}}},
-        Result
-    ),
+    ?assertBtResultObjError(insecure_distribution, Result),
     #{errReason := #{error := Error}} = Result,
     ?assertEqual(shapeManifest, Error#beamtalk_error.selector).
 
@@ -253,10 +247,7 @@ shape_skew_current_node_is_zero_test() ->
 %% an off-host node we are not connected to answers node_down.
 shape_skew_disconnected_node_is_node_down_test() ->
     Result = beamtalk_node:shapeSkew(beamtalk_node:from_atom(?OFF_HOST_NODE)),
-    ?assertMatch(
-        #{isOk := false, errReason := #{error := #beamtalk_error{kind = node_down}}},
-        Result
-    ).
+    ?assertBtResultObjError(node_down, Result).
 
 %%====================================================================
 %% introspect: off-host insecure_distribution (actors / supervisors)
@@ -266,20 +257,14 @@ shape_skew_disconnected_node_is_node_down_test() ->
 %% actors/1 on an off-host node without TLS refuses before touching the network.
 actors_off_host_without_tls_is_insecure_distribution_test() ->
     Result = beamtalk_node:actors(beamtalk_node:from_atom(?OFF_HOST_NODE)),
-    ?assertMatch(
-        #{isOk := false, errReason := #{error := #beamtalk_error{kind = insecure_distribution}}},
-        Result
-    ),
+    ?assertBtResultObjError(insecure_distribution, Result),
     #{errReason := #{error := Error}} = Result,
     ?assertEqual(actors, Error#beamtalk_error.selector).
 
 %% Same introspect path for supervisors/1.
 supervisors_off_host_without_tls_is_insecure_distribution_test() ->
     Result = beamtalk_node:supervisors(beamtalk_node:from_atom(?OFF_HOST_NODE)),
-    ?assertMatch(
-        #{isOk := false, errReason := #{error := #beamtalk_error{kind = insecure_distribution}}},
-        Result
-    ),
+    ?assertBtResultObjError(insecure_distribution, Result),
     #{errReason := #{error := Error}} = Result,
     ?assertEqual(supervisors, Error#beamtalk_error.selector).
 

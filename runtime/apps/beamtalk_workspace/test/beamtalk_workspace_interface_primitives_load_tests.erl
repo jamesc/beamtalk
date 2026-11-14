@@ -152,10 +152,8 @@ load_semantic_compile_error_is_structured(#{tmp := Tmp, unique := U}) ->
     Path = filename:join(Tmp, "WiLoadBroken" ++ U ++ ".bt"),
     ok = file:write_file(Path, <<"invalid @@@ syntax">>),
     [
-        ?_assertException(
-            error,
-            #{error := #beamtalk_error{}},
-            beamtalk_workspace_interface_primitives:load(list_to_binary(Path))
+        ?_test(
+            ?assertBtError(_, beamtalk_workspace_interface_primitives:load(list_to_binary(Path)))
         )
     ].
 

@@ -419,7 +419,7 @@ test_extension_error_propagation() ->
     try
         Result = beamtalk_dispatch:lookup(crashExt, [], Self, State, 'Counter'),
         %% BT-4593: a raise from an invoked method answers the wrapped map.
-        ?assertMatch({error, #{error := #beamtalk_error{}}}, Result)
+        ?assertBtErrorTuple(_, _, _, Result)
     after
         (try
             ets:delete(beamtalk_extensions, {'Counter', crashExt}),
@@ -1001,7 +1001,7 @@ test_dispatch_throws_wrapped() ->
 
         %% dispatch/4 raises → caught → wrapped exception map (BT-4593)
         Result = beamtalk_dispatch:lookup(throwMethod, [], Self, State, 'ThrowingDispatchClass'),
-        ?assertMatch({error, #{error := #beamtalk_error{}}}, Result)
+        ?assertBtErrorTuple(_, _, _, Result)
     after
         gen_server:stop(Pid),
         code:purge(bt_test_dispatch_throws_stub),
@@ -1059,7 +1059,7 @@ test_actor_instance_bypass_throwing_module() ->
         Result = beamtalk_dispatch:lookup(
             'displayString', [], ActorSelf, State, 'ActorDispatchThrowsClass'
         ),
-        ?assertMatch({error, #{error := #beamtalk_error{}}}, Result)
+        ?assertBtErrorTuple(_, _, _, Result)
     after
         gen_server:stop(Pid),
         code:purge(bt_test_actor_dispatch_throws_stub),
@@ -1103,7 +1103,7 @@ test_extension_bad_arity() ->
         %% Caught and wrapped like any other extension-body crash, rather
         %% than raising the raw {bad_extension_arity, 1} tuple.
         Result = beamtalk_dispatch:lookup(badArityExt, [], Self, State, 'Counter'),
-        ?assertMatch({error, #{error := #beamtalk_error{selector = badArityExt}}}, Result)
+        ?assertBtErrorTuple(_, _, badArityExt, Result)
     after
         (try
             ets:delete(beamtalk_extensions, {'Counter', badArityExt}),
@@ -1222,7 +1222,7 @@ test_extension_raises_reraised() ->
     Self = make_ref(),
     try
         Result = beamtalk_dispatch:lookup(throwingExt, [], Self, State, 'Counter'),
-        ?assertMatch({error, #{error := #beamtalk_error{}}}, Result)
+        ?assertBtErrorTuple(_, _, _, Result)
     after
         (try
             ets:delete(beamtalk_extensions, {'Counter', throwingExt}),
@@ -1342,9 +1342,7 @@ test_compiled_dispatch_returns_error_tuple() ->
         Result = beamtalk_dispatch:lookup(errMethod, [], Self, State, 'DispatchErrTupleClass'),
         %% Normalized to 2-tuple; the resolved owner's answered error is a
         %% raise (a wrapped map), never the walk's own miss (BT-4593).
-        ?assertMatch(
-            {error, #{error := #beamtalk_error{kind = does_not_understand}}}, Result
-        ),
+        ?assertBtErrorTuple(does_not_understand, _, _, Result),
         ?assertEqual(2, tuple_size(Result))
     after
         gen_server:stop(Pid),

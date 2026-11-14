@@ -238,8 +238,6 @@ every_timer_dies_when_caller_dies_test() ->
 %%% send:to:after: / send:to:every: — message timers (BT-4048)
 %%% ============================================================================
 
--define(TYPE_ERROR, #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}}).
-
 send_after_to_pid_delivers_message_test() ->
     T = beamtalk_timer:'send:to:after:'({tick, 1}, self(), 10),
     ?assertMatch(#{'$beamtalk_class' := 'Timer', tref := _}, T),
@@ -316,8 +314,8 @@ send_after_remote_pid_fires_test() ->
     ?assertNot(beamtalk_timer:cancel(T)).
 
 send_after_delay_too_large_raises_test() ->
-    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:after:'(tick, self(), 4294967296)),
-    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:every:'(tick, self(), 4294967296)).
+    ?assertBtError(type_error, beamtalk_timer:'send:to:after:'(tick, self(), 4294967296)),
+    ?assertBtError(type_error, beamtalk_timer:'send:to:every:'(tick, self(), 4294967296)).
 
 %% A repeating timer to a registered name stops when the named process dies,
 %% so a restarted process under the same name does not inherit its ticks.
@@ -477,10 +475,10 @@ send_after_unregistered_global_is_inert_test() ->
     ?assertNot(beamtalk_timer:cancel(T)).
 
 send_after_bad_target_raises_test() ->
-    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:after:'(tick, 42, 10)).
+    ?assertBtError(type_error, beamtalk_timer:'send:to:after:'(tick, 42, 10)).
 
 send_after_negative_delay_raises_test() ->
-    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:after:'(tick, self(), -1)).
+    ?assertBtError(type_error, beamtalk_timer:'send:to:after:'(tick, self(), -1)).
 
 send_every_delivers_until_cancelled_test() ->
     T = beamtalk_timer:'sendEvery'(tick, self(), 10),
@@ -515,7 +513,7 @@ send_every_stops_when_target_dies_test() ->
     ?assertNot(beamtalk_timer:'isActive'(T)).
 
 send_every_zero_interval_raises_test() ->
-    ?assertError(?TYPE_ERROR, beamtalk_timer:'send:to:every:'(tick, self(), 0)).
+    ?assertBtError(type_error, beamtalk_timer:'send:to:every:'(tick, self(), 0)).
 
 flush_ticks() ->
     receive
