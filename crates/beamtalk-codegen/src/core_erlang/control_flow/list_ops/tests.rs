@@ -704,6 +704,7 @@ fn test_transform_op_with_local_mutation_uses_tuple_acc_table() {
             &[
                 "'lists':'foldl'",
                 "let Count@ = call 'erlang':'element'(2, ",
+                "maps':'put'('__local__count'",
                 "call 'erlang':'not'",
                 "'beamtalk_collection':'from_list_like'(",
             ],
