@@ -473,6 +473,52 @@ frame_table_test_() ->
                         beamtalk_stack_frame:render_mfa({'bt@user@bt4815_hpack', class_new, 1})
                     )
                 end},
+                {"BT-4816: undef on a Beamtalk class names the method", fun() ->
+                    ST = [{?SOLO_MOD, class_start, [a], []}],
+                    #{error := E} = beamtalk_exception_handler:ensure_wrapped(error, undef, ST),
+                    ?assertEqual(
+                        {beamtalk_string, <<"Undefined function: Bt4815Solo class>>start">>},
+                        E#beamtalk_error.message
+                    ),
+                    ?assertEqual(
+                        <<"bt@bt4815pkg@bt4815_solo:class_start/1">>,
+                        maps:get(mfa, E#beamtalk_error.details)
+                    )
+                end},
+                {"BT-4816: undef on an unresolved bt@ module keeps the raw MFA in details", fun() ->
+                        ST = [{'bt@user@bt4816_unknown', run, 2, []}],
+                        #{error := E} = beamtalk_exception_handler:ensure_wrapped(error, undef, ST),
+                        ?assertEqual(
+                            <<"bt@user@bt4816_unknown:run/2">>,
+                            maps:get(mfa, E#beamtalk_error.details)
+                        )
+                    end},
+                {"BT-4816: undef on foreign Erlang stays module:function/arity", fun() ->
+                    ST = [{some_mod, some_fun, 2, []}],
+                    #{error := E} = beamtalk_exception_handler:ensure_wrapped(error, undef, ST),
+                    ?assertEqual(
+                        {beamtalk_string, <<"Undefined function: some_mod:some_fun/2">>},
+                        E#beamtalk_error.message
+                    ),
+                    ?assertNot(maps:is_key(mfa, E#beamtalk_error.details))
+                end},
+                {"BT-4816: method error tail renders a Beamtalk callee as Class>>selector", fun() ->
+                        Msg = beamtalk_actor:format_method_error_message(
+                            'Ticker', bump, error, badarg, [{?SOLO_MOD, class_go, 1, []}]
+                        ),
+                        ?assertEqual(
+                            <<"Bad argument in Ticker>>bump (called Bt4815Solo class>>go)">>, Msg
+                        )
+                    end},
+                {"BT-4816: method error tail keeps a foreign callee as module:function/arity",
+                    fun() ->
+                        Msg = beamtalk_actor:format_method_error_message(
+                            'Ticker', bump, error, badarg, [{lists, reverse, [x, y], []}]
+                        ),
+                        ?assertEqual(
+                            <<"Bad argument in Ticker>>bump (called lists:reverse/2)">>, Msg
+                        )
+                    end},
                 {"raw_mfa/1 is always module:function/arity", fun() ->
                     ?assertEqual(
                         <<"bt@bt4815pkg@bt4815_solo:class_new/1">>,
