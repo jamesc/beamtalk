@@ -38,7 +38,6 @@ TestCase subclass: CallNodeLineTest
     x := n ** "a"
     x + 1
 
-
   testIfNotNilFrameReportsItsLine =>
     trace := [
       self notNil: 1 block: [:x | x / 0]
@@ -64,26 +63,19 @@ TestCase subclass: CallNodeLineTest
     self assert: (frame file endsWith: "call_node_line_test.bt")
 
   testGuardedBifFrameReportsItsLine =>
-    trace := [
-      self divide: 1
-    ] on: Exception do: [:e | e stackTrace]
+    trace := [self divide: 1] on: Exception do: [:e | e stackTrace]
     frame := self frameFor: #divide: in: trace
     self assert: frame line equals: 30
     self assert: (frame file endsWith: "call_node_line_test.bt")
 
   testBareBifFrameReportsItsLine =>
-    trace := [
-      self divideTyped: 1
-    ] on: Exception do: [:e | e stackTrace]
+    trace := [self divideTyped: 1] on: Exception do: [:e | e stackTrace]
     frame := self frameFor: #divideTyped: in: trace
     self assert: frame line equals: 34
     self assert: (frame file endsWith: "call_node_line_test.bt")
 
   testPowerBifFrameReportsItsLine =>
-    trace := [
-      self power: 1
-    ] on: Exception do: [:e | e stackTrace]
+    trace := [self power: 1] on: Exception do: [:e | e stackTrace]
     frame := self frameFor: #power: in: trace
     self assert: frame line equals: 38
     self assert: (frame file endsWith: "call_node_line_test.bt")
-
