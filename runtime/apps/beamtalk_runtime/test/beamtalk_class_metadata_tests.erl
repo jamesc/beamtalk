@@ -223,6 +223,28 @@ match_subclasses_reflects_insert_test() ->
         ?assertEqual(['Widget'], beamtalk_class_metadata:match_subclasses('Object'))
     end).
 
+%% BT-4840: many subclasses of one hot superclass stay distinct, repeated
+%% re-inserts of the same class never duplicate its edge, an unrelated
+%% superclass is not matched, and a superclass change moves the edge.
+match_subclasses_many_under_hot_superclass_test() ->
+    with_clean_tables(fun() ->
+        Names = [list_to_atom("HotSub" ++ integer_to_list(I)) || I <- lists:seq(1, 500)],
+        [ok = beamtalk_class_metadata:insert(N, m, [], 'Hot', undefined) || N <- Names],
+        [ok = beamtalk_class_metadata:insert(N, m, [], 'Hot', undefined) || N <- Names],
+        ok = beamtalk_class_metadata:insert('HotSibling', m, [], 'Hotter', undefined),
+        ?assertEqual(
+            lists:sort(Names), lists:sort(beamtalk_class_metadata:match_subclasses('Hot'))
+        ),
+        ?assertEqual(500, ets:select_count(?SUBCLASS_INDEX, [{{{'Hot', '_'}, '_'}, [], [true]}])),
+        ?assertEqual(['HotSibling'], beamtalk_class_metadata:match_subclasses('Hotter')),
+        ok = beamtalk_class_metadata:insert('HotSub1', m, [], 'Hotter', undefined),
+        ?assertEqual(
+            ['HotSibling', 'HotSub1'],
+            lists:sort(beamtalk_class_metadata:match_subclasses('Hotter'))
+        ),
+        ?assertNot(lists:member('HotSub1', beamtalk_class_metadata:match_subclasses('Hot')))
+    end).
+
 %% merge_identity/5 (the reload path) re-registering a class under the SAME
 %% superclass must not duplicate the edge or disturb it.
 match_subclasses_reflects_reregister_same_superclass_test() ->
