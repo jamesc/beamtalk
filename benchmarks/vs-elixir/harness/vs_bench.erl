@@ -174,6 +174,14 @@ rows() ->
         {"11d", dispatch, "a > 0 ifTrue: [1] ifFalse: [2] / if", 200000, 'ifTrueIfFalse:a:', int, [
             {if_else, int}
         ]},
+        {"11e", dispatch, "a < 10, a :: Integer / a < 10", 200000, 'lessTyped:a:', int, [
+            {less, int}
+        ]},
+        {"11f", dispatch, "[a > i] whileTrue:, a :: Integer / recursion", 200000, 'whileTyped:a:',
+            int, [{while_to, int}]},
+        {"11g", dispatch, "a max: 3, a :: Integer / max(a, 3)", 200000, 'maxTyped:a:', int, [
+            {max_of, int}
+        ]},
         {"12a", dispatch, "p class / p.__struct__", 200000, 'classOf:p:', point, [
             {struct_of, point}
         ]},
@@ -601,6 +609,9 @@ compiles_to("11a") -> "letrec loop; + with is_number guard and coercion try";
 compiles_to("11b") -> "erlang:'+'(A, 1)";
 compiles_to("11c") -> "is_number guard, erlang:'+'";
 compiles_to("11d") -> "send(Bool, 'ifTrue:ifFalse:', [fun, fun]) -> True:dispatch/3";
+compiles_to("11e") -> "is_number guard (declared Integer, BT-4823), erlang:'<'";
+compiles_to("11f") -> "letrec loop; is_number guard on the typed limit (BT-4823), erlang:'>'";
+compiles_to("11g") -> "Number>>max: (self guarded: Number is not a proven class), erlang:'>'";
 compiles_to("12a") -> "typed receiver (BT-4127): is_map + tag guard, erlang:whereis + class-object tuple with the pinned module; untyped: beamtalk_primitive:class_of_object derived-cache hit";
 compiles_to("12b") -> "class ref built per call (whereis_class + module_name_safe) + send(P, 'isKindOf:') -> direct objectIsKindOf/2 call (no FFI proxy, BT-4410): one memoised {is_kind_of, C, B} lookup (BT-4221)";
 compiles_to("12c") -> "as 12b, but the String literal bakes its module (whereis only, no module_name_safe, BT-4411) and String:dispatch/3 takes the memoised inherited_target verdict {value, Object, ...} straight to Object:dispatch/3 (BT-4260; no per-level extensions walk)";

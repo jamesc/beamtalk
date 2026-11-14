@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4823 fixture (see declared_guard_probe.bt).
+
+/// Breaks an `:: Integer` declaration and defines its own ordering, answering
+/// Booleans: `rival > 0` is `true`, `rival < 0` is `false`.
+Value subclass: DeclaredGuardRival
+
+  > _other => true
+
+  < _other => false
