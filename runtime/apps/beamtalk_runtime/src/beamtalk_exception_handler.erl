@@ -745,9 +745,10 @@ ensure_wrapped(Other, Stacktrace) ->
 -doc """
 An already-wrapped exception keeps the stacktrace it carries: that one was
 taken where the exception was raised, and a later catch (dispatch, a
-`sync_call` relay, a reraise) sees only its own, shallower stack. The catch
-stack backfills an exception that carries none, or only an empty one (BT-4837). The cost is one map
-lookup on the error path; the success path is untouched.
+`sync_call` relay, a reraise, a rejected future) sees only its own, shallower
+stack. The catch stack backfills an exception that carries none, or only an
+empty one (BT-4837). The cost is one map lookup on the error path; the success
+path is untouched.
 """.
 -spec keep_innermost_stacktrace(map(), list()) -> map().
 keep_innermost_stacktrace(#{raw_stacktrace := [_ | _]} = Already, _Stacktrace) ->
@@ -855,7 +856,8 @@ ensure_wrapped(throw, Reason, Stacktrace) ->
             },
             Wrapped = wrap(Error)
     end,
-    Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => CaughtType};
+    %% A rejected future carries the callee's raise-site stack; keep it (BT-4837).
+    (keep_innermost_stacktrace(Wrapped, Stacktrace))#{erlang_class => CaughtType};
 ensure_wrapped(_Type, Other, Stacktrace) ->
     Wrapped = wrap_with_stacktrace(Other, Stacktrace),
     Wrapped#{raw_stacktrace => capture_stacktrace(Stacktrace), erlang_class => error}.

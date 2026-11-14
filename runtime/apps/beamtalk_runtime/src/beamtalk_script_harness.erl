@@ -117,8 +117,9 @@ else from the stack of the catch.
 
 By default only the visible frames (display form, ADR 0139) are listed, with a
 `(N frames hidden; --raw-mfa shows all)` line when some were left out and the
-caller passed a `raw_mfa` option (it has the switch), as `beamtalk test` prints. With `raw_mfa => true` the whole stack is listed, hidden
-frames included, each beside its raw `module:function/arity`.
+caller passed a `raw_mfa` option (it has the switch), as `beamtalk test`
+prints. With `raw_mfa => true` the whole stack is listed, hidden frames
+included, each beside its raw `module:function/arity`.
 """.
 -spec raw_trace(map(), term(), list()) -> iodata().
 raw_trace(Opts, Reason, Stacktrace) when is_list(Stacktrace) ->
