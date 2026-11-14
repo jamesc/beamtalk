@@ -21,7 +21,8 @@ set -uo pipefail
 label="${1:-EUnit}"
 
 # Strip ANSI colour codes; rebar3 colours its report.
-output="$(sed 's/\x1b\[[0-9;]*m//g')"
+# Also strip CR: the Windows recipe feeds PowerShell `Out-String` output (CRLF).
+output="$(sed -e 's/\x1b\[[0-9;]*m//g' -e 's/\r$//')"
 
 # Test-name lines sit at a two-space indent directly under the `Failures:` /
 # `Pending:` headings ("  1) mod:fun/0: desc" and "  mod:fun/0: desc");
