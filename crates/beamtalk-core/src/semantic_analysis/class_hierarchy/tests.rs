@@ -2612,6 +2612,42 @@ fn classinfo_from_ast_defaults_is_internal_false() {
         "is_internal should be false for non-internal classes"
     );
 }
+// BT-4806: the four `stamp_package*` tests are two pairs over different APIs under test
+// (`stamp_package` on a built hierarchy vs `stamp_package_on_infos` on a bare `Vec<ClassInfo>`),
+// each with its own fixture and extra assertions, so they stay separate; only the duplicated
+// `ClassInfo` literal is shared.
+/// BT-4806: a packaged `ClassInfo` as BEAM metadata would carry it for a class compiled
+/// elsewhere; the `stamp_package*` and `add_from_beam_meta` tests share it.
+fn remote_class_info(name: &str, is_internal: bool, package: &str) -> ClassInfo {
+    ClassInfo {
+        surface_incomplete: false,
+        in_caller_new1: false,
+        is_module_less: false,
+        name: EcoString::from(name),
+        superclass: Some(EcoString::from("Object")),
+        is_sealed: false,
+        is_abstract: false,
+        is_typed: false,
+        is_internal,
+        package: Some(EcoString::from(package)),
+        is_value: false,
+        is_native: false,
+        auto_ctors: None,
+        handle_scope: None,
+        state: vec![],
+        state_types: HashMap::new(),
+        state_has_default: HashMap::new(),
+        state_kinds: HashMap::new(),
+        initialize_assigns: std::collections::BTreeSet::new(),
+        has_dynamic_field_writer: false,
+        methods: vec![],
+        class_methods: vec![],
+        class_variables: vec![],
+        type_params: vec![],
+        type_param_bounds: vec![],
+        superclass_type_args: vec![],
+    }
+}
 #[test]
 fn stamp_package_sets_package_on_non_builtin_classes() {
     let source = "Actor subclass: Counter\n  state: count = 0\n";
@@ -2637,34 +2673,7 @@ fn stamp_package_sets_package_on_non_builtin_classes() {
 #[test]
 fn stamp_package_does_not_overwrite_existing_package() {
     let mut h = ClassHierarchy::with_builtins();
-    let info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: EcoString::from("RemoteClass"),
-        superclass: Some(EcoString::from("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: Some(EcoString::from("other_pkg")),
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
-    };
+    let info = remote_class_info("RemoteClass", false, "other_pkg");
     h.add_from_beam_meta(vec![info]);
     h.stamp_package("myapp");
     let cls = h.get_class("RemoteClass").unwrap();
@@ -2699,34 +2708,7 @@ fn stamp_package_on_infos_sets_package_on_non_builtin_classes() {
 }
 #[test]
 fn stamp_package_on_infos_does_not_overwrite_existing_package() {
-    let mut infos = vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: EcoString::from("RemoteClass"),
-        superclass: Some(EcoString::from("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: Some(EcoString::from("other_pkg")),
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
-    }];
+    let mut infos = vec![remote_class_info("RemoteClass", false, "other_pkg")];
 
     ClassHierarchy::stamp_package_on_infos(&mut infos, "myapp");
 
@@ -2739,34 +2721,7 @@ fn stamp_package_on_infos_does_not_overwrite_existing_package() {
 #[test]
 fn add_from_beam_meta_preserves_is_internal_and_package() {
     let mut h = ClassHierarchy::with_builtins();
-    let info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: EcoString::from("InternalHelper"),
-        superclass: Some(EcoString::from("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: true,
-        package: Some(EcoString::from("mylib")),
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
-    };
+    let info = remote_class_info("InternalHelper", true, "mylib");
     h.add_from_beam_meta(vec![info]);
     let cls = h.get_class("InternalHelper").unwrap();
     assert!(
@@ -2801,32 +2756,56 @@ fn extract_class_infos_captures_methods_and_state() {
     assert!(info.methods.iter().any(|m| m.selector == "getValue"));
 }
 // --- Extension method registration tests ---
-#[test]
-fn register_extensions_adds_instance_method() {
+//
+// BT-4806: the six `register_extensions_*` tests share their fixture (a builtin hierarchy and
+// a one-entry extension index) but assert six different facets of the result (method counts,
+// the class side, a `Dynamic` return, an unknown class, no override, `resolves_selector`), so
+// they stay separate tests over this shared builder, not rows of one table.
+fn single_extension_index(
+    class_name: &str,
+    side: crate::compilation::extension_index::MethodSide,
+    selector: &str,
+    file: &str,
+    arity: usize,
+    param_types: Vec<Option<ecow::EcoString>>,
+    return_type: Option<&str>,
+) -> crate::compilation::extension_index::ExtensionIndex {
     use crate::compilation::extension_index::{
-        ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
+        ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo,
     };
-    use std::path::PathBuf;
-    let mut h = ClassHierarchy::with_builtins();
-    let original_count = h.all_methods("String").len();
     let mut index = ExtensionIndex::new();
-    let key = ExtensionKey {
-        class_name: "String".into(),
-        side: MethodSide::Instance,
-        selector: "shout".into(),
-    };
     index.entries_mut().insert(
-        key,
+        ExtensionKey {
+            class_name: class_name.into(),
+            side,
+            selector: selector.into(),
+        },
         vec![ExtensionLocation {
-            file_path: PathBuf::from("String+Shout.bt"),
+            file_path: std::path::PathBuf::from(file),
             span: test_span(),
             type_info: ExtensionTypeInfo {
                 answers_receiver: false,
-                arity: 0,
-                param_types: vec![],
-                return_type: Some("String".into()),
+                arity,
+                param_types,
+                return_type: return_type.map(Into::into),
             },
         }],
+    );
+    index
+}
+#[test]
+fn register_extensions_adds_instance_method() {
+    use crate::compilation::extension_index::MethodSide;
+    let mut h = ClassHierarchy::with_builtins();
+    let original_count = h.all_methods("String").len();
+    let index = single_extension_index(
+        "String",
+        MethodSide::Instance,
+        "shout",
+        "String+Shout.bt",
+        0,
+        vec![],
+        Some("String"),
     );
     h.register_extensions(&index);
     let methods = h.all_methods("String");
@@ -2838,30 +2817,17 @@ fn register_extensions_adds_instance_method() {
 }
 #[test]
 fn register_extensions_adds_class_method() {
-    use crate::compilation::extension_index::{
-        ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
-    };
-    use std::path::PathBuf;
+    use crate::compilation::extension_index::MethodSide;
     let mut h = ClassHierarchy::with_builtins();
     let original_count = h.all_class_methods("String").len();
-    let mut index = ExtensionIndex::new();
-    let key = ExtensionKey {
-        class_name: "String".into(),
-        side: MethodSide::Class,
-        selector: "fromJson:".into(),
-    };
-    index.entries_mut().insert(
-        key,
-        vec![ExtensionLocation {
-            file_path: PathBuf::from("String+JSON.bt"),
-            span: test_span(),
-            type_info: ExtensionTypeInfo {
-                answers_receiver: false,
-                arity: 1,
-                param_types: vec![Some("String".into())],
-                return_type: Some("String".into()),
-            },
-        }],
+    let index = single_extension_index(
+        "String",
+        MethodSide::Class,
+        "fromJson:",
+        "String+JSON.bt",
+        1,
+        vec![Some("String".into())],
+        Some("String"),
     );
     h.register_extensions(&index);
     let methods = h.all_class_methods("String");
@@ -2872,29 +2838,16 @@ fn register_extensions_adds_class_method() {
 }
 #[test]
 fn register_extensions_unannotated_uses_dynamic() {
-    use crate::compilation::extension_index::{
-        ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
-    };
-    use std::path::PathBuf;
+    use crate::compilation::extension_index::MethodSide;
     let mut h = ClassHierarchy::with_builtins();
-    let mut index = ExtensionIndex::new();
-    let key = ExtensionKey {
-        class_name: "Array".into(),
-        side: MethodSide::Instance,
-        selector: "shuffle".into(),
-    };
-    index.entries_mut().insert(
-        key,
-        vec![ExtensionLocation {
-            file_path: PathBuf::from("Array+Shuffle.bt"),
-            span: test_span(),
-            type_info: ExtensionTypeInfo {
-                answers_receiver: false,
-                arity: 0,
-                param_types: vec![],
-                return_type: None,
-            },
-        }],
+    let index = single_extension_index(
+        "Array",
+        MethodSide::Instance,
+        "shuffle",
+        "Array+Shuffle.bt",
+        0,
+        vec![],
+        None,
     );
     h.register_extensions(&index);
     let ext = h
@@ -2904,29 +2857,16 @@ fn register_extensions_unannotated_uses_dynamic() {
 }
 #[test]
 fn register_extensions_skips_unknown_class() {
-    use crate::compilation::extension_index::{
-        ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
-    };
-    use std::path::PathBuf;
+    use crate::compilation::extension_index::MethodSide;
     let mut h = ClassHierarchy::with_builtins();
-    let mut index = ExtensionIndex::new();
-    let key = ExtensionKey {
-        class_name: "NonexistentClass".into(),
-        side: MethodSide::Instance,
-        selector: "doStuff".into(),
-    };
-    index.entries_mut().insert(
-        key,
-        vec![ExtensionLocation {
-            file_path: PathBuf::from("Nonexistent+Stuff.bt"),
-            span: test_span(),
-            type_info: ExtensionTypeInfo {
-                answers_receiver: false,
-                arity: 0,
-                param_types: vec![],
-                return_type: None,
-            },
-        }],
+    let index = single_extension_index(
+        "NonexistentClass",
+        MethodSide::Instance,
+        "doStuff",
+        "Nonexistent+Stuff.bt",
+        0,
+        vec![],
+        None,
     );
     // Should not panic
     h.register_extensions(&index);
@@ -2934,31 +2874,18 @@ fn register_extensions_skips_unknown_class() {
 }
 #[test]
 fn register_extensions_does_not_override_existing_method() {
-    use crate::compilation::extension_index::{
-        ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
-    };
-    use std::path::PathBuf;
+    use crate::compilation::extension_index::MethodSide;
     let mut h = ClassHierarchy::with_builtins();
     // "size" already exists on String
     let original = h.find_method("String", "size").unwrap().clone();
-    let mut index = ExtensionIndex::new();
-    let key = ExtensionKey {
-        class_name: "String".into(),
-        side: MethodSide::Instance,
-        selector: "size".into(),
-    };
-    index.entries_mut().insert(
-        key,
-        vec![ExtensionLocation {
-            file_path: PathBuf::from("String+Size.bt"),
-            span: test_span(),
-            type_info: ExtensionTypeInfo {
-                answers_receiver: false,
-                arity: 0,
-                param_types: vec![],
-                return_type: Some("Integer".into()),
-            },
-        }],
+    let index = single_extension_index(
+        "String",
+        MethodSide::Instance,
+        "size",
+        "String+Size.bt",
+        0,
+        vec![],
+        Some("Integer"),
     );
     h.register_extensions(&index);
     // Original method should be unchanged
@@ -2967,33 +2894,20 @@ fn register_extensions_does_not_override_existing_method() {
 }
 #[test]
 fn register_extensions_resolves_selector() {
-    use crate::compilation::extension_index::{
-        ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
-    };
-    use std::path::PathBuf;
+    use crate::compilation::extension_index::MethodSide;
     let mut h = ClassHierarchy::with_builtins();
     assert!(
         !h.resolves_selector("String", "toJson"),
         "precondition: toJson doesn't exist"
     );
-    let mut index = ExtensionIndex::new();
-    let key = ExtensionKey {
-        class_name: "String".into(),
-        side: MethodSide::Instance,
-        selector: "toJson".into(),
-    };
-    index.entries_mut().insert(
-        key,
-        vec![ExtensionLocation {
-            file_path: PathBuf::from("String+JSON.bt"),
-            span: test_span(),
-            type_info: ExtensionTypeInfo {
-                answers_receiver: false,
-                arity: 0,
-                param_types: vec![],
-                return_type: Some("String".into()),
-            },
-        }],
+    let index = single_extension_index(
+        "String",
+        MethodSide::Instance,
+        "toJson",
+        "String+JSON.bt",
+        0,
+        vec![],
+        Some("String"),
     );
     h.register_extensions(&index);
     assert!(
@@ -4090,17 +4004,61 @@ fn direct_constructors_unknown_class_fails_closed() {
     assert_eq!(h.direct_constructors("Nope"), DirectConstructors::default());
 }
 
+/// BT-4806: the former `direct_constructors_{missing_ancestor,cycle,incomplete_ancestor}_*`
+/// trio. A class whose ancestor chain cannot be trusted (an unknown or cyclic superclass, or
+/// an ancestor whose surface is incomplete and may hide a user `new:` dropped by error
+/// recovery) fails closed for `new:`; nullary `new` needs no ancestor walk (it always calls
+/// the class's own `new/0`), so it stays direct.
 #[test]
-fn direct_constructors_missing_ancestor_fails_closed_for_new1() {
-    let mut h = bt4099_hierarchy_for_source("Value subclass: Pt\n");
-    h.classes.get_mut("Pt").expect("Pt should exist").superclass =
-        Some(ecow::EcoString::from("Missing"));
-    let ctors = h.direct_constructors("Pt");
-    assert!(!ctors.new1, "unknown ancestors fail closed");
-    assert!(
-        ctors.new0,
-        "nullary `new` needs no ancestor walk: it always calls the class's own new/0"
-    );
+fn direct_constructors_untrusted_ancestors_fail_closed_for_new1_table() {
+    type Edit = fn(&mut ClassHierarchy);
+    // (label, source, class asked, hand-edit applied to the built hierarchy)
+    let cases: [(&str, &str, &str, Edit); 3] = [
+        ("missing ancestor", "Value subclass: Pt\n", "Pt", |h| {
+            h.classes.get_mut("Pt").expect("Pt should exist").superclass =
+                Some(ecow::EcoString::from("Missing"));
+        }),
+        (
+            "cycle terminates",
+            "Value subclass: Aaa\nValue subclass: Bbb\n",
+            "Aaa",
+            |h| {
+                h.classes
+                    .get_mut("Aaa")
+                    .expect("Aaa should exist")
+                    .superclass = Some(ecow::EcoString::from("Bbb"));
+                h.classes
+                    .get_mut("Bbb")
+                    .expect("Bbb should exist")
+                    .superclass = Some(ecow::EcoString::from("Aaa"));
+            },
+        ),
+        (
+            "incomplete ancestor surface",
+            "Value subclass: Mid\nValue subclass: Sub\n",
+            "Sub",
+            |h| {
+                h.classes
+                    .get_mut("Sub")
+                    .expect("Sub should exist")
+                    .superclass = Some(ecow::EcoString::from("Mid"));
+                h.classes
+                    .get_mut("Mid")
+                    .expect("Mid should exist")
+                    .surface_incomplete = true;
+            },
+        ),
+    ];
+    for (label, source, class, edit) in cases {
+        let mut h = bt4099_hierarchy_for_source(source);
+        edit(&mut h);
+        let ctors = h.direct_constructors(class);
+        assert!(!ctors.new1, "[{label}] untrusted ancestors fail closed");
+        assert!(
+            ctors.new0,
+            "[{label}] nullary `new` needs no ancestor walk: it always calls the class's own new/0"
+        );
+    }
 }
 
 /// BT-4132: an indirect Value subclass is anchored by `propagate_class_kind`
@@ -4373,44 +4331,6 @@ fn builtin_indirect_value_subclasses_get_verdicts() {
     assert!(
         my_test.new0 && my_test.new1,
         "TestCase subclass: {my_test:?}"
-    );
-}
-
-#[test]
-fn direct_constructors_cycle_terminates_and_fails_closed() {
-    let mut h = bt4099_hierarchy_for_source("Value subclass: Aaa\nValue subclass: Bbb\n");
-    h.classes
-        .get_mut("Aaa")
-        .expect("Aaa should exist")
-        .superclass = Some(ecow::EcoString::from("Bbb"));
-    h.classes
-        .get_mut("Bbb")
-        .expect("Bbb should exist")
-        .superclass = Some(ecow::EcoString::from("Aaa"));
-    let ctors = h.direct_constructors("Aaa");
-    assert!(!ctors.new1);
-    assert!(ctors.new0);
-}
-
-#[test]
-fn direct_constructors_incomplete_ancestor_fails_closed_for_new1() {
-    // An existing ancestor with an incomplete surface may hide a user
-    // `new:` dropped by error recovery: fail closed.
-    let mut h = bt4099_hierarchy_for_source("Value subclass: Mid\nValue subclass: Sub\n");
-    {
-        let sub = h.classes.get_mut("Sub").expect("Sub should exist");
-        sub.superclass = Some(ecow::EcoString::from("Mid"));
-        let mid = h.classes.get_mut("Mid").expect("Mid should exist");
-        mid.surface_incomplete = true;
-    }
-    let ctors = h.direct_constructors("Sub");
-    assert!(
-        !ctors.new1,
-        "an ancestor with an incomplete surface may hide a user `new:`"
-    );
-    assert!(
-        ctors.new0,
-        "nullary `new` needs no ancestor walk: it always calls the class's own new/0"
     );
 }
 
