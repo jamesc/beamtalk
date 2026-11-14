@@ -513,8 +513,8 @@ start_link_handles_unknown_message_test() ->
         %% Send an arbitrary message — the loop should consume it and continue.
         Pid ! {arbitrary, message, 123},
         Pid ! another_message,
-        %% Yield so the loop has a chance to process the messages.
-        timer:sleep(50),
+        %% Wait until the loop has processed the messages.
+        ok = beamtalk_test_wait:idle(Pid),
         ?assert(is_process_alive(Pid)),
         exit(Pid, shutdown),
         receive

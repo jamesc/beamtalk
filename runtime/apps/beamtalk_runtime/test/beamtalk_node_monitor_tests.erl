@@ -298,19 +298,8 @@ class_loaded_info_server_survives_test_() ->
     end}.
 
 wait_for_restart(Name, TimeoutMs) ->
-    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
-    wait_for_restart_loop(Name, Deadline).
-
-wait_for_restart_loop(Name, Deadline) ->
-    case whereis(Name) of
-        Pid when is_pid(Pid) ->
-            ok;
-        undefined ->
-            case Deadline - erlang:monotonic_time(millisecond) of
-                R when R > 0 ->
-                    timer:sleep(10),
-                    wait_for_restart_loop(Name, Deadline);
-                _ ->
-                    {error, restart_timeout}
-            end
+    try
+        beamtalk_test_wait:until(fun() -> is_pid(whereis(Name)) end, TimeoutMs)
+    catch
+        error:{wait_timeout, _} -> {error, restart_timeout}
     end.

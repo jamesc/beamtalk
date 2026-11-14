@@ -42,6 +42,7 @@ init(#{mode := crash}) ->
     erlang:error(boom).
 
 handle_continue(Step, #{delay := Delay} = State) ->
+    %% sleep: simulates slow async init (class 2)
     timer:sleep(Delay),
     {noreply, State#{done => Step}};
 handle_continue(Step, State) ->

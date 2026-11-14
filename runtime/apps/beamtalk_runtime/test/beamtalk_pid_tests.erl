@@ -28,6 +28,7 @@ Covers both exported functions directly:
 %%% ============================================================================
 
 is_alive_live_local_pid_test() ->
+    %% sleep: keeps a live helper process around (class 2)
     Pid = spawn(fun() -> timer:sleep(5000) end),
     ?assert(beamtalk_pid:is_alive(Pid)),
     exit(Pid, kill).

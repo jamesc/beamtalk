@@ -198,7 +198,10 @@ class_removed_drops_workspace_class_source_test_() ->
                         ok = beamtalk_class_lifecycle:class_removed(
                             ClassName, bt3105_lifecycle_mod4
                         ),
-                        timer:sleep(50),
+                        %% class_removed/2 clears the source asynchronously.
+                        ok = beamtalk_test_wait:until(fun() ->
+                            beamtalk_workspace_meta:get_class_source(ClassNameBin) =:= undefined
+                        end),
 
                         ?assertEqual(
                             undefined, beamtalk_workspace_meta:get_class_source(ClassNameBin)
@@ -268,7 +271,11 @@ class_removed_purges_all_five_registries_together_test_() ->
                     end,
                     case WorkspaceOk of
                         true ->
-                            timer:sleep(50),
+                            %% class_removed/2 clears the source asynchronously.
+                            ok = beamtalk_test_wait:until(fun() ->
+                                beamtalk_workspace_meta:get_class_source(ClassNameBin) =:=
+                                    undefined
+                            end),
                             ?assertEqual(
                                 undefined, beamtalk_workspace_meta:get_class_source(ClassNameBin)
                             );

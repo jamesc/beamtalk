@@ -293,7 +293,7 @@ owner_restart_reclaims(Name, Tables) ->
     ?assert(is_pid(OldPid)),
     with_supervisor_receive_trace(fun() ->
         kill_and_wait(OldPid),
-        NewPid = wait_for_restart(Name, OldPid, 50),
+        NewPid = wait_for_restart(Name, OldPid),
         lists:foreach(
             fun(T) ->
                 ?assertEqual({T, NewPid}, {T, ets:info(T, owner)}),
@@ -363,18 +363,17 @@ sync_heir() ->
     _ = sys:get_state(beamtalk_ets_heir),
     ok.
 
-wait_for_restart(_Name, _OldPid, 0) ->
-    error(restart_timeout);
-wait_for_restart(Name, OldPid, N) ->
-    case whereis(Name) of
-        Pid when is_pid(Pid), Pid =/= OldPid ->
-            %% init/1 has returned once the process answers a sys call.
-            _ = sys:get_state(Pid),
-            Pid;
-        _ ->
-            timer:sleep(20),
-            wait_for_restart(Name, OldPid, N - 1)
-    end.
+wait_for_restart(Name, OldPid) ->
+    ok = beamtalk_test_wait:until(fun() ->
+        case whereis(Name) of
+            Pid when is_pid(Pid), Pid =/= OldPid -> true;
+            _ -> false
+        end
+    end),
+    Pid = whereis(Name),
+    %% init/1 has returned once the process answers a sys call.
+    _ = sys:get_state(Pid),
+    Pid.
 
 delete_test_table() ->
     case ets:info(?TABLE) of

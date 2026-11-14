@@ -323,7 +323,7 @@ deny_list_parity_test() ->
 %% as a leaf, never a raise (ADR 0092 §4).
 partial_tree_does_not_raise_test() ->
     Dead = spawn(fun() -> ok end),
-    _ = sys_wait_dead(Dead),
+    _ = beamtalk_test_wait:dead(Dead),
     FakeSup = spawn_fake_supervisor([{child_a, Dead, worker, [some_mod]}]),
     try
         Nodes = beamtalk_process_navigation:snapshot_from_pids([FakeSup], system),
@@ -474,7 +474,7 @@ from_non_supervisor_pid_is_single_node_test() ->
 from_dead_supervisor_is_stale_handle_test() ->
     DeadPid = spawn(fun() -> ok end),
     %% Ensure it is dead before the call.
-    _ = sys_wait_dead(DeadPid),
+    _ = beamtalk_test_wait:dead(DeadPid),
     {error, Err} = beamtalk_process_navigation:from(DeadPid),
     ?assertEqual(stale_handle, Err#beamtalk_error.kind),
     ?assertEqual('ProcessNavigation', Err#beamtalk_error.class).
@@ -484,38 +484,22 @@ from_wrong_type_is_type_error_test() ->
     ?assertEqual(type_error, Err#beamtalk_error.kind),
     ?assertEqual('ProcessNavigation', Err#beamtalk_error.class).
 
-sys_wait_dead(Pid) ->
-    case erlang:is_process_alive(Pid) of
-        false ->
-            ok;
-        true ->
-            timer:sleep(5),
-            sys_wait_dead(Pid)
-    end.
-
 %% Wait until `Pid` presents the OTP supervisor marker (`$initial_call`) in its
 %% process dictionary — the message-free probe `beamtalk_process_navigation` uses
 %% to recognise a supervisor. The fake supervisor plants this asynchronously, so
 %% a test that lists its children must wait for the marker first.
 wait_until_supervisor(Pid) ->
-    wait_until_supervisor(Pid, 200).
-
-wait_until_supervisor(_Pid, 0) ->
-    error(supervisor_marker_not_set);
-wait_until_supervisor(Pid, N) ->
-    case erlang:process_info(Pid, dictionary) of
-        {dictionary, Dict} ->
-            case lists:keyfind('$initial_call', 1, Dict) of
-                {'$initial_call', {supervisor, _, _}} ->
-                    ok;
-                _ ->
-                    timer:sleep(5),
-                    wait_until_supervisor(Pid, N - 1)
-            end;
-        _ ->
-            timer:sleep(5),
-            wait_until_supervisor(Pid, N - 1)
-    end.
+    beamtalk_test_wait:until(fun() ->
+        case erlang:process_info(Pid, dictionary) of
+            {dictionary, Dict} ->
+                case lists:keyfind('$initial_call', 1, Dict) of
+                    {'$initial_call', {supervisor, _, _}} -> true;
+                    _ -> false
+                end;
+            _ ->
+                false
+        end
+    end).
 
 %%====================================================================
 %% Tests: lazy guarded status
@@ -523,7 +507,7 @@ wait_until_supervisor(Pid, N) ->
 
 status_nil_for_dead_pid_test() ->
     DeadPid = spawn(fun() -> ok end),
-    _ = sys_wait_dead(DeadPid),
+    _ = beamtalk_test_wait:dead(DeadPid),
     ?assertEqual(nil, beamtalk_process_navigation:status(DeadPid)).
 
 status_nil_for_non_pid_test() ->
@@ -810,7 +794,7 @@ child_handles_no_children_is_empty_test() ->
 %% never a crash (graceful handling).
 child_handles_dead_supervisor_is_error_test() ->
     Dead = spawn(fun() -> ok end),
-    _ = sys_wait_dead(Dead),
+    _ = beamtalk_test_wait:dead(Dead),
     Result = beamtalk_process_navigation:child_handles(pid_to_list(Dead)),
     ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result).
 

@@ -38,6 +38,7 @@ init(Args) ->
 handle_continue(initialize = Continue, #{mode := slow_continue} = State) ->
     beamtalk_actor:ack_initialized(Continue, {noreply, State, {continue, slow}});
 handle_continue(initialize = Continue, #{mode := slow_initialize, delay := Delay} = State) ->
+    %% sleep: simulates slow initialize (class 2)
     timer:sleep(Delay),
     beamtalk_actor:ack_initialized(Continue, {noreply, State});
 handle_continue(initialize = Continue, #{mode := stop_continue} = State) ->
@@ -57,6 +58,7 @@ handle_continue(initialize = Continue, #{mode := fail_after_first, starts := Sta
 handle_continue(initialize = Continue, #{mode := crash} = State) ->
     beamtalk_actor:ack_initialized(Continue, {stop, {error, function_clause}, State});
 handle_continue(slow = Continue, #{delay := Delay} = State) ->
+    %% sleep: simulates slow continue (class 2)
     timer:sleep(Delay),
     beamtalk_actor:ack_initialized(Continue, {noreply, State#{slow_done => true}}).
 

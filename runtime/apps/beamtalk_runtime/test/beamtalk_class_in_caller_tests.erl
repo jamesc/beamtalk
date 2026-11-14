@@ -264,15 +264,11 @@ errors_match() ->
         end
     end).
 
-%% Polls until `Base`'s metadata row is gone (a stand-in install's wait).
+%% Waits until `Base`'s metadata row is gone (a stand-in install's wait).
 wait_until_row_gone(Base) ->
-    case beamtalk_class_metadata:lookup_superclass(Base) of
-        {ok, _} ->
-            timer:sleep(5),
-            wait_until_row_gone(Base);
-        not_found ->
-            ok
-    end.
+    beamtalk_test_wait:until(fun() ->
+        beamtalk_class_metadata:lookup_superclass(Base) =:= not_found
+    end).
 
 outcome_with(Pid, Selector, Args) ->
     try send(Pid, Selector, Args) of

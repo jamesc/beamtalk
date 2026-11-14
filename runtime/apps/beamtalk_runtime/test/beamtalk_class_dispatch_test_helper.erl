@@ -106,6 +106,7 @@ the pid it ran in (BT-4556: bounds a class-process `send/4` wait).
 """.
 -spec 'class_testSleep:'(term(), non_neg_integer()) -> pid().
 'class_testSleep:'(_ClassSelf, Ms) ->
+    %% sleep: simulates a slow class method (class 2)
     timer:sleep(Ms),
     self().
 

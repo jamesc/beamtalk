@@ -48,16 +48,7 @@ spawn_dummy() ->
 
 stop_dummy(Pid) ->
     Pid ! stop,
-    wait_dead(Pid).
-
-wait_dead(Pid) ->
-    case is_process_alive(Pid) of
-        false ->
-            ok;
-        true ->
-            timer:sleep(5),
-            wait_dead(Pid)
-    end.
+    beamtalk_test_wait:dead(Pid).
 
 expect_change(Pid) ->
     receive
@@ -84,17 +75,10 @@ sync(_) ->
 %% handles the monitor 'DOWN', and a sys:get_state/1 round trip does not order
 %% that signal (different senders), so asserting right after the death races.
 wait_unwatched(Actor) ->
-    wait_unwatched(Actor, 200).
-
-wait_unwatched(Actor, 0) ->
-    ?assertNot(beamtalk_object_watch:is_watched(Actor));
-wait_unwatched(Actor, N) ->
-    case beamtalk_object_watch:is_watched(Actor) of
-        false ->
-            ok;
-        true ->
-            timer:sleep(10),
-            wait_unwatched(Actor, N - 1)
+    try
+        beamtalk_test_wait:until(fun() -> not beamtalk_object_watch:is_watched(Actor) end, 2000)
+    catch
+        error:{wait_timeout, _} -> ?assertNot(beamtalk_object_watch:is_watched(Actor))
     end.
 
 %%====================================================================
@@ -175,7 +159,7 @@ subscriber_death_cleans_up_test_() ->
             ok = sync(ok),
             ?assert(beamtalk_object_watch:is_watched(Actor)),
             Sub ! die,
-            wait_dead(Sub),
+            ok = beamtalk_test_wait:dead(Sub),
             %% Last subscriber gone → pid no longer watched (once the DOWN lands).
             wait_unwatched(Actor),
             stop_dummy(Actor)
