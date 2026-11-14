@@ -66,13 +66,7 @@ stop_dummy(Pid) ->
     wait_dead(Pid).
 
 wait_dead(Pid) ->
-    case is_process_alive(Pid) of
-        false ->
-            ok;
-        true ->
-            timer:sleep(5),
-            wait_dead(Pid)
-    end.
+    beamtalk_test_wait:dead(Pid).
 
 %% A descriptor stand-in that never answers a close request. `file:close/1` on
 %% a pid sends the request and then waits for either a `{file_reply, ...}` or

@@ -406,7 +406,7 @@ diagnostics_for_success_returns_diagnostics_list_test() ->
     StartResult = application:ensure_all_started(beamtalk_compiler),
     %% Let a freshly-started compiler port come up before compiling.
     case StartResult of
-        {ok, [_ | _]} -> timer:sleep(200);
+        {ok, [_ | _]} -> ok = beamtalk_test_wait:sync(beamtalk_compiler_server);
         _ -> ok
     end,
     Result = beamtalk_repl_ops_dev:diagnostics_for(<<"1 + 1">>, <<"expression">>, <<>>),
@@ -428,7 +428,7 @@ diagnostics_op_source_path_applies_project_table_test() ->
     application:ensure_all_started(compiler),
     StartResult = application:ensure_all_started(beamtalk_compiler),
     case StartResult of
-        {ok, [_ | _]} -> timer:sleep(200);
+        {ok, [_ | _]} -> ok = beamtalk_test_wait:sync(beamtalk_compiler_server);
         _ -> ok
     end,
     Root = filename:join(

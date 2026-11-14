@@ -256,6 +256,8 @@ file_lines_take_closes_handle_test() ->
         #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := Stream} = LinesResult,
         Result = beamtalk_stream:take(Stream, 1),
         ?assertEqual([{beamtalk_string, <<"line1">>}], Result),
+        %% sleep: no observable condition (the test asserts nothing after
+        %% the take; this only lets the stream's finalizer run before cleanup)
         timer:sleep(10),
         ok
     after

@@ -136,12 +136,14 @@ readLine_blocks_until_data_arrives_test() ->
     }),
     Self = self(),
     %% Spawn a process that will block on readLine
-    _Caller = spawn(fun() ->
+    Caller = spawn(fun() ->
         Result = gen_server:call(Pid, {readLine, []}, 5000),
         Self ! {readLine_result, Result}
     end),
-    %% Give the caller time to issue the gen_server:call
-    timer:sleep(50),
+    %% Wait until the caller is blocked in gen_server:call (its request is
+    %% already queued), then until the subprocess has handled that request.
+    ok = beamtalk_test_wait:idle(Caller),
+    ok = beamtalk_test_wait:sync(Pid),
     %% Write a line — the blocked readLine should now resolve
     gen_server:call(Pid, {'writeLine:', [<<"world">>]}),
     Line =

@@ -96,13 +96,7 @@ unregister_transcript() ->
     end.
 
 wait_gone(Name) ->
-    case whereis(Name) of
-        undefined ->
-            ok;
-        _ ->
-            timer:sleep(10),
-            wait_gone(Name)
-    end.
+    beamtalk_test_wait:until(fun() -> whereis(Name) =:= undefined end).
 
 %%% logger handler callback
 

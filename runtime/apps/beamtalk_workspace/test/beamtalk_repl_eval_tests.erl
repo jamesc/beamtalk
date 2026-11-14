@@ -283,7 +283,7 @@ io_capture_dead_process_test() ->
     OldGL = group_leader(),
     CapturePid = spawn(fun() -> ok end),
     %% Let it die
-    timer:sleep(50),
+    ok = beamtalk_test_wait:dead(CapturePid),
     Output = beamtalk_io_capture:stop({CapturePid, OldGL}),
     ?assertEqual(<<>>, Output).
 
@@ -1891,7 +1891,7 @@ eval_setup() ->
         {error, {already_started, _}} -> ok
     end,
     %% Allow the runtime to register its bootstrap classes before compiling.
-    timer:sleep(300),
+    ok = beamtalk_test_wait:class('Object'),
     %% A live beamtalk_workspace_meta is needed by reload_file/1,
     %% precheck_method/4, remove_method/3,4 (non-stdlib), and a standalone
     %% method definition reached through do_eval/2 — all recompile from the
@@ -2919,8 +2919,7 @@ stdlib_gate_setup() ->
     application:ensure_all_started(beamtalk_runtime),
     application:ensure_all_started(beamtalk_stdlib),
     %% Let the stdlib classes (ErlangModule, ...) register before patching.
-    timer:sleep(1500),
-    ok.
+    ok = beamtalk_test_wait:class('ErlangModule').
 
 stdlib_gate_cleanup(_) ->
     %% Intentional no-op: beamtalk_runtime / beamtalk_stdlib are left running for

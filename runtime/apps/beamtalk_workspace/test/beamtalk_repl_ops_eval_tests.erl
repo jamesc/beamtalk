@@ -38,7 +38,7 @@ setup(SessionId) ->
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
     {ok, _} = application:ensure_all_started(beamtalk_compiler),
     %% Allow the runtime to register its bootstrap classes before compiling.
-    timer:sleep(300),
+    ok = beamtalk_test_wait:class('Object'),
     {ok, SessionPid} = beamtalk_repl_shell:start_link(SessionId),
     SessionPid.
 

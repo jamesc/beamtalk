@@ -193,7 +193,7 @@ reload_suite_setup() ->
     end,
     %% Let the runtime register bootstrap classes before compiling user code
     %% (mirrors beamtalk_workspace_revert_tests:suite_setup/0).
-    timer:sleep(300),
+    ok = beamtalk_test_wait:class('Object'),
     ok.
 
 %% Never tear down or restart a shared, already-live runtime here — this

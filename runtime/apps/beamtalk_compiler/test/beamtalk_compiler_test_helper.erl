@@ -25,15 +25,10 @@ That's fine for callers: a subsequent `gen_server:call` queues safely behind
 """.
 -spec wait_for_compiler_server_restart() -> ok.
 wait_for_compiler_server_restart() ->
-    wait_for_compiler_server_restart(100).
-
-wait_for_compiler_server_restart(0) ->
-    error(compiler_server_did_not_restart);
-wait_for_compiler_server_restart(Attempts) ->
-    case whereis(beamtalk_compiler_server) of
-        undefined ->
-            timer:sleep(10),
-            wait_for_compiler_server_restart(Attempts - 1);
-        Pid when is_pid(Pid) ->
-            ok
+    try
+        beamtalk_test_wait:until(
+            fun() -> is_pid(whereis(beamtalk_compiler_server)) end, 1000, 10
+        )
+    catch
+        error:{wait_timeout, _} -> error(compiler_server_did_not_restart)
     end.

@@ -821,7 +821,8 @@ format_error_message_eval_error_wrapped_exception_test() ->
 term_to_json_future_pending_test() ->
     %% Futures are now tagged tuples {beamtalk_future, Pid}
     Future = beamtalk_future:new(),
-    timer:sleep(50),
+    {beamtalk_future, FuturePid} = Future,
+    ok = beamtalk_test_wait:sync(FuturePid),
     Result = beamtalk_repl_json:term_to_json(Future),
     ?assertEqual(<<"#Future<pending>">>, Result),
     beamtalk_future:resolve(Future, ok).

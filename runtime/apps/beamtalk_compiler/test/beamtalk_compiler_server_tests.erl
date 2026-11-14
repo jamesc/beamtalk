@@ -870,7 +870,7 @@ cast_ignored() ->
 unknown_info() ->
     %% Sending random message should not crash the server
     beamtalk_compiler_server ! {unexpected_message, 123},
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_compiler_server),
     ?assert(is_pid(whereis(beamtalk_compiler_server))).
 
 %%% ---------------------------------------------------------------

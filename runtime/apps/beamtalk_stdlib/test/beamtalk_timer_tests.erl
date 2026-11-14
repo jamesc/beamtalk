@@ -152,8 +152,16 @@ is_active_after_fired_test() ->
     ?assertNot(beamtalk_timer:'isActive'(T)).
 
 is_active_repeating_stays_active_test() ->
-    T = beamtalk_timer:'every:do:'(20, fun() -> ok end),
-    timer:sleep(80),
+    Self = self(),
+    T = beamtalk_timer:'every:do:'(20, fun() -> Self ! tick end),
+    %% Let the timer fire several times: a repeating timer stays active.
+    [
+        receive
+            tick -> ok
+        after 2000 -> error(timer_did_not_tick)
+        end
+     || _ <- [1, 2, 3]
+    ],
     ?assert(beamtalk_timer:'isActive'(T)),
     beamtalk_timer:cancel(T).
 
@@ -186,6 +194,7 @@ ffi_shim_every_returns_timer_test() ->
     beamtalk_timer:cancel(T).
 
 ffi_shim_sleep_returns_nil_test() ->
+    %% sleep: the code under test is the sleep itself
     ?assertEqual(nil, beamtalk_timer:sleep(1)).
 
 ffi_shim_after_error_propagates_test() ->
@@ -195,6 +204,7 @@ ffi_shim_every_error_propagates_test() ->
     ?assertBtError(type_error, beamtalk_timer:every(0, fun() -> ok end)).
 
 ffi_shim_sleep_error_propagates_test() ->
+    %% sleep: the code under test is the sleep itself (argument validation)
     ?assertBtError(type_error, beamtalk_timer:sleep(-1)).
 
 %%% ============================================================================

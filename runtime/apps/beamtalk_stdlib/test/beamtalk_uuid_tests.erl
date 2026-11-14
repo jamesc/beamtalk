@@ -72,7 +72,9 @@ v7_version_nibble_is_7_test() ->
 
 v7_monotonic_ordering_test() ->
     A = beamtalk_uuid:'v7'(),
-    timer:sleep(5),
+    %% v7 embeds a millisecond timestamp: wait for the clock to tick past it.
+    T0 = erlang:system_time(millisecond),
+    ok = beamtalk_test_wait:until(fun() -> erlang:system_time(millisecond) > T0 end),
     B = beamtalk_uuid:'v7'(),
     ?assert(beamtalk_uuid:'<'(A, B)),
     ?assert(beamtalk_uuid:'>'(B, A)).

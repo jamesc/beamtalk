@@ -137,49 +137,35 @@ get_events(CollectorPid) ->
     end.
 
 wait_for_exit(CollectorPid) ->
-    wait_for_exit(CollectorPid, 50).
-
-wait_for_exit(CollectorPid, 0) ->
-    error({timeout_waiting_for_exit, get_events(CollectorPid)});
-wait_for_exit(CollectorPid, Tries) ->
-    Events = get_events(CollectorPid),
-    HasExit = lists:any(
-        fun
-            ({'subprocessExit:from:', _}) -> true;
-            (_) -> false
-        end,
-        Events
-    ),
-    case HasExit of
-        true ->
-            Events;
-        false ->
-            timer:sleep(100),
-            wait_for_exit(CollectorPid, Tries - 1)
-    end.
+    IsExit = fun
+        ({'subprocessExit:from:', _}) -> true;
+        (_) -> false
+    end,
+    try
+        beamtalk_test_wait:until(
+            fun() -> lists:any(IsExit, get_events(CollectorPid)) end, 5000, 20
+        )
+    catch
+        error:{wait_timeout, _} ->
+            error({timeout_waiting_for_exit, get_events(CollectorPid)})
+    end,
+    get_events(CollectorPid).
 
 -doc "Poll until a subprocessLine event with the expected text arrives.".
 wait_for_line(CollectorPid, Expected) ->
-    wait_for_line(CollectorPid, Expected, 50).
-
-wait_for_line(CollectorPid, Expected, 0) ->
-    error({timeout_waiting_for_line, Expected, get_events(CollectorPid)});
-wait_for_line(CollectorPid, Expected, Tries) ->
-    Events = get_events(CollectorPid),
-    HasLine = lists:any(
-        fun
-            ({'subprocessLine:from:', [Line | _]}) -> Line =:= Expected;
-            (_) -> false
-        end,
-        Events
-    ),
-    case HasLine of
-        true ->
-            Events;
-        false ->
-            timer:sleep(100),
-            wait_for_line(CollectorPid, Expected, Tries - 1)
-    end.
+    IsLine = fun
+        ({'subprocessLine:from:', [Line | _]}) -> Line =:= Expected;
+        (_) -> false
+    end,
+    try
+        beamtalk_test_wait:until(
+            fun() -> lists:any(IsLine, get_events(CollectorPid)) end, 5000, 20
+        )
+    catch
+        error:{wait_timeout, _} ->
+            error({timeout_waiting_for_line, Expected, get_events(CollectorPid)})
+    end,
+    get_events(CollectorPid).
 
 %%% ============================================================================
 %%% stdout lines pushed to notify actor

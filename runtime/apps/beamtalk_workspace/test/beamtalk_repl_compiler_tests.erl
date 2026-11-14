@@ -363,7 +363,7 @@ setup_compiler() ->
         {error, {already_started, _}} -> ok
     end,
     %% Give the runtime a moment to register its bootstrap classes.
-    timer:sleep(300),
+    ok = beamtalk_test_wait:class('Object'),
     ok.
 
 teardown_compiler(_) ->

@@ -82,7 +82,7 @@ suite_setup() ->
         {error, {already_started, _}} -> ok
     end,
     %% Let the runtime register bootstrap classes before compiling user code.
-    timer:sleep(300),
+    ok = beamtalk_test_wait:class('Object'),
     ok.
 
 suite_teardown(_) ->
@@ -546,15 +546,13 @@ init(bare_sup) ->
 fake_self(Pid) ->
     {beamtalk_object, 'Workspace', 'bt@stdlib@workspace', Pid}.
 
-wait_for_class(_ClassAtom, 0) ->
-    error(class_not_registered);
 wait_for_class(ClassAtom, N) ->
-    case beamtalk_runtime_api:whereis_class(ClassAtom) of
-        Pid when is_pid(Pid) -> Pid;
-        _ ->
-            timer:sleep(20),
-            wait_for_class(ClassAtom, N - 1)
-    end.
+    try
+        ok = beamtalk_test_wait:class(ClassAtom, N * 20)
+    catch
+        error:{class_not_registered, _} -> error(class_not_registered)
+    end,
+    beamtalk_runtime_api:whereis_class(ClassAtom).
 
 stop_existing(Name) ->
     case whereis(Name) of
