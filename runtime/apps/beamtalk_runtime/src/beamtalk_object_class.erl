@@ -2003,8 +2003,11 @@ remove_dead_class_registration(ClassName, Module) ->
 remove_claimed_dead_class(ClassName, Module, Owner) ->
     case beamtalk_class_metadata:delete_if_owner(ClassName, Owner) of
         false ->
-            %% The row names another owner: the class was rebuilt after the
-            %% re-check. Leave it registered and announce nothing. The dead
+            %% The row names another owner (the class was rebuilt after the
+            %% re-check), or is already gone (another teardown won; the dead
+            %% owner's own dependents are dropped either way). Leave any
+            %% rebuilt class registered and announce nothing: the `ClassRemoved`
+            %% announcement belongs to the teardown that won the claim. The dead
             %% pid's index rows are kept: a holder of the old class object
             %% recovers through the reverse-index row (BT-4552), exactly as
             %% after `restart_compiled_class/4`; the stale loaded-class/backing

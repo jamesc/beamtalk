@@ -589,6 +589,8 @@ delete_if_owner(Name, Owner) when is_pid(Owner) ->
             case lookup_owner(Name) of
                 not_found ->
                     drop_dependents(Name, Owner),
+                    %% Deliberately unkeyed (a scan of the whole index): the row
+                    %% is gone, so the old superclass is unknown. Rare path.
                     delete_subclass_edge('_', Name, Owner),
                     beamtalk_class_shadow_flags:invalidate(Name),
                     beamtalk_class_derived_cache:invalidate();
