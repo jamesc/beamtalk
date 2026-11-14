@@ -10,7 +10,7 @@
 
 use crate::core_erlang::class_meta;
 use crate::core_erlang::field_types::{
-    BareOperator, COMPARABLE_TYPES, FieldTypeFact, NUMERIC_TYPES, classify_fields,
+    BareOperator, ComparisonKinds, FieldTypeFact, NUMERIC_TYPES, classify_fields,
 };
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::generator::{ClassContext, DirectCallTable, ReplContext, ValueTypeContext};
@@ -464,10 +464,13 @@ impl CoreErlangGenerator {
     /// comparison BIFs are correct for `Character`/`String` too (both define
     /// `< <=` as `@primitive`), so a `:: Character`/`:: String` param stays on
     /// the bare-BIF fast path and skips the runtime comparison guard.
-    pub(in crate::core_erlang) fn param_is_comparable(&self, name: &str) -> bool {
+    pub(in crate::core_erlang) fn param_comparison_kinds(
+        &self,
+        name: &str,
+    ) -> Option<ComparisonKinds> {
         self.current_method_param_types
             .get(name)
-            .is_some_and(|ty| COMPARABLE_TYPES.contains(&ty.as_str()))
+            .and_then(|ty| ComparisonKinds::of_type_name(ty))
     }
 
     /// Records a [`FieldTypeFact`] for every instance field and class variable
@@ -543,8 +546,16 @@ impl CoreErlangGenerator {
 
     /// `self.<field>` is comparison-bare when known primitive-ordered
     /// (numeric, `Character`, or `String`) and not nilable (BT-3924).
-    pub(in crate::core_erlang) fn field_is_comparable(&self, name: &str) -> bool {
-        self.field_is_bare(name, BareOperator::Comparison)
+    pub(in crate::core_erlang) fn field_comparison_kinds(
+        &self,
+        name: &str,
+    ) -> Option<ComparisonKinds> {
+        let facts = if self.in_class_method() {
+            &self.current_class_var_types
+        } else {
+            &self.current_class_field_types
+        };
+        facts.get(name).and_then(FieldTypeFact::comparison_kinds)
     }
 
     /// `self.<field>` is arithmetic-bare when known numeric.

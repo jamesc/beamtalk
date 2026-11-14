@@ -5,6 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
+use super::field_types::ComparisonKinds;
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -23,6 +24,12 @@ pub(in crate::core_erlang) enum OperatorGuard {
     /// `< > <= >=`: primitive-comparable (`is_number` or `is_binary`) → bare
     /// BIF; anything else → message dispatch (BT-3924).
     Comparison,
+    /// `< > <= >=` on a receiver whose kind is *declared* (a typed parameter
+    /// or field) but not proven: the same shape as [`Self::Comparison`] with
+    /// a test for exactly the declared kinds, so a value that violates the
+    /// declaration (`nil` in an `:: Integer` parameter) dispatches and raises
+    /// `does_not_understand` instead of term-ordering (BT-4823).
+    DeclaredComparison(ComparisonKinds),
 }
 
 impl OperatorGuard {
@@ -61,6 +68,24 @@ impl OperatorGuard {
                 type_test("is_binary"),
                 ")",
             ],
+            Self::DeclaredComparison(kinds) => {
+                // `is_number` covers `is_integer`, so a numeric declaration
+                // needs no separate codepoint test.
+                let mut tests = Vec::new();
+                if kinds.number {
+                    tests.push(type_test("is_number"));
+                } else if kinds.character {
+                    tests.push(type_test("is_integer"));
+                }
+                if kinds.string {
+                    tests.push(type_test("is_binary"));
+                }
+                let mut tests = tests.into_iter();
+                let first = tests.next().unwrap_or_else(|| type_test("is_number"));
+                tests.fold(first, |acc, next| {
+                    docvec!["call 'erlang':'or'(", acc, ", ", next, ")"]
+                })
+            }
         }
     }
 }
@@ -87,9 +112,21 @@ pub(in crate::core_erlang) fn is_ordering_comparison(op: &str) -> bool {
     matches!(op, "<" | ">" | "<=" | ">=")
 }
 
+/// What the compiler knows about a comparison receiver's kind
+/// ([`CoreErlangGenerator::comparison_receiver`], BT-4823).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ComparisonReceiver {
+    /// Proven by the compiler (a literal, `self` in a builtin class): bare BIF.
+    Proven,
+    /// Declared but not proven (a typed parameter or field): kind-tested.
+    Declared(ComparisonKinds),
+    /// Not known: the general primitive-comparable guard.
+    Unknown,
+}
+
 /// Whether `expr` is a literal with a builtin total order (a number, string
 /// or character), on which the comparison BIFs (`< > <= >=`) are correct.
-/// The literal half of [`CoreErlangGenerator::receiver_is_statically_comparable`],
+/// The literal half of [`CoreErlangGenerator::comparison_receiver`],
 /// shared with the guard-return rewrite (`guard_returns`, BT-4452).
 pub(in crate::core_erlang) fn is_comparable_literal(expr: &Expression) -> bool {
     use beamtalk_core::ast::Literal;
@@ -318,8 +355,14 @@ impl CoreErlangGenerator {
         let is_comparison = is_ordering_comparison(op);
         if is_arithmetic && !self.receiver_is_statically_numeric(left) {
             Some(OperatorGuard::Arithmetic)
-        } else if is_comparison && !self.receiver_is_statically_comparable(left) {
-            Some(OperatorGuard::Comparison)
+        } else if is_comparison {
+            match self.comparison_receiver(left) {
+                ComparisonReceiver::Proven => None,
+                ComparisonReceiver::Declared(kinds) => {
+                    Some(OperatorGuard::DeclaredComparison(kinds))
+                }
+                ComparisonReceiver::Unknown => Some(OperatorGuard::Comparison),
+            }
         } else {
             None
         }
@@ -348,59 +391,51 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// Whether `expr` is statically known to evaluate to a value with a
-    /// builtin total order, so the comparison fast path can skip the runtime
-    /// primitive-comparable guard and emit a bare comparison BIF.
+    /// How much the compiler knows about the kind of a comparison receiver
+    /// `expr` (`< > <= >=`), which decides the guard in front of the bare
+    /// comparison BIF. Erlang's `<` is a total order over every term and never
+    /// raises, so a bare BIF on a value of the wrong kind answers silently and
+    /// wrongly (`nil > 10` → `true`); only a *proven* kind may skip the guard.
     ///
-    /// A broader set than [`Self::receiver_is_statically_numeric`]: bare
-    /// `erlang:'<'` is exactly the builtin `<` of every type the runtime guard
-    /// lets through (numbers, characters, strings — see
-    /// [`OperatorGuard::predicate_doc`]), so this also accepts
-    /// `Character`/`String` (both define `< <=` as `@primitive`) and their
-    /// literals. Recognises:
-    /// * numeric / character / string literals,
-    /// * `self` inside a builtin comparable class
-    ///   (`Integer`/`Float`/`Character`/`String`),
-    /// * an identifier bound to a `:: Integer/Float/Number/Character/String`
-    ///   parameter whose name the method body never rebinds (BT-3921), and
-    /// * a `self.<field>` read whose field is known primitive-ordered.
+    /// * [`ComparisonReceiver::Proven`] — the compiler knows the kind: a
+    ///   numeric / character / string literal, or `self` inside a builtin
+    ///   comparable class (`Integer`/`Float`/`Character`/`String`). Bare BIF.
+    /// * [`ComparisonReceiver::Declared`] — only a declaration says so, and a
+    ///   declared type is not enforced at runtime (a `Dynamic` argument, an
+    ///   FFI result or a cast can violate it, BT-4823): an identifier bound to
+    ///   a `:: Integer/Float/Number/Character/String` parameter whose name the
+    ///   method body never rebinds (BT-3921), or a `self.<field>` read whose
+    ///   field is declared with such a type (BT-3892, BT-3925; unlike
+    ///   arithmetic, no union with a `Nil` member, BT-3924). The guard tests
+    ///   for the declared kinds.
+    /// * [`ComparisonReceiver::Unknown`] — everything else, untyped and
+    ///   object-typed fields included: the general primitive-comparable guard.
     ///
-    /// The `self.<field>` case is **type-aware**, and the
-    /// stakes are higher here than for arithmetic: `erlang:'<'` is a total order
-    /// over every term and never raises, so a bare comparison on an object-typed
-    /// field would *silently* term-order the tagged map instead of dispatching —
-    /// a wrong boolean, not a `badarith`. So a field with an explicit
-    /// non-primitive declared type (e.g. `field: lo :: Money`) routes through the
-    /// runtime guard, making `self.lo < other lo` dispatch to `Money>><` — and
-    /// an `:: Integer | Nil` field holding `nil` raise `does_not_understand`.
-    /// The same field facts as [`Self::receiver_is_statically_numeric`] apply
-    /// (BT-3892, BT-3925): numeric / `Character` / `String` declared fields
-    /// (unions of those, but — unlike arithmetic — no union with a `Nil`
-    /// member, BT-3924) stay on the bare comparison BIF; everything else,
-    /// untyped fields included, is guarded.
-    pub(in crate::core_erlang) fn receiver_is_statically_comparable(
-        &self,
-        expr: &Expression,
-    ) -> bool {
+    /// Only the receiver is checked. The argument is deliberately not
+    /// (BT-3928): `5 < nil` term-orders and answers `true`.
+    pub(in crate::core_erlang) fn comparison_receiver(&self, expr: &Expression) -> ComparisonReceiver {
         match expr {
-            Expression::Literal(..) => is_comparable_literal(expr),
-            Expression::Identifier(id) => {
-                if id.name == "self" {
-                    matches!(
-                        self.class_name().as_str(),
-                        "Integer" | "Float" | "Character" | "String"
-                    )
+            Expression::Literal(..) if is_comparable_literal(expr) => ComparisonReceiver::Proven,
+            Expression::Identifier(id) if id.name == "self" => {
+                if matches!(
+                    self.class_name().as_str(),
+                    "Integer" | "Float" | "Character" | "String"
+                ) {
+                    ComparisonReceiver::Proven
                 } else {
-                    self.param_is_comparable(&id.name)
+                    ComparisonReceiver::Unknown
                 }
             }
+            Expression::Identifier(id) => self
+                .param_comparison_kinds(&id.name)
+                .map_or(ComparisonReceiver::Unknown, ComparisonReceiver::Declared),
             Expression::FieldAccess {
                 receiver, field, ..
-            } => {
-                matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
-                    && self.field_is_comparable(&field.name)
+            } if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self") => {
+                self.field_comparison_kinds(&field.name)
+                    .map_or(ComparisonReceiver::Unknown, ComparisonReceiver::Declared)
             }
-            _ => false,
+            _ => ComparisonReceiver::Unknown,
         }
     }
 

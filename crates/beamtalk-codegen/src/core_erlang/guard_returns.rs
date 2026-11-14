@@ -68,8 +68,7 @@
 //!   `true`, `false`, a structural BIF comparison such as `=:=`
 //!   ([`is_boolean_by_construction`]), or an ordering comparison
 //!   (`< > <= >=`) codegen lowers to a bare BIF because its left operand is
-//!   a number/string/character literal or a trusted `:: Integer`-family
-//!   parameter ([`Rewriter::typed_comparison`], BT-4452). The rewrite
+//!   a number/string/character literal ([`Rewriter::typed_comparison`], BT-4452). The rewrite
 //!   records each such comparison, and the compile fails unless codegen did
 //!   lower it bare ([`CoreErlangGenerator::unconfirmed_boolean_comparisons`]);
 //!   or an `and:`/`or:` of Booleans by construction with a literal
@@ -108,7 +107,6 @@ use beamtalk_core::state_threading_selectors::{
 };
 use ecow::EcoString;
 
-use crate::core_erlang::field_types::{COMPARABLE_TYPES, trusted_param_types};
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::operators::{is_comparable_literal, is_ordering_comparison};
 use beamtalk_cerl_doc::{Document, docvec, leaf};
@@ -268,10 +266,6 @@ struct Rewriter {
     /// The left-operand spans of the typed comparisons the rewrite relied on
     /// as Booleans by construction.
     boolean_comparisons: HashSet<Span>,
-    /// The method's parameters codegen trusts to hold a value with a builtin
-    /// total order ([`trusted_param_types`] in [`COMPARABLE_TYPES`]), so a
-    /// comparison on one lowers to a bare BIF.
-    comparable_params: HashSet<EcoString>,
     /// How many times the method assigns each local, nested blocks included.
     assignments: HashMap<EcoString, usize>,
     /// The method's and its blocks' parameter names.
@@ -286,11 +280,6 @@ impl Rewriter {
         let mut rw = Self {
             conditions: HashMap::new(),
             boolean_comparisons: HashSet::new(),
-            comparable_params: trusted_param_types(method)
-                .into_iter()
-                .filter(|(_, ty)| COMPARABLE_TYPES.contains(ty))
-                .map(|(name, _)| EcoString::from(name))
-                .collect(),
             assignments: HashMap::new(),
             parameters: method
                 .parameters
@@ -359,10 +348,11 @@ impl Rewriter {
 
     /// The left operand of `expr` when it is a comparison (`< > <= >=`)
     /// codegen lowers to a bare Erlang BIF, which answers a Boolean and never
-    /// sends: its left operand is a literal with a builtin total order or a
-    /// trusted comparable parameter — the operands
-    /// [`CoreErlangGenerator::receiver_is_statically_comparable`] accepts
-    /// from the method alone (BT-4452).
+    /// sends: its left operand is a literal with a builtin total order, the
+    /// one operand whose kind the compiler proves
+    /// ([`CoreErlangGenerator::comparison_receiver`]). A typed parameter is
+    /// only declared, so its comparison carries a kind guard that dispatches
+    /// a wrong-kind receiver (BT-4823) and is not a Boolean by construction.
     fn typed_comparison<'e>(&self, expr: &'e Expression) -> Option<&'e Expression> {
         let Expression::MessageSend {
             receiver,
@@ -376,10 +366,7 @@ impl Rewriter {
         if !is_ordering_comparison(op) {
             return None;
         }
-        let bare = is_comparable_literal(receiver)
-            || matches!(receiver.as_ref(), Expression::Identifier(id)
-                if self.comparable_params.contains(&id.name));
-        bare.then_some(receiver.as_ref())
+        is_comparable_literal(receiver).then_some(receiver.as_ref())
     }
 
     /// Records `receiver`, a conditional's receiver the rewrite treats as a

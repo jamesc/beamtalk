@@ -6,21 +6,24 @@
 //!
 //! **DDD Context:** Code Generation
 //!
-//! `receiver_is_statically_numeric` / `receiver_is_statically_comparable`
-//! (`operators.rs`) keep `self.<field> + x` / `self.<field> < x` on the bare
-//! Erlang BIF only when the field is *known* to hold a primitive. This module
-//! owns what "known" means for a field, so the decision is made once, where
-//! the field-type map is built, rather than special-cased at the operator.
+//! `receiver_is_statically_numeric` / `comparison_receiver` (`operators.rs`)
+//! decide how `self.<field> + x` / `self.<field> < x` lower. This module owns
+//! what a field's declaration says, so the decision is made once, where the
+//! field-type map is built, rather than special-cased at the operator.
+//! Arithmetic stays on the bare BIF for a numeric declaration; a comparison
+//! on a declared field keeps a kind guard (BT-4823), since a declaration is
+//! not enforced at runtime and Erlang's `<` never raises.
 //!
 //! The rule is the declared type, and nothing else:
 //!
-//! * A **declared** field records its full [`DeclaredType`]. A simple type is
-//!   bare when it is in the operator's primitive set. For **arithmetic** a
-//!   union is bare when *every non-`Nil` member* is (so `:: Integer | Nil`
-//!   stays bare while `:: Point | Nil` is guarded): the arithmetic BIF already
-//!   raises `badarith` on `nil`. For **comparison** a `Nil` member makes the
-//!   union guarded: the comparison BIF would silently term-order `nil`
-//!   (`nil < 5` → `false`), while the runtime guard dispatches it to a
+//! * A **declared** field records its full [`DeclaredType`]. For
+//!   **arithmetic** a simple numeric type is bare, and so is a union when
+//!   *every non-`Nil` member* is (so `:: Integer | Nil` stays bare while
+//!   `:: Point | Nil` is guarded): the arithmetic BIF already raises
+//!   `badarith` on `nil`. For **comparison** a comparable simple type, or a
+//!   `Nil`-free union of them, gets a guard testing exactly the declared kinds
+//!   ([`ComparisonKinds`]); a `Nil` member (or any object member) gets the
+//!   general guard instead, which dispatches `nil` to a
 //!   `does_not_understand` (BT-3924). See [`BareOperator`]. Every other shape
 //!   (generic, singleton, false-or, …) is an object type and is guarded.
 //! * An **untyped** field — `state:`, `field:` or `classState:`, of any class
@@ -48,11 +51,62 @@ use beamtalk_core::semantic_analysis::extract_pattern_bindings;
 /// Builtin types on which the arithmetic BIFs (`+ - * /`) are correct.
 pub(in crate::core_erlang) const NUMERIC_TYPES: &[&str] = &["Integer", "Float", "Number"];
 
-/// Builtin types with a primitive total order, on which the comparison BIFs
-/// (`< > <= >=`) are correct: the numeric types plus `Character` and `String`
-/// (both define `< <=` as `@primitive`).
-pub(in crate::core_erlang) const COMPARABLE_TYPES: &[&str] =
-    &["Integer", "Float", "Number", "Character", "String"];
+/// Which primitive kinds a *declared* comparison receiver may hold, so the
+/// guard in front of the bare comparison BIF tests exactly those (BT-4823).
+/// The declaration is evidence of what the receiver should be, not a proof: a
+/// `Dynamic` argument or an FFI result can still put `nil` in an
+/// `:: Integer` parameter, and Erlang's `<` would then term-order it
+/// silently (`nil > 10` → `true`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(in crate::core_erlang) struct ComparisonKinds {
+    /// `Integer`, `Float` or `Number`: tested with `is_number`.
+    pub(in crate::core_erlang) number: bool,
+    /// `Character` (a codepoint integer at runtime): tested with `is_integer`.
+    pub(in crate::core_erlang) character: bool,
+    /// `String` (a binary at runtime): tested with `is_binary`.
+    pub(in crate::core_erlang) string: bool,
+}
+
+impl ComparisonKinds {
+    /// The kind of a builtin comparable type name (`Integer`, `Float`, `Number`, `Character`, `String`).
+    pub(in crate::core_erlang) fn of_type_name(name: &str) -> Option<Self> {
+        let mut kinds = Self::default();
+        match name {
+            "Integer" | "Float" | "Number" => kinds.number = true,
+            "Character" => kinds.character = true,
+            "String" => kinds.string = true,
+            _ => return None,
+        }
+        Some(kinds)
+    }
+
+    fn union(self, other: Self) -> Self {
+        Self {
+            number: self.number || other.number,
+            character: self.character || other.character,
+            string: self.string || other.string,
+        }
+    }
+
+    /// The kinds a declared field type may hold when comparison is bare on it:
+    /// a comparable simple type, or a `Nil`-free union of them.
+    pub(in crate::core_erlang) fn of_declared_type(ty: &DeclaredType) -> Option<Self> {
+        match ty {
+            DeclaredType::Simple(name) => Self::of_type_name(name),
+            DeclaredType::Union(members) => {
+                if members.iter().any(is_nil_type) {
+                    return None;
+                }
+                let mut kinds = Self::default();
+                for member in members {
+                    kinds = kinds.union(Self::of_declared_type(member)?);
+                }
+                (!members.is_empty()).then_some(kinds)
+            }
+            _ => None,
+        }
+    }
+}
 
 /// What codegen knows about one field's runtime type.
 #[derive(Debug, Clone, PartialEq)]
@@ -63,60 +117,46 @@ pub(in crate::core_erlang) enum FieldTypeFact {
     Untyped,
 }
 
-/// The operator family a fast-path decision is for: it fixes which builtin
-/// types the bare BIF is correct on, and whether a `Nil` union member may
-/// share the bare path.
+/// The operator family a bare-BIF fast-path decision is for. Only arithmetic
+/// decides from a field's declared type alone: a comparison receiver, declared
+/// or not, always carries a kind guard ([`ComparisonKinds`], BT-4823).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum BareOperator {
     /// `+ - * /` — bare on [`NUMERIC_TYPES`]; the BIF raises `badarith` on
     /// `nil`, so a `Nil` union member does not force the guard.
     Arithmetic,
-    /// `< > <= >=` — bare on [`COMPARABLE_TYPES`]; the BIF is a total term
-    /// order that would silently answer `nil < 5` → `false`, so a `Nil`
-    /// union member forces the runtime guard, which dispatches `nil` to a
-    /// `does_not_understand` (BT-3924).
-    Comparison,
-}
-
-impl BareOperator {
-    /// Builtin types on which this operator's BIF is correct.
-    pub(in crate::core_erlang) fn primitive_set(self) -> &'static [&'static str] {
-        match self {
-            Self::Arithmetic => NUMERIC_TYPES,
-            Self::Comparison => COMPARABLE_TYPES,
-        }
-    }
-
-    /// Whether a `nil` reaching this operator's bare BIF raises (so a `Nil`
-    /// union member may stay on the bare path).
-    fn bif_raises_on_nil(self) -> bool {
-        matches!(self, Self::Arithmetic)
-    }
 }
 
 impl FieldTypeFact {
+    /// The kinds a `self.<field>` comparison receiver with this fact may hold,
+    /// when comparison on it is bare (BT-4823).
+    pub(in crate::core_erlang) fn comparison_kinds(&self) -> Option<ComparisonKinds> {
+        match self {
+            Self::Declared(ty) => ComparisonKinds::of_declared_type(ty),
+            Self::Untyped => None,
+        }
+    }
+
     /// Whether a `self.<field>` read with this fact may skip the runtime
     /// operator guard for `op`.
     pub(in crate::core_erlang) fn is_bare(&self, op: BareOperator) -> bool {
+        let BareOperator::Arithmetic = op;
         match self {
-            Self::Declared(ty) => declared_type_is_bare(ty, op),
+            Self::Declared(ty) => declared_type_is_bare(ty),
             Self::Untyped => false,
         }
     }
 }
 
-/// A declared type is bare when it is a simple type in `op`'s primitive set,
-/// or — only for an operator whose BIF raises on `nil` — a union with at least
-/// one non-`Nil` member whose non-`Nil` members all are.
-fn declared_type_is_bare(ty: &DeclaredType, op: BareOperator) -> bool {
+/// A declared type is bare for arithmetic when it is a numeric simple type,
+/// or a union with at least one non-`Nil` member whose non-`Nil` members all
+/// are (the BIF raises `badarith` on `nil`).
+fn declared_type_is_bare(ty: &DeclaredType) -> bool {
     match ty {
-        DeclaredType::Simple(name) => op.primitive_set().contains(&name.as_str()),
+        DeclaredType::Simple(name) => NUMERIC_TYPES.contains(&name.as_str()),
         DeclaredType::Union(members) => {
-            if !op.bif_raises_on_nil() && members.iter().any(is_nil_type) {
-                return false;
-            }
             let mut non_nil = members.iter().filter(|m| !is_nil_type(m)).peekable();
-            non_nil.peek().is_some() && non_nil.all(|m| declared_type_is_bare(m, op))
+            non_nil.peek().is_some() && non_nil.all(|m| declared_type_is_bare(m))
         }
         _ => false,
     }
@@ -153,7 +193,7 @@ pub(in crate::core_erlang) fn classify_fields(
 /// block parameter, local or pattern variable of the same name (shadowing is
 /// a warning, not an error) may hold anything, and neither the field
 /// classifier's walk nor the operator fast-path classifiers
-/// (`receiver_is_statically_numeric` / `receiver_is_statically_comparable`,
+/// (`receiver_is_statically_numeric` / `comparison_receiver`,
 /// which match an identifier against the method's parameters by name) track
 /// scopes. So a parameter whose name the body rebinds anywhere is left out —
 /// its operators keep the runtime guard, which is always correct. Parameters
@@ -230,7 +270,7 @@ mod tests {
     }
 
     fn comparable(facts: &HashMap<String, FieldTypeFact>, f: &str) -> bool {
-        facts[f].is_bare(BareOperator::Comparison)
+        facts[f].comparison_kinds().is_some()
     }
 
     #[test]

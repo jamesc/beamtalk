@@ -1,0 +1,97 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4823: a comparison (`< > <= >=`) on a receiver whose kind is only
+// declared (an `:: Integer` parameter or field) checks the receiver at run
+// time. Erlang's `<` is a total term order and never raises, so trusting the
+// declaration made `nil > 10` answer `true`. A wrong-kind receiver now
+// dispatches and raises `does_not_understand`, as for an unknown receiver
+// (BT-3924). The argument stays unchecked (BT-3928). Fixture:
+// `fixtures/typed_comparison_probe.bt`.
+
+TestCase subclass: TypedComparisonReceiverTest
+  field: probe = nil
+
+  setUp => self.probe := TypedComparisonProbe new
+
+  /// A `Dynamic` value reaching a typed parameter, as an argument.
+  wrong => #{#v => nil} at: #v
+
+  testWrongKindInIntegerParamRaisesForEveryOperator =>
+    self should: [self.probe intLt: self wrong] raise: #does_not_understand
+    self should: [self.probe intGt: self wrong] raise: #does_not_understand
+    self should: [self.probe intLe: self wrong] raise: #does_not_understand
+    self should: [self.probe intGe: self wrong] raise: #does_not_understand
+    self should: [self.probe intGt: (#{#v => true} at: #v)] raise: #does_not_understand
+    self should: [self.probe intLt: (#{#v => true} at: #v)] raise: #does_not_understand
+
+  testRightKindInIntegerParamStillAnswers =>
+    self assert: (self.probe intLt: 3)
+    self deny: (self.probe intLt: 10)
+    self assert: (self.probe intGt: 11)
+    self deny: (self.probe intGt: 10)
+    self assert: (self.probe intLe: 10)
+    self deny: (self.probe intLe: 11)
+    self assert: (self.probe intGe: 10)
+    self deny: (self.probe intGe: 9)
+    // A Float in an Integer parameter still orders numerically.
+    self assert: (self.probe intGt: 10.5)
+
+  testFloatAndNumberParams =>
+    self should: [self.probe floatLt: self wrong] raise: #does_not_understand
+    self should: [self.probe floatGt: self wrong] raise: #does_not_understand
+    self should: [self.probe numberLe: self wrong] raise: #does_not_understand
+    self should: [self.probe numberGe: self wrong] raise: #does_not_understand
+    self assert: (self.probe floatLt: 1.0)
+    self assert: (self.probe floatGt: 2.0)
+    self assert: (self.probe numberLe: 10)
+    self assert: (self.probe numberGe: 10.5)
+
+  testCharacterAndStringParams =>
+    self should: [self.probe charLt: self wrong] raise: #does_not_understand
+    self should: [self.probe charGe: self wrong] raise: #does_not_understand
+    self should: [self.probe stringLt: self wrong] raise: #does_not_understand
+    self should: [self.probe stringGt: self wrong] raise: #does_not_understand
+    self assert: (self.probe charLt: $a)
+    self assert: (self.probe charGe: $z)
+    self assert: (self.probe stringLt: "apple")
+    self assert: (self.probe stringGt: "zebra")
+
+  testStringParamHoldingANumberDoesNotTermOrder =>
+    // A number is a wrong kind for `:: String`; it must not be ordered as
+    // a binary would be, so it dispatches (and raises).
+    self should: [self.probe stringLt: (#{#v => 5} at: #v)] raise: #does_not_understand
+
+  testWrongKindInTypedFieldRaisesForEveryOperator =>
+    bad := TypedComparisonProbe new: #{#limit => self wrong}
+    self should: [bad fieldLt] raise: #does_not_understand
+    self should: [bad fieldGt] raise: #does_not_understand
+    self should: [bad fieldLe] raise: #does_not_understand
+    self should: [bad fieldGe] raise: #does_not_understand
+
+  testRightKindInTypedFieldStillAnswers =>
+    twelve := TypedComparisonProbe new: #{#limit => 12}
+    self deny: twelve fieldLt
+    self assert: twelve fieldGt
+    self deny: twelve fieldLe
+    self assert: twelve fieldGe
+
+  testOtherFieldKinds =>
+    bad := TypedComparisonProbe new: #{#ratio => self wrong, #label => self wrong, #either => self wrong}
+    self should: [bad floatFieldGt] raise: #does_not_understand
+    self should: [bad stringFieldLt] raise: #does_not_understand
+    self should: [bad unionFieldGt] raise: #does_not_understand
+    good := TypedComparisonProbe new: #{#ratio => 2.5, #label => "a", #either => 11}
+    self assert: good floatFieldGt
+    self assert: good stringFieldLt
+    self assert: good unionFieldGt
+
+  testTypedLocalStillRaises =>
+    self should: [self.probe localGt: self wrong] raise: #does_not_understand
+    self assert: (self.probe localGt: 11)
+
+  /// BT-3928: only the receiver is checked. `5 < nil` and a typed receiver
+  /// with a wrong-kind argument still fall back to Erlang term order.
+  testArgumentSideIsStillUnchecked =>
+    self assert: (self.probe literalLtArg: nil)
+    self assert: (self.probe intLtArg: 5 other: nil)
