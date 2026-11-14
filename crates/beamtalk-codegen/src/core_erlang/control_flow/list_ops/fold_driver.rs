@@ -178,20 +178,23 @@ pub(in crate::core_erlang::control_flow) enum FoldOp<'a> {
 }
 
 /// How the fold closes after its epilogue bindings.
-enum EpilogueTail {
+enum EpilogueTail<'a> {
     /// `{Result, State}`.
     Value,
     /// `detect:ifNone:`: a `case` on this found flag, `{Result, State}` or the
     /// `ifNone:` arm.
-    IfNone(Document<'static>),
+    IfNone {
+        found_flag: Document<'static>,
+        if_none: &'a Expression,
+    },
 }
 
 /// The post-fold result of a [`FoldOp`]: the `let` chain ending in `" in "`
 /// and the variable holding the op's result value.
-struct Epilogue {
+struct Epilogue<'a> {
     bindings: Document<'static>,
     result: Document<'static>,
-    tail: EpilogueTail,
+    tail: EpilogueTail<'a>,
 }
 
 impl FoldOp<'_> {
@@ -388,7 +391,7 @@ impl FoldOp<'_> {
         fold_result: &str,
         vars: &[String],
         str_check_var: &str,
-    ) -> Epilogue {
+    ) -> Epilogue<'_> {
         let element = |n: i64, v: &str| {
             docvec![
                 " = call 'erlang':'element'(",
@@ -435,8 +438,11 @@ impl FoldOp<'_> {
                 ),
                 result: var(0),
             },
-            Self::DetectIfNone { .. } => Epilogue {
-                tail: EpilogueTail::IfNone(var(1)),
+            Self::DetectIfNone { if_none } => Epilogue {
+                tail: EpilogueTail::IfNone {
+                    found_flag: var(1),
+                    if_none,
+                },
                 bindings: docvec![first(0), "let ", var(1), element(2, fold_result)],
                 result: var(0),
             },
@@ -777,7 +783,7 @@ impl CoreErlangGenerator {
             // Re-pack into StateAcc for outer method-body `maps:get` extraction.
             let (repack_doc, stateacc) =
                 plan.append_repack_stateacc_doc(self, lowered.guarded_op_bracket);
-            let tail = self.fold_tail_doc(&op, epilogue.tail, epilogue.result, &stateacc, None)?;
+            let tail = self.fold_tail_doc(epilogue.tail, epilogue.result, &stateacc, None)?;
             docs.push(docvec![
                 ThreadingPlan::foldl_call_doc(
                     &lambda_var,
@@ -845,13 +851,8 @@ impl CoreErlangGenerator {
             .as_ref()
             .map_or(Document::Nil, |s| s.unwrap_result(&fold_result));
         let extract_doc = plan.generate_extract_suffix_doc(&state_out, self);
-        let tail = self.fold_tail_doc(
-            &op,
-            epilogue.tail,
-            epilogue.result,
-            &state_out,
-            slots.as_ref(),
-        )?;
+        let tail =
+            self.fold_tail_doc(epilogue.tail, epilogue.result, &state_out, slots.as_ref())?;
         docs.push(docvec![
             ThreadingPlan::foldl_call_doc(&lambda_var, init_acc, &safe_list_var, fold_pair),
             unwrap,
@@ -873,20 +874,20 @@ impl CoreErlangGenerator {
     /// fold appended in map mode), or `detect:ifNone:`'s closing `case`.
     fn fold_tail_doc(
         &mut self,
-        op: &FoldOp<'_>,
-        tail: EpilogueTail,
+        tail: EpilogueTail<'_>,
         result: Document<'static>,
         state_var: &str,
         slots: Option<&FoldFamilySlots>,
     ) -> Result<Document<'static>> {
-        if let EpilogueTail::IfNone(flag) = tail {
+        if let EpilogueTail::IfNone {
+            found_flag,
+            if_none,
+        } = tail
+        {
             // `detect:ifNone:` is not in `SELF_THREADING_FOLDS` (pinned exactly
             // by `self_threading_is_exactly_the_named_folds`), so it never has
             // `Self` slots to close here; its two arms would need them together.
-            let FoldOp::DetectIfNone { if_none } = op else {
-                unreachable!("only `detect:ifNone:` builds an `IfNone` epilogue tail");
-            };
-            return self.if_none_case_doc(if_none, flag, result, state_var);
+            return self.if_none_case_doc(if_none, found_flag, result, state_var);
         }
         let result_open = docvec!["{", result, ", ", leaf::var(state_var.to_string())];
         Ok(match slots {
