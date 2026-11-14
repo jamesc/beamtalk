@@ -960,3 +960,40 @@ read_meta_autoload_loads_unloaded_module_test() ->
 read_meta_autoload_unavailable_test() ->
     ?assertEqual(none, beamtalk_class_metadata:read_meta_autoload(bt3792_no_such_module)),
     ?assertEqual(none, beamtalk_class_metadata:read_meta_autoload("not an atom")).
+
+%%====================================================================
+%% BT-4831: class load must not scan the whole funs table
+%%====================================================================
+
+%% `insert/5`'s dead-owner cleanup matches `{Class, '_'}`; on a `set` that is a
+%% full-table scan, on an `ordered_set` the bound class prefix limits the walk
+%% to that class's key range. The table type is the invariant that keeps class
+%% load proportional to the class, so pin it.
+funs_table_is_ordered_set_test() ->
+    beamtalk_class_metadata:new(),
+    ?assertEqual(ordered_set, ets:info(?FUN_TABLE, type)).
+
+%% Funs left by an earlier (dead) owner go on insert/5; the new owner's funs
+%% and every other class's funs (including a class whose name merely shares a
+%% prefix) are untouched.
+insert_drops_only_dead_owner_funs_of_that_class_test() ->
+    with_clean_tables(fun() ->
+        Info = #{block => fun() -> ok end, arity => 0},
+        Dead = spawn(fun() ->
+            ok = beamtalk_class_metadata:put_class_method_fun('Bt4831', old, Info),
+            ok = beamtalk_class_metadata:put_class_method_fun('Bt4831Sub', keep, Info),
+            ok = beamtalk_class_metadata:put_class_method_fun('Bt4831', old2, Info)
+        end),
+        Ref = monitor(process, Dead),
+        receive
+            {'DOWN', Ref, process, Dead, _} -> ok
+        end,
+        ok = beamtalk_class_metadata:put_class_method_fun('Other', keep, Info),
+        ok = beamtalk_class_metadata:insert('Bt4831', mod, [], 'Object', false),
+        ok = beamtalk_class_metadata:put_class_method_fun('Bt4831', fresh, Info),
+        Keys = lists:sort([K || {K, _, _} <- ets:tab2list(?FUN_TABLE)]),
+        ?assertEqual(
+            [{'Bt4831', fresh}, {'Bt4831Sub', keep}, {'Other', keep}],
+            Keys
+        )
+    end).

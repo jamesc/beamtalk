@@ -353,10 +353,14 @@ new() ->
         {keypos, #class_metadata.name},
         {read_concurrency, true}
     ]),
-    %% The funs table is a plain set (default keypos 1) of
-    %% {{DefiningClass, Selector}, #{block, arity}, Owner} (BT-4808).
+    %% The funs table is an ordered_set (default keypos 1) of
+    %% {{DefiningClass, Selector}, #{block, arity}, Owner} (BT-4808). Ordered
+    %% (BT-4831) so a `{Class, '_'}` key pattern walks only that class's key
+    %% range instead of the whole table: class load and teardown cost is
+    %% proportional to the class, not to every loaded class. Dispatch still
+    %% does the one exact-key `ets:lookup/2` (the key is fully bound).
     ensure_table(?FUN_TABLE, [
-        set,
+        ordered_set,
         public,
         named_table,
         {read_concurrency, true}
