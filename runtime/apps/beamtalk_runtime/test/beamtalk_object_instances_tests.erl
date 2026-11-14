@@ -846,7 +846,7 @@ sync_stale_pass_keeps_rows_registered_after_the_snapshot_test_() ->
                     end
                 end),
                 ok = beamtalk_object_instances:register('Counter', Live),
-                %% An index row with no bag row: the real stale case.
+                %% An index row with no class-table row: the real stale case.
                 true = ets:insert(beamtalk_instance_class, {Orphan, 'Counter'}),
                 %% Empty snapshot: both pids look stale to it.
                 ok = beamtalk_object_instances:drop_stale_index_rows(#{}),
@@ -899,8 +899,10 @@ sustained_concurrent_register_keeps_up_test_() ->
                     ?assert(Total > 0),
                     ?assert(MaxQueue =< 20 * Spawners, {max_queue, MaxQueue, registered, Total}),
                     ok = beamtalk_test_wait:until(fun() ->
-                        ets:info(beamtalk_instance_registry, size) =:= 0 andalso
-                            ets:info(beamtalk_instance_class, size) =:= 0
+                        %% Only this test's class: the server may be shared
+                        %% with other tests' live actors.
+                        ets:match_object(beamtalk_instance_registry, {{Class, '_'}}) =:= [] andalso
+                            ets:match_object(beamtalk_instance_class, {'_', Class}) =:= []
                     end),
                     ?assertEqual([], beamtalk_object_instances:all(Class))
                 end)}

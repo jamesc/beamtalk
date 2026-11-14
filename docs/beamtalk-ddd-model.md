@@ -1287,7 +1287,7 @@ Domain events represent significant occurrences in the system. They enable loose
 
 **Context:** Need to implement `Class allInstances` for introspection
 
-**Decision:** Use ETS bag table with process monitors for auto-cleanup
+**Decision:** Use an ETS table with process monitors for auto-cleanup. The table is an `ordered_set` keyed `{Class, Pid}` (BT-4842; it was a `bag` keyed by class, where insert and delete cost O(instances of the class))
 
 **Alternatives Considered:**
 - Global heap scan: Impossible on BEAM (per-process heaps)
