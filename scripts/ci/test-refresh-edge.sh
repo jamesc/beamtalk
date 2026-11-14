@@ -35,6 +35,10 @@ check() { # label, condition-exit-status
   if [ "$2" -eq 0 ]; then echo "ok: $1"; else echo "FAIL: $1" >&2; failures=$((failures + 1)); fi
 }
 
+# Installer served as a release-style asset with a checksum.
+cp "$T/install.sh" "$T/release/install.sh"
+sha256sum "$T/release/install.sh" | awk '{print $1 "  install.sh"}' > "$T/release/install.sh.sha256"
+
 # run_case <name> <marker-sum|-|ro> [extra env ...]; sets OUT, RC, CALLS, P
 run_case() {
   local name="$1" marker="$2"
@@ -88,8 +92,58 @@ printf '#!/bin/sh\nexit 1\n' > "$T/fail-install.sh"
 run_case instfail "$OLD" BEAMTALK_INSTALLER="$T/fail-install.sh"
 check "installer failure: exit 0 and warns" "$([ "$RC" -eq 0 ] && grep -q 'reinstall failed' "$T/instfail.err"; echo $?)"
 
+# installer fetched by URL with a matching checksum: runs
+run_case urlok "$OLD" BEAMTALK_INSTALLER= BEAMTALK_INSTALLER_URL="file://$T/release/install.sh"
+check "installer url, checksum ok: runs once" "$([ "$RC" -eq 0 ] && [ "$CALLS" -eq 1 ]; echo $?)"
+
+# installer checksum mismatch: warn, keep the build, installer never runs
+mkdir -p "$T/tampered"
+cp "$T/release/install.sh" "$T/tampered/install.sh"
+echo "# tampered" >> "$T/tampered/install.sh"
+cp "$T/release/install.sh.sha256" "$T/tampered/install.sh.sha256"
+run_case tamper "$OLD" BEAMTALK_INSTALLER= BEAMTALK_INSTALLER_URL="file://$T/tampered/install.sh"
+check "installer checksum mismatch: exit 0, not run, warns, marker kept" \
+  "$([ "$RC" -eq 0 ] && [ "$CALLS" -eq 0 ] && grep -q 'does not match' "$T/tamper.err" && grep -q "^$OLD" "$P/.beamtalk-build.sha256"; echo $?)"
+
+# installer checksum missing: warn, not run
+mkdir -p "$T/nosum"
+cp "$T/release/install.sh" "$T/nosum/install.sh"
+run_case nosum "$OLD" BEAMTALK_INSTALLER= BEAMTALK_INSTALLER_URL="file://$T/nosum/install.sh"
+check "installer checksum missing: exit 0, not run, warns" "$([ "$RC" -eq 0 ] && [ "$CALLS" -eq 0 ] && grep -q 'checksum' "$T/nosum.err"; echo $?)"
+
+# lock held by another session: skip with a status line, installer not run
+P="$T/locked"; mkdir -p "$P"
+printf '%s  %s\n' "$OLD" "$ASSET" > "$P/.beamtalk-build.sha256"
+( exec 8>"$P/.beamtalk-refresh.lock"; flock -n 8; sleep 5 ) &
+HOLDER=$!
+sleep 0.5
+RC=0
+OUT="$(env BEAMTALK_PREFIX="$P" BEAMTALK_EDGE_BASE_URL="file://$T/release" \
+  BEAMTALK_INSTALLER="$T/install.sh" FAKE_SUM="$NEW" bash "$SCRIPT" 2>/dev/null)" || RC=$?
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null || true
+check "lock held: exit 0, skipped line, installer not run" \
+  "$([ "$RC" -eq 0 ] && [[ "$OUT" == *"skipped, another session"* && "$(wc -l <<<"$OUT")" -eq 1 ]] && [ ! -f "$P/installer-calls" ]; echo $?)"
+
+# override scope: BEAMTALK_EDGE_BASE_URL lifts https-only for the tarball
+# checksum fetch only; the installer fetches keep --proto =https.
+mkdir -p "$T/fakebin"
+cat > "$T/fakebin/curl" <<'FAKE'
+#!/bin/sh
+echo "$*" >> "$CURL_LOG"
+# Never touch the network: fail any https fetch after logging it.
+case "$*" in *https://*) exit 22 ;; esac
+exec "$REAL_CURL" "$@"
+FAKE
+chmod +x "$T/fakebin/curl"
+REAL_CURL="$(command -v curl)"
+: > "$T/curl.log"
+run_case scope "$OLD" BEAMTALK_INSTALLER= PATH="$T/fakebin:$PATH" REAL_CURL="$REAL_CURL" CURL_LOG="$T/curl.log"
+check "override scope: base-url fetch has no --proto" "$(grep "release/beamtalk-edge" "$T/curl.log" | grep -vq -- '--proto'; echo $?)"
+check "override scope: installer fetches keep --proto =https" "$(grep 'install.sh' "$T/curl.log" | grep -q -- "--proto =https"; echo $?)"
+check "override scope: installer fetched from the https release url" "$(grep -q 'https://github.com/jamesc/beamtalk/releases/download/edge/install.sh ' "$T/curl.log" || grep -q 'edge/install.sh$' "$T/curl.log"; echo $?)"
+
 if [ "$failures" -gt 0 ]; then
   echo "❌ test-refresh-edge: $failures case(s) failed" >&2
   exit 1
 fi
-echo "✅ test-refresh-edge: current / stale / no marker / failure paths behave"
+echo "✅ test-refresh-edge: current / stale / no marker / failure / installer checksum / lock / override scope behave"
