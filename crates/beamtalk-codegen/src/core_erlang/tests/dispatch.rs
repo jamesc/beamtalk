@@ -3473,7 +3473,7 @@ fn try_codegen(src: &str) -> std::result::Result<String, CodeGenError> {
 /// A literal `classMethods:` block whose parameter count does not match the selector's
 /// (`self` plus one per keyword) is a compile-time `BlockArityError` naming the selector.
 #[test]
-#[allow(clippy::too_many_lines, clippy::type_complexity)] // a data table: one entry per former test
+#[allow(clippy::type_complexity)] // a data table: one entry per former test
 fn test_bt2276_class_methods_wrong_arity_block_rejected_table() {
     // (label, source, selector needle, expected arity, declared params, hint needle)
     let cases: [(&str, &str, &str, &str, usize, Option<&str>); 2] = [
@@ -3563,7 +3563,7 @@ fn test_bt2276_class_methods_accepted_values_compile_table() {
 /// runtime walk, and passes nothing and rebinds nothing: no `ClassVars` argument, no
 /// `{class_var_result, ..}` unwrap.
 #[test]
-#[allow(clippy::too_many_lines, clippy::type_complexity)] // a data table: one entry per former test
+#[allow(clippy::type_complexity)] // a data table: one entry per former test
 fn test_class_method_self_send_shape_table() {
     // (label, source, function whose body is inspected (whole module when None),
     //  must contain, must not contain)
