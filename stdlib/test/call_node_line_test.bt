@@ -47,13 +47,14 @@ TestCase subclass: CallNodeLineTest
     x := a ++ n
     x size
 
-  // BT-4851: inline `Erlang ...` calls, non-tail and tail position.
+  // BT-4851: an inline `Erlang ...` call in non-tail position.
   inlineNonTail: n =>
     x := Erlang erlang abs: n
     x + 1
 
   // Typed arguments let codegen emit the direct `try call 'M':'F'` form
-  // (BT-4485) instead of the proxy.
+  // (BT-4485) instead of the proxy; `ffi_direct_call.rs` pins that this exact
+  // send takes it.
   inlineDirect: s :: String =>
     x := Erlang erlang binary_to_integer: s
     x + 1
@@ -120,11 +121,11 @@ TestCase subclass: CallNodeLineTest
     self assert: frame line equals: 52
     self assert: (frame file endsWith: "call_node_line_test.bt")
 
-  // BT-4851 audit: a tail-position `Erlang ...` call leaves no frame for the
-  // method (a tail call), so there is no line to report; the proxy call node
-  // is annotated like every other send.
+  // BT-4851: the BT-4485 direct `try call 'M':'F'` form (typed argument) also
+  // reports the send's line. A tail-position `Erlang ...` call is not tested:
+  // a tail call leaves no frame for the method, so there is no line to report.
   testInlineErlangDirectFrameReportsItsLine =>
     trace := [self inlineDirect: "a"] on: Exception do: [:e | e stackTrace]
     frame := self frameFor: #inlineDirect: in: trace
-    self assert: frame line equals: 58
+    self assert: frame line equals: 59
     self assert: (frame file endsWith: "call_node_line_test.bt")
