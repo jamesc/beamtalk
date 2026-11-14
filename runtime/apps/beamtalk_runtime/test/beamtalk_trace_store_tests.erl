@@ -724,7 +724,8 @@ crash_recovery_preserves_exact_counts_test_() ->
                     take_store_direct(),
                     TestPid = seed_crash_test_data(),
                     gen_server:stop(beamtalk_trace_store),
-                    timer:sleep(50),
+                    %% The heir has taken over the handed-back tables
+                    ok = beamtalk_test_wait:sync(beamtalk_ets_heir),
                     {ok, _} = beamtalk_trace_store:start_link(),
                     assert_seeded_data_intact(TestPid)
                 end)},
@@ -798,7 +799,7 @@ crash_cleanup(State) ->
                 catch
                     _:_ -> ok
                 end,
-            timer:sleep(50),
+            ok = beamtalk_test_wait:until(fun() -> whereis(beamtalk_trace_store) =:= undefined end),
             case
                 try
                     supervisor:restart_child(SupPid, beamtalk_trace_store)
@@ -865,7 +866,8 @@ vm_measurements_handler_test_() ->
                     #{},
                     #{}
                 ),
-                timer:sleep(50),
+                %% The measurements are a cast; sync waits until it is handled
+                ok = beamtalk_test_wait:sync(beamtalk_trace_store),
 
                 %% System health should include the VM stats
                 Health = beamtalk_trace_store:system_health(),
@@ -3036,13 +3038,9 @@ sweep_and_sync() ->
 %% A chunked sweep (BT-4124) spans several gen_server turns: poll until no
 %% continuation is pending. The first call is served after the sweep message.
 wait_sweep_done() ->
-    case gen_server:call(beamtalk_trace_store, sweep_pending) of
-        false ->
-            ok;
-        true ->
-            timer:sleep(5),
-            wait_sweep_done()
-    end.
+    beamtalk_test_wait:until(fun() ->
+        gen_server:call(beamtalk_trace_store, sweep_pending) =:= false
+    end).
 
 sweep_remote_pid_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->

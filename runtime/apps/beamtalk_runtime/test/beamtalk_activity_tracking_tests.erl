@@ -52,8 +52,8 @@ session_connect_updates_activity_test() ->
         %% Get initial activity time
         {ok, InitialTime} = beamtalk_workspace_meta:get_last_activity(),
 
-        %% Wait a moment to ensure time changes
-        timer:sleep(1100),
+        %% Wait for the second-resolution clock to tick past the initial time
+        ok = wait_clock_after(InitialTime),
 
         %% Simulate session connection by calling update_activity
         %% (This is what beamtalk_repl_server does when a session is created)
@@ -80,8 +80,8 @@ actor_spawn_updates_activity_test() ->
         %% Get initial activity time
         {ok, InitialTime} = beamtalk_workspace_meta:get_last_activity(),
 
-        %% Wait a moment
-        timer:sleep(1100),
+        %% Wait for the second-resolution clock to tick past the initial time
+        ok = wait_clock_after(InitialTime),
 
         %% Simulate actor spawn by calling update_activity
         %% (This is what beamtalk_actor:register_spawned does after registration)
@@ -108,8 +108,8 @@ code_reload_updates_activity_test() ->
         %% Get initial activity time
         {ok, InitialTime} = beamtalk_workspace_meta:get_last_activity(),
 
-        %% Wait a moment
-        timer:sleep(1100),
+        %% Wait for the second-resolution clock to tick past the initial time
+        ok = wait_clock_after(InitialTime),
 
         %% Simulate code reload by calling update_activity
         %% (This is what beamtalk_repl_eval:do_load does after module load)
@@ -137,19 +137,19 @@ multiple_activity_updates_test() ->
         {ok, Time1} = beamtalk_workspace_meta:get_last_activity(),
 
         %% Update 1
-        timer:sleep(1100),
+        ok = wait_clock_after(Time1),
         ok = beamtalk_workspace_meta:update_activity(),
         {ok, Time2} = beamtalk_workspace_meta:get_last_activity(),
         ?assert(Time2 > Time1, "First update should increase time"),
 
         %% Update 2
-        timer:sleep(1100),
+        ok = wait_clock_after(Time2),
         ok = beamtalk_workspace_meta:update_activity(),
         {ok, Time3} = beamtalk_workspace_meta:get_last_activity(),
         ?assert(Time3 > Time2, "Second update should increase time"),
 
         %% Update 3
-        timer:sleep(1100),
+        ok = wait_clock_after(Time3),
         ok = beamtalk_workspace_meta:update_activity(),
         {ok, Time4} = beamtalk_workspace_meta:get_last_activity(),
         ?assert(Time4 > Time3, "Third update should increase time")
@@ -171,8 +171,8 @@ mark_activity_delegates_to_workspace_meta_test() ->
         %% Get initial activity time
         {ok, InitialTime} = beamtalk_workspace_meta:get_last_activity(),
 
-        %% Wait a moment
-        timer:sleep(1100),
+        %% Wait for the second-resolution clock to tick past the initial time
+        ok = wait_clock_after(InitialTime),
 
         %% Use the convenience function
         ok = beamtalk_idle_monitor:mark_activity(),
@@ -183,3 +183,8 @@ mark_activity_delegates_to_workspace_meta_test() ->
     after
         gen_server:stop(MetaPid)
     end.
+
+%% Block until the wall clock (second resolution, as workspace_meta stamps
+%% activity) has passed `Time`, so the next update gets a strictly larger value.
+wait_clock_after(Time) ->
+    beamtalk_test_wait:until(fun() -> erlang:system_time(second) > Time end, 2000).

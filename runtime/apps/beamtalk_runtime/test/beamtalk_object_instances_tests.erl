@@ -214,8 +214,10 @@ auto_cleanup_on_process_death_test_() ->
                 %% Kill the process
                 Instance ! stop,
 
-                %% Give the monitor time to fire
-                timer:sleep(50),
+                %% Wait for the monitor to fire and the row to be removed
+                ok = beamtalk_test_wait:until(fun() ->
+                    beamtalk_object_instances:all('Counter') =:= []
+                end),
 
                 %% Should be automatically removed
                 ?assertEqual(0, beamtalk_object_instances:count('Counter')),
@@ -555,13 +557,14 @@ concurrent_registration_stress_test_() ->
 
                 %% Verify count
 
-                % Give ETS time to stabilize
-                timer:sleep(50),
+                %% register/2 is a synchronous call, so the rows are already visible
                 ?assertEqual(NumInstances, beamtalk_object_instances:count('Counter')),
 
                 %% Clean up
                 [Pid ! stop || Pid <- Instances],
-                timer:sleep(100),
+                ok = beamtalk_test_wait:until(fun() ->
+                    beamtalk_object_instances:all('Counter') =:= []
+                end),
 
                 %% Verify all cleaned up
                 ?assertEqual(0, beamtalk_object_instances:count('Counter'))
@@ -620,8 +623,8 @@ handle_cast_ignored_test_() ->
                 %% Send a cast message (not part of API, should be ignored)
                 gen_server:cast(Pid, {unknown, cast}),
 
-                %% Give it time to process
-                timer:sleep(10),
+                %% Wait until the server has processed the cast
+                ok = beamtalk_test_wait:sync(Pid),
 
                 %% Verify server still works
                 ?assertEqual(1, beamtalk_object_instances:count('Counter')),
