@@ -80,6 +80,10 @@ impl OperatorGuard {
                 if kinds.string {
                     tests.push(type_test("is_binary"));
                 }
+                debug_assert!(
+                    !tests.is_empty(),
+                    "a DeclaredComparison guard is built from a non-empty ComparisonKinds"
+                );
                 let mut tests = tests.into_iter();
                 let first = tests.next().unwrap_or_else(|| type_test("is_number"));
                 tests.fold(first, |acc, next| {

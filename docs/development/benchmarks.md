@@ -1846,3 +1846,35 @@ keeps its `make_ref`).
 | `expr: 1` (expression form) | 0.060 – 0.066 | 0.062 – 0.067 |
 
 As for BT-4415, the guard now costs what the expression form costs.
+
+### BT-4823: a comparison on a declared receiver keeps a kind guard
+
+A comparison on an `:: Integer`-style parameter or field is no longer a bare
+BIF, because a declared type is not enforced at run time and Erlang's `<`
+never raises: `nil > 10` answered `true`. It now carries one inline kind test
+(`is_number`, `is_integer` or `is_binary`) and dispatches a receiver that fails
+it. A receiver the compiler proves (a literal, `self` in a builtin class) stays
+bare.
+
+`just bench-vs-elixir` rows 11d–11g (typed `>`/`<`, a `whileTrue:` on a typed
+limit, `max:`): reductions and heap words are identical before and after, and
+the ns differences are inside the run-to-run spread. Typed actor loops
+(`[limit > i] whileTrue:` and `[self.cap > i] whileTrue:` over `state:`) lower
+to the same `StateAcc` shape as before and measured 58.3 → 57.9 and
+75.3 → 77.1 ns per iteration.
+
+The BT-4452 guard clause (`x > 0 ifTrue: [^self one]`, `x :: Integer`) needs
+care: a guarded comparison is not a Boolean by construction, so the rewrite
+decides its condition through `beamtalk_guard_return` instead. Same harness as
+BT-4452 (sealed class method, 2M calls, median of 9, three interleaved runs,
+ns per call):
+
+| Case | base | BT-4823 |
+|---|--:|--:|
+| `guard: 1` (`^self one` taken) | 74.0 / 62.1 / 61.6 | 62.1 / 76.6 / 61.2 |
+| `guard: 0` (falls through) | 41.2 / 41.4 / 38.7 | 40.1 / 43.2 / 41.8 |
+| `expr: 1` (expression form) | 67.7 / 62.7 / 62.6 | 63.7 / 64.2 / 64.6 |
+
+The compiled method has no `make_ref` (the frame stays gone). A two-branch
+guard or a tail conditional on a declared comparison is not covered by the
+helper and keeps its frame again.

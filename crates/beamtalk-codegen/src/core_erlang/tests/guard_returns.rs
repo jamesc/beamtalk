@@ -125,6 +125,40 @@ fn typed_comparison_guard_needs_no_helper() {
 }
 
 #[test]
+fn declared_param_guard_clause_keeps_the_direct_return() {
+    // BT-4823: `x :: Integer` is only declared, so `x > 0` carries a kind
+    // guard and its dispatching arm may answer a non-Boolean. The guard
+    // clause is still a direct return, with the condition decided by
+    // `beamtalk_guard_return`, even though `^self one` has effects.
+    let code = codegen(
+        "Object subclass: G\n\
+         \x20 class sealed one => 1\n\
+         \x20 class sealed guard: x :: Integer =>\n\
+         \x20   x > 0 ifTrue: [^self one]\n\
+         \x20   2\n",
+    );
+    assert_no_nlr_frame(&code);
+    assert!(
+        code.contains("call 'erlang':'is_number'(")
+            && code.contains("call 'beamtalk_guard_return':'if_true'"),
+        "{code}"
+    );
+}
+
+#[test]
+fn declared_param_two_branch_and_tail_guards_keep_their_frame() {
+    // Not a Boolean by construction, and no helper decides a two-branch
+    // conditional: the frame stays (BT-4823).
+    let code = codegen(
+        "Value subclass: W\n\
+         \x20 field: n :: Integer = 0\n\
+         \x20 clamp: x :: Integer =>\n\
+         \x20   x > 100 ifTrue: [^self withN: 100] ifFalse: [self withN: x]\n",
+    );
+    assert!(code.contains("make_ref"), "{code}");
+}
+
+#[test]
 fn guard_with_effectful_return_on_non_boolean_receiver_keeps_its_frame() {
     // `self withN: 0` would run outside the receiver's own `ifTrue:` once
     // rewritten, so only a Boolean by construction may take this shape.

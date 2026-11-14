@@ -20,9 +20,16 @@ block throws the same signal a `^` throws (`?NLR/3` in `beamtalk.hrl`),
 so it unwinds the receiver's method, including across an actor call, exactly
 as the guard's own block did.
 
-The compiler uses this only for a guard whose block is `[^v]` with a `v` that
+The compiler uses this for a guard whose block is `[^v]` with a `v` that
 has no effects, so it makes no difference that `v` is evaluated after the
-receiver's method has unwound rather than inside it.
+receiver's method has unwound rather than inside it. It also uses it for a
+guard on a comparison against a declared parameter (`x > 0 ifTrue: [^self
+one]` with `x :: Integer`, BT-4823), where the comparison answers a Boolean
+while the declaration holds and only a receiver that broke it reaches this
+module. There the block may hold any statements before the `^`, and they run
+after the receiver's own `ifTrue:` has unwound, like `v`. That is the one
+difference from the guard as written, and it shows only for a receiver that
+broke its declaration, defines its own `>` and answers a non-Boolean.
 """.
 
 -include("beamtalk.hrl").
