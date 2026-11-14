@@ -2650,6 +2650,20 @@ bt4808_rebuild_drops_dead_owners_leftover_entries_test() ->
     ?assertEqual(not_found, beamtalk_class_metadata:lookup_method_record(Name, class, gone)),
     true = beamtalk_class_metadata:delete_if_owner(Name, self()).
 
+%% A class tearing itself down whose row is already gone still drops what it
+%% stamped (funs, records, flags, edge); a row naming another owner is left.
+bt4808_delete_if_owner_without_row_drops_own_dependents_test() ->
+    Name = 'BT4808NoRow',
+    Pid = bt4808_builder_class(Name, 'Object', true),
+    ok = beamtalk_class_monitor:unwatch(Name),
+    true = ets:delete(beamtalk_class_metadata, Name),
+    ?assertNot(beamtalk_class_metadata:delete_if_owner(Name, Pid)),
+    ?assertEqual([], ets:match_object(beamtalk_class_method_funs, {{Name, '_'}, '_', '_'})),
+    ?assertNot(beamtalk_class_shadow_flags:is_set(runtime_fun, Name)),
+    ?assertNot(beamtalk_class_shadow_flags:is_set(class_vars, Name)),
+    ?assertNot(lists:member(Name, beamtalk_class_metadata:match_subclasses('Object'))),
+    gen_server:stop(Pid).
+
 bt4808_builder_class(Name, Super, HasClassVars) ->
     beamtalk_class_registry:ensure_pg_started(),
     beamtalk_class_registry:ensure_hierarchy_table(),

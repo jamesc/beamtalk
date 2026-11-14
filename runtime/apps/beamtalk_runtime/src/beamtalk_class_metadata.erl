@@ -50,16 +50,16 @@ absence of the others.
 `beamtalk_class_subclass_index` — a `bag` of `{Superclass, ClassName, Owner}`
 edges (`Owner`: the class process that wrote it, BT-4808), keyed on
 `Superclass` — instead of an `ets:match/2` scan of every row in `?TABLE`. A
-`bag` table (many rows per key) cannot share `?TABLE`'s `set`
-semantics, so this is a genuine second table rather than a field on the
-existing row; the "second table" it replaces is only the mental model of a
-"seventh, independently-lifecycled table" that the original consolidation weighed against — this
-one has no owner module, public API, or lifecycle of its own. It is created
-and destroyed by this module's own `new/0`, and every write that can change a
-row's `superclass` (`insert/5` via `claim_subclass_edge/3`, `merge_identity/5`
-via `sync_subclass_index/3`, `delete/1`, `delete_if_owner/2`) maintains it
-as an internal side effect, keyed off the row's
-*previous* superclass value (read via `field/2` before the write lands) so a
+`bag` table (many rows per key) cannot share `?TABLE`'s `set` semantics, so
+this is a genuine second table rather than a field on the existing row; the
+"second table" it replaces is only the mental model of a "seventh,
+independently-lifecycled table" that the original consolidation weighed
+against — this one has no owner module, public API, or lifecycle of its own.
+It is created and destroyed by this module's own `new/0`, and every write that
+can change a row's `superclass` (`insert/5` via `claim_subclass_edge/3`,
+`merge_identity/5` via `sync_subclass_index/3`, `delete/1`,
+`delete_if_owner/2`) maintains it as an internal side effect, keyed off the
+row's *previous* superclass value (read via `field/2` before the write lands) so a
 re-register that changes superclass removes the stale edge from the old
 parent rather than leaving it to accumulate. Storing the edge independently of
 the superclass's own row (rather than as a `subclasses` list field on it)
@@ -555,8 +555,9 @@ rebuilt under the same name at any point of the teardown replaces the row and
 stamps its own funs, records, flags and edge with its own pid, so none of its
 entries can be matched, and no re-check between steps (or lock on
 registration) is needed. Returns `true` when the claim was won (the dependents
-Owner wrote are gone) and `false` when the row names another owner or is gone
-(nothing is touched).
+Owner wrote are gone) and `false` otherwise. When the row names another owner
+nothing is touched; when the row is already gone, the dependents `Owner` wrote
+are still dropped (they carry its pid, so no other class's can match).
 """.
 -spec delete_if_owner(class_name(), pid()) -> boolean().
 delete_if_owner(Name, Owner) when is_pid(Owner) ->
@@ -582,6 +583,18 @@ delete_if_owner(Name, Owner) when is_pid(Owner) ->
             finish_removal(Name, OldSuperclass, Owner),
             true;
         false ->
+            %% Row gone (e.g. its table was recreated): what `Owner` stamped
+            %% still hangs around, and only `Owner`'s is matched. A row naming
+            %% another owner is a rebuilt class's: leave everything.
+            case lookup_owner(Name) of
+                not_found ->
+                    drop_dependents(Name, Owner),
+                    delete_subclass_edge('_', Name, Owner),
+                    beamtalk_class_shadow_flags:invalidate(Name),
+                    beamtalk_class_derived_cache:invalidate();
+                {ok, _} ->
+                    ok
+            end,
             false
     end.
 
