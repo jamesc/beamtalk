@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4837 / BT-4828 fixture: a protocol in its own file whose provided method
+// raises. An actor in another file `uses:` it, and the actor frame must show
+// this file's line (adr0139_frames.btscript).
+
+Protocol define: Adr0139Provision
+  label -> String
+
+  boomP -> Object => Erlang maps get: #missing from: (Dictionary new)
