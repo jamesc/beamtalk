@@ -1,7 +1,7 @@
 # ADR 0017: Browser Connectivity to Running Workspaces
 
 ## Status
-Implemented (Phases 0–2, 2026-02-17); Phase 3 In Progress (2026-06-06). Phase-1 vanilla-JS browser frontend **removed** (2026-06-06, BT-2415) — superseded by the Phoenix LiveView IDE (ADR 0017 Phase 3 / ADR 0099).
+Implemented (2026-06-07) — Phases 0–2 implemented 2026-02-17 (epic BT-684); Phase 3 Phoenix LiveView IDE (`editors/liveview`, Attach topology) shipped 2026-06-06 (BT-2398: Waves 1–4 BT-2407–BT-2410, BT-2402), with auth + non-localhost deployment delivered by ADR 0091 (BT-2416, 2026-06-07; BT-2411 closed as its duplicate). Phase-1 vanilla-JS browser frontend **removed** (2026-06-06, BT-2415). Debugger integration and the Message Timeline from the Phase 3 list were not built and are not tracked under this ADR.
 
 **Update (2026-06-06, BT-2415):** The Phase-1 vanilla-JS browser workspace has been removed. The static assets (`priv/index.html`, `priv/static/workspace.css`, `priv/static/workspace.js`), the `cowboy_static` dispatch routes that served them (`/` and `/static/[...]`), the separate `--web`/`--web-port` browser HTTP listener (CLI flags, `beamtalk_repl_server` web listener, `web_port` plumbing through the supervisor and CLI), and their tests are gone. The browser surface is now delivered by the Phoenix LiveView IDE, which reaches the term-op layer directly. **What remains:** the `/ws` JSON-over-WebSocket REPL transport (cowboy listener `beamtalk_repl_ws`, `beamtalk_ws_handler`), which is the shared protocol transport for the CLI REPL, MCP, and VS Code clients — this is unaffected. `beamtalk_ws_log_handler` (VS Code Output panel log streaming) and the cowboy/ranch dependencies also remain.
 
@@ -645,8 +645,8 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 
 ## Implementation Tracking
 
-**Epic:** BT-684
-**Status:** Done (Phases 0–2 complete; Phase 3 is a separate Phoenix epic)
+**Epic:** BT-684 (Phases 0–2), BT-2398 (Phase 3)
+**Status:** Done (Phases 0–2 complete 2026-02-17; Phase 3 LiveView IDE complete 2026-06-06, auth via ADR 0091 / BT-2416 2026-06-07)
 
 | Phase | Issue | Title | Size | Status |
 |-------|-------|-------|------|--------|
@@ -657,6 +657,15 @@ Build the workspace experience on Phase 0's validated transport. The browser mus
 | 1 | BT-689 | CLI --web and --web-port flags for browser workspace | S | Done |
 | 1 | BT-722 | Wire new nREPL ops into browser workspace | M | Done |
 | 2 | BT-690 | Actor lifecycle push messages for browser workspace | M | Done |
+| 3 | BT-2394 | Research: Phoenix LiveView topology spike — embed vs attach vs separate | — | Done |
+| 3 | BT-2398 | LiveView IDE: browser workspace on the Attach topology (epic) | XL | Done |
+| 3 | BT-2402 | Port remaining REPL ops to the term contract | — | Done |
+| 3 | BT-2407 | LiveView IDE Wave 1: skeleton app + eval + Transcript panes | — | Done |
+| 3 | BT-2408 | LiveView IDE Wave 2: Inspector + bindings panes | — | Done |
+| 3 | BT-2409 | LiveView IDE Wave 3: method-level edit/save/flush | — | Done |
+| 3 | BT-2410 | LiveView IDE Wave 4: multi-tab / session-resume polish + hot-reload coherence | — | Done |
+| 3 | BT-2415 | Remove the Phase-1 vanilla-JS browser frontend + its --web listener | — | Done |
+| 3 | BT-2411 | LiveView IDE Wave 5: auth + non-localhost deployment | — | Duplicate (of BT-2416, ADR 0091 — Done) |
 
 ## Migration Path
 
