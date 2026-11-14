@@ -196,3 +196,89 @@ fn compile_resolves_qualified_stdlib_use_beside_a_carried_namesake() {
         "expected the stdlib's provisions, not the carried Comparable's: {core_erlang}"
     );
 }
+
+/// BT-4828: `protocol_source_paths` rides beside `protocol_sources` so the
+/// per-file `'__beamtalk_method_lines'/0` table covers an actor method that a
+/// protocol in *another* file provides, with the protocol's file and line.
+/// Without the path the flattened method has no row (REPL/workspace loads
+/// rendered it as `Class>>dispatch`).
+#[test]
+fn compile_with_protocol_source_paths_gives_cross_file_provision_a_method_lines_row() {
+    const PROTOCOL: &str = "// header\n\n\
+         Protocol define: Describable\n\
+         \x20 describe -> String => 1 printString\n";
+    const ACTOR: &str = "Actor subclass: Report\n  uses: Describable\n\n  bump => 1\n";
+    let compile = |with_paths: bool| {
+        let mut request = Map::from([
+            (atom("command"), atom("compile")),
+            (atom("source"), binary(ACTOR)),
+            (atom("source_path"), binary("a.bt")),
+            (atom("module_name"), binary("bt@report")),
+            (
+                atom("protocol_sources"),
+                Term::from(Map::from([(binary("Describable"), binary(PROTOCOL))])),
+            ),
+        ]);
+        if with_paths {
+            request.map.insert(
+                atom("protocol_source_paths"),
+                Term::from(Map::from([(binary("Describable"), binary("b.bt"))])),
+            );
+        }
+        let response = handle_compile(&request);
+        assert_eq!(
+            response_status(&response).as_deref(),
+            Some("ok"),
+            "{response:?}"
+        );
+        response_field_str(&response, "core_erlang").expect("core_erlang")
+    };
+
+    let table_of = |code: &str| -> String {
+        code.split("'__beamtalk_method_lines'/0 = fun")
+            .nth(1)
+            .and_then(|rest| rest.split("'has_method'/1 = fun").next())
+            .unwrap_or_else(|| panic!("expected a method-lines table, got:\n{code}"))
+            .to_string()
+    };
+
+    let without = compile(false);
+    let table = table_of(&without);
+    assert!(
+        table.contains("'bump'") && !table.contains("'describe'"),
+        "without a protocol path the provision has no row, got:\n{table}"
+    );
+
+    let with = compile(true);
+    let table = table_of(&with);
+    assert!(
+        table.contains("'bump'") && table.contains("'describe'"),
+        "with the protocol path the provision has a row, got:\n{table}"
+    );
+    // Each row is `{<<file bytes>>, {Line, Selector}}`; the file is a binary
+    // literal, printed byte by byte.
+    let row_of = |selector: &str| -> String {
+        let marker = format!("{{4, '{selector}'}}");
+        let end = table
+            .find(&marker)
+            .unwrap_or_else(|| panic!("no row for {selector}: {table}"));
+        let start = table[..end].rfind("#{").expect("row start");
+        table[start..end].to_string()
+    };
+    let file_bytes = |file: &str| -> String {
+        file.bytes()
+            .map(|b| format!("#<{b}>(8,1,'integer',['unsigned'|['big']])"))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    // `describe` is on line 4 of the protocol's file `b.bt`; `bump` is on
+    // line 4 of the actor's own `a.bt`.
+    assert!(
+        row_of("describe").contains(&file_bytes("b.bt")),
+        "the provision's row is under the protocol's file and line, got:\n{table}"
+    );
+    assert!(
+        row_of("bump").contains(&file_bytes("a.bt")),
+        "the actor's own row stays under its own file, got:\n{table}"
+    );
+}

@@ -83,6 +83,7 @@ Extracted from beamtalk_repl_eval.
     safe_atom_result/1,
     splice_out_span/2,
     track_protocol_source/2,
+    track_protocol_source/3,
     load_class_binary/4,
     maybe_autoflush/1,
     %% Also a seam for `beamtalk_repl_loader_rewrite_sites_tests.erl`, which
@@ -161,7 +162,7 @@ handle_load(Path, State) ->
                         %% {ok, protocol_definition, Info, Warnings} binding to
                         %% {ok, Binary, ClassNames, ModuleName}.
                         {ok, protocol_definition, ProtocolInfo, _Warnings} ->
-                            track_protocol_source(ProtocolInfo, Source),
+                            track_protocol_source(ProtocolInfo, Source, Path),
                             load_protocol_module(ProtocolInfo, Path, State);
                         {ok, Binary, ClassNames, ModuleName} ->
                             load_compiled_module(
@@ -201,7 +202,7 @@ handle_load(Path, State, PrebuiltIndexes) ->
                     of
                         %% Protocol definition — must match before generic 4-tuple.
                         {ok, protocol_definition, ProtocolInfo, _Warnings} ->
-                            track_protocol_source(ProtocolInfo, Source),
+                            track_protocol_source(ProtocolInfo, Source, Path),
                             load_protocol_module(ProtocolInfo, Path, State);
                         {ok, Binary, ClassNames, ModuleName} ->
                             load_compiled_module(
@@ -224,7 +225,7 @@ handle_load_source(SourceBin, Label, State) ->
     case beamtalk_repl_compiler:compile_file(Source, Label, false, undefined, PrebuiltIndexes) of
         %% Protocol definition — must match before generic 4-tuple.
         {ok, protocol_definition, ProtocolInfo, _Warnings} ->
-            track_protocol_source(ProtocolInfo, Source),
+            track_protocol_source(ProtocolInfo, Source, undefined),
             load_protocol_module(ProtocolInfo, undefined, State);
         {ok, Binary, ClassNames, ModuleName} ->
             load_compiled_module(Binary, ClassNames, ModuleName, Source, undefined, State);
@@ -250,7 +251,15 @@ cannot substitute for this.
 """.
 -spec with_ambient_protocol_sources(map()) -> map().
 with_ambient_protocol_sources(Indexes) ->
-    maps:merge(#{protocol_sources => beamtalk_workspace_meta:all_protocol_sources()}, Indexes).
+    maps:merge(
+        #{
+            protocol_sources => beamtalk_workspace_meta:all_protocol_sources(),
+            %% BT-4828: the paths ride beside the texts, so codegen can
+            %% attribute a cross-file protocol's methods to its own file.
+            protocol_source_paths => beamtalk_workspace_meta:all_protocol_source_paths()
+        },
+        Indexes
+    ).
 
 %% Record this file's protocol source(s) (ADR 0127 §10a / BT-3593) so a
 %% LATER cross-file `uses:` — an ordinary `:load` of a class in a different
@@ -260,9 +269,15 @@ with_ambient_protocol_sources(Indexes) ->
 %% this protocol's own install still has to run, mirroring this module's
 %% other pre-install bookkeeping calls (e.g. `prime_shape_capture/1`).
 -spec track_protocol_source(map(), string()) -> ok.
-track_protocol_source(#{protocols := ProtocolNameBins}, Source) ->
+track_protocol_source(ProtocolInfo, Source) ->
+    track_protocol_source(ProtocolInfo, Source, undefined).
+
+%% BT-4828: also records the protocol file's path (`undefined` for a
+%% REPL-defined protocol) so it can ride to codegen beside the source.
+-spec track_protocol_source(map(), string(), string() | undefined) -> ok.
+track_protocol_source(#{protocols := ProtocolNameBins}, Source, Path) ->
     lists:foreach(
-        fun(NameBin) -> beamtalk_workspace_meta:set_protocol_source(NameBin, Source) end,
+        fun(NameBin) -> beamtalk_workspace_meta:set_protocol_source(NameBin, Source, Path) end,
         ProtocolNameBins
     ).
 
