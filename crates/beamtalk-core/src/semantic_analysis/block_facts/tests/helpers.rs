@@ -232,6 +232,14 @@ fn sbu_cascade_no_ref_is_clean() {
     assert_eq!(stored_block_var_uses(&expr, "blk"), (false, false));
 }
 
+#[test]
+fn sbu_cascade_scans_args_of_folded_first_message() {
+    // The parser folds the first cascade message into the receiver as a MessageSend.
+    // `blk value: blk; value: 1` — blk is both the receiver (safe send) and an arg (unsafe).
+    let expr = parse_first_expr("blk value: blk; value: 1");
+    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, true));
+}
+
 // --- Parenthesized ---
 
 #[test]
