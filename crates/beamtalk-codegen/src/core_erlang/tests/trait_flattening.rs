@@ -148,6 +148,22 @@ fn generate_cross_file(
     protocol_path: &str,
     with_protocol_source: bool,
 ) -> String {
+    generate_cross_file_at(
+        user_src,
+        protocol_src,
+        Some(protocol_path),
+        with_protocol_source,
+    )
+}
+
+/// [`generate_cross_file`] with an optional protocol path (`None`: a
+/// REPL-defined protocol, which has text but no file).
+fn generate_cross_file_at(
+    user_src: &str,
+    protocol_src: &str,
+    protocol_path: Option<&str>,
+    with_protocol_source: bool,
+) -> String {
     let protocol = parse_protocol_file(protocol_src);
     let mut module = parse_fixture(user_src);
     let analysis = analyse_full(
@@ -173,7 +189,7 @@ fn generate_cross_file(
             [(
                 protocol.name.name.clone(),
                 beamtalk_core::semantic_analysis::ProtocolSource {
-                    path: Some(protocol_path.into()),
+                    path: protocol_path.map(Into::into),
                     text: protocol_src.into(),
                     package: None,
                 },
@@ -234,6 +250,26 @@ fn flattened_provision_line_annotation_points_into_the_protocol_file() {
         code.contains("{'file', \"pkg/describable.bt\"}") && code.contains("[5,"),
         "expected the flattened `describe` to be annotated with \
          describable.bt line 5, got:\n{code}"
+    );
+}
+
+/// BT-4817: a flattened provision whose protocol has text but no path (a
+/// REPL-defined protocol) counts its lines through the protocol's text, so
+/// they must not be stamped with the user's file. The stack-frame renderer
+/// reads the `__beamtalk_method_lines/0` rows of a frame's own file; a
+/// protocol-relative line under the user's file would name the wrong method.
+#[test]
+fn flattened_provision_from_pathless_protocol_never_carries_the_users_file() {
+    let code = generate_cross_file_at(REPORT_FILE, DESCRIBABLE_FILE, None, true);
+    assert!(code.contains("describe"), "{code}");
+    // Its line (5, in the protocol) is annotated bare: no `{'file', ..}` entry.
+    let line5 = code
+        .lines()
+        .find(|l| l.contains("-| [5"))
+        .unwrap_or_else(|| panic!("expected a line-5 annotation, got:\n{code}"));
+    assert!(
+        !line5.contains("'file'"),
+        "a pathless protocol's lines must not be stamped with a file, got: {line5}"
     );
 }
 

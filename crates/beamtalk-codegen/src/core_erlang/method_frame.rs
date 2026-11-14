@@ -161,9 +161,13 @@ impl<'a> MethodFrame<'a> {
                 let prev_text = generator
                     .source_text
                     .replace(protocol_source.text.to_string());
-                if let Some(path) = protocol_source.path {
-                    generator.source_path = Some(path.to_string());
-                }
+                // A protocol with no path (REPL-defined) must not borrow the
+                // user's: its lines count through the protocol's text, so
+                // stamping them with the user's file would name a line of a
+                // file they are not in (the stack-frame selector table would
+                // then read them against the user's own methods). Bare line
+                // annotations carry no file, and the renderer falls back.
+                generator.source_path = protocol_source.path.map(|path| path.to_string());
                 (prev_text, prev_path)
             });
 
