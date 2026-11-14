@@ -750,13 +750,13 @@ code_change_callback_test_() ->
     end}.
 
 %%====================================================================
-%% BT-4845: register/2 writes the rows in the caller, casts only the monitor
+%% BT-4845: registration of short-lived and just-registered actors
 %%====================================================================
 
 %% An actor that has already exited when it is registered (the buccaneer
 %% stream shape: `continueWith: #run` then `stopWith:`) must not leave a row
-%% behind: the monitor cast arrives after the insert, gets an immediate
-%% `noproc` DOWN, and the server removes the rows.
+%% behind: the server's monitor gets an immediate `noproc` DOWN, and the
+%% server removes the rows.
 register_of_already_dead_pid_leaves_no_rows_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
@@ -767,7 +767,7 @@ register_of_already_dead_pid_leaves_no_rows_test_() ->
                 end,
                 ok = beamtalk_object_instances:register('Counter', Pid),
                 ok = beamtalk_test_wait:until(fun() ->
-                    ets:lookup(beamtalk_instance_registry, 'Counter') =:= [] andalso
+                    ets:match_object(beamtalk_instance_registry, {{'Counter', '_'}}) =:= [] andalso
                         beamtalk_object_instances:class_of(Pid) =:= undefined
                 end)
             end)
@@ -805,8 +805,8 @@ register_is_visible_on_return_test_() ->
         ]
     end}.
 
-%% unregister/2 right after register/2 removes the rows even if the server has
-%% not yet handled the monitor cast, and the late cast does not bring them back.
+%% unregister/2 right after register/2 removes the rows, and nothing the
+%% server still has queued brings them back.
 unregister_right_after_register_wins_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
         [
@@ -818,9 +818,9 @@ unregister_right_after_register_wins_test_() ->
                 end),
                 ok = beamtalk_object_instances:register('Counter', P),
                 ok = beamtalk_object_instances:unregister('Counter', P),
-                %% Flush the server's mailbox: the cast was queued first.
+                %% Flush the server's mailbox.
                 _ = sys:get_state(beamtalk_object_instances),
-                ?assertEqual([], ets:lookup(beamtalk_instance_registry, 'Counter')),
+                ?assertEqual([], ets:match_object(beamtalk_instance_registry, {{'Counter', '_'}})),
                 ?assertEqual(undefined, beamtalk_object_instances:class_of(P)),
                 P ! stop
             end)
@@ -854,6 +854,137 @@ sync_stale_pass_keeps_rows_registered_after_the_snapshot_test_() ->
                 ?assertEqual(undefined, beamtalk_object_instances:class_of(Orphan)),
                 Live ! stop,
                 Orphan ! stop
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-4842: the registry keeps up with sustained concurrent starts
+%%====================================================================
+
+%% Several processes register short-lived pids as fast as they can for a
+%% while (the buccaneer shape: many connections each starting stream actors).
+%% The registry must keep up: its mailbox stays short the whole time and every
+%% row is gone soon after the last exit.
+%%
+%% With BT-4845's asynchronous `register/2` (rows written by the caller, a
+%% cast for the monitor) nothing held spawners to the server's pace: the
+%% mailbox reached tens of thousands of messages within a second and
+%% throughput fell by more than an order of magnitude.
+sustained_concurrent_register_keeps_up_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            {timeout, 120,
+                ?_test(begin
+                    Spawners = 16,
+                    RunMs = 1500,
+                    Class = bt4842_sustained,
+                    Deadline = erlang:monotonic_time(millisecond) + RunMs,
+                    Parent = self(),
+                    Workers = [
+                        spawn_link(fun() ->
+                            Parent ! {registered, self(), register_until(Class, Deadline, 0)}
+                        end)
+                     || _ <- lists:seq(1, Spawners)
+                    ],
+                    MaxQueue = max_queue_until(Deadline, 0),
+                    Total = lists:sum([
+                        receive
+                            {registered, W, N} -> N
+                        end
+                     || W <- Workers
+                    ]),
+                    %% Each spawner has at most one call queued, and each
+                    %% pid it has registered at most one 'DOWN'.
+                    ?assert(Total > 0),
+                    ?assert(MaxQueue =< 20 * Spawners, {max_queue, MaxQueue, registered, Total}),
+                    ok = beamtalk_test_wait:until(fun() ->
+                        ets:info(beamtalk_instance_registry, size) =:= 0 andalso
+                            ets:info(beamtalk_instance_class, size) =:= 0
+                    end),
+                    ?assertEqual([], beamtalk_object_instances:all(Class))
+                end)}
+        ]
+    end}.
+
+%% Register batches of ten pids that exit at once until `Deadline`; answers how
+%% many were registered.
+register_until(Class, Deadline, N) ->
+    case erlang:monotonic_time(millisecond) >= Deadline of
+        true ->
+            N;
+        false ->
+            lists:foreach(
+                fun(_) ->
+                    Pid = spawn(fun() -> ok end),
+                    ok = beamtalk_object_instances:register(Class, Pid)
+                end,
+                lists:seq(1, 10)
+            ),
+            register_until(Class, Deadline, N + 10)
+    end.
+
+%% The longest registry mailbox seen until `Deadline`, sampled every millisecond.
+max_queue_until(Deadline, Max) ->
+    {message_queue_len, Len} = erlang:process_info(
+        whereis(beamtalk_object_instances), message_queue_len
+    ),
+    case erlang:monotonic_time(millisecond) >= Deadline of
+        true ->
+            max(Max, Len);
+        false ->
+            timer:sleep(1),
+            max_queue_until(Deadline, max(Max, Len))
+    end.
+
+%% The class table is an `ordered_set` keyed `{Class, Pid}`: inserting into a
+%% `bag` keyed by class walks every instance of that class.
+class_table_is_an_ordered_set_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_assertEqual(ordered_set, ets:info(beamtalk_instance_registry, type)),
+            ?_test(begin
+                P = spawn(fun() ->
+                    receive
+                        stop -> ok
+                    end
+                end),
+                ok = beamtalk_object_instances:register('Counter', P),
+                ?assertEqual(
+                    [{{'Counter', P}}],
+                    ets:tab2list(beamtalk_instance_registry)
+                ),
+                P ! stop
+            end)
+        ]
+    end}.
+
+%% A registry upgraded in place (or one that reclaims a table an older server
+%% left with the heir) still has the `bag` of `{Class, Pid}` rows; the
+%% migration keeps every registration.
+bag_table_is_migrated_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(Server) ->
+        [
+            ?_test(begin
+                P = spawn(fun() ->
+                    receive
+                        stop -> ok
+                    end
+                end),
+                %% The table is owned by the server, so swap it there.
+                _ = sys:replace_state(Server, fun(State) ->
+                    true = ets:delete(beamtalk_instance_registry),
+                    beamtalk_instance_registry = ets:new(
+                        beamtalk_instance_registry, [named_table, public, bag]
+                    ),
+                    true = ets:insert(beamtalk_instance_registry, {'Counter', P}),
+                    ok = beamtalk_object_instances:migrate_bag_table(),
+                    State
+                end),
+                ?assertEqual(ordered_set, ets:info(beamtalk_instance_registry, type)),
+                ?assertEqual([P], beamtalk_object_instances:all('Counter')),
+                ?assertEqual(1, beamtalk_object_instances:count('Counter')),
+                P ! stop
             end)
         ]
     end}.

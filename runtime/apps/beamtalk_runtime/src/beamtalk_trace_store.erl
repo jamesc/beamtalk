@@ -1879,7 +1879,7 @@ do_bottlenecks(Limit) ->
         try
             ets:foldl(
                 fun
-                    ({Class, Pid}, Acc) when is_atom(Class), is_pid(Pid) ->
+                    ({{Class, Pid}}, Acc) when is_atom(Class), is_pid(Pid) ->
                         [{Class, Pid} | Acc];
                     %% Another writer's malformed row: skip, never crash
                     %% the query.

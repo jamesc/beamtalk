@@ -232,9 +232,9 @@ instance_registry_reclaims_after_crash() ->
     end),
     ok = beamtalk_object_instances:register(Class, Actor),
     %% Simulate a server killed part-way through a two-table write: an
-    %% `unregister` that dropped the bag row but not the index row (Orphan),
-    %% and a `register` that wrote the bag but not the index (Actor's index
-    %% row removed). The restart must reconcile the index with the bag.
+    %% `unregister` that dropped the class-table row but not the index row (Orphan),
+    %% and a `register` that wrote the class table but not the index (Actor's index
+    %% row removed). The restart must reconcile the index with the class table.
     Orphan = spawn(fun() ->
         receive
             stop -> ok
