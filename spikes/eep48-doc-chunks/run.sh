@@ -47,4 +47,9 @@ if [ -n "${BEAMTALK_LIB:-}" ]; then
   erl -noshell -pa _out $(ls -d "$BEAMTALK_LIB"/*/ebin | grep -v beamtalk_stdlib | sed 's/^/-pa /') -pa "$E" \
       -eval "eep48_runtime_proto:report(\"$E\"), halt()."
   escript e6_mapping_stats.escript "$E"
+  echo "### E10 cost of carrying the docs term inside the Core text"
+  escript e10_carrier_cost.escript "$E"
+  if command -v elixir >/dev/null; then
+    echo "### E11 Elixir and doc/chunks side files"; elixir -pa "$E" e11_elixir_side_file.exs
+  fi
 fi

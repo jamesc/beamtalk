@@ -2,7 +2,7 @@
 
 **Prototype code. Nothing here is on a production code path, and nothing in
 the build references it.** It backs the measurements in
-[ADR 0149](../../docs/ADR/0149-eep48-doc-chunks-via-compiler-extra-chunks.md).
+[ADR 0149](../../docs/ADR/0149-eep48-doc-chunks-for-beamtalk-modules.md).
 
 ## Run it
 
@@ -25,8 +25,10 @@ Output goes to `./_out` (git-ignored). The Elixir and ExDoc steps run only when
 | `e5_memory_loaded.escript` | `code:get_doc/1` for a module loaded with `code:load_binary/3` (a REPL class), four load-path variants |
 | `eep48_runtime_proto.erl` | Builds `docs_v1` from live `class_state` and writes `doc/chunks/<mod>.chunk` side files for the whole stdlib |
 | `e6_mapping_stats.escript` | How selector entries line up with real exports; the cost of flattening inherited methods |
-| `e7_compile_cost.escript` | Compile time with and without the chunk |
+| `e7_compile_cost.escript` | Compile time with and without the chunk, chunk passed out of band (so it does not include the cost of getting the term through Core text; E10 does) |
 | `e9_docs_carrier.escript` | Can codegen hand the finished `docs_v1` term to the build worker inside the Core module? (Not as an attribute; yes as a constant function the worker lifts out.) |
+| `e10_carrier_cost.escript` | End-to-end cost (`core_scan` + `core_parse` + `compile:forms`) of carrying the docs term inside the Core Erlang text, in three encodings, over the whole stdlib |
+| `e11_elixir_side_file.exs` | Does Elixir's `Code.fetch_docs/1` read `doc/chunks/<Mod>.chunk` side files? (Yes.) |
 | `e8_iex.exs` | `Code.fetch_docs/1` and IEx `h` |
 | `e8_exdoc_fake_abstract_code.escript`, `exdoc/` | ExDoc over the prototype `.beam` files, with and without a synthetic Erlang abstract-code chunk |
 | `fixture/` | Two small classes (a `Value` and an `Actor`) and the Erlang/Core baseline for E1 |

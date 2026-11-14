@@ -17,7 +17,7 @@ main([Ebin]) ->
         Hit = fun(L) -> length([E || {{function, N, A}, _, _, _, _} = E <- L, lists:member({N, A}, Ex)]) end,
         {length(Inst), Hit(Inst), length(Cls), Hit(Cls)}
     end || {M, D} <- Ds, filelib:is_file(filename:join(Ebin, atom_to_list(M) ++ ".beam"))],
-    io:format("modules without a .beam (runtime-synthesised classes): ~p~n",
+    io:format("classes whose module is not in this ebin dir (hand-written runtime modules): ~p~n",
               [[M || {M, _} <- Ds, not filelib:is_file(filename:join(Ebin, atom_to_list(M) ++ ".beam"))]]),
     Sum = fun(I) -> lists:sum([element(I, T) || T <- Stats]) end,
     io:format("instance-side entries: ~p, of which {Selector, Arity+1} is a real export: ~p~n"
