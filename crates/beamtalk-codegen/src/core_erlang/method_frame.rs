@@ -151,12 +151,22 @@ impl<'a> MethodFrame<'a> {
         // A `uses:`-flattened method's spans are offsets into its protocol's
         // file, so for the duration of the frame map lines (and stamp the
         // `file` of line annotations) through that protocol's source.
-        let prev_source = generator
-            .flattened_method_source(
-                selector_name.as_str(),
-                boundary == MethodBoundary::ClassMethod,
-            )
-            .map(|protocol_source| {
+        let is_class_method = boundary == MethodBoundary::ClassMethod;
+        let protocol_source =
+            generator.flattened_method_source(selector_name.as_str(), is_class_method);
+        let prev_source = if protocol_source.is_none()
+            && !is_class_method
+            && generator
+                .flattened_method_origin(selector_name.as_str())
+                .is_some()
+        {
+            // Flattened, but its protocol's source is not available: the spans
+            // are offsets into a file we do not have, so any line mapped
+            // through the user's text is made up. Annotate bare (no file)
+            // rather than stamp the user's file with it.
+            Some((generator.source_text.clone(), generator.source_path.take()))
+        } else {
+            protocol_source.map(|protocol_source| {
                 let prev_path = generator.source_path.clone();
                 let prev_text = generator
                     .source_text
@@ -169,7 +179,8 @@ impl<'a> MethodFrame<'a> {
                 // annotations carry no file, and the renderer falls back.
                 generator.source_path = protocol_source.path.map(|path| path.to_string());
                 (prev_text, prev_path)
-            });
+            })
+        };
 
         (
             Self {

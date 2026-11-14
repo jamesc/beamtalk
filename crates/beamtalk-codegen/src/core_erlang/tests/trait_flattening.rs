@@ -279,6 +279,13 @@ fn flattened_provision_from_pathless_protocol_never_carries_the_users_file() {
 /// stack-frame selector table. It gets no row; the actor's own method does.
 #[test]
 fn flattened_provision_without_protocol_source_has_no_method_lines_row() {
+    // `describe` makes a send, which (unlike a literal) carries a line annotation.
+    const SENDING_PROTOCOL: &str = concat!(
+        "// header comment so the provision is not on line 1\n",
+        "// second header line\n\n",
+        "Protocol define: Describable\n",
+        "  describe -> String => 1 printString\n",
+    );
     use std::fmt::Write as _;
     // Long enough that the protocol offset of `describe` falls inside it,
     // so the bug (a made-up row) cannot hide behind an out-of-range offset.
@@ -286,7 +293,7 @@ fn flattened_provision_without_protocol_source_has_no_method_lines_row() {
     for i in 0..12 {
         writeln!(actor, "  bump{i} => {i}").unwrap();
     }
-    let code = generate_cross_file(&actor, DESCRIBABLE_FILE, "pkg/describable.bt", false);
+    let code = generate_cross_file(&actor, SENDING_PROTOCOL, "pkg/describable.bt", false);
     let table = code
         .split("'__beamtalk_method_lines'/0 = fun")
         .nth(1)
@@ -295,6 +302,19 @@ fn flattened_provision_without_protocol_source_has_no_method_lines_row() {
     assert!(
         table.contains("'bump'") && !table.contains("'describe'"),
         "own method only, no row for the flattened `describe`, got:\n{table}"
+    );
+    // The body's line annotations must not carry the user's file with a line
+    // that is really a protocol offset, so no frame reads `report.bt:N` and
+    // gets matched against the user's methods.
+    // `describe`'s own `dispatch/4` clause: up to the next clause.
+    let clause = code
+        .split("<'describe'> when 'true' ->")
+        .nth(1)
+        .and_then(|rest| rest.split("<OtherSelector>").next())
+        .unwrap_or_else(|| panic!("expected a describe clause, got:\n{code}"));
+    assert!(
+        !clause.contains("'file'"),
+        "a provision without protocol source must be annotated bare, got:\n{clause}"
     );
 }
 
