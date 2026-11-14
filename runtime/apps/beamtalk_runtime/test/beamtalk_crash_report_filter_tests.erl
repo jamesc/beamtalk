@@ -212,7 +212,11 @@ await(Match) ->
     end.
 
 drain() ->
-    catch unregister(bt4820_test),
+    try
+        unregister(bt4820_test)
+    catch
+        error:badarg -> ok
+    end,
     true = register(bt4820_test, self()),
     process_flag(trap_exit, true),
     drain_mailbox().
