@@ -1,7 +1,7 @@
 # ADR 0097: Desktop Attach Client — One Front Node per Workspace
 
 ## Status
-Accepted (in progress, 2026-06-13) — all 4 phases + spike landed (BT-2983–BT-2989): front hooks, broker core, Tauri picker UI, Linux/macOS/Windows packaging. Verified end-to-end on macOS (real hands-on `cargo tauri dev` run: picker, attach/detach, window-per-workspace, `Cmd-W` interception, WKWebView rendering under real LiveView traffic — see `desktop/README.md` § Shell decision status). Linux and Windows still unverified; CI release lanes remain `workflow_dispatch`-only pending those.
+Implemented (2026-09-24; accepted 2026-06-13) — Epic BT-2982 Done (2026-08-07): all phases + spike landed (BT-2983–BT-2989, BT-2991, plus hardening BT-3045/BT-3046/BT-3056–BT-3062, BT-3225/BT-3229/BT-3230): front hooks, broker core, Tauri picker UI, Linux/macOS/Windows packaging; hidden-node follow-up BT-3616 Done 2026-09-24. Verified end-to-end on macOS (real hands-on `cargo tauri dev` run: picker, attach/detach, window-per-workspace, `Cmd-W` interception, WKWebView rendering under real LiveView traffic — see `desktop/README.md` § Shell decision status). Outstanding (untracked): hands-on verification on Linux and Windows; `desktop-release.yml` is still `workflow_dispatch`/`workflow_call`-only and not yet wired into `release.yml`.
 
 Builds on [ADR 0091 — Connection Security for Remote Workspace Access](0091-remote-workspace-access-phoenix-authenticated-front.md)
 (the Attach topology and its cookie boundary) and
@@ -605,7 +605,7 @@ CI release lanes. **Not** affected: the wire/RPC/eval layer, the Rust toolchain.
 - BT-2989 — E2E validation + user docs
 - BT-3616 — Follow-up (from [ADR 0126](0126-distribution-location-transparent-actors.md) §9 item 5): `ensure_distributed/0` now starts the front as a **hidden** node (`:net_kernel.start/2` with `hidden: true`), so it no longer appears in the workspace's visible `nodes()`, fires `NodeUp`/`NodeDown`, or joins shape-skew checks / the `global` mesh
 
-**Status:** Planned
+**Status:** Complete — all issues above are Done (epic BT-2982 closed 2026-08-07; BT-3616 closed 2026-09-24).
 
 ## References
 - Related issues: BT-2982 (Epic), BT-2983–BT-2989 (see Implementation Tracking above)

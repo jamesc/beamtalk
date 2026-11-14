@@ -1,7 +1,7 @@
 # ADR 0116: Double-Dispatch Coercion for Number-on-the-Left Arithmetic
 
 ## Status
-Accepted (2026-08-25)
+Implemented (2026-08-25) — Phases 1–4 landed (BT-3262–BT-3266, parent BT-2712); 2026-10-18 addendum follow-ups BT-3892, BT-3924, BT-3925 also Done
 
 ## Context
 
@@ -1016,8 +1016,9 @@ duplicate Epic)
 - BT-3264 — BUnit tests for number-on-the-left arithmetic coercion (Phase 3; blocked by BT-3263)
 - BT-3265 — Benchmark + language docs for number-on-the-left arithmetic (Phase 4; blocked by BT-3263)
 - BT-3266 — Right-operand untyped `self.<field>` gap: design decision (accepted, not fixed — see Addendum above)
+- BT-3892, BT-3924, BT-3925 — 2026-10-18 addendum follow-ups (untyped/union `self.<field>` guarding, comparison guard inversion, Actor `state:` fields)
 
-**Status:** Planned
+**Status:** Complete — all issues Done (BT-3262–BT-3266 closed 2026-08-25, BT-2712 closed 2026-08-25; addendum issues closed 2026-10-18)
 
 ## References
 - Related issues: BT-2712 (this ADR), BT-2708 (epic), BT-2709 (Phase 1,

@@ -3,6 +3,14 @@
 ## Status
 Proposed (2026-05-24)
 
+**Status note (2026-11-14):** no decision has been recorded and no implementation
+work was planned for this ADR's L1/L2 VS Code surfaces — there is no
+`beamtalk-live://` content provider, no `beamtalk-image:/` `FileSystemProvider`,
+and no `aClass sourceString` accessor in the tree. Several later ADRs and the
+LiveView IDE op layer cite it as the "read-surface" (ADR 0091, ADR 0096; BT-2408),
+and the live-image browse/edit role has largely been taken up by the LiveView IDE
+(ADR 0017 Phase 3, ADR 0096 System Browser) rather than VS Code.
+
 ## Context
 
 ### Problem
