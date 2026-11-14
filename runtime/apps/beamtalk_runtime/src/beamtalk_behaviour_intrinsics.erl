@@ -1624,9 +1624,11 @@ classReload(Self) ->
             catch
                 error:undef -> ok
             end,
-            case erlang:apply(beamtalk_repl_eval, reload_class_file, [SourcePathStr, ClassName]) of
+            case beamtalk_workspace_callback:reload_class_file(SourcePathStr, ClassName) of
                 {ok, _Classes} ->
                     Self;
+                {error, no_workspace} ->
+                    beamtalk_capability:raise_no_workspace(reload, ClassName);
                 {error, {class_not_found, _, Path, Defined}} ->
                     Error0 = beamtalk_error:new(reload_failed, ClassName),
                     DefinedStr = lists:join(<<", ">>, [list_to_binary(D) || D <- Defined]),

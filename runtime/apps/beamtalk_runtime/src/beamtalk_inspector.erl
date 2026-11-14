@@ -1048,20 +1048,18 @@ evaluate(#{subject := Subject}, Src) ->
     eval_value(Subject, to_source(Src)).
 
 %% Compile and evaluate `Source` (a string) with `self` bound to `Self`,
-%% delegating to the workspace eval pipeline via `erlang:apply` to keep
-%% `beamtalk_runtime` free of a compile-time dependency on `beamtalk_workspace`
-%% (the same indirection `beamtalk_behaviour_intrinsics` uses for live patches).
+%% delegating to the workspace eval pipeline through `beamtalk_workspace_callback`
+%% (`beamtalk_runtime` has no compile-time dependency on `beamtalk_workspace`).
 %% A workspace that is not running, or an internal failure, degrades to an
 %% `eval_unavailable` error — never a crash.
 -spec eval_value(term(), string()) -> {ok, term()} | {error, #beamtalk_error{}}.
 eval_value(Self, Source) ->
-    try erlang:apply(beamtalk_repl_eval, eval_with_self, [Self, Source]) of
+    try beamtalk_workspace_callback:eval_with_self(Self, Source) of
         {ok, Value} -> {ok, Value};
+        {error, no_workspace} -> {error, eval_unavailable_error()};
         {error, #beamtalk_error{} = Err} -> {error, Err};
         {error, Reason} -> {error, eval_failed_error(Reason)}
     catch
-        error:undef ->
-            {error, eval_unavailable_error()};
         %% BT-3735: a `^` from a captured block is control flow for a catch
         %% frame further up the caller's stack; pass it through.
         throw:Nlr:NlrStack when ?IS_NLR(Nlr) ->

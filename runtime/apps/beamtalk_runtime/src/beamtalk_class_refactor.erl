@@ -30,14 +30,16 @@ introspection; the code moved verbatim.
 * `beamtalk_refactor_support` — reentrancy/capability guards and the
   removal change-log helpers shared with `beamtalk_behaviour_intrinsics`
   and `beamtalk_selector_refactor`.
-* **Workspace layer (dynamic).** The runtime application cannot depend on
+* **Workspace layer.** The runtime application cannot depend on
   `beamtalk_workspace` or `beamtalk_compiler` at compile time (they sit
-  above it), so every call into them goes through `erlang:apply/3` and is
-  invisible to `rebar3 xref`. Here these are `beamtalk_repl_eval`
-  (`rewrite_sites/2`, `validate_sites/2`, `emit_rewrite_change_entry/2`,
-  `remove_method/4`, `emit_remove_change_entry/5`,
-  `emit_extension_remove_change_entry/7`, `compile_method/N`,
-  `precheck_method/N`), `beamtalk_repl_loader:class_source_file/1`,
+  above it). Calls into `beamtalk_repl_eval` (`rewrite_sites/2`,
+  `validate_sites/2`, `emit_rewrite_change_entry/2`, `remove_method/4`,
+  `emit_remove_change_entry/5`, `emit_extension_remove_change_entry/7`,
+  `compile_method/6`, `precheck_method/4`) go through
+  `beamtalk_workspace_callback`, which xref sees and which answers
+  `{error, no_workspace}` when no workspace is running. The remaining
+  dynamic `erlang:apply/3` calls (invisible to `rebar3 xref`) are
+  `beamtalk_repl_loader:class_source_file/1`,
   `beamtalk_workspace_meta:get_class_source/1` and
   `beamtalk_compiler:resolve_class_span/2` / `resolve_method_span/4`. The
   same indirection is used by `beamtalk_selector_refactor` and
@@ -339,7 +341,7 @@ extension_prev_source(EtsClass, Selector) ->
     end.
 
 %% Best-effort ChangeLog append for an extension removal — mirrors
-%% log_local_removal/3's `error:undef` guard below: the extension install
+%% log_local_removal/3's `no_workspace` handling below: the extension install
 %% already succeeded above, so a missing/unavailable workspace here must
 %% never surface as a caller-visible error.
 -spec log_extension_removal(
@@ -349,13 +351,9 @@ extension_prev_source(EtsClass, Selector) ->
 log_extension_removal(ClassName, Selector, Side, Owner, PrevSource) ->
     ClassNameBin = atom_to_binary(ClassName, utf8),
     {Author, AuthorKind} = beamtalk_refactor_support:current_author_context(),
-    try
-        erlang:apply(beamtalk_repl_eval, emit_extension_remove_change_entry, [
-            ClassNameBin, Selector, Side, Owner, PrevSource, Author, AuthorKind
-        ])
-    catch
-        error:undef -> ok
-    end,
+    _ = beamtalk_workspace_callback:emit_extension_remove_change_entry(
+        ClassNameBin, Selector, Side, Owner, PrevSource, Author, AuthorKind
+    ),
     ok.
 
 %% `Self`'s removal side and class pid. A metaclass-tagged receiver
@@ -382,8 +380,7 @@ extension_ets_class(ClassName, class) -> beamtalk_class_registry:class_object_ta
 %% by ADR 0112 rather than duplicated — see the ADR's *Implementation*
 %% section), with the stdlib gate relaxed (the `allow_stdlib` policy)
 %% since `removeSelector:` installs unconditionally. Routed via
-%% `erlang:apply/3` to avoid a compile-time dependency from `beamtalk_runtime`
-%% to `beamtalk_workspace` — the same indirection `do_compile_source/4` uses.
+%% `beamtalk_workspace_callback` (no compile-time dependency on `beamtalk_workspace`).
 %% Raises `no_workspace` when no workspace is running on this node, and a
 %% structured `runtime_error` if the removal itself fails (recompile error). Best-effort logs a
 %% `"remove-method"` ChangeLog entry after a successful removal (ADR 0112
@@ -392,14 +389,13 @@ extension_ets_class(ClassName, class) -> beamtalk_class_registry:class_object_ta
 remove_local_method(ClassName, Selector, Side) ->
     ok = beamtalk_capability:require_workspace('removeSelector:', ClassName),
     ClassNameBin = atom_to_binary(ClassName, utf8),
-    case
-        erlang:apply(beamtalk_repl_eval, remove_method, [
-            ClassNameBin, Selector, Side, allow_stdlib
-        ])
-    of
+    case beamtalk_workspace_callback:remove_method(ClassNameBin, Selector, Side, allow_stdlib) of
         {ok, _} ->
             log_local_removal(ClassNameBin, Selector, Side),
             ok;
+        {error, no_workspace} ->
+            %% The workspace stopped after the require_workspace guard above.
+            beamtalk_capability:raise_no_workspace('removeSelector:', ClassName);
         {error, #beamtalk_error{} = Structured} ->
             %% A refusal the workspace already worded (e.g. a stdlib protocol,
             %% a protocol edit rejected by its users' recompile).
@@ -416,20 +412,14 @@ remove_local_method(ClassName, Selector, Side) ->
 %% 0112 Phase 3) — the install already succeeded above, so a logging
 %% failure must never surface to the caller. `emit_remove_change_entry/5`
 %% already self-swallows every internal failure (mirrors `emit_change_entry/1`
-%% for a patch); the `error:undef` catch here only guards the degenerate case
-%% where the workspace app itself is unreachable, which cannot realistically
-%% happen immediately after the removal above succeeded through the identical
-%% `erlang:apply/3` seam, but is cheap to guard defensively all the same.
+%% for a patch); a `{error, no_workspace}` answer (the workspace stopped
+%% right after the removal above) is ignored.
 -spec log_local_removal(binary(), atom(), instance | class) -> ok.
 log_local_removal(ClassNameBin, Selector, Side) ->
     {Author, AuthorKind} = beamtalk_refactor_support:current_author_context(),
-    try
-        erlang:apply(beamtalk_repl_eval, emit_remove_change_entry, [
-            ClassNameBin, Selector, Side, Author, AuthorKind
-        ])
-    catch
-        error:undef -> ok
-    end,
+    _ = beamtalk_workspace_callback:emit_remove_change_entry(
+        ClassNameBin, Selector, Side, Author, AuthorKind
+    ),
     ok.
 
 -doc """
@@ -493,7 +483,24 @@ classRenameTo(Self, NewName) when is_atom(NewName) ->
     ok = beamtalk_refactor_support:require_class_responsive(ClassPid, OldName, 'renameTo:'),
     ok = ensure_rename_collision_free(OldName, NewName),
     OldNameBin = atom_to_binary(OldName, utf8),
-    Classification = beamtalk_refactor_support:capture_class_removal_snapshot(OldNameBin),
+    %% The stdlib/dependency/dynamic classification comes from the workspace;
+    %% without it a stdlib class would look "dynamic" and be renamed, so fail
+    %% closed (at the classification itself, not in a separate check).
+    Classification =
+        case beamtalk_refactor_support:classify_class(OldNameBin) of
+            {ok, Snapshot} ->
+                Snapshot;
+            {error, no_workspace} ->
+                beamtalk_capability:raise_no_workspace('renameTo:', OldName);
+            {error, {classify_failed, _}} ->
+                %% Unknown stdlib/dependency/dynamic status: refuse rather than guess.
+                beamtalk_error:raise(
+                    beamtalk_error:with_message(
+                        beamtalk_error:new(runtime_error, OldName, 'renameTo:'),
+                        <<"Cannot rename: the workspace failed to classify the class (see the log); refusing rather than guessing whether it is a stdlib or dependency class">>
+                    )
+                )
+        end,
     ok = ensure_class_renamable(OldName, Classification),
     NewNameBin = atom_to_binary(NewName, utf8),
     {DefinitionSite, ReferenceSites} =
@@ -893,9 +900,8 @@ class_source_file_for(ClassNameBin) ->
         error:undef -> undefined
     end.
 
-%% Thin `erlang:apply/3` forwarding to the shared multi-site rewrite
-%% mechanism — same indirection every other cross-app call in this
-%% module already uses. A dynamic class with neither a definition site nor
+%% Thin forwarding to the shared multi-site rewrite mechanism through
+%% `beamtalk_workspace_callback`. A dynamic class with neither a definition site nor
 %% any reference site (never mentioned anywhere in-project) has nothing to
 %% rewrite at all; `rewrite_sites/2` itself refuses that shape
 %% (`{error, no_sites}`) since it is normally a caller bug, but here it is
@@ -932,7 +938,7 @@ rewrite_class_sites(
     {ok, #{definition => undefined, sites => []}};
 rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, _Classification, Selector) ->
     ok = beamtalk_capability:require_workspace(Selector, OldName),
-    erlang:apply(beamtalk_repl_eval, rewrite_sites, [DefinitionSite, ReferenceSites]).
+    beamtalk_workspace_callback:rewrite_sites(DefinitionSite, ReferenceSites).
 
 %% The reference-site rewrite that runs AFTER `install_class_rename/3` has
 %% already moved the registry identity. A `no_workspace` refusal here (the
@@ -943,8 +949,9 @@ rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, _Classification, Se
 -spec rewrite_after_identity_move(atom(), map() | undefined, [map()], map()) ->
     {ok, map()} | {error, term()}.
 rewrite_after_identity_move(OldName, DefinitionSite, ReferenceSites, Classification) ->
-    try
-        rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification)
+    try rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) of
+        {error, no_workspace} -> {error, workspace_unavailable};
+        Result -> Result
     catch
         error:#{error := #beamtalk_error{kind = no_workspace}} ->
             {error, workspace_unavailable}
@@ -963,7 +970,7 @@ validate_class_sites(_OldName, undefined, [], #{not_flushable_reason := <<"dynam
     ok;
 validate_class_sites(OldName, DefinitionSite, ReferenceSites, _Classification) ->
     ok = beamtalk_capability:require_workspace('renameTo:', OldName),
-    erlang:apply(beamtalk_repl_eval, validate_sites, [DefinitionSite, ReferenceSites]).
+    beamtalk_workspace_callback:validate_sites(DefinitionSite, ReferenceSites).
 
 -doc """
 Move the class registry identity from `OldName` to `NewName` after a
@@ -1131,9 +1138,8 @@ compile_source_op(durable) -> 'compile:source:';
 compile_source_op(ephemeral) -> 'tryCompile:source:'.
 
 %% Shared compile-and-install path for compile:source: / tryCompile:source:.
-%% Routes to beamtalk_repl_eval:compile_method/6 via erlang:apply to keep
-%% beamtalk_runtime free of a compile-time dependency on beamtalk_workspace
-%% (the same indirection classReload/1 uses).
+%% Routes to the workspace's compile_method/6 via beamtalk_workspace_callback
+%% (beamtalk_runtime has no compile-time dependency on beamtalk_workspace).
 -spec do_compile_source(#beamtalk_object{}, atom(), binary(), durable | ephemeral) ->
     #beamtalk_object{}.
 do_compile_source(Self, Selector, Source, Intent) ->
@@ -1148,12 +1154,14 @@ do_compile_source(Self, Selector, Source, Intent) ->
     SourceBin = ensure_source_binary(Selector, Source, Intent, ClassName),
     {Author, AuthorKind} = beamtalk_refactor_support:current_author_context(),
     case
-        erlang:apply(beamtalk_repl_eval, compile_method, [
+        beamtalk_workspace_callback:compile_method(
             ClassNameBin, Selector, SourceBin, Intent, Author, AuthorKind
-        ])
+        )
     of
         {ok, _ClassNameBin} ->
             Self;
+        {error, no_workspace} ->
+            beamtalk_capability:raise_no_workspace(compile_source_op(Intent), ClassName);
         {error, Reason} ->
             Error0 = beamtalk_error:new(compile_failed, ClassName),
             Msg = beamtalk_error:chars_to_binary(
@@ -1196,13 +1204,11 @@ classPrecheckCompileSource(Self, Selector, Source) ->
     %% instance-side only: like classCompileSource/3, the class-side
     %% patch path (`Class class >> sel') does not route through this
     %% primitive — see beamtalk_repl_loader's patch_side/1 callers.
-    case
-        erlang:apply(beamtalk_repl_eval, precheck_method, [
-            ClassNameBin, Selector, SourceBin, instance
-        ])
-    of
+    case beamtalk_workspace_callback:precheck_method(ClassNameBin, Selector, SourceBin, instance) of
         {ok, Result} ->
             precheck_result_to_dictionary(Result);
+        {error, no_workspace} ->
+            beamtalk_capability:raise_no_workspace('precheckCompile:source:', ClassName);
         {error, Reason} ->
             Error0 = beamtalk_error:new(compile_failed, ClassName),
             Msg = beamtalk_error:chars_to_binary(

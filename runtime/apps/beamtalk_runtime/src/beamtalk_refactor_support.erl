@@ -38,6 +38,7 @@ verbatim.
     require_method_capability/3,
     has_runtime_class_fun/2,
     capture_class_removal_snapshot/1,
+    classify_class/1,
     log_class_removal/2,
     current_author_context/0,
     %% Shared by the class-rename and method-rename pipelines (BT-4703).
@@ -170,12 +171,10 @@ has_runtime_class_fun(ClassName, Selector) ->
 %% best-effort snapshot of a class's current full source and its
 %% on-disk flushability classification, taken by
 %% classRemoveFromSystemByName/1 before its teardown begins (see that call
-%% site's comment for why the ordering matters). Routed via `erlang:apply/3`
-%% to avoid a compile-time dependency from `beamtalk_runtime` to
-%% `beamtalk_workspace` — the same indirection `remove_local_method/3` uses.
-%% Degrades to a not-flushable/`"dynamic"` snapshot on ANY failure — not just
-%% `error:undef` (the missing-workspace-app case `remove_local_method/3`'s own
-%% catch guards) — because unlike that helper's post-mutation logging, this
+%% site's comment for why the ordering matters). Routed via
+%% `beamtalk_workspace_callback`. Degrades to a not-flushable/`"dynamic"`
+%% snapshot on ANY failure — not just `{error, no_workspace}` (no workspace
+%% running) — because unlike that helper's post-mutation logging, this
 %% call runs BEFORE teardown starts: an uncaught exception here (e.g. a
 %% transient `gen_server:call` failure against `beamtalk_workspace_meta`)
 %% would abort the removal itself, not just degrade its audit trail. A
@@ -183,16 +182,38 @@ has_runtime_class_fun(ClassName, Selector) ->
 %% describe.
 -spec capture_class_removal_snapshot(binary()) -> map().
 capture_class_removal_snapshot(ClassNameBin) ->
-    try
-        erlang:apply(beamtalk_repl_eval, capture_class_removal_snapshot, [ClassNameBin])
-    catch
-        error:undef ->
-            %% Expected when the workspace app isn't running (e.g. plain
-            %% runtime, no live ChangeLog) — not a bug, so no log line.
+    case classify_class(ClassNameBin) of
+        {ok, Snapshot} ->
+            Snapshot;
+        {error, no_workspace} ->
+            %% Expected when no workspace is running (e.g. plain runtime, no
+            %% live ChangeLog) — not a bug, so no log line.
             #{flushable => false, not_flushable_reason => <<"dynamic">>};
+        {error, {classify_failed, _}} ->
+            %% Already logged by classify_class/1.
+            #{flushable => false, not_flushable_reason => <<"dynamic">>}
+    end.
+
+%% The same snapshot, but a missing workspace is reported instead of being
+%% read as "dynamic". For operations that act on the classification (class
+%% rename moves a registry identity, so mistaking a stdlib class for a dynamic
+%% one is not harmless): the answer and the check that a workspace exists
+%% come from ONE callback call, so they cannot disagree. An unexpected failure
+%% is reported as `{error, {classify_failed, _}}` rather than read as
+%% "dynamic": only `capture_class_removal_snapshot/1`, which must never block a
+%% removal, degrades it.
+-spec classify_class(binary()) ->
+    {ok, map()} | {error, no_workspace | {classify_failed, {atom(), term()}}}.
+classify_class(ClassNameBin) ->
+    try beamtalk_workspace_callback:capture_class_removal_snapshot(ClassNameBin) of
+        Snapshot when is_map(Snapshot) ->
+            {ok, Snapshot};
+        {error, no_workspace} ->
+            {error, no_workspace}
+    catch
         Class:Reason:Stack ->
             ?LOG_WARNING(
-                "capture_class_removal_snapshot failed unexpectedly for ~p — logging removal as dynamic",
+                "capture_class_removal_snapshot failed unexpectedly for ~p",
                 [ClassNameBin],
                 #{
                     error_class => Class,
@@ -202,7 +223,7 @@ capture_class_removal_snapshot(ClassNameBin) ->
                     domain => [beamtalk, runtime]
                 }
             ),
-            #{flushable => false, not_flushable_reason => <<"dynamic">>}
+            {error, {classify_failed, {Class, Reason}}}
     end.
 
 %% Best-effort ChangeLog append after a successful class removal,
@@ -215,13 +236,11 @@ capture_class_removal_snapshot(ClassNameBin) ->
 -spec log_class_removal(binary(), map()) -> ok.
 log_class_removal(ClassNameBin, Snapshot) ->
     {Author, AuthorKind} = current_author_context(),
-    try
-        erlang:apply(beamtalk_repl_eval, emit_remove_class_change_entry, [
-            ClassNameBin, Snapshot, Author, AuthorKind
-        ])
-    catch
-        error:undef -> ok
-    end,
+    %% `{error, no_workspace}` (no workspace running) is ignored: no live
+    %% ChangeLog to append to.
+    _ = beamtalk_workspace_callback:emit_remove_class_change_entry(
+        ClassNameBin, Snapshot, Author, AuthorKind
+    ),
     ok.
 
 %% ADR 0125 §1.5: refuse a method-level compile or workspace operation on a
@@ -341,7 +360,9 @@ rename_collision_error(selector, ClassName, NewSelector) ->
 %% a classification with neither a definition nor any reference site.
 -spec rename_rewrite_failed_error(atom(), binary(), binary(), binary(), term()) ->
     #beamtalk_error{}.
-rename_rewrite_failed_error(ErrClass, Op, _Noun, _NoSitesMsg, workspace_unavailable) ->
+rename_rewrite_failed_error(ErrClass, Op, _Noun, _NoSitesMsg, Reason) when
+    Reason =:= workspace_unavailable; Reason =:= no_workspace
+->
     Error0 = beamtalk_error:new(runtime_error, ErrClass),
     beamtalk_error:with_message(
         Error0,
@@ -366,9 +387,5 @@ rename_rewrite_failed_error(ErrClass, _Op, Noun, _NoSitesMsg, Reason) ->
 log_rename_change(Fields, RewriteResult) ->
     {Author, AuthorKind} = current_author_context(),
     Spec = Fields#{intent => durable, author => Author, author_kind => AuthorKind},
-    try
-        erlang:apply(beamtalk_repl_eval, emit_rewrite_change_entry, [Spec, RewriteResult])
-    catch
-        error:undef -> ok
-    end,
+    _ = beamtalk_workspace_callback:emit_rewrite_change_entry(Spec, RewriteResult),
     ok.

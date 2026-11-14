@@ -38,9 +38,12 @@ setup() ->
 setup_workspace() ->
     Result = setup(),
     ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
+    %% BT-4792: install the workspace callback the way the capability guard does.
+    ok = beamtalk_workspace_callback:register(beamtalk_repl_eval),
     Result.
 
 teardown_workspace(ClassNames) ->
+    ok = beamtalk_workspace_callback:unregister(),
     ok = beamtalk_capability:clear(),
     teardown(ClassNames).
 
@@ -2775,7 +2778,8 @@ rewrite_after_identity_move_no_workspace_is_error_tuple_test() ->
     ).
 
 classRenameTo_dynamic_class_reregisters_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    %% renameTo: classifies the class through the workspace callback.
+    {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
         {ClassObj, Pid} = register_class('BT3278RenameEUnitTarget', #{}, #{}),
         Result = beamtalk_class_refactor:classRenameTo(
             ClassObj, 'BT3278RenameEUnitRenamed'
@@ -2788,6 +2792,41 @@ classRenameTo_dynamic_class_reregisters_test_() ->
             ),
             ?_assertEqual(Pid, beamtalk_class_registry:whereis_class('BT3278RenameEUnitRenamed')),
             ?_assertEqual('BT3278RenameEUnitRenamed', gen_server:call(Pid, class_name))
+        ]
+    end}.
+
+%% A classification that crashes must refuse the rename BEFORE any mutation,
+%% not be read as a "dynamic" class (which would let a stdlib class be renamed).
+classRenameTo_refuses_without_mutation_when_classification_fails_test_() ->
+    {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BT4792ClassifyFailTarget', #{}, #{}),
+                Mod = beamtalk_workspace_callback_tests:load_crashing_workspace(),
+                ok = beamtalk_workspace_callback:register(Mod),
+                try
+                    ?assertError(
+                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+                        beamtalk_class_refactor:classRenameTo(
+                            ClassObj, 'BT4792ClassifyFailRenamed'
+                        )
+                    ),
+                    ?assertEqual(
+                        Pid, beamtalk_class_registry:whereis_class('BT4792ClassifyFailTarget')
+                    ),
+                    ?assertEqual(
+                        undefined,
+                        beamtalk_class_registry:whereis_class('BT4792ClassifyFailRenamed')
+                    )
+                after
+                    beamtalk_workspace_callback_tests:unload_crashing_workspace(Mod),
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
         ]
     end}.
 

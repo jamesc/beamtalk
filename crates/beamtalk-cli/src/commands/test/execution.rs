@@ -333,11 +333,17 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     // up by `just coverage-all`'s wildcard merge.
     let (cover_preamble, cover_epilogue) = bunit_cover_fragments(&beam_paths, &runtime_dir);
 
-    // Call beamtalk_test_runner:run_all(Jobs) and serialize result to JSON
+    // `beamtalk test` runs no workspace supervisor, so nothing registers the
+    // workspace callback. Register `beamtalk_repl_eval` when its code is loadable so
+    // the runtime's pure classification/compile calls answer as they did before they
+    // went through `beamtalk_workspace_callback`. This leaves a registered callback
+    // with no recorded capabilities, a combination only `beamtalk test` produces; a
+    // workspace supervisor started and stopped by a test restores it when it stops.
     let eval_cmd = format!(
         "{cover_preamble}\
          {{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
          application:set_env(beamtalk_stdlib, full_traces, {full_traces}), \
+         ok = beamtalk_workspace_callback:register_if_loaded(beamtalk_repl_eval), \
          {root_package_start}\
          {hex_deps_start_cmd}\
          {load_cmd}\
@@ -552,8 +558,11 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
     // parses EUnit's own summary lines to get exact pass/fail counts
     // (e.g. "  2 tests passed." or "  Failed: 1.  Skipped: 0.  Passed: 2.")
     // rather than relying on the coarse ok/error return value.
+    // The workspace callback is registered here for the same reason as in
+    // `run_bunit_tests`.
     let eval_cmd = format!(
         "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+         ok = beamtalk_workspace_callback:register_if_loaded(beamtalk_repl_eval), \
          {root_package_start}\
          {hex_deps_start_cmd}\
          Mods = [{module_list}], \
