@@ -347,7 +347,7 @@ EUnit suite and the Rust `StackFrameInfo` test both check.
 
 | Surface | Where the frames appear |
 |---------|-------------------------|
-| REPL protocol | `frames` on an `eval` error response: the complete list, innermost first, hidden frames flagged. Absent when no stacktrace was captured. |
+| REPL protocol | `frames` on an `eval` error response over the WebSocket (the path the REPL and MCP use): the complete list, innermost first, hidden frames flagged. Absent when no stacktrace was captured, and on the dist-attached term path (`{error, #beamtalk_error{}, ...}` carries no stacktrace). |
 | MCP | `evaluate` error results carry the same list as `structuredContent.frames`; the text content is unchanged. |
 | LSP | `surface-specific`: no LSP payload carries a stack trace today, so there is nothing to pass through. |
 | JSON logs | The `stacktrace` field is an array of these frames (was a newline-joined string); the raw `mfa` field is unchanged. |

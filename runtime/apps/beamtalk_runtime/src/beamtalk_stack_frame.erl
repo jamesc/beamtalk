@@ -221,11 +221,11 @@ structured_frame(Frame) ->
     Module = maps:get(module, Frame, undefined),
     Function = maps:get(function, Frame, undefined),
     #{
-        <<"display">> => format_frame(Frame),
+        <<"display">> => utf8(format_frame(Frame)),
         <<"module">> => null_if_undefined(Module),
         <<"function">> => null_if_undefined(Function),
         <<"arity">> => maps:get(arity, Frame, 0),
-        <<"file">> => null_if_nil(maps:get(file, Parts)),
+        <<"file">> => utf8(null_if_nil(maps:get(file, Parts))),
         <<"line">> => null_if_nil(maps:get(line, Parts)),
         <<"hidden">> => maps:get(visible, Frame, true) =:= false
     }.
@@ -237,6 +237,17 @@ hidden ones flagged and kept (the complete unfiltered list).
 -spec structured_frames(list()) -> [#{binary() => term()}].
 structured_frames(Stacktrace) ->
     [structured_frame(F) || F <- wrap(Stacktrace)].
+
+%% The structured form is JSON-encoded later, outside any caller's try: a
+%% display text or path that is not valid UTF-8 must not make that raise.
+-spec utf8(term()) -> term().
+utf8(Bin) when is_binary(Bin) ->
+    case unicode:characters_to_binary(Bin) of
+        Valid when is_binary(Valid) -> Valid;
+        _ -> unicode:characters_to_binary(Bin, latin1)
+    end;
+utf8(Other) ->
+    Other.
 
 -spec null_if_undefined(term()) -> term().
 null_if_undefined(undefined) -> null;

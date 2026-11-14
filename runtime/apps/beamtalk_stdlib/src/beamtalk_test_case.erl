@@ -689,7 +689,8 @@ The structured form of the frames `format_stacktrace/1` renders (BT-4355).
 One map per rendered line, innermost first: `class`, `selector`, `block`
 (compiler-lifted block marker), `file` (display path or `nil`), `line` (`nil`
 when unknown) and `repeat` (adjacent identical frames collapsed into this one,
-the `[xN]` marker), plus `structured`, the `beamtalk_stack_frame:structured_frame/1`
+the `[xN]` marker; the entry keeps the first collapsed frame's raw MFA, so
+repeats whose lifted-fun names differ name only one of them), plus `structured`, the `beamtalk_stack_frame:structured_frame/1`
 map carrying the display string, raw module/function/arity and `hidden` flag
 (ADR 0139, decision 4). Built from the same selection and
 `beamtalk_stack_frame:frame_parts/1` as the text, so the two cannot disagree.

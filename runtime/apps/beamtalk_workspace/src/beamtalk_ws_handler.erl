@@ -136,12 +136,14 @@ websocket_info(
 ->
     WrappedReason = beamtalk_repl_errors:ensure_structured_error(Reason),
     Location = extract_compile_error_location(Reason),
+    %% Frames come from the raw reason: `ensure_structured_error/1` drops them.
+    Metadata = maps:merge(Location, beamtalk_repl_protocol:frames_metadata(Reason)),
     Response = beamtalk_repl_json:encode_error(
         WrappedReason,
         Msg,
         Output,
         Warnings,
-        Location
+        Metadata
     ),
     {[{text, Response}], State#ws_state{
         pending_eval = undefined,

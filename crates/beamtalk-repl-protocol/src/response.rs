@@ -77,7 +77,11 @@ pub struct ReplResponse {
     /// The raised exception's complete stack, innermost first (error
     /// responses, ADR 0139 decision 4). Every frame carries both forms and a
     /// `hidden` flag; hidden frames are present, not removed.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_frames_leniently",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub frames: Option<Vec<StackFrameInfo>>,
 
     // --- Session / bindings ---
@@ -266,6 +270,16 @@ impl ReplResponse {
     }
 }
 
+/// `frames` is diagnostic data: an off-shape frame must not stop the primary
+/// error from decoding, so any decode failure yields `None`.
+fn deserialize_frames_leniently<'de, D>(d: D) -> Result<Option<Vec<StackFrameInfo>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(value.and_then(|v| serde_json::from_value(v).ok()))
+}
+
 /// One structured stack frame (ADR 0139, decision 4): the display string and
 /// the raw MFA side by side. The key set is pinned to
 /// `tests/repl-protocol/frame_fields.json`, which the Erlang
@@ -396,6 +410,14 @@ mod tests {
         assert!(!frames[0].hidden);
         assert!(frames[1].hidden, "hidden frames are kept, flagged");
         assert_eq!(frames[1].line, None);
+    }
+
+    #[test]
+    fn off_shape_frames_do_not_lose_the_error() {
+        let json = r#"{"error":"boom","status":["done","error"],"frames":[{"display":7}]}"#;
+        let resp: ReplResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.error.as_deref(), Some("boom"));
+        assert!(resp.frames.is_none());
     }
 
     #[test]

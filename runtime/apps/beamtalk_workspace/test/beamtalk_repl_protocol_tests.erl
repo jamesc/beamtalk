@@ -126,29 +126,26 @@ encode_result_new_format_test() ->
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
-%% BT-4819 (ADR 0139 decision 4): an eval error carries the complete frame list,
-%% both forms per frame, hidden frames flagged rather than removed.
-encode_error_carries_structured_frames_test() ->
+%% BT-4819 (ADR 0139 decision 4): the frames come from the raw eval_error
+%% reason, complete, both forms per frame, hidden frames flagged not removed.
+frames_metadata_carries_structured_frames_test() ->
     Stack = [
         {lists, foldl, 3, [{file, "lists.erl"}, {line, 2471}]},
         {gen_server, try_handle_call, 4, [{file, "gen_server.erl"}, {line, 1}]}
     ],
     ExObj = beamtalk_exception_handler:ensure_wrapped(error, badarg, Stack),
-    Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"m1">>, <<"bob">>),
-    Json = beamtalk_repl_protocol:encode_error(
-        {eval_error, error, ExObj}, Msg, fun(_) -> <<"boom">> end
-    ),
-    #{<<"frames">> := [First, Second]} = json:decode(Json),
-    ?assertEqual(<<"lists">>, maps:get(<<"module">>, First)),
+    #{<<"frames">> := [First, Second]} =
+        beamtalk_repl_protocol:frames_metadata({eval_error, error, ExObj}),
+    %% Atoms until `json:encode` (see the WebSocket test for the wire form).
+    ?assertEqual(lists, maps:get(<<"module">>, First)),
     ?assertEqual(<<"lists:foldl/3 (lists.erl:2471)">>, maps:get(<<"display">>, First)),
     ?assertEqual(false, maps:get(<<"hidden">>, First)),
     ?assertEqual(true, maps:get(<<"hidden">>, Second)),
     ?assertEqual(lists:sort(frame_fixture_fields()), lists:sort(maps:keys(First))).
 
-encode_error_without_stacktrace_has_no_frames_test() ->
-    Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"m1">>, <<"bob">>),
-    Json = beamtalk_repl_protocol:encode_error(some_reason, Msg, fun(_) -> <<"boom">> end),
-    ?assertNot(maps:is_key(<<"frames">>, json:decode(Json))).
+frames_metadata_empty_without_stacktrace_test() ->
+    ?assertEqual(#{}, beamtalk_repl_protocol:frames_metadata(some_reason)),
+    ?assertEqual(#{}, beamtalk_repl_protocol:frames_metadata({eval_error, error, #{}})).
 
 frame_fixture_fields() ->
     #{<<"frame_fields">> := Fields} = beamtalk_test_corpus:load_json_fixture([
