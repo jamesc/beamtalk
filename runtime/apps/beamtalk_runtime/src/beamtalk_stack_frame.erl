@@ -75,7 +75,7 @@ Frame table (the first column is what the frame is, not what it is called):
 `classify_frames/1` is the one place that decides which frames a surface lists
 by default; test failure output and `Exception>>stackTrace` use it, and
 `wrap/1` stamps the verdict on each frame as `visible`. Nothing is dropped:
-`beamtalk_exception_handler:frames/1` and `--full-traces` keep the whole
+`beamtalk_exception_handler:frames/1` and `--raw-mfa` keep the whole
 ordered list.
 
 | Frame | Default |
@@ -105,6 +105,7 @@ loaded class modules share it. Which frames are listed is not decided here.
     classify_frames/1,
     visible_frames/1,
     format_frame/1,
+    format_frame_raw/1,
     render_mfa/1,
     render_mfas/1,
     raw_mfa/1,
@@ -578,6 +579,22 @@ format_frame(Frame) ->
                 end
         end,
     <<(head(Parts))/binary, LocationPart/binary>>.
+
+-doc """
+`format_frame/1` with the raw MFA beside the display name:
+`Counter>>increment (counter.bt:12)  [bt@counter:increment/1]`. The text
+renderer behind `--raw-mfa` (ADR 0139, decision 4); a render option chosen by
+the consumer, never a node setting. A frame with no module or function shows
+the display form alone.
+""".
+-spec format_frame_raw(map()) -> binary().
+format_frame_raw(#{module := Module, function := Function, arity := Arity} = Frame) when
+    is_atom(Module), is_atom(Function), Module =/= undefined, Function =/= undefined
+->
+    Raw = raw_mfa({Module, Function, Arity}),
+    <<(format_frame(Frame))/binary, "  [", Raw/binary, "]">>;
+format_frame_raw(Frame) ->
+    format_frame(Frame).
 
 -doc """
 Render a bare `{Module, Function, Arity}` for a human, in the same notation as

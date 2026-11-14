@@ -63,6 +63,8 @@ pub(crate) fn print_help() {
     println!("  :help Erlang <mod> <fn> Show Erlang function docs and type signature");
     println!("  :exit, :q       Exit the REPL");
     println!("  :clear          Clear all variable bindings");
+    println!("  :raw-mfa [on|off]  List every error stack frame with its raw MFA");
+    println!("                  (this session only; bare :raw-mfa toggles)");
     println!("  :bindings       Show current variable bindings");
     println!(
         "  :sync, :s       Sync workspace with project in current dir (requires beamtalk.toml)"

@@ -71,6 +71,13 @@ pub(crate) const EXIT: ReplCommandSpec = ReplCommandSpec {
     takes_class_expr_arg: false,
 };
 
+pub(crate) const RAW_MFA: ReplCommandSpec = ReplCommandSpec {
+    name: ":raw-mfa",
+    aliases: &[],
+    help: "Show every stack frame with its raw module:function/arity for this session: `:raw-mfa [on|off]`",
+    takes_class_expr_arg: false,
+};
+
 pub(crate) const CLEAR: ReplCommandSpec = ReplCommandSpec {
     name: ":clear",
     aliases: &[],
@@ -191,6 +198,7 @@ pub(crate) const REPL_COMMAND_TABLE: &[&ReplCommandSpec] = &[
     &HELP,
     &EXIT,
     &CLEAR,
+    &RAW_MFA,
     &BINDINGS,
     &SYNC,
     &UNLOAD,

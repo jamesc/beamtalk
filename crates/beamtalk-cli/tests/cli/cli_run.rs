@@ -446,3 +446,49 @@ fn dependency_own_stdlib_named_protocol_is_compiled_and_runs_bt_3915() {
         "Rank must not gain the stdlib Comparable's provisions"
     );
 }
+
+/// BT-4821: `beamtalk run --raw-mfa` follows an uncaught error with the whole
+/// stack, each frame's display name beside its raw MFA; the default output
+/// is the message alone.
+#[test]
+fn run_raw_mfa_lists_frames_with_raw_mfa_bt_4821() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Boom.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Boom\n\
+         \n\
+         \x20\x20class run => Error signal: \"bt4821 boom\"\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk_run()
+        .current_dir(project.path())
+        .args(["Boom", "run"])
+        .assert()
+        .failure()
+        .stderr(contains("bt4821 boom"))
+        .stderr(contains("  at ").not());
+
+    cli_common::beamtalk_run()
+        .current_dir(project.path())
+        .args(["Boom", "run", "--raw-mfa"])
+        .assert()
+        .failure()
+        .stderr(contains("bt4821 boom"))
+        .stderr(contains("  at "))
+        .stderr(contains("[beamtalk_script_harness:dispatch/4]"));
+}
+
+#[test]
+fn run_raw_mfa_rejects_service_mode_bt_4821() {
+    let project = cli_common::fixture_project();
+    cli_common::beamtalk_run()
+        .current_dir(project.path())
+        .args([".", "--raw-mfa"])
+        .assert()
+        .failure()
+        .stderr(contains("`--raw-mfa` applies to script mode"));
+}

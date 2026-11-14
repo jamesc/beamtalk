@@ -972,9 +972,9 @@ struct TestPipeline {
     package_ebin_dirs: Vec<Utf8PathBuf>,
     /// Max concurrent test classes (0 = auto, 1 = sequential).
     jobs: usize,
-    /// BT-4355: render the complete filtered stack trace for each failure
-    /// instead of the 3-frame default (`beamtalk test --full-traces`).
-    full_traces: bool,
+    /// BT-4821: raw output (`beamtalk test --raw-mfa`): every frame for each
+    /// failure, hidden ones included, with its raw MFA beside the display name.
+    raw_mfa: bool,
     /// ADR 0072: Hex dependency names that need OTP app startup before tests.
     hex_dep_names: Vec<String>,
     /// Native `EUnit` test module names (modules ending in `_test` or `_tests`).
@@ -1030,7 +1030,7 @@ pub fn run_tests(
     warnings_as_errors: bool,
     jobs: usize,
     quiet: bool,
-    full_traces: bool,
+    raw_mfa: bool,
 ) -> Result<()> {
     info!("Starting BUnit test run");
     let start_time = Instant::now();
@@ -1061,7 +1061,7 @@ pub fn run_tests(
         warnings_as_errors,
         jobs,
     )?;
-    pipeline.full_traces = full_traces;
+    pipeline.raw_mfa = raw_mfa;
 
     // BT-4809: build the packages (rebar3 hex deps, `native/*.erl`) *before*
     // compiling fixtures and test sources, as `beamtalk build` orders native
@@ -1504,7 +1504,7 @@ fn initialize_pipeline(
         package_modules: Vec::new(),
         package_ebin_dirs: Vec::new(),
         jobs,
-        full_traces: false,
+        raw_mfa: false,
         hex_dep_names: Vec::new(),
         native_test_modules: Vec::new(),
     })

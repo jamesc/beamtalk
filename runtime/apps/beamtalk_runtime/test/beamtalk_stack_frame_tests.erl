@@ -825,3 +825,42 @@ print_string_independent_of_hidden_flag_test() ->
     Shown = beamtalk_stack_frame:dispatch('printString', [], Frame#{visible => true}),
     Hidden = beamtalk_stack_frame:dispatch('printString', [], Frame#{visible => false}),
     ?assertEqual(Shown, Hidden).
+
+%%% BT-4821: format_frame_raw/1 puts the raw MFA beside the display name.
+format_frame_raw_appends_raw_mfa_test() ->
+    Frame = make_test_frame(),
+    Display = beamtalk_stack_frame:format_frame(Frame),
+    ?assertEqual(
+        <<Display/binary, "  [beamtalk_integer:+/2]">>,
+        beamtalk_stack_frame:format_frame_raw(Frame)
+    ).
+
+format_frame_raw_without_module_is_display_only_test() ->
+    Frame = (make_test_frame())#{module => undefined},
+    ?assertEqual(
+        beamtalk_stack_frame:format_frame(Frame), beamtalk_stack_frame:format_frame_raw(Frame)
+    ).
+
+%% The Rust `StackFrameInfo::display_raw` renders the same lines from the same fixture.
+format_frame_raw_matches_shared_fixture_test() ->
+    #{<<"cases">> := Cases} = beamtalk_test_corpus:load_json_fixture([
+        "tests", "repl-protocol", "raw_frame_lines.json"
+    ]),
+    lists:foreach(
+        fun(
+            #{
+                <<"module">> := M,
+                <<"function">> := F,
+                <<"arity">> := A,
+                <<"display">> := Display,
+                <<"raw_line">> := Line
+            }
+        ) ->
+            [Frame] = beamtalk_stack_frame:wrap([
+                {binary_to_atom(M, utf8), binary_to_atom(F, utf8), A, []}
+            ]),
+            ?assertEqual(Display, beamtalk_stack_frame:format_frame(Frame)),
+            ?assertEqual(Line, beamtalk_stack_frame:format_frame_raw(Frame))
+        end,
+        Cases
+    ).
