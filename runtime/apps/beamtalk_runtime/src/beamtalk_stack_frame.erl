@@ -23,7 +23,7 @@ StackFrame objects are value types (tagged maps) with fields:
   file => binary() | nil,    % Source file path
   line => non_neg_integer() | nil, % Source line number
   class_name => atom() | nil, % Beamtalk class name (if the runtime class table knows the module)
-  package => binary() | nil   % package qualifier, set only when two loaded classes share the name
+  package => binary() | nil   % package qualifier, set only when two loaded class modules share the name
 }
 ```
 
@@ -53,7 +53,7 @@ Frame table (the first column is what the frame is, not what it is called):
 Names resolve through the runtime class table
 (`beamtalk_class_registry:module_to_class_map/0`); there is no string-guessing
 fallback. A class name is package-qualified (`json@Parser`) only when two
-loaded classes share it. Which frames are listed is not decided here.
+loaded class modules share it. Which frames are listed is not decided here.
 """.
 
 -export([
@@ -188,14 +188,16 @@ shared_class_segments(Frames, ModuleToClass) ->
             #{};
         true ->
             Counts = lists:foldl(
-                fun({Loaded, _}, Acc) ->
+                fun(Loaded, Acc) ->
                     case class_segment(Loaded) of
                         undefined -> Acc;
                         Seg -> Acc#{Seg => maps:get(Seg, Acc, 0) + 1}
                     end
                 end,
                 #{},
-                code:all_loaded()
+                %% The BIF, not code:all_loaded/0: no code_server round trip while
+                %% an exception is being read or a log line formatted.
+                erlang:loaded()
             ),
             maps:filter(fun(_, N) -> N > 1 end, Counts)
     end.
@@ -383,7 +385,7 @@ this, so the text and structured forms cannot drift; BT-4355):
 `kind` (`beamtalk` for a resolved class, `unresolved` for a `bt@...` module
 the class table cannot resolve, `erlang` for any other module, `unknown` when
 the frame has no module), `class` (the class, package-qualified only when two
-loaded classes share the name; else the raw module name; `?` when unknown),
+loaded class modules share the name; else the raw module name; `?` when unknown),
 `selector` (the user-visible selector, without the `class_` prefix and the
 block marker), `class_side`, `block` (true for compiler-lifted funs), `file`
 (the display path, `nil` when unknown) and `line` (`nil` when unknown or 0).
