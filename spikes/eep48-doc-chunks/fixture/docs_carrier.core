@@ -1,0 +1,18 @@
+%% PROTOTYPE fixture (BT-4852, ADR 0149): a whole docs_v1 term carried inside the
+%% Core Erlang module. Binaries are not legal in Core attribute constants
+%% (core_parse: syntax error before '#'), so the carrier is a constant function.
+module 'docs_carrier' ['inc'/1, '__beamtalk_docs'/0, 'module_info'/0, 'module_info'/1]
+    attributes []
+'__beamtalk_docs'/0 =
+    fun () ->
+        {'docs_v1', 1, 'beamtalk', #{#<116>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']])}#,
+          ~{#{#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']])}# => #{#<72>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']])}#}~,
+          ~{'beamtalk_class' => 'AttrDocs'}~,
+          [{{'function', 'inc', 1}, 1, [#{#<105>(8,1,'integer',['unsigned'|['big']])}#], 'none', ~{'selector' => 'inc'}~}]}
+'inc'/1 =
+    fun (_0) -> call 'erlang':'+'(_0, 1)
+'module_info'/0 =
+    fun () -> call 'erlang':'get_module_info'('docs_carrier')
+'module_info'/1 =
+    fun (_0) -> call 'erlang':'get_module_info'('docs_carrier', _0)
+end
