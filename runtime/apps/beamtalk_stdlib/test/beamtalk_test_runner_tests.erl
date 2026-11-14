@@ -764,6 +764,22 @@ live_execution_test_() ->
                 ?assert(maps:get(failed, R) >= 1),
                 ?assert(maps:get(skipped, R) >= 1)
             end},
+            {"run_classes runs only the named classes (BT-4832)", fun() ->
+                %% One synthetic class = testAlpha pass, testBravo fail, testCharlie skip;
+                %% the other registered classes must not be counted.
+                R = beamtalk_test_runner:run_classes([?SYNTH_CLASS], 1),
+                ?assertEqual(3, maps:get(total, R)),
+                ?assertEqual(1, maps:get(passed, R)),
+                ?assertEqual(1, maps:get(failed, R)),
+                ?assertEqual(1, maps:get(skipped, R)),
+                R2 = beamtalk_test_runner:run_classes([?SYNTH_CLASS, 'BtTestRunnerSynthTest2'], 2),
+                ?assertEqual(6, maps:get(total, R2))
+            end},
+            {"run_classes ignores unknown classes and runs nothing for []", fun() ->
+                R = beamtalk_test_runner:run_classes(['NoSuchTestClassBt4832'], 1),
+                ?assertEqual(0, maps:get(total, R)),
+                ?assertEqual(0, maps:get(total, beamtalk_test_runner:run_classes([], 0)))
+            end},
             {"run_all (concurrent) aggregates with wall-clock duration", fun() ->
                 R = beamtalk_test_runner:run_all(2),
                 ?assertEqual('TestResult', maps:get('$beamtalk_class', R)),
