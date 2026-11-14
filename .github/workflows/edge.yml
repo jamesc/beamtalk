@@ -109,6 +109,13 @@ jobs:
           # latest main commit (rolling). --cleanup-tag removes the git tag too.
           gh release delete edge --yes --cleanup-tag 2>/dev/null || true
 
+          # Publish the installer from this commit next to the tarball, with a
+          # checksum, so scripts/refresh-edge.sh can verify it before running
+          # it (BT-4833).
+          mkdir -p dist-installer
+          cp scripts/install.sh dist-installer/install.sh
+          (cd dist-installer && sha256sum install.sh > install.sh.sha256)
+
           gh release create edge \
             --title "Edge Build (${SHORT_SHA})" \
             --notes "Rolling per-merge build from \`main\` at ${DATE}.
@@ -124,4 +131,6 @@ jobs:
             --prerelease \
             --target "${GITHUB_SHA}" \
             "${{ steps.package.outputs.archive }}" \
-            "${{ steps.package.outputs.archive }}.sha256"
+            "${{ steps.package.outputs.archive }}.sha256" \
+            dist-installer/install.sh \
+            dist-installer/install.sh.sha256
