@@ -371,128 +371,63 @@ send_map_size_test() ->
 %%% Reflection methods (class, respondsTo)
 %%% ============================================================================
 
-%% Test class reflection directly via dispatch
-reflection_class_integer_test() ->
-    ?assertEqual('Integer', 'bt@stdlib@integer':dispatch('class', [], 42)),
-    ?assertEqual('Integer', 'bt@stdlib@integer':dispatch('class', [], -100)),
-    ?assertEqual('Integer', 'bt@stdlib@integer':dispatch('class', [], 0)).
+%% BT-4806: the former reflection_class_{integer,string,boolean,nil,block,tuple}_test
+%% functions. Each stdlib module answers `class` for its receiver directly via dispatch.
+reflection_class_test_() ->
+    [
+        {Label, ?_assertEqual(Expected, Mod:dispatch('class', [], Receiver))}
+     || {Label, Mod, Receiver, Expected} <- [
+            {"Integer 42", 'bt@stdlib@integer', 42, 'Integer'},
+            {"Integer -100", 'bt@stdlib@integer', -100, 'Integer'},
+            {"Integer 0", 'bt@stdlib@integer', 0, 'Integer'},
+            {"String hello", 'bt@stdlib@string', <<"hello">>, 'String'},
+            {"String empty", 'bt@stdlib@string', <<>>, 'String'},
+            {"true", 'bt@stdlib@true', true, 'True'},
+            {"false", 'bt@stdlib@false', false, 'False'},
+            {"nil", 'bt@stdlib@undefined_object', nil, 'UndefinedObject'},
+            {"Block", 'bt@stdlib@block', fun() -> ok end, 'Block'},
+            {"Tuple", 'bt@stdlib@tuple', {a, b, c}, 'Tuple'}
+        ]
+    ].
 
-reflection_class_string_test() ->
-    ?assertEqual('String', 'bt@stdlib@string':dispatch('class', [], <<"hello">>)),
-    ?assertEqual('String', 'bt@stdlib@string':dispatch('class', [], <<>>)).
+%% BT-4806: the former reflection_responds_to_{integer,string,boolean,nil,block,tuple,float}_test_
+%% generators. Each row is one `respondsTo:` question put directly to the receiver's stdlib
+%% module: the four selectors every receiver answers, then two it does not.
+reflection_responds_to_test_() ->
+    Specs = [
+        {"Integer", 'bt@stdlib@integer', 42, ['+', 'class', 'abs', 'respondsTo:'], [
+            'unknownMethod', 'fooBar'
+        ]},
+        {"String", 'bt@stdlib@string', <<"hi">>, ['++', 'class', 'size', 'respondsTo:'], [
+            'unknownMethod', '+'
+        ]},
+        {"true", 'bt@stdlib@true', true, ['not', 'class', 'ifTrue:', 'respondsTo:'], [
+            'unknownMethod', '+'
+        ]},
+        {"nil", 'bt@stdlib@undefined_object', nil, ['isNil', 'class', 'ifNil:', 'respondsTo:'], [
+            'unknownMethod', '+'
+        ]},
+        {"Block", 'bt@stdlib@block', fun() -> ok end, ['value', 'class', 'arity', 'respondsTo:'], [
+            'unknownMethod', '+'
+        ]},
+        {"Tuple", 'bt@stdlib@tuple', {a, b, c}, ['size', 'class', 'at:', 'respondsTo:'], [
+            'unknownMethod', '+'
+        ]},
+        {"Float", 'bt@stdlib@float', 3.14, ['+', 'class', 'abs', 'respondsTo:'], [
+            'unknownMethod', 'fooBar'
+        ]}
+    ],
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+        {
+            lists:flatten(io_lib:format("~s ~s ~p", [Name, verb(Expected), Selector])),
+            ?_assertEqual(Expected, Mod:dispatch('respondsTo:', [Selector], Receiver))
+        }
+     || {Name, Mod, Receiver, Yes, No} <- Specs,
+        {Expected, Selector} <- [{true, S} || S <- Yes] ++ [{false, S} || S <- No]
+    ]}.
 
-reflection_class_boolean_test() ->
-    ?assertEqual('True', 'bt@stdlib@true':dispatch('class', [], true)),
-    ?assertEqual('False', 'bt@stdlib@false':dispatch('class', [], false)).
-
-reflection_class_nil_test() ->
-    ?assertEqual('UndefinedObject', 'bt@stdlib@undefined_object':dispatch('class', [], nil)).
-
-reflection_class_block_test() ->
-    ?assertEqual('Block', 'bt@stdlib@block':dispatch('class', [], fun() -> ok end)).
-
-reflection_class_tuple_test() ->
-    ?assertEqual('Tuple', 'bt@stdlib@tuple':dispatch('class', [], {a, b, c})).
-
-%% Test respondsTo reflection directly via dispatch
-reflection_responds_to_integer_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% True cases - methods that exist
-        ?assertEqual(true, 'bt@stdlib@integer':dispatch('respondsTo:', ['+'], 42)),
-        ?assertEqual(true, 'bt@stdlib@integer':dispatch('respondsTo:', ['class'], 42)),
-        ?assertEqual(true, 'bt@stdlib@integer':dispatch('respondsTo:', ['abs'], 42)),
-        ?assertEqual(true, 'bt@stdlib@integer':dispatch('respondsTo:', ['respondsTo:'], 42)),
-
-        %% False cases - methods that don't exist
-        ?assertEqual(false, 'bt@stdlib@integer':dispatch('respondsTo:', ['unknownMethod'], 42)),
-        ?assertEqual(false, 'bt@stdlib@integer':dispatch('respondsTo:', ['fooBar'], 42))
-    end}.
-
-reflection_responds_to_string_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% True cases
-        ?assertEqual(true, 'bt@stdlib@string':dispatch('respondsTo:', ['++'], <<"hi">>)),
-        ?assertEqual(true, 'bt@stdlib@string':dispatch('respondsTo:', ['class'], <<"hi">>)),
-        ?assertEqual(true, 'bt@stdlib@string':dispatch('respondsTo:', ['size'], <<"hi">>)),
-        ?assertEqual(true, 'bt@stdlib@string':dispatch('respondsTo:', ['respondsTo:'], <<"hi">>)),
-
-        %% False cases
-        ?assertEqual(
-            false, 'bt@stdlib@string':dispatch('respondsTo:', ['unknownMethod'], <<"hi">>)
-        ),
-        ?assertEqual(false, 'bt@stdlib@string':dispatch('respondsTo:', ['+'], <<"hi">>))
-    end}.
-
-reflection_responds_to_boolean_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% True cases
-        ?assertEqual(true, 'bt@stdlib@true':dispatch('respondsTo:', ['not'], true)),
-        ?assertEqual(true, 'bt@stdlib@true':dispatch('respondsTo:', ['class'], true)),
-        ?assertEqual(true, 'bt@stdlib@true':dispatch('respondsTo:', ['ifTrue:'], true)),
-        ?assertEqual(true, 'bt@stdlib@true':dispatch('respondsTo:', ['respondsTo:'], true)),
-
-        %% False cases
-        ?assertEqual(false, 'bt@stdlib@true':dispatch('respondsTo:', ['unknownMethod'], true)),
-        ?assertEqual(false, 'bt@stdlib@true':dispatch('respondsTo:', ['+'], true))
-    end}.
-
-reflection_responds_to_nil_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% True cases
-        ?assertEqual(true, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['isNil'], nil)),
-        ?assertEqual(true, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['class'], nil)),
-        ?assertEqual(true, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['ifNil:'], nil)),
-        ?assertEqual(
-            true, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['respondsTo:'], nil)
-        ),
-
-        %% False cases
-        ?assertEqual(
-            false, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['unknownMethod'], nil)
-        ),
-        ?assertEqual(false, 'bt@stdlib@undefined_object':dispatch('respondsTo:', ['+'], nil))
-    end}.
-
-reflection_responds_to_block_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        Block = fun() -> ok end,
-        %% True cases
-        ?assertEqual(true, 'bt@stdlib@block':dispatch('respondsTo:', ['value'], Block)),
-        ?assertEqual(true, 'bt@stdlib@block':dispatch('respondsTo:', ['class'], Block)),
-        ?assertEqual(true, 'bt@stdlib@block':dispatch('respondsTo:', ['arity'], Block)),
-        ?assertEqual(true, 'bt@stdlib@block':dispatch('respondsTo:', ['respondsTo:'], Block)),
-
-        %% False cases
-        ?assertEqual(false, 'bt@stdlib@block':dispatch('respondsTo:', ['unknownMethod'], Block)),
-        ?assertEqual(false, 'bt@stdlib@block':dispatch('respondsTo:', ['+'], Block))
-    end}.
-
-reflection_responds_to_tuple_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        Tuple = {a, b, c},
-        %% True cases
-        ?assertEqual(true, 'bt@stdlib@tuple':dispatch('respondsTo:', ['size'], Tuple)),
-        ?assertEqual(true, 'bt@stdlib@tuple':dispatch('respondsTo:', ['class'], Tuple)),
-        ?assertEqual(true, 'bt@stdlib@tuple':dispatch('respondsTo:', ['at:'], Tuple)),
-        ?assertEqual(true, 'bt@stdlib@tuple':dispatch('respondsTo:', ['respondsTo:'], Tuple)),
-
-        %% False cases
-        ?assertEqual(false, 'bt@stdlib@tuple':dispatch('respondsTo:', ['unknownMethod'], Tuple)),
-        ?assertEqual(false, 'bt@stdlib@tuple':dispatch('respondsTo:', ['+'], Tuple))
-    end}.
-
-reflection_responds_to_float_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% True cases
-        ?assertEqual(true, 'bt@stdlib@float':dispatch('respondsTo:', ['+'], 3.14)),
-        ?assertEqual(true, 'bt@stdlib@float':dispatch('respondsTo:', ['class'], 3.14)),
-        ?assertEqual(true, 'bt@stdlib@float':dispatch('respondsTo:', ['abs'], 3.14)),
-        ?assertEqual(true, 'bt@stdlib@float':dispatch('respondsTo:', ['respondsTo:'], 3.14)),
-
-        %% False cases
-        ?assertEqual(false, 'bt@stdlib@float':dispatch('respondsTo:', ['unknownMethod'], 3.14)),
-        ?assertEqual(false, 'bt@stdlib@float':dispatch('respondsTo:', ['fooBar'], 3.14))
-    end}.
+verb(true) -> "responds to";
+verb(false) -> "does not respond to".
 
 %%% ============================================================================
 %%% perform: dynamic message send tests
@@ -778,11 +713,6 @@ print_string_beamtalk_error_test() ->
     ?assert(is_binary(Result)),
     ?assert(byte_size(Result) > 0).
 
-print_string_set_test() ->
-    Set = #{'$beamtalk_class' => 'Set', elements => [1, 2, 3]},
-    Result = beamtalk_primitive:print_string(Set),
-    ?assertEqual(<<"Set(1, 2, 3)">>, Result).
-
 print_string_plain_map_test_() ->
     {setup,
         fun() ->
@@ -797,31 +727,6 @@ print_string_plain_map_test_() ->
             Result = beamtalk_primitive:print_string(#{a => 1}),
             ?assert(is_binary(Result))
         end}.
-
-print_string_pid_test() ->
-    %% Raw pids (the `Pid` class, ADR-documented in pid.bt) render
-    %% `#Pid<X.Y.Z>` — liveness-agnostic, distinct from pid_label/1's
-    %% liveness-probed `#Actor<>`/`#Dead<>` wire/test-only rendering.
-    Result = beamtalk_primitive:print_string(self()),
-    ?assertMatch(<<"#Pid<", _/binary>>, Result),
-    ?assertEqual($>, binary:last(Result)).
-
-print_string_reference_test() ->
-    Result = beamtalk_primitive:print_string(make_ref()),
-    ?assertMatch(<<"#Ref<", _/binary>>, Result).
-
-print_string_block_test() ->
-    %% A Block reached via direct recursion (e.g. nested inside a
-    %% collection) previously fell into the ~p catch-all as a raw `#Fun<...>`.
-    ?assertEqual(<<"Block/0">>, beamtalk_primitive:print_string(fun() -> ok end)),
-    ?assertEqual(<<"Block/2">>, beamtalk_primitive:print_string(fun(_, _) -> ok end)).
-
-print_string_supervisor_tuple_test() ->
-    %% Without a dedicated clause, a supervisor tuple nested inside a
-    %% collection (printed via direct recursion) fell into the generic
-    %% is_tuple/1 clause and rendered as a raw Erlang tuple.
-    Result = beamtalk_primitive:print_string({beamtalk_supervisor, 'MySup', mysup_mod, self()}),
-    ?assertMatch(<<"Supervisor(MySup, ", _/binary>>, Result).
 
 %%% ============================================================================
 %%% class_of_object/1 Tests
@@ -1050,22 +955,6 @@ display_string_float_test() ->
     Result = beamtalk_primitive:display_string(3.14),
     ?assert(is_binary(Result)),
     ?assert(byte_size(Result) > 0).
-
-display_string_pid_test() ->
-    %% display_string/1 had no is_pid/1 clause at all, so a raw pid
-    %% fell into the ~p catch-all and rendered as the bare Erlang `<0.123.0>`
-    %% instead of matching print_string/1's `#Pid<0.123.0>`.
-    Result = beamtalk_primitive:display_string(self()),
-    ?assertMatch(<<"#Pid<", _/binary>>, Result),
-    ?assertEqual($>, binary:last(Result)).
-
-display_string_reference_test() ->
-    Result = beamtalk_primitive:display_string(make_ref()),
-    ?assertMatch(<<"#Ref<", _/binary>>, Result).
-
-display_string_supervisor_tuple_test() ->
-    Result = beamtalk_primitive:display_string({beamtalk_supervisor, 'MySup', mysup_mod, self()}),
-    ?assertMatch(<<"Supervisor(MySup, ", _/binary>>, Result).
 
 %%% ============================================================================
 %%% send/3 — Boolean dispatch
@@ -1368,12 +1257,6 @@ find_ancestor_file(Dir, RelPath, N) ->
         false -> find_ancestor_file(filename:dirname(Dir), RelPath, N - 1)
     end.
 
-print_string_pid_uses_opaque_ops_test() ->
-    Result = beamtalk_primitive:print_string(self()),
-    ?assert(is_binary(Result)),
-    %% Should have #Pid< prefix from beamtalk_opaque_ops
-    ?assertMatch(<<"#Pid<", _/binary>>, Result).
-
 print_string_port_uses_opaque_ops_test() ->
     {ok, Port} = gen_tcp:listen(0, []),
     try
@@ -1383,12 +1266,6 @@ print_string_port_uses_opaque_ops_test() ->
     after
         gen_tcp:close(Port)
     end.
-
-print_string_reference_uses_opaque_ops_test() ->
-    Ref = make_ref(),
-    Result = beamtalk_primitive:print_string(Ref),
-    ?assert(is_binary(Result)),
-    ?assertMatch(<<"#Ref<", _/binary>>, Result).
 
 print_string_plain_map_empty_test_() ->
     {setup,
@@ -1951,19 +1828,6 @@ module_for_value_tagged_variants_test_() ->
 %%% print_string_map — Set / Array / Stream
 %%% ============================================================================
 
-print_string_map_set_test() ->
-    %% Hand-build a Set-tagged map.
-    SetMap = #{'$beamtalk_class' => 'Set', elements => [1, 2, 3]},
-    Result = beamtalk_primitive:print_string(SetMap),
-    ?assert(is_binary(Result)),
-    %% Should start with "Set("
-    ?assertMatch(<<"Set(", _/binary>>, Result).
-
-print_string_map_array_test() ->
-    ArrMap = #{'$beamtalk_class' => 'Array', data => #{0 => 1, 1 => 2}},
-    Result = beamtalk_primitive:print_string(ArrMap),
-    ?assertMatch(<<"#[", _/binary>>, Result).
-
 %%% ============================================================================
 %%% responds_to — beamtalk_object records with non-class tag
 %%% ============================================================================
@@ -2106,6 +1970,13 @@ print_string_table_test_() ->
             {"list of strings", <<"#(\"a\", \"b\")">>, [<<"a">>, <<"b">>]},
             {"nested tuple", <<"{{1, 2}, {3, 4}}">>, {{1, 2}, {3, 4}}},
             {"empty set", <<"Set()">>, #{'$beamtalk_class' => 'Set', elements => []}},
+            {"set with elements", <<"Set(1, 2, 3)">>, #{
+                '$beamtalk_class' => 'Set', elements => [1, 2, 3]
+            }},
+            %% A Block reached via direct recursion (e.g. nested inside a collection)
+            %% previously fell into the ~p catch-all as a raw `#Fun<...>`.
+            {"block/0", <<"Block/0">>, fun() -> ok end},
+            {"block/2", <<"Block/2">>, fun(_, _) -> ok end},
             {"float -2.5", <<"-2.5">>, -2.5},
             {"float 0.0", <<"0.0">>, 0.0}
         ]
@@ -2141,6 +2012,45 @@ display_string_table_test_() ->
             {"float 0.0", <<"0.0">>, 0.0},
             {"block/0", <<"Block/0">>, fun() -> ok end},
             {"block/1", <<"Block/1">>, fun(_) -> ok end}
+        ]
+    ].
+
+%% BT-4806: the former print_string_{pid,reference,supervisor_tuple,pid_uses_opaque_ops,
+%% reference_uses_opaque_ops,map_set,map_array}_test and display_string_{pid,reference,
+%% supervisor_tuple}_test functions. Receivers whose rendering embeds a runtime-specific id are
+%% checked by prefix (and, for a pid, the closing `>`): {Label, Function, Input, Prefix, Last}.
+%% print_string_port_uses_opaque_ops_test stays separate because it owns a socket.
+print_display_prefix_table_test_() ->
+    Sup = {beamtalk_supervisor, 'MySup', mysup_mod, self()},
+    [
+        {Label, fun() ->
+            Result = beamtalk_primitive:Fn(Input),
+            ?assert(is_binary(Result)),
+            ?assertEqual(Prefix, binary:part(Result, 0, byte_size(Prefix))),
+            case Last of
+                none -> ok;
+                _ -> ?assertEqual(Last, binary:last(Result))
+            end
+        end}
+     || {Label, Fn, Input, Prefix, Last} <- [
+            %% Raw pids (the `Pid` class, pid.bt) render `#Pid<X.Y.Z>`: liveness-agnostic,
+            %% distinct from pid_label/1's liveness-probed `#Actor<>`/`#Dead<>` rendering.
+            {"print_string pid", print_string, self(), <<"#Pid<">>, $>},
+            {"print_string pid uses opaque ops", print_string, self(), <<"#Pid<">>, none},
+            {"print_string reference", print_string, make_ref(), <<"#Ref<">>, none},
+            {"print_string reference uses opaque ops", print_string, make_ref(), <<"#Ref<">>, none},
+            %% Without a dedicated clause a supervisor tuple nested in a collection fell into
+            %% the generic is_tuple/1 clause and rendered as a raw Erlang tuple.
+            {"print_string supervisor tuple", print_string, Sup, <<"Supervisor(MySup, ">>, none},
+            {"print_string Set map", print_string,
+                #{'$beamtalk_class' => 'Set', elements => [1, 2, 3]}, <<"Set(">>, none},
+            {"print_string Array map", print_string,
+                #{'$beamtalk_class' => 'Array', data => #{0 => 1, 1 => 2}}, <<"#[">>, none},
+            %% display_string/1 had no is_pid/1 clause, so a raw pid rendered as the bare
+            %% Erlang `<0.123.0>` instead of matching print_string/1's `#Pid<0.123.0>`.
+            {"display_string pid", display_string, self(), <<"#Pid<">>, $>},
+            {"display_string reference", display_string, make_ref(), <<"#Ref<">>, none},
+            {"display_string supervisor tuple", display_string, Sup, <<"Supervisor(MySup, ">>, none}
         ]
     ].
 
