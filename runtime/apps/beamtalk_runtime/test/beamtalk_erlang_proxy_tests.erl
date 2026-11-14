@@ -2624,9 +2624,9 @@ selector_to_function_conformance_test_() ->
     [
         begin
             #{<<"selector">> := SelectorBin, <<"expected">> := ExpectedBin} = Case,
-            Selector = list_to_atom(binary_to_list(SelectorBin)),
-            Expected = binary_to_list(ExpectedBin),
-            {binary_to_list(SelectorBin), fun() ->
+            Selector = binary_to_atom(SelectorBin, utf8),
+            Expected = unicode:characters_to_list(ExpectedBin),
+            {unicode:characters_to_list(SelectorBin), fun() ->
                 Got = selector_result_to_string(
                     beamtalk_erlang_proxy:selector_to_function(Selector)
                 ),
@@ -2636,5 +2636,5 @@ selector_to_function_conformance_test_() ->
      || Case <- Cases
     ].
 
-selector_result_to_string({ok, Atom}) -> atom_to_list(Atom);
-selector_result_to_string({error, Bin}) -> binary_to_list(Bin).
+selector_result_to_string({ok, Atom}) -> unicode:characters_to_list(atom_to_binary(Atom, utf8));
+selector_result_to_string({error, Bin}) -> unicode:characters_to_list(Bin).
