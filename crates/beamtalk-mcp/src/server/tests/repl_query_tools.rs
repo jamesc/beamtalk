@@ -115,6 +115,90 @@ async fn evaluate_error_includes_line_and_hint() {
     assert!(text.contains("boom"), "expected error message in {text:?}");
 }
 
+/// BT-4830 (ADR 0139, decision 4): a REPL eval-error reply's `frames` pass
+/// through `evaluate` as `structuredContent.frames`, every frame keeping the
+/// key set pinned by `tests/repl-protocol/frame_fields.json`, hidden frames
+/// included and flagged. Offline: a canned reply, no live workspace.
+#[tokio::test]
+async fn evaluate_error_passes_frames_through_as_structured_content() {
+    let fixture_path =
+        beamtalk_workspace::cargo_workspace_root!().join("tests/repl-protocol/frame_fields.json");
+    let fixture: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&fixture_path).expect("read fixture"))
+            .expect("parse fixture");
+    let mut pinned: Vec<String> = fixture["frame_fields"]
+        .as_array()
+        .expect("frame_fields array")
+        .iter()
+        .map(|v| v.as_str().expect("string key").to_owned())
+        .collect();
+    pinned.sort();
+
+    // The wire shape of `beamtalk_stack_frame:structured_frame/1`: every
+    // pinned key present on every frame (null when unknown).
+    let frames = serde_json::json!([
+        {
+            "display": "Counter>>increment (counter.bt:12)",
+            "module": "bt@counter", "function": "increment", "arity": 1,
+            "file": "counter.bt", "line": 12, "hidden": false
+        },
+        {
+            "display": "gen_server:call/3",
+            "module": "gen_server", "function": "call", "arity": 3,
+            "file": null, "line": null, "hidden": true
+        }
+    ]);
+    // Guard the canned reply itself against drifting from the fixture.
+    for frame in frames.as_array().unwrap() {
+        let mut keys: Vec<String> = frame.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, pinned, "canned frame keys drifted from the fixture");
+    }
+
+    let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+        "error": "boom",
+        "status": ["done", "error"],
+        "frames": frames.clone()
+    })))
+    .await;
+    let result = mcp
+        .evaluate(Parameters(EvaluateParams {
+            code: "Counter new increment".to_string(),
+            trace: None,
+        }))
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    let structured = result
+        .structured_content
+        .expect("structuredContent.frames must be present on an eval error with frames");
+    assert_eq!(structured["frames"], frames, "{structured}");
+    for frame in structured["frames"].as_array().unwrap() {
+        let mut keys: Vec<String> = frame.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, pinned, "passed-through frame keys: {frame}");
+    }
+}
+
+/// An eval error whose reply carries no `frames` adds no structured content.
+#[tokio::test]
+async fn evaluate_error_without_frames_has_no_structured_content() {
+    let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+        "error": "boom",
+        "status": ["done", "error"]
+    })))
+    .await;
+    let result = mcp
+        .evaluate(Parameters(EvaluateParams {
+            code: "x".to_string(),
+            trace: None,
+        }))
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    assert!(result.structured_content.is_none());
+}
+
 // --- complete ---
 
 #[tokio::test]
