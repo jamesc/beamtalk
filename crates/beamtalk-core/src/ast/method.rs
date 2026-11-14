@@ -539,3 +539,37 @@ mod tests {
         );
     }
 }
+
+/// A method that repeats an earlier definition's `(selector, kind)` in one
+/// method list (BT-4811).
+#[derive(Debug, Clone, Copy)]
+pub struct DuplicateMethod<'a> {
+    /// The repeated (later) definition.
+    pub method: &'a MethodDefinition,
+    /// Span of the first definition with the same `(selector, kind)`.
+    pub first_span: Span,
+}
+
+/// Every method in `methods` (one class side's list) that repeats an earlier
+/// `(selector, kind)`, in source order.
+///
+/// The one rule for "duplicate method": semantic analysis reports each result
+/// as a diagnostic and codegen refuses the first one as a backstop.
+#[must_use]
+pub fn duplicate_methods(methods: &[MethodDefinition]) -> Vec<DuplicateMethod<'_>> {
+    let mut seen: std::collections::HashMap<(EcoString, MethodKind), Span> =
+        std::collections::HashMap::new();
+    let mut dups = Vec::new();
+    for method in methods {
+        match seen.entry((method.selector.name(), method.kind)) {
+            std::collections::hash_map::Entry::Occupied(first) => dups.push(DuplicateMethod {
+                method,
+                first_span: *first.get(),
+            }),
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                slot.insert(method.span);
+            }
+        }
+    }
+    dups
+}
