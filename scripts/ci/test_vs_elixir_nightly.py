@@ -27,8 +27,9 @@ REPORT = """# vs-elixir bench
 
 
 def results(**ns):
+    """Rows with a constant Elixir control of 100 ns, so BT/EX moves with bt_ns."""
     return {"meta": {}, "rows": {k: {"label": k, "bt_ns": x, "bt_red": 1.0, "bt_words": 1.0,
-                                      "ex_ns": 1.0, "ex_red": 1.0, "ex_words": 1.0}
+                                      "ex_ns": 100.0, "ex_red": 1.0, "ex_words": 1.0}
                                   for k, x in ns.items()}}
 
 
@@ -89,6 +90,22 @@ class Compare(unittest.TestCase):
     def test_faster_and_new_rows_pass(self):
         code, _ = self.run_cmp(results(**{"7a": 10.0, "16a": 500.0}), results(**{"7a": 100.0}))
         self.assertEqual(code, 0)
+
+    def test_slow_runner_night_does_not_trip(self):
+        # BT and the Elixir control both 50% slower: the ratio is unchanged.
+        cur = results(**{"7a": 150.0})
+        cur["rows"]["7a"]["ex_ns"] = 150.0
+        base = results(**{"7a": 100.0})
+        base["rows"]["7a"]["ex_ns"] = 100.0
+        code, _ = self.run_cmp(cur, base)
+        self.assertEqual(code, 0)
+
+    def test_bt_only_slowdown_trips_even_on_a_fast_runner(self):
+        cur = results(**{"7a": 90.0})      # BT 10% faster in absolute terms...
+        cur["rows"]["7a"]["ex_ns"] = 60.0  # ...but the control is 40% faster
+        code, s = self.run_cmp(cur, results(**{"7a": 100.0}))
+        self.assertEqual(code, 1)
+        self.assertIn("REGRESSED", s)
 
     def test_baseline_row_missing_tonight_fails(self):
         code, s = self.run_cmp(results(**{"7a": 100.0}), results(**{"7a": 100.0, "7b": 100.0}))

@@ -49,15 +49,13 @@ with the previous night. Nothing else in this directory changes.
 | Rows | 7a-7d (actor sync read, state update, cast, `self hasField:`) and 16a-16d (actor start-up: async start + `continueWith:` + stop, with args, plain `Actor` spawn + stop, 100 in flight) |
 | Rounds | 5 (`BENCH_ROUNDS` in the workflow); row 0 always runs |
 | Recorded | Beamtalk ns/op, reductions/op and words/op, net of the loop baseline, plus Elixir ns/op measured in the same node as a control |
-| Gate | Beamtalk **ns/op** only. A row fails when it is more than **25%** above the baseline (`THRESHOLD_PCT`). Reductions and words are shown, never gated: BT-4842 showed reductions staying flat while latency rose 5x |
+| Gate | Time only: Beamtalk ns/op **relative to the Elixir ns/op of the same row** (BT/EX), timed in the same node and rounds. A row fails when that ratio is more than **25%** above the baseline's (`THRESHOLD_PCT`), or when a baseline row is missing tonight. Reductions and words are shown, never gated: BT-4842 showed reductions staying flat while latency rose 5x. The ratio is used because shared runners vary by tens of percent night to night: two runs of identical code differed by 30% in raw ns, and the Elixir control moved with them |
 | Baseline | the `vs-elixir-nightly` artifact (`results.json`) of the latest earlier run on the same branch. It is uploaded only when the check passes, so a regressed night never becomes the baseline |
 | First run | no earlier artifact: the table shows the current figures, the check passes and the night becomes the baseline |
 | Output | a before/after table in the job summary on every run; the full report is the `vs-elixir-nightly-report` artifact |
 
-The 25% is a starting point. Shared runners are noisy and the fast rows are
-short, so tune `THRESHOLD_PCT` (or the rows) once a week of nightlies shows the
-spread; the Elixir control column in the summary shows whether a night was
-slow across the board.
+The 25% is a starting point; the fast rows are short, so tune `THRESHOLD_PCT` (or the rows) once a week of nightlies shows the
+spread; the summary shows raw ns and the Elixir control beside the gated ratio.
 
 To try it on a branch: run the Nightly workflow with `workflow_dispatch`,
 `bench_only` set (skips the macOS, Windows and dist jobs). The first dispatch

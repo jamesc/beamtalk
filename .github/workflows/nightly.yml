@@ -398,7 +398,8 @@ jobs:
   # ─── vs-elixir actor rows: time compared with the previous night (BT-4844) ─
   # Runs rows 7a-7d and 16a-16d of benchmarks/vs-elixir, stores the result as
   # an artifact only when the check passes, and fails when a row's Beamtalk
-  # ns/op is more than 25% above the last stored night of the same branch.
+  # ns/op, relative to the same row's Elixir control, is more than 25% above
+  # the last stored night of the same branch.
   # See benchmarks/vs-elixir/README.md § Nightly subset.
   vs-elixir-bench:
     needs: check-activity

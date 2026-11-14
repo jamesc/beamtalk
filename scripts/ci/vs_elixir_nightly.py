@@ -48,6 +48,14 @@ def parse_report(text):
     return rows
 
 
+def rel(r):
+    """Beamtalk ns/op relative to the Elixir control timed in the same node and
+    rounds. Shared runners vary by tens of percent from night to night
+    (identical code measured -30% and +56% on the Elixir side alone), and that
+    variation moves both sides; the ratio cancels it."""
+    return r["bt_ns"] / r["ex_ns"] if r.get("ex_ns", 0) > 0 else r["bt_ns"]
+
+
 def pct(cur, base):
     if base is None or base <= 0:
         return None
@@ -60,16 +68,18 @@ def compare(current, baseline, threshold):
     base_rows = (baseline or {}).get("rows", {})
     lines = []
     regressed = []
-    head = ["Row", "Operation", "BT ns before", "BT ns after", "time Δ", "red before", "red after",
-            "words before", "words after", "EX ns after", "verdict"]
+    head = ["Row", "Operation", "BT ns before", "BT ns after", "EX ns before", "EX ns after",
+            "BT/EX before", "BT/EX after", "gated Δ", "red before", "red after",
+            "words before", "words after", "verdict"]
     lines.append("| " + " | ".join(head) + " |")
-    lines.append("|---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|")
+    lines.append("|---|---|" + "--:|" * 11 + "---|")
     # A baseline row absent tonight (errored, printed "-") must not pass
     # silently and then drop out of the next baseline.
     for rid in sorted(set(base_rows) - set(cur_rows), key=row_key):
         b = base_rows[rid]
-        lines.append(f"| {rid} | {b['label'].replace('|', chr(92) + '|')} | {fmt(b['bt_ns'])} | - | - | "
-                     f"{fmt(b['bt_red'])} | - | {fmt(b['bt_words'])} | - | - | **MISSING** |")
+        lines.append(f"| {rid} | {b['label'].replace('|', chr(92) + '|')} | {fmt(b['bt_ns'])} | - | "
+                     f"{fmt(b['ex_ns'])} | - | {fmt(rel(b))} | - | - | {fmt(b['bt_red'])} | - | "
+                     f"{fmt(b['bt_words'])} | - | **MISSING** |")
         regressed.append(rid)
     for rid in sorted(cur_rows, key=row_key):
         c = cur_rows[rid]
@@ -77,21 +87,23 @@ def compare(current, baseline, threshold):
         if b is None:
             delta, verdict = None, "new" if baseline else "no baseline"
         else:
-            delta = pct(c["bt_ns"], b["bt_ns"])
+            delta = pct(rel(c), rel(b))
             if delta is not None and delta > threshold:
                 verdict = "**REGRESSED**"
                 regressed.append(rid)
             else:
                 verdict = "ok"
         lines.append(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                 rid,
                 c["label"].replace("|", "\\|"),
                 fmt(b and b["bt_ns"]), fmt(c["bt_ns"]),
+                fmt(b and b["ex_ns"]), fmt(c["ex_ns"]),
+                fmt(b and rel(b)), fmt(rel(c)),
                 "-" if delta is None else f"{delta:+.0f}%",
                 fmt(b and b["bt_red"]), fmt(c["bt_red"]),
                 fmt(b and b["bt_words"]), fmt(c["bt_words"]),
-                fmt(c["ex_ns"]), verdict,
+                verdict,
             )
         )
     return lines, regressed
@@ -133,7 +145,7 @@ def cmd_compare(args):
         with open(args.baseline, encoding="utf-8") as f:
             baseline = json.load(f)
     lines, regressed = compare(current, baseline, args.threshold)
-    out = ["## vs-elixir nightly subset (BT ns/op, time-gated)", ""]
+    out = ["## vs-elixir nightly subset (time-gated: BT ns/op relative to the Elixir control)", ""]
     if baseline is None:
         out.append("No baseline (first run, or no earlier successful night): "
                    "nothing to compare, the check passes. Tonight's figures become the baseline.")
@@ -141,7 +153,8 @@ def cmd_compare(args):
         bm, cm = baseline.get("meta", {}), current.get("meta", {})
         out.append(f"Baseline: `{bm.get('sha', '?')}` ({bm.get('date', '?')}); "
                    f"current: `{cm.get('sha', '?')}` ({cm.get('date', '?')}). "
-                   f"A row fails when Beamtalk ns/op is more than {args.threshold:g}% above the baseline; "
+                   f"A row fails when Beamtalk ns/op relative to the Elixir control (BT/EX) is more than "
+                   f"{args.threshold:g}% above the baseline; "
                    "reductions and words are shown, not gated.")
     out.append("")
     out += lines
