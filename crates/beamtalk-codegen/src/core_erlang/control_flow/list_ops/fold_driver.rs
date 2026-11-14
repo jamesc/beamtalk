@@ -72,6 +72,71 @@ impl<'a> From<&'a str> for FoldParams<'a> {
     }
 }
 
+/// Binds the `detect:` answer out of a mutation-threading fold result,
+/// raising `not_found` when nothing matched.
+///
+/// The fold seeds its accumulator with `{'nil', 'false', …}` and processes every
+/// element, so slot 1 alone cannot say whether the search succeeded — `'nil'` is
+/// both the seed and a legitimate match. Slot 2 is the found flag, and it is the
+/// one consulted here, which also makes `#(nil) detect: [:x | x isNil]` answer
+/// `nil` rather than raise.
+///
+/// The class named in the error comes from the receiver, so a `Set` routed
+/// through the list-op path reports `Set` rather than `List`.
+fn bind_detect_found_or_raise_doc(
+    found_result: &str,
+    fold_result: &str,
+    recv_var: &str,
+    class_var: &str,
+    no_match_var: String,
+) -> Document<'static> {
+    docvec![
+        "let ",
+        leaf::var(found_result.to_owned()),
+        " = case call 'erlang':'element'(2, ",
+        leaf::var(fold_result.to_owned()),
+        ") of <'true'> when 'true' -> call 'erlang':'element'(1, ",
+        leaf::var(fold_result.to_owned()),
+        ") <'false'> when 'true' -> let ",
+        leaf::var(class_var.to_owned()),
+        " = call 'beamtalk_primitive':'class_of'(",
+        leaf::var(recv_var.to_owned()),
+        ") in call 'beamtalk_collection':'raiseDetectNotFound'(",
+        leaf::var(class_var.to_owned()),
+        ")",
+        // An explicit fallback: a `case` without one inside a `try` body (a
+        // protected body, a handler) trips OTP's `beam_validator`
+        // (`ambiguous_catch_try_state`, see `case_clause_fallback`).
+        CoreErlangGenerator::case_clause_fallback_doc(no_match_var),
+        " end in ",
+    ]
+}
+
+/// BT-3841 (BT-3805): the fold lambda of a writing `anySatisfy:` /
+/// `allSatisfy:` / `detect:` / `detect:ifNone:` stops running the block once the
+/// answer is decided (Smalltalk semantics: the block runs up to and including
+/// the first decisive element). `lists:foldl` has no early exit, so the lambda
+/// returns the accumulator unchanged for every later element: `decided_value` is
+/// the value of `decided_var` (`BoolAcc` / `FoundFlag`) that means decided.
+fn skip_when_decided(
+    decided_value: &'static str,
+    decided_var: &'static str,
+    acc_state_var: &str,
+    body: Document<'static>,
+) -> Document<'static> {
+    docvec![
+        "case ",
+        decided_var,
+        " of <",
+        decided_value,
+        "> when 'true' -> ",
+        leaf::var(acc_state_var.to_string()),
+        " <_> when 'true' -> ",
+        body,
+        " end",
+    ]
+}
+
 /// The spec of a stateful fold the driver
 /// ([`CoreErlangGenerator::generate_fold_with_mutations`]) lowers: its label,
 /// body kind, leading accumulator slots and post-fold epilogue.
@@ -95,6 +160,14 @@ pub(in crate::core_erlang::control_flow) enum FoldOp<'a> {
     Partition,
     /// `groupBy:` — a map of key to reversed group.
     GroupBy,
+    /// `anySatisfy:` — a boolean accumulator, decided by the first match.
+    AnySatisfy,
+    /// `allSatisfy:` — a boolean accumulator, decided by the first failure.
+    AllSatisfy,
+    /// `detect:` — `{FoundItem, FoundFlag}`, raising `not_found` on no match.
+    Detect,
+    /// `detect:ifNone:` — `{FoundItem, FoundFlag}`, then `if_none` on no match.
+    DetectIfNone { if_none: &'a Expression },
     /// `inject:into:` (BT-3916: also the synthetic fold under
     /// `eachWithIndex:` / `do:separatedBy:`, whose receiver guard names
     /// `guard`).
@@ -109,6 +182,8 @@ pub(in crate::core_erlang::control_flow) enum FoldOp<'a> {
 struct Epilogue {
     bindings: Document<'static>,
     result: Document<'static>,
+    /// `detect:ifNone:` only: the found flag its closing `case` tests.
+    found_flag: Option<Document<'static>>,
 }
 
 impl FoldOp<'_> {
@@ -124,6 +199,10 @@ impl FoldOp<'_> {
             Self::DropWhile => "dropWhile:",
             Self::Partition => "partition:",
             Self::GroupBy => "groupBy:",
+            Self::AnySatisfy => "anySatisfy:",
+            Self::AllSatisfy => "allSatisfy:",
+            Self::Detect => "detect:",
+            Self::DetectIfNone { .. } => "detect:ifNone:",
             Self::Inject { .. } => "inject:into:",
         }
     }
@@ -138,7 +217,11 @@ impl FoldOp<'_> {
 
     fn list_kind(&self) -> ListOpKind {
         match self {
-            Self::TakeWhile | Self::DropWhile | Self::Partition => ListOpKind::TwoSlot,
+            Self::TakeWhile
+            | Self::DropWhile
+            | Self::Partition
+            | Self::Detect
+            | Self::DetectIfNone { .. } => ListOpKind::TwoSlot,
             _ => ListOpKind::Accumulate,
         }
     }
@@ -164,6 +247,12 @@ impl FoldOp<'_> {
             Self::GroupBy => BodyKind::FoldlGroupBy {
                 item_var: item_var(),
             },
+            Self::AnySatisfy | Self::AllSatisfy => BodyKind::FoldlBoolPredicate {
+                is_all: matches!(self, Self::AllSatisfy),
+            },
+            Self::Detect | Self::DetectIfNone { .. } => BodyKind::FoldlDetect {
+                item_var: item_var(),
+            },
             Self::Inject { .. } => BodyKind::FoldlInject,
         }
     }
@@ -178,6 +267,8 @@ impl FoldOp<'_> {
             Self::DropWhile => &["AccList", "StillDropping"],
             Self::Partition => &["MatchList", "NoMatchList"],
             Self::GroupBy => &["GroupMap"],
+            Self::AnySatisfy | Self::AllSatisfy => &["BoolAcc"],
+            Self::Detect | Self::DetectIfNone { .. } => &["FoundItem", "FoundFlag"],
             Self::Inject { .. } => &[],
         }
     }
@@ -191,14 +282,61 @@ impl FoldOp<'_> {
             Self::TakeWhile | Self::DropWhile => vec![empty_list(), leaf::atom("true")],
             Self::Partition => vec![empty_list(), empty_list()],
             Self::GroupBy => vec![Document::Str("~{}~")],
+            Self::AnySatisfy => vec![leaf::atom("false")],
+            Self::AllSatisfy => vec![leaf::atom("true")],
+            Self::Detect | Self::DetectIfNone { .. } => {
+                vec![leaf::atom("nil"), leaf::atom("false")]
+            }
             Self::Inject { .. } => vec![],
         }
     }
 
     /// Whether the tuple-mode initial accumulator opens `{ ` (a list or map
-    /// seed) rather than `{` (a count or an `inject:into:` seed).
+    /// seed) rather than `{` (a count, a boolean, `nil` or an `inject:into:`
+    /// seed).
     fn pads_tuple_init(&self) -> bool {
-        !matches!(self, Self::Count | Self::Inject { .. })
+        matches!(
+            self,
+            Self::Collect
+                | Self::Select
+                | Self::Reject
+                | Self::FlatMap
+                | Self::TakeWhile
+                | Self::DropWhile
+                | Self::Partition
+                | Self::GroupBy
+        )
+    }
+
+    /// BT-3841 (BT-3805): the early-exit capability. A search fold stops
+    /// running the block once its answer is decided; `lists:foldl` has no
+    /// early exit, so the lambda returns the accumulator unchanged for every
+    /// later element. `(decided value, decided slot)` when the op has one.
+    fn decided(&self) -> Option<(&'static str, &'static str)> {
+        match self {
+            Self::AnySatisfy => Some(("'true'", "BoolAcc")),
+            Self::AllSatisfy => Some(("'false'", "BoolAcc")),
+            Self::Detect | Self::DetectIfNone { .. } => Some(("'true'", "FoundFlag")),
+            _ => None,
+        }
+    }
+
+    /// Wraps the lowered fold body in the early-exit guard when the op has one.
+    fn guard_decided(&self, acc_state_var: &str, body: Document<'static>) -> Document<'static> {
+        match self.decided() {
+            Some((value, var)) => skip_when_decided(value, var, acc_state_var, body),
+            None => body,
+        }
+    }
+
+    /// `detect:ifNone:`'s handler block, packed with the search block.
+    fn handler(&self) -> Option<&Block> {
+        match self {
+            Self::DetectIfNone {
+                if_none: Expression::Block(handler),
+            } => Some(handler),
+            _ => None,
+        }
     }
 
     /// The prefix of the temp the fold call binds its result to.
@@ -225,12 +363,16 @@ impl FoldOp<'_> {
                 "PartResult",
             ],
             Self::GroupBy => &["RawMap", "FinalMap"],
+            Self::AnySatisfy | Self::AllSatisfy => &["BoolResult"],
+            Self::Detect => &["FoundResult", "DetectRecvClass", "DetectNoMatch"],
+            Self::DetectIfNone { .. } => &["FoundItem", "FoundFlag"],
             Self::Inject { .. } => &["AccOut"],
         };
         names.iter().map(|n| generator.fresh_temp_var(n)).collect()
     }
 
     /// The `let` chain turning the fold result into the op's value.
+    #[allow(clippy::too_many_lines)]
     /// `str_check_var` is the receiver temp the String-aware repack tests.
     fn epilogue(
         &self,
@@ -264,19 +406,39 @@ impl FoldOp<'_> {
                 let (str_binding, str_result) =
                     generator.generate_list_like_result_binding(str_check_var, &vars[1]);
                 Epilogue {
+                    found_flag: None,
                     bindings: docvec![first(0), reversed(1, 0), str_binding, " in "],
                     result: leaf::var(str_result),
                 }
             }
             Self::TakeWhile | Self::DropWhile => Epilogue {
+                found_flag: None,
                 bindings: docvec![first(0), reversed(1, 0)],
                 result: var(1),
             },
-            Self::Count | Self::Inject { .. } => Epilogue {
+            Self::Detect => Epilogue {
+                found_flag: None,
+                bindings: bind_detect_found_or_raise_doc(
+                    &vars[0],
+                    fold_result,
+                    str_check_var,
+                    &vars[1],
+                    vars[2].clone(),
+                ),
+                result: var(0),
+            },
+            Self::DetectIfNone { .. } => Epilogue {
+                found_flag: Some(var(1)),
+                bindings: docvec![first(0), "let ", var(1), element(2, fold_result)],
+                result: var(0),
+            },
+            Self::Count | Self::AnySatisfy | Self::AllSatisfy | Self::Inject { .. } => Epilogue {
+                found_flag: None,
                 bindings: first(0),
                 result: var(0),
             },
             Self::FlatMap => Epilogue {
+                found_flag: None,
                 bindings: docvec![
                     first(0),
                     reversed(1, 0),
@@ -289,6 +451,7 @@ impl FoldOp<'_> {
                 result: var(2),
             },
             Self::Partition => Epilogue {
+                found_flag: None,
                 bindings: docvec![
                     first(0),
                     "let ",
@@ -307,6 +470,7 @@ impl FoldOp<'_> {
                 result: var(4),
             },
             Self::GroupBy => Epilogue {
+                found_flag: None,
                 bindings: docvec![
                     first(0),
                     "let ",
@@ -486,8 +650,13 @@ impl CoreErlangGenerator {
         op: FoldOp<'_>,
     ) -> Result<Document<'static>> {
         let label = op.label();
-        let (plan, _) =
-            self.begin_fold_plan(body, op.list_kind(), None, fold_threads_self(label), false)?;
+        let (plan, _) = self.begin_fold_plan(
+            body,
+            op.list_kind(),
+            op.handler(),
+            fold_threads_self(label),
+            false,
+        )?;
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
         let safe_list_var = self.fresh_temp_var("temp");
@@ -588,7 +757,7 @@ impl CoreErlangGenerator {
                 &acc_state_var,
                 slot_count,
             )?;
-            docs.push(lowered.body_doc);
+            docs.push(op.guard_decided(&acc_state_var, lowered.body_doc));
             docs.insert(0, lowered.prestore);
 
             let fold_result = self.fresh_temp_var(op.fold_result_prefix());
@@ -600,6 +769,8 @@ impl CoreErlangGenerator {
             // Re-pack into StateAcc for outer method-body `maps:get` extraction.
             let (repack_doc, stateacc) =
                 plan.append_repack_stateacc_doc(self, lowered.guarded_op_bracket);
+            let tail =
+                self.fold_tail_doc(&op, epilogue.found_flag, epilogue.result, &stateacc, None)?;
             docs.push(docvec![
                 ThreadingPlan::foldl_call_doc(
                     &lambda_var,
@@ -610,11 +781,7 @@ impl CoreErlangGenerator {
                 epilogue.bindings,
                 extract_doc,
                 repack_doc,
-                "{",
-                epilogue.result,
-                ", ",
-                leaf::var(stateacc),
-                "}",
+                tail,
             ]);
             return Ok(Document::Vec(docs));
         }
@@ -650,14 +817,9 @@ impl CoreErlangGenerator {
             leaf::var(acc_state_var.clone()),
             ") in ",
         ]);
-        docs.push(self.lower_map_fold_body(
-            body,
-            &plan,
-            &body_kind,
-            params,
-            &acc_state_var,
-            slot_count,
-        )?);
+        let body_doc =
+            self.lower_map_fold_body(body, &plan, &body_kind, params, &acc_state_var, slot_count)?;
+        docs.push(op.guard_decided(&acc_state_var, body_doc));
 
         let fold_result = self.fresh_temp_var(op.fold_result_prefix());
         let vars = op.epilogue_vars(self);
@@ -675,11 +837,14 @@ impl CoreErlangGenerator {
         let unwrap = slots
             .as_ref()
             .map_or(Document::Nil, |s| s.unwrap_result(&fold_result));
-        let result_open = docvec!["{", epilogue.result, ", ", leaf::var(state_out.clone())];
-        let result_tuple = match &slots {
-            Some(s) => s.close_tuple(result_open, self),
-            None => docvec![result_open, "}"],
-        };
+        let extract_doc = plan.generate_extract_suffix_doc(&state_out, self);
+        let tail = self.fold_tail_doc(
+            &op,
+            epilogue.found_flag,
+            epilogue.result,
+            &state_out,
+            slots.as_ref(),
+        )?;
         docs.push(docvec![
             ThreadingPlan::foldl_call_doc(&lambda_var, init_acc, &safe_list_var, fold_pair),
             unwrap,
@@ -691,10 +856,58 @@ impl CoreErlangGenerator {
             ", ",
             leaf::var(fold_result),
             ") in ",
-            plan.generate_extract_suffix_doc(&state_out, self),
-            result_tuple,
+            extract_doc,
+            tail,
         ]);
         Ok(Document::Vec(docs))
+    }
+
+    /// What closes the fold: `{Result, State}` (with the `Self` slots after the
+    /// fold appended in map mode), or `detect:ifNone:`'s closing `case`.
+    fn fold_tail_doc(
+        &mut self,
+        op: &FoldOp<'_>,
+        found_flag: Option<Document<'static>>,
+        result: Document<'static>,
+        state_var: &str,
+        slots: Option<&FoldFamilySlots>,
+    ) -> Result<Document<'static>> {
+        if let (FoldOp::DetectIfNone { if_none }, Some(flag)) = (op, found_flag) {
+            return self.if_none_case_doc(if_none, flag, result, state_var);
+        }
+        let result_open = docvec!["{", result, ", ", leaf::var(state_var.to_string())];
+        Ok(match slots {
+            Some(s) => s.close_tuple(result_open, self),
+            None => docvec![result_open, "}"],
+        })
+    }
+
+    /// `detect:ifNone:`'s closing `case`: the found item with the state, or
+    /// the `ifNone:` arm threaded from `state_var`.
+    fn if_none_case_doc(
+        &mut self,
+        if_none: &Expression,
+        found_flag: Document<'static>,
+        found_item: Document<'static>,
+        state_var: &str,
+    ) -> Result<Document<'static>> {
+        let if_none_arm = self.generate_if_none_branch_tuple(if_none, state_var)?;
+        // An explicit fallback: a `case` without one inside a `try` body
+        // (a protected body, a handler) trips OTP's `beam_validator`
+        // (`ambiguous_catch_try_state`, see `case_clause_fallback`).
+        let no_match_fallback = self.case_clause_fallback("DetectNoMatch");
+        Ok(docvec![
+            "case ",
+            found_flag,
+            " of <'true'> when 'true' -> {",
+            found_item,
+            ", ",
+            leaf::var(state_var.to_string()),
+            "} <'false'> when 'true' -> ",
+            if_none_arm,
+            no_match_fallback,
+            " end",
+        ])
     }
 }
 
