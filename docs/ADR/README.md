@@ -111,7 +111,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0082](0082-method-level-edit-save-and-changelog.md) | Method-Level Edit and Save in the Live Workspace | Implemented | 2026-05-17 |
 | [0083](0083-metaclass-aware-type-inference.md) | Metaclass-Aware Type Inference | Implemented | 2026-05-23 |
 | [0084](0084-class-side-runtime-method-fun-dispatch.md) | Class-Side Runtime Method Installation and Fun Dispatch | Implemented (amended by 0142, 2026-10-30) | 2026-05-24 |
-| [0085](0085-editor-live-image-representation.md) | Editor Live-Image Representation | Proposed | 2026-05-24 |
+| [0085](0085-editor-live-image-representation.md) | Editor Live-Image Representation | Superseded by [0096](0096-system-browser-data-source.md) (2026-11-14) | 2026-05-24 |
 | [0086](0086-string-subclass-of-binary.md) | Make String a Subclass of Binary | Implemented | 2026-03-21 |
 | [0087](0087-maintained-xref-index-for-system-navigation.md) | Maintained Selector→Sites Cross-Reference Index for SystemNavigation | Implemented | 2026-05-26 |
 | [0088](0088-direct-cerl-emission.md) | Direct Core Erlang AST Emission via ETF | Phases 1–4 Rejected; Wire Deferred | 2026-05-26 |
