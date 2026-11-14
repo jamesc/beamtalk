@@ -2312,7 +2312,7 @@ initialize_raise_answers_result_error_for_result_forms_test() ->
     with_bt3963_class('BT3963Sup', Config, fun() ->
         ResultError = fun(Selector, Args) ->
             R = beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, Selector, Args),
-            ?assertBtResultError(_, R),
+            ?assertBtResultObjError(_, R),
             #{errReason := #{error := E}} = R,
             E
         end,
@@ -4586,7 +4586,7 @@ concurrent_supervise(HookOutcome) ->
                 %% BT-3994: `supervise` answers a failed initialize in its
                 %% `Result` (both callers), instead of raising.
                 {returned, FirstResult} = First,
-                ?assertBtResultError(supervisor_start_failed, FirstResult),
+                ?assertBtResultObjError(supervisor_start_failed, FirstResult),
                 receive
                     {'DOWN', SupRef, process, SupPid, _} -> ok
                 after 2000 -> error(supervisor_not_stopped)

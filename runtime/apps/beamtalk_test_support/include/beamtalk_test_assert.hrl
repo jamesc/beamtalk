@@ -61,6 +61,7 @@
 -define(assertBtErrorHint(Kind, Class, Selector, Hint, Expr),
     ?assertError(
         #{
+            '$beamtalk_class' := _,
             error := #beamtalk_error{
                 kind = Kind, class = Class, selector = Selector, hint = Hint
             }

@@ -801,19 +801,19 @@ test_class_self_spawn_as_reserved() ->
     Result = beamtalk_class_instantiation:class_self_spawn_as(
         'Counter', 'bt@counter', false, logger
     ),
-    ?assertBtResultError(reserved_name, Result).
+    ?assertBtResultObjError(reserved_name, Result).
 
 test_class_self_named_spawn_not_spawnable() ->
     with_spawn_kind_classes(fun() ->
         lists:foreach(
             fun({Class, Mod}) ->
-                ?assertBtResultError(
+                ?assertBtResultObjError(
                     does_not_understand,
                     Class,
                     'spawnAs:',
                     beamtalk_class_instantiation:class_self_spawn_as(Class, Mod, false, nm)
                 ),
-                ?assertBtResultError(
+                ?assertBtResultObjError(
                     does_not_understand,
                     Class,
                     'spawnWith:as:',
@@ -830,7 +830,7 @@ test_class_self_spawn_as_abstract() ->
     Result = beamtalk_class_instantiation:class_self_spawn_as(
         'AbstractThing', some_mod, true, my_name
     ),
-    ?assertBtResultError(instantiation_error, 'AbstractThing', 'spawnAs:', Result).
+    ?assertBtResultObjError(instantiation_error, 'AbstractThing', 'spawnAs:', Result).
 
 test_class_self_spawn_with_success() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
@@ -875,7 +875,7 @@ test_class_self_spawn_with_abstract() ->
     Result = beamtalk_class_instantiation:class_self_spawn_with(
         'AbstractThing', some_mod, true, #{}, my_name
     ),
-    ?assertBtResultError(instantiation_error, 'AbstractThing', 'spawnWith:as:', Result).
+    ?assertBtResultObjError(instantiation_error, 'AbstractThing', 'spawnWith:as:', Result).
 
 %%====================================================================
 %% Module-less (builder-built) generic instantiation
