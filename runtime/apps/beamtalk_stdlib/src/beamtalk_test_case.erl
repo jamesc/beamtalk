@@ -886,9 +886,12 @@ failure_stacktrace(Module, Reason, CatchStacktrace) ->
         Carried ->
             %% A stack taken in the test process itself (an FFI error wrapped by the
             %% proxy, an `ensure:` reraise) already holds the test method's frames.
-            case lists:keymember(Module, 1, Carried) of
+            %% A block defined in the test method but run by an actor also puts a
+            %% test-module frame in the carried stack, so compare the frames themselves.
+            TestFrames = [Frame || {M, _, _, _} = Frame <- CatchStacktrace, M =:= Module],
+            case TestFrames =/= [] andalso lists:member(hd(TestFrames), Carried) of
                 true -> Carried;
-                false -> Carried ++ [Frame || {M, _, _, _} = Frame <- CatchStacktrace, M =:= Module]
+                false -> Carried ++ TestFrames
             end
     end.
 

@@ -969,5 +969,12 @@ failure_stacktrace_appends_the_test_frames_once_test() ->
         InProcess,
         beamtalk_test_case:failure_stacktrace('bt@user@t', Ex(InProcess), Catch)
     ),
+    %% An actor ran a block defined in the test method: its fun frame is in the
+    %% carried stack, but the test method's own frame is not, so it is appended.
+    Block = [{maps, get, 2, []}, {'bt@user@t', '-testBoom/0-fun-0-', 1, [{line, 8}]}],
+    ?assertEqual(
+        Block ++ [hd(Test)],
+        beamtalk_test_case:failure_stacktrace('bt@user@t', Ex(Block), Catch)
+    ),
     %% Nothing carried: the catch stack.
     ?assertEqual(Catch, beamtalk_test_case:failure_stacktrace('bt@user@t', not_found, Catch)).
