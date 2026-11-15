@@ -995,7 +995,10 @@ sort_bt_files_by_deps(Files) ->
         fun(Path) ->
             Decls = extract_bt_class_infos(Path),
             Defined = [C || {C, _} <- Decls],
-            Needs = lists:usort([S || {_, S} <- Decls, S =/= undefined, not lists:member(S, Defined)]),
+            Needs = lists:usort([
+                S
+             || {_, S} <- Decls, S =/= undefined, not lists:member(S, Defined)
+            ]),
             #{path => Path, defined => Defined, needs => Needs}
         end,
         Files
