@@ -78,3 +78,19 @@ Object subclass: Caller
     );
     assert!(w.is_empty(), "{w:#?}");
 }
+
+#[test]
+fn match_guard_send_checked() {
+    let w = conformance_warnings(
+        r"
+Object subclass: Caller
+  run: h :: Host n: n :: Integer -> Nil =>
+    n match: [
+      x when: [(h take: Mute new) isNil] -> x;
+      _ -> nil
+    ]
+    nil
+",
+    );
+    assert_eq!(w.len(), 1, "{w:#?}");
+}

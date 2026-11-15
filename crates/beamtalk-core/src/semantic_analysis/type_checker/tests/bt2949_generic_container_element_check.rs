@@ -534,3 +534,19 @@ fn bt4862_compatible_nested_sends_no_warning() {
     let diags = run_with_protocols(source);
     assert_no_expects_diagnostic(&diags);
 }
+
+#[test]
+fn bt4862_variance_checked_inside_match_guard() {
+    let source = r#"Object subclass: Probe
+  check: n :: Integer -> Nil =>
+    l :: List(Integer) := #()
+    r := n match: [
+      x when: [(l ++ #("a", "b")) isEmpty] -> x;
+      _ -> nil
+    ]
+    _u := r
+    nil
+"#;
+    let diags = run_with_protocols(source);
+    assert_one_expects_diagnostic(&diags, "List(Integer)", "List(String)");
+}
