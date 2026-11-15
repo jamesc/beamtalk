@@ -29,6 +29,9 @@ cd "$REPO_ROOT"
 ALLOWLIST=(
     # Owns ?IS_NLR itself.
     'runtime/apps/beamtalk_runtime/include/beamtalk.hrl'
+    # Generated from codegen's `sentinel_tags.rs` (BT-4901): defines the
+    # `?BT_NLR_TAG` macro `?IS_NLR` and `?NLR` are built from.
+    'runtime/apps/beamtalk_runtime/include/beamtalk_sentinel_tags.hrl'
     # Distribution codec: destructures and rebuilds the tuple to walk its
     # Value field (ADR 0126 §5.1/§5.5).
     'runtime/apps/beamtalk_runtime/src/beamtalk_wire.erl'
