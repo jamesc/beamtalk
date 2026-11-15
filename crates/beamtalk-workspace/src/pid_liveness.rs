@@ -149,6 +149,119 @@ pub fn proc_start_time(pid: u32) -> Option<u64> {
     }
 }
 
+/// Terminate a process by PID. The one implementation behind
+/// `beamtalk workspace stop --force` and the desktop broker's orphan reaper.
+///
+/// - **Unix:** with `grace = None`, `SIGKILL` at once. With `Some(grace)`,
+///   `SIGTERM`, sleep `grace`, then `SIGKILL` if the process is still alive
+///   and `is_target()` still holds (the `SIGTERM` result is ignored; a failure
+///   of the final kill is what is reported).
+/// - **Windows:** a single `TerminateProcess` (there is no graceful signal for
+///   an arbitrary external process, so `grace` is ignored). `is_target()` is
+///   checked *after* the handle is open, which closes the PID-reuse window.
+///
+/// `is_target` is a last-moment identity check (e.g. "its start time is still
+/// the one recorded"); pass `|| true` to skip it. Returns `Ok(())` when the
+/// process is already gone (`ESRCH` on Unix, `ERROR_INVALID_PARAMETER` or
+/// `ERROR_ACCESS_DENIED` after the handle opened on Windows) — the goal, the
+/// process not running, is achieved either way.
+///
+/// # Errors
+///
+/// Returns an error for PID 0 (the "unknown PID" sentinel; signalling it would
+/// hit the caller's process group), a PID the platform cannot represent, or
+/// when the OS refuses the kill.
+pub fn kill_process(
+    pid: u32,
+    grace: Option<std::time::Duration>,
+    is_target: impl Fn() -> bool,
+) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+
+    if pid == 0 {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "process ID unavailable (0)",
+        ));
+    }
+
+    #[cfg(unix)]
+    {
+        let pid_i = i32::try_from(pid).map_err(|_| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                format!("PID {pid} too large for platform"),
+            )
+        })?;
+        if let Some(grace) = grace {
+            // SAFETY: kill(2) with a valid pid and standard signal number.
+            unsafe { libc::kill(pid_i, libc::SIGTERM) };
+            std::thread::sleep(grace);
+            if !(is_process_alive(pid) && is_target()) {
+                return Ok(());
+            }
+        }
+        // SAFETY: kill(2) with a valid pid and standard signal number.
+        let ret = unsafe { libc::kill(pid_i, libc::SIGKILL) };
+        if ret == 0 {
+            return Ok(());
+        }
+        let err = Error::last_os_error();
+        if err.raw_os_error() == Some(libc::ESRCH) {
+            // Already exited — e.g. a graceful shutdown that finished just
+            // after a wait timeout.
+            return Ok(());
+        }
+        Err(err)
+    }
+
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::{CloseHandle, FALSE};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_TERMINATE, TerminateProcess,
+        };
+
+        let _ = grace;
+        // SAFETY: Windows API call with documented parameters.
+        let handle = unsafe { OpenProcess(PROCESS_TERMINATE, FALSE, pid) };
+        if handle.is_null() {
+            let err = Error::last_os_error();
+            // ERROR_INVALID_PARAMETER (87): the process no longer exists.
+            if err.raw_os_error() == Some(87) {
+                return Ok(());
+            }
+            return Err(err);
+        }
+        let mut result = Ok(());
+        if is_target() {
+            // SAFETY: handle is valid, obtained from OpenProcess above.
+            let ret = unsafe { TerminateProcess(handle, 1) };
+            if ret == FALSE {
+                // Capture the error *before* CloseHandle, which may clobber it.
+                let err = Error::last_os_error();
+                // ERROR_ACCESS_DENIED (5): the process exited between
+                // OpenProcess and TerminateProcess — analogous to ESRCH.
+                if err.raw_os_error() != Some(5) {
+                    result = Err(err);
+                }
+            }
+        }
+        // SAFETY: handle is valid, obtained from OpenProcess above.
+        unsafe { CloseHandle(handle) };
+        result
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (grace, is_target);
+        Err(Error::new(
+            ErrorKind::Unsupported,
+            "terminating a process is not supported on this platform",
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -171,6 +284,26 @@ mod tests {
         // u32::MAX cannot be converted to i32, so the early `return false` on the
         // i32::try_from branch fires before any syscall.
         assert!(!is_process_alive(u32::MAX));
+    }
+
+    #[test]
+    fn kill_process_rejects_pid_zero() {
+        let err = kill_process(0, None, || true).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_process_kills_a_running_child_and_tolerates_it_being_gone() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        kill_process(pid, None, || true).unwrap();
+        child.wait().unwrap();
+        // Reaped: the PID no longer exists, which is still a success.
+        kill_process(pid, None, || true).unwrap();
     }
 
     #[cfg(target_os = "linux")]

@@ -33,10 +33,12 @@ pub(crate) fn start_beam_node(
     crate::commands::build_stamp::require_supported_otp()?;
 
     // Find runtime directory - try multiple locations
-    let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
+    let repl_startup::DiscoveredRuntime {
+        runtime_dir,
+        layout,
+        paths,
+    } = repl_startup::discover_beam_paths()?;
     info!("Using runtime at: {}", runtime_dir.display());
-
-    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
 
     // Auto-build runtime if not compiled (dev mode only)
     if layout == repl_startup::RuntimeLayout::Dev && !paths.runtime_ebin.exists() {
