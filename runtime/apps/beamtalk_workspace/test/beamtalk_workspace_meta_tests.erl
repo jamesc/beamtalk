@@ -467,6 +467,8 @@ stale_metadata_project_path_does_not_override_launcher_test() ->
     PrevPkg = application:get_env(beamtalk_runtime, root_package),
     ok = beamtalk_package:set_root_package(<<"mypkg">>),
     stop_if_running(),
+    %% The module name comes from the compiler port (BT-4868).
+    {ok, _} = application:ensure_all_started(beamtalk_compiler),
     {ok, Pid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WsId,
         project_path => list_to_binary(RealDir),
@@ -483,6 +485,8 @@ stale_metadata_project_path_does_not_override_launcher_test() ->
         )
     after
         gen_server:stop(Pid),
+        %% Restore the baseline "compiler not running" state later modules expect.
+        _ = application:stop(beamtalk_compiler),
         case PrevPkg of
             {ok, V} -> application:set_env(beamtalk_runtime, root_package, V);
             undefined -> application:unset_env(beamtalk_runtime, root_package)

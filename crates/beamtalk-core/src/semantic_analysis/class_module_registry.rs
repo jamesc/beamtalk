@@ -810,12 +810,18 @@ mod tests {
     #[test]
     fn module_name_for_path_covers_every_root_kind() {
         let name = |p: &str, k| module_name_for_path(Utf8Path::new(p), "web", k);
-        assert_eq!(name("counter.bt", ModuleRootKind::Src).unwrap(), "bt@web@counter");
+        assert_eq!(
+            name("counter.bt", ModuleRootKind::Src).unwrap(),
+            "bt@web@counter"
+        );
         assert_eq!(
             name("util/HttpResponse.bt", ModuleRootKind::Src).unwrap(),
             "bt@web@util@http_response"
         );
-        assert_eq!(name("foo.bt", ModuleRootKind::Test).unwrap(), "bt@web@test@foo");
+        assert_eq!(
+            name("foo.bt", ModuleRootKind::Test).unwrap(),
+            "bt@web@test@foo"
+        );
         assert_eq!(
             name("sub/Foo.bt", ModuleRootKind::Test).unwrap(),
             "bt@web@test@sub@foo"

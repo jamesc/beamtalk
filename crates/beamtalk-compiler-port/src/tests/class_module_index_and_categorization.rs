@@ -361,7 +361,10 @@ fn module_name_for_path_matches_shared_corpus() {
     let raw = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
     let corpus: Vec<serde_json::Value> = serde_json::from_str(&raw).expect("corpus is JSON array");
-    assert!(corpus.len() >= 10, "corpus must cover src/test/none/invalid");
+    assert!(
+        corpus.len() >= 10,
+        "corpus must cover src/test/none/invalid"
+    );
 
     for case in &corpus {
         let field = |k: &str| case[k].as_str().unwrap_or_else(|| panic!("{case}: no {k}"));
@@ -376,14 +379,22 @@ fn module_name_for_path_matches_shared_corpus() {
             panic!("{case}: expected map response, got {response:?}");
         };
         if let Some(expected) = case["module"].as_str() {
-            assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{case}: {response:?}");
+            assert_eq!(
+                map_get(m, "status"),
+                Some(&atom("ok")),
+                "{case}: {response:?}"
+            );
             assert_eq!(
                 map_get(m, "module_name").and_then(term_to_string),
                 Some(expected.to_string()),
                 "{case}"
             );
         } else {
-            assert_eq!(map_get(m, "status"), Some(&atom("error")), "{case}: {response:?}");
+            assert_eq!(
+                map_get(m, "status"),
+                Some(&atom("error")),
+                "{case}: {response:?}"
+            );
             assert_eq!(
                 map_get(m, "reason"),
                 Some(&atom(case["error"].as_str().unwrap())),

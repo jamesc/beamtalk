@@ -1755,8 +1755,7 @@ fn check_duplicate_test_module(
 ) -> Result<()> {
     if let Some(existing) = compiled_tests.iter().find(|c| {
         c.test_class.module_name == test_class.module_name
-            || (c.test_class.class_name == test_class.class_name
-                && c.package.as_deref() == package)
+            || (c.test_class.class_name == test_class.class_name && c.package.as_deref() == package)
     }) {
         miette::bail!(
             "Duplicate test class '{}': test class '{}' in '{}' and test class '{}' in '{}' \
@@ -1789,8 +1788,11 @@ fn test_file_module_name(
     use beamtalk_core::semantic_analysis::{ModuleRootKind, module_name_for_path};
 
     let file = canonical_path(test_file);
-    let package = canonical_package_root(&file)
-        .and_then(|root| pkg_root_to_name.get(&root).map(|name| (root, name.as_str())));
+    let package = canonical_package_root(&file).and_then(|root| {
+        pkg_root_to_name
+            .get(&root)
+            .map(|name| (root, name.as_str()))
+    });
     let (relative, package_name, root_kind) = match &package {
         Some((root, name)) => match file.strip_prefix(root.join("test")) {
             Ok(relative) => (relative, *name, ModuleRootKind::Test),

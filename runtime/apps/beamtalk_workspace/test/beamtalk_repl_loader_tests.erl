@@ -1514,22 +1514,22 @@ t_compute_package_module_name(_Proj) ->
     Proj = live_project_dir(),
     Path = filename:join([Proj, "src", "Widget.bt"]),
     Result = beamtalk_repl_loader:compute_package_module_name(Path),
-    ?assertEqual(<<"bt@loaderpkg@widget">>, Result).
+    ?assertEqual({ok, <<"bt@loaderpkg@widget">>}, Result).
 
 t_compute_package_module_name_test_dir(_Proj) ->
     %% A file under test/ resolves to bt@loaderpkg@test@<module>.
     Proj = live_project_dir(),
     Path = filename:join([Proj, "test", "WidgetTest.bt"]),
     Result = beamtalk_repl_loader:compute_package_module_name(Path),
-    ?assertEqual(<<"bt@loaderpkg@test@widget_test">>, Result).
+    ?assertEqual({ok, <<"bt@loaderpkg@test@widget_test">>}, Result).
 
 t_compute_package_module_name_outside_subdirs(_Proj) ->
     %% A file in the project root but outside src/ and test/ falls back to the
-    %% bt@<stem> form via stem_module_name/1.
+    %% bt@<stem> form (the port's `none` root).
     Proj = live_project_dir(),
     Path = filename:join([Proj, "Widget.bt"]),
     Result = beamtalk_repl_loader:compute_package_module_name(Path),
-    ?assertEqual(<<"bt@widget">>, Result).
+    ?assertEqual({ok, <<"bt@widget">>}, Result).
 
 t_new_class_agent_author(_Proj) ->
     %% When the submission boundary stamps $beamtalk_author / $beamtalk_author_kind

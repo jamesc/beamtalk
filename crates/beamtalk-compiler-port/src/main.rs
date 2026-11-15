@@ -34,8 +34,9 @@ use handlers::{
     handle_find_definition_selector_spans, handle_find_ffi_sites_in_source,
     handle_find_field_readers_in_source, handle_find_field_writers_in_source,
     handle_find_references_to_in_source, handle_find_selector_send_spans,
-    handle_find_senders_in_source, handle_module_name_for_path, handle_reindent_method_source, handle_resolve_class_span,
-    handle_resolve_completion_type, handle_resolve_method_span, handle_version,
+    handle_find_senders_in_source, handle_module_name_for_path, handle_reindent_method_source,
+    handle_resolve_class_span, handle_resolve_completion_type, handle_resolve_method_span,
+    handle_version,
 };
 use respond::error_response;
 
