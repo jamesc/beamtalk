@@ -342,12 +342,16 @@ fn compile_fixture(
     Ok(module_name)
 }
 
-/// Derive a BEAM module name from a fixture file path (e.g. `counter.bt` → `bt@counter`).
+/// Derive a BEAM module name from a fixture file path (e.g. `counter.bt` →
+/// `bt@counter`) through the one shared path-to-module rule
+/// (`module_name_for_path`, out-of-tree root, ADR 0026), so a fixture whose
+/// name `beamtalk build` or the REPL would reject (`my-helper.bt`) is rejected
+/// here too.
 fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
-    let stem = fixture_path
-        .file_stem()
-        .ok_or_else(|| miette::miette!("Fixture file has no name: {}", fixture_path))?;
-    Ok(util::bt_module_name_from_stem(stem))
+    use beamtalk_core::semantic_analysis::{ModuleRootKind, module_name_for_path};
+
+    module_name_for_path(fixture_path, "", ModuleRootKind::OutOfTree)
+        .map_err(|e| miette::miette!("Cannot name fixture '{fixture_path}': {e}"))
 }
 
 /// Build class → module name and class → superclass indexes from fixture files.
@@ -1825,8 +1829,8 @@ fn test_file_module_name(
 /// Discover, compile, and generate wrappers for a single test file.
 ///
 /// Handles `@load` directive resolution, path-based module naming
-/// (`test_file_module_name`),
-/// `TestCase` compilation, `EUnit` wrapper generation, and doc test discovery.
+/// (`test_file_module_name`), `TestCase` compilation, `EUnit` wrapper
+/// generation, and doc test discovery.
 fn compile_single_test_file(
     pipeline: &mut TestPipeline,
     test_file: &Utf8Path,
@@ -3025,6 +3029,19 @@ mod tests {
         fs::write(&bad, "").unwrap();
         let err = test_file_module_name(&bad, &pkgs).expect_err("hyphen is invalid");
         assert!(err.to_string().contains("my-test"), "{err}");
+    }
+
+    /// BT-4868: fixtures use the same naming rule as every other file, so a
+    /// name `beamtalk build` rejects is rejected here too.
+    #[test]
+    fn test_fixture_module_name_uses_shared_rule() {
+        assert_eq!(
+            fixture_module_name(Utf8Path::new("fixtures/MyHelper.bt")).unwrap(),
+            "bt@my_helper"
+        );
+        let err = fixture_module_name(Utf8Path::new("fixtures/my-helper.bt"))
+            .expect_err("hyphen is not a valid module-name character");
+        assert!(err.to_string().contains("my-helper"), "{err}");
     }
 
     /// BT-4350: two files in the *same* package declaring the same `TestCase`
