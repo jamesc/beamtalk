@@ -2974,7 +2974,6 @@ impl CoreErlangGenerator {
                 BodyExprKind::DestructureAssignment => {
                     self.lower_stmt_destructure_assignment(
                         cx,
-                        LocalWrite::Slot,
                         &mut StmtTail::Arm {
                             last_result: &mut last_result,
                         },

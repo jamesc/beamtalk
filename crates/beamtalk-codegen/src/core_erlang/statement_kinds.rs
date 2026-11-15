@@ -135,8 +135,8 @@ impl CoreErlangGenerator {
 
     /// `BodyExprKind::DestructureAssignment`: `{a, b} := expr`.
     ///
-    /// `local_write` is how the body writes the names it binds: the method
-    /// root binds them with the extraction's `let`s alone
+    /// How the body writes the names it binds follows from the tail: the
+    /// method root binds them with the extraction's `let`s alone
     /// ([`LocalWrite::Plain`]); an arm also writes each to its frame's slot
     /// ([`LocalWrite::Slot`], BT-4439). A destructuring whose right-hand side
     /// is itself a field write (`{a, b} := (self.x := ...)`, BT-3495) lowers,
@@ -145,7 +145,6 @@ impl CoreErlangGenerator {
     pub(super) fn lower_stmt_destructure_assignment(
         &mut self,
         cx: StmtCx<'_>,
-        local_write: LocalWrite,
         tail: &mut StmtTail<'_>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
@@ -157,6 +156,10 @@ impl CoreErlangGenerator {
         } = cx;
         let Expression::DestructureAssignment { pattern, value, .. } = expr else {
             return Ok(());
+        };
+        let local_write = match tail {
+            StmtTail::Reply => LocalWrite::Plain,
+            StmtTail::Arm { .. } => LocalWrite::Slot,
         };
         let write_of = |_: &str| local_write;
         // Only an arm lowers the field write as its own `Bind` here. A method

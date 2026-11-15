@@ -8,7 +8,6 @@
 //! Generates method dispatch case clauses, method body with state threading
 //! and reply tuples for actor (`gen_server`) methods.
 
-use super::super::control_flow::LocalWrite;
 use super::super::method_frame::{MethodBoundary, MethodFrame};
 use super::super::sequencing::PrecompiledScope;
 use super::super::statement_kinds::{StmtCx, StmtTail};
@@ -830,12 +829,9 @@ impl CoreErlangGenerator {
                     self.lower_reply_local_assign_tier2_block(cx, &mut stmts)
                 }
                 BodyExprKind::LocalAssignPure => self.lower_reply_local_assign_pure(cx, &mut stmts),
-                BodyExprKind::DestructureAssignment => self.lower_stmt_destructure_assignment(
-                    cx,
-                    LocalWrite::Plain,
-                    &mut StmtTail::Reply,
-                    &mut stmts,
-                ),
+                BodyExprKind::DestructureAssignment => {
+                    self.lower_stmt_destructure_assignment(cx, &mut StmtTail::Reply, &mut stmts)
+                }
                 BodyExprKind::SuperSend => self.lower_reply_super_send(cx, &mut stmts),
                 BodyExprKind::ErrorSend => self.lower_reply_error_send(cx, &mut stmts),
                 BodyExprKind::Tier2ValueCall => self.lower_reply_tier2_value_call(cx, &mut stmts),
