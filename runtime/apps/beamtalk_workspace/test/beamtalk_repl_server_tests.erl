@@ -44,24 +44,24 @@ generate_nonce_is_hex_test() ->
 
 safe_to_existing_atom_existing_test() ->
     %% 'ok' is a well-known existing atom
-    ?assertEqual({ok, ok}, beamtalk_repl_server:safe_to_existing_atom(<<"ok">>)).
+    ?assertEqual({ok, ok}, beamtalk_repl_errors:safe_to_existing_atom(<<"ok">>)).
 
 safe_to_existing_atom_nonexistent_test() ->
     %% A random string should fail
     ?assertEqual(
         {error, badarg},
-        beamtalk_repl_server:safe_to_existing_atom(<<"xyzzy_nonexistent_atom_9999">>)
+        beamtalk_repl_errors:safe_to_existing_atom(<<"xyzzy_nonexistent_atom_9999">>)
     ).
 
 safe_to_existing_atom_empty_test() ->
-    ?assertEqual({error, badarg}, beamtalk_repl_server:safe_to_existing_atom(<<>>)).
+    ?assertEqual({error, badarg}, beamtalk_repl_errors:safe_to_existing_atom(<<>>)).
 
 safe_to_existing_atom_non_binary_test() ->
-    ?assertEqual({error, badarg}, beamtalk_repl_server:safe_to_existing_atom(123)).
+    ?assertEqual({error, badarg}, beamtalk_repl_errors:safe_to_existing_atom(123)).
 
 safe_to_existing_atom_integer_atom_test() ->
     %% 'Integer' is a well-known existing atom in beamtalk
-    ?assertEqual({ok, 'Integer'}, beamtalk_repl_server:safe_to_existing_atom(<<"Integer">>)).
+    ?assertEqual({ok, 'Integer'}, beamtalk_repl_errors:safe_to_existing_atom(<<"Integer">>)).
 
 %% Generator: runs all TCP integration tests within a single workspace instance
 tcp_integration_test_() ->
@@ -1089,46 +1089,46 @@ tcp_clone_uniqueness_test(Port) ->
 %%% validate_actor_pid/1 tests
 
 validate_actor_pid_invalid_format_test() ->
-    ?assertEqual({error, invalid_pid}, beamtalk_repl_server:validate_actor_pid("not_a_pid")).
+    ?assertEqual({error, invalid_pid}, beamtalk_repl_ops_actors:validate_actor_pid("not_a_pid")).
 
 validate_actor_pid_unknown_actor_test() ->
     %% Valid PID format but not registered as an actor
     PidStr = pid_to_list(self()),
-    ?assertEqual({error, unknown_actor}, beamtalk_repl_server:validate_actor_pid(PidStr)).
+    ?assertEqual({error, unknown_actor}, beamtalk_repl_ops_actors:validate_actor_pid(PidStr)).
 
 %%% is_known_actor/1 tests
 
 is_known_actor_no_registry_test() ->
     %% When no registry is running, should return false
-    ?assertEqual(false, beamtalk_repl_server:is_known_actor(self())).
+    ?assertEqual(false, beamtalk_repl_ops_actors:is_known_actor(self())).
 
 %%% get_completions/1 tests
 
 get_completions_empty_prefix_test() ->
-    ?assertEqual([], beamtalk_repl_server:get_completions(<<>>)).
+    ?assertEqual([], beamtalk_repl_ops_dev:get_completions(<<>>)).
 
 get_completions_no_match_test() ->
     %% No class registry running, only keywords should match
-    Result = beamtalk_repl_server:get_completions(<<"zzzzz">>),
+    Result = beamtalk_repl_ops_dev:get_completions(<<"zzzzz">>),
     ?assertEqual([], Result).
 
 get_completions_keyword_match_test() ->
-    Result = beamtalk_repl_server:get_completions(<<"self">>),
+    Result = beamtalk_repl_ops_dev:get_completions(<<"self">>),
     ?assert(lists:member(<<"self">>, Result)).
 
 get_completions_keyword_prefix_test() ->
-    Result = beamtalk_repl_server:get_completions(<<"su">>),
+    Result = beamtalk_repl_ops_dev:get_completions(<<"su">>),
     ?assert(lists:member(<<"super">>, Result)),
     ?assert(lists:member(<<"subclass:">>, Result)).
 
 get_completions_workspace_binding_test() ->
     %% Workspace bindings (Transcript, Beamtalk, Workspace) should appear
-    Result = beamtalk_repl_server:get_completions(<<"Transcri">>),
+    Result = beamtalk_repl_ops_dev:get_completions(<<"Transcri">>),
     ?assert(lists:member(<<"Transcript">>, Result)).
 
 get_completions_workspace_binding_prefix_test() ->
     %% "Work" should match the Workspace binding
-    Result = beamtalk_repl_server:get_completions(<<"Work">>),
+    Result = beamtalk_repl_ops_dev:get_completions(<<"Work">>),
     ?assert(lists:member(<<"Workspace">>, Result)).
 
 %%% parse_receiver_and_prefix/1 tests
@@ -1966,48 +1966,48 @@ mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes) ->
 resolve_class_to_module_no_registry_test() ->
     %% With no class registry running, should return the class name itself
     ?assertEqual(
-        some_unknown_class, beamtalk_repl_server:resolve_class_to_module(some_unknown_class)
+        some_unknown_class, beamtalk_repl_ops_load:resolve_class_to_module(some_unknown_class)
     ).
 
 %%% resolve_module_atoms/2 tests
 
 resolve_module_atoms_explicit_test() ->
-    ?assertEqual([my_module], beamtalk_repl_server:resolve_module_atoms(my_module, [])).
+    ?assertEqual([my_module], beamtalk_repl_ops_load:resolve_module_atoms(my_module, [])).
 
 resolve_module_atoms_from_classes_test() ->
     %% Module name must exist as an atom
     % elp:fixme W0023 intentional atom creation
     _ = list_to_atom("erlang"),
     Classes = [#{name => "erlang"}],
-    Result = beamtalk_repl_server:resolve_module_atoms(undefined, Classes),
+    Result = beamtalk_repl_ops_load:resolve_module_atoms(undefined, Classes),
     ?assert(lists:member(erlang, Result)).
 
 resolve_module_atoms_empty_classes_test() ->
-    ?assertEqual([], beamtalk_repl_server:resolve_module_atoms(undefined, [])).
+    ?assertEqual([], beamtalk_repl_ops_load:resolve_module_atoms(undefined, [])).
 
 resolve_module_atoms_unknown_class_test() ->
     Classes = [#{name => "xyzzy_nonexistent_class_99"}],
-    ?assertEqual([], beamtalk_repl_server:resolve_module_atoms(undefined, Classes)).
+    ?assertEqual([], beamtalk_repl_ops_load:resolve_module_atoms(undefined, Classes)).
 
 resolve_module_atoms_binary_name_test() ->
     %% Test with binary class name (covers lines 917-920)
     % elp:fixme W0023 intentional atom creation
     _ = list_to_atom("erlang"),
     Classes = [#{name => <<"erlang">>}],
-    Result = beamtalk_repl_server:resolve_module_atoms(undefined, Classes),
+    Result = beamtalk_repl_ops_load:resolve_module_atoms(undefined, Classes),
     ?assert(lists:member(erlang, Result)).
 
 resolve_module_atoms_binary_unknown_test() ->
     Classes = [#{name => <<"xyzzy_nonexistent_binary_99">>}],
-    ?assertEqual([], beamtalk_repl_server:resolve_module_atoms(undefined, Classes)).
+    ?assertEqual([], beamtalk_repl_ops_load:resolve_module_atoms(undefined, Classes)).
 
 resolve_module_atoms_empty_name_test() ->
     Classes = [#{name => ""}],
-    ?assertEqual([], beamtalk_repl_server:resolve_module_atoms(undefined, Classes)).
+    ?assertEqual([], beamtalk_repl_ops_load:resolve_module_atoms(undefined, Classes)).
 
 resolve_module_atoms_other_type_test() ->
     Classes = [#{name => 42}],
-    ?assertEqual([], beamtalk_repl_server:resolve_module_atoms(undefined, Classes)).
+    ?assertEqual([], beamtalk_repl_ops_load:resolve_module_atoms(undefined, Classes)).
 
 %%% generate_session_id/0 tests
 
@@ -2025,13 +2025,13 @@ generate_session_id_unique_test() ->
 
 base_protocol_response_with_id_session_test() ->
     Msg = {protocol_msg, <<"eval">>, <<"id1">>, <<"s1">>, #{}},
-    Base = beamtalk_repl_server:base_protocol_response(Msg),
+    Base = beamtalk_repl_ops_dev:base_protocol_response(Msg),
     ?assertEqual(<<"id1">>, maps:get(<<"id">>, Base)),
     ?assertEqual(<<"s1">>, maps:get(<<"session">>, Base)).
 
 base_protocol_response_no_id_no_session_test() ->
     Msg = {protocol_msg, <<"eval">>, undefined, undefined, #{}},
-    Base = beamtalk_repl_server:base_protocol_response(Msg),
+    Base = beamtalk_repl_ops_dev:base_protocol_response(Msg),
     ?assertEqual(error, maps:find(<<"id">>, Base)),
     ?assertEqual(error, maps:find(<<"session">>, Base)).
 
@@ -2180,28 +2180,28 @@ ensure_structured_error_beamtalk_object_test() ->
 %%% make_class_not_found_error/1 tests
 
 make_class_not_found_error_atom_test() ->
-    Err = beamtalk_repl_server:make_class_not_found_error('Counter'),
+    Err = beamtalk_repl_ops_dev:make_class_not_found_error('Counter'),
     ?assertEqual(class_not_found, Err#beamtalk_error.kind),
     ?assert(binary:match(element(2, Err#beamtalk_error.message), <<"Counter">>) =/= nomatch).
 
 make_class_not_found_error_binary_test() ->
-    Err = beamtalk_repl_server:make_class_not_found_error(<<"MyClass">>),
+    Err = beamtalk_repl_ops_dev:make_class_not_found_error(<<"MyClass">>),
     ?assertEqual(class_not_found, Err#beamtalk_error.kind),
     ?assert(binary:match(element(2, Err#beamtalk_error.message), <<"MyClass">>) =/= nomatch).
 
 %%% format_name/1 tests
 
 format_name_atom_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_repl_server:format_name(hello)).
+    ?assertEqual(<<"hello">>, beamtalk_repl_errors:format_name(hello)).
 
 format_name_binary_test() ->
-    ?assertEqual(<<"world">>, beamtalk_repl_server:format_name(<<"world">>)).
+    ?assertEqual(<<"world">>, beamtalk_repl_errors:format_name(<<"world">>)).
 
 format_name_list_test() ->
-    ?assertEqual(<<"abc">>, beamtalk_repl_server:format_name("abc")).
+    ?assertEqual(<<"abc">>, beamtalk_repl_errors:format_name("abc")).
 
 format_name_other_test() ->
-    Result = beamtalk_repl_server:format_name({some, tuple}),
+    Result = beamtalk_repl_errors:format_name({some, tuple}),
     ?assert(is_binary(Result)).
 
 %% ===================================================================

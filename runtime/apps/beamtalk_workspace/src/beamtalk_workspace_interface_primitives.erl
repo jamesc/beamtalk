@@ -195,7 +195,7 @@ newClass(Source, Path) ->
     ok = beamtalk_capability:require('newClass:at:', 'Workspace', <<"Workspace newClass:at:">>),
     case validate_new_class_args(Source, Path) of
         {ok, SourceBin, PathBin} ->
-            case beamtalk_repl_eval:new_class(SourceBin, PathBin) of
+            case beamtalk_repl_loader_newclass:new_class(SourceBin, PathBin) of
                 {ok, ClassObjects} -> ClassObjects;
                 {error, Err} -> beamtalk_error:raise(Err)
             end;
@@ -277,7 +277,7 @@ moveClass(ClassArg, NewPath) ->
         end,
     ClassPid = erlang:element(4, ClassArg),
     ClassName = beamtalk_object_class:class_name_safe(ClassPid),
-    case beamtalk_repl_eval:move_class(ClassName, NewPathBin) of
+    case beamtalk_repl_loader_rewrite:move_class(ClassName, NewPathBin) of
         ok -> ClassArg;
         {error, Err} -> beamtalk_error:raise(Err)
     end.
@@ -811,7 +811,7 @@ reinstall_reverted_class(ClassNameBin, PrevBody, Entry) ->
 ) ->
     term().
 reinstall_reverted_class_body(ClassNameBin, PrevBody, SourceFile, Entry) ->
-    case beamtalk_repl_eval:revert_remove_class(PrevBody, SourceFile) of
+    case beamtalk_repl_loader_newclass:revert_remove_class(PrevBody, SourceFile) of
         {ok, _Objects} ->
             %% Mirrors `revert_removal/3`'s "undoing an add emits no new
             %% entry" symmetry: undoing this removal doesn't emit one
@@ -972,7 +972,7 @@ the reverted state IS the pre-rename state, nothing new needs recording.
 """.
 -spec revert_rename_entry(binary(), beamtalk_workspace_changelog:entry()) -> term().
 revert_rename_entry(ClassNameBin, Entry) ->
-    case beamtalk_repl_eval:revert_rename_sites(Entry) of
+    case beamtalk_repl_loader_rewrite:revert_rename_sites(Entry) of
         {ok, RevertedClassBin} ->
             retire_reverted_rename_entry(RevertedClassBin, Entry);
         {error, Reason} ->
@@ -1873,7 +1873,7 @@ handle_load(Other) ->
 %% short-circuits without falling through to reload_class_file/1.
 -spec handle_load_after_native(string()) -> term() | {error, #beamtalk_error{}}.
 handle_load_after_native(Path) ->
-    case beamtalk_repl_eval:reload_class_file(Path) of
+    case beamtalk_repl_loader:reload_class_file(Path) of
         {ok, ClassNames} ->
             %% Record class source so subsequent `Class >> selector => body`
             %% method-patch syntax (which depends on workspace_meta:get_class_source/1)

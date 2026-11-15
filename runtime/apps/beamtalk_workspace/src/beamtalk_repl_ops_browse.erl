@@ -824,7 +824,7 @@ browse_categories(ClassName) ->
             not_found_error(<<"browse-categories">>, ClassName);
         _ClassPid ->
             %% Resolve the source file the SAME way
-            %% `save-section` does (`beamtalk_repl_loader:class_source_file/1`
+            %% `save-section` does (`beamtalk_repl_loader_changelog_entries:class_source_file/1`
             %% — the ADR 0082 install-hook resolver, not this module's
             %% `origin_module/2` + `source_file_of/1` reflection pair used by
             %% ops 1-4). Divergent resolvers for a browse-then-save round trip
@@ -833,7 +833,7 @@ browse_categories(ClassName) ->
             %% protocol's defining module); a single shared resolver makes
             %% that structurally impossible.
             SourceFile =
-                case beamtalk_repl_loader:class_source_file(atom_to_binary(ClassName, utf8)) of
+                case beamtalk_repl_loader_changelog_entries:class_source_file(atom_to_binary(ClassName, utf8)) of
                     nil -> null;
                     Path when is_binary(Path) -> Path
                 end,

@@ -2706,7 +2706,7 @@ maybe_reload_renamed_class_source(_Prepared) ->
 -spec reload_renamed_class_source(binary(), binary()) -> ok.
 reload_renamed_class_source(NewPath, NewClassBin) ->
     ExpectedClassName =
-        case beamtalk_repl_server:safe_to_existing_atom(NewClassBin) of
+        case beamtalk_repl_errors:safe_to_existing_atom(NewClassBin) of
             {ok, Atom} -> Atom;
             {error, _} -> undefined
         end,

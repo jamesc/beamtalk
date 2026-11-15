@@ -39,7 +39,7 @@ introspection; the code moved verbatim.
   `beamtalk_workspace_callback`, which xref sees and which answers
   `{error, no_workspace}` when no workspace is running. The remaining
   dynamic `erlang:apply/3` calls (invisible to `rebar3 xref`) are
-  `beamtalk_repl_loader:class_source_file/1`,
+  `beamtalk_repl_loader_changelog_entries:class_source_file/1`,
   `beamtalk_workspace_meta:get_class_source/1` and
   `beamtalk_compiler:resolve_class_span/2` / `resolve_method_span/4`. The
   same indirection is used by `beamtalk_selector_refactor` and
@@ -888,12 +888,12 @@ current_class_source(ClassNameBin) ->
 
 %% `ClassNameBin`'s on-disk source file, for a `rewrite_site()`'s
 %% `source_file` ChangeLog-attribution field only (see that type's doc) —
-%% reuses `beamtalk_repl_loader:class_source_file/1` (already exported for
+%% reuses `beamtalk_repl_loader_changelog_entries:class_source_file/1` (already exported for
 %% exactly this kind of cross-module reuse) rather than re-deriving
 %% it. `undefined` for a class with no backing file.
 -spec class_source_file_for(binary()) -> binary() | undefined.
 class_source_file_for(ClassNameBin) ->
-    try erlang:apply(beamtalk_repl_loader, class_source_file, [ClassNameBin]) of
+    try erlang:apply(beamtalk_repl_loader_changelog_entries, class_source_file, [ClassNameBin]) of
         SourceFile when is_binary(SourceFile) -> SourceFile;
         nil -> undefined
     catch

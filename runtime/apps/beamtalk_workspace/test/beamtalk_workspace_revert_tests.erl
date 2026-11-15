@@ -315,7 +315,7 @@ revert_new_class_removes_the_class(#{tmp := Tmp, unique := U}) ->
     Source = iolist_to_binary([
         <<"Actor subclass: ">>, ClassName, <<"\n  v => 1\n">>
     ]),
-    {ok, _Objs} = beamtalk_repl_eval:new_class(Source, list_to_binary(TargetPath)),
+    {ok, _Objs} = beamtalk_repl_loader_newclass:new_class(Source, list_to_binary(TargetPath)),
     LoadedBefore = beamtalk_runtime_api:whereis_class(binary_to_atom(ClassName, utf8)),
     %% Revert the new-class entry via the FFI surface (new-class rows carry
     %% selector = nil, mapped to the `new-class` placeholder).
