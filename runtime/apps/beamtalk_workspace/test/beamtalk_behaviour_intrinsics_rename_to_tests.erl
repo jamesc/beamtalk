@@ -92,7 +92,7 @@ setup() ->
     %% `no_workspace` unless this node records a workspace capability.
     ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
     %% BT-4792: the runtime reaches the workspace pipeline through this callback.
-    ok = beamtalk_workspace_callback:register(beamtalk_repl_eval),
+    ok = beamtalk_workspace_callback:register(beamtalk_workspace_callback_impl),
     application:ensure_all_started(compiler),
     case application:ensure_all_started(beamtalk_compiler) of
         {ok, _} -> ok;
@@ -378,7 +378,7 @@ rename_to_revert_after_flush_is_unsupported(_Fixture) ->
 %% validate the reference-site rewrite FIRST (`beamtalk_repl_eval:
 %% validate_sites/2`, non-mutating), commit the registry-identity move
 %% second (`beamtalk_object_class:rename/2`), and only then perform the
-%% real rewrite (`beamtalk_repl_eval:rewrite_sites/2`) — see
+%% real rewrite (`beamtalk_repl_loader_rewrite:rewrite_sites/2`) — see
 %% `beamtalk_behaviour_intrinsics:do_rename_and_rewrite/7`'s own doc.
 %% Round 3's fix moved the identity move before the rewrite (closing the
 %% original gap: committing the rewrite first, then discovering the
@@ -425,7 +425,7 @@ setup_dynamic_with_reference() ->
     %% `no_workspace` unless this node records a workspace capability.
     ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
     %% BT-4792: the runtime reaches the workspace pipeline through this callback.
-    ok = beamtalk_workspace_callback:register(beamtalk_repl_eval),
+    ok = beamtalk_workspace_callback:register(beamtalk_workspace_callback_impl),
     application:ensure_all_started(compiler),
     case application:ensure_all_started(beamtalk_compiler) of
         {ok, _} -> ok;
@@ -491,9 +491,9 @@ dynamic_class_rename_orders_identity_move_before_reference_rewrite(#{class_obj :
         end
     end),
     1 = erlang:trace(Worker, true, [call, {tracer, Self}]),
-    1 = erlang:trace_pattern({beamtalk_repl_eval, validate_sites, 2}, true, [global]),
+    1 = erlang:trace_pattern({beamtalk_repl_loader_rewrite, validate_sites, 2}, true, [global]),
     1 = erlang:trace_pattern({beamtalk_object_class, rename, 2}, true, [global]),
-    1 = erlang:trace_pattern({beamtalk_repl_eval, rewrite_sites, 2}, true, [global]),
+    1 = erlang:trace_pattern({beamtalk_repl_loader_rewrite, rewrite_sites, 2}, true, [global]),
     Worker ! go,
     Result =
         receive
@@ -501,9 +501,9 @@ dynamic_class_rename_orders_identity_move_before_reference_rewrite(#{class_obj :
         after 5000 ->
             erlang:error(bt3278_reorder_worker_timeout)
         end,
-    _ = erlang:trace_pattern({beamtalk_repl_eval, validate_sites, 2}, false, [global]),
+    _ = erlang:trace_pattern({beamtalk_repl_loader_rewrite, validate_sites, 2}, false, [global]),
     _ = erlang:trace_pattern({beamtalk_object_class, rename, 2}, false, [global]),
-    _ = erlang:trace_pattern({beamtalk_repl_eval, rewrite_sites, 2}, false, [global]),
+    _ = erlang:trace_pattern({beamtalk_repl_loader_rewrite, rewrite_sites, 2}, false, [global]),
     %% The worker has already sent its result and is about to exit by the
     %% time we get here — disabling a dead pid's trace flags raises
     %% `badarg` and is a no-op anyway (flags die with the process).
@@ -527,11 +527,11 @@ bt3278_drain_call_order() ->
 
 bt3278_drain_call_order(Acc) ->
     receive
-        {trace, _Pid, call, {beamtalk_repl_eval, validate_sites, _Args}} ->
+        {trace, _Pid, call, {beamtalk_repl_loader_rewrite, validate_sites, _Args}} ->
             bt3278_drain_call_order([validate_sites | Acc]);
         {trace, _Pid, call, {beamtalk_object_class, rename, _Args}} ->
             bt3278_drain_call_order([rename | Acc]);
-        {trace, _Pid, call, {beamtalk_repl_eval, rewrite_sites, _Args}} ->
+        {trace, _Pid, call, {beamtalk_repl_loader_rewrite, rewrite_sites, _Args}} ->
             bt3278_drain_call_order([rewrite_sites | Acc])
     after 200 ->
         lists:reverse(Acc)

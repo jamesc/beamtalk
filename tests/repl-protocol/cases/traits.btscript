@@ -254,7 +254,7 @@ File writeAll: _bt3594GreetableProtoPath contents: "Protocol define: Bt3594Greet
 // Re-loading the SAME path re-triggers `reload_compile_and_load`'s protocol
 // branch (`reload_protocol_fanout`, ADR 0127 §11) exactly as an explicit
 // `ProtocolName reload` would — `Workspace load:` always routes through the
-// reload-capable path (`beamtalk_repl_eval:reload_class_file/1`), so this
+// reload-capable path (`beamtalk_repl_loader:reload_class_file/1`), so this
 // finds Bt3594Greetable's existing users via the same users index and
 // atomically recompiles/hot-swaps them, with no separate `reload` send
 // needed.
