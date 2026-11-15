@@ -261,10 +261,7 @@ fn test_class_state_emits_class_fields_in_meta() {
         "  classState: label = \"unset\"\n\n",
         "  class total => self.total\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+    let code = codegen_named(src, "counter");
 
     // Instance-side fields unchanged.
     assert!(
@@ -283,10 +280,7 @@ fn test_no_class_state_emits_empty_class_fields() {
     // a class with no `classState:` declarations emits an empty
     // class_fields list so the runtime intrinsic always finds the key.
     let src = concat!("Actor subclass: Counter\n", "  state: value = 0\n");
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+    let code = codegen_named(src, "counter");
 
     assert!(
         code.contains("'class_fields' => []"),
@@ -308,10 +302,7 @@ fn test_late_state_and_classstate_emit_field_kinds_in_meta() {
         "  classState: total :: Integer = 0\n\n",
         "  launch => self.proc\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("codex_client"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "codex_client");
 
     assert!(
         code.contains("'field_kinds' => ~{'proc' => 'late', 'id' => 'eager'}~"),
@@ -336,10 +327,7 @@ fn test_late_state_omitted_from_init_state_literal() {
         "  state: id :: Integer = 0\n\n",
         "  launch => self.proc\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("codex_client"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "codex_client");
 
     let default_state = code
         .split("let DefaultState = ~{")
@@ -371,10 +359,7 @@ fn test_late_classstate_omitted_from_classstate_map() {
         "  classState: total :: Integer = 0\n\n",
         "  class launch => self.current\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("codex_client"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "codex_client");
 
     let class_state = code
         .split("'classState' => ~{")
@@ -401,10 +386,7 @@ fn test_no_late_fields_emit_empty_field_kinds_when_no_state() {
     // 'class_fields' emitting `[]` in test_no_class_state_emits_empty_class_fields
     // — the runtime intrinsic always finds the key.
     let src = "Actor subclass: Empty\n  noop => nil\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("empty")).expect("codegen should succeed");
+    let code = codegen_named(src, "empty");
 
     assert!(
         code.contains("'field_kinds' => ~{}~"),

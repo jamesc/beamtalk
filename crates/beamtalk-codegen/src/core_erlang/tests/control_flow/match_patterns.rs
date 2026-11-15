@@ -14,12 +14,7 @@ fn test_match_array_pattern_arm_generates_is_map_guard_chain() {
     // `arr match: [#[h, t] -> h + t; _ -> 0]` should compile to a
     // conditional chain using is_map + maps:get('$beamtalk_class', ..., 'undefined') + size check.
     let src = "Object subclass: Foo\n  test: arr =>\n    arr match: [\n      #[h, t] -> h + t;\n      _ -> 0\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
-
-    eprintln!("Generated code for array pattern match:\n{code}");
+    let code = codegen_named(src, "foo");
 
     assert!(
         code.contains("call 'erlang':'is_map'("),
@@ -44,12 +39,7 @@ fn test_match_map_pattern_arm_generates_core_erlang_map_pattern() {
     // `d match: [#{#event => evName} -> evName; _ -> "none"]`
     // should compile to a native Core Erlang map pattern `~{'event' := EvName}~`.
     let src = "Object subclass: Foo\n  test: d =>\n    d match: [\n      #{#event => evName} -> evName;\n      _ -> \"none\"\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
-
-    eprintln!("Generated code for map pattern match:\n{code}");
+    let code = codegen_named(src, "foo");
 
     assert!(
         code.contains("~{"),
@@ -71,10 +61,7 @@ fn test_match_array_pattern_fallthrough_to_wildcard() {
     // fall through to the next arm — not crash.
     // Wildcard fallback arm should be present in the generated code.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #[a, b] -> a + b;\n      _ -> 42\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+    let code = codegen_named(src, "foo");
 
     // The fallback (42) should appear in the generated code
     assert!(
@@ -93,12 +80,7 @@ fn test_match_nested_array_pattern_arm() {
     // `arr match: [#[#[a, b], c] -> a+b+c; _ -> 0]`
     // should generate nested is_map + size checks for the inner array.
     let src = "Object subclass: Foo\n  test: arr =>\n    arr match: [\n      #[#[a, b], c] -> a + b + c;\n      _ -> 0\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
-
-    eprintln!("Generated code for nested array pattern match:\n{code}");
+    let code = codegen_named(src, "foo");
 
     // Should have multiple is_map checks (outer + inner array)
     let is_map_count = code.matches("call 'erlang':'is_map'(").count();
@@ -120,10 +102,7 @@ fn test_match_array_pattern_uses_maps_get_with_default_not_map_get() {
     // that a plain Erlang map (Beamtalk Dictionary) as the match subject does not
     // crash with {badkey, '$beamtalk_class'} — it should fall through instead.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      #[a, b] -> a + b;\n      _ -> 0\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+    let code = codegen_named(src, "foo");
 
     // Verify the 3-arg form maps:get/3 is used — the key, the map, AND the default 'undefined'.
     // This prevents regression to maps:get/2 or erlang:map_get/2 (both throw on missing key).
@@ -143,12 +122,7 @@ fn test_match_array_pattern_duplicate_variable_emits_equality_check() {
     // The second occurrence of `x` must emit an `erlang:=:=` equality check
     // rather than a bare re-binding.
     let src = "Object subclass: Foo\n  test: arr =>\n    arr match: [\n      #[x, x] -> \"equal\";\n      _ -> \"differ\"\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
-
-    eprintln!("Generated code for duplicate-variable array pattern:\n{code}");
+    let code = codegen_named(src, "foo");
 
     // Must emit a strict-equality call for the duplicate variable.
     assert!(
@@ -174,12 +148,7 @@ fn test_match_nil_pattern_compiles_to_atom_literal() {
     // ADR 0107 Phase A: `nil` pattern reuses the existing atom-literal
     // codegen path verbatim — no new runtime mechanism.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      nil -> 0;\n      _ -> 1\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
-
-    eprintln!("Generated code for nil pattern match:\n{code}");
+    let code = codegen_named(src, "foo");
 
     assert!(
         code.contains("<'nil'>"),
@@ -195,12 +164,7 @@ fn test_match_type_pattern_string_compiles_to_tag_test() {
     // tag test — a bare binary is a `Binary`, never a `String`, so the
     // old `is_binary` BIF test is wrong.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      s :: String -> s;\n      _ -> \"none\"\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
-
-    eprintln!("Generated code for String type pattern match:\n{code}");
+    let code = codegen_named(src, "foo");
 
     assert!(
         code.contains("'beamtalk_string'"),
@@ -218,10 +182,7 @@ fn test_match_type_pattern_binary_compiles_to_subclass_aware_test() {
     // Binary`): the `is_binary` BIF test, falling back to the `String`
     // `{'beamtalk_string', _}` tag test for the sealed subclass.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      b :: Binary -> b;\n      _ -> \"none\"\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+    let code = codegen_named(src, "foo");
 
     assert!(
         code.contains("'erlang':'is_binary'"),
@@ -238,10 +199,7 @@ fn test_match_type_pattern_bitstring_compiles_to_unaligned_test() {
     // ADR 0141 (BT-4139): `b :: Bitstring` matches exactly the unaligned
     // bitstrings — `is_bitstring` and not `is_binary` — never a map tag.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      b :: Bitstring -> b;\n      _ -> \"none\"\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
+    let code = codegen_named(src, "foo");
 
     assert!(
         code.contains("'erlang':'is_bitstring'"),
@@ -265,12 +223,7 @@ fn test_match_type_pattern_tagged_class_compiles_to_map_tag_check() {
     // compiles a single class per call, so the pattern's target class (`Bar`)
     // and the method under test live on the same class.
     let src = "Value subclass: Bar\n  field: n = 0\n\n  test: x =>\n    x match: [\n      b :: Bar -> b;\n      _ -> \"none\"\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("bar")).expect("codegen should succeed");
-
-    eprintln!("Generated code for tagged-class type pattern match:\n{code}");
+    let code = codegen_named(src, "bar");
 
     assert!(
         code.contains("'erlang':'is_map'"),
@@ -326,10 +279,7 @@ fn test_match_type_pattern_leaf_class_keeps_exact_tag_fast_path_with_kind_of_fal
     // of a different user class falls back to the runtime kind-of test, so a
     // subclass declared elsewhere (or hot-loaded later) still matches.
     let src = "Value subclass: Bar\n  test: x =>\n    x match: [\n      b :: Bar -> b;\n      _ -> \"none\"\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("bar")).expect("codegen should succeed");
+    let code = codegen_named(src, "bar");
     assert!(
         code.contains("'maps':'get'('$beamtalk_class'"),
         "Leaf type pattern keeps the exact-tag fast path. Got:\n{code}"
@@ -347,12 +297,7 @@ fn test_match_type_pattern_mixed_with_nil_and_native_arms_compiles() {
     // still compile into one dispatch chain (verifies the
     // dispatch/interleaving layer, not just each strategy in isolation).
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      nil -> 0;\n      n :: Integer -> n;\n      _ -> -1\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
-
-    eprintln!("Generated code for mixed nil/type/wildcard match:\n{code}");
+    let code = codegen_named(src, "foo");
 
     assert!(
         code.contains("<'nil'>"),
@@ -370,12 +315,7 @@ fn test_match_type_pattern_block_compiles_to_is_function_test() {
     // needs its own guard-safe BIF entry rather than falling into the
     // tagged-class `is_map` path (which would never match a `fun`).
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      blk :: Block -> blk;\n      _ -> \"none\"\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
-
-    eprintln!("Generated code for Block type pattern match:\n{code}");
+    let code = codegen_named(src, "foo");
 
     assert!(
         code.contains("'erlang':'is_function'"),
@@ -391,12 +331,7 @@ fn test_match_type_pattern_true_false_nil_use_exact_atom_match() {
     // single-atom test rather than the tagged-class `is_map` check (which
     // would never match a plain atom).
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      t :: True -> 1;\n      f :: False -> 2;\n      n :: Nil -> 3;\n      u :: UndefinedObject -> 4;\n      _ -> 0\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
-
-    eprintln!("Generated code for True/False/Nil/UndefinedObject type patterns:\n{code}");
+    let code = codegen_named(src, "foo");
 
     // Scope the `is_map` check to the `match:` construct's own compiled
     // function (`'test:'/2`), not the whole module: `dispatch/3` now
@@ -435,12 +370,7 @@ fn test_match_type_pattern_actor_class_uses_tuple_tag_check_and_compiles() {
     // match a live actor instance. Verifies both the generated shape and
     // that it actually compiles through erlc (not just pretty-prints).
     let src = "Actor subclass: Counter\n  state: count = 0\n\n  test: x =>\n    x match: [\n      c :: Counter -> c;\n      _ -> \"none\"\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
-
-    eprintln!("Generated code for actor type pattern match:\n{code}");
+    let code = codegen_named(src, "counter");
 
     assert!(
         code.contains("'erlang':'is_tuple'"),
@@ -464,12 +394,7 @@ fn test_match_type_pattern_pid_reference_port_use_guard_safe_bifs() {
     // its own guard-safe BIF entry rather than the tagged-class `is_map`
     // check (which would never match a bare pid/ref/port).
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      p :: Pid -> 1;\n      r :: Reference -> 2;\n      pt :: Port -> 3;\n      _ -> 0\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
-
-    eprintln!("Generated code for Pid/Reference/Port type patterns:\n{code}");
+    let code = codegen_named(src, "foo");
 
     assert!(
         code.contains("'erlang':'is_pid'"),
@@ -492,12 +417,7 @@ fn test_match_type_pattern_tuple_excludes_actor_reference_shape() {
     // `x :: Tuple` must explicitly exclude the reserved actor/supervisor
     // tags or it would incorrectly match a live actor reference too.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      t :: Tuple -> 1;\n      _ -> 0\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("foo")).expect("codegen should succeed");
-
-    eprintln!("Generated code for Tuple type pattern:\n{code}");
+    let code = codegen_named(src, "foo");
 
     assert!(
         code.contains("'erlang':'is_tuple'"),
@@ -534,12 +454,7 @@ fn test_match_type_pattern_supervisor_subclass_uses_tuple_tag_check_and_compiles
     // match — a concrete Supervisor subclass cannot itself carry compiled
     // custom instance methods (OTP's supervisor behaviour owns `handle_call`).
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      s :: WebApp -> s;\n      _ -> \"none\"\n    ]\n\nSupervisor subclass: WebApp\n  childSpecs => #()\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("webapp")).expect("codegen should succeed");
-
-    eprintln!("Generated code for Supervisor type pattern match:\n{code}");
+    let code = codegen_named(src, "webapp");
 
     assert!(
         code.contains("'erlang':'is_tuple'"),
@@ -566,12 +481,7 @@ fn test_match_type_pattern_dynamic_supervisor_subclass_uses_tuple_tag_check_and_
     // See the Supervisor test above for why `Foo` (the class whose method
     // actually gets compiled) must be `module.classes.first()`.
     let src = "Object subclass: Foo\n  test: x =>\n    x match: [\n      p :: Pool -> p;\n      _ -> \"none\"\n    ]\n\nObject subclass: Widget\n\nDynamicSupervisor(Widget) subclass: Pool\n  childClass => Widget\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("pool")).expect("codegen should succeed");
-
-    eprintln!("Generated code for DynamicSupervisor type pattern match:\n{code}");
+    let code = codegen_named(src, "pool");
 
     assert!(
         code.contains("'erlang':'is_tuple'"),
@@ -615,8 +525,6 @@ fn test_match_type_pattern_actor_subclass_resolves_through_cross_file_stub_chain
     )
     .expect("codegen should succeed");
 
-    eprintln!("Generated code for cross-file actor type pattern match:\n{code}");
-
     assert!(
         code.contains("'erlang':'is_tuple'"),
         "Actor-class type pattern should test is_tuple even through a cross-file stub chain. \
@@ -658,8 +566,6 @@ fn test_match_type_pattern_supervisor_subclass_resolves_through_cross_file_stub_
     )
     .expect("codegen should succeed");
 
-    eprintln!("Generated code for cross-file supervisor type pattern match:\n{code}");
-
     assert!(
         code.contains("'erlang':'is_tuple'"),
         "Supervisor-class type pattern should test is_tuple even through a cross-file stub \
@@ -685,12 +591,7 @@ fn test_match_type_pattern_dictionary_and_tagged_class_arms_interleave_in_one_ca
     // dispatch chain, not collide on temp-var names or short-circuit past
     // the second arm.
     let src = "Value subclass: Bar\n  field: n = 0\n\n  test: x =>\n    x match: [\n      d :: Dictionary -> d;\n      b :: Bar -> b;\n      _ -> \"none\"\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("bar")).expect("codegen should succeed");
-
-    eprintln!("Generated code for Dictionary + tagged-class match:\n{code}");
+    let code = codegen_named(src, "bar");
 
     assert!(
         code.matches("'erlang':'is_map'").count() >= 2,

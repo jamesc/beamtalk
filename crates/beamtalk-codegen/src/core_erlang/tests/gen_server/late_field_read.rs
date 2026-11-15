@@ -31,10 +31,7 @@ fn late_instance_field_read_emits_guarded_maps_find_and_compiles() {
         "  state: id :: Integer = 0\n\n",
         "  sendLine: line => self.proc\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("codex_client"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "codex_client");
 
     assert!(
         code.contains("case call 'maps':'find'('proc', State) of"),
@@ -82,10 +79,7 @@ fn eager_instance_field_read_stays_bare_maps_get_alongside_late_sibling() {
         "  state: id :: Integer = 0\n\n",
         "  getId => self.id\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("codex_client"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "codex_client");
 
     assert!(
         code.contains("call 'maps':'get'('id', State)"),
@@ -105,10 +99,7 @@ fn late_class_var_read_inlines_the_hit_and_falls_back_to_get_late() {
         "  classState: total :: Integer = 0\n\n",
         "  class fetch => self.current\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("codex_client"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "codex_client");
 
     assert!(
         code.contains("call 'maps':'find'('current', "),
@@ -140,10 +131,7 @@ fn eager_class_var_read_uses_get_alongside_late_sibling() {
         "  classState: total :: Integer = 0\n\n",
         "  class fetchTotal => self.total\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("codex_client"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "codex_client");
 
     assert!(
         code.contains("call 'beamtalk_class_vars':'get'(ClassSelf, 'total')"),
@@ -247,10 +235,7 @@ fn late_field_read_inside_hybrid_while_loop_is_not_pre_extracted_and_compiles() 
         "    ]\n",
         "    nil\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("codex_client"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "codex_client");
 
     // The hybrid pre-extraction preamble must mutate-extract 'n' (eager)
     // but never pre-extract 'proc' via a bare maps:get.
@@ -297,10 +282,7 @@ fn late_field_read_inside_while_loop_that_never_runs_compiles() {
         "    ]\n",
         "    nil\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("codex_client"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "codex_client");
     assert!(
         code.contains("case call 'maps':'find'('proc', "),
         "the `late` field read inside the loop body must be the guarded maps:find form. Got:\n{code}"
@@ -332,10 +314,7 @@ fn late_field_mutated_inside_while_loop_does_not_select_hybrid_and_compiles() {
         "    ]\n",
         "    nil\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("codex_client"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "codex_client");
 
     // A `late` mutated field must never be pre-extracted with a bare
     // maps:get ahead of the loop (Hybrid mode's pre-extraction preamble).

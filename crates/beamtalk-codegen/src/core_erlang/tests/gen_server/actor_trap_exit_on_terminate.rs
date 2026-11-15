@@ -21,10 +21,7 @@ fn test_actor_without_terminate_override_does_not_trap_exit() {
         "  state: value = 0\n\n",
         "  increment => self.value := self.value + 1\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("plain_counter"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "plain_counter");
 
     assert!(
         !code.contains("process_flag"),
@@ -48,10 +45,7 @@ fn test_actor_with_terminate_override_traps_exit_in_init() {
         "  state: value = 0\n\n",
         "  terminate: _reason => nil\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("cleanup_actor"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "cleanup_actor");
 
     let init_body =
         extract_core_fn(&code, "'init'/1 = fun").expect("init/1 must be present in generated code");
@@ -128,10 +122,7 @@ fn test_actor_inheriting_terminate_override_from_cross_file_ancestor_traps_exit(
 #[test]
 fn test_plain_actor_handle_info_still_delegates_to_runtime() {
     let src = "Actor subclass: PlainCounter\n  state: value = 0\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("plain_counter"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "plain_counter");
 
     let info_body = extract_core_fn(&code, "'handle_info'/2 = fun")
         .expect("handle_info/2 must be present in generated code");
@@ -152,10 +143,7 @@ fn test_server_subclass_handle_info_intercepts_linked_exit_before_dispatch() {
         "  handleInfo: msg =>\n",
         "    msg == #tick ifTrue: [self.count := self.count + 1]\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("tick_server"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "tick_server");
 
     let info_body = extract_core_fn(&code, "'handle_info'/2 = fun")
         .expect("handle_info/2 must be present in generated code");
