@@ -456,6 +456,12 @@ impl CoreErlangGenerator {
     ///
     /// The order of checks matters: more specific patterns (e.g. field assignment)
     /// must come before general ones (e.g. pure expression).
+    // Deliberately a separate classifier from `classify_vt_body_expr` and `classify_block_expr`: each classifies
+    // for a different frame (actor method body, value-type `Self` body, plain
+    // closure body), with different kind enums and predicates (loop-threading
+    // `is_*_with_vt_local_threading` vs `control_flow_has_mutations`;
+    // `is_last`-driven). Only the leading shapes (`^`, field assignment, local
+    // assignment, destructure) coincide.
     pub(in crate::core_erlang) fn classify_body_expr(&self, expr: &Expression) -> BodyExprKind {
         // Early return — `^ value`
         if matches!(expr, Expression::Return { .. }) {
@@ -678,10 +684,8 @@ impl CoreErlangGenerator {
     /// [`threaded_ir::ThreadedStmt::Statement`] built by the SAME codegen
     /// call production ran before this migration (byte-identity: only the
     /// container changed, from `Vec<Document>` to `Vec<ThreadedStmt>`).
-    /// Version steps hidden inside shared multi-module helpers
-    /// (`generate_field_assignment_open`,
-    /// `generate_self_field_at_put_open`) remain inside their `Statement`s —
-    /// see `verify_body_with_opaque_version_gaps`'s backfill accounting.
+    /// Field writes are real `Bind`s (`lower_field_assignment_bind`,
+    /// `lower_stmt_self_field_at_put`, `lower_stmt_self_clear_field`).
     ///
     /// Classification happens exactly once per statement (`classify_body_expr`),
     /// interleaved with lowering: just before a statement is lowered, so the
@@ -804,9 +808,15 @@ impl CoreErlangGenerator {
             }
 
             match kind {
-                BodyExprKind::SelfFieldAtPut => self.lower_reply_self_field_at_put(cx, &mut stmts),
-                BodyExprKind::SelfClearField => self.lower_reply_self_clear_field(cx, &mut stmts),
-                BodyExprKind::FieldAssignment => self.lower_reply_field_assignment(cx, &mut stmts),
+                BodyExprKind::SelfFieldAtPut => {
+                    self.lower_stmt_self_field_at_put(cx, &mut StmtTail::Reply, &mut stmts)
+                }
+                BodyExprKind::SelfClearField => {
+                    self.lower_stmt_self_clear_field(cx, &mut StmtTail::Reply, &mut stmts)
+                }
+                BodyExprKind::FieldAssignment => {
+                    self.lower_stmt_field_assignment(cx, &mut StmtTail::Reply, &mut stmts)
+                }
                 BodyExprKind::FieldAssignmentControlFlow => {
                     self.lower_reply_field_assignment_control_flow(cx, &mut stmts)
                 }
@@ -1040,166 +1050,8 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    // Mutation hidden inside a shared multi-module helper
-    // (`generate_self_field_at_put_open` — also called from
-    // conditionals.rs): stays an opaque Statement; the version
-    // step it performs is accounted for by
-    // `verify_body_with_opaque_version_gaps`'s backfill.
-    fn lower_reply_self_field_at_put(
-        &mut self,
-        cx: StmtCx<'_>,
-        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
-    ) -> Result<()> {
-        use threaded_ir::ThreadedStmt;
-        let StmtCx {
-            expr,
-            span,
-            is_last,
-            ..
-        } = cx;
-        // BT-4310: the name and value are sequenced ahead of the put.
-        let scope = self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, stmts)?;
-        let (doc, val_var) = self.generate_self_field_at_put_open(expr)?;
-        self.finish_precompiled_scope(scope)?;
-        stmts.push(ThreadedStmt::Statement(doc, span));
-        if is_last {
-            let final_state = self.current_state_var();
-            stmts.push(ThreadedStmt::Statement(
-                docvec![
-                    "{'reply', ",
-                    leaf::var(val_var),
-                    ", ",
-                    leaf::var(final_state),
-                    "}",
-                ],
-                span,
-            ));
-        }
-        Ok(())
-    }
-
-    // Mirrors SelfFieldAtPut immediately above — same opaque
-    // Statement + is_last reply shape, mirroring
-    // `generate_self_clear_field_open` (ADR 0124 §1/B4).
-    fn lower_reply_self_clear_field(
-        &mut self,
-        cx: StmtCx<'_>,
-        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
-    ) -> Result<()> {
-        use threaded_ir::ThreadedStmt;
-        let StmtCx {
-            expr,
-            span,
-            is_last,
-            ..
-        } = cx;
-        let scope = self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, stmts)?;
-        let (doc, val_var) = self.generate_self_clear_field_open(expr)?;
-        self.finish_precompiled_scope(scope)?;
-        stmts.push(ThreadedStmt::Statement(doc, span));
-        if is_last {
-            let final_state = self.current_state_var();
-            stmts.push(ThreadedStmt::Statement(
-                docvec![
-                    "{'reply', ",
-                    leaf::var(val_var),
-                    ", ",
-                    leaf::var(final_state),
-                    "}",
-                ],
-                span,
-            ));
-        }
-        Ok(())
-    }
-
-    fn lower_reply_field_assignment(
-        &mut self,
-        cx: StmtCx<'_>,
-        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
-    ) -> Result<()> {
-        use threaded_ir::ThreadedStmt;
-        let StmtCx {
-            expr,
-            span,
-            is_last,
-            ..
-        } = cx;
-        // ADR 0118 phase 1a: `self.log := self.log ++ #(self
-        // getValue)`, `self.count := self.count + (self bump)` —
-        // the RHS's state-effecting sub-expressions land in this
-        // body's IR as real `Bind`s BEFORE `source_version` is
-        // read (the exact snapshot a reverted prototype once
-        // desynced) and before the shared open helper mints its
-        // own step; the RHS compile below substitutes the
-        // already-sequenced value.
-        let rhs_scope = match expr {
-            Expression::Assignment { value, .. } => {
-                self.thread_ahead(value, stmts, threaded_ir::FrameId::ROOT)?
-            }
-            _ => PrecompiledScope::new(),
-        };
-        if is_last {
-            if let Expression::Assignment { target, value, .. } = expr
-                && let Expression::FieldAccess { field, .. } = target.as_ref()
-            {
-                let val_var = self.fresh_temp_var("Val");
-                let source_version = self.state_version();
-                let value_str = self.expression_doc(value)?;
-                let new_state = self.next_state_var();
-                let target_version = self.state_version();
-                stmts.push(ThreadedStmt::Statement(
-                    docvec!["let ", leaf::var(val_var.clone()), " = ", value_str, " in ",],
-                    span,
-                ));
-                // BT-4369: every field write records itself.
-                self.note_field_write(&field.name, span);
-                // The real field mutation, as a real Bind —
-                // `render_bind`'s `BindOp::Put` arm is the
-                // single place the `maps:put` shape lives.
-                stmts.push(ThreadedStmt::Bind {
-                    target: threaded_ir::VersionedVar::new(
-                        threaded_ir::VersionPrefix::State,
-                        target_version,
-                        threaded_ir::FrameId::ROOT,
-                    ),
-                    source: threaded_ir::VersionedVar::new(
-                        threaded_ir::VersionPrefix::State,
-                        source_version,
-                        threaded_ir::FrameId::ROOT,
-                    ),
-                    op: threaded_ir::BindOp::Put {
-                        field: field.name.to_string(),
-                        value: threaded_ir::ValueRef::Var(val_var.clone()),
-                        // Unused placeholder — see
-                        // `lower_cf_field_assignment_binds`.
-                    },
-                    span,
-                });
-                stmts.push(ThreadedStmt::Statement(
-                    docvec![
-                        "{'reply', ",
-                        leaf::var(val_var),
-                        ", ",
-                        leaf::var(new_state),
-                        "}",
-                    ],
-                    span,
-                ));
-            }
-        } else {
-            // Shared helper (`generate_field_assignment_open`,
-            // also called from conditionals/exception_handling/
-            // list_ops/intrinsics): opaque Statement, version
-            // step backfilled at verify time.
-            let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
-            stmts.push(ThreadedStmt::Statement(doc, span));
-        }
-        self.finish_precompiled_scope(rhs_scope)?;
-        Ok(())
-    }
-
     // Self.field := expr where RHS is control flow returning {Value, State}
+    // Not shared with the arm walker (`lower_arm_field_assignment_control_flow`); see `lower_reply_local_assign_pure`.
     #[expect(
         clippy::too_many_lines,
         reason = "one statement kind (FieldAssignmentControlFlow) of the statement walker"
@@ -1360,6 +1212,7 @@ impl CoreErlangGenerator {
     // instead (ADR 0111 Addendum 4's type-level rule: a
     // version-mutating statement must be a `Bind`, never a
     // `Statement`, but `Bind`'s `op` may still be opaque).
+    // Not shared with the arm walker (`lower_arm_self_field_at_put_control_flow`); see `lower_reply_local_assign_pure`.
     fn lower_reply_self_field_at_put_control_flow(
         &mut self,
         cx: StmtCx<'_>,
@@ -1472,6 +1325,7 @@ impl CoreErlangGenerator {
     // Element 2 of the RHS tuple becomes the next real `State` Bind
     // (Direct — the RHS is a computed map, not a static field Put);
     // the tuple unpack and threaded-local rebinds stay opaque Statements.
+    // Not shared with the arm walker (`lower_arm_destructure_assignment_control_flow`); see `lower_reply_local_assign_pure`.
     fn lower_reply_destructure_assignment_control_flow(
         &mut self,
         cx: StmtCx<'_>,
@@ -1916,6 +1770,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // Not shared with the arm walker (`lower_arm_tier2_value_call`); see `lower_reply_local_assign_pure`.
     fn lower_reply_tier2_value_call(
         &mut self,
         cx: StmtCx<'_>,
@@ -2000,6 +1855,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // Not shared with the arm walker (`lower_arm_control_flow_with_mutations`); see `lower_reply_local_assign_pure`.
     fn lower_reply_control_flow_with_mutations(
         &mut self,
         cx: StmtCx<'_>,

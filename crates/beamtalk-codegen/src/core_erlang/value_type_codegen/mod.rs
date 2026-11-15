@@ -35,7 +35,7 @@ use beamtalk_core::ast::{ClassDefinition, ClassKind, MethodKind, Module, TypeAnn
 /// Classification of how a value-type method body expression should be handled
 /// for Self-threading.  Produced by [`CoreErlangGenerator::classify_vt_body_expr`]
 /// and consumed by the unified body loop in [`CoreErlangGenerator::generate_value_type_method`].
-enum VtBodyExprKind {
+pub(in crate::core_erlang) enum VtBodyExprKind {
     /// `^ value` — early return from method.
     EarlyReturn,
     /// `self.field := value` — direct field assignment (Self-threading).

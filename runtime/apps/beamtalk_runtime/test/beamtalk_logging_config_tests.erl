@@ -951,6 +951,8 @@ remove_test_file_handler() ->
 
 -define(BT_4321_DOMAIN, [beamtalk, user, bt_4321]).
 
+%% Own handler kept (not beamtalk_test_log): these tests exercise logger handler
+%% configuration itself (domain filters, primary and module level changes).
 -doc "Forward each log event to the test process (handler callback).".
 log(LogEvent, #{config := #{parent := Parent}}) ->
     Parent ! {bt_4321_log_event, LogEvent},

@@ -22,8 +22,6 @@ capture crash reports.
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, format_status/1]).
 -export(['__beamtalk_secrets'/0]).
-%% logger handler callback
--export([log/2]).
 
 -define(R, <<"[redacted]">>).
 
@@ -52,10 +50,6 @@ handle_cast({cast, bump, [], _Ctx}, #{count := N} = State) ->
 
 handle_info(_Msg, State) ->
     {noreply, State}.
-
-log(Event, #{config := #{pid := Pid}}) ->
-    Pid ! {captured_log, Event},
-    ok.
 
 start() ->
     {ok, Pid} = gen_server:start(?MODULE, #{token => <<"tok-s3cret">>, count => 7}, []),
@@ -182,8 +176,7 @@ get_status_redacts_state_and_log_test() ->
     end.
 
 crash_report_redacts_message_and_state_test() ->
-    HandlerId = bt4567_capture,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{pid => self()}}),
+    Capture = beamtalk_test_log:start_capture(error),
     Pid = start(),
     MRef = monitor(process, Pid),
     try
@@ -197,19 +190,17 @@ crash_report_redacts_message_and_state_test() ->
         ?assertEqual({'$gen_cast', {cast, 'login:', ?R, #{}}}, LastMsg),
         ?assertEqual(#{token => ?R, count => 7}, State)
     after
-        logger:remove_handler(HandlerId)
+        beamtalk_test_log:stop_capture(Capture)
     end.
 
 await_terminate_report(Pid) ->
-    receive
-        {captured_log, #{msg := {report, #{label := {gen_server, terminate}} = Report}}} ->
-            case Report of
-                #{name := Pid} -> Report;
-                _ -> await_terminate_report(Pid)
-            end;
-        {captured_log, _Other} ->
-            await_terminate_report(Pid)
-    after 5000 -> error(no_terminate_report)
+    Matches = fun
+        (#{msg := {report, #{label := {gen_server, terminate}, name := Name}}}) -> Name =:= Pid;
+        (_) -> false
+    end,
+    case beamtalk_test_log:await(Matches, 5000) of
+        {ok, #{msg := {report, Report}}} -> Report;
+        timeout -> error(no_terminate_report)
     end.
 
 %%% ----------------------------------------------------------------------
@@ -243,8 +234,7 @@ compiled_actor_get_status_redacts_test() ->
 
 compiled_actor_crash_report_redacts_test() ->
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
-    HandlerId = bt4567_compiled_capture,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{pid => self()}}),
+    Capture = beamtalk_test_log:start_capture(error),
     Pid = element(4, 'bt@secret_vault_actor':spawn()),
     MRef = monitor(process, Pid),
     try
@@ -258,7 +248,7 @@ compiled_actor_crash_report_redacts_test() ->
         ?assertEqual({'$gen_cast', {cast, 'explode:', ?R, #{}}}, LastMsg),
         ?assertMatch(#{verifier := ?R, count := 7}, State)
     after
-        logger:remove_handler(HandlerId)
+        beamtalk_test_log:stop_capture(Capture)
     end.
 
 %%% ----------------------------------------------------------------------
@@ -325,8 +315,7 @@ crash_filter_fails_closed_test() ->
 
 compiled_actor_proc_lib_report_redacts_queued_send_test() ->
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
-    HandlerId = bt4666_compiled_capture,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{pid => self()}}),
+    Capture = beamtalk_test_log:start_capture(error),
     Pid = element(4, 'bt@secret_vault_actor':spawn()),
     MRef = monitor(process, Pid),
     try
@@ -345,15 +334,14 @@ compiled_actor_proc_lib_report_redacts_queued_send_test() ->
         ?assertMatch([{'$gen_call', _, {'unlock:', ?R, _}}], Messages),
         ?assertEqual(nomatch, string:find(lists:flatten(io_lib:format("~p", [Info])), "31337"))
     after
-        logger:remove_handler(HandlerId)
+        beamtalk_test_log:stop_capture(Capture)
     end.
 
 %% BT-4477: an actor started by `safe_spawn_monitored_async/2` (a `proc_lib`
 %% fun, not `gen_server:start*`) is redacted in the crash report like any other.
 async_spawned_actor_proc_lib_report_redacts_queued_send_test() ->
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
-    HandlerId = bt4477_async_capture,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{pid => self()}}),
+    Capture = beamtalk_test_log:start_capture(error),
     {ok, {Pid, MonRef}} =
         beamtalk_actor:safe_spawn_monitored_async('bt@secret_vault_actor', #{}),
     try
@@ -370,19 +358,19 @@ async_spawned_actor_proc_lib_report_redacts_queued_send_test() ->
         ?assertMatch([{'$gen_call', _, {'unlock:', ?R, _}}], Messages),
         ?assertEqual(nomatch, string:find(lists:flatten(io_lib:format("~p", [Info])), "31337"))
     after
-        logger:remove_handler(HandlerId)
+        beamtalk_test_log:stop_capture(Capture)
     end.
 
 await_proc_lib_report(Pid) ->
-    receive
-        {captured_log, #{msg := {report, #{label := {proc_lib, crash}, report := [Info, _]}}}} ->
-            case proplists:get_value(pid, Info) of
-                Pid -> Info;
-                _ -> await_proc_lib_report(Pid)
-            end;
-        {captured_log, _Other} ->
-            await_proc_lib_report(Pid)
-    after 5000 -> error(no_proc_lib_report)
+    Matches = fun
+        (#{msg := {report, #{label := {proc_lib, crash}, report := [Info, _]}}}) ->
+            proplists:get_value(pid, Info) =:= Pid;
+        (_) ->
+            false
+    end,
+    case beamtalk_test_log:await(Matches, 5000) of
+        {ok, #{msg := {report, #{report := [Info, _]}}}} -> Info;
+        timeout -> error(no_proc_lib_report)
     end.
 
 crash_filter_redacts_installed_state_cell_test() ->

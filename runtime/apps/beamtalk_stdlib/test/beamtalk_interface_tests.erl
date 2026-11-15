@@ -14,67 +14,21 @@ in findSendersIn/2 and findReferencesToIn/2, while [] is still returned
 (per-method fault-tolerance contract unchanged).
 """.
 
-%% Logger handler callback for log capture
--export([log/2]).
-
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
-%%% Logger handler callback
-%%% ============================================================================
-
-%% Capture log events and forward to the test process.
-log(LogEvent, #{config := #{parent := Parent}}) ->
-    Parent ! {captured_log, LogEvent},
-    ok.
-
-%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 
-install_capture_handler() ->
-    HandlerId = beamtalk_interface_test_capture,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{
-        config => #{parent => self()},
-        level => all
-    }),
-    %% Lower the primary logger level to 'all' so our capture handler receives
-    %% warning/error events. The sys.config for tests sets primary level to 'error'
-    %% to suppress noise; we restore it after the test.
-    #{level := OrigLevel} = logger:get_primary_config(),
-    ok = logger:set_primary_config(level, all),
-    {HandlerId, OrigLevel}.
-
-remove_capture_handler({HandlerId, OrigLevel}) ->
-    logger:remove_handler(HandlerId),
-    logger:set_primary_config(level, OrigLevel).
-
-%% Drain one log event from the mailbox that matches a given level.
+%% Wait for one captured log event of the given level.
 %% Returns {ok, LogEvent} | not_found.
-%% Uses a fixed deadline so non-matching events consume the timeout budget
-%% rather than resetting it on each recursion (avoids waiting far longer than
-%% Timeout under log noise).
 collect_log(Level, Timeout) ->
-    Deadline = erlang:monotonic_time(millisecond) + Timeout,
-    collect_log_until(Level, Deadline).
-
-collect_log_until(Level, Deadline) ->
-    Remaining = Deadline - erlang:monotonic_time(millisecond),
-    case Remaining =< 0 of
-        true ->
-            not_found;
-        false ->
-            receive
-                {captured_log, #{level := Level} = E} ->
-                    {ok, E};
-                {captured_log, _Other} ->
-                    collect_log_until(Level, Deadline)
-            after Remaining ->
-                not_found
-            end
+    case beamtalk_test_log:await(fun(#{level := L}) -> L =:= Level end, Timeout) of
+        {ok, E} -> {ok, E};
+        timeout -> not_found
     end.
 
 %%% ============================================================================
@@ -84,7 +38,7 @@ collect_log_until(Level, Deadline) ->
 log_compiler_diagnostics_warning_test() ->
     %% Diagnostics that do NOT indicate port unavailability should trigger
     %% a LOG_WARNING.
-    Handle = install_capture_handler(),
+    Handle = beamtalk_test_log:start_capture(all),
     try
         Diagnostics = [#{message => <<"Parse error: unexpected token">>}],
         beamtalk_interface:log_compiler_diagnostics(Diagnostics, 'findSendersIn:selector:'),
@@ -97,7 +51,7 @@ log_compiler_diagnostics_warning_test() ->
         ?assertEqual('findSendersIn:selector:', maps:get(selector, Meta)),
         ?assertEqual(Diagnostics, maps:get(diagnostics, Meta))
     after
-        remove_capture_handler(Handle)
+        beamtalk_test_log:stop_capture(Handle)
     end.
 
 %%% ============================================================================
@@ -107,7 +61,7 @@ log_compiler_diagnostics_warning_test() ->
 log_compiler_diagnostics_error_on_port_unavailable_test() ->
     %% Diagnostics that indicate the compiler server is not available should
     %% trigger a LOG_ERROR (not just a warning).
-    Handle = install_capture_handler(),
+    Handle = beamtalk_test_log:start_capture(all),
     try
         Diagnostics = [#{message => <<"Compiler server is not available">>}],
         beamtalk_interface:log_compiler_diagnostics(Diagnostics, 'findReferencesToIn:class:'),
@@ -119,7 +73,7 @@ log_compiler_diagnostics_error_on_port_unavailable_test() ->
         ?assertEqual('findReferencesToIn:class:', maps:get(selector, Meta)),
         ?assertEqual(Diagnostics, maps:get(diagnostics, Meta))
     after
-        remove_capture_handler(Handle)
+        beamtalk_test_log:stop_capture(Handle)
     end.
 
 %%% ============================================================================
@@ -128,7 +82,7 @@ log_compiler_diagnostics_error_on_port_unavailable_test() ->
 
 log_compiler_diagnostics_error_on_timeout_test() ->
     %% "timed out" diagnostics also escalate to LOG_ERROR.
-    Handle = install_capture_handler(),
+    Handle = beamtalk_test_log:start_capture(all),
     try
         Diagnostics = [#{message => <<"Compiler server timed out">>}],
         beamtalk_interface:log_compiler_diagnostics(Diagnostics, 'findSendersIn:selector:'),
@@ -140,7 +94,7 @@ log_compiler_diagnostics_error_on_timeout_test() ->
         ?assertEqual('findSendersIn:selector:', maps:get(selector, Meta)),
         ?assertEqual(Diagnostics, maps:get(diagnostics, Meta))
     after
-        remove_capture_handler(Handle)
+        beamtalk_test_log:stop_capture(Handle)
     end.
 
 %%% ============================================================================
