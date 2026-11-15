@@ -306,11 +306,9 @@ test_resolve_spawn_module_incomplete_chain() ->
 
 %% The error the shadowed static route raises (unwrapped from its exception).
 static_route_error(Class, Selector) ->
-    try resolve_spawn(Class, Selector, actor) of
-        Module -> error({expected_raise, Module})
-    catch
-        %% BT-4900: kept hand-written - value-returning helper (hands the error back to the caller)
-        error:#{error := #beamtalk_error{} = Error} -> Error
+    case beamtalk_test_assert:raised_error(fun() -> resolve_spawn(Class, Selector, actor) end) of
+        no_error -> error(expected_raise);
+        Error -> Error
     end.
 
 test_handle_spawn_not_spawnable() ->

@@ -155,8 +155,10 @@ outcome(Fun) ->
     try Fun() of
         V -> {ok, V}
     catch
+        %% BT-4900: kept hand-written - value-returning helper with a pattern guard on details
         error:#{error := #beamtalk_error{details = D} = E} when is_map(D) ->
             {beamtalk_error, E#beamtalk_error{details = maps:remove(erlang_stacktrace, D)}};
+        %% BT-4900: kept hand-written - value-returning helper with a pattern guard on details
         error:#{error := #beamtalk_error{} = E} ->
             {beamtalk_error, E};
         C:R ->

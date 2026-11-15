@@ -381,6 +381,7 @@ dispatch_and_has_method_agree_test() ->
                     beamtalk_file_handle:dispatch(Selector, Args, Handle),
                     ok
                 catch
+                    %% BT-4900: kept hand-written - negative assertion (must NOT raise does_not_understand)
                     error:#{error := #beamtalk_error{kind = does_not_understand}} ->
                         ?assert(false)
                 end
