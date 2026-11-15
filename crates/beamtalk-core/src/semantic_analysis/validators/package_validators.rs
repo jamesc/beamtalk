@@ -6,7 +6,7 @@
 //! **DDD Context:** Semantic Analysis
 //!
 //! Validates that package qualifiers in `ClassReference` nodes and
-//! `StandaloneMethodDefinition` targets reference declared dependencies.
+//! `StandaloneMethodDefinition` targets name a known package: a declared dependency, the current package or the stdlib.
 
 use crate::ast::{Expression, Module};
 use crate::ast_walker::walk_expression;
