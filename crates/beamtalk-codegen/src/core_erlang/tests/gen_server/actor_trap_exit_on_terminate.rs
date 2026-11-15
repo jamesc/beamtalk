@@ -72,29 +72,8 @@ fn test_actor_with_terminate_override_traps_exit_in_init() {
 fn test_actor_inheriting_terminate_override_from_cross_file_ancestor_traps_exit() {
     use beamtalk_core::ast::MethodKind;
     use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
-    use std::collections::HashMap;
 
     let ancestor = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: ecow::EcoString::from("BaseCleanupActor"),
-        superclass: Some(ecow::EcoString::from("Actor")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: "terminate:".into(),
             arity: 1,
@@ -112,11 +91,7 @@ fn test_actor_inheriting_terminate_override_from_cross_file_ancestor_traps_exit(
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("BaseCleanupActor", Some("Actor"))
     };
 
     // LeafActor extends the cross-file BaseCleanupActor and does not define

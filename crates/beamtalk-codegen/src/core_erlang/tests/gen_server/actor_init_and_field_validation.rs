@@ -782,20 +782,6 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
     use std::collections::HashMap;
 
     let ancestor = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: ecow::EcoString::from("BaseActor"),
-        superclass: Some(ecow::EcoString::from("Actor")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![
             ecow::EcoString::from("nilField"),
             ecow::EcoString::from("nilUnionField"),
@@ -834,15 +820,7 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
             m.insert(ecow::EcoString::from("reqField"), false);
             m
         },
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("BaseActor", Some("Actor"))
     };
 
     // LogChild extends cross-file BaseActor; only LogChild's AST is present.
@@ -924,20 +902,6 @@ fn test_cross_file_ancestor_late_field_excluded_from_validation() {
     use std::collections::HashMap;
 
     let ancestor = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: ecow::EcoString::from("BaseActor"),
-        superclass: Some(ecow::EcoString::from("Actor")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![
             ecow::EcoString::from("lateField"),
             ecow::EcoString::from("reqField"),
@@ -966,14 +930,7 @@ fn test_cross_file_ancestor_late_field_excluded_from_validation() {
             m.insert(ecow::EcoString::from("reqField"), SlotKind::Eager);
             m
         },
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("BaseActor", Some("Actor"))
     };
 
     // LogChild extends cross-file BaseActor; only LogChild's AST is present.
