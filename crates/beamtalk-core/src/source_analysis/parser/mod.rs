@@ -62,9 +62,12 @@ use ecow::EcoString;
 mod binary;
 mod declarations;
 mod expressions;
+mod methods;
 mod patterns;
+mod protocols;
+mod types;
 
-use declarations::DoubleColonSkip;
+use types::DoubleColonSkip;
 
 // Property-based tests (ADR 0011 Phase 2)
 #[cfg(test)]
