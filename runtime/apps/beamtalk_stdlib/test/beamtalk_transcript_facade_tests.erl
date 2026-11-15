@@ -98,6 +98,8 @@ unregister_transcript() ->
 wait_gone(Name) ->
     beamtalk_test_wait:until(fun() -> whereis(Name) =:= undefined end).
 
+%%% Own handler kept (not beamtalk_test_log): it tests the transcript handler
+%%% installation itself, with a domain-filtered handler and a persistent_term claim.
 %%% logger handler callback
 
 log(#{msg := Msg, level := Level, meta := Meta}, _Config) ->
