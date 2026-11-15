@@ -798,8 +798,9 @@ encode_diagnostics_empty_list_test() ->
 response_keys_fixture() ->
     beamtalk_test_corpus:load_json_fixture(["tests", "repl-protocol", "response_keys.json"]).
 
-%% One decoded response from every exported top-level encoder, with its
-%% optional fields populated so their keys appear.
+%% One decoded response per encoder family, called at its widest arity with its
+%% optional fields populated so their keys appear. Shorter arities delegate to
+%% the widest one; a key added only to a narrower variant would not be seen.
 all_encoder_responses() ->
     Msg = beamtalk_test_repl:make_msg(<<"x">>, <<"id-1">>, <<"sess-1">>),
     TJ = fun identity/1,
