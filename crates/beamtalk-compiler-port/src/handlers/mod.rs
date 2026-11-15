@@ -17,6 +17,7 @@ mod diagnostics_and_version;
 pub(crate) mod expression;
 pub(crate) mod inline_definitions;
 mod method_span;
+mod module_name;
 mod source_queries;
 
 pub(crate) use categorize::handle_categorize_methods;
@@ -33,6 +34,7 @@ pub(crate) use method_span::{
     handle_find_definition_selector_spans, handle_find_selector_send_spans,
     handle_reindent_method_source, handle_resolve_method_span,
 };
+pub(crate) use module_name::handle_module_name_for_path;
 pub(crate) use source_queries::{
     handle_find_all_sends_in_source, handle_find_announce_sites_in_source,
     handle_find_ffi_sites_in_source, handle_find_field_readers_in_source,

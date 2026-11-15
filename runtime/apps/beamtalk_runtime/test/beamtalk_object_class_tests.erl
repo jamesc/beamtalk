@@ -129,6 +129,9 @@ teardown(_) ->
     catch
         _:_ -> ok
     end,
+    %% A raw wipe bypasses the metadata API, so flush the derived facts
+    %% (e.g. the memoised module->class map) cached against the old rows.
+    beamtalk_class_derived_cache:invalidate(),
     %% Clean up collision warnings table entries
     try
         ets:delete_all_objects(beamtalk_class_warnings)
@@ -1457,19 +1460,18 @@ class_method_self_call_spawn_with_test() ->
     ).
 
 -doc """
-Verify the error contains the class name extracted from the registered pid name.
+Verify the error names the class from the class process's dictionary.
 
-class_name_from_pid/1 strips 'beamtalk_class_' from the registered
-name to populate the error's class field. Exercise the full error path by
-spawning a process registered as a class and calling class_send on self().
+`beamtalk_object_class:init/1` stores `beamtalk_class_name` in the process
+dictionary; `handle_metaclass_self_call/2` and the self-instantiation fallback
+read it (BT-4892: the registered-name parse was removed). Exercise the error
+path from a process that carries that entry.
 """.
 class_method_self_call_class_name_in_error_test() ->
     TestClassName = 'SelfCallNameTestClass',
-    % elp:fixme W0023 intentional atom creation
-    RegName = list_to_atom("beamtalk_class_" ++ atom_to_list(TestClassName)),
     Parent = self(),
     spawn(fun() ->
-        register(RegName, self()),
+        put(beamtalk_class_name, TestClassName),
         try
             beamtalk_class_dispatch:class_send(self(), spawn, [])
         catch
@@ -1479,8 +1481,6 @@ class_method_self_call_class_name_in_error_test() ->
     end),
     receive
         {self_call_error, ErrorMap} ->
-            %% class_name_from_pid/1 should have recovered TestClassName from
-            %% the registered process name and included it in the error record.
             ?assertBtErrorValue(instantiation_error, TestClassName, spawn, ErrorMap)
     after 2000 ->
         ?assert(false)

@@ -32,10 +32,11 @@
 
 use crate::Location;
 use beamtalk_core::ast::{
-    BinarySegment, ClassDefinition, Expression, MethodDefinition, Module, ParameterDefinition,
-    Pattern, ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAliasDefinition,
+    ClassDefinition, Expression, MethodDefinition, Module, ParameterDefinition, Pattern,
+    ProtocolDefinition, ProtocolMethodSignature, StateDeclaration, TypeAliasDefinition,
     TypeAnnotation, TypeParamDecl,
 };
+use beamtalk_core::ast_walker::{WalkNode, walk_expression_and_patterns, walk_sends};
 use beamtalk_core::source_analysis::Span;
 use camino::Utf8PathBuf;
 
@@ -330,168 +331,37 @@ fn collect_type_annotation_refs(
     }
 }
 
-/// Recursively collect class name references in expressions.
+/// Collect the class name references in `expr`.
+///
+/// A closure over [`walk_expression_and_patterns`]: an `Identifier` or
+/// `ClassReference` spelling `class_name`, and a `Constructor` or `Type`
+/// pattern naming it (`Result` in `Result ok: v`) are the leaf cases. Mirrors
+/// `find_identifier_in_pattern` in `crate` so goto-definition and
+/// find-references see the same set of sites.
 fn collect_class_refs(
     expr: &Expression,
     class_name: &str,
     file_path: &Utf8PathBuf,
     results: &mut Vec<Location>,
 ) {
-    match expr {
-        Expression::Identifier(ident) if ident.name == class_name => {
+    let first = results.len();
+    walk_expression_and_patterns(expr, &mut |node| match node {
+        WalkNode::Expr(Expression::Identifier(ident)) if ident.name == class_name => {
             results.push(Location::new(file_path.clone(), ident.span));
         }
-        Expression::ClassReference { name, .. } if name.name == class_name => {
+        WalkNode::Expr(Expression::ClassReference { name, .. }) if name.name == class_name => {
             results.push(Location::new(file_path.clone(), name.span));
         }
-        Expression::Assignment { target, value, .. } => {
-            collect_class_refs(target, class_name, file_path, results);
-            collect_class_refs(value, class_name, file_path, results);
+        WalkNode::Pattern(Pattern::Constructor { class, .. } | Pattern::Type { class, .. })
+            if class.name == class_name =>
+        {
+            results.push(Location::new(file_path.clone(), class.span));
         }
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            collect_class_refs(receiver, class_name, file_path, results);
-            for arg in arguments {
-                collect_class_refs(arg, class_name, file_path, results);
-            }
-        }
-        Expression::Block(block) => {
-            for stmt in &block.body {
-                collect_class_refs(&stmt.expression, class_name, file_path, results);
-            }
-        }
-        Expression::Return { value, .. } => {
-            collect_class_refs(value, class_name, file_path, results);
-        }
-        Expression::Parenthesized { expression, .. } => {
-            collect_class_refs(expression, class_name, file_path, results);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            collect_class_refs(receiver, class_name, file_path, results);
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            collect_class_refs(receiver, class_name, file_path, results);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    collect_class_refs(arg, class_name, file_path, results);
-                }
-            }
-        }
-        Expression::Match { value, arms, .. } => {
-            collect_class_refs(value, class_name, file_path, results);
-            for arm in arms {
-                // Walk arm patterns so constructor pattern class names
-                // (e.g. `Result` in `Result ok: v`) are reported as references.
-                collect_pattern_class_refs(&arm.pattern, class_name, file_path, results);
-                if let Some(guard) = &arm.guard {
-                    collect_class_refs(guard, class_name, file_path, results);
-                }
-                collect_class_refs(&arm.body, class_name, file_path, results);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for segment in segments {
-                if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment {
-                    collect_class_refs(expr, class_name, file_path, results);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                collect_class_refs(expr, class_name, file_path, results);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for element in elements {
-                collect_class_refs(element, class_name, file_path, results);
-            }
-            if let Some(tail_expr) = tail {
-                collect_class_refs(tail_expr, class_name, file_path, results);
-            }
-        }
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for element in elements {
-                collect_class_refs(element, class_name, file_path, results);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                collect_class_refs(&pair.key, class_name, file_path, results);
-                collect_class_refs(&pair.value, class_name, file_path, results);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Recursively collect class name references inside a destructuring pattern.
-///
-/// Only `Pattern::Constructor` carries a class identifier (`Result` in
-/// `Result ok: v`). All other variants just host nested patterns, which we walk
-/// so a constructor nested inside a tuple, list, array, map, or binary pattern
-/// is still reported. Mirrors `find_identifier_in_pattern` in
-/// `crate` so goto-definition and find-references see the
-/// same set of sites.
-fn collect_pattern_class_refs(
-    pattern: &Pattern,
-    class_name: &str,
-    file_path: &Utf8PathBuf,
-    results: &mut Vec<Location>,
-) {
-    match pattern {
-        Pattern::Constructor {
-            class, keywords, ..
-        } => {
-            if class.name == class_name {
-                results.push(Location::new(file_path.clone(), class.span));
-            }
-            for (_, nested) in keywords {
-                collect_pattern_class_refs(nested, class_name, file_path, results);
-            }
-        }
-        Pattern::Tuple { elements, .. } => {
-            for element in elements {
-                collect_pattern_class_refs(element, class_name, file_path, results);
-            }
-        }
-        Pattern::Array { elements, rest, .. } => {
-            for element in elements {
-                collect_pattern_class_refs(element, class_name, file_path, results);
-            }
-            if let Some(rest_pat) = rest {
-                collect_pattern_class_refs(rest_pat, class_name, file_path, results);
-            }
-        }
-        Pattern::List { elements, tail, .. } => {
-            for element in elements {
-                collect_pattern_class_refs(element, class_name, file_path, results);
-            }
-            if let Some(tail_pat) = tail {
-                collect_pattern_class_refs(tail_pat, class_name, file_path, results);
-            }
-        }
-        Pattern::Map { pairs, .. } => {
-            for pair in pairs {
-                collect_pattern_class_refs(&pair.value, class_name, file_path, results);
-            }
-        }
-        Pattern::Binary { segments, .. } => {
-            for segment in segments {
-                collect_pattern_class_refs(&segment.value, class_name, file_path, results);
-            }
-        }
-        Pattern::Type { class, .. } => {
-            if class.name == class_name {
-                results.push(Location::new(file_path.clone(), class.span));
-            }
-        }
-        Pattern::Wildcard(_) | Pattern::Literal(_, _) | Pattern::Variable(_) | Pattern::Nil(_) => {}
-    }
+        WalkNode::Expr(_) | WalkNode::Pattern(_) => {}
+    });
+    // A match arm's patterns are reported ahead of its scrutinee; restore
+    // source order.
+    results[first..].sort_by_key(|location| location.span.start());
 }
 
 /// Find call sites of a selector across files — sends only, no
@@ -681,105 +551,26 @@ pub fn find_class_declarations<'a>(
     results
 }
 
-/// Recursively collect selector references in expressions.
+/// Collect the references to `selector_name` among the sends in `expr`.
+///
+/// A closure over [`walk_sends`], which pairs every send, a cascade's later
+/// messages included, with its selector.
 fn collect_selector_refs(
     expr: &Expression,
     selector_name: &str,
     file_path: &Utf8PathBuf,
     results: &mut Vec<Location>,
 ) {
-    match expr {
-        Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            span,
-            ..
-        } => {
-            if selector.name() == selector_name {
-                // Use the span of the selector keywords if available, otherwise the send span
-                let ref_span = selector_reference_span(selector).unwrap_or(*span);
-                results.push(Location::new(file_path.clone(), ref_span));
-            }
-            collect_selector_refs(receiver, selector_name, file_path, results);
-            for arg in arguments {
-                collect_selector_refs(arg, selector_name, file_path, results);
-            }
+    let first = results.len();
+    walk_sends(expr, &mut |send| {
+        if send.selector.name() == selector_name {
+            let ref_span = selector_reference_span(send.selector).unwrap_or(send.span);
+            results.push(Location::new(file_path.clone(), ref_span));
         }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            collect_selector_refs(receiver, selector_name, file_path, results);
-            for msg in messages {
-                if msg.selector.name() == selector_name {
-                    let ref_span = selector_reference_span(&msg.selector).unwrap_or(msg.span);
-                    results.push(Location::new(file_path.clone(), ref_span));
-                }
-                for arg in &msg.arguments {
-                    collect_selector_refs(arg, selector_name, file_path, results);
-                }
-            }
-        }
-        Expression::Assignment { target, value, .. } => {
-            collect_selector_refs(target, selector_name, file_path, results);
-            collect_selector_refs(value, selector_name, file_path, results);
-        }
-        Expression::Block(block) => {
-            for stmt in &block.body {
-                collect_selector_refs(&stmt.expression, selector_name, file_path, results);
-            }
-        }
-        Expression::Return { value, .. } => {
-            collect_selector_refs(value, selector_name, file_path, results);
-        }
-        Expression::Parenthesized { expression, .. } => {
-            collect_selector_refs(expression, selector_name, file_path, results);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            collect_selector_refs(receiver, selector_name, file_path, results);
-        }
-        Expression::Match { value, arms, .. } => {
-            collect_selector_refs(value, selector_name, file_path, results);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    collect_selector_refs(guard, selector_name, file_path, results);
-                }
-                collect_selector_refs(&arm.body, selector_name, file_path, results);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for segment in segments {
-                if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment {
-                    collect_selector_refs(expr, selector_name, file_path, results);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                collect_selector_refs(expr, selector_name, file_path, results);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for element in elements {
-                collect_selector_refs(element, selector_name, file_path, results);
-            }
-            if let Some(tail_expr) = tail {
-                collect_selector_refs(tail_expr, selector_name, file_path, results);
-            }
-        }
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for element in elements {
-                collect_selector_refs(element, selector_name, file_path, results);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                collect_selector_refs(&pair.key, selector_name, file_path, results);
-                collect_selector_refs(&pair.value, selector_name, file_path, results);
-            }
-        }
-        _ => {}
-    }
+    });
+    // `walk_sends` reports a cascade's messages together, ahead of the sends
+    // nested in their receiver and arguments; restore source order.
+    results[first..].sort_by_key(|location| location.span.start());
 }
 
 /// Get the span covering a selector's keywords (for keyword messages)
@@ -864,6 +655,33 @@ mod tests {
 
         let refs = find_selector_references("bar", [(&file, &module)]);
         assert_eq!(refs.len(), 2);
+    }
+
+    #[test]
+    fn find_selector_references_in_destructure_value() {
+        // The send on the right of `{a, b} :=` is a call site like any other.
+        let file = Utf8PathBuf::from("test.bt");
+        let module = parse_source("{a, b} := x bar");
+
+        let refs = find_selector_send_sites("bar", [(&file, &module)]);
+        assert_eq!(refs.len(), 1);
+    }
+
+    #[test]
+    fn find_selector_references_in_cascade_are_in_source_order() {
+        // The cascade's messages are reported together by the walker, ahead of
+        // the send nested in the first message's argument; the result is still
+        // in source order.
+        let file = Utf8PathBuf::from("test.bt");
+        let module = parse_source("t foo: (u bar); baz");
+
+        let mut starts = Vec::new();
+        for selector in ["foo:", "bar", "baz"] {
+            let refs = find_selector_send_sites(selector, [(&file, &module)]);
+            assert_eq!(refs.len(), 1, "{selector}");
+            starts.push(refs[0].span.start());
+        }
+        assert!(starts.windows(2).all(|w| w[0] < w[1]), "{starts:?}");
     }
 
     #[test]

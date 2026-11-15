@@ -16,6 +16,7 @@ use super::ir::{
     RethrowSlot, ThreadedStmt, ThreadingMode, TokenId, TryRegion, ValueRef, VersionPrefix,
     VersionedVar,
 };
+use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form::Layout;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -554,7 +555,9 @@ fn render_nlr_throw(stmt: &ThreadedStmt, ctx: &RenderCtx) -> Document<'static> {
         store,
         "let ",
         leaf::var(result_var.clone()),
-        " = call 'erlang':'throw'({'$bt_nlr', ",
+        " = call 'erlang':'throw'({",
+        leaf::atom(sentinel_tags::NLR),
+        ", ",
         leaf::var(token.name().to_string()),
         ", ",
         render_value(value, ctx),
@@ -723,7 +726,9 @@ fn render_on_do_catch(
     for clause in clauses {
         match clause {
             CatchClause::NlrPassThrough(NlrThrowShape::Tuple4) => docs.push(docvec![
-                "<{'throw', {'$bt_nlr', ",
+                "<{'throw', {",
+                leaf::atom(sentinel_tags::NLR),
+                ", ",
                 leaf::var(vars.nlr_tok_var.clone()),
                 ", ",
                 leaf::var(vars.nlr_val_var.clone()),
@@ -734,7 +739,9 @@ fn render_on_do_catch(
                 " ",
             ]),
             CatchClause::NlrPassThrough(NlrThrowShape::Tuple3) => docs.push(docvec![
-                "<{'throw', {'$bt_nlr', ",
+                "<{'throw', {",
+                leaf::atom(sentinel_tags::NLR),
+                ", ",
                 leaf::var(vars.nlr_tok_var2.clone()),
                 ", ",
                 leaf::var(vars.nlr_val_var2.clone()),
@@ -847,7 +854,7 @@ fn foreign_clause_head(vars: &EnsureCatchVars) -> Document<'static> {
         "}> when call 'erlang':'=:='(call 'erlang':'element'(1, ",
         leaf::var(vars.foreign_nlr_var.clone()),
         "), ",
-        leaf::atom("$bt_nlr"),
+        leaf::atom(sentinel_tags::NLR),
         ") -> ",
     ]
 }
@@ -947,7 +954,9 @@ fn relay_guard(vars: &EnsureCatchVars, token: Option<&TokenId>) -> Option<Docume
 /// `{'$bt_nlr', Tok, Val, Carried}`, the throw a relay takes.
 fn relay_pattern(vars: &EnsureCatchVars) -> Document<'static> {
     docvec![
-        "{'$bt_nlr', ",
+        "{",
+        leaf::atom(sentinel_tags::NLR),
+        ", ",
         leaf::var(vars.nlr_tok_var.clone()),
         ", ",
         leaf::var(vars.nlr_val_var.clone()),
@@ -987,7 +996,9 @@ fn relay_resume(
     };
     docvec![
         store,
-        "call 'erlang':'throw'({'$bt_nlr', ",
+        "call 'erlang':'throw'({",
+        leaf::atom(sentinel_tags::NLR),
+        ", ",
         leaf::var(vars.nlr_tok_var.clone()),
         ", ",
         leaf::var(vars.nlr_val_var.clone()),

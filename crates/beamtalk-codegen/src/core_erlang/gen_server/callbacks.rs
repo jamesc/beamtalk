@@ -12,6 +12,7 @@
 use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::exception_forms::{CatchVars, build_caught_triple_doc, wrap_and_reraise_doc};
 use super::super::{CoreErlangGenerator, Result};
+use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form::Layout;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
@@ -472,7 +473,7 @@ impl CoreErlangGenerator {
                                 "spawnWith:",
                                 Document::Str(base_state_var),
                                 Document::Str("InitArgs"),
-                                &["$bt_init_ack"],
+                                &[sentinel_tags::INIT_ACK],
                             ),
                         ]
                     ),
@@ -1319,7 +1320,9 @@ impl CoreErlangGenerator {
                     docvec![
                         "let ",
                         leaf::var(clear_stack_var),
-                        " = call 'erlang':'erase'('$bt_call_stack') in",
+                        " = call 'erlang':'erase'(",
+                        leaf::atom(sentinel_tags::CALL_STACK),
+                        ") in",
                     ],
                     line(),
                     "case ",
@@ -1486,7 +1489,7 @@ impl CoreErlangGenerator {
                     line(),
                     docvec![
                         "<{",
-                        leaf::atom("$bt_continue"),
+                        leaf::atom(sentinel_tags::CONTINUE),
                         ", [{CastSelector, CastArgs}|ContRest]}> when 'true' ->",
                     ],
                     nest(
@@ -1661,7 +1664,9 @@ impl CoreErlangGenerator {
             ),
             " in",
             line(),
-            "let _ClearStack = call 'erlang':'erase'('$bt_call_stack') in",
+            "let _ClearStack = call 'erlang':'erase'(",
+            leaf::atom(sentinel_tags::CALL_STACK),
+            ") in",
         ]
     }
 
@@ -1766,7 +1771,9 @@ impl CoreErlangGenerator {
                                 // §5.1) — decode via the shared helper, then
                                 // redispatch or drop.
                                 line(),
-                                "<{'$beamtalk_wire', _WireVersion, 'cast', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->",
+                                "<{",
+                                leaf::atom(sentinel_tags::WIRE),
+                                ", _WireVersion, 'cast', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->",
                                 nest(
                                     INDENT,
                                     docvec![
@@ -1870,7 +1877,9 @@ impl CoreErlangGenerator {
                                 // Wire-tagged remote call (ADR 0126 §5.1) — decode via
                                 // the shared helper, then redispatch or reply directly.
                                 line(),
-                                "<{'$beamtalk_wire', _WireVersion, 'call', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->",
+                                "<{",
+                                leaf::atom(sentinel_tags::WIRE),
+                                ", _WireVersion, 'call', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->",
                                 nest(
                                     INDENT,
                                     docvec![

@@ -35,9 +35,10 @@ use crate::queries::{
 use crate::{HoverInfo, Position};
 use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{
-    BinarySegment, ClassDefinition, Expression, Literal, MessageSelector, MethodDefinition, Module,
-    Pattern, SlotKind, StateDeclaration, declared_shape_migrations,
+    CascadeMessage, ClassDefinition, Expression, Identifier, Literal, MapPair, MessageSelector,
+    MethodDefinition, Module, Pattern, SlotKind, StateDeclaration, declared_shape_migrations,
 };
+use beamtalk_core::ast_walker::{CursorBound, children_in_source_order};
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;
 use beamtalk_core::semantic_analysis::type_checker::native_type_registry::NativeTypeRegistry;
 use beamtalk_core::semantic_analysis::{
@@ -783,8 +784,16 @@ fn find_hover_in_pattern(pattern: &Pattern, offset: u32, type_map: &TypeMap) -> 
     }
 }
 
+/// What a hover query reads besides the expression under the cursor.
+struct HoverEnv<'a> {
+    context: &'a ClassContext<'a>,
+    hierarchy: &'a ClassHierarchy,
+    type_map: &'a TypeMap,
+    native_types: Option<&'a NativeTypeRegistry>,
+    alias_registry: Option<&'a AliasRegistry>,
+}
+
 /// Recursively searches for hover information in an expression.
-#[expect(clippy::too_many_lines, reason = "match on Expression variants")]
 fn find_hover_in_expr(
     expr: &Expression,
     offset: u32,
@@ -794,547 +803,99 @@ fn find_hover_in_expr(
     native_types: Option<&NativeTypeRegistry>,
     alias_registry: Option<&AliasRegistry>,
 ) -> Option<HoverInfo> {
-    let span = expr.span();
-    if offset < span.start() || offset >= span.end() {
+    let env = HoverEnv {
+        context,
+        hierarchy,
+        type_map,
+        native_types,
+        alias_registry,
+    };
+    hover_in_expr(expr, offset, &env)
+}
+
+/// Hover under the cursor ([`CursorBound::Within`]): the leaf and special
+/// cases are handled here, and every container that only holds sub-expressions
+/// descends into whichever child holds the offset.
+fn hover_in_expr(expr: &Expression, offset: u32, env: &HoverEnv<'_>) -> Option<HoverInfo> {
+    if !CursorBound::Within.contains(expr.span(), offset) {
         return None;
     }
+    let nested = || {
+        children_in_source_order(expr)
+            .into_iter()
+            .find_map(|child| hover_in_expr(child, offset, env))
+    };
 
     match expr {
-        Expression::Identifier(ident) => {
-            if offset >= ident.span.start() && offset < ident.span.end() {
-                // Special handling for `self` - show type context
-                if ident.name == "self" {
-                    return Some(self_hover_info(ident.span, context));
-                }
-                // Show inferred type if available
-                let inferred = type_map.get(ident.span);
-                let type_info = inferred.and_then(InferredType::display_for_diagnostic);
-                let mut contents = if let Some(ty) = type_info {
-                    format!("Identifier: `{}` — Type: {ty}", ident.name)
-                } else {
-                    format!("Identifier: `{}`", ident.name)
-                };
-                // ADR 0103: annotate reference/handle-typed values with their
-                // sendability tier (the tier's sole v1 consumer).
-                //
-                // `alias_registry` (ADR 0108 follow-up)
-                // is threaded through from `compute_hover` so an alias-typed
-                // `Value` field's hover tier composes through the alias's
-                // expansion instead of falling back to `Tier::Unknown` for
-                // the opaque alias name.
-                if let Some(tier) = inferred.and_then(|ty| {
-                    beamtalk_core::semantic_analysis::type_checker::sendability::hover_tier_label(
-                        ty,
-                        hierarchy,
-                        alias_registry,
-                    )
-                }) {
-                    contents.push_str(" — Sendability: ");
-                    contents.push_str(&tier);
-                }
-                Some(HoverInfo::new(contents, ident.span))
-            } else {
-                None
-            }
-        }
+        Expression::Identifier(ident) => Some(identifier_hover_info(ident, env)),
         Expression::ClassReference {
             name,
             package,
             span,
-        } => {
-            if offset >= span.start() && offset < span.end() {
-                Some(class_reference_hover_info(
-                    &name.name,
-                    package.as_ref().map(|p| &p.name),
-                    *span,
-                    hierarchy,
-                ))
-            } else {
-                None
-            }
-        }
-        Expression::Super(span) => {
-            if offset >= span.start() && offset < span.end() {
-                Some(HoverInfo::new(
-                    "Keyword: `super` (superclass method dispatch)".to_string(),
-                    *span,
-                ))
-            } else {
-                None
-            }
-        }
-        Expression::Literal(lit, span) => {
-            if offset >= span.start() && offset < span.end() {
-                // Render the literal via `unparse_literal_display` — the single
-                // source of truth for literal-to-source rendering —
-                // so hover text agrees with Beamtalk quoting/escaping rules.
-                let rendered = beamtalk_core::unparse::unparse_literal_display(lit);
-                let info = match lit {
-                    Literal::Integer(_) => format!("Integer: `{rendered}`"),
-                    Literal::Float(_) => format!("Float: `{rendered}`"),
-                    Literal::String(_) => format!("String: `{rendered}`"),
-                    Literal::Symbol(_) => format!("Symbol: `{rendered}`"),
-                    Literal::List(_) => "List literal".to_string(),
-                    Literal::Character(_) => format!("Character: `{rendered}`"),
-                };
-                Some(HoverInfo::new(info, *span))
-            } else {
-                None
-            }
-        }
-        Expression::Assignment { target, value, .. } => find_hover_in_expr(
-            target,
-            offset,
-            context,
-            hierarchy,
-            type_map,
-            native_types,
-            alias_registry,
-        )
-        .or_else(|| {
-            find_hover_in_expr(
-                value,
-                offset,
-                context,
-                hierarchy,
-                type_map,
-                native_types,
-                alias_registry,
-            )
-        }),
+        } => Some(class_reference_hover_info(
+            &name.name,
+            package.as_ref().map(|p| &p.name),
+            *span,
+            env.hierarchy,
+        )),
+        Expression::Super(span) => Some(HoverInfo::new(
+            "Keyword: `super` (superclass method dispatch)".to_string(),
+            *span,
+        )),
+        Expression::Literal(lit, span) => Some(literal_hover_info(lit, *span)),
         Expression::MessageSend {
             receiver,
             selector,
             arguments,
             span,
             ..
-        } => {
-            // First check receiver and arguments
-            if let Some(hover) = find_hover_in_expr(
-                receiver,
-                offset,
-                context,
-                hierarchy,
-                type_map,
-                native_types,
-                alias_registry,
-            ) {
-                return Some(hover);
-            }
-            // ADR 0147: the key of a shape-aware keyed read (`o at: #port`)
-            // shows that key's value type.
-            if let (Some(key_arg), Some(receiver_ty)) =
-                (arguments.first(), type_of_parsed(type_map, receiver))
-            {
-                let key_span = key_arg.span();
-                if offset >= key_span.start()
-                    && offset < key_span.end()
-                    && let Some(text) =
-                        shape_keys::keyed_send_hover_text(&selector.name(), key_arg, receiver_ty)
-                {
-                    return Some(HoverInfo::new(text, key_span));
-                }
-            }
-            if let Some(hover) = arguments.iter().find_map(|arg| {
-                find_hover_in_expr(
-                    arg,
-                    offset,
-                    context,
-                    hierarchy,
-                    type_map,
-                    native_types,
-                    alias_registry,
-                )
-            }) {
-                return Some(hover);
-            }
-
-            // At this point we know we're not hovering over the receiver or any argument.
-            // Compute a more precise selector span based on selector type.
-            let receiver_span = receiver.span();
-            let in_selector = match selector {
-                // For unary and binary messages, the selector appears between the end
-                // of the receiver and the start of the first argument (if any), or
-                // up to the end of the message send when there are no arguments.
-                MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
-                    let start = receiver_span.end();
-                    let end = arguments
-                        .first()
-                        .map_or_else(|| span.end(), |arg| arg.span().start());
-                    offset >= start && offset < end
-                }
-                // For keyword messages, selector parts are interleaved with arguments.
-                // We approximate by treating any position within the message send span
-                // (that's not the receiver or an argument) as being over the selector.
-                MessageSelector::Keyword(_) => offset >= span.start() && offset < span.end(),
-            };
-
-            if in_selector {
-                // Compute a span for the selector region
-                let selector_span = match selector {
-                    MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
-                        let start = receiver_span.end();
-                        let end = arguments
-                            .first()
-                            .map_or_else(|| span.end(), |arg| arg.span().start());
-                        Span::new(start, end)
-                    }
-                    // For keyword messages, use the full span since parts are interleaved
-                    MessageSelector::Keyword(_) => *span,
-                };
-                if let Some(hover) = resolved_selector_hover_info(
-                    receiver,
-                    selector,
-                    selector_span,
-                    context,
-                    hierarchy,
-                    type_map,
-                    native_types,
-                ) {
-                    return Some(hover);
-                }
-                return Some(selector_hover_info(selector, selector_span));
-            }
-            None
+        } => message_send_hover(receiver, selector, arguments, *span, offset, env),
+        Expression::Cascade {
+            receiver, messages, ..
+        } => cascade_hover(receiver, messages, offset, env),
+        Expression::DestructureAssignment { pattern, .. } => {
+            find_hover_in_pattern(pattern, offset, env.type_map).or_else(nested)
         }
-        Expression::Block(block) => block.body.iter().find_map(|s| {
-            find_hover_in_expr(
-                &s.expression,
-                offset,
-                context,
-                hierarchy,
-                type_map,
-                native_types,
-                alias_registry,
-            )
-        }),
-        Expression::Return { value, .. } => find_hover_in_expr(
-            value,
-            offset,
-            context,
-            hierarchy,
-            type_map,
-            native_types,
-            alias_registry,
-        ),
-        Expression::DestructureAssignment { pattern, value, .. } => {
-            find_hover_in_pattern(pattern, offset, type_map).or_else(|| {
-                find_hover_in_expr(
-                    value,
-                    offset,
-                    context,
-                    hierarchy,
-                    type_map,
-                    native_types,
-                    alias_registry,
-                )
-            })
-        }
-        Expression::Parenthesized { expression, span } => find_hover_in_expr(
-            expression,
-            offset,
-            context,
-            hierarchy,
-            type_map,
-            native_types,
-            alias_registry,
-        )
         // On the parentheses themselves (BT-4237): the wrapper means
         // nothing, so it hovers as its inner expression's type. Only outside
         // the inner expression: a position inside it that finds no hover of
         // its own keeps giving none, as it does without the parentheses.
-        .or_else(|| {
-            let inner = expression.span();
-            (offset < inner.start() || offset >= inner.end())
-                .then(|| parenthesized_hover_info(expr, *span, type_map))
+        Expression::Parenthesized { expression, span } => nested().or_else(|| {
+            (!CursorBound::Within.contains(expression.span(), offset))
+                .then(|| parenthesized_hover_info(expr, *span, env.type_map))
                 .flatten()
         }),
-        Expression::FieldAccess {
-            receiver, field, ..
-        } => {
-            if offset >= field.span.start() && offset < field.span.end() {
-                // Show declared state type if available from the class hierarchy.
-                //
-                // `state_field_type` returns a bare `EcoString` from
-                // `ClassHierarchy`, not a resolved `InferredType`, so it
-                // never carries a `TypeProvenance::Aliased` tag the way
-                // `type_map`'s `InferredType`s do for a local/parameter
-                // value. Re-resolve through
-                // `AliasRegistry::resolve_display_name` when the declared
-                // type names a registered alias so hovering a state field
-                // *access* (`self someField`) shows `AliasName (expansion)`
-                // too, matching local/parameter hover; fall back to the raw
-                // annotation text otherwise.
-                let field_type = match context {
-                    ClassContext::InstanceMethod(class) => {
-                        hierarchy.state_field_type(class.name.name.as_str(), field.name.as_str())
-                    }
-                    ClassContext::StandaloneInstanceMethod(name) => {
-                        hierarchy.state_field_type(name, field.name.as_str())
-                    }
-                    _ => None,
-                };
-                let contents = if let Some(ty) = field_type {
-                    // Alias lookup only applies to a bare `Simple` name — a
-                    // `Generic`/`Union`/etc. declared type was never a
-                    // registered alias name to begin with (ADR 0108 aliases
-                    // are single bare identifiers), so it falls straight
-                    // through to its own `Display`.
-                    let display: String = match &ty {
-                        beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType::Simple(
-                            name,
-                        ) => alias_registry
-                            .and_then(|registry| registry.resolve_display_name(name))
-                            .map_or_else(|| ty.to_string(), |s| s.to_string()),
-                        _ => ty.to_string(),
-                    };
-                    format!("`{} :: {display}`", field.name)
-                } else {
-                    format!("`{}`", field.name)
-                };
-                Some(
-                    HoverInfo::new(contents, field.span)
-                        .with_documentation("_state variable_".to_string()),
-                )
-            } else {
-                find_hover_in_expr(
-                    receiver,
-                    offset,
-                    context,
-                    hierarchy,
-                    type_map,
-                    native_types,
-                    alias_registry,
-                )
-            }
+        Expression::FieldAccess { field, .. }
+            if offset >= field.span.start() && offset < field.span.end() =>
+        {
+            Some(field_hover_info(field, env))
         }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            if let Some(hover) = find_hover_in_expr(
-                receiver,
-                offset,
-                context,
-                hierarchy,
-                type_map,
-                native_types,
-                alias_registry,
-            ) {
-                return Some(hover);
-            }
-            // Check each cascaded message
-            for msg in messages {
-                // Check arguments first
-                if let Some(hover) = msg.arguments.iter().find_map(|arg| {
-                    find_hover_in_expr(
-                        arg,
-                        offset,
-                        context,
-                        hierarchy,
-                        type_map,
-                        native_types,
-                        alias_registry,
-                    )
-                }) {
-                    return Some(hover);
-                }
-                // Compute selector span: from message start to first argument (or message end)
-                if offset >= msg.span.start() && offset < msg.span.end() {
-                    let selector_end = msg
-                        .arguments
-                        .first()
-                        .map_or_else(|| msg.span.end(), |arg| arg.span().start());
-                    let selector_span = Span::new(msg.span.start(), selector_end);
-
-                    // Only show hover if we're in the selector region (before first arg)
-                    if offset >= msg.span.start() && offset < selector_end {
-                        if let Some(hover) = resolved_selector_hover_info(
-                            receiver,
-                            &msg.selector,
-                            selector_span,
-                            context,
-                            hierarchy,
-                            type_map,
-                            native_types,
-                        ) {
-                            return Some(hover);
-                        }
-                        return Some(selector_hover_info(&msg.selector, selector_span));
-                    }
-                }
-            }
-            None
-        }
-        Expression::Match { value, arms, .. } => find_hover_in_expr(
-            value,
-            offset,
-            context,
-            hierarchy,
-            type_map,
-            native_types,
-            alias_registry,
-        )
-        .or_else(|| {
-            arms.iter().find_map(|arm| {
-                find_hover_in_pattern(&arm.pattern, offset, type_map)
-                    .or_else(|| {
-                        arm.guard.as_ref().and_then(|g| {
-                            find_hover_in_expr(
-                                g,
-                                offset,
-                                context,
-                                hierarchy,
-                                type_map,
-                                native_types,
-                                alias_registry,
-                            )
+        Expression::Match { value, arms, .. } => {
+            // A match arm also holds a pattern, which is not an expression and
+            // so is not among the node's children: pattern, guard, body.
+            hover_in_expr(value, offset, env).or_else(|| {
+                arms.iter().find_map(|arm| {
+                    find_hover_in_pattern(&arm.pattern, offset, env.type_map)
+                        .or_else(|| {
+                            arm.guard
+                                .as_ref()
+                                .and_then(|g| hover_in_expr(g, offset, env))
                         })
-                    })
-                    .or_else(|| {
-                        find_hover_in_expr(
-                            &arm.body,
-                            offset,
-                            context,
-                            hierarchy,
-                            type_map,
-                            native_types,
-                            alias_registry,
-                        )
-                    })
+                        .or_else(|| hover_in_expr(&arm.body, offset, env))
+                })
             })
-        }),
+        }
         Expression::MapLiteral { pairs, span } => {
-            if offset >= span.start() && offset < span.end() {
-                // Check if hovering over a specific key or value
-                for pair in pairs {
-                    // ADR 0147: a symbol key of a literal that infers a shape
-                    // shows that key's value type.
-                    let key_span = pair.key.span();
-                    if let (Expression::Literal(Literal::Symbol(key), _), Some(literal_ty)) =
-                        (&pair.key, type_of_parsed(type_map, expr))
-                        && offset >= key_span.start()
-                        && offset < key_span.end()
-                        && let Some(text) = shape_keys::key_hover_text(key, literal_ty, false)
-                    {
-                        return Some(HoverInfo::new(text, key_span));
-                    }
-                    if let Some(hover) = find_hover_in_expr(
-                        &pair.key,
-                        offset,
-                        context,
-                        hierarchy,
-                        type_map,
-                        native_types,
-                        alias_registry,
-                    ) {
-                        return Some(hover);
-                    }
-                    if let Some(hover) = find_hover_in_expr(
-                        &pair.value,
-                        offset,
-                        context,
-                        hierarchy,
-                        type_map,
-                        native_types,
-                        alias_registry,
-                    ) {
-                        return Some(hover);
-                    }
-                }
-                // Hovering over the map literal itself
-                Some(HoverInfo::new(
-                    format!("Map literal with {} pairs", pairs.len()),
-                    *span,
-                ))
-            } else {
-                None
-            }
+            Some(map_literal_hover(expr, pairs, *span, offset, env))
         }
-        Expression::ListLiteral {
-            elements,
-            tail,
-            span,
-        } => {
-            if offset >= span.start() && offset < span.end() {
-                for elem in elements {
-                    if let Some(hover) = find_hover_in_expr(
-                        elem,
-                        offset,
-                        context,
-                        hierarchy,
-                        type_map,
-                        native_types,
-                        alias_registry,
-                    ) {
-                        return Some(hover);
-                    }
-                }
-                if let Some(t) = tail
-                    && let Some(hover) = find_hover_in_expr(
-                        t,
-                        offset,
-                        context,
-                        hierarchy,
-                        type_map,
-                        native_types,
-                        alias_registry,
-                    )
-                {
-                    return Some(hover);
-                }
-                Some(HoverInfo::new(
-                    format!("List literal with {} elements", elements.len()),
-                    *span,
-                ))
-            } else {
-                None
-            }
-        }
-        Expression::ArrayLiteral { elements, span } => {
-            if offset >= span.start() && offset < span.end() {
-                for elem in elements {
-                    if let Some(hover) = find_hover_in_expr(
-                        elem,
-                        offset,
-                        context,
-                        hierarchy,
-                        type_map,
-                        native_types,
-                        alias_registry,
-                    ) {
-                        return Some(hover);
-                    }
-                }
-                Some(HoverInfo::new(
-                    format!("Array literal with {} elements", elements.len()),
-                    *span,
-                ))
-            } else {
-                None
-            }
-        }
-        Expression::TupleLiteral { elements, span } => {
-            if offset >= span.start() && offset < span.end() {
-                for elem in elements {
-                    if let Some(hover) = find_hover_in_expr(
-                        elem,
-                        offset,
-                        context,
-                        hierarchy,
-                        type_map,
-                        native_types,
-                        alias_registry,
-                    ) {
-                        return Some(hover);
-                    }
-                }
-                Some(HoverInfo::new(
-                    format!("Tuple literal with {} elements", elements.len()),
-                    *span,
-                ))
-            } else {
-                None
-            }
+        // A literal built from sub-expressions hovers as itself when no
+        // element does.
+        Expression::ListLiteral { .. }
+        | Expression::ArrayLiteral { .. }
+        | Expression::TupleLiteral { .. }
+        | Expression::StringInterpolation { .. }
+        | Expression::BinaryConstruction { .. } => {
+            nested().or_else(|| Some(composite_literal_hover_info(expr)))
         }
         Expression::Primitive {
             name,
@@ -1342,80 +903,287 @@ fn find_hover_in_expr(
             span,
             ..
         } => {
-            if offset >= span.start() && offset < span.end() {
-                let display = if *is_quoted {
-                    format!("Primitive: `@primitive \"{name}\"`")
-                } else {
-                    format!("Primitive: `@primitive {name}`")
-                };
-                Some(HoverInfo::new(display, *span))
+            let display = if *is_quoted {
+                format!("Primitive: `@primitive \"{name}\"`")
             } else {
-                None
-            }
+                format!("Primitive: `@primitive {name}`")
+            };
+            Some(HoverInfo::new(display, *span))
         }
         Expression::Error { message, span } => {
-            if offset >= span.start() && offset < span.end() {
-                Some(HoverInfo::new(format!("Error: {message}"), *span))
-            } else {
-                None
-            }
+            Some(HoverInfo::new(format!("Error: {message}"), *span))
         }
-        Expression::StringInterpolation { segments, span } => {
-            if offset >= span.start() && offset < span.end() {
-                // Check interpolated expressions for hover targets
-                for segment in segments {
-                    if let beamtalk_core::ast::StringSegment::Interpolation(expr) = segment
-                        && let Some(info) = find_hover_in_expr(
-                            expr,
-                            offset,
-                            context,
-                            hierarchy,
-                            type_map,
-                            native_types,
-                            alias_registry,
-                        )
-                    {
-                        return Some(info);
-                    }
-                }
-                Some(HoverInfo::new("Interpolated string".to_string(), *span))
-            } else {
-                None
-            }
-        }
-        Expression::BinaryConstruction { segments, span } => {
-            if offset >= span.start() && offset < span.end() {
-                // Check segment values and sizes for hover targets
-                for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                    if let Some(info) = find_hover_in_expr(
-                        expr,
-                        offset,
-                        context,
-                        hierarchy,
-                        type_map,
-                        native_types,
-                        alias_registry,
-                    ) {
-                        return Some(info);
-                    }
-                }
-                Some(HoverInfo::new("Binary construction".to_string(), *span))
-            } else {
-                None
-            }
-        }
+        Expression::Spread { name, span } => Some(HoverInfo::new(
+            format!("Rest pattern: `...{}`", name.name),
+            *span,
+        )),
         Expression::ExpectDirective { .. } => None,
-        Expression::Spread { name, span } => {
-            if offset >= span.start() && offset < span.end() {
-                Some(HoverInfo::new(
-                    format!("Rest pattern: `...{}`", name.name),
-                    *span,
-                ))
-            } else {
-                None
-            }
+        // Containers that only hold sub-expressions: a field access outside
+        // its field name (the receiver), assignment, block and return.
+        Expression::FieldAccess { .. }
+        | Expression::Assignment { .. }
+        | Expression::Block(_)
+        | Expression::Return { .. } => nested(),
+    }
+}
+
+/// Hover inside a map literal: a shape key (ADR 0147), a key or value
+/// expression, else the literal itself.
+fn map_literal_hover(
+    expr: &Expression,
+    pairs: &[MapPair],
+    span: Span,
+    offset: u32,
+    env: &HoverEnv<'_>,
+) -> HoverInfo {
+    for pair in pairs {
+        // ADR 0147: a symbol key of a literal that infers a shape
+        // shows that key's value type.
+        let key_span = pair.key.span();
+        if let (Expression::Literal(Literal::Symbol(key), _), Some(literal_ty)) =
+            (&pair.key, type_of_parsed(env.type_map, expr))
+            && CursorBound::Within.contains(key_span, offset)
+            && let Some(text) = shape_keys::key_hover_text(key, literal_ty, false)
+        {
+            return HoverInfo::new(text, key_span);
+        }
+        if let Some(hover) = hover_in_expr(&pair.key, offset, env)
+            .or_else(|| hover_in_expr(&pair.value, offset, env))
+        {
+            return hover;
         }
     }
+    HoverInfo::new(format!("Map literal with {} pairs", pairs.len()), span)
+}
+
+/// Hover for a list, array, tuple, interpolated-string or binary-construction
+/// literal itself (no element under the cursor).
+fn composite_literal_hover_info(expr: &Expression) -> HoverInfo {
+    let (text, span) = match expr {
+        Expression::ListLiteral { elements, span, .. } => (
+            format!("List literal with {} elements", elements.len()),
+            *span,
+        ),
+        Expression::ArrayLiteral { elements, span } => (
+            format!("Array literal with {} elements", elements.len()),
+            *span,
+        ),
+        Expression::TupleLiteral { elements, span } => (
+            format!("Tuple literal with {} elements", elements.len()),
+            *span,
+        ),
+        Expression::StringInterpolation { span, .. } => ("Interpolated string".to_string(), *span),
+        _ => ("Binary construction".to_string(), expr.span()),
+    };
+    HoverInfo::new(text, span)
+}
+
+/// Hover for an identifier: `self` shows the type context; anything else shows
+/// the inferred type and, for reference/handle-typed values, the sendability
+/// tier.
+fn identifier_hover_info(ident: &Identifier, env: &HoverEnv<'_>) -> HoverInfo {
+    // Special handling for `self` - show type context
+    if ident.name == "self" {
+        return self_hover_info(ident.span, env.context);
+    }
+    // Show inferred type if available
+    let inferred = env.type_map.get(ident.span);
+    let type_info = inferred.and_then(InferredType::display_for_diagnostic);
+    let mut contents = if let Some(ty) = type_info {
+        format!("Identifier: `{}` — Type: {ty}", ident.name)
+    } else {
+        format!("Identifier: `{}`", ident.name)
+    };
+    // ADR 0103: annotate reference/handle-typed values with their
+    // sendability tier (the tier's sole v1 consumer).
+    //
+    // `alias_registry` (ADR 0108 follow-up)
+    // is threaded through from `compute_hover` so an alias-typed
+    // `Value` field's hover tier composes through the alias's
+    // expansion instead of falling back to `Tier::Unknown` for
+    // the opaque alias name.
+    if let Some(tier) = inferred.and_then(|ty| {
+        beamtalk_core::semantic_analysis::type_checker::sendability::hover_tier_label(
+            ty,
+            env.hierarchy,
+            env.alias_registry,
+        )
+    }) {
+        contents.push_str(" — Sendability: ");
+        contents.push_str(&tier);
+    }
+    HoverInfo::new(contents, ident.span)
+}
+
+/// Hover for a literal, rendered via `unparse_literal_display` — the single
+/// source of truth for literal-to-source rendering — so hover text agrees with
+/// Beamtalk quoting/escaping rules.
+fn literal_hover_info(lit: &Literal, span: Span) -> HoverInfo {
+    let rendered = beamtalk_core::unparse::unparse_literal_display(lit);
+    let info = match lit {
+        Literal::Integer(_) => format!("Integer: `{rendered}`"),
+        Literal::Float(_) => format!("Float: `{rendered}`"),
+        Literal::String(_) => format!("String: `{rendered}`"),
+        Literal::Symbol(_) => format!("Symbol: `{rendered}`"),
+        Literal::List(_) => "List literal".to_string(),
+        Literal::Character(_) => format!("Character: `{rendered}`"),
+    };
+    HoverInfo::new(info, span)
+}
+
+/// Hover for the field name of a state-field access (`self.count`): the
+/// declared state type from the class hierarchy, when there is one.
+fn field_hover_info(field: &Identifier, env: &HoverEnv<'_>) -> HoverInfo {
+    // `state_field_type` returns a bare `EcoString` from
+    // `ClassHierarchy`, not a resolved `InferredType`, so it
+    // never carries a `TypeProvenance::Aliased` tag the way
+    // `type_map`'s `InferredType`s do for a local/parameter
+    // value. Re-resolve through
+    // `AliasRegistry::resolve_display_name` when the declared
+    // type names a registered alias so hovering a state field
+    // *access* (`self someField`) shows `AliasName (expansion)`
+    // too, matching local/parameter hover; fall back to the raw
+    // annotation text otherwise.
+    let field_type = match env.context {
+        ClassContext::InstanceMethod(class) => env
+            .hierarchy
+            .state_field_type(class.name.name.as_str(), field.name.as_str()),
+        ClassContext::StandaloneInstanceMethod(name) => {
+            env.hierarchy.state_field_type(name, field.name.as_str())
+        }
+        _ => None,
+    };
+    let contents = if let Some(ty) = field_type {
+        // Alias lookup only applies to a bare `Simple` name — a
+        // `Generic`/`Union`/etc. declared type was never a
+        // registered alias name to begin with (ADR 0108 aliases
+        // are single bare identifiers), so it falls straight
+        // through to its own `Display`.
+        let display: String = match &ty {
+            beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType::Simple(name) => env
+                .alias_registry
+                .and_then(|registry| registry.resolve_display_name(name))
+                .map_or_else(|| ty.to_string(), |s| s.to_string()),
+            _ => ty.to_string(),
+        };
+        format!("`{} :: {display}`", field.name)
+    } else {
+        format!("`{}`", field.name)
+    };
+    HoverInfo::new(contents, field.span).with_documentation("_state variable_".to_string())
+}
+
+/// Hover inside a message send: the receiver, then the arguments (and the key
+/// of a shape-aware keyed read), then the selector itself.
+fn message_send_hover(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+    span: Span,
+    offset: u32,
+    env: &HoverEnv<'_>,
+) -> Option<HoverInfo> {
+    if let Some(hover) = hover_in_expr(receiver, offset, env) {
+        return Some(hover);
+    }
+    // ADR 0147: the key of a shape-aware keyed read (`o at: #port`)
+    // shows that key's value type.
+    if let (Some(key_arg), Some(receiver_ty)) =
+        (arguments.first(), type_of_parsed(env.type_map, receiver))
+    {
+        let key_span = key_arg.span();
+        if CursorBound::Within.contains(key_span, offset)
+            && let Some(text) =
+                shape_keys::keyed_send_hover_text(&selector.name(), key_arg, receiver_ty)
+        {
+            return Some(HoverInfo::new(text, key_span));
+        }
+    }
+    if let Some(hover) = arguments
+        .iter()
+        .find_map(|arg| hover_in_expr(arg, offset, env))
+    {
+        return Some(hover);
+    }
+
+    // At this point we know we're not hovering over the receiver or any argument.
+    // Compute a more precise selector span based on selector type.
+    let receiver_span = receiver.span();
+    let selector_span = match selector {
+        // For unary and binary messages, the selector appears between the end
+        // of the receiver and the start of the first argument (if any), or
+        // up to the end of the message send when there are no arguments.
+        MessageSelector::Unary(_) | MessageSelector::Binary(_) => {
+            let end = arguments
+                .first()
+                .map_or_else(|| span.end(), |arg| arg.span().start());
+            Span::new(receiver_span.end(), end)
+        }
+        // For keyword messages, selector parts are interleaved with arguments.
+        // We approximate by treating any position within the message send span
+        // (that's not the receiver or an argument) as being over the selector,
+        // and use the full span.
+        MessageSelector::Keyword(_) => span,
+    };
+    if !(offset >= selector_span.start() && offset < selector_span.end()) {
+        return None;
+    }
+    if let Some(hover) = resolved_selector_hover_info(
+        receiver,
+        selector,
+        selector_span,
+        env.context,
+        env.hierarchy,
+        env.type_map,
+        env.native_types,
+    ) {
+        return Some(hover);
+    }
+    Some(selector_hover_info(selector, selector_span))
+}
+
+/// Hover inside a cascade: the receiver, then each later message's arguments
+/// and selector.
+fn cascade_hover(
+    receiver: &Expression,
+    messages: &[CascadeMessage],
+    offset: u32,
+    env: &HoverEnv<'_>,
+) -> Option<HoverInfo> {
+    if let Some(hover) = hover_in_expr(receiver, offset, env) {
+        return Some(hover);
+    }
+    for msg in messages {
+        if let Some(hover) = msg
+            .arguments
+            .iter()
+            .find_map(|arg| hover_in_expr(arg, offset, env))
+        {
+            return Some(hover);
+        }
+        // The selector region runs from the message start to its first
+        // argument (or the message end); hover only there.
+        let selector_end = msg
+            .arguments
+            .first()
+            .map_or_else(|| msg.span.end(), |arg| arg.span().start());
+        if offset >= msg.span.start() && offset < selector_end {
+            let selector_span = Span::new(msg.span.start(), selector_end);
+            if let Some(hover) = resolved_selector_hover_info(
+                receiver,
+                &msg.selector,
+                selector_span,
+                env.context,
+                env.hierarchy,
+                env.type_map,
+                env.native_types,
+            ) {
+                return Some(hover);
+            }
+            return Some(selector_hover_info(&msg.selector, selector_span));
+        }
+    }
+    None
 }
 
 fn resolved_selector_hover_info(
@@ -1853,6 +1621,24 @@ mod tests {
             "got: {}",
             hover.contents
         );
+    }
+
+    #[test]
+    fn compute_hover_cursor_at_end_of_token_is_not_on_it() {
+        // Hover uses the `Within` rule: the offset just past the last character
+        // of `42` (the newline) is not on it; the last character is.
+        let src = "x := 42\ny := 1";
+        assert!(hover_at(src, Position::new(0, 6)).is_some());
+        assert!(hover_at(src, Position::new(0, 7)).is_none());
+    }
+
+    #[test]
+    fn compute_hover_inside_destructure_value_and_list_element() {
+        // Containers the walker descends through: a destructuring assignment's
+        // value, and a list literal's elements.
+        let src = "{a, b} := #(1, \"hi\")";
+        let hover = hover_at(src, pos_at(src, src.find("\"hi").unwrap())).expect("hover");
+        assert!(hover.contents.contains("String"), "got: {}", hover.contents);
     }
 
     #[test]

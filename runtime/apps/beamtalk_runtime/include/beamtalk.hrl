@@ -10,6 +10,11 @@
 %%% Note: Generated Core Erlang modules do not emit this include directive,
 %%% but they do generate code that uses the record tuple representation directly.
 
+%% BT-4901: the reserved atoms generated Core Erlang and the runtime agree on
+%% (`?BT_NLR_TAG`, `?BT_CONTINUE_TAG`, `?BT_INIT_ACK_KEY`, `?BT_CALL_STACK_KEY`,
+%% `?BT_WIRE_TAG`), generated from `sentinel_tags.rs` by `beamtalk build-stdlib`.
+-include_lib("beamtalk_runtime/include/beamtalk_sentinel_tags.hrl").
+
 %% @doc Object reference record.
 %%
 %% This record bundles class metadata with the actor pid, enabling proper
@@ -167,7 +172,6 @@
 %% continuation queue, `{continue, {?BT_CONTINUE_TAG, [{Selector, Args}]}}`
 %% (`beamtalk_actor:add_continue/2`). Shared with `beamtalk_actor_redaction`,
 %% which redacts secret-selector continuations in status and sys logs.
--define(BT_CONTINUE_TAG, '$bt_continue').
 
 %% @doc BT-3968: process-dictionary key holding an actor's deferred
 %% continuation queue (`self continueWith: #sel` from inside a method) as a
@@ -238,13 +242,13 @@
 -define(IS_NLR(T),
     (is_tuple(T) andalso
         (tuple_size(T) =:= 4 orelse tuple_size(T) =:= 3) andalso
-        element(1, T) =:= '$bt_nlr')
+        element(1, T) =:= ?BT_NLR_TAG)
 ).
 
 %% @doc The state-carrying `^` signal codegen throws (ADR 0041), for runtime
 %% code that must throw one itself (`beamtalk_guard_return`, BT-4415). Read
 %% it back with `?IS_NLR/1` and `element(2, T)` for the token.
--define(NLR(Token, Value, State), {'$bt_nlr', Token, Value, State}).
+-define(NLR(Token, Value, State), {?BT_NLR_TAG, Token, Value, State}).
 
 %% @doc CompiledMethod value object type.
 %%

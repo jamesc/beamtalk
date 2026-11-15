@@ -9,6 +9,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
+use crate::core_erlang::sentinel_tags;
 use crate::core_erlang::threaded_ir::{
     BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
 };
@@ -145,7 +146,9 @@ impl CoreErlangGenerator {
         let no_match_fallback = self.case_clause_fallback(&format!("{var_prefix}NoMatch"));
         let nlr_tuple_doc = || {
             docvec![
-                "{'$bt_nlr', ",
+                "{",
+                leaf::atom(sentinel_tags::NLR),
+                ", ",
                 leaf::var(nlr_token_var.clone()),
                 ", ",
                 leaf::var(nlr_value_var.clone()),

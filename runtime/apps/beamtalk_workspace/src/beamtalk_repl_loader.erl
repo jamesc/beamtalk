@@ -45,6 +45,8 @@ Extracted from beamtalk_repl_eval.
     %% install/remove paths use them too; they are exported only so the
     %% split compiles, not because they are public API.
     compile_reload_source/5,
+    compile_reload_source_by_path/3,
+    compile_reload_source_by_path/4,
     normalize_class_source_key/1,
     patch_module_target/1,
     source_path_or_empty/1,
@@ -81,8 +83,6 @@ Extracted from beamtalk_repl_eval.
     extract_trailing_info/1,
     resolve_class_name/1,
     existing_atom_or_undefined/1,
-    resolve_package_module/4,
-    try_package_relative/3,
     maybe_add_loaded_module/2,
     store_file_class_sources/3,
     store_class_sources/4,
@@ -114,18 +114,13 @@ handle_load(Path, State) ->
                 {ok, SourceBin} ->
                     Source = binary_to_list(SourceBin),
                     StdlibMode = is_stdlib_path(Path),
-                    ModuleNameOverride = compute_package_module_name(Path),
                     %% ADR 0127 §10a / BT-3593: ambient `protocol_sources`
                     %% context — see `with_ambient_protocol_sources/1`'s doc
                     %% for why a same-file-only `uses:` isn't enough here.
                     PrebuiltIndexes = with_ambient_protocol_sources(
                         beamtalk_repl_compiler:build_class_indexes()
                     ),
-                    case
-                        beamtalk_repl_compiler:compile_file(
-                            Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes
-                        )
-                    of
+                    case compile_file_named(Source, Path, StdlibMode, PrebuiltIndexes) of
                         %% Protocol definition from file compilation.
                         %% Must be matched before the generic 4-tuple to avoid
                         %% {ok, protocol_definition, Info, Warnings} binding to
@@ -162,13 +157,8 @@ handle_load(Path, State, PrebuiltIndexes) ->
                 {ok, SourceBin} ->
                     Source = binary_to_list(SourceBin),
                     StdlibMode = is_stdlib_path(Path),
-                    ModuleNameOverride = compute_package_module_name(Path),
                     FullIndexes = with_ambient_protocol_sources(PrebuiltIndexes),
-                    case
-                        beamtalk_repl_compiler:compile_file(
-                            Source, Path, StdlibMode, ModuleNameOverride, FullIndexes
-                        )
-                    of
+                    case compile_file_named(Source, Path, StdlibMode, FullIndexes) of
                         %% Protocol definition — must match before generic 4-tuple.
                         {ok, protocol_definition, ProtocolInfo, _Warnings} ->
                             track_protocol_source(ProtocolInfo, Source, Path),
@@ -1068,10 +1058,14 @@ reload_class_file_impl(Path, ExpectedClassName, BatchOpts) ->
                     {error, {read_error, Reason}};
                 {ok, SourceBin} ->
                     Source = binary_to_list(SourceBin),
-                    ModuleNameOverride = compute_package_module_name(Path),
-                    reload_compile_and_load(
-                        Source, Path, ModuleNameOverride, ExpectedClassName, BatchOpts
-                    )
+                    case compute_package_module_name(Path) of
+                        {ok, ModuleNameOverride} ->
+                            reload_compile_and_load(
+                                Source, Path, ModuleNameOverride, ExpectedClassName, BatchOpts
+                            );
+                        {error, _} = Error ->
+                            Error
+                    end
             end
     end.
 
@@ -2126,67 +2120,120 @@ class_name_atoms(Classes) ->
 safe_atom_result({ok, Atom}) -> {true, Atom};
 safe_atom_result({error, badarg}) -> false.
 
-%% Compute a package-qualified module name for a file.
+%% `compile_reload_source/4,5` under the module name `compute_package_module_name/1`
+%% derives for `Path` (the file-backed reload paths: protocol fan-out and its
+%% rollbacks, protocol edits). A path the naming rule rejects is an `{error, _}`
+%% before anything is compiled.
+-spec compile_reload_source_by_path(string(), string(), atom() | undefined) ->
+    {ok, protocol_definition, map()}
+    | {ok, compiled, binary(), [map()], atom()}
+    | {error, term()}.
+compile_reload_source_by_path(Source, Path, ExpectedClassName) ->
+    case compute_package_module_name(Path) of
+        {ok, ModuleNameOverride} ->
+            compile_reload_source(Source, Path, ModuleNameOverride, ExpectedClassName);
+        {error, _} = Error ->
+            Error
+    end.
+
+-spec compile_reload_source_by_path(string(), string(), atom() | undefined, map()) ->
+    {ok, protocol_definition, map()}
+    | {ok, compiled, binary(), [map()], atom()}
+    | {error, term()}.
+compile_reload_source_by_path(Source, Path, ExpectedClassName, PrebuiltIndexes) ->
+    case compute_package_module_name(Path) of
+        {ok, ModuleNameOverride} ->
+            compile_reload_source(
+                Source, Path, ModuleNameOverride, ExpectedClassName, PrebuiltIndexes
+            );
+        {error, _} = Error ->
+            Error
+    end.
+
+%% `beamtalk_repl_compiler:compile_file/5` under the file's module name
+%% override; a path segment the naming rule rejects is a compile error before
+%% anything is compiled.
+-spec compile_file_named(string(), string(), boolean(), map()) ->
+    {ok, binary(), [#{name := string(), superclass := string()}], atom()}
+    | {ok, protocol_definition, map(), [beamtalk_repl_protocol:warning()]}
+    | {error, term()}.
+compile_file_named(Source, Path, StdlibMode, PrebuiltIndexes) ->
+    case compute_package_module_name(Path) of
+        {ok, ModuleNameOverride} ->
+            beamtalk_repl_compiler:compile_file(
+                Source, Path, StdlibMode, ModuleNameOverride, PrebuiltIndexes
+            );
+        {error, _} = Error ->
+            Error
+    end.
+
+%% Compute the module name override for a file (BT-4868).
 %%
-%% With package context: derives `bt@{package}@{relative_path_segments}`
-%% for files under src/ or test/.  Files outside those directories (e.g.
-%% examples/, fixtures/) fall back to `bt@{stem_snake_case}` so the same
-%% class always gets the same module name regardless of load path.
-%% Without package context: returns `undefined` so the compiler port
-%% derives the name from the class name instead.  This is intentional —
+%% With package context the name comes from the compiler port's one
+%% path-to-module rule (`beamtalk_compiler:module_name_for_path/3`, built on
+%% Rust `relative_module_segments`, the rule `beamtalk build` and `beamtalk
+%% test` use): `bt@{package}@{path}` for a file under `src/`,
+%% `bt@{package}@test@{path}` under `test/`, and `bt@{stem}` for a file under
+%% neither (examples/, fixtures/), so the same class gets the same module name
+%% regardless of load path. This module only works out which root the file is
+%% under; it never spells a module name itself.
+%%
+%% Without package context: `{ok, undefined}`, so the compiler port derives
+%% the name from the class name instead.  This is intentional —
 %% class-name-based naming in the REPL enables hot reload across file
 %% renames (e.g., hot_counter.bt and hot_counter_v2.bt both define
 %% HotCounter → same module bt@hot_counter).
--spec compute_package_module_name(string()) -> binary() | undefined.
+%%
+%% A path segment outside `[A-Za-z0-9_]` (`my-class.bt`) is a load error, the
+%% same rejection `beamtalk build` gives.
+-spec compute_package_module_name(string()) ->
+    {ok, binary() | undefined} | {error, {compile_error, binary()}}.
+compute_package_module_name("") ->
+    %% No backing file (a REPL-defined class, e.g. in protocol fan-out): let the
+    %% port derive the module name from the class. `filename:absname("")` is
+    %% the VM's cwd, which must never name a module.
+    {ok, undefined};
 compute_package_module_name(Path) ->
     case beamtalk_workspace_meta:get_metadata() of
         {ok, #{package_name := PackageName, project_path := ProjectPath}} when
             is_binary(PackageName), is_binary(ProjectPath)
         ->
             AbsPath = filename:absname(Path),
-            ProjectRoot = binary_to_list(ProjectPath),
-            resolve_package_module(AbsPath, ProjectRoot, PackageName, Path);
+            {RootKind, RelPath} = module_root_and_relative_path(
+                AbsPath, binary_to_list(ProjectPath)
+            ),
+            case
+                beamtalk_compiler:module_name_for_path(
+                    unicode:characters_to_binary(RelPath), PackageName, RootKind
+                )
+            of
+                {ok, ModuleName} -> {ok, ModuleName};
+                {error, _Reason, Message} -> {error, {compile_error, Message}}
+            end;
         _ ->
-            undefined
+            {ok, undefined}
     end.
 
-%% Try src/ then test/ to resolve the package module name.
-%% Falls back to bt@{stem} for files outside src/ and test/ (e.g. examples/).
--spec resolve_package_module(string(), string(), binary(), string()) -> binary().
-resolve_package_module(AbsPath, ProjectRoot, PackageName, OrigPath) ->
-    case try_package_relative(AbsPath, ProjectRoot, "src") of
-        {ok, ModuleName} ->
-            iolist_to_binary(["bt@", PackageName, "@", ModuleName]);
+%% Which root `AbsPath` is under, and its `/`-joined path relative to it:
+%% `src/`, then `test/`, else `none` (the whole path; the port uses only the
+%% file name). Which `test/` files are fixtures is the port's call, not this
+%% module's. The directory itself is not a file to name a module after.
+-spec module_root_and_relative_path(string(), string()) -> {src | test | none, string()}.
+module_root_and_relative_path(AbsPath, ProjectRoot) ->
+    case relative_below(AbsPath, ProjectRoot, "src") of
+        {ok, Rel} ->
+            {src, Rel};
         undefined ->
-            case try_package_relative(AbsPath, ProjectRoot, "test") of
-                {ok, ModuleName} ->
-                    iolist_to_binary(["bt@", PackageName, "@test@", ModuleName]);
-                undefined ->
-                    stem_module_name(OrigPath)
+            case relative_below(AbsPath, ProjectRoot, "test") of
+                {ok, Rel} -> {test, Rel};
+                undefined -> {none, AbsPath}
             end
     end.
 
-%% Derive module name from the file stem: bt@{snake_case_stem}.
--spec stem_module_name(string()) -> binary().
-stem_module_name(Path) ->
-    Basename = filename:basename(Path, ".bt"),
-    Snake = to_snake_case(Basename),
-    iolist_to_binary(["bt@", Snake]).
-
-%% Check if AbsPath is under ProjectRoot/SubDir and return the relative module path.
--spec try_package_relative(string(), string(), string()) ->
-    {ok, iodata()} | undefined.
-try_package_relative(AbsPath, ProjectRoot, SubDir) ->
-    Dir = filename:join(ProjectRoot, SubDir),
-    AbsDir = filename:absname(Dir),
-    %% Strictly below `AbsDir` (a non-empty relative part list): the directory
-    %% itself is not a file to name a module after.
+-spec relative_below(string(), string(), string()) -> {ok, string()} | undefined.
+relative_below(AbsPath, ProjectRoot, SubDir) ->
+    AbsDir = filename:absname(filename:join(ProjectRoot, SubDir)),
     case beamtalk_workspace_file:relative_parts(AbsDir, AbsPath) of
-        {ok, [_ | _] = RelParts} ->
-            Last = lists:last(RelParts),
-            RelPartsNoExt = lists:droplast(RelParts) ++ [filename:rootname(Last)],
-            SnakeSegments = [to_snake_case(S) || S <- RelPartsNoExt],
-            {ok, lists:join("@", SnakeSegments)};
-        _NotStrictlyInside ->
-            undefined
+        {ok, [_ | _] = RelParts} -> {ok, lists:flatten(lists:join("/", RelParts))};
+        _NotStrictlyInside -> undefined
     end.

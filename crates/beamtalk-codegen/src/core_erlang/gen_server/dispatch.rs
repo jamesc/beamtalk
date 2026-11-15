@@ -12,6 +12,7 @@ use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::super::value_accessors;
 use super::super::{CoreErlangGenerator, Result};
+use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{Block, Expression, MethodKind, Module};
@@ -527,13 +528,17 @@ impl CoreErlangGenerator {
                             INDENT,
                             docvec![
                                 line(),
-                                "<{'throw', {'$bt_nlr', ",
+                                "<{'throw', {",
+                                leaf::atom(sentinel_tags::NLR),
+                                ", ",
                                 leaf::var(nlr_token_var.clone()),
                                 ", ",
                                 leaf::var(nlr_value_var.clone()),
                                 ", ",
                                 leaf::var(nlr_state_var.clone()),
-                                "}}> when 'true' -> {'error', {'$bt_nlr', ",
+                                "}}> when 'true' -> {'error', {",
+                                leaf::atom(sentinel_tags::NLR),
+                                ", ",
                                 leaf::var(nlr_token_var),
                                 ", ",
                                 leaf::var(nlr_value_var),

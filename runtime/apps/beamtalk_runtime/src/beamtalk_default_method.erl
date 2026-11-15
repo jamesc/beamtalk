@@ -109,6 +109,13 @@ owner(Class, Selector) ->
                 end
         end
     end,
+    %% `+ 1`: the walk starts at `Class` itself, where
+    %% `beamtalk_method_resolver:published_method_info/2` uses the same budget
+    %% for the same reason. Deliberately `walk_ancestors/3`, not
+    %% `walk_or_warn/4`: this is a probe on the send path, and a cycle answers
+    %% `unpublished` -- "no decision, do not cache" -- so every caller takes
+    %% its general path (`is_default/2` answers `false`). Logging here would
+    %% repeat on every send, as nothing caches the answer.
     try beamtalk_hierarchy:walk_ancestors(Class, StepFun, ?MAX_HIERARCHY_DEPTH + 1) of
         {found, Owner} -> Owner;
         not_found -> none;

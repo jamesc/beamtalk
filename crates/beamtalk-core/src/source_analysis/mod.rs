@@ -417,3 +417,50 @@ mod completion_word_boundary_tests {
         }
     }
 }
+
+/// The selector-shape corpus shared with the Erlang runtime (BT-4901):
+/// `beamtalk_class_builder:selector_arity/1` keeps its own copy of the
+/// binary-selector character set, so both sides read
+/// `selector_shape_conformance.json` and a change to either set fails the
+/// other side's test.
+#[cfg(test)]
+mod selector_shape_conformance_tests {
+    use super::*;
+
+    fn corpus() -> serde_json::Value {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../runtime/apps/beamtalk_runtime/test/fixtures/selector_shape_conformance.json",
+        );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        serde_json::from_str(&raw).expect("selector_shape_conformance.json is JSON")
+    }
+
+    #[test]
+    fn binary_selector_chars_match_the_corpus() {
+        let corpus = corpus();
+        let chars = corpus["binary_chars"].as_array().expect("binary_chars");
+        assert!(chars.len() > 20, "corpus must cover the ASCII punctuation");
+        for case in chars {
+            let c = case["char"].as_str().expect("char").chars().next().unwrap();
+            let expected = case["binary"].as_bool().expect("binary");
+            assert_eq!(is_binary_selector_char(c), expected, "char {c:?}");
+        }
+    }
+
+    #[test]
+    fn selector_shapes_match_the_corpus() {
+        let corpus = corpus();
+        let selectors = corpus["selectors"].as_array().expect("selectors");
+        assert!(!selectors.is_empty());
+        for case in selectors {
+            let sel = case["selector"].as_str().expect("selector");
+            let kind = case["kind"].as_str().expect("kind");
+            assert_eq!(
+                is_valid_selector(sel),
+                kind != "invalid",
+                "is_valid_selector({sel:?}) with kind {kind}"
+            );
+        }
+    }
+}
