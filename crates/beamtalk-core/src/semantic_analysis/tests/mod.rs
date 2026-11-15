@@ -72,5 +72,6 @@ mod match_arm_analysis;
 mod match_arm_block;
 mod paren_operand_spans;
 mod self_misuse_and_unused_variables;
+mod standalone_e0402;
 mod typed_params_knowledge_scope_and_cross_file;
 mod workspace_bindings_protocols_and_aliases;

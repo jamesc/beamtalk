@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Behaviour change: E0402 now applies to extension methods (BT-4923).**
+  - Changed: a standalone `Foo >> sel` or `Foo class >> sel` method whose parameter or return type names an `internal` class of the current package is now a hard error (E0402, "Internal class 'X' appears in public signature of 'Foo >> sel'"), the same as for a method written in the class body. This includes an extension in a different file than `Foo`, and an extension on another package's public class. An `internal` extension method that satisfies a public protocol requirement is the same error. Before, these compiled silently. Extensions marked `internal`, and extensions on an `internal` class, are still exempt. The stdlib and the in-repo examples build clean; downstream packages were not scanned.
+  - Do: make the class public, change the signature, or mark the extension method `internal` (`Foo >> internal sel => …`).
 - **Two checks now run on a `Foo >> sel` extension in another file (BT-4923).**
   - Changed: a `MySup >> childSpecs => #(Worker)` extension whose supervisor class is declared in a different file now gets the "no explicit `class supervisionPolicy`" warning for each policy-less Actor child, as it already did when the class and `childSpecs` sat in one file. A `Sub >> helper` or `Sub class >> helper` extension in another file now gets the W0401 warning when it shadows an `internal` method of the superclass.
   - Do: nothing for correct code. To clear the supervision warning, add `class supervisionPolicy -> Symbol => #permanent` (or `#transient`) to the child. To clear W0401, rename the extension method.
