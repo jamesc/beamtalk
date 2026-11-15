@@ -138,7 +138,7 @@ encode_with_errors(Selector, Encode) ->
     end.
 
 %%% ============================================================================
-%%% FFI aliases — no-colon names for Erlang FFI dispatch
+%%% Pretty printing
 %%% ============================================================================
 
 -doc """

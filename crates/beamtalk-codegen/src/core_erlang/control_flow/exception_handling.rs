@@ -843,7 +843,11 @@ impl CoreErlangGenerator {
     /// `StateAcc` variable it starts from.
     fn try_do_tier2_call(body: Document<'static>, entry: String) -> Document<'static> {
         docvec![
-            "call 'beamtalk_result':'tryDo'(fun (StateAcc) -> ",
+            "call ",
+            leaf::atom("beamtalk_result"),
+            ":",
+            leaf::atom("tryDo"),
+            "(fun (StateAcc) -> ",
             body,
             ", ",
             leaf::var(entry),

@@ -3,7 +3,7 @@
 
 // BT-3750 (ADR 0131 Phase 4): the Rust <-> Erlang conformance fixture for
 // `Result tryDo:`. The catch boundary lives in the runtime
-// (`beamtalk_result:tryDo/1` for Tier 1 blocks, `'tryDo:'/2` for Tier 2
+// (`beamtalk_result:tryDo/1` for Tier 1 blocks, `tryDo/2` for Tier 2
 // blocks that write an outer local) and codegen only picks the arity, so the
 // two arities must agree on everything observable: the Result, the
 // class-variable state (`protect/1` restores it on a raise in both) and, for

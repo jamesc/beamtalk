@@ -10,10 +10,10 @@ EUnit tests for beamtalk_result module.
 
 Tests cover:
 - from_tagged_tuple/1 — ok tuple, error tuple (atom, #beamtalk_error{}, wrapped map)
-- 'fromTuple:'/1 — ok, error, and invalid-input clauses
-- class_tryDo:/3 — success path, exception path, NLR re-raise
-- 'unwrapError:'/2 — wrapped exception re-raise, raw symbol signal, raw map
-- Colon-free implementations: ok/1, error/1, fromTuple/1, tryDo/1, unwrapError/1
+- fromTuple/1 — ok, error, and invalid-input clauses
+- tryDo/1, tryDo/2 — success path, exception path, NLR re-raise
+- unwrapError/1 — wrapped exception re-raise, raw symbol signal, raw map
+- ok/1, error/1 — direct constructors
 """.
 
 -include_lib("eunit/include/eunit.hrl").

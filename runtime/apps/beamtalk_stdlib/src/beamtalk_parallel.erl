@@ -54,8 +54,6 @@ error:` for that slot. It never crashes the caller.
 %% Class methods (canonical colon forms)
 -export([all/1, all/2, any/1]).
 
-%% FFI shims for (Erlang beamtalk_parallel) / `self delegate` dispatch
-
 -type worker_result() :: beamtalk_result:t().
 -type pending() :: #{pos_integer() => {pid(), reference()}}.
 
@@ -402,7 +400,7 @@ instead of being rebuilt from scratch on every invocation — see
 ) -> worker_result().
 gather_any(_CallRef, Pending, _PendingByRef, IndexOrder, Errors) when map_size(Pending) =:= 0 ->
     %% Every block failed — aggregate the reasons (already-wrapped Exception
-    %% objects) into a List, in input order. `makeError:` stores the reason
+    %% objects) into a List, in input order. `beamtalk_result:error/1` stores the reason
     %% as-is (unlike `from_tagged_tuple/1`, which would try to re-wrap the
     %% whole List as if it were a single raw exception reason).
     Reasons = [maps:get(Idx, Errors) || Idx <- IndexOrder],

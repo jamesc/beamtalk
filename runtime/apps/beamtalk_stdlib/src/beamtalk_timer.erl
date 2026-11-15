@@ -69,8 +69,6 @@ colon stripped. The colon-free functions (`'after'/2`, `every/2`, `sleep/1`,
 %% Instance methods
 -export([cancel/1, 'isActive'/1, 'printString'/1]).
 
-%% FFI shims for (Erlang beamtalk_timer) dispatch
-
 -ifdef(TEST).
 -export([next_deadline/3]).
 -endif.
