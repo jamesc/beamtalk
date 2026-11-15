@@ -792,5 +792,4 @@ modules use this one.
 """.
 -spec safe_xref(fun(() -> ok)) -> ok.
 safe_xref(Fun) ->
-    %% bt-catcher-audit: not-applicable-other-process - Fun is a gen_server call to beamtalk_xref
     beamtalk_call_failure:tolerate_gone(Fun, ok, #{stopping => true}).

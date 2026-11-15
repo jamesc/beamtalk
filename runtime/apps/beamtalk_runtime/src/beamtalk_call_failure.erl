@@ -122,6 +122,8 @@ growing a private ladder:
 """.
 -spec tolerate_gone(fun(() -> T), D, gone_opts()) -> T | D when T :: term(), D :: term().
 tolerate_gone(Fun, Default, Opts) ->
+    %% bt-catcher-audit: not-applicable-other-process - every caller passes a gen_server
+    %% call (or pg/other-process call) to a separate process, never a Beamtalk block
     try
         Fun()
     catch
