@@ -41,10 +41,8 @@ Owned by `beamtalk_runtime_sup`, so it exists in every boot context
     register_actor/4,
     unregister_actor/2,
     list_actors/1,
-    kill_actor/2,
     get_actor/2,
     count_actors_for_module/2,
-    get_pids_for_module/2,
     on_actor_spawned/4,
     track_spawned/2,
     list_objects/0,
@@ -60,6 +58,14 @@ Owned by `beamtalk_runtime_sup`, so it exists in every boot context
     terminate/2,
     code_change/3
 ]).
+
+%% Exported for tests only (BT-4903): no production caller.
+-ifdef(TEST).
+-export([
+    get_pids_for_module/2,
+    kill_actor/2
+]).
+-endif.
 
 -record(state, {
     actors :: #{pid() => actor_metadata()},
@@ -238,6 +244,7 @@ unregister_actor(RegistryPid, ActorPid) ->
 list_actors(RegistryPid) ->
     gen_server:call(RegistryPid, list_actors).
 
+-ifdef(TEST).
 -doc """
 Kill a specific actor.
 Returns ok if killed, {error, not_found} if not registered.
@@ -245,6 +252,7 @@ Returns ok if killed, {error, not_found} if not registered.
 -spec kill_actor(pid(), pid()) -> ok | {error, not_found}.
 kill_actor(RegistryPid, ActorPid) ->
     gen_server:call(RegistryPid, {kill, ActorPid}).
+-endif.
 
 -doc """
 Get metadata for a specific actor.
@@ -262,13 +270,15 @@ Returns {ok, Count} where Count is the number of actors from that module.
 count_actors_for_module(RegistryPid, ModuleName) ->
     gen_server:call(RegistryPid, {count_for_module, ModuleName}).
 
+-ifdef(TEST).
 -doc """
 Get PIDs of all actors using a specific module.
-Used by hot reload to trigger sys:change_code/4 after module reload.
+Test-only (BT-4903): no production caller.
 """.
 -spec get_pids_for_module(pid(), atom()) -> {ok, [pid()]} | {error, term()}.
 get_pids_for_module(RegistryPid, ModuleName) ->
     gen_server:call(RegistryPid, {pids_for_module, ModuleName}).
+-endif.
 
 %%% gen_server callbacks
 

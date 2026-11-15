@@ -61,35 +61,48 @@ pub mod test_support {
     use crate::semantic_analysis::class_hierarchy::DeclaredType;
     use crate::source_analysis::{Severity, Span, lex_with_eof, parse};
 
-    /// Parses a Beamtalk source string and returns the [`Module`] AST.
+    /// The one parse-and-assert implementation behind [`parse_bt`] and
+    /// [`parse_ok`]: parses `source` and panics, listing every diagnostic and
+    /// the source, if any diagnostic satisfies `rejects`.
+    fn parse_rejecting(
+        helper: &str,
+        source: &str,
+        rejects: impl Fn(&crate::source_analysis::Diagnostic) -> bool,
+    ) -> Module {
+        let (module, diagnostics) = parse(lex_with_eof(source));
+        let rejected = diagnostics.iter().filter(|d| rejects(d)).count();
+        assert!(
+            rejected == 0,
+            "{helper}: source produced {rejected} rejected parse diagnostic(s):\n  {}\n\nSource:\n{source}",
+            diagnostics
+                .iter()
+                .map(|d| format!("{d:?}"))
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        );
+        module
+    }
+
+    /// Parses `source` and returns the [`Module`] AST, panicking on any
+    /// **Error** diagnostic.
     ///
-    /// Panics with a helpful message if any parse diagnostics are emitted,
-    /// including the source and all diagnostic messages.
+    /// Strictness: Errors rejected; Warnings and Lints accepted. Use this when
+    /// the fixture may legitimately draw parse warnings (e.g. a redundant `.`)
+    /// that the test is not about. [`parse_ok`] is the stricter sibling.
     ///
     /// # Panics
     ///
     /// Panics if the source contains parse errors.
     pub fn parse_bt(source: &str) -> Module {
-        let (module, diagnostics) = parse(lex_with_eof(source));
-        let errors: Vec<_> = diagnostics
-            .iter()
-            .filter(|d| d.severity == Severity::Error)
-            .collect();
-        if !errors.is_empty() {
-            let msgs: Vec<_> = diagnostics.iter().map(|d| format!("{d:?}")).collect();
-            panic!(
-                "parse_bt: source produced {} parse error(s):\n  {}\n\nSource:\n{}",
-                errors.len(),
-                msgs.join("\n  "),
-                source
-            );
-        }
-        module
+        parse_rejecting("parse_bt", source, |d| d.severity == Severity::Error)
     }
 
-    /// Parses `source` and returns the [`Module`] AST, asserting that there are
-    /// no Error or Warning diagnostics. Lint diagnostics are ignored (they do
-    /// not block compilation).
+    /// Parses `source` and returns the [`Module`] AST, panicking on any
+    /// **Error or Warning** diagnostic.
+    ///
+    /// Strictness: Errors and Warnings rejected; Lints accepted (they do not
+    /// block compilation). [`parse_bt`] is the looser sibling that also accepts
+    /// Warnings.
     ///
     /// Shared across `beamtalk-core`'s parser tests and dependent crates'
     /// integration tests (e.g. `beamtalk-repl/tests/repl_codegen_smoke.rs`).
@@ -98,14 +111,7 @@ pub mod test_support {
     ///
     /// Panics if `source` produces any Error or Warning diagnostics.
     pub fn parse_ok(source: &str) -> Module {
-        let tokens = lex_with_eof(source);
-        let (module, diagnostics) = parse(tokens);
-        let non_lint: Vec<_> = diagnostics
-            .iter()
-            .filter(|d| d.severity != Severity::Lint)
-            .collect();
-        assert!(non_lint.is_empty(), "Expected no errors, got: {non_lint:?}");
-        module
+        parse_rejecting("parse_ok", source, |d| d.severity != Severity::Lint)
     }
 
     /// `value`'s `Debug` form with every span erased, so two trees that

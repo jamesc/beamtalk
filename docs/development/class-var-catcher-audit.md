@@ -60,7 +60,7 @@ All carry a `converted` marker, so the lint fails if one loses its conversion:
 - `beamtalk_class_vars:protect/1` itself.
 - `beamtalk_result:tryDo/1`, its Tier 2 twin `tryDo/2` (ADR 0131 §5, BT-3750) and `beamtalk_test_case:should_raise/2` (`should:raise:`): the block runs under `protect/1`.
 - `beamtalk_repl_eval:run_self_eval_module/3` (Inspector `evaluate:`): the eval runs under `protect/1` (BT-3728) and re-raises a `^` throw (BT-3735). Tests: `beamtalk_repl_eval_tests:eval_with_self_discards_class_var_writes`, `eval_with_self_reraises_nlr_and_keeps_class_var_writes`.
-- `beamtalk_erlang_proxy:apply_with_coercion/5` and `maybe_retry_badarg/7`: the pre-call snapshot is restored before the `badarg` charlist retry (BT-3728). Test: `beamtalk_erlang_proxy_tests:native_call_badarg_retry_discards_first_attempt_class_var_writes_test`.
+- `beamtalk_erlang_proxy:apply_with_coercion/5` and `maybe_retry/9`: the pre-call snapshot is restored before the `badarg` charlist retry and the `function_clause` nested-String retry (BT-3728, BT-4866). Tests: `beamtalk_erlang_proxy_tests:native_call_badarg_retry_discards_first_attempt_class_var_writes_test`, `function_clause_retry_discards_first_attempt_class_var_writes_test`.
 
 ## What the lint cannot see, and watch items
 
