@@ -20,13 +20,6 @@ Keyword constructors are ordinary class methods: the in-caller path of ADR
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
-%% Logger handler callback for the BT-4126 stale-verdict warning tests.
--export([log/2]).
-
-log(LogEvent, #{config := #{parent := Parent}}) ->
-    Parent ! {log_event, LogEvent},
-    ok.
-
 -define(HELPER, beamtalk_class_direct_ctor_helper).
 %% No `new/0` / `new/1` exports: the "missing export falls through" module.
 -define(PLAIN_HELPER, beamtalk_class_dispatch_test_helper).
@@ -260,27 +253,10 @@ reload(Name, Meta) ->
 %% Lifts the primary level to `all` for the run and restores whatever it was
 %% (test/sys.config sets `warning` so the warnings_file sink captures them).
 stale_warnings(Key, Fun) ->
-    HandlerId = bt_4126_stale_verdict_test_handler,
-    #{level := OldLevel} = logger:get_primary_config(),
-    ok = logger:set_primary_config(level, all),
-    ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{parent => self()}, level => all}),
-    try
-        Fun()
-    after
-        logger:remove_handler(HandlerId),
-        logger:set_primary_config(level, OldLevel)
-    end,
-    drain_warnings(Key, []).
-
-drain_warnings(Key, Acc) ->
-    receive
-        {log_event, #{level := warning, meta := #{Key := _} = Meta}} ->
-            drain_warnings(Key, [Meta | Acc]);
-        {log_event, _} ->
-            drain_warnings(Key, Acc)
-    after 0 ->
-        lists:reverse(Acc)
-    end.
+    beamtalk_test_log:with_capture(all, fun() ->
+        Fun(),
+        [Meta || #{level := warning, meta := #{Key := _} = Meta} <- beamtalk_test_log:drain()]
+    end).
 
 %% A class-side `new:` as `class_method_info` carries it for a compiled class.
 -define(USER_NEW1, #{'new:' => #{arity => 1}}).

@@ -25,9 +25,6 @@ suite happens to register it first.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
-%% Logger handler callback for the fun-outside-table warning test below.
--export([log/2]).
-
 %% Called from the dynamically-compiled meta-stub module installed by
 %% with_shape_chain_cart_meta/3 below — must be exported since it's invoked
 %% as beamtalk_shape_migration_tests:apply_meta_override/1 from that other
@@ -48,10 +45,6 @@ suite happens to register it first.
 %% single-process tests, not for a value read by a *different* node's actor
 %% process during dispatch.
 -export([build_delegate_proxy/3]).
-
-log(LogEvent, #{config := #{parent := Parent}}) ->
-    Parent ! {log_event, LogEvent},
-    ok.
 
 apply_meta_override(Real) ->
     {ShapeVersion, Migrations} = get(bt_3536_shape_chain_cart_meta_override),
@@ -395,13 +388,7 @@ assert_late_reconcile_outcome(<<"typed_field_unset_error">>, FieldName, _Case, R
 %% must still succeed (the gap is a no-op step, same as any other gap) while
 %% also warning that `migrateFromV2:` exists but will not run.
 test_migrate_warns_when_class_method_outside_shape_migrations_table() ->
-    logger:set_primary_config(level, all),
-    HandlerId = bt_3537_stray_migration_warning_test_handler,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{
-        config => #{parent => self()},
-        level => all
-    }),
-    try
+    beamtalk_test_log:with_capture(all, fun() ->
         with_shape_chain_cart_meta(3, #{1 => 'migrateFromV1:'}, fun() ->
             {ok, NewFields, ToVersion} =
                 beamtalk_shape_migration:migrate('ShapeChainCart', 1, #{itemCount => 2}),
@@ -411,12 +398,9 @@ test_migrate_warns_when_class_method_outside_shape_migrations_table() ->
             %% `tag`, it does not run the stray method.
             ?assertEqual(20, maps:get(total, NewFields)),
             ?assertEqual({beamtalk_string, <<"none">>}, maps:get(tag, NewFields)),
-            ?assert(receive_stray_migration_warning('ShapeChainCart', 'migrateFromV2:', 5))
+            ?assert(receive_stray_migration_warning('ShapeChainCart', 'migrateFromV2:', 1000))
         end)
-    after
-        logger:remove_handler(HandlerId),
-        logger:set_primary_config(level, error)
-    end.
+    end).
 
 %% BT-3543: the same scenario as
 %% test_migrate_warns_when_class_method_outside_shape_migrations_table/0, but
@@ -425,62 +409,40 @@ test_migrate_warns_when_class_method_outside_shape_migrations_table() ->
 %% since beamtalk_repl_loader:hot_reload_class/2 already ran the check once
 %% for the class before fanning out to instances.
 test_migrate_skip_stray_warning_suppresses_warning() ->
-    logger:set_primary_config(level, all),
-    HandlerId = bt_3543_skip_stray_warning_test_handler,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{
-        config => #{parent => self()},
-        level => all
-    }),
-    try
+    beamtalk_test_log:with_capture(all, fun() ->
         with_shape_chain_cart_meta(3, #{1 => 'migrateFromV1:'}, fun() ->
             {ok, _NewFields, ToVersion} =
                 beamtalk_shape_migration:migrate('ShapeChainCart', 1, #{itemCount => 2}, #{
                     skip_stray_warning => true
                 }),
             ?assertEqual(3, ToVersion),
-            ?assertNot(receive_stray_migration_warning('ShapeChainCart', 'migrateFromV2:', 2))
+            ?assertNot(receive_stray_migration_warning('ShapeChainCart', 'migrateFromV2:', 200))
         end)
-    after
-        logger:remove_handler(HandlerId),
-        logger:set_primary_config(level, error)
-    end.
+    end).
 
 %% BT-3543: check_stray_migrations/1 is the once-per-reload call site
 %% (beamtalk_repl_loader:hot_reload_class/2) — it must still warn on its own,
 %% with no migrate/3-4 call at all.
 test_check_stray_migrations_warns_directly() ->
-    logger:set_primary_config(level, all),
-    HandlerId = bt_3543_check_stray_migrations_test_handler,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{
-        config => #{parent => self()},
-        level => all
-    }),
-    try
+    beamtalk_test_log:with_capture(all, fun() ->
         with_shape_chain_cart_meta(3, #{1 => 'migrateFromV1:'}, fun() ->
             ok = beamtalk_shape_migration:check_stray_migrations('ShapeChainCart'),
-            ?assert(receive_stray_migration_warning('ShapeChainCart', 'migrateFromV2:', 5))
+            ?assert(receive_stray_migration_warning('ShapeChainCart', 'migrateFromV2:', 1000))
         end)
-    after
-        logger:remove_handler(HandlerId),
-        logger:set_primary_config(level, error)
-    end.
+    end).
 
-%% Drains up to N pending {log_event, ...} messages looking for the
-%% stray-migration warning naming Class and Selector.
-receive_stray_migration_warning(_Class, _Selector, 0) ->
-    false;
-receive_stray_migration_warning(Class, Selector, N) ->
-    receive
-        {log_event, #{level := warning, meta := Meta}} ->
-            case
-                maps:get(class, Meta, undefined) =:= Class andalso
-                    lists:member(Selector, maps:get(selectors, Meta, []))
-            of
-                true -> true;
-                false -> receive_stray_migration_warning(Class, Selector, N - 1)
-            end
-    after 1000 ->
-        false
+%% Waits for the stray-migration warning naming Class and Selector.
+receive_stray_migration_warning(Class, Selector, Timeout) ->
+    Matches = fun
+        (#{level := warning, meta := Meta}) ->
+            maps:get(class, Meta, undefined) =:= Class andalso
+                lists:member(Selector, maps:get(selectors, Meta, []));
+        (_) ->
+            false
+    end,
+    case beamtalk_test_log:await(Matches, Timeout) of
+        {ok, _} -> true;
+        timeout -> false
     end.
 
 %%====================================================================
