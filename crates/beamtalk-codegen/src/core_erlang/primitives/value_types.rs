@@ -329,7 +329,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::too_many_lines)] // one contiguous table; splitting hurts readability
     fn generate_tuple_bif_table() {
         assert_bif_table(
             generate_tuple_bif,
@@ -404,12 +403,13 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::too_many_lines)] // one contiguous table; splitting hurts readability
     fn generate_value_bif_table() {
         assert_bif_table(
             generate_value_bif,
             &[
                 // generate_value_bif tests
+                // ADR 0094: Value printString routes through the canonical structural
+                // renderer for byte-identical output with the runtime fallback.
                 (
                     "test_value_print_string_uses_canonical_renderer",
                     "printString",
@@ -421,7 +421,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::too_many_lines)] // one contiguous table; splitting hurts readability
     fn generate_set_bif_table() {
         assert_bif_table(
             generate_set_bif,

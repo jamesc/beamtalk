@@ -244,7 +244,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::too_many_lines)] // one contiguous table; splitting hurts readability
     fn generate_future_bif_table() {
         assert_bif_table(
             generate_future_bif,
@@ -299,7 +298,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::too_many_lines)] // one contiguous table; splitting hurts readability
     fn generate_file_handle_bif_table() {
         assert_bif_table(
             generate_file_handle_bif,

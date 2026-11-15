@@ -284,6 +284,10 @@ mod tests {
                     &["N"],
                     "call 'beamtalk_list':'at'(Self, N)",
                 ),
+                // Routes through `beamtalk_equality:member/2`, not bare
+                // `lists:member/2`, so an `equals:` override on the element class is
+                // honoured. That helper still takes `lists:member/2` first, so the
+                // positive case costs the same as before.
                 (
                     "test_includes",
                     "includes:",
@@ -303,6 +307,8 @@ mod tests {
                     &[],
                     "call 'lists':'reverse'(Self)",
                 ),
+                // collapses `1` and `1.0`. `beamtalk_list:unique/1` sorts the same way
+                // but deduplicates with `=:=`.
                 (
                     "test_unique",
                     "unique",

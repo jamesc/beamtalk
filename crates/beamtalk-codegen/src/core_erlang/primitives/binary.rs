@@ -116,7 +116,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::too_many_lines)] // one contiguous table; splitting hurts readability
     fn generate_binary_bif_table() {
         assert_bif_table(
             generate_binary_bif,

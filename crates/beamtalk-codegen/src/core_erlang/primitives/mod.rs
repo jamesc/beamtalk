@@ -1914,14 +1914,18 @@ mod tests {
                 "notAMethod",
                 &[],
             ),
+            // binary_bif returns None when params is empty (uses `?` on params.first())
             ("test_integer_binary_op_missing_param", "Integer", "+", &[]),
+            // power_bif returns None when params is empty
             ("test_integer_power_missing_param", "Integer", "**", &[]),
+            // bitShift: returns None when params is empty
             (
                 "test_integer_bit_shift_missing_param",
                 "Integer",
                 "bitShift:",
                 &[],
             ),
+            // raisedTo: returns None when params is empty
             (
                 "test_integer_raised_to_missing_param",
                 "Integer",
