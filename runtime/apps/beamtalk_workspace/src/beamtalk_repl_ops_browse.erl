@@ -257,13 +257,13 @@ class_row(Pid, TestClasses) ->
         Name = beamtalk_runtime_api:class_name(Pid),
         Super = beamtalk_runtime_api:superclass(Pid),
         ModName = origin_module(Name, beamtalk_runtime_api:module_name(Pid)),
-        SourceFile = source_file_of(ModName),
+        SourceFile = beamtalk_repl_row:source_file_of(ModName),
         SourceOrigin = source_origin_of(ModName, SourceFile),
         {true, #{
             <<"name">> => atom_to_binary(Name, utf8),
             <<"superclass">> => atom_or_null(Super),
             <<"category">> => category_of(ModName),
-            <<"comment">> => first_line(class_doc(Pid)),
+            <<"comment">> => beamtalk_repl_row:first_line(class_doc(Pid)),
             <<"sealed">> => safe_bool(fun() -> beamtalk_runtime_api:is_sealed(Pid) end),
             <<"typed">> => safe_bool(fun() -> beamtalk_runtime_api:is_typed(Pid) end),
             <<"abstract">> => safe_bool(fun() -> beamtalk_runtime_api:is_abstract(Pid) end),
@@ -309,7 +309,7 @@ browse_protocols(ClassName, ClassSide) ->
     %% `beamtalk_protocol_object` dispatch module) so the method rows' source
     %% badges match where the protocol actually lives (stdlib vs project).
     ModName = origin_module(ClassName, mod_name_for_class(ClassName)),
-    SourceFile = source_file_of(ModName),
+    SourceFile = beamtalk_repl_row:source_file_of(ModName),
     %% Resolve the class pid once here (not per selector) so
     %% `selector_row` can enrich each `synthetic` row with its resolved
     %% signature + doc for a VS Code-style method-list hover. `undefined` when
@@ -587,7 +587,7 @@ browse_class_definition(ClassName) ->
             %% `beamtalk_protocol_object`; resolve its defining module so the
             %% definition pane's category/origin/source_origin are accurate.
             ModName = origin_module(ClassName, beamtalk_runtime_api:module_name(ClassPid)),
-            SourceFile = source_file_of(ModName),
+            SourceFile = beamtalk_repl_row:source_file_of(ModName),
             SourceOrigin = source_origin_of(ModName, SourceFile),
             %% Native-backed classes (ADR 0056) carry their backing
             %% Erlang module name so the System Browser can badge them and offer
@@ -1730,10 +1730,9 @@ self_delegate_selectors(Exports) ->
 dispatch_export_selector({Name, _Arity}) ->
     case atom_to_list(Name) of
         "dispatch_" ++ Rest when Rest =/= [] ->
-            try
-                {true, list_to_existing_atom(Rest)}
-            catch
-                error:badarg -> false
+            case beamtalk_text:to_existing_atom(Rest) of
+                {ok, Selector} -> {true, Selector};
+                error -> false
             end;
         _ ->
             false
@@ -1746,9 +1745,9 @@ dispatch_export_selector({Name, _Arity}) ->
 -spec delegate_row(atom(), atom()) -> beamtalk_xref:native_caller_row().
 delegate_row(ClassName, Selector) ->
     Line =
-        case beamtalk_xref:method_info(ClassName, false, Selector) of
-            #{line := L} when is_integer(L), L > 0 -> L;
-            _ -> 1
+        case beamtalk_repl_row:method_line(ClassName, false, Selector) of
+            null -> 1;
+            L -> L
         end,
     #{owner => ClassName, class_side => false, method => Selector, line => Line}.
 
@@ -1757,14 +1756,11 @@ delegate_row(ClassName, Selector) ->
 %% a sentinel → no matching clause, never an atom-table growth).
 -spec optional_selector(map()) -> atom() | undefined.
 optional_selector(Params) ->
-    case maps:get(<<"selector">>, Params, undefined) of
-        Sel when is_binary(Sel), byte_size(Sel) > 0 ->
-            try
-                binary_to_existing_atom(Sel, utf8)
-            catch
-                error:badarg -> '__browse_unknown_selector__'
-            end;
-        _ ->
+    case beamtalk_repl_params:nonempty_binary(Params, <<"selector">>) of
+        {ok, Sel} ->
+            {ok, Atom} = beamtalk_repl_params:existing_atom_param(Sel, sentinel),
+            Atom;
+        error ->
             undefined
     end.
 
@@ -1996,14 +1992,14 @@ validate_module(Params) ->
 %% unknown module is a structured not-found error, never an atom-table growth.
 -spec resolve_module(binary()) -> {ok, atom()} | {error, binary()}.
 resolve_module(Mod) ->
-    try
-        Module = binary_to_existing_atom(Mod, utf8),
-        case code:is_loaded(Module) of
-            {file, _} -> {ok, Module};
-            false -> {error, module_not_found_message(Mod)}
-        end
-    catch
-        error:badarg -> {error, module_not_found_message(Mod)}
+    case beamtalk_text:to_existing_atom(Mod) of
+        {ok, Module} ->
+            case code:is_loaded(Module) of
+                {file, _} -> {ok, Module};
+                false -> {error, module_not_found_message(Mod)}
+            end;
+        error ->
+            {error, module_not_found_message(Mod)}
     end.
 
 -spec module_not_found_message(binary()) -> binary().
@@ -2012,11 +2008,9 @@ module_not_found_message(Mod) ->
 
 -spec validate_class(map()) -> {ok, atom()} | {error, binary()}.
 validate_class(Params) ->
-    case maps:get(<<"class">>, Params, undefined) of
-        Cls when is_binary(Cls), byte_size(Cls) > 0 ->
-            resolve_class(Cls);
-        _ ->
-            {error, <<"`class` (non-empty string) is required">>}
+    case beamtalk_repl_params:nonempty_binary(Params, <<"class">>) of
+        {ok, Cls} -> resolve_class(Cls);
+        error -> {error, <<"`class` (non-empty string) is required">>}
     end.
 
 -spec validate_class_side(map()) ->
@@ -2065,33 +2059,27 @@ validate_side(Params) ->
 
 -spec validate_selector(map()) -> {ok, atom()} | {error, binary()}.
 validate_selector(Params) ->
-    case maps:get(<<"selector">>, Params, undefined) of
-        Sel when is_binary(Sel), byte_size(Sel) > 0 ->
-            %% binary_to_existing_atom: untrusted client input must not grow the
-            %% VM atom table. A selector the runtime has never seen reads as a
-            %% sentinel, which yields a not-found (null source) result rather
-            %% than a validation failure — mirrors beamtalk_repl_ops_nav.
-            try
-                {ok, binary_to_existing_atom(Sel, utf8)}
-            catch
-                error:badarg -> {ok, '__browse_unknown_selector__'}
-            end;
-        _ ->
-            {error, <<"`selector` (non-empty string) is required">>}
+    %% Untrusted client input must not grow the VM atom table. A selector the
+    %% runtime has never seen reads as the sentinel, which yields a not-found
+    %% (null source) result rather than a validation failure — as in
+    %% beamtalk_repl_ops_nav.
+    case beamtalk_repl_params:nonempty_binary(Params, <<"selector">>) of
+        {ok, Sel} -> beamtalk_repl_params:existing_atom_param(Sel, sentinel);
+        error -> {error, <<"`selector` (non-empty string) is required">>}
     end.
 
 %% Resolve a class-name binary to an atom only if it names a known class. An
 %% unknown class is a structured not-found error, not an atom-table growth.
 -spec resolve_class(binary()) -> {ok, atom()} | {error, binary()}.
 resolve_class(Cls) ->
-    try
-        Name = binary_to_existing_atom(Cls, utf8),
-        case beamtalk_runtime_api:whereis_class(Name) of
-            undefined -> {error, class_not_found_message(Cls)};
-            _Pid -> {ok, Name}
-        end
-    catch
-        error:badarg -> {error, class_not_found_message(Cls)}
+    case beamtalk_text:to_existing_atom(Cls) of
+        {ok, Name} ->
+            case beamtalk_runtime_api:whereis_class(Name) of
+                undefined -> {error, class_not_found_message(Cls)};
+                _Pid -> {ok, Name}
+            end;
+        error ->
+            {error, class_not_found_message(Cls)}
     end.
 
 -spec class_not_found_message(binary()) -> binary().
@@ -2106,7 +2094,7 @@ class_not_found_message(Cls) ->
 source_file_for_class(ClassName) ->
     case beamtalk_runtime_api:whereis_class(ClassName) of
         undefined -> null;
-        Pid -> source_file_of(beamtalk_runtime_api:module_name(Pid))
+        Pid -> beamtalk_repl_row:source_file_of(beamtalk_runtime_api:module_name(Pid))
     end.
 
 -spec mod_name_for_class(atom()) -> atom().
@@ -2134,13 +2122,6 @@ origin_module(ClassName, ModName) ->
         _ -> ModName
     end.
 
--spec source_file_of(atom()) -> binary() | null.
-source_file_of(ModName) ->
-    case beamtalk_reflection:source_file_from_module(ModName) of
-        nil -> null;
-        Path when is_binary(Path) -> Path
-    end.
-
 %% Class category = the declared package (ADR 0070), read via field reflection —
 %% never by sending the class a method. `null` when no package is declared (the
 %% browser groups these under "Uncategorized", Pharo convention).
@@ -2156,15 +2137,6 @@ class_doc(Pid) ->
     case safe_class_call(Pid, get_doc) of
         D when is_binary(D) -> D;
         _ -> null
-    end.
-
--spec first_line(binary() | null) -> binary() | null.
-first_line(null) ->
-    null;
-first_line(Doc) when is_binary(Doc) ->
-    case binary:split(Doc, <<"\n">>) of
-        [Line | _] -> Line;
-        [] -> Doc
     end.
 
 %% Decide a selector's browser protocol bucket (ADR 0096 §"Protocol of a

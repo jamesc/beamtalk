@@ -162,7 +162,13 @@ param_scanner_sees_known_reads_test() ->
         [<<"before">>, <<"class">>, <<"code">>, <<"side">>, <<"suffix">>],
         lists:sort(op_reads(beamtalk_repl_ops_dev, <<"hover">>))
     ),
-    ?assertEqual([<<"actor">>], op_reads(beamtalk_repl_ops_actors, <<"kill">>)).
+    ?assertEqual([<<"actor">>], op_reads(beamtalk_repl_ops_actors, <<"kill">>)),
+    %% Reads made through `beamtalk_repl_params` helpers stay visible.
+    ?assertEqual([<<"actor">>], op_reads(beamtalk_repl_ops_watch, <<"pid-stats">>)),
+    NavReads = op_reads(beamtalk_repl_ops_nav, <<"nav-query">>),
+    ?assert(lists:member(<<"selector">>, NavReads)),
+    ?assert(lists:member(<<"class">>, NavReads)),
+    ?assert(lists:member(<<"module">>, NavReads)).
 
 undeclared_reads(Handler) ->
     [
@@ -226,7 +232,8 @@ local_calls(Form) ->
     ).
 
 %% Keys read as `maps:get/find/is_key/take(<<"k">>, Params…)` or through the
-%% `binary_param(<<"k">>, Params)` helper; the map must be a variable named
+%% `binary_param(<<"k">>, Params)` helper, or the `beamtalk_repl_params`
+%% request-param helpers (`nonempty_binary(Params, <<"k">>)`, `actor_pid(Params)`); the map must be a variable named
 %% `Params` so rows and results being read are not mistaken for requests.
 param_keys(Form) ->
     collect(
@@ -239,6 +246,22 @@ param_keys(Form) ->
                 literal_key(K);
             ({call, _, {atom, _, binary_param}, [K, {var, _, 'Params'}]}) ->
                 literal_key(K);
+            %% `beamtalk_repl_params` helpers read the key themselves: the key
+            %% is the literal argument (`nonempty_binary/2`) or fixed
+            %% (`actor_pid/1` reads `actor`), so the scan must still see it.
+            (
+                {call, _, {remote, _, {atom, _, beamtalk_repl_params}, {atom, _, nonempty_binary}},
+                    [
+                        {var, _, 'Params'}, K
+                    ]}
+            ) ->
+                literal_key(K);
+            (
+                {call, _, {remote, _, {atom, _, beamtalk_repl_params}, {atom, _, actor_pid}}, [
+                    {var, _, 'Params'}
+                ]}
+            ) ->
+                [<<"actor">>];
             (_) ->
                 []
         end,

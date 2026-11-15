@@ -480,15 +480,27 @@ tokenise_send_chain(Expr) when is_binary(Expr) ->
                     %% Use binary_to_existing_atom to avoid atom table exhaustion from
                     %% user input.  Valid selectors are already loaded as method atoms;
                     %% unknown selectors mean the chain will break anyway.
-                    try
-                        SelectorAtoms = [binary_to_existing_atom(S, utf8) || S <- Selectors],
-                        {ok, ReceiverToken, SelectorAtoms}
-                    catch
-                        error:badarg -> error
+                    case existing_atoms(Selectors) of
+                        {ok, SelectorAtoms} -> {ok, ReceiverToken, SelectorAtoms};
+                        error -> error
                     end;
                 error ->
                     error
             end
+    end.
+
+%% All-or-nothing existing-atom conversion: `error` if any name has no atom.
+-spec existing_atoms([binary()]) -> {ok, [atom()]} | error.
+existing_atoms(Names) ->
+    existing_atoms(Names, []).
+
+-spec existing_atoms([binary()], [atom()]) -> {ok, [atom()]} | error.
+existing_atoms([], Acc) ->
+    {ok, lists:reverse(Acc)};
+existing_atoms([Name | Rest], Acc) ->
+    case beamtalk_text:to_existing_atom(Name) of
+        {ok, Atom} -> existing_atoms(Rest, [Atom | Acc]);
+        error -> error
     end.
 
 -doc """
@@ -629,14 +641,14 @@ parse_binary_hops([Token | Rest]) ->
                                 true ->
                                     error;
                                 false ->
-                                    try
-                                        Sel = binary_to_existing_atom(Token, utf8),
-                                        case parse_binary_hops(Rest2) of
-                                            {ok, MoreHops} -> {ok, [{binary, Sel} | MoreHops]};
-                                            error -> error
-                                        end
-                                    catch
-                                        error:badarg -> error
+                                    case beamtalk_text:to_existing_atom(Token) of
+                                        {ok, Sel} ->
+                                            case parse_binary_hops(Rest2) of
+                                                {ok, MoreHops} -> {ok, [{binary, Sel} | MoreHops]};
+                                                error -> error
+                                            end;
+                                        error ->
+                                            error
                                     end
                             end
                     end;
@@ -644,14 +656,14 @@ parse_binary_hops([Token | Rest]) ->
                     %% Must be a valid unary selector (no colon, starts with letter/_)
                     case is_valid_unary_selector(Token) of
                         true ->
-                            try
-                                Sel = binary_to_existing_atom(Token, utf8),
-                                case parse_binary_hops(Rest) of
-                                    {ok, MoreHops} -> {ok, [{unary, Sel} | MoreHops]};
-                                    error -> error
-                                end
-                            catch
-                                error:badarg -> error
+                            case beamtalk_text:to_existing_atom(Token) of
+                                {ok, Sel} ->
+                                    case parse_binary_hops(Rest) of
+                                        {ok, MoreHops} -> {ok, [{unary, Sel} | MoreHops]};
+                                        error -> error
+                                    end;
+                                error ->
+                                    error
                             end;
                         false ->
                             %% Keyword send or other unrecognised token

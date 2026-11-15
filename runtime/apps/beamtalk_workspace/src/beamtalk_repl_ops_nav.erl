@@ -222,39 +222,29 @@ with_editor_context(Params) ->
 -spec with_selector(map(), senders | implementors) ->
     {ok, {senders | implementors, atom()}} | {error, binary()}.
 with_selector(Params, Kind) ->
-    case maps:get(<<"selector">>, Params, undefined) of
-        Sel when is_binary(Sel), byte_size(Sel) > 0 ->
-            %% binary_to_existing_atom: untrusted client input must not be
-            %% able to grow the VM atom table. xref lookups can only
-            %% succeed for selectors already known to the runtime, so a
-            %% missing-atom error returns an empty result set, not a
-            %% validation failure.
-            try
-                {ok, {Kind, binary_to_existing_atom(Sel, utf8)}}
-            catch
-                error:badarg ->
-                    {ok, {Kind, '__nav_query_unknown__'}}
-            end;
-        _ ->
+    %% Untrusted client input must not grow the VM atom table. xref lookups can
+    %% only succeed for selectors already known to the runtime, so an unknown
+    %% name (the `sentinel` policy) returns an empty result set, not a
+    %% validation failure.
+    case beamtalk_repl_params:nonempty_binary(Params, <<"selector">>) of
+        {ok, Sel} ->
+            {ok, Atom} = beamtalk_repl_params:existing_atom_param(Sel, sentinel),
+            {ok, {Kind, Atom}};
+        error ->
             {error, <<"`selector` (non-empty string) is required for senders/implementors">>}
     end.
 
 -spec with_class(map(), references | required_methods | conforming_classes) ->
     {ok, {references | required_methods | conforming_classes, atom()}} | {error, binary()}.
 with_class(Params, Kind) ->
-    case maps:get(<<"class">>, Params, undefined) of
-        Cls when is_binary(Cls), byte_size(Cls) > 0 ->
-            %% binary_to_existing_atom: see comment in with_selector/2. For the
-            %% protocol kinds an unknown protocol name likewise yields
-            %% the shared sentinel — `required_methods`/`conforming_classes`
-            %% return [] for an unregistered protocol, not a validation error.
-            try
-                {ok, {Kind, binary_to_existing_atom(Cls, utf8)}}
-            catch
-                error:badarg ->
-                    {ok, {Kind, '__nav_query_unknown__'}}
-            end;
-        _ ->
+    %% See with_selector/2. For the protocol kinds an unknown protocol name
+    %% likewise yields the sentinel — `required_methods`/`conforming_classes`
+    %% return [] for an unregistered protocol, not a validation error.
+    case beamtalk_repl_params:nonempty_binary(Params, <<"class">>) of
+        {ok, Cls} ->
+            {ok, Atom} = beamtalk_repl_params:existing_atom_param(Cls, sentinel),
+            {ok, {Kind, Atom}};
+        error ->
             {error, with_class_error(Kind)}
     end.
 
@@ -266,19 +256,14 @@ with_class_error(_ProtocolKind) ->
 
 -spec with_module(map()) -> {ok, {callers_of_native_module, atom()}} | {error, binary()}.
 with_module(Params) ->
-    case maps:get(<<"module">>, Params, undefined) of
-        Mod when is_binary(Mod), byte_size(Mod) > 0 ->
-            %% binary_to_existing_atom: see comment in with_selector/2. A native
-            %% module name that is not yet an atom (the module is not loaded)
-            %% yields the shared sentinel — `callers_of_native_module` returns []
-            %% for it, not a validation error.
-            try
-                {ok, {callers_of_native_module, binary_to_existing_atom(Mod, utf8)}}
-            catch
-                error:badarg ->
-                    {ok, {callers_of_native_module, '__nav_query_unknown__'}}
-            end;
-        _ ->
+    %% See with_selector/2. A native module name that is not yet an atom (the
+    %% module is not loaded) yields the sentinel — `callers_of_native_module`
+    %% returns [] for it, not a validation error.
+    case beamtalk_repl_params:nonempty_binary(Params, <<"module">>) of
+        {ok, Mod} ->
+            {ok, Atom} = beamtalk_repl_params:existing_atom_param(Mod, sentinel),
+            {ok, {callers_of_native_module, Atom}};
+        error ->
             {error,
                 <<"`module` (non-empty native module name) is required for callers_of_native_module">>}
     end.
@@ -351,8 +336,8 @@ native_caller_to_row(Row) ->
         <<"class_side">> => ClassSide,
         <<"method">> => atom_to_binary(Method, utf8),
         <<"line">> => Line,
-        <<"source_file">> => source_file_of(Owner),
-        <<"source_origin">> => source_origin_of(Owner)
+        <<"source_file">> => beamtalk_repl_row:class_source_file(Owner),
+        <<"source_origin">> => beamtalk_repl_row:source_origin_of(Owner)
     }.
 
 -spec implementors_value([{atom(), boolean()}], atom()) -> map().
@@ -381,8 +366,8 @@ required_method_to_row(Selector, ProtocolName) ->
         %% A protocol requirement has no defining source line — the row is
         %% navigable via its selector (→ Implementors), not via goto-definition.
         <<"line">> => null,
-        <<"source_file">> => source_file_of(ProtocolName),
-        <<"source_origin">> => source_origin_of(ProtocolName)
+        <<"source_file">> => beamtalk_repl_row:class_source_file(ProtocolName),
+        <<"source_origin">> => beamtalk_repl_row:source_origin_of(ProtocolName)
     }.
 
 %% Split a required-method selector atom into `{ClassSide, BareSelectorBin}`.
@@ -411,8 +396,8 @@ conforming_class_to_row(Cls) ->
         <<"class_side">> => false,
         <<"method">> => null,
         <<"line">> => null,
-        <<"source_file">> => source_file_of(Cls),
-        <<"source_origin">> => source_origin_of(Cls)
+        <<"source_file">> => beamtalk_repl_row:class_source_file(Cls),
+        <<"source_origin">> => beamtalk_repl_row:source_origin_of(Cls)
     }.
 
 -spec site_to_row(beamtalk_xref:site()) -> map().
@@ -428,8 +413,8 @@ site_to_row(Site) ->
         <<"class_side">> => ClassSide,
         <<"method">> => atom_to_binary(Method, utf8),
         <<"line">> => Line,
-        <<"source_file">> => source_file_of(Owner),
-        <<"source_origin">> => source_origin_of(Owner)
+        <<"source_file">> => beamtalk_repl_row:class_source_file(Owner),
+        <<"source_origin">> => beamtalk_repl_row:source_origin_of(Owner)
     }.
 
 -spec implementor_to_row(atom(), boolean(), atom()) -> map().
@@ -442,44 +427,7 @@ implementor_to_row(Cls, ClassSide, Selector) ->
         <<"class">> => atom_to_binary(Cls, utf8),
         <<"class_side">> => ClassSide,
         <<"method">> => atom_to_binary(Selector, utf8),
-        <<"line">> => method_line_of(Cls, ClassSide, Selector),
-        <<"source_file">> => source_file_of(Cls),
-        <<"source_origin">> => source_origin_of(Cls)
+        <<"line">> => beamtalk_repl_row:method_line(Cls, ClassSide, Selector),
+        <<"source_file">> => beamtalk_repl_row:class_source_file(Cls),
+        <<"source_origin">> => beamtalk_repl_row:source_origin_of(Cls)
     }.
-
--spec source_file_of(atom()) -> binary() | null.
-source_file_of(ClassName) ->
-    case beamtalk_runtime_api:whereis_class(ClassName) of
-        undefined ->
-            null;
-        ClassPid ->
-            ModuleName = beamtalk_object_class:module_name_safe(ClassPid),
-            case beamtalk_reflection:source_file_from_module(ModuleName) of
-                nil -> null;
-                Path when is_binary(Path) -> Path
-            end
-    end.
-
--spec source_origin_of(atom()) -> binary().
-source_origin_of(ClassName) ->
-    case beamtalk_runtime_api:whereis_class(ClassName) of
-        undefined ->
-            <<"project">>;
-        ClassPid ->
-            ModName = beamtalk_object_class:module_name_safe(ClassPid),
-            SourceFile =
-                case beamtalk_reflection:source_file_from_module(ModName) of
-                    nil -> null;
-                    Path when is_binary(Path) -> Path
-                end,
-            beamtalk_repl_ops_browse:source_origin_of(ModName, SourceFile)
-    end.
-
--spec method_line_of(atom(), boolean(), atom()) -> pos_integer() | null.
-method_line_of(ClassName, ClassSide, Selector) ->
-    %% The xref `method_info()` map carries the method-header line — exactly
-    %% what `textDocument/implementation` needs to anchor the goto.
-    case beamtalk_xref:method_info(ClassName, ClassSide, Selector) of
-        #{line := Line} when is_integer(Line), Line > 0 -> Line;
-        _ -> null
-    end.

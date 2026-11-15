@@ -823,10 +823,9 @@ from patch-source-derived text (same atom-table-safety reasoning as
 meta_type_from_binary(<<"Dynamic">>) ->
     none;
 meta_type_from_binary(Bin) ->
-    try
-        binary_to_existing_atom(Bin, utf8)
-    catch
-        error:badarg -> none
+    case beamtalk_text:to_existing_atom(Bin) of
+        {ok, Atom} -> Atom;
+        error -> none
     end.
 
 -spec do_trigger_image() -> image_result().
@@ -1203,10 +1202,9 @@ rather than minting a fresh atom from reload-derived text, mirroring
 field_accessor_atoms(NameBin) ->
     lists:filtermap(
         fun(SelBin) ->
-            try
-                {true, binary_to_existing_atom(SelBin, utf8)}
-            catch
-                error:badarg -> false
+            case beamtalk_text:to_existing_atom(SelBin) of
+                {ok, Sel} -> {true, Sel};
+                error -> false
             end
         end,
         [NameBin, with_star_selector(NameBin)]
