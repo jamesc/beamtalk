@@ -15,7 +15,7 @@ Read-side views over the ChangeLog: the `Workspace diff`/`changeLog` value maps 
 
 -export([changeLog/0, dirtyMethods/0, change_entries/0]).
 
-%% `beamtalk_workspace_changelog:entry()` is opaque, but these two views read
+%% `beamtalk_workspace_changelog:entry()` is opaque, but the functions listed below read
 %% the `#entry{}` record fields directly (the record lives in the shared
 %% `beamtalk_workspace_changelog.hrl`, as it does for the codec and log
 %% modules). They were inside the defining module before the split, where
