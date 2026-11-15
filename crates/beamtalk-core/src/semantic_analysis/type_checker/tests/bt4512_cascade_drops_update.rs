@@ -29,9 +29,7 @@ Actor subclass: Counter
 
 fn diagnostics_for(body: &str) -> Vec<Diagnostic> {
     let source = format!("{POINT}\nObject subclass: Probe\n{body}");
-    let module = parse_source(&source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
+    diags_with_expect(&source)
 }
 
 fn drops(diags: &[Diagnostic]) -> Vec<&Diagnostic> {

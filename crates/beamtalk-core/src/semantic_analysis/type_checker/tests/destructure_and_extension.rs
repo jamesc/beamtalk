@@ -363,9 +363,7 @@ Base subclass: Child
   field: y = 0
   class make: val => self new: #{#y => val}
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     // Simulate Base from another file: Value subclass: Base (field: x = 0)
     let base_info = ClassInfo {

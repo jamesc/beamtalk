@@ -508,15 +508,10 @@ mod tests {
     use super::*;
     use crate::compilation::diagnostics_policy::apply_expect_directives;
     use crate::semantic_analysis::analyse;
-    use crate::source_analysis::{Severity, lex_with_eof, parse};
+    use crate::source_analysis::Severity;
 
     fn module_of(src: &str) -> Module {
-        let (module, parse_diags) = parse(lex_with_eof(src));
-        assert!(
-            parse_diags.is_empty(),
-            "Parse failed: {parse_diags:?}\n{src}"
-        );
-        module
+        crate::test_helpers::test_support::parse_ok(src)
     }
 
     fn of_category(src: &str, category: DiagnosticCategory) -> Vec<Diagnostic> {

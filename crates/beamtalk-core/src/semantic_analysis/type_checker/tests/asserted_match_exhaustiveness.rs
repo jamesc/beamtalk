@@ -61,12 +61,11 @@ fn compass_type() -> InferredType {
 /// silently or reports exactly one `Error`).
 fn asserted_diagnostics(scrutinee_ty: InferredType, arms: Vec<MatchArm>) -> Vec<Diagnostic> {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    env.set_local("compass", scrutinee_ty);
+
     let expr = asserted_match_expr(var("compass"), arms);
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    checker.diagnostics().to_vec()
+
+    let (_, diags) = infer_with_diags(&expr, &hierarchy, &[("compass", scrutinee_ty)]);
+    diags
 }
 
 /// Runs inference over the equivalent *advisory* `match:` (same scrutinee
@@ -74,12 +73,13 @@ fn asserted_diagnostics(scrutinee_ty: InferredType, arms: Vec<MatchArm>) -> Vec<
 /// warning — used to pin that the advisory path is untouched.
 fn advisory_warnings(scrutinee_ty: InferredType, arms: Vec<MatchArm>) -> Vec<Diagnostic> {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    env.set_local("compass", scrutinee_ty);
+    let mut session = InferSession::new();
+    session.env.set_local("compass", scrutinee_ty);
     let expr = plain_match_expr(var("compass"), arms);
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    checker
+
+    let _ = session.infer(&expr, &hierarchy);
+    session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("non-exhaustive"))

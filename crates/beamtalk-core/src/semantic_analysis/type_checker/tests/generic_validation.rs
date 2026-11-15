@@ -45,8 +45,7 @@ fn bt2022_generic_return_type_inner_arg_mismatch_warns() {
         type_args: vec![InferredType::known("String"), InferredType::known("Error")],
         provenance: TypeProvenance::Inferred(span()),
     };
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -111,8 +110,7 @@ fn bt2022_generic_return_type_matching_inner_args_no_warning() {
         type_args: vec![InferredType::known("Integer"), InferredType::known("Error")],
         provenance: TypeProvenance::Inferred(span()),
     };
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -159,8 +157,7 @@ fn bt2022_generic_return_type_bare_body_no_warning() {
 
     // Body infers as bare GenResult (no type_args) — no enough info to warn
     let body_type = InferredType::known("GenResult");
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -209,8 +206,7 @@ fn bt2022_dictionary_inner_arg_mismatch_warns() {
         type_args: vec![InferredType::known("Symbol"), InferredType::known("String")],
         provenance: TypeProvenance::Inferred(span()),
     };
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -256,8 +252,7 @@ fn bt2022_list_inner_arg_mismatch_warns() {
         type_args: vec![InferredType::known("String")],
         provenance: TypeProvenance::Inferred(span()),
     };
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -341,8 +336,7 @@ fn bt2022_generic_type_param_in_declared_args_not_warned() {
         type_args: vec![InferredType::known("String"), InferredType::known("Error")],
         provenance: TypeProvenance::Inferred(span()),
     };
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -382,8 +376,7 @@ fn bt2033_never_return_with_known_body_warns() {
 
     // Body infers as Integer — clearly not divergent
     let body_type = InferredType::known("Integer");
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("NeverProbe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "NeverProbe", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -433,8 +426,7 @@ fn bt2033_never_return_with_never_body_no_warning() {
 
     // Body is divergent (e.g. always `self error: ...`)
     let body_type = InferredType::Never;
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("NeverProbe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "NeverProbe", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -482,12 +474,7 @@ Object subclass: Box(T)
   value -> T => x
   wrapped -> T => self value
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -519,12 +506,7 @@ Object subclass: Box(T)
   value -> T => x
   wrapped -> T => self value
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let class = module
         .classes
@@ -539,15 +521,16 @@ Object subclass: Box(T)
     let stmt = wrapped.body.last().expect("wrapped has at least one stmt");
     let expr = &stmt.expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
     // Mirror what `check_module` does: seed `self` with the receiver type
     // produced by the centralised helper.
-    env.set_local(
-        "self",
-        super::super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
+    let ty = infer_with_locals(
+        expr,
+        &hierarchy,
+        &[(
+            "self",
+            super::super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
+        )],
     );
-    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
     match &ty {
         InferredType::Known { class_name, .. } => assert_eq!(
@@ -572,12 +555,7 @@ Object subclass: Pair(K, V)
   second -> V => v
   rewrap -> V => self second
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let class = module
         .classes
@@ -592,13 +570,14 @@ Object subclass: Pair(K, V)
     let stmt = rewrap.body.last().expect("rewrap has at least one stmt");
     let expr = &stmt.expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "self",
-        super::super::type_resolver::receiver_type_for_class(&"Pair".into(), &hierarchy),
+    let ty = infer_with_locals(
+        expr,
+        &hierarchy,
+        &[(
+            "self",
+            super::super::type_resolver::receiver_type_for_class(&"Pair".into(), &hierarchy),
+        )],
     );
-    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
     match &ty {
         InferredType::Known { class_name, .. } => assert_eq!(
@@ -628,12 +607,7 @@ Object subclass: Base(E)
 Base(R) subclass: Sub(R)
   borrow -> R => super peek
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let sub = module
         .classes
@@ -648,13 +622,14 @@ Base(R) subclass: Sub(R)
     let stmt = borrow.body.last().expect("borrow has at least one stmt");
     let expr = &stmt.expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "self",
-        super::super::type_resolver::receiver_type_for_class(&"Sub".into(), &hierarchy),
+    let ty = infer_with_locals(
+        expr,
+        &hierarchy,
+        &[(
+            "self",
+            super::super::type_resolver::receiver_type_for_class(&"Sub".into(), &hierarchy),
+        )],
     );
-    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
     match &ty {
         InferredType::Known { class_name, .. } => assert_eq!(
@@ -680,12 +655,7 @@ Object subclass: Base(E)
 Base(Integer) subclass: IntBase
   borrow -> Integer => super peek
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let int_base = module
         .classes
@@ -700,13 +670,14 @@ Base(Integer) subclass: IntBase
     let stmt = borrow.body.last().expect("borrow has at least one stmt");
     let expr = &stmt.expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "self",
-        super::super::type_resolver::receiver_type_for_class(&"IntBase".into(), &hierarchy),
+    let ty = infer_with_locals(
+        expr,
+        &hierarchy,
+        &[(
+            "self",
+            super::super::type_resolver::receiver_type_for_class(&"IntBase".into(), &hierarchy),
+        )],
     );
-    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
     match &ty {
         InferredType::Known { class_name, .. } => assert_eq!(
@@ -733,12 +704,7 @@ Object subclass: Box(T)
   state: x :: T = nil
   metatype => self class
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let class = module
         .classes
@@ -756,13 +722,14 @@ Object subclass: Box(T)
         .expect("metatype has at least one stmt");
     let expr = &stmt.expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "self",
-        super::super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
+    let ty = infer_with_locals(
+        expr,
+        &hierarchy,
+        &[(
+            "self",
+            super::super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
+        )],
     );
-    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
     // `self class` on `Box(T)` resolves through `class -> Self class`
     // (Object>>class) to the metatype-of-Box (ADR 0083). The metatype is

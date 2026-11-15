@@ -10,24 +10,12 @@
 //! subtyping, and no false-positive diagnostics on class values flowing through
 //! variables).
 
-use super::super::*;
 use super::common::*;
 use ecow::EcoString;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Lex + parse + build a hierarchy for a full source string.
-fn parse_and_build(source: &str) -> (Module, ClassHierarchy) {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
-    (module, hierarchy)
-}
 
 /// Type-check `source` and return every does-not-understand (DNU) diagnostic.
 fn dnu_diags(source: &str) -> Vec<EcoString> {
@@ -48,10 +36,7 @@ fn infer_with_self_meta(
     class_name: &str,
     hierarchy: &ClassHierarchy,
 ) -> InferredType {
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("self", InferredType::meta(class_name));
-    checker.infer_expr(expr, hierarchy, &mut env, false)
+    infer_with_locals(expr, hierarchy, &[("self", InferredType::meta(class_name))])
 }
 
 /// Infer the type of `recv class <selector>` style send where `recv` is a local
@@ -62,10 +47,7 @@ fn infer_send_on_local(
     send: &Expression,
     hierarchy: &ClassHierarchy,
 ) -> InferredType {
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(local, local_ty);
-    checker.infer_expr(send, hierarchy, &mut env, false)
+    infer_with_locals(send, hierarchy, &[(local, local_ty)])
 }
 
 // ---------------------------------------------------------------------------
@@ -625,11 +607,12 @@ fn infer_send_on_local_with_dnu(
     send: &Expression,
     hierarchy: &ClassHierarchy,
 ) -> (InferredType, Vec<EcoString>) {
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(local, local_ty);
-    let ty = checker.infer_expr(send, hierarchy, &mut env, false);
-    let dnus = checker
+    let mut session = InferSession::new();
+
+    session.env.set_local(local, local_ty);
+    let ty = session.infer(send, hierarchy);
+    let dnus = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("does not understand"))
@@ -806,11 +789,11 @@ fn class_literal_through_variable_then_new_infers_instance() {
     // now Meta{Foo}; storing it in a local keeps the metatype, so `klass new`
     // routes through the type-driven class-side path and yields a `Foo` instance.
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     // klass := Integer
     let assign_expr = assign("klass", class_ref("Integer"));
-    let assigned_ty = checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
+    let assigned_ty = session.infer(&assign_expr, &hierarchy);
     assert_eq!(
         assigned_ty.as_meta().map(EcoString::as_str),
         Some("Integer"),
@@ -818,7 +801,7 @@ fn class_literal_through_variable_then_new_infers_instance() {
     );
     // klass new
     let new_send = msg_send(var("klass"), MessageSelector::Unary("new".into()), vec![]);
-    let new_ty = checker.infer_expr(&new_send, &hierarchy, &mut env, false);
+    let new_ty = session.infer(&new_send, &hierarchy);
     assert_eq!(
         new_ty.as_known().map(EcoString::as_str),
         Some("Integer"),
@@ -831,12 +814,12 @@ fn class_literal_through_variable_resolves_class_selector() {
     // AC: `klass <classSelector>` resolves class-side when `klass` came from a
     // bare class literal. `name` lives on Behaviour (class-side) -> Symbol.
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     let assign_expr = assign("klass", class_ref("Integer"));
-    checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
+    session.infer(&assign_expr, &hierarchy);
     let name_send = msg_send(var("klass"), MessageSelector::Unary("name".into()), vec![]);
-    let ty = checker.infer_expr(&name_send, &hierarchy, &mut env, false);
+    let ty = session.infer(&name_send, &hierarchy);
     assert_eq!(
         ty.as_known().map(EcoString::as_str),
         Some("Symbol"),
@@ -955,14 +938,13 @@ fn syntactic_class_literal_new_still_works() {
     // (it dispatches via the `Expression::ClassReference` receiver arm, not the
     // type-driven Meta path). `Integer new` infers an Integer instance.
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let new_send = msg_send(
         class_ref("Integer"),
         MessageSelector::Unary("new".into()),
         vec![],
     );
-    let ty = checker.infer_expr(&new_send, &hierarchy, &mut env, false);
+    let ty = infer(&new_send, &hierarchy);
     assert_eq!(
         ty.as_known().map(EcoString::as_str),
         Some("Integer"),

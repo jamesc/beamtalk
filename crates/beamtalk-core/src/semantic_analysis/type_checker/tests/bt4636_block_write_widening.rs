@@ -9,10 +9,7 @@ use super::common::*;
 
 fn diagnostics_for(body: &str) -> Vec<Diagnostic> {
     let source = format!("Object subclass: Probe\n{body}");
-    let (module, perrs) =
-        crate::source_analysis::parse(crate::source_analysis::lex_with_eof(&source));
-    assert!(perrs.is_empty(), "parse errors: {perrs:?}\n{source}");
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let (module, hierarchy) = parse_and_build(&source);
     run_with_expect(&module, &hierarchy)
 }
 
