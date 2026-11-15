@@ -1039,6 +1039,23 @@ value_type_error_and_object_test() ->
     ?assertEqual(
         <<"error">>, beamtalk_repl_json:value_type(beamtalk_error:new(type_error, 'Integer'))
     ),
+    %% A caught exception is the wrapper map, not the bare record.
+    ?assertEqual(
+        <<"error">>,
+        beamtalk_repl_json:value_type(
+            beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'Integer'))
+        )
+    ),
+    %% Non-UTF-8 Binaries render as hex: no tag.
+    ?assertEqual(undefined, beamtalk_repl_json:value_type(<<255, 254>>)),
     %% Untagged shapes carry no tag: the client keeps its text heuristic.
     ?assertEqual(undefined, beamtalk_repl_json:value_type(#{a => 1})),
     ?assertEqual(undefined, beamtalk_repl_json:value_type({1, 2})).
+
+%% The main BT-4912 case: a tagged value object (whose text comes from a user
+%% `printString`, possibly `3.14`) is an `object`, never a `float`.
+value_type_tagged_value_object_test() ->
+    ?assertEqual(
+        <<"object">>,
+        beamtalk_repl_json:value_type(#{'$beamtalk_class' => 'Point', x => 1, y => 2})
+    ).

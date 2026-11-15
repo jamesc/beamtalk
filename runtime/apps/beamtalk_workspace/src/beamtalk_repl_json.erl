@@ -272,7 +272,8 @@ value_type({beamtalk_string, Bin}) when is_binary(Bin) -> <<"string">>;
 value_type(Value) when is_binary(Value) ->
     case unicode:characters_to_binary(Value, utf8, utf8) of
         Bin when is_binary(Bin) -> <<"string">>;
-        _ -> <<"object">>
+        %% A non-UTF-8 Binary renders as `<<AB CD>>` hex; no useful tag.
+        _ -> undefined
     end;
 value_type({beamtalk_character, _}) ->
     <<"character">>;
@@ -306,6 +307,10 @@ value_type(#beamtalk_object{class = Class}) ->
     end;
 value_type({beamtalk_supervisor, _, _, _}) ->
     <<"actor">>;
+value_type(#{'$beamtalk_class' := _, error := #beamtalk_error{}}) ->
+    %% A caught exception: `ensure_wrapped/1` wraps the record in a tagged map,
+    %% which the generic clause below would call an `object`.
+    <<"error">>;
 value_type(Value) when is_map(Value) ->
     %% Only tagged value objects (user classes, which `term_to_json/1`
     %% renders through their `printString`) are `object`. A plain Dictionary

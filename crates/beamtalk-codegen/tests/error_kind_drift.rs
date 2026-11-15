@@ -179,19 +179,21 @@ fn literal(arg: &str) -> Option<String> {
 ///
 /// `#[cfg(test)]` also marks single items and out-of-line `mod x;`
 /// declarations in the middle of a file, so cutting at the first marker would
-/// silently skip everything after it; only an inline test module is a cut.
+/// silently skip everything after it. Only an inline test module is a cut, and
+/// the last one is taken so production code after an earlier one is kept.
 fn non_test_source(src: &str) -> &str {
     const MARKER: &str = "#[cfg(test)]\n";
+    let mut cut = src.len();
     let mut from = 0;
     while let Some(rel) = src[from..].find(MARKER) {
         let at = from + rel;
         let next_line = src[at + MARKER.len()..].lines().next().unwrap_or("");
         if next_line.trim_start().starts_with("mod ") && next_line.trim_end().ends_with('{') {
-            return &src[..at];
+            cut = at;
         }
         from = at + MARKER.len();
     }
-    src
+    &src[..cut]
 }
 
 /// Kinds emitted by non-test codegen source.
