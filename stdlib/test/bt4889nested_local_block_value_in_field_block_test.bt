@@ -11,7 +11,10 @@ TestCase subclass: Bt4889NestedLocalBlockValueInFieldBlockTest
 
   nestedLocalBlockInFieldBlock =>
     x := 0
-    [[x := x + 1] value. self.n := x] value
+    [
+      [x := x + 1] value
+      self.n := x
+    ] value
     x + self.n
 
   testNestedLocalWriteSurvivesAndFeedsTheFieldWrite =>
