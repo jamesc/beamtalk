@@ -102,12 +102,18 @@ table.
 
 - **Same code, different numbers.** The harness reports 2-3x higher
   Beamtalk times than Benchee (16a: 28 µs against 10 µs at one scheduler).
-  Not batch size: Benchee at N = 2000 gives 10.8 µs/op. The harness wraps
-  each timed call in a GC trace of every process in the node, and these rows
-  start thousands of processes. Not isolated by experiment. Use Benchee's
-  figures for the time of a row and the harness's for reductions, heap words
-  and attribution. The Beamtalk/Elixir ratio for 16a at one scheduler is 11x
-  (Benchee) against 22x (harness).
+  Not batch size: Benchee at N = 2000 gives 10.8 µs/op. The cause is the
+  harness's GC trace of every process in the node around each timed call,
+  which costs more the more processes a row starts. With
+  `VS_BENCH_NO_TRACE=1` (trace off, one scheduler, 3 runs, 7 rounds each) the
+  gap closes: 16a BT 11.1 µs / EX 0.96-0.99 µs (Benchee 10.1 / 0.94), 16c BT
+  11.9-12.1 / EX 3.2 (Benchee 10.8 / 3.09). With the trace on: 16a 28.0-28.7
+  / 1.32-1.39, 16c 26.6-27.1 / 4.06-4.08. So tracing inflates Beamtalk 2.2-2.6x
+  and Elixir 1.3-1.4x, which overstates the Beamtalk/Elixir time ratio for
+  process-start rows (16a: 21x traced, 11.5x untraced). Only rows 16a and 16c
+  at one scheduler were checked. Use Benchee, or the harness with the trace
+  off, for the time of a row; the harness's reductions and heap words need the
+  trace and are unaffected.
 - **Noise.** At one scheduler, identical runs agree within 1-6% on both
   tools. At four schedulers the harness's 16d varies by 49% across three runs
   (the BT-4854 "up to 40%"); Benchee's 16d varies by 1.4%, because it takes
