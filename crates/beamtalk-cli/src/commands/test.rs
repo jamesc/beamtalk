@@ -3048,6 +3048,52 @@ mod tests {
         assert!(err.to_string().contains("my-helper"), "{err}");
     }
 
+    /// BT-4868: what `beamtalk test` names a fixture (`fixture_module_name`) and
+    /// what the shared rule names a file under `test/` (the REPL loader's path)
+    /// agree, including for directory names the walker treats differently
+    /// (`fixtures` is skipped, `Fixtures` is not) and an invalid directory
+    /// below a fixtures directory.
+    #[test]
+    fn test_fixture_naming_agrees_with_shared_rule() {
+        use beamtalk_core::semantic_analysis::{ModuleRootKind, module_name_for_path};
+
+        for relative in [
+            "fixtures/Helper.bt",
+            "http1/fixtures/Helper.bt",
+            "fixtures/sub-dir/Helper.bt",
+        ] {
+            assert_eq!(
+                module_name_for_path(Utf8Path::new(relative), "web", ModuleRootKind::Test).unwrap(),
+                fixture_module_name(Utf8Path::new(&format!("test/{relative}"))).unwrap(),
+                "{relative}"
+            );
+        }
+        // `Fixtures` is a test directory to the walker, so it gets a path name.
+        assert_eq!(
+            module_name_for_path(
+                Utf8Path::new("Fixtures/Foo.bt"),
+                "web",
+                ModuleRootKind::Test
+            )
+            .unwrap(),
+            "bt@web@test@fixtures@foo"
+        );
+        let (_temp, dir) = temp_utf8_dir();
+        fs::create_dir_all(dir.join("fixtures")).unwrap();
+        fs::create_dir_all(dir.join("Fixtures")).unwrap();
+        fs::write(dir.join("fixtures/a.bt"), "").unwrap();
+        fs::write(dir.join("Fixtures/b.bt"), "").unwrap();
+        let found = find_test_files(&dir).unwrap();
+        assert!(
+            found.iter().any(|f| f.ends_with("Fixtures/b.bt")),
+            "{found:?}"
+        );
+        assert!(
+            !found.iter().any(|f| f.ends_with("fixtures/a.bt")),
+            "{found:?}"
+        );
+    }
+
     /// BT-4350: two files in the *same* package declaring the same `TestCase`
     /// subclass must be rejected (the second would silently replace the
     /// first's class and its tests would never run), naming both files. Module

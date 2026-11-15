@@ -31,6 +31,7 @@
 //! design rationale, prior art, and the open questions left for later phases.
 
 use crate::ast::to_module_name;
+use crate::file_walker::FIXTURES_DIR_NAME;
 use camino::Utf8Path;
 use std::collections::HashMap;
 
@@ -302,6 +303,17 @@ pub fn module_name_for_path(
         segment: String::new(),
         path: path.to_string(),
     };
+    // A fixture under `test/` is named like an out-of-tree file, `bt@{stem}`.
+    // Decided on the raw directory names (what `FileWalker::test_files` compares),
+    // before any segment is normalised or validated: `beamtalk test` accepts
+    // `test/fixtures/sub-dir/X.bt` and does not treat `test/Fixtures/` as fixtures.
+    if root == ModuleRootKind::Test
+        && path
+            .parent()
+            .is_some_and(|dir| dir.components().any(|c| c.as_str() == FIXTURES_DIR_NAME))
+    {
+        return module_name_for_path(path, package, ModuleRootKind::OutOfTree);
+    }
     let segments = match root {
         ModuleRootKind::Src | ModuleRootKind::Test => relative_module_segments(path)?,
         ModuleRootKind::OutOfTree => {
@@ -316,14 +328,6 @@ pub fn module_name_for_path(
         return Err(ClassModuleRegistryError::ReservedTestDirectory {
             path: path.to_string(),
         });
-    }
-    // A fixture under `test/` is `bt@{stem}`, whatever its depth.
-    if root == ModuleRootKind::Test
-        && segments[..segments.len() - 1]
-            .iter()
-            .any(|s| s == "fixtures")
-    {
-        return Ok(format!("bt@{}", segments[segments.len() - 1]));
     }
     let joined = segments.join("@");
     Ok(match root {
@@ -882,6 +886,11 @@ mod tests {
         let test = |p: &str| module_name_for_path(Utf8Path::new(p), "web", ModuleRootKind::Test);
         assert_eq!(test("fixtures/Helper.bt").unwrap(), "bt@helper");
         assert_eq!(test("http1/fixtures/Helper.bt").unwrap(), "bt@helper");
+        // Decided on the raw directory name, before validation: an invalid
+        // directory below a fixtures directory is fine, `Fixtures` is not one.
+        assert_eq!(test("fixtures/sub-dir/Helper.bt").unwrap(), "bt@helper");
+        assert_eq!(test("Fixtures/Foo.bt").unwrap(), "bt@web@test@fixtures@foo");
+        assert!(test("fixtures/Foo-Bar.bt").is_err());
         // A file called fixtures.bt, or a src/ file in a fixtures directory, is not one.
         assert_eq!(test("fixtures.bt").unwrap(), "bt@web@test@fixtures");
         assert_eq!(

@@ -70,6 +70,11 @@ impl Default for FileWalker {
     }
 }
 
+/// The directory name `beamtalk test` treats as holding fixtures: skipped when
+/// collecting test files ([`FileWalker::test_files`]) and named by stem rather
+/// than by path (`module_name_for_path`, BT-4868). The one spelling both use.
+pub const FIXTURES_DIR_NAME: &str = "fixtures";
+
 impl FileWalker {
     /// Create a new walker with default settings.
     pub fn new() -> Self {
@@ -214,7 +219,7 @@ impl FileWalker {
             "target",
             "node_modules",
             "_build",
-            "fixtures",
+            FIXTURES_DIR_NAME,
         ])
     }
 
