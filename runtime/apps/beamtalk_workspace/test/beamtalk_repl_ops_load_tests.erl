@@ -29,7 +29,7 @@ write_temp_file(Dir, Name, Content) ->
 %% Create a fresh temp directory for a test using a relative path.
 %% Relative directories work cross-platform and avoid POSIX /tmp assumptions.
 make_temp_dir() ->
-    Base = "bt_ops_load_test_" ++ integer_to_list(erlang:unique_integer([positive])),
+    Base = "bt_ops_load_test_" ++ beamtalk_test_unique:id(),
     ok = file:make_dir(Base),
     Base.
 
@@ -65,7 +65,7 @@ find_bt_files_empty_dir_test() ->
     end.
 
 find_bt_files_nonexistent_dir_test() ->
-    Missing = "missing_bt_ops_load_test_dir_" ++ integer_to_list(erlang:unique_integer([positive])),
+    Missing = "missing_bt_ops_load_test_dir_" ++ beamtalk_test_unique:id(),
     ?assertEqual([], beamtalk_workspace_project_sync:find_bt_files(Missing)).
 
 find_bt_files_finds_bt_files_test() ->
@@ -424,7 +424,7 @@ get_file_mtime_missing_file_test() ->
 %%====================================================================
 
 find_erl_files_nonexistent_dir_test() ->
-    Missing = "missing_native_test_" ++ integer_to_list(erlang:unique_integer([positive])),
+    Missing = "missing_native_test_" ++ beamtalk_test_unique:id(),
     ?assertEqual([], beamtalk_workspace_project_sync:find_erl_files(Missing, false)).
 
 find_erl_files_empty_dir_test() ->
@@ -1430,7 +1430,7 @@ parity_setup() ->
     application:ensure_all_started(beamtalk_runtime),
     Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Proj =
-        Tmp ++ "/bt_ops_parity_" ++ integer_to_list(erlang:unique_integer([positive])),
+        Tmp ++ "/bt_ops_parity_" ++ beamtalk_test_unique:id(),
     ok = file:make_dir(Proj),
     ok = file:write_file(
         filename:join(Proj, "beamtalk.toml"),
@@ -1877,7 +1877,7 @@ setup_project_class(ClassName, Src) ->
     end,
     application:ensure_all_started(beamtalk_runtime),
     Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
-    Proj = Tmp ++ "/bt_section_" ++ integer_to_list(erlang:unique_integer([positive])),
+    Proj = Tmp ++ "/bt_section_" ++ beamtalk_test_unique:id(),
     ok = file:make_dir(Proj),
     ok = file:write_file(
         filename:join(Proj, "beamtalk.toml"), <<"[package]\nname = \"sectionpkg\"\n">>
@@ -2532,12 +2532,12 @@ handle_term_load_source_missing_key_returns_error_test() ->
 
 handle_term_load_source_success_test() ->
     SessionId = list_to_binary(
-        "htls-ok-" ++ integer_to_list(erlang:unique_integer([positive]))
+        "htls-ok-" ++ beamtalk_test_unique:id()
     ),
     {ok, SessionPid} = beamtalk_repl_shell:start_link(SessionId),
     try
         ClassName = list_to_binary(
-            "HtlsOk" ++ integer_to_list(erlang:unique_integer([positive]))
+            "HtlsOk" ++ beamtalk_test_unique:id()
         ),
         Source = iolist_to_binary([<<"Object subclass: ">>, ClassName, <<"\n  value => 1\n">>]),
         Result = beamtalk_repl_ops_load:handle_term(
@@ -2557,7 +2557,7 @@ handle_term_load_source_success_test() ->
 
 handle_term_load_source_compile_error_returns_structured_error_test() ->
     SessionId = list_to_binary(
-        "htls-err-" ++ integer_to_list(erlang:unique_integer([positive]))
+        "htls-err-" ++ beamtalk_test_unique:id()
     ),
     {ok, SessionPid} = beamtalk_repl_shell:start_link(SessionId),
     try
@@ -2577,13 +2577,13 @@ handle_term_unload_unknown_module_returns_class_not_found_test() ->
 
 handle_term_unload_success_test() ->
     SessionId = list_to_binary(
-        "htlu-ok-" ++ integer_to_list(erlang:unique_integer([positive]))
+        "htlu-ok-" ++ beamtalk_test_unique:id()
     ),
     {ok, SessionPid} = beamtalk_repl_shell:start_link(SessionId),
     Dir = filename:absname(make_temp_dir()),
     try
         ClassName = list_to_binary(
-            "HtluOk" ++ integer_to_list(erlang:unique_integer([positive]))
+            "HtluOk" ++ beamtalk_test_unique:id()
         ),
         Path = write_temp_file(
             Dir,
@@ -2616,12 +2616,12 @@ handle_load_source_empty_encodes_json_error_test() ->
 
 handle_load_source_success_encodes_json_result_test() ->
     SessionId = list_to_binary(
-        "htl-json-ok-" ++ integer_to_list(erlang:unique_integer([positive]))
+        "htl-json-ok-" ++ beamtalk_test_unique:id()
     ),
     {ok, SessionPid} = beamtalk_repl_shell:start_link(SessionId),
     try
         ClassName = list_to_binary(
-            "HtlJsonOk" ++ integer_to_list(erlang:unique_integer([positive]))
+            "HtlJsonOk" ++ beamtalk_test_unique:id()
         ),
         Source = iolist_to_binary([<<"Object subclass: ">>, ClassName, <<"\n  value => 1\n">>]),
         Msg = {protocol_msg, <<"load-source">>, <<"h-2">>, undefined, #{}},
@@ -2652,12 +2652,12 @@ handle_load_source_success_encodes_json_result_test() ->
 
 %% A class name with no recorded collision drains to an empty warnings list.
 collect_load_warnings_no_collisions_test() ->
-    Name = "ClwNoCollision" ++ integer_to_list(erlang:unique_integer([positive])),
+    Name = "ClwNoCollision" ++ beamtalk_test_unique:id(),
     _ = list_to_atom(Name),
     ?assertEqual([], beamtalk_workspace_project_sync:collect_load_warnings([#{name => Name}])).
 
 collect_load_warnings_with_collision_test() ->
-    Name = "ClwCollision" ++ integer_to_list(erlang:unique_integer([positive])),
+    Name = "ClwCollision" ++ beamtalk_test_unique:id(),
     ClassAtom = list_to_atom(Name),
     ok = beamtalk_class_registry:record_class_collision_warning(
         ClassAtom, 'bt@pkgA@ClwFoo', 'bt@pkgB@ClwFoo'

@@ -55,7 +55,7 @@ setup() ->
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
     end,
-    Unique = integer_to_list(erlang:unique_integer([positive])),
+    Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-move-class-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
     GadgetPath = filename:join(ProjDir, "bt3272_gadget.bt"),
@@ -234,7 +234,7 @@ setup_dynamic() ->
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
     end,
-    Unique = integer_to_list(erlang:unique_integer([positive])),
+    Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-move-class-dyn-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
     {ok, _} = beamtalk_workspace_meta:start_link(#{
@@ -318,7 +318,7 @@ setup_dependency() ->
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
     end,
-    Unique = integer_to_list(erlang:unique_integer([positive])),
+    Unique = beamtalk_test_unique:id(),
     %% `ProjDir` is the active project tree; the fixture class's own source
     %% file lives OUTSIDE it (`OutsideDir`), so `classify_source_file/1`
     %% classifies it "dependency" rather than "flushable".

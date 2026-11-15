@@ -269,9 +269,9 @@ handle_load_directory_test() ->
     ).
 
 handle_load_compile_error_test() ->
-    UniqueId = erlang:unique_integer([positive]),
+    UniqueId = beamtalk_test_unique:id(),
     TempFile = filename:join(
-        beamtalk_test_fs:base_dir(), io_lib:format("loader_test_~p.bt", [UniqueId])
+        beamtalk_test_fs:base_dir(), io_lib:format("loader_test_~s.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<"invalid syntax @@@">>),
     State = beamtalk_repl_state:new(undefined, 0),
@@ -298,9 +298,9 @@ handle_load_3_directory_test() ->
     ).
 
 handle_load_3_compile_error_test() ->
-    UniqueId = erlang:unique_integer([positive]),
+    UniqueId = beamtalk_test_unique:id(),
     TempFile = filename:join(
-        beamtalk_test_fs:base_dir(), io_lib:format("loader_h3_~p.bt", [UniqueId])
+        beamtalk_test_fs:base_dir(), io_lib:format("loader_h3_~s.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<"invalid syntax @@@">>),
     State = beamtalk_repl_state:new(undefined, 0),
@@ -342,9 +342,9 @@ reload_class_file_directory_test() ->
     ).
 
 reload_class_file_compile_error_test() ->
-    UniqueId = erlang:unique_integer([positive]),
+    UniqueId = beamtalk_test_unique:id(),
     TempFile = filename:join(
-        beamtalk_test_fs:base_dir(), io_lib:format("loader_reload_~p.bt", [UniqueId])
+        beamtalk_test_fs:base_dir(), io_lib:format("loader_reload_~s.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<"invalid @@@ syntax">>),
     Result = beamtalk_repl_loader:reload_class_file(TempFile),
@@ -685,7 +685,7 @@ validate_target_path_existing_directory_is_target_exists_test() ->
     Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Dir =
         Tmp ++ "/bt_new_class_dir_test_" ++
-            integer_to_list(erlang:unique_integer([positive])),
+            beamtalk_test_unique:id(),
     ok = file:make_dir(Dir),
     try
         {error, Err} = beamtalk_repl_loader_newclass:validate_target_path(Dir),
@@ -735,7 +735,7 @@ loader_setup() ->
     end,
     application:ensure_all_started(beamtalk_runtime),
     Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
-    Proj = Tmp ++ "/bt_loader_proj_" ++ integer_to_list(erlang:unique_integer([positive])),
+    Proj = Tmp ++ "/bt_loader_proj_" ++ beamtalk_test_unique:id(),
     ok = file:make_dir(Proj),
     %% A recorded root package (BT-3651: the launcher-set `root_package` env
     %% workspace_meta reads at init) exercises compute_package_module_name/1's
@@ -1462,7 +1462,7 @@ live_project_dir() ->
 
 t_new_class_success(_Proj) ->
     Proj = live_project_dir(),
-    Name = "NewClassOk" ++ integer_to_list(erlang:unique_integer([positive])),
+    Name = "NewClassOk" ++ beamtalk_test_unique:id(),
     Path = filename:join(Proj, Name ++ ".bt"),
     file:delete(Path),
     Src = "Object subclass: " ++ Name ++ "\n  greet => 1\n",
@@ -1482,7 +1482,7 @@ t_new_class_outside_project() ->
     %% A path outside the workspace project_path is rejected before compiling.
     Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Path =
-        Tmp ++ "/bt_outside_" ++ integer_to_list(erlang:unique_integer([positive])) ++
+        Tmp ++ "/bt_outside_" ++ beamtalk_test_unique:id() ++
             "/Outsider.bt",
     {error, Err} = beamtalk_repl_loader_newclass:new_class(
         <<"Object subclass: Outsider">>, list_to_binary(Path)
@@ -1503,7 +1503,7 @@ t_new_class_already_loaded(_Proj) ->
     Proj = live_project_dir(),
     %% Create a class, then attempt to create it again at a fresh path → the
     %% name is already loaded in the registry.
-    Name = "NewClassDup" ++ integer_to_list(erlang:unique_integer([positive])),
+    Name = "NewClassDup" ++ beamtalk_test_unique:id(),
     Path1 = filename:join(Proj, Name ++ ".bt"),
     file:delete(Path1),
     Src = "Object subclass: " ++ Name ++ "\n  v => 1\n",
@@ -1557,7 +1557,7 @@ t_new_class_agent_author(_Proj) ->
     %% into the process dictionary, emit_new_class_entry records them. This drives
     %% new_class_author/0 and new_class_author_kind/0's agent branches.
     Proj = live_project_dir(),
-    Name = "AgentClass" ++ integer_to_list(erlang:unique_integer([positive])),
+    Name = "AgentClass" ++ beamtalk_test_unique:id(),
     Path = filename:join(Proj, Name ++ ".bt"),
     file:delete(Path),
     erlang:put('$beamtalk_author', <<"agent">>),
@@ -1596,7 +1596,7 @@ t_new_class_author_kind_only(_Proj) ->
     %% default-author path maps the agent kind to <<"agent">> (line in
     %% new_class_default_author/0).
     Proj = live_project_dir(),
-    Name = "KindOnly" ++ integer_to_list(erlang:unique_integer([positive])),
+    Name = "KindOnly" ++ beamtalk_test_unique:id(),
     Path = filename:join(Proj, Name ++ ".bt"),
     file:delete(Path),
     erlang:put('$beamtalk_author_kind', agent),
@@ -1629,7 +1629,7 @@ t_reload_class_file_protocol(Proj) ->
 %% module binary actually changed (not merely that the reload "succeeded"),
 %% since a stale-but-successful reload would otherwise look identical.
 t_protocol_reload_fanout_reaches_user(Proj) ->
-    N = integer_to_list(erlang:unique_integer([positive])),
+    N = beamtalk_test_unique:id(),
     ProtoName = "Bt3593Greeter" ++ N,
     UserName = "Bt3593GreeterUser" ++ N,
     ProtoPath = write_bt(
@@ -1674,7 +1674,7 @@ t_protocol_reload_fanout_reaches_user(Proj) ->
 %% and each fan-out user's recompile — with the batch's `project_batch`, so
 %% a fan-out mid-batch never resets the compiler port's verified batch.
 t_protocol_reload_fanout_carries_project_batch(Proj) ->
-    N = integer_to_list(erlang:unique_integer([positive])),
+    N = beamtalk_test_unique:id(),
     ProtoName = "Bt4394Greeter" ++ N,
     UserName = "Bt4394GreeterUser" ++ N,
     ProtoPath = write_bt(
@@ -1720,7 +1720,7 @@ t_protocol_reload_fanout_carries_project_batch(Proj) ->
 %% wholesale — neither the protocol nor the user is reinstalled — and the
 %% error names the failing user.
 t_protocol_reload_rejected_names_failing_user(Proj) ->
-    N = integer_to_list(erlang:unique_integer([positive])),
+    N = beamtalk_test_unique:id(),
     ProtoName = "Bt3593Rej" ++ N,
     UserName = "Bt3593RejUser" ++ N,
     ProtoPath = write_bt(
@@ -1767,7 +1767,7 @@ t_protocol_reload_rejected_names_failing_user(Proj) ->
 %% reload still succeeds for the protocol and every OTHER, source-backed
 %% user, and the untracked user is simply absent from the result.
 t_protocol_reload_skips_user_without_tracked_source(Proj) ->
-    N = integer_to_list(erlang:unique_integer([positive])),
+    N = beamtalk_test_unique:id(),
     ProtoName = "Bt3593Skip" ++ N,
     UserName = "Bt3593SkipUser" ++ N,
     ProtoPath = write_bt(
@@ -1801,7 +1801,7 @@ t_protocol_reload_skips_user_without_tracked_source(Proj) ->
 %% file under a `stdlib/src/' path is refused outright, before compiling a
 %% single user.
 t_protocol_reload_refuses_stdlib(Proj) ->
-    N = integer_to_list(erlang:unique_integer([positive])),
+    N = beamtalk_test_unique:id(),
     ProtoName = "Bt3593Stdlib" ++ N,
     StdlibDir = filename:join([Proj, "stdlib", "src"]),
     ok = filelib:ensure_dir(filename:join(StdlibDir, "anchor")),
@@ -1845,7 +1845,7 @@ t_protocol_reload_refuses_stdlib(Proj) ->
 %% `SimpleName` (both share the `"Bt3593Rb"` prefix, differing only at
 %% `"Multi"` vs. `"Simple"`).
 t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj) ->
-    N = integer_to_list(erlang:unique_integer([positive])),
+    N = beamtalk_test_unique:id(),
     P1Name = "Bt3593RbP1" ++ N,
     P2Name = "Bt3593RbP2" ++ N,
     MultiName = "Bt3593RbMulti" ++ N,
@@ -1915,7 +1915,7 @@ t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj) ->
 %% `runtime_error` naming the abi_mismatch message, and the already-installed
 %% protocol module is rolled back to its previous source.
 t_protocol_reload_fanout_bare_structured_error(Proj) ->
-    N = integer_to_list(erlang:unique_integer([positive])),
+    N = beamtalk_test_unique:id(),
     PName = "Bt3773FoP" ++ N,
     UName = "Bt3773FoUser" ++ N,
     UFile = UName ++ ".bt",

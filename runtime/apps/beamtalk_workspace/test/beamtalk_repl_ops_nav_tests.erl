@@ -577,7 +577,7 @@ nav_tests(_Pid) ->
                         <<"__nav_query_flood_">>,
                         integer_to_binary(N),
                         <<"_">>,
-                        integer_to_binary(erlang:unique_integer([positive]))
+                        list_to_binary(beamtalk_test_unique:id())
                     ]),
                     Response = beamtalk_repl_ops_nav:handle(
                         <<"nav-query">>,
@@ -664,7 +664,7 @@ nav_tests(_Pid) ->
                         <<"__nav_query_flood_mod_">>,
                         integer_to_binary(N),
                         <<"_">>,
-                        integer_to_binary(erlang:unique_integer([positive]))
+                        list_to_binary(beamtalk_test_unique:id())
                     ]),
                     Response = beamtalk_repl_ops_nav:handle(
                         <<"nav-query">>,
@@ -705,7 +705,7 @@ nav_tests(_Pid) ->
                         <<"__NavQueryFloodClass_">>,
                         integer_to_binary(N),
                         <<"_">>,
-                        integer_to_binary(erlang:unique_integer([positive]))
+                        list_to_binary(beamtalk_test_unique:id())
                     ]),
                     Response = beamtalk_repl_ops_nav:handle(
                         <<"nav-query">>,
@@ -843,7 +843,7 @@ delegate_callers_setup() ->
     %% are visible to the reflection reads (and the backing-module atom interned
     %% for the op's `binary_to_existing_atom`).
     {module, beamtalk_test_native_facade} = code:ensure_loaded(beamtalk_test_native_facade),
-    Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
+    Uniq = beamtalk_test_unique:id(),
     ClassName = list_to_atom("NavDelegateCounter_" ++ Uniq),
     {ClassPid, Owned} =
         case

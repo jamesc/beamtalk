@@ -219,7 +219,7 @@ matches_pattern_trailing_underscore_is_wildcard_test() ->
 %%% ============================================================================
 
 unique_mod(Prefix) ->
-    list_to_atom(Prefix ++ integer_to_list(erlang:unique_integer([positive]))).
+    list_to_atom(Prefix ++ beamtalk_test_unique:id()).
 
 load_value_eval(Mod, Value) ->
     Forms = [

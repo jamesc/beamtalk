@@ -429,7 +429,7 @@ mcp_signal_file_with_workspace_test_() ->
             beamtalk_logging_config:ensure_table(),
             %% Start a mock workspace_meta that returns a test workspace ID
             TestWsId = iolist_to_binary(
-                io_lib:format("test_mcp_~p", [erlang:unique_integer([positive])])
+                io_lib:format("test_mcp_~s", [beamtalk_test_unique:id()])
             ),
             %% Create workspace directory
             WsDir = beamtalk_platform:workspace_dir(TestWsId),
@@ -478,7 +478,7 @@ mcp_signal_file_with_real_workspace_test_() ->
         fun() ->
             stop_workspace_meta_if_running(),
             TestWsId = iolist_to_binary(
-                io_lib:format("test_mcp_~p", [erlang:unique_integer([positive])])
+                io_lib:format("test_mcp_~s", [beamtalk_test_unique:id()])
             ),
             {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
             ProjectPath = iolist_to_binary([TmpDir, "/test"]),
@@ -927,7 +927,7 @@ install_test_file_handler_with_file() ->
     _ = logger:remove_handler(beamtalk_file_log),
     TmpFile = filename:join(
         filename:basedir(user_cache, "beamtalk"),
-        "test_log_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".log"
+        "test_log_" ++ beamtalk_test_unique:id() ++ ".log"
     ),
     ok = filelib:ensure_dir(TmpFile),
     logger:add_handler(beamtalk_file_log, logger_std_h, #{
@@ -995,7 +995,7 @@ log_renders_tagged_string_through_std_h_test() ->
         iolist_to_binary([
             TmpDir,
             "/bt_4321_log_",
-            integer_to_list(erlang:unique_integer([positive])),
+            beamtalk_test_unique:id(),
             ".log"
         ])
     ),

@@ -429,5 +429,5 @@ assert_wire_check(PeerPid) ->
 stage_dir() ->
     filename:join(
         beamtalk_test_fs:base_dir(),
-        "beamtalk_wire_check_" ++ integer_to_list(erlang:unique_integer([positive]))
+        "beamtalk_wire_check_" ++ beamtalk_test_unique:id()
     ).

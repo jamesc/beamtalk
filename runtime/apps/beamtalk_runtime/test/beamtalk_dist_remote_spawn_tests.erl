@@ -151,7 +151,7 @@ node_down_on_unreachable_node() ->
     %% name, so `erpc:call/5` fails with `{erpc, noconnection}`.
     {ok, Host} = inet:gethostname(),
     GhostNode = list_to_atom(
-        "bt3599_ghost_" ++ integer_to_list(erlang:unique_integer([positive])) ++ "@" ++ Host
+        "bt3599_ghost_" ++ beamtalk_test_unique:id() ++ "@" ++ Host
     ),
     ?assertMatch(
         {error, #beamtalk_error{kind = node_down}},

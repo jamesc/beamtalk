@@ -1,23 +1,11 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `split_type_params`, `extract_ffi_function_info`, `resolve_type_string`
+//! `extract_ffi_function_info`, `resolve_type_string`
 //! substitution, and `set_param_types`.
 
 use super::super::*;
 use super::common::*;
-
-// ---- split_type_params ----
-//
-// Thin wrapper over `string_utils::split_top_level`, whose exhaustive
-// nesting/edge-case coverage lives at its definition site.
-// This is a smoke test that the wrapper is wired up correctly.
-
-#[test]
-fn split_type_params_nested() {
-    let result = TypeChecker::split_type_params("GenResult(A, B), E");
-    assert_eq!(result, vec!["GenResult(A, B)", "E"]);
-}
 
 // ---- extract_ffi_function_info ----
 //

@@ -235,19 +235,6 @@ impl TypeChecker {
         Self::build_substitution_map(hierarchy, method_class, &current_args)
     }
 
-    /// Split a comma-separated list of type parameters, respecting nested parentheses.
-    ///
-    /// `"T, E"` → `["T", "E"]`
-    /// `"GenResult(A, B), E"` → `["GenResult(A, B)", "E"]`
-    ///
-    /// Thin wrapper over the shared nesting-aware scanner
-    /// (`string_utils::split_top_level`) — kept as a method so the
-    /// many `Self::split_type_params` call sites in this module don't need
-    /// to change.
-    pub(in crate::semantic_analysis::type_checker) fn split_type_params(s: &str) -> Vec<&str> {
-        crate::semantic_analysis::string_utils::split_top_level(s, ',')
-    }
-
     /// Does the declared type mention `Self` / `Self class`
     /// *anywhere* in its tree (including, harmlessly, at the top level —
     /// callers reach this check only after already special-casing and
@@ -356,7 +343,8 @@ impl TypeChecker {
             let (declared_base, declared_args_slice) =
                 type_resolver::split_generic_base(param_type);
             if let Some(inner) = declared_args_slice {
-                let declared_params = Self::split_type_params(inner);
+                let declared_params =
+                    crate::semantic_analysis::string_utils::split_top_level(inner, ',');
 
                 // Normalise the arg type — if it's a nullable union
                 // (e.g. `List(String) | Nil`), strip nil and try to unify with

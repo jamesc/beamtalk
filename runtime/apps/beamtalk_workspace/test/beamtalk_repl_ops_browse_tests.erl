@@ -250,7 +250,7 @@ delegate_setup() ->
     %% Load the facade so its `__beamtalk_meta/0` + `dispatch_<selector>` exports
     %% are visible to the reflection reads, regardless of test ordering.
     {module, beamtalk_test_native_facade} = code:ensure_loaded(beamtalk_test_native_facade),
-    Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
+    Uniq = beamtalk_test_unique:id(),
     ClassName = list_to_atom("DelegateCounter_" ++ Uniq),
     {Pid, Owned} = start_browse_class(ClassName, #{
         name => ClassName,
@@ -1181,7 +1181,7 @@ browse_setup() ->
     %% concurrent fixture, or a real class in the image — the names the System
     %% Browser asserts against are bound into the context and threaded through
     %% every test body, so nothing depends on a fixed `'BrowseCounter'` atom.
-    Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
+    Uniq = beamtalk_test_unique:id(),
     ClassName = list_to_atom("BrowseCounter_" ++ Uniq),
     ClassNameBin = atom_to_binary(ClassName, utf8),
     ModuleName = list_to_atom("bt@test@browse_counter_" ++ Uniq),
@@ -1487,7 +1487,7 @@ browse_tests(#{class_name := Class}) ->
             %% runtime-reflected boolean (mirroring sealed/abstract), so the IDE
             %% editor header can render the Typed badge without parsing the
             %% synthesized definition skeleton.
-            Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
+            Uniq = beamtalk_test_unique:id(),
             TypedName = list_to_atom("BrowseTyped_" ++ Uniq),
             TypedModule = list_to_atom("bt@test@browse_typed_" ++ Uniq),
             {TypedPid, Owned} = start_browse_class(TypedName, #{
@@ -2081,7 +2081,7 @@ protocol_setup() ->
                 ok
         end,
     beamtalk_protocol_registry:init(),
-    Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
+    Uniq = beamtalk_test_unique:id(),
     ProtoName = list_to_atom("BrowseProto_" ++ Uniq),
     %% A stub protocol class object, dispatched (as the real ones are) by the
     %% shared beamtalk_protocol_object module — which has no package/source.
@@ -2387,7 +2387,7 @@ stop_meta(Pid) when is_pid(Pid) ->
     end.
 
 make_project_dir(Pkg) ->
-    Uniq = erlang:integer_to_list(erlang:unique_integer([positive, monotonic])),
+    Uniq = beamtalk_test_unique:id(),
     Dir = filename:join(
         element(2, beamtalk_file:'tempDirectory'()), "bt2640_proj_" ++ Uniq
     ),
