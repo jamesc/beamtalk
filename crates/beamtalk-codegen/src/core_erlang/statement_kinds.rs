@@ -15,7 +15,7 @@
 //! arms.
 
 use super::control_flow::LocalWrite;
-use super::threaded_ir::{ThreadedStmt, ValueRef};
+use super::threaded_ir::{BindOp, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::core_erlang::threaded_ir::FrameId;
 use beamtalk_cerl_doc::{docvec, leaf};
@@ -192,6 +192,153 @@ impl CoreErlangGenerator {
         };
         if is_last {
             self.deliver_last_var(tail, rhs_var, span, stmts)?;
+        }
+        Ok(())
+    }
+
+    /// `BodyExprKind::FieldAssignment`: `self.field := expr`.
+    ///
+    /// ADR 0118 phase 1a / ADR 0111 Addendum 15: the right-hand side's
+    /// state-effecting sub-expressions land in the body's IR as real `Bind`s
+    /// before the version snapshot, and the write is a real `Bind(Put)`
+    /// (`lower_field_assignment_bind`); a last statement answers the written
+    /// value.
+    pub(super) fn lower_stmt_field_assignment(
+        &mut self,
+        cx: StmtCx<'_>,
+        tail: &mut StmtTail<'_>,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let val_var = self.lower_field_assignment_bind(cx.expr, cx.frame, cx.span, stmts)?;
+        if cx.is_last {
+            self.deliver_last_var(tail, val_var, cx.span, stmts)?;
+        }
+        Ok(())
+    }
+
+    /// `BodyExprKind::SelfFieldAtPut`: `self fieldAt: name put: value`.
+    ///
+    /// The mutation is a real `Bind(Direct(maps:put))`: the key is a computed
+    /// value, not a static field name, so it cannot use `BindOp::Put`
+    /// (ADR 0111 Addendum 4: a version-mutating statement is a `Bind`, never a
+    /// `Statement`, but a `Bind`'s `op` may be opaque).
+    pub(super) fn lower_stmt_self_field_at_put(
+        &mut self,
+        cx: StmtCx<'_>,
+        tail: &mut StmtTail<'_>,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            frame,
+        } = cx;
+        if let Expression::MessageSend { arguments, .. } = expr {
+            // BT-4369: a dynamic-key field write records itself for the loop checkout.
+            self.note_field_write("<dynamic>", span);
+            // BT-4310: the name and value are sequenced ahead of
+            // the put, so the `State` read below is the one after
+            // the value: a value's own change (a self-send, a
+            // nested field write, a State-only fold) survives the
+            // put, which before BT-4310 built on the state from
+            // before the value and dropped it.
+            let scope = self.thread_send_arguments(expr, frame, stmts)?;
+            let name_var = self.fresh_var("Name");
+            let val_var = self.fresh_temp_var("Val");
+            let name_code = self.expression_doc(&arguments[0])?;
+            let source_version = self.state_version();
+            let current_state_name = self.current_state_var();
+            let val_code = self.expression_doc(&arguments[1])?;
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(name_var.clone()),
+                    " = ",
+                    name_code,
+                    " in let ",
+                    leaf::var(val_var.clone()),
+                    " = ",
+                    val_code,
+                    " in ",
+                ],
+                span,
+            ));
+            let _ = self.next_state_var();
+            let target_version = self.state_version();
+            stmts.push(ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                op: BindOp::Direct(ValueRef::Doc(docvec![
+                    "call 'maps':'put'(",
+                    leaf::var(name_var),
+                    ", ",
+                    leaf::var(val_var.clone()),
+                    ", ",
+                    leaf::var(current_state_name),
+                    ")",
+                ])),
+                span,
+            });
+            self.finish_precompiled_scope(scope)?;
+            if is_last {
+                self.deliver_last_var(tail, val_var, span, stmts)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// `BodyExprKind::SelfClearField`: `self clearField: name` (ADR 0124
+    /// §1/B4). Same `Bind(Direct)` shape as `SelfFieldAtPut`, with
+    /// `maps:remove`; the statement answers `Self`.
+    pub(super) fn lower_stmt_self_clear_field(
+        &mut self,
+        cx: StmtCx<'_>,
+        tail: &mut StmtTail<'_>,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            frame,
+        } = cx;
+        if let Expression::MessageSend { arguments, .. } = expr {
+            // BT-4369: a dynamic-key field write records itself for the loop checkout.
+            self.note_field_write("<dynamic>", span);
+            let scope = self.thread_send_arguments(expr, frame, stmts)?;
+            let name_var = self.fresh_var("Name");
+            let name_code = self.expression_doc(&arguments[0])?;
+            self.finish_precompiled_scope(scope)?;
+            let source_version = self.state_version();
+            let current_state_name = self.current_state_var();
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(name_var.clone()),
+                    " = ",
+                    name_code,
+                    " in ",
+                ],
+                span,
+            ));
+            let _ = self.next_state_var();
+            let target_version = self.state_version();
+            stmts.push(ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                op: BindOp::Direct(ValueRef::Doc(docvec![
+                    "call 'maps':'remove'(",
+                    leaf::var(name_var),
+                    ", ",
+                    leaf::var(current_state_name),
+                    ")",
+                ])),
+                span,
+            });
+            if is_last {
+                self.deliver_last_var(tail, "Self".to_string(), span, stmts)?;
+            }
         }
         Ok(())
     }

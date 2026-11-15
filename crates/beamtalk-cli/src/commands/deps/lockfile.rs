@@ -66,7 +66,6 @@ use std::fmt::Write as _;
 use crate::commands::toml_utils::escape_toml_string;
 
 /// The lockfile filename.
-#[allow(dead_code)] // Used by tests; will be called by build system (ADR 0070 Phase 2+)
 pub const LOCKFILE_NAME: &str = "beamtalk.lock";
 
 /// The lockfile header comment.
@@ -77,7 +76,6 @@ const LOCKFILE_HEADER: &str = "\
 
 /// A single locked git dependency entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // Used by tests; will be called by build system (ADR 0070 Phase 2+)
 pub struct LockEntry {
     /// The dependency name.
     pub name: String,

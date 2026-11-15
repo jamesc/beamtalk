@@ -561,18 +561,29 @@ Returns `not_found` when no registered class has this module, not an error —
 callers should fall back to the string heuristic in that case, exactly as
 `beamtalk_workspace_project_sync:module_to_class_name_map/0` already does in bulk.
 
-A lookup in `module_to_class_map/0`, which is memoised in
-`beamtalk_class_derived_cache` and rebuilt (one ETS fold) only after a class
-write flushes it: no fold per call, but the cache read copies the whole map
-(one entry per loaded class) onto the caller's heap. To resolve many modules
-at once, fetch the map once with `module_to_class_map/0`.
+Independent of the number of loaded classes on a warm read: the answer is
+its own small row in `beamtalk_class_derived_cache` (key
+`{module_class, Module}`, `not_found` cached too), so a hit is one ETS lookup
+of a single `{ok, Name} | not_found` term. Every class write that can change
+a row's module flushes the cache (the same `invalidate/0` the whole-map entry
+relies on); the first read of a module afterwards derives its row from
+`module_to_class_map/0`, which pays one ETS fold shared by every module until
+the next class write. To resolve many modules at once, fetching that map once
+(`module_to_class_map/0`) avoids even the per-module row.
+
+A persistent_term copy of the map was rejected: replacing it triggers a global
+GC, and a class load rewrites it once per class (hundreds at boot).
 """.
 -spec class_name_for_module(atom()) -> {ok, class_name()} | not_found.
 class_name_for_module(Module) when is_atom(Module) ->
-    case maps:find(Module, module_to_class_map()) of
-        {ok, Name} -> {ok, Name};
-        error -> not_found
-    end;
+    beamtalk_class_derived_cache:fetch({module_class, Module}, fun() ->
+        Answer =
+            case maps:find(Module, module_to_class_map()) of
+                {ok, Name} -> {ok, Name};
+                error -> not_found
+            end,
+        {cache, Answer}
+    end);
 class_name_for_module(_) ->
     not_found.
 

@@ -3261,7 +3261,7 @@ child_class_from_children(SupClass, SupPid) ->
         is_pid(Pid),
         is_atom(M)
     ],
-    %% One read of the memoised map, not one per child (each read copies it).
+    %% One read of the memoised map for all children, not one row read each.
     ModClasses = beamtalk_class_registry:module_to_class_map(),
     Resolved = [
         {ClassName, M}
