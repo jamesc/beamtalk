@@ -41,7 +41,6 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     ensure_class_warnings_table/0,
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
-    drain_class_warnings_by_qualified_names/1,
     record_pending_load_error/2,
     drain_pending_load_errors_by_names/1,
     clear_pending_load_errors_by_names/1,
@@ -70,7 +69,6 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     ensure_loaded_classes_table/0,
     record_loaded_class/2,
     forget_loaded_class/2,
-    loaded_class_names/0,
     loaded_class_entries/0,
     meta_backing_module/1,
     ensure_backing_module_index_table/0,
@@ -89,7 +87,13 @@ Extracted from `beamtalk_object_class` for single-responsibility.
 ]).
 
 -ifdef(TEST).
--export([class_identity/1, prune_dead_class_pids/1]).
+-export([
+    class_identity/1,
+    prune_dead_class_pids/1,
+    %% No production caller (BT-4903).
+    loaded_class_names/0,
+    drain_class_warnings_by_qualified_names/1
+]).
 -endif.
 
 -export_type([
@@ -395,6 +399,7 @@ drain_class_warnings_by_names(ClassNames) ->
             )
     end.
 
+-ifdef(TEST).
 -doc """
 Drain collision warnings for the given {Package, ClassName} pairs.
 Package-aware drain that only removes warnings for the specified
@@ -425,6 +430,7 @@ drain_class_warnings_by_qualified_names(QualifiedNames) ->
                 QualifiedNames
             )
     end.
+-endif.
 
 -doc """
 Record a structured error to be surfaced after a failed module load.
@@ -1159,6 +1165,7 @@ forget_loaded_class(ClassName, Pid) when is_atom(ClassName), is_pid(Pid) ->
             ok
     end.
 
+-ifdef(TEST).
 -doc """
 Return the set of currently-loaded class names.
 
@@ -1173,6 +1180,7 @@ loaded_class_names() ->
     sets:from_list(
         [Name || {Name, _Pid} <- loaded_class_entries()], [{version, 2}]
     ).
+-endif.
 
 -doc """
 Return the live `{ClassName, Pid}` rows from the loaded-class index.

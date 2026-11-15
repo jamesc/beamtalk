@@ -278,8 +278,6 @@ actual transitions write (set when unset, erase when set); both are rare
     is_shadowed/2,
     direct_call_ok/2,
     shadow_free/2,
-    is_direct_flag_set/1,
-    direct_flag_value/1,
     invalidate/1,
     invalidate_descendants_of_tag/1,
     erase_all_static_call_keys/0,
@@ -292,6 +290,14 @@ actual transitions write (set when unset, erase when set); both are rare
     static_call_key_value/1,
     static_calls_key/1
 ]).
+
+%% Exported for tests only (BT-4903): no production caller.
+-ifdef(TEST).
+-export([
+    direct_flag_value/1,
+    is_direct_flag_set/1
+]).
+-endif.
 
 -include("beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -667,15 +673,19 @@ shadow_free(ClassTag, ClassName) ->
         _ -> true
     end.
 
+-ifdef(TEST).
 -doc "True while the derived flag for `ClassTag` is installed, with either value (test hook).".
 -spec is_direct_flag_set(atom()) -> boolean().
 is_direct_flag_set(ClassTag) ->
     persistent_term:get(ClassTag, false) =/= false.
+-endif.
 
+-ifdef(TEST).
 -doc "The installed derived value for `ClassTag`, `false` when absent (test hook).".
 -spec direct_flag_value(atom()) -> derived() | false.
 direct_flag_value(ClassTag) ->
     persistent_term:get(ClassTag, false).
+-endif.
 
 %% The derived value the raw flags and the chain's published facts imply;
 %% `false` (install nothing) while not ready or shadowed.

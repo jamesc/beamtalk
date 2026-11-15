@@ -995,11 +995,13 @@ Handles the full spawn sequence:
 Unlike `safe_spawn/2` (unnamed) in its common case, this stays
 **linked** — it is the shared implementation behind both
 `spawnAs:`/`spawnWith:as:`/`spawnAs:scope:`/`spawnWith:as:scope:` *and*
-the real OTP supervisor child MFA that `beamtalk_supervisor:spec_to_otp/1`
-builds for `SupervisionSpec withName:`/`withName:scope:` children (ADR
-0079: `{beamtalk_actor, spawnAs, [Name, Module]}` / `[Name, Module,
-InitArgs]`, or, for `global`, `{beamtalk_actor, spawnAsGlobal, ...}` —
-either way this function is the start callback). That link is not a
+the start `beamtalk_supervisor:start_actor_child/3` makes for
+`SupervisionSpec withName:`/`withName:scope:` children (ADR 0079; a child spec
+recorded by a release before BT-4701 names `{beamtalk_actor, spawnAs, ...}` /
+`{beamtalk_actor, spawnAsGlobal, ...}` instead, which the compatibility
+delegates at the end of this module still forward to
+`beamtalk_actor_registry` — either way this function is the start callback).
+That link is not a
 bug — it is exactly the OTP contract a real supervisor relies on to
 detect the child's exit and restart it; removing it would silently break
 supervised named-actor restart (see `beamtalk_supervisor_tests:supervisor_restart_re_registers_name_test/0`).

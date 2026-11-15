@@ -379,33 +379,25 @@ set. A pending `'remove-class'` entry left out of the applied set because
     flush_kinds/2
 ]).
 
-%% Exported for tests.
+%% Cross-module entry points (the workspace interface primitives and the LSP
+%% flush path call `complete_flush/5`).
 -export([
-    splice/3,
-    group_by_file/1,
-    complete_flush/5,
-    filter_shadowed_by_survivor/2,
-    renamed_target_keys/1,
-    announce_flush_completed/2,
-    %% ADR 0112: exercises the `(class, selector, side)` shadow-key
-    %% fix directly — the shadow-key logic is exercised without going
-    %% through prepare_splice/2.
-    shadow_duplicates/1,
-    %% ADR 0113 Phase 2: tier classification, exported for direct unit
-    %% coverage independent of a full flush round-trip.
-    entry_tier/1,
-    %% ADR 0113 Phase 2: lets a crash-recovery test construct the exact
-    %% staged path a real flush attempt would have produced, without
-    %% duplicating the naming format in the test module.
-    delete_staging_path/3,
-    %% ADR 0114 Phase 2: rename-class multi-file staging, exported
-    %% for direct unit coverage independent of a full flush round-trip.
-    %% (`resolve_new_path/1` lives in `beamtalk_workspace_flush_rename`.)
-    is_rename_class_entry/1,
-    %% ADR 0114 Phase 3: rename-method multi-file staging, exported
-    %% for direct unit coverage independent of a full flush round-trip.
-    is_rename_method_entry/1
+    complete_flush/5
 ]).
+
+%% Exported for tests only (BT-4903): no production caller.
+-ifdef(TEST).
+-export([
+    announce_flush_completed/2,
+    delete_staging_path/3,
+    entry_tier/1,
+    filter_shadowed_by_survivor/2,
+    group_by_file/1,
+    renamed_target_keys/1,
+    shadow_duplicates/1,
+    splice/3
+]).
+-endif.
 
 -type filter() ::
     any
@@ -1215,6 +1207,7 @@ combine_phase_a({ok, P1}, {conflict, C2}) ->
 cleanup_other_prepared({ok, P}) -> beamtalk_workspace_flush_support:cleanup_tmps(P);
 cleanup_other_prepared(_) -> ok.
 
+-ifdef(TEST).
 -doc """
 Splice `Replacement` into `Body` at the byte range `{Start, End}` (half-open).
 Delegates to `beamtalk_workspace_span:splice/3`; kept exported for tests.
@@ -1222,6 +1215,7 @@ Delegates to `beamtalk_workspace_span:splice/3`; kept exported for tests.
 -spec splice(binary(), {non_neg_integer(), non_neg_integer()}, binary()) -> binary().
 splice(Body, Span, Replacement) ->
     beamtalk_workspace_span:splice(Body, Span, Replacement).
+-endif.
 
 %%% ----------------------------------------------------------------------------
 %%% Phase B: commit (rename into place, or unlink a staged delete)

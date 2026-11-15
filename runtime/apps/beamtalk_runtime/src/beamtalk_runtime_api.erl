@@ -54,7 +54,6 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
     local_class_methods/1,
     local_instance_methods/1,
     instance_variables/1,
-    all_field_names/1,
     superclass/1
 ]).
 
@@ -149,6 +148,13 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 -export([
     is_keyword_selector/1
 ]).
+
+%% Exported for tests only (BT-4903): no production caller.
+-ifdef(TEST).
+-export([
+    all_field_names/1
+]).
+-endif.
 
 %%% ====================================================================
 %%% Class Registry Delegators
@@ -278,6 +284,7 @@ local_instance_methods(Pid) ->
 instance_variables(Pid) ->
     beamtalk_object_class:instance_variables(Pid).
 
+-ifdef(TEST).
 -doc """
 Return all field names for a class, including inherited ones, by class
 name — no live instance or class pid required. Delegates to
@@ -289,6 +296,7 @@ the flattened field set of a class it only has a `ClassName` atom for.
 -spec all_field_names(atom()) -> [atom()].
 all_field_names(ClassName) ->
     beamtalk_behaviour_intrinsics:classAllFieldNamesByName(ClassName).
+-endif.
 
 -spec superclass(pid()) -> atom() | none.
 superclass(Pid) ->

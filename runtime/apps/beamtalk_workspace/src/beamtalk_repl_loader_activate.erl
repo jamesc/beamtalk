@@ -16,16 +16,17 @@ Module activation for the loader: loading a compiled class module into the class
 -export([
     activate_module/2,
     activate_module/3,
-    activate_module/4,
-    register_classes/2,
-    trigger_hot_reload/2
+    activate_module/4
 ]).
 
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
 -export([
     resolve_class_name/1,
-    existing_atom_or_undefined/1
+    existing_atom_or_undefined/1,
+    %% No production caller (BT-4903).
+    register_classes/2,
+    trigger_hot_reload/2
 ]).
 -endif.
 
