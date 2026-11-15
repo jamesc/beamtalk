@@ -16,7 +16,7 @@
 
 use super::control_flow::LocalWrite;
 use super::threaded_ir::{ThreadedStmt, ValueRef};
-use super::{CoreErlangGenerator, Result};
+use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::core_erlang::threaded_ir::FrameId;
 use beamtalk_cerl_doc::{docvec, leaf};
 use beamtalk_core::ast::Expression;
@@ -155,7 +155,11 @@ impl CoreErlangGenerator {
             frame,
         } = cx;
         let Expression::DestructureAssignment { pattern, value, .. } = expr else {
-            return Ok(());
+            return Err(CodeGenError::Internal(
+                "lower_stmt_destructure_assignment: statement classified DestructureAssignment \
+                 is not one"
+                    .to_string(),
+            ));
         };
         let local_write = match tail {
             StmtTail::Reply => LocalWrite::Plain,
