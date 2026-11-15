@@ -328,8 +328,7 @@ fn infer_expr_list_literal_array_tail_widens_to_dynamic() {
     assert_eq!(
         diags.len(),
         1,
-        "Array cons tail should emit one improper-list diagnostic, got: {:?}",
-        diags
+        "Array cons tail should emit one improper-list diagnostic, got: {diags:?}"
     );
     assert!(
         diags[0].message.contains("improper list"),
@@ -363,8 +362,7 @@ fn infer_expr_list_literal_list_tail_no_diagnostic() {
     );
     assert!(
         diags.is_empty(),
-        "List cons tail is proper — no diagnostic expected, got: {:?}",
-        diags
+        "List cons tail is proper — no diagnostic expected, got: {diags:?}"
     );
 }
 
@@ -386,8 +384,7 @@ fn infer_expr_list_literal_dynamic_tail_no_diagnostic() {
     );
     assert!(
         diags.is_empty(),
-        "Dynamic cons tail should not be flagged, got: {:?}",
-        diags
+        "Dynamic cons tail should not be flagged, got: {diags:?}"
     );
 }
 
@@ -410,8 +407,7 @@ fn infer_expr_list_literal_non_collection_tail_warns() {
     assert_eq!(
         diags.len(),
         1,
-        "Integer cons tail should emit one improper-list diagnostic, got: {:?}",
-        diags
+        "Integer cons tail should emit one improper-list diagnostic, got: {diags:?}"
     );
     assert!(diags[0].message.contains("Integer"));
 }

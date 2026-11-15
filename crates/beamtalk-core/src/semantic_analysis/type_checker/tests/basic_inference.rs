@@ -563,8 +563,7 @@ fn test_match_arm_pattern_vars_bound_in_body() {
     );
     assert!(
         diags.is_empty(),
-        "match-bound var `n` should shadow outer Integer binding — no DNU warnings: {:?}",
-        diags
+        "match-bound var `n` should shadow outer Integer binding — no DNU warnings: {diags:?}"
     );
 }
 
@@ -599,8 +598,7 @@ fn test_match_arm_pattern_vars_bound_in_guard() {
     );
     assert!(
         diags.is_empty(),
-        "match-bound var `n` in guard should shadow outer Integer binding — no DNU warnings: {:?}",
-        diags
+        "match-bound var `n` in guard should shadow outer Integer binding — no DNU warnings: {diags:?}"
     );
 }
 

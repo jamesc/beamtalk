@@ -100,7 +100,7 @@ fn asserted_diagnostics(scrutinee_ty: InferredType, arms: Vec<MatchArm>) -> Vec<
     let expr = match_expr(true, var("raw"), arms);
 
     let (_, diags) = infer_with_diags(&expr, &hierarchy, &[("raw", scrutinee_ty)]);
-    diags.to_vec()
+    diags
 }
 
 // ── ADR 0107 headline example: `String | Nil` missing the `nil` arm ────

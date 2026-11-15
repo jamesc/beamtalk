@@ -65,7 +65,7 @@ fn asserted_diagnostics(scrutinee_ty: InferredType, arms: Vec<MatchArm>) -> Vec<
     let expr = asserted_match_expr(var("compass"), arms);
 
     let (_, diags) = infer_with_diags(&expr, &hierarchy, &[("compass", scrutinee_ty)]);
-    diags.to_vec()
+    diags
 }
 
 /// Runs inference over the equivalent *advisory* `match:` (same scrutinee
