@@ -318,6 +318,13 @@ instance_registry_reclaims_after_crash() ->
     end.
 
 boot_tables_name_heir() ->
+    %% Other suites run in the same VM (e.g. beamtalk_class_registry_tests)
+    %% recreate this table from a test process, which would then own it.
+    %% Restart the app with the table removed so it is created by
+    %% beamtalk_runtime_app:start/2, whatever ran before.
+    ok = application:stop(beamtalk_runtime),
+    _ = catch ets:delete(beamtalk_class_state_snapshot),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
     HeirPid = whereis(beamtalk_ets_heir),
     %% beamtalk_class_state_snapshot is created by beamtalk_runtime_app:start/2
     %% (owned by the application master), not by the first class gen_server,
