@@ -184,6 +184,15 @@ impl PendingDeclarationExpect {
     }
 }
 
+/// Which grammar position a selector is being parsed in.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SelectorContext {
+    /// A method definition in a class body.
+    Method,
+    /// A method signature in a `Protocol` body (extra guards, newline-separated).
+    Protocol,
+}
+
 impl Parser {
     /// Reports a "use `::` not `:`" error for type annotations and advances past the `:`.
     fn type_annotation_colon_error(&mut self) {
@@ -2435,14 +2444,45 @@ impl Parser {
     ///
     /// Returns the selector and parameter definitions (with optional type annotations).
     fn parse_method_selector(&mut self) -> Option<(MessageSelector, Vec<ParameterDefinition>)> {
+        self.parse_selector_and_params(SelectorContext::Method)
+    }
+
+    /// Parses a parameter name followed by an optional `:: Type` annotation.
+    fn parse_param_definition(&mut self, missing_name_msg: &str) -> ParameterDefinition {
+        let param_name = self.parse_identifier(missing_name_msg);
+        match self.parse_optional_param_type() {
+            Some(ta) => ParameterDefinition::with_type(param_name, ta),
+            None => ParameterDefinition::new(param_name),
+        }
+    }
+
+    /// Parses a unary, binary, or keyword selector with its parameters.
+    ///
+    /// Shared by method definitions and protocol method signatures; the
+    /// [`SelectorContext`] selects the guards that differ between the two.
+    fn parse_selector_and_params(
+        &mut self,
+        context: SelectorContext,
+    ) -> Option<(MessageSelector, Vec<ParameterDefinition>)> {
+        let in_protocol = context == SelectorContext::Protocol;
         match self.current_kind() {
-            // Unary method: `methodName`
+            // Unary: `methodName`
             TokenKind::Identifier(name) => {
+                // Protocol bodies: guard against consuming identifiers that
+                // start the next definition (e.g. `Protocol`).
+                if in_protocol
+                    && (name == "Protocol"
+                        || name == "abstract"
+                        || name == "sealed"
+                        || name == "typed")
+                {
+                    return None;
+                }
                 let selector = MessageSelector::Unary(name.clone());
                 self.advance();
                 Some((selector, Vec::new()))
             }
-            // Binary method: `+ other`, `-> other` (ADR 0047), `>> other`
+            // Binary: `+ other`, `-> other` (ADR 0047), `>> other`
             // Arrow and GtGt are separate token kinds but valid binary selectors.
             TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt => {
                 let op_name = match self.current_kind() {
@@ -2454,40 +2494,44 @@ impl Parser {
                 let selector = MessageSelector::Binary(op_name);
                 self.advance();
 
-                let param_name =
-                    self.parse_identifier("Expected parameter name after binary selector");
-                let type_annotation = self.parse_optional_param_type();
-                let param = match type_annotation {
-                    Some(ta) => ParameterDefinition::with_type(param_name, ta),
-                    None => ParameterDefinition::new(param_name),
-                };
+                let param =
+                    self.parse_param_definition("Expected parameter name after binary selector");
                 Some((selector, vec![param]))
             }
-            // Keyword method: `at: index put: value` or `deposit: amount :: Integer`
-            TokenKind::Keyword(_) => {
+            // Keyword: `at: index put: value` or `deposit: amount :: Integer`
+            TokenKind::Keyword(kw) => {
+                // Protocol bodies: `extending:` is the protocol extension keyword.
+                if in_protocol && kw == "extending:" {
+                    return None;
+                }
                 let mut keywords = Vec::new();
                 let mut parameters = Vec::new();
 
                 while let TokenKind::Keyword(keyword) = self.current_kind() {
+                    // In protocol bodies, keywords on a new line are separate
+                    // signatures. Only continue if the keyword is on the same
+                    // line as the previous one (i.e., a multi-keyword selector
+                    // like `at: key put: value`).
+                    if in_protocol
+                        && !keywords.is_empty()
+                        && self.current_token().has_leading_newline()
+                    {
+                        break;
+                    }
                     let span = self.current_token().span();
                     keywords.push(KeywordPart::new(keyword.clone(), span));
                     self.advance();
 
-                    // Parse parameter name, then optional `:: Type` annotation
-                    let param_name = self.parse_identifier("Expected parameter name after keyword");
-                    let type_annotation = self.parse_optional_param_type();
-                    let param = match type_annotation {
-                        Some(ta) => ParameterDefinition::with_type(param_name, ta),
-                        None => ParameterDefinition::new(param_name),
-                    };
-                    parameters.push(param);
+                    parameters
+                        .push(self.parse_param_definition("Expected parameter name after keyword"));
                 }
 
-                let selector = MessageSelector::Keyword(keywords);
-                Some((selector, parameters))
+                Some((MessageSelector::Keyword(keywords), parameters))
             }
             _ => {
-                self.error("Expected method selector");
+                if !in_protocol {
+                    self.error("Expected method selector");
+                }
                 None
             }
         }
@@ -3313,75 +3357,7 @@ impl Parser {
         let doc_comment = pre_doc.or_else(|| self.collect_doc_comment());
         let comments = pre_comments;
 
-        // Determine what kind of signature this is
-        let (selector, parameters) = match self.current_kind() {
-            // Unary: identifier (not followed by `=>`, not a known delimiter keyword)
-            TokenKind::Identifier(name) => {
-                // Guard against consuming non-signature identifiers
-                // (e.g., `Protocol` starting the next definition)
-                if name == "Protocol" || name == "abstract" || name == "sealed" || name == "typed" {
-                    return None;
-                }
-                let selector = MessageSelector::Unary(name.clone());
-                self.advance();
-                (selector, Vec::new())
-            }
-            // Binary: `+ other`, `< other`, `-> other` (ADR 0047), `>> other`
-            // Arrow and GtGt are separate token kinds but valid binary selectors.
-            TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt => {
-                let op_name = match self.current_kind() {
-                    TokenKind::BinarySelector(op) => op.clone(),
-                    TokenKind::Arrow => "->".into(),
-                    TokenKind::GtGt => ">>".into(),
-                    _ => unreachable!(),
-                };
-                let selector = MessageSelector::Binary(op_name);
-                self.advance();
-
-                let param_name =
-                    self.parse_identifier("Expected parameter name after binary selector");
-                let type_annotation = self.parse_optional_param_type();
-                let param = match type_annotation {
-                    Some(ta) => ParameterDefinition::with_type(param_name, ta),
-                    None => ParameterDefinition::new(param_name),
-                };
-                (selector, vec![param])
-            }
-            // Keyword: `do: block :: Block(E, Object)`
-            TokenKind::Keyword(kw) => {
-                // Guard: `extending:` is the protocol extension keyword, not a selector
-                if kw == "extending:" {
-                    return None;
-                }
-                let mut keywords = Vec::new();
-                let mut parameters = Vec::new();
-
-                while let TokenKind::Keyword(keyword) = self.current_kind() {
-                    // In protocol bodies, keywords on a new line are separate
-                    // signatures. Only continue if the keyword is on the same
-                    // line as the previous one (i.e., a multi-keyword selector
-                    // like `at: key put: value`).
-                    if !keywords.is_empty() && self.current_token().has_leading_newline() {
-                        break;
-                    }
-                    let span = self.current_token().span();
-                    keywords.push(KeywordPart::new(keyword.clone(), span));
-                    self.advance();
-
-                    let param_name = self.parse_identifier("Expected parameter name after keyword");
-                    let type_annotation = self.parse_optional_param_type();
-                    let param = match type_annotation {
-                        Some(ta) => ParameterDefinition::with_type(param_name, ta),
-                        None => ParameterDefinition::new(param_name),
-                    };
-                    parameters.push(param);
-                }
-
-                let selector = MessageSelector::Keyword(keywords);
-                (selector, parameters)
-            }
-            _ => return None,
-        };
+        let (selector, parameters) = self.parse_selector_and_params(SelectorContext::Protocol)?;
 
         // Parse optional return type: `-> Type`
         let return_type = self.parse_optional_return_type();

@@ -15,17 +15,12 @@
 //! alike — split out of `gen_server/methods.rs`, which was actor-specific
 //! in name but carried this shared logic.
 
-use super::CoreErlangGenerator;
+use super::{CoreErlangGenerator, selector_mangler::MAX_ATOM_BYTES};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::{ClassDefinition, MethodDefinition};
 use beamtalk_core::semantic_analysis::{InferredType, TypeProvenance};
 use ecow::EcoString;
-
-/// Erlang's hard cap on atom size (ERTS source: `MAX_ATOM_CHARACTERS` / UTF-8
-/// bytes).  Selectors or class names that exceed this limit cannot be emitted
-/// as legal Core Erlang atoms and are dropped from xref / dispatch tables.
-pub(in crate::core_erlang) const MAX_ATOM_BYTES: usize = 255;
 
 /// ADR 0115 Phase 2: the xref `recv_type` write-path vocabulary a
 /// message send's receiver `InferredType` projects onto — see

@@ -15,7 +15,7 @@
 //! (metadata + xref), which is what created the `methods.rs` ↔
 //! `value_type_codegen.rs` import cycle.
 
-use super::{CoreErlangGenerator, xref::MAX_ATOM_BYTES};
+use super::{CoreErlangGenerator, selector_mangler::MAX_ATOM_BYTES};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, concat, join, leaf};
 use beamtalk_core::ast::{ClassDefinition, ClassKind, StateDeclaration};

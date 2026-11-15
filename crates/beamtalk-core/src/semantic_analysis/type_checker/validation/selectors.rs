@@ -389,7 +389,7 @@ impl TypeChecker {
         if arg_class.as_str() != declared_base || type_args.is_empty() {
             return;
         }
-        let declared_params = super::super::TypeChecker::split_type_params(inner);
+        let declared_params = crate::semantic_analysis::string_utils::split_top_level(inner, ',');
         for (declared_param, actual) in declared_params.iter().zip(type_args.iter()) {
             let decl_eco: EcoString = (*declared_param).into();
             if class_info.type_params.contains(&decl_eco) {

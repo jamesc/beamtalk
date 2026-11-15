@@ -31,8 +31,10 @@
 
 use beamtalk_cerl_doc::hash::fnv1a_64;
 
-/// Maximum length for an Erlang/Core Erlang atom (hard VM limit).
-const MAX_ATOM_LEN: usize = 255;
+/// Erlang's hard cap on atom size (ERTS source: `MAX_ATOM_CHARACTERS` / UTF-8
+/// bytes).  Names that would exceed it are hashed to `kw_<16-hex>` by the
+/// mangling helpers here, and dropped from xref / accessor metadata tables.
+pub(in crate::core_erlang) const MAX_ATOM_BYTES: usize = 255;
 
 /// The prefix the runtime prepends to selector atoms to form class method
 /// function names (see `beamtalk_class_dispatch:class_method_fun_name/1`).
@@ -64,7 +66,7 @@ const DISPATCH_PREFIX: &str = "dispatch_";
 /// [`safe_class_method_selector`] instead.
 #[must_use]
 pub fn safe_atom_name(name: &str) -> String {
-    if name.len() <= MAX_ATOM_LEN {
+    if name.len() <= MAX_ATOM_BYTES {
         name.to_string()
     } else {
         let hash = fnv1a_64(name.as_bytes());
@@ -85,7 +87,7 @@ pub fn safe_atom_name(name: &str) -> String {
 /// `class_method_fun_name(Selector) -> list_to_atom("class_" ++ atom_to_list(Selector))`.
 #[must_use]
 pub fn safe_class_method_selector(selector: &str) -> String {
-    if CLASS_METHOD_PREFIX.len() + selector.len() <= MAX_ATOM_LEN {
+    if CLASS_METHOD_PREFIX.len() + selector.len() <= MAX_ATOM_BYTES {
         selector.to_string()
     } else {
         let hash = fnv1a_64(selector.as_bytes());
@@ -145,7 +147,7 @@ pub fn dispatch_fn_name(selector: &str) -> String {
 /// tools and runtime patterns that inspect the name by prefix still work for
 /// long selectors.
 fn prefixed_fn_name(prefix: &str, selector: &str) -> String {
-    if prefix.len() + selector.len() <= MAX_ATOM_LEN {
+    if prefix.len() + selector.len() <= MAX_ATOM_BYTES {
         format!("{prefix}{selector}")
     } else {
         let hash = fnv1a_64(selector.as_bytes());
