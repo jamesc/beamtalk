@@ -77,9 +77,7 @@ registry() ->
             _ ->
                 false
         end,
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
-    beamtalk_class_registry:ensure_methods_table(),
+    beamtalk_class_metadata:new(),
     beamtalk_class_registry:ensure_class_warnings_table(),
     beamtalk_class_registry:ensure_pid_table(),
     beamtalk_class_registry:ensure_pending_errors_table(),
