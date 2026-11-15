@@ -185,10 +185,10 @@ ensure_pg_started_test() ->
     ?assertEqual(ok, beamtalk_class_registry:ensure_pg_started()).
 
 %%% ============================================================================
-%%% ensure_hierarchy_table tests
+%%% beamtalk_class_metadata:new/0 tests
 %%% ============================================================================
 
-ensure_hierarchy_table_test_() ->
+class_metadata_new_test_() ->
     {setup,
         fun() ->
             %% Save existing entries to restore after test
@@ -1255,17 +1255,6 @@ drain_warnings_no_table_test() ->
         [],
         beamtalk_class_registry:drain_class_warnings_by_names([])
     ).
-
-%%% ============================================================================
-%%% ensure_module_table tests
-%%% ============================================================================
-
-ensure_module_table_test() ->
-    beamtalk_class_metadata:new(),
-    ?assertNotEqual(undefined, ets:info(beamtalk_class_metadata)),
-    %% Idempotent
-    beamtalk_class_metadata:new(),
-    ?assertNotEqual(undefined, ets:info(beamtalk_class_metadata)).
 
 %%% ============================================================================
 %%% pending load errors tests

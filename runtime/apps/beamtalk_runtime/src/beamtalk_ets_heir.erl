@@ -200,7 +200,8 @@ reclaimed from the heir (class registry, metadata, protocol registry, ...).
 When `Name` does not exist it is created with `Opts` plus `heir_option/0`;
 losing a creation race to another process (`ets:new/2` raises `badarg`) is
 tolerated, because the winner's table is the same table. When it already
-exists the heir is set if the caller owns it and it has none.
+exists the heir is set if the caller owns it and the heir is not already the
+running heir process (`maybe_set_heir/1`).
 
 Unlike `ensure_table/2` this never reclaims the table from the heir.
 """.
