@@ -1,41 +1,25 @@
-# ADR 0150: Actor Registry Off the Start Path — Insert, Then Monitor
+# ADR 0150: Actor Registration Off the Start Path
 
 ## Status
-Proposed (2026-11-15). Issue BT-4854; the rest of the start path is BT-4932.
+Proposed (2026-11-15; revised the same day after owner review, which sent the first draft back). Issue BT-4854; the rest of the start path is BT-4932.
 
-Amends [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md),
-[ADR 0009](0009-otp-application-structure.md),
-[ADR 0069](0069-actor-observability-and-tracing.md),
-[ADR 0093](0093-announcements-event-substrate.md),
-[ADR 0123](0123-versioned-state-migration.md),
-[ADR 0126](0126-distribution-location-transparent-actors.md) and
-[ADR 0129](0129-class-side-system-facades.md), and ADR-5 of
-`docs/beamtalk-ddd-model.md`. The amendments to those documents are made by
-the implementation PR, after this ADR is accepted (see
-[Consequences for earlier ADRs](#consequences-for-earlier-adrs)).
+> **Revision note.** The first draft decided "insert, then monitor" with a table, a bounded pending buffer, a drain pass, a backstop reaper and a scan rebuild, and dismissed a no-table design in six lines. This revision puts four options side by side, corrects the facts the first draft got wrong, and **recommends the no-table design (D)**, with the minimal table design (C) as the fallback if one of the acceptance conditions below fails. Nothing in this ADR is implemented. The WIP prototype of the first draft is on `bt-4854-registry-impl`; it is evidence, not a decision.
+
+Amends, if accepted: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md), [0009](0009-otp-application-structure.md), [0069](0069-actor-observability-and-tracing.md), [0079](0079-named-actor-registration.md), [0093](0093-announcements-event-substrate.md), [0123](0123-versioned-state-migration.md), [0126](0126-distribution-location-transparent-actors.md), [0129](0129-class-side-system-facades.md) and ADR-5 of `docs/beamtalk-ddd-model.md` (see [Consequences for earlier ADRs](#consequences-for-earlier-adrs)). Those documents are edited by the implementation PR, after acceptance.
 
 ## Context
 
 ### Problem
 
-Two singletons sit on every actor start:
+Every actor start passes through up to **three** registrations:
 
-- `beamtalk_object_instances` (`allInstances`, hot reload, `class_of/1`). The
-  generated `spawn`, `spawn_monitored` and `spawn_monitored_async` call its
-  `register/2` — a synchronous `gen_server:call` — from the *spawning* process.
-  The server monitors the pid and writes two ETS tables.
-- `beamtalk_actor_registry` (`beamtalk_repl_actors`; `Node current actors`, the
-  REPL, IDE and LiveView actor lists). Each actor's own `init/1` emits
-  `[beamtalk, actor, lifecycle, start]`; `maybe_announce_lifecycle/2` in
-  `beamtalk_actor.erl` turns that into a `track_spawned/2` cast, and the server
-  calls the class process from its handler and monitors the pid.
+1. `beamtalk_object_instances` (a gen_server and two ETS tables: `allInstances`, hot reload, `class_of/1`). The generated `spawn`, `spawn_monitored` and `spawn_monitored_async` (and the native facade's `spawn`) call its `register/2`, a synchronous `gen_server:call`, from the *spawning* process (`gen_server/spawn.rs`, `instance_registration_doc`).
+2. The node-wide actor list. Naming matters here, because two different things are called "actor registry":
+   - the process **registered locally as `beamtalk_actor_registry`** is `beamtalk_repl_actors` (`start_link(registered)`): the actor list behind `Node current actors`, the REPL, IDE and LiveView lists, `stop_class_actors` and `should_purge_module`. Each compiled actor's generated `init/1` emits `[beamtalk, actor, lifecycle, start]`; `maybe_announce_lifecycle/2` in `beamtalk_actor.erl` turns it into a `track_spawned/2` cast; the server resolves the module with a call to the class process and monitors the pid;
+   - the **module `beamtalk_actor_registry.erl`** is the ADR 0079 *name* registry (`register_name/2`, `all_registered/0`, `actor_started_at/1`). It is not part of this change. Below, "the actor list" means the first, and "the name registry" the second.
+3. On **REPL-originated spawns** only, generated code calls `beamtalk_actor:register_spawned/4` (`dispatch_codegen/spawn.rs`) → `on_actor_spawned/4` → `register_actor/4`, a second synchronous call to the actor list, plus the `actor_spawned_hook` that feeds `beamtalk_workspace_meta`. It adds the module name (the lifecycle path resolves it anyway) and the hook.
 
-Both are single processes, so every start in the node queues behind them. Phase 1
-of BT-4854 measured what this costs and where the rest of the cost sits. The
-numbers are from a cloud VM (Firecracker, 4 cores, OTP 28.5), so they compare
-only with each other and not with the maintainer's M5 Max numbers (rows 16a–16d
-in the issue). `+S 1` is stable and measures total CPU; `+S 4` is noisy (16a/16c
-varied by up to 40% between identical runs) and is shown as a median.
+The two servers are singletons, so every start on the node queues behind them. Phase 1 of BT-4854 measured the cost and where the rest of the cost sits. The numbers are from a cloud VM (Firecracker, 4 cores, OTP 28.5), so **they compare only with each other**, not with the maintainer's M5 Max numbers (rows 16a–16d in the issue). `+S 1` is stable and measures total CPU; `+S 4` is noisy (16a/16c varied by up to 40% between identical runs) and is shown as a median.
 
 | Per actor, µs | 16a start→run→stop `+S4` / `+S1` | 16c plain spawn + stop `+S4` / `+S1` | 16d, 100 in flight `+S4` / `+S1` |
 |---|---|---|---|
@@ -43,432 +27,248 @@ varied by up to 40% between identical runs) and is shown as a median.
 | baseline (today) | 31.9–36.3 / 10.5–10.9 | 14.3–14.4 / 11.6–11.8 | 14.6–15.0 / 10.6–11.0 |
 | ets-reaper | 11.6–11.8 / 8.0–8.3 | 10.5–10.7 / 8.1 | 6.9–8.5 / 7.9–8.6 |
 | lazy-batch | 11.7 / 8.3 | 10.7 / 8.4 | 6.9 / 8.1 |
-| **insert-then-monitor (chosen)** | **12.7 / 8.9** | **11.8 / 9.4** | **9.8 / 9.1** |
-| label-scan (no table) | 11.5 / 7.4 | 9.7 / 7.7 | 4.9 / 7.2 |
+| insert-then-monitor | 12.7 / 8.9 | 11.8 / 9.4 | 9.8 / 9.1 |
+| **label-scan (no table)** | **11.5 / 7.4** | **9.7 / 7.7** | **4.9 / 7.2** |
 | sharded (4 servers) | 38.7 / 10.3 | 36.8 / 11.4 | 17.4 / 10.5 |
 | partition-link | 14.0–42.6 / 8.7 | 19–23 / 10.5 | 8.3 / 8.5 |
 
 What the profile says:
 
-- **The cost is cross-scheduler, not CPU.** At `+S 1` async and sync start cost
-  the same (10.5 vs 11.8 µs). At `+S 4`, 16a is 30× the floor: the `track_spawned`
-  cast saves about 10 µs of wall time for 1.4 µs of CPU, which is wake-ups and
-  contention on the two singletons. The cloud VM probably exaggerates this
-  compared with the M5 Max.
-- **The registries are about a third of the start cost at `+S 1`** (~3.5 µs of
-  ~10.9 µs: `register` call, `track` cast, two monitors, `DOWN` handling). Lifecycle
-  announce and telemetry emit are ~2.0 µs, bare `spawn_monitor` ~0.9 µs, and the
-  remaining ~4.5 µs is `proc_lib` setup, `init`, `continueWith:`/`stopWith:`
-  dispatch and the harness. **No registry design reaches 2–3× of `spawn_monitor`.**
-  That target belongs to BT-4932 and is not part of this ADR.
-- **The synchronous call is also the flow control.** BT-4845 made `register/2`
-  caller-side ETS writes plus a cast; with the call gone, the registry mailbox
-  and dead rows grew without bound and buccaneer fell from 133.6k to about 7k
-  req/s. BT-4842 restored the call. Baseline open loop (16 spawners, 3 s, async):
-  `beamtalk_object_instances` mailbox 24, `beamtalk_actor_registry` mailbox
-  **1972**. Any design that removes the call has to bound its own queues.
+- **The cost is cross-scheduler, not CPU.** At `+S 1` async and sync start cost the same (10.5 vs 11.8 µs). At `+S 4`, 16a is 30× the floor: removing the `track_spawned` cast saved about 10 µs of wall time for 1.4 µs of CPU, which is wake-ups and contention on the singletons. A VM probably exaggerates this compared with the M5 Max.
+- **The registrations are about a third of the start cost at `+S 1`** (~3.5 µs of ~10.9 µs). Lifecycle announce and telemetry emit are ~2.0 µs, bare `spawn_monitor` ~0.9 µs, and the remaining ~4.5 µs is `proc_lib` setup, `init`, dispatch and the harness. **No registry design reaches 2–3× of `spawn_monitor`.** The registry-free floor is 7.0 µs at `+S 1`. The rest is BT-4932.
+- **The synchronous call is also the flow control.** BT-4845 made `register/2` caller-side ETS writes plus a cast; with the call gone, the registry mailbox and dead rows grew without bound and buccaneer fell from 133.6k to about 7k req/s. BT-4842 restored the call. Baseline open loop (16 spawners, 3 s, async): `beamtalk_object_instances` mailbox 24, the actor list's mailbox **1972**. Any design that keeps a queue-fed registry has to bound it.
+- **A table moves contention from a mailbox to ETS; the measurements here cannot show that.** Every table design adds caller-side writes on every scheduler (about four per spawn once the actor's own `init/1` registers too), and a shared counter. The prototype numbers above come from a 4-core VM, cover the caller-side inserts of the *first* row shape only (not the `init/1` insert nor merged columns), and so say little about 18 schedulers. A design with no shared write on the start path has no such risk.
 
-### Current state
+### Current state, corrected
 
-`beamtalk_object_instances` keeps two ETS tables, owned by the server and with
-`beamtalk_ets_heir` as heir: `beamtalk_instance_registry` (`ordered_set`, keyed
-`{Class, Pid}`) and `beamtalk_instance_class` (`set`, `{Pid, Class}`, for O(1)
-`class_of/1`). `beamtalk_actor_registry` keeps its own map of pid → metadata
-(`pid`, `class`, `module`, `spawned_at`).
-
-**The two registries do not hold the same set.** Verified in the code:
-
-- `beamtalk_object_instances:register/2` is called only from the generated
-  `spawn`, `spawn_monitored` and `spawn_monitored_async`
-  (`gen_server/spawn.rs`, `gen_server/native_facade.rs`), through
-  `instance_registration_doc`. Nothing in `runtime/` calls it.
-- `safe_spawn_linked/2` and `safe_spawn_named/5` (supervised children,
-  `spawnAs:`, `withName:` children) call `gen_server:start_link(Module, …)`
-  directly, so they never run the generated `spawn` and are **not** in
-  `beamtalk_object_instances`. A `native:` backing module started by
-  `safe_start_native` is not either. Supervised children started through a
-  `withClassMethod:` factory *are*, because the factory calls `self spawn`.
-- `beamtalk_actor_registry` is fed from the actor's own `init/1`
-  (`beamtalk_actor.erl`, the lifecycle-start telemetry), so it holds every actor
-  whose generated `init/1` ran, including supervised and named children.
-
-So `allInstances` (and hot reload, which uses it) misses supervised and named
-actors today, while `Node current actors` lists them.
+- **Who is in which registry.** `register/2` of `beamtalk_object_instances` is called only from generated `spawn*` (and the native facade's). `safe_spawn_linked/2` and `safe_spawn_named/5` (supervised children, `spawnAs:`, `withName:`) call `gen_server:start_link` directly and are **not** in `beamtalk_object_instances`. An unnamed supervised child started through a `withClassMethod:` factory *is* (the factory calls `self spawn`). The actor list holds every actor whose generated `init/1` emits the lifecycle event (compiled actors, supervised and named included), and `native:` actors only when REPL-spawned. So `allInstances` and hot reload miss plain supervised and named children today; `Node current actors`, `stop_class_actors` and `should_purge_module` do not.
+- **Who carries the process-dictionary markers.** `'$beamtalk_actor'` (value: the class) is written by *generated* `init/1` code (`beamtalk_actor_marker_doc`, `gen_server/callbacks.rs`), at the top of `init/1`, **except** when `init/1` is called with `__skip_initialize__ => true` (a subclass's `init/1` using the parent's as a state builder; hot reload and shape migration also call it that way in the *calling* process, which must not be marked). It is written for compiled actors including supervised and named children. The interpretive `beamtalk_actor:init/1` (deleted by BT-4871) writes it too. `native:` backing-module actors (`safe_start_native`, user gen_servers) carry **no** marker and emit no lifecycle event; their class is recoverable from `'$initial_call'` through the index `beamtalk_actor_registry` (the name-registry module) already keeps for them. **`'$beamtalk_actor_started_at'` is written only by the interpretive `beamtalk_actor:init/1`** (`beamtalk_actor.erl`); no generated code writes it, `grep started_at crates/` is empty, and BT-4871 removes the only writer. So `actor_started_at/1`, used by the ADR 0126 §4 `global` name-conflict tie-break, returns `undefined` for a compiled actor, and `resolve_global_conflict/3` then falls back to `global:random_exit_name/3`. The comment "every actor carries this" is false for compiled actors. This is separate from the ADR (reported on BT-4854); it matters here because a design that needs `spawned_at` from the process must write it.
+- **Pid reuse.** An ERTS local pid has 28 bits of identity, so a pid can be reused only after at least 2^28 (≈268M) spawns. At the ~325k registrations per second the open-loop test reached, that is about 14 minutes of continuous flooding, not "never". It matters only to a design that keeps rows across a pid's death for that long.
 
 ### Readers
 
-Phase 1 listed every reader. What each one needs:
+Phase 1 listed every reader. Frequency matters, and the first draft got it wrong.
 
-| Reader | Needs |
-|---|---|
-| `Node current actors` / `actorsOf:` / `actorAt:` (`beamtalk_node.erl` `local_actors/0`, `local_actor_at/1`; erpc targets) | Exact, unordered. Visible when `spawn` returns. Pinned by `node_test.bt`, `workspace_actors.btscript`, `dynamic_supervisor_children_test.bt`. |
-| `stop_class_actors` (`removeFromSystem`), `should_purge_module` | Exact. A missed actor keeps a purged module or has its code purged. |
-| Hot reload (`beamtalk_repl_loader_activate`, via `beamtalk_runtime_api:all_instances/1`) | Exact for actors alive at reload. A missed actor silently keeps old code and state shape. |
-| REPL `inspect` / `kill` / `pid-stats` (`is_known_actor`) | Exact within about a second of spawn. |
-| REPL / CLI / MCP / VS Code actor lists, `actor_snapshot_frames` (LiveView) | Eventual, but `:actors` right after a spawn must show it, and a snapshot must leave no gap with the pushes. |
-| `trace_store` bottlenecks (raw ETS fold of `beamtalk_instance_registry`), `actor_health` | Eventual, unordered; missing actors are skipped. |
-| `lookup_class` → `class_of/1` on every pid-based send (`beamtalk_actor.erl`) | Hot path, O(1) ETS lookup. A missing row gives class `unknown`, and `sync_send_remote` then uses the 5 s timeout instead of `infinity` for `TimeoutProxy`. |
-| `count_actors_for_module` (`list-classes`), `workspace_meta` actor count | Eventual. |
+| Reader | Source today | What it asks | How often |
+|---|---|---|---|
+| `class_of/1` via `lookup_class/1` in `beamtalk_actor.erl` (5 direct sites + `resolve_class/2`) | instance table | the class of a bare pid, for dispatch telemetry and the `{Class, Selector}` aggregates, the `TimeoutProxy` → `infinity` timeout rule in `sync_send_remote`, and `deadlock_detected` error context | see below |
+| `Node current actors` / `actorsOf:` / `actorAt:` (`beamtalk_node.erl`, erpc targets) | actor list | every live actor | on demand, local or over erpc; tests pin it (`node_test.bt`, `workspace_actors.btscript`) |
+| REPL / CLI / MCP / VS Code actor lists, `actor_snapshot_frames` (LiveView) | actor list | every live actor with class, module, spawn time; the snapshot must leave no gap with the pushes | on demand, plus on connect |
+| `stop_class_actors` (`removeFromSystem`) | actor list | live actors of one class | per `removeFromSystem` |
+| `should_purge_module` (`beamtalk_repl_eval.erl`) | actor list | does any tracked actor's recorded module equal this eval module? | **after every REPL evaluation** (`cleanup_module` in `after` clauses) |
+| Hot reload (`beamtalk_repl_loader_activate.erl`) | instance table, `all_instances/1` | live pids of one class | once per reloaded class and once per descendant, per reload |
+| `trace_store` bottlenecks (raw fold of `beamtalk_instance_registry`), `actor_health` | instance table | queue depth of every live actor / class of one pid | on demand |
+| `count_actors_for_module` (`list-classes`), `workspace_meta` count | actor list | counts | on demand |
 
-Nothing in stdlib reads `allInstances` or `instanceCount`.
+What `class_of/1` is used for, site by site (read from the code, not measured):
 
-## Decision
+| Site | Class used for | Hint available? |
+|---|---|---|
+| `async_send/4` final clause (`beamtalk_actor.erl` ~1511) | `dispatch_span` metadata and always-on aggregate | no `_known` variant exists |
+| `cast_send/3` → `cast_send_pid/4` (~1609) | same | `cast_send_known/4` passes the record's class |
+| `sync_send/3` → `sync_send_remote/4` (~1829) | span, **and the `TimeoutProxy` rule** (semantic) | `sync_send_known/4` passes it |
+| `sync_send/4` family (~2027) | span only | `sync_send_known/5` passes it |
+| `raise_self_send_during_away_super/2` (~2072), `raise_call_cycle/3` (~2183) | context field of a `deadlock_detected` error | error path only |
+| `kill_and_wait/1` (~2420) | metadata of the `kill` lifecycle event | pid only |
 
-**Insert first, monitor later, in one table set.** Registration stops being a
-call to a server. The caller inserts its rows immediately; a batched pass in
-the registry server monitors the new rows whose actors are still alive and
-deletes the rows of those that are already dead. After that, death is reported
-by the runtime (`'DOWN'`), and the live table is never swept.
+The ordinary Beamtalk send path (`beamtalk_message_dispatch`) already passes the `#beamtalk_object{}` record's class (BT-4113) and never calls `lookup_class`. The bare-pid callers are: `async_send/4` (futures), the generated native facade (`native_facade.rs`, which has the record and a static class in hand), `beamtalk_reactive_subprocess`, `sync_send(ActorPid, node, [])` inside `is_remote`, the two error paths and `kill`. Today a lookup of an unregistered pid (a supervised child) already answers `unknown`.
 
-### 1. Registration is an insert in the caller
+## Options
 
-`beamtalk_object_instances:register(Class, Pid)` becomes, in the calling
-process:
+### S — Status quo
+Keep both singletons and the synchronous call. Cost: 16a is 30× the floor at `+S 4` in the VM; buccaneer's HTTP/2 streams stay bare processes. Benefit: nothing changes, nothing to test. It does not meet BT-4854.
 
-1. Insert the row `{{Class, Pid}, Token, …}` into `beamtalk_instance_registry`
-   and `{Pid, Class, Token}` into `beamtalk_instance_class`. `Token` is a
-   fresh `erlang:unique_integer([monotonic])`. The row also carries what
-   `beamtalk_actor_registry` keeps today (`module`, `spawned_at`).
-2. Add `Pid` to the pending table and increment the pending counter (an
-   `atomics` counter).
-3. If `Pid` is not alive, delete the rows it just inserted (the caller can win
-   the race against a short-lived actor, as seen in about 1% of async starts).
-4. If the counter is above the bound, apply back-pressure (below). Otherwise
-   return `ok`.
+### B — Insert, then monitor, as specified in the first draft
+Caller inserts rows (pid-keyed row with a registration token, class-table row), adds the pid to a pending table, bumps an `atomics` counter; a server drains the pending table in 50 ms batches, monitoring live pids and deleting dead ones; a bounded pending buffer with a synchronous `flush/0` at the bound; a backstop timer reaper (`max(30 s, 20 × pass time)`); a restart pass; a scan rebuild when the heir is lost; the actor list becomes a view; the actor's own `init/1` inserts again. Six mechanisms. 16a 12.7 / 8.9 µs.
 
-The order is rows first, then pending, so a pass never sees a pending pid
-without rows. A caller killed between 1 and 2 leaves rows that nothing
-monitors; the backstop reaper (§4) covers that.
+### C — The minimal table design
+Reviewer's reduction of B, which this ADR accepts as the form a table design should take:
+- **Order:** the caller adds the pid to the pending table *first*, then inserts the rows. A pending pid without rows is harmless if the `'DOWN'` handler deletes by pid lookup, which removes the reaper's main job.
+- **No `is_process_alive` calls** in the drain or the caller: `erlang:monitor/2` on a dead pid delivers `'DOWN'` (`noproc`) immediately.
+- **Drain monitors everything.** It removes exactly what it read (`ets:take/2` per key, never "delete all after a list") and decrements the counter by the number drained, never resets it.
+- **One arbiter for the double insert.** `ets:insert_new/2` on the pid-keyed table is the arbiter; the loser writes nothing (no second row in the class table). No registration token: a pid-reuse guard on the *current monitor reference per pid* is enough, because stale rows survive at most one drain period (50 ms), not 2^28 spawns.
+- **No timer reaper.** Rows written while the server is down are covered by the restart pass, because the pending table survives under the heir (BT-4123). The restart pass monitors every row (monitoring a dead pid yields `'DOWN'`).
+- **Bound** on the pending table with back-pressure (`flush/0` call at the bound); **scan** only to rebuild after the heir itself is lost.
+- `write_concurrency` / `decentralized_counters` on every table written from callers.
+- `trace_store` and every other raw reader go through an API function, not a pattern match on row shape (the current `trace_store` fold matches `{{Class, Pid}}` only and skips everything else as malformed, so a wider row would silently return empty bottlenecks).
 
-When an actor becomes visible does **not change**: the row exists before
-`spawn` returns, and in the async case before `init/1` has run, exactly as
-today.
+Four mechanisms: pending + drain, bound, restart pass, scan rebuild.
 
-### 2. One source of truth
+### D — No registry table; the class travels; the rare readers scan
+Remove all three registrations from the start path. There is no table, no server, no monitor, no cast.
 
-`beamtalk_actor_registry` stops being a separate store. Its API
-(`list_actors/1`, `get_actor/2`, `count_actors_for_module/2`, `list_objects/0`,
-`object_at/1`, `track_spawned/2`) becomes views over the same tables, and the
-`track_spawned` cast is removed. The class-process call in its handler is
-gone with it (its job — resolving `module` — is done once, by the registering
-caller, from data it already has).
+1. **The class travels.** Every `lookup_class` site either gets the class from the caller or computes it only when needed:
+   - sites with a `#beamtalk_object{}` or a static class already pass it (`*_known` variants); add `async_send_known/…` and make the native facade emit the `_known` call (it has `Self` and a static `class_name`); `beamtalk_reactive_subprocess` passes the class it holds;
+   - the error paths and `kill_and_wait/1` are rare and may read `process_info(Pid, {dictionary, '$beamtalk_actor'})` (≈1.6 µs plus a signal to the target, against ≈0.7 µs for the ETS read);
+   - the remaining bare-pid callers use the same read. This is the only cost D adds to a send, and only for sends that arrive with a bare pid. The `{Class, Selector}` aggregate is always on, so a bare-pid send needs the class whether or not telemetry is attached; the `TimeoutProxy` rule needs it semantically, but proxies are reached through `beamtalk_message_dispatch`, which has the record.
+2. **Readers become scans or stop enumerating.** `erlang:processes_iterator/0` plus `process_info(Pid, {dictionary, '$beamtalk_actor'})`. One enumeration costs about **2.5–4.5 µs per process in the node**, whatever the fraction that are actors:
 
-The actor's own `init/1` (via `maybe_announce_lifecycle`) also does the same
-insert, idempotently (same `{Class, Pid}` key; the earlier caller-side row wins
-and is kept, so `spawned_at` is not rewritten). That is what makes the table
-cover **every** start path.
+   | live processes | one enumeration (`+S 4`) |
+   |---|---|
+   | 1k | 3–6 ms |
+   | 100k | 0.21–0.30 s |
+   | 1M | 2.6–4.6 s (two concurrent scans slow each other: 4.9–5.7 s each) |
 
-**What newly becomes visible to `allInstances`, hot reload and the IDE lists:**
-the actors that today are in `beamtalk_actor_registry` but not in
-`beamtalk_object_instances`: supervised and named children
-(`safe_spawn_linked/2`, `safe_spawn_named/5`, `start_actor_child/2,3`) and
-`native:` backing-module actors if their `init/1` runs the lifecycle event
-(**to be verified by the implementation**, which must test each start path in
-the table in `beamtalk_actor.erl`'s Spawn Architecture). Consequences:
+   Reader by reader:
 
-- `Foo allInstances` and `Foo instanceCount` include supervised children of
-  `Foo`.
-- Hot reload (`loader_activate`) now migrates supervised actors too. Today it
-  silently skips them. This is a bug fix, but it is an observable change and
-  goes in the CHANGELOG.
-- `stop_class_actors` and `should_purge_module` see them, so `removeFromSystem`
-  and purge stop supervised children of the class, and the supervisor restarts
-  them according to its strategy. This is the behaviour users expect, but it
-  has not happened before.
-- Nothing is removed from any list: every row either registry had stays.
+   | Reader | Under D | Cost |
+   |---|---|---|
+   | `Node current actors`, `actorsOf:`, `actorAt:`, REPL / CLI / MCP / IDE lists, `trace_store` bottlenecks, `count_actors_for_module`, `workspace_meta` count | one scan per call; `actorAt:` is `process_info` on the parsed pid plus the marker check, no scan | 3–6 ms at 1k; 0.2–0.3 s at 100k; seconds at 1M |
+   | `allInstances` / `instanceCount` | scan, filter by class | O(processes in the node), not O(instances of the class) |
+   | `stop_class_actors` | one scan | per `removeFromSystem` |
+   | **`should_purge_module`** | **does not enumerate actors.** The question is "does anything still run this module's code", which `code:soft_purge/1` / `erlang:check_process_code/2` answer directly, including processes outside the actor list and processes holding funs of the module. The actor list's recorded module is the class module, never the eval module `beamtalk_repl_eval_N`, so the present check is in practice always `true` after the read. To be verified when implemented. | no registry read, no scan; this also removes the per-evaluation O(actors) call today |
+   | Hot reload | **one scan per reload**, grouped by class, instead of one `ets:select` per class and per descendant | one scan per save |
+   | `class_of/1` readers | see item 1 | ≈0 for the common path |
+   | `actor_snapshot_frames` and the incremental IDE feed | the consistent-snapshot problem is real: a scan is not one, and the feed must leave no gap with pushes. Not solved by D alone. | see below |
 
-### 3. Cleanup by batched monitor
+3. **An index only while someone is watching (optional, not part of D's first step).** `ActorSpawned` / `ActorStopped` already exist as system announcements (ADR 0093). An IDE or workspace session that wants an incremental feed subscribes, takes one scan as its initial snapshot, and applies the announcements after it (subscribe first, then scan, then drop announcements older than the scan). The index lives in the subscriber, not in the runtime: no runtime state exists without a consumer, which is the property `docs/beamtalk-principles.md` §4 asks for (the same operations mean the same thing in the REPL, `beamtalk run`, `beamtalk test` and releases). It differs from the dismissed "register only when a workspace is attached" in that `Node current actors`, hot reload and purge work everywhere, by scan; only the incremental feed needs a subscriber.
+4. **What it gives and removes.** Start path removes: both `register` calls, the `track_spawned` cast and its monitor, the class-process call in the cast handler, and the REPL `register_spawned` → `on_actor_spawned` → `register_actor/4` call (the REPL no longer needs to tell the runtime about an actor; the `actor_spawned_hook` for `beamtalk_workspace_meta` moves to the ActorSpawned announcement subscriber). What remains: the `'$beamtalk_actor'` write the actor already does, one `erlang:system_time/1` write for `'$beamtalk_actor_started_at'` (see below), the lifecycle announce and telemetry (BT-4932). Measured prototype: 16a **7.4 µs at `+S 1`** against 8.9 for B and 10.9 today, 11.5 vs 12.7 vs 31.9–36.3 at `+S 4`.
+5. **What `spawned_at` needs.** A scan cannot recover `'$beamtalk_actor_started_at'` unless the process wrote it. D has the generated `init/1` write it (one `system_time` call and one `put`; the cost is not yet measured and goes into the acceptance measurements). That also fixes the ADR 0126 §4 tie-break for compiled actors and does not depend on BT-4871.
+6. **`native:` backing-module actors.** User gen_servers with no marker and no lifecycle event. They are in `allInstances` today only because the facade's `spawn` registers them. Under D they would disappear from `allInstances` and hot reload unless the scan also matches `'$initial_call'` against the backing-module index `beamtalk_actor_registry` (the name-registry module) already keeps for `Node current actors`. D uses that index in the scan; this must be tested, and it is a point where B or C would be safer.
 
-The registry server drains the pending table every 50 ms, or sooner when a
-"kick" message arrives (sent by the caller that moves the counter from 0 to 1,
-so the mailbox holds at most one kick). For each pending pid it checks
-`is_process_alive/1`: a live pid is monitored (one monitor per pid, kept in a
-`pid → {Ref, Token}` map); a dead pid has its rows deleted with
-`ets:delete_object/2` on the exact row. It then handles `'DOWN'` for the
-monitored pids by deleting the same exact rows.
+What D costs, plainly:
+- `allInstances`, hot reload and the actor lists are O(**all processes in the node**), not O(actors of the class). At development scale (1k–10k processes) that is milliseconds. At 100k processes it is 0.2–0.3 s per call, which hurts anything polled; at 1M it is seconds and two concurrent scans slow each other.
+- No O(1) `instanceCount`. No consistent snapshot from a scan.
+- A scan signals every process in the node.
+- Bare-pid sends pay ≈1.6 µs plus a signal until their callers are fixed to pass the class.
+- Native actors need the `'$initial_call'` match.
 
-A clean stop also deletes its own rows from `terminate/2`, so the `'DOWN'` for
-it finds nothing to do. That is an optimisation, not a correctness rule.
+Who is hurt: a node with ~1M processes that runs hot reload, `removeFromSystem` or a polled actor list. The project does not currently serve that case through those readers (hot reload is a development operation; production nodes are not hot-reloaded in bulk), and ordinary runtime paths do not touch them. Whether the project needs to is the one owner call D hinges on.
 
-**Stale window.** A row can outlive its actor by at most the interval between
-the actor's death and the next pass (50 ms by default) if it died before being
-monitored, and by the `'DOWN'` delivery lag (µs to ms) after. Enumerating
-readers (`all/1`, `count/1`, the list views, `object_at/1`) filter with
-`is_process_alive/1`, so the window is not visible to them. `class_of/1` and the
-raw `trace_store` fold do not filter; a dead pid's class is harmless there.
+### What each option leaves to build and maintain
 
-### 4. Bounded pending buffer, and the backstop reaper
+| | mechanisms | start path (`+S 1`, 16a) | readers | risk |
+|---|---|---|---|---|
+| S | 0 new | 10.9 µs | unchanged | the problem stays |
+| B | pending buffer, drain, bound, timer reaper, restart pass, scan rebuild (6) | 8.9 µs | table views | highest: most code and states to test; shared counter and ETS writes on every scheduler |
+| C | pending + drain, bound, restart pass, scan rebuild (4) | ≈8.9 µs | table views | medium: shared writes at `+S 18` unmeasured |
+| D | scan, plumbing the class through sends, `started_at` write (3 small) | 7.4 µs | scans | readers O(processes); native actors; snapshot only with a subscriber |
 
-**The bound.** The pending counter is limited to `PendingMax` (initial value
-8192, set from the open-loop test in the implementation and kept in
-`persistent_term` / application env). At the bound, `register/2` does a
-`gen_server:call` that makes the server drain the pending table, then returns.
-So above the bound, registration is the synchronous call it is today and
-spawners are paced by the server again, but only until the buffer is back
-below the bound. Below the bound nothing waits. The kick mailbox holds at most
-one message, the `'DOWN'` messages are bounded by the live monitored pids, and
-the pending table is bounded by `PendingMax` plus the number of callers
-in flight. Memory is bounded by live actors plus the dead rows of actors that
-died before their monitor, i.e. ≤ one drain period of kills.
+## Decision (recommended)
 
-If the server is down (restarting), the call fails; the caller ignores the
-failure (the codegen already wraps `register` in a `try`), so the bound is soft
-for the length of a restart.
+**Adopt D.** It removes the work instead of making it cheaper, it needs the fewest mechanisms, it has no shared write on the start path (so nothing for 18 schedulers to contend on), it needs no recovery story (no owner, no heir, no rebuild), and the two readers that run most often (`class_of/1` on the send path, `should_purge_module` after every evaluation) stop enumerating or stop looking up. Its costs fall on rare, human-driven readers, which is also where the owner's steer (the registries "may not be needed as much now") points.
 
-**The backstop reaper.** A low-frequency pass for the rows nothing monitors:
-rows from a caller killed between steps 1 and 2, rows inserted while the
-server was restarting, and rows whose `'DOWN'` was lost with a crashed server.
-It is triggered by:
+**Acceptance conditions.** D is accepted only if each of these holds when measured; if one fails, fall back to **C**:
+1. Rows 16a/16c/16d on the maintainer's machine at `+S 18`, before and after, and the nightly vs-elixir gate does not regress. (The cloud-VM numbers in this ADR are not sufficient to accept either design; contention is the thing they cannot show.)
+2. One enumeration at the process counts of the project's real nodes (the maintainer's, and a buccaneer load test), including with 100k–1M live processes, stays inside a bound the owner accepts for hot reload and the REPL actor list.
+3. The `'$beamtalk_actor_started_at'` write in generated `init/1` costs less than the registry hop it replaces.
+4. Native-actor listing through `'$initial_call'` works in a test.
+5. Every reader in the table above has a test (including `trace_store` bottlenecks and `actor_health`, which must not return empty silently).
 
-- a timer, with period `max(30 s, 20 × the last pass time)`, so a pass costs at
-  most about 5% of a core (one pass costs ~0.3 µs per row: 26.8 ms at 100k rows,
-  346 ms at 1M);
-- a server restart (a full pass at `init/1`, §5).
+**If C is chosen instead,** it must be built as specified in [Option C](#c--the-minimal-table-design), with `PendingMax` **a placeholder** (the first draft's 8192 was asserted before any harness result). The open-loop harness (16 spawners, `PendingMax` 512) showed pending peaking at ≈520, server mailbox 36–58 and dead rows ≤530 over ≈400k registrations per mode; the value for production has to come from the `+S 18` run (where does pacing start, how much memory does an async flood hold), and is part of acceptance.
 
-The pass walks the pid index in chunks (`ets:select` with a continuation, 1000
-rows, yielding between chunks), skips every pid that is in the monitor map,
-and for the rest either monitors it (alive) or deletes its rows (dead). It is a
-backstop: the primary cleanup is the monitor, and in steady state the pass
-finds nothing.
+## Observable changes
 
-### 5. Pid-reuse guard and owner crash
+Common to any option that removes the synchronous call:
+- Registration no longer paces spawners: a spawn flood queues runnable actors, as a bare `spawn_monitor` flood does (120k–700k runnable actors in the open loop). That is process backlog, not registry growth. The CI test asserts rows and mailboxes (or, under D, that no registry process or table exists), not process count.
+- The two registries stop being two sources: under D neither exists; under C the actor list is a view of the instance table.
 
-**Pid reuse.** A pid can be reused after about 2^28 spawns. Every row carries
-the registration `Token`, the monitor map records the token it monitored, and
-every delete (`'DOWN'`, pass, reaper, `terminate/2`) is an
-`ets:delete_object/2` of the exact `{Key, Token, …}` row. A late `'DOWN'` for an
-old incarnation cannot delete the row the new incarnation inserted, because the
-tokens differ. A `'DOWN'` whose monitor ref is not the current one for that pid
-is ignored.
+Membership. Under D, scanning by the marker finds every compiled actor, supervised and named children included, so **`allInstances` and hot reload gain members** (today they miss plain supervised and named children). The actor list readers (`Node current actors`, `stop_class_actors`, `should_purge_module`) already have them. Option C with the actor's own `init/1` insert has the same effect. If the owner wants membership kept as today, that is a separate decision (see Alternatives, "Keep membership"). The effect on purge is analysed next.
 
-**Owner crash.** Both tables, and the pending table, name `beamtalk_ets_heir`
-as heir, as today. When the supervisor restarts the server, `init/1` reclaims
-the tables and runs the same pass as the reaper over every row (monitor the
-live ones, delete the dead ones). Callers keep inserting while the server is
-down; their rows are picked up by that pass. If the heir dies too and the
-tables come back empty, `init/1` rebuilds them by a **label scan** (§6) instead
-of leaving running actors unregistered, as `beamtalk_object_instances`
-documents today.
+### Supervised children and `removeFromSystem` / purge
 
-### 6. The label scan, and who uses it
-
-Every actor already writes `'$beamtalk_actor'` (its class) and
-`'$beamtalk_actor_started_at'` into its process dictionary in `init/1`. A
-reader can enumerate actors with `erlang:processes_iterator/0` and
-`process_info(Pid, {dictionary, '$beamtalk_actor'})`, with no table and no
-start-path write. Its cost is about **2.5–4.5 µs per process in the node**,
-whatever the fraction that are actors:
-
-| live processes | one enumeration (`+S 4`) |
-|---|---|
-| 1k | 3–6 ms |
-| 100k | 0.21–0.30 s |
-| 1M | 2.6–4.6 s (two concurrent scans slow each other: 4.9–5.7 s each) |
-
-A scan is not a consistent snapshot, it signals every target process, and it
-scales with all processes. It is used only by readers that are rare and
-exact-at-enumeration:
-
-- hot reload (`loader_activate`), `stop_class_actors`, `should_purge_module`:
-  they need every live actor of a class and run at most a few times a session;
-  the scan sees actors that were never registered;
-- the rebuild of the tables after the heir is lost (§5).
-
-Everything else keeps the table: `class_of/1` and `lookup_class` (hot path,
-0.7 µs vs 1.6 µs plus a signal), `allInstances`/`instanceCount` by class
-(O(class rows), not O(all processes)), `Node current actors`/`actorAt:`
-(erpc targets, polled by tooling), the REPL, IDE and LiveView lists and
-`actor_snapshot_frames` (need a consistent snapshot and metadata), the
-`trace_store` bottlenecks, `count_actors_for_module` and `workspace_meta`.
-
-### 7. What changes observably
-
-- **Registration no longer paces spawners** below the bound. A spawn flood
-  queues runnable actors, as a bare `spawn_monitor` flood does (120k–700k
-  runnable actors in the open loop). That is process backlog, not registry
-  growth. The old pacing comes back only above `PendingMax`.
-- **`allInstances` and the IDE lists** include supervised and named children
-  (§2). The set is otherwise unchanged.
-- **Dead rows** are removed by monitor, with the stale window in §3, and
-  readers filter by liveness.
-- `Node current actors` and the REPL lists are views over the one table:
-  `beamtalk_actor_registry`'s own state, its cast and its monitor per actor are
-  gone.
-- `sustained_concurrent_register_keeps_up_test_` pins "register must be a
-  synchronous call". It is replaced by an open-loop test (many spawners, never
-  draining) asserting bounded registry mailboxes, bounded pending size and
-  bounded dead rows, under clean stops and `exit(kill)` floods. It asserts
-  rows and mailboxes, not process count.
+This hazard exists **on main today**, independent of this ADR: `stop_class_actors/1` reads the registered actor list, which already holds supervised and named children, and kills each. `removeFromSystem` kills the actors *before* it stops the class process and deletes the module. **Reproduction result: pending (a test on main is running); this section is completed before the revision is final.**
 
 ## Prior Art
 
-- **Elixir `Registry`:** partitioned ETS tables; registered processes *link* to
-  the partition process, and the partition deletes rows on `EXIT`. Death is
-  reported by the runtime, which is the property we keep, but with monitors
-  instead of links (see Alternatives).
-- **OTP `pg` and `global`:** monitor-driven membership with a registrar process.
-  Both put a process on the registration path, which is what this ADR removes.
-- **OTP `proc_lib` labels (OTP 27) and `processes_iterator` (OTP 28):** make an
-  enumeration of labelled processes possible without a registry. Idiomatic for
-  identification, not for lookup.
-- **Smalltalk `allInstances`:** a heap scan. BEAM has per-process heaps, so
-  ADR 0005 chose explicit tracking; this ADR keeps that and uses the scan
-  only where Smalltalk would also scan: rarely, on a human's request.
+- **Elixir `Registry`:** partitioned ETS tables; registered processes *link* to the partition, which deletes rows on `EXIT`. We do not copy it: the link is two-way (killing a partition killed 143 of 400 live actors).
+- **OTP `pg` / `global`:** monitor-driven membership with a registrar process, a process on the registration path.
+- **`proc_lib` labels (OTP 27) and `processes_iterator` (OTP 28):** make enumeration of labelled processes possible without a registry; `observer` and `recon` enumerate processes this way.
+- **Smalltalk `allInstances`:** a heap scan (ADR 0005). D keeps Smalltalk's semantics (a scan, on request) and drops the BEAM-specific bookkeeping ADR 0005 added.
 
 ## User Impact
 
-- **Newcomer / Smalltalk developer:** `Foo allInstances` now includes
-  supervised instances of `Foo`; it matches what `Node current actors` already
-  showed. Nothing to learn.
-- **Erlang/Elixir developer:** the registry is ETS plus monitors, with a
-  bounded buffer — the shape they expect. `process_info(links)` is unchanged
-  (no registry link, unlike the partition design).
-- **Operator:** actor start is cheaper under concurrency and no longer
-  funnels through two singletons. The cost: a spawn flood now builds a
-  runnable queue instead of being slowed by the registry, and a hot reload
-  or purge on a node with ~1M processes costs seconds (§6).
-- **Tooling developer:** the IDE and LiveView lists read the same table as
-  `allInstances`, so there is one answer. A row can be stale for up to 50 ms
-  after a death; the readers filter, and the tooling sees no change.
+- **Newcomer / Smalltalk developer:** `Foo allInstances` has the same meaning; supervised instances are now included.
+- **Erlang/Elixir developer:** under D there is nothing to inspect: no registry process, no tables, no links, `process_info` shows the marker. Under C the shape is ETS plus monitors.
+- **Operator:** actor start is cheaper under concurrency. Under D, a scan-backed list or hot reload costs seconds at 1M processes.
+- **Tooling developer:** the IDE gets its snapshot from one scan and its updates from the existing announcements; an IDE that needs an always-on index builds it itself.
 
 ## Steelman Analysis
 
 | Option | Strongest case |
 |---|---|
-| Insert-then-monitor (chosen) | **BEAM veteran:** death is reported by the runtime and the live table is never swept; the idiom of every registry in OTP. **Operator:** visibility timing is unchanged, so nothing that works today moves. |
-| Periodic reaper as primary | **Language designer:** nothing on the start path at all and no monitor per actor; the simplest to reason about. **Operator:** the lowest start cost (8.0 vs 8.9 µs at `+S 1`). |
-| Partition processes with links | **BEAM veteran:** it is the Elixir `Registry` design, so it is a known quantity. |
-| Label scan alone | **Smalltalk purist:** it is `allInstances` as Smalltalk does it. **Language designer:** no state to keep consistent; the table cannot disagree with reality. |
-| Lazy batch | **Operator:** the same cost as the reaper with monitor-driven cleanup. |
+| S | **Operator:** nothing moves; the synchronous call is proven flow control. |
+| B/C (table) | **BEAM veteran:** monitor-driven membership, O(class) reads, exact `instanceCount`, a consistent snapshot, the Elixir `Registry` shape. **Tooling developer:** the IDE lists stay O(actors). |
+| D (no table) | **Language designer:** nothing to keep consistent; the table cannot disagree with reality. **Smalltalk purist:** `allInstances` is a scan, as in Smalltalk. **Operator:** no singleton, no recovery path, the lowest start cost. |
+| Partition-link | **BEAM veteran:** the known Elixir design. |
 
-Tension: the reaper is cheapest at start and the label scan has no state at
-all, but both cost the readers or the operator at scale; the monitor-driven
-design costs about 1 µs of CPU per start at `+S 1` (8.9 vs 8.0 µs) and keeps
-every reader's behaviour.
+Tension: tooling wants an index, operators want no shared state on the start path. D resolves it by putting the index in the subscriber; C keeps it in the runtime.
 
 ## Alternatives Considered
 
 ### Periodic reaper as the primary cleanup (`research/bt-4854-ets-reaper`)
-Caller-side inserts; no monitor per actor; a reaper walks the pid index and
-deletes the rows of dead actors. Fastest registry-with-table design (16a
-11.8 / 8.3 µs). Rejected as the *primary* mechanism: a pass walks every live
-row, at 346 ms per pass at 1M rows (26.8 ms at 100k), so a fixed 250 ms period
-costs more than a core at about 1M actors and the period has to grow with the
-table, which pushes the stale window to seconds at that scale; dead rows peak
-at kills × period (63k with `exit(kill)` in the open loop); and a periodic sweep
-of live state is not the OTP convention, where death is reported by the
-runtime. Kept as a low-frequency backstop (§4).
+Caller-side inserts, no monitor per actor, a reaper walks the pid index. 16a 11.8 / 8.3 µs. Rejected as the primary mechanism: a pass walks every live row, 346 ms per pass at 1M rows (26.8 ms at 100k), so a fixed 250 ms period costs more than a core at about 1M actors and the period has to grow with the table, pushing the stale window to seconds; dead rows peak at kills × period (63k with `exit(kill)`); a periodic sweep of live state is not the OTP convention, where the runtime reports death.
 
 ### Partition processes with links (`research/bt-4854-partition-link`)
-The Elixir `Registry` model: actors link to a partition process that deletes
-rows on `EXIT`. Rejected: the link is two-way, so a partition crash kills its
-actors. Measured: `exit(Partition, kill)` killed **143 of 400** live actors.
-Also: the link appears in `process_info(links)` and, for a trapping actor, as an
-`{'EXIT', Partition, _}` to `onLinkedExit:reason:`; start cost was unstable at
-`+S 4` (14.0–42.6 µs for 16a), because link and unlink are signals to another
-process; and the actor must link from its own `init/1`, which leaves a window
-between `init` and the link that needs a sweep anyway. No BIF sets a monitor
-on behalf of another process, so a "monitor with no message at start" variant
-does not exist either.
+Rejected: a partition crash kills its actors (143 of 400 measured); the link is visible in `process_info(links)` and, for a trapping actor, in `onLinkedExit:reason:`; 16a at `+S 4` was unstable (14.0–42.6 µs); the actor must link from its own `init/1`, leaving a window that needs a sweep anyway. No BIF sets a monitor on behalf of another process, so a monitor variant with no start-path message does not exist.
 
 ### Sharded registries (`research/bt-4854-sharded`)
-One server per scheduler, routed by pid. No gain: 16a 38.7 µs at `+S 4`,
-because the synchronous round trip stays on the path and sharding only spreads
-the queue.
+No gain (16a 38.7 µs at `+S 4`): the synchronous round trip stays on the path.
 
 ### Lazy batch (`research/bt-4854-lazy-batch`)
-Writes go to a pending buffer; the server drains on a timer and before any
-enumeration. Same start cost as the reaper, but readers need a flush and rows
-are invisible until the drain. Under an async flood the buffer reached 680k
-rows (168 MB). Insert-then-monitor is this design with the rows inserted
-at once, so the flush disappears; the bound in §4 closes the same buffer
-problem.
+Pending buffer drained on a timer and before enumeration. Same start cost; readers need a flush; the buffer reached 680k rows (168 MB) under an async flood. C is this design with the rows inserted at once and the bound added.
 
-### Label scan as the registry (`research/bt-4854-label-scan`)
-No tables; readers scan `processes_iterator`. Cheapest start (16a 7.4 µs at
-`+S 1`, about the registry-free floor of 7.0). Rejected as the registry:
-2.6–4.6 s per enumeration at 1M processes; it cannot serve `class_of/1` on
-every send (1.6 µs plus a signal to the target, against 0.7 µs); it is not a
-consistent snapshot; and the cost is per process in the node, not per actor of
-the class. Adopted for the rare readers in §6.
+### Keep membership as it is today
+The decision of this ADR bundles four separable things: registration off the start path; merging the two registries; widening `allInstances` and hot reload to supervised and named actors; moving rare readers to scans. All the measured gain comes from the first. One could keep membership as it is today (for example a `via` column on a table, set by the generated `spawn`, which `allInstances` and hot reload filter on) and take the widening as its own decision once the supervision interplay above is settled. It is rejected here only because it keeps the table and the two-source problem it exists to remove; if the owner wants the widening separated, that is C with a `via` column, and the hazard analysis above decides the second step.
 
 ### Register only when a workspace is attached
-Not prototyped. It breaks `Node current actors` and hot reload under plain
-`beamtalk run` and `beamtalk test`, and adds a mode with different meaning
-in different boot contexts, which `docs/beamtalk-principles.md` §4 rules out.
+Not prototyped. Breaks `Node current actors` and hot reload under plain `beamtalk run` and `beamtalk test`, and adds a mode whose meaning differs by boot context (`docs/beamtalk-principles.md` §4). D's optional subscriber-held index is not this: no runtime state depends on it.
 
 ## Consequences
 
 ### Positive
-- Both singletons are off the start path: no call, no cast, no class-process
-  call per actor. 16a/16c/16d improve by 2.9×/1.2×/1.5× at `+S 4` and 17–19% at
-  `+S 1` in the insert-then-monitor prototype (same VM, medians, `+S 4` noisy).
-- One table, one source of truth; `allInstances`, hot reload and purge stop
-  missing supervised and named actors.
-- Mailboxes and dead rows are bounded by construction, and tested in CI.
-- Visibility timing is unchanged.
+- Registration is off the start path under D: 16a 7.4 µs at `+S 1` (from 10.9), no shared write.
+- Nothing to recover after a crash, and no mailbox or table to bound under D.
+- `should_purge_module` stops reading the actor list on every REPL evaluation.
 
 ### Negative
-- The 2–3× target of BT-4854 is not met by this change; the rest of the start
-  path (~7 µs) is BT-4932.
-- A bounded buffer, a drain pass, a reaper and a rebuild are four mechanisms
-  to test and maintain, where the baseline had one call.
-- Above `PendingMax` registration paces spawners again, and below it a flood
-  can leave a large runnable backlog.
-- The label scan makes hot reload and purge cost seconds on a node with ~1M
-  processes.
-- Supervised actors becoming visible to `allInstances`/hot reload/purge is a
-  behaviour change that existing programs may notice.
+- The 2–3× target of BT-4854 is not met by this change (BT-4932).
+- D makes `allInstances`, hot reload and the actor lists O(processes in the node).
+- Behaviour changes: `allInstances` and hot reload include supervised and named children; native actors need a separate match under D.
+- Tooling that wants an index builds its own from announcements.
 
 ### Neutral
-- `beamtalk_actor_registry` keeps its name and API.
-- The pid-keyed `beamtalk_instance_class` table stays.
-- Nothing in stdlib depends on `allInstances`.
+- The name-registry module `beamtalk_actor_registry.erl` is unchanged.
+- ADR 0126's `actor_started_at/1` starts returning values for compiled actors if D's `started_at` write is adopted (a behaviour change to the `global` tie-break, which today falls back to `random_exit_name/3`).
+
+## Migration Path
+
+Observable changes and what to do about them:
+- **`allInstances` includes supervised and named children** of the class. Code that assumed only `spawn`-started instances now sees more; filter on `supervisor` ancestry if needed. CHANGELOG entry.
+- **Hot reload migrates them too.** Previously missed supervised actors kept old code and old state shape. A supervised actor whose migration fails stays suspended (ADR 0123), so a supervisor shutdown waits out its timeout for it; the implementation documents this on the reload path.
+- **`removeFromSystem` / purge:** see the section above; no change to the set of actors it touches (they were already in the actor list).
+- **`global` name conflicts between compiled actors** resolve by start time instead of `random_exit_name/3` if the `started_at` write is adopted.
+- Anything reading `beamtalk_instance_registry` / `beamtalk_instance_class` directly (`trace_store`) moves to an API or a scan in the implementation PR.
 
 ## Implementation
 
-Phase 2 of BT-4854, one PR, after this ADR is accepted:
+After acceptance, one PR for the chosen option, plus a small PR per behaviour fix found on the way. For D:
+1. Plumb the class: `async_send_known`, native-facade `_known` call, `beamtalk_reactive_subprocess`; the remaining bare-pid sites read the marker.
+2. Generated `init/1` writes `'$beamtalk_actor_started_at'`; `actor_started_at/1` is unchanged.
+3. Scan reader in one runtime module (`beamtalk_actor_scan` or similar) used by `allInstances`, hot reload (one scan per reload, grouped), `stop_class_actors`, the actor lists, `trace_store` bottlenecks, `actor_health`; `'$initial_call'` match for native actors.
+4. `should_purge_module` answers with `code:soft_purge/1` / `erlang:check_process_code/2`.
+5. Remove `register` from generated `spawn*` and the native facade, `track_spawned`, `register_spawned`, `beamtalk_object_instances`, `beamtalk_repl_actors`' state; the `actor_spawned_hook` for `beamtalk_workspace_meta` moves to an announcement subscriber. Update `docs/development/surface-parity.md` for the lists.
+6. Tests: a reader test per row of the reader table; a scan-cost guard; native actors in `allInstances`; a CI test that a spawn flood leaves no registry state.
+7. Measurements as the acceptance conditions; list in the PR what to re-measure on the maintainer's machine at `+S 18`.
 
-1. `beamtalk_object_instances`: caller-side insert, pending table and counter,
-   drain pass, monitor map with tokens, bound, reaper, restart pass, scan
-   rebuild. Rows carry `module` and `spawned_at`.
-2. `beamtalk_repl_actors`: views over the tables; `track_spawned/2` becomes
-   the idempotent insert; the cast and per-actor monitor are removed. In
-   `beamtalk_actor.erl` the change is limited to `maybe_announce_lifecycle/2`
-   and the registration calls.
-3. `loader_activate`, `stop_class_actors`, `should_purge_module`: use the scan
-   reader.
-4. Tests: open-loop CI test; the reader table above; pid-reuse guard;
-   owner-crash recovery (kill the server, kill server and heir); every start
-   path in the Spawn Architecture table; the existing EUnit, stdlib, BUnit,
-   workspace and LiveView suites.
-5. Docs: amendments to the ADRs below, `docs/beamtalk-ddd-model.md` ADR-5,
-   CHANGELOG.
-6. Measure rows 16a/16c/16d before and after on the same machine. The numbers
-   in this ADR are from a 4-core cloud VM; the implementation PR lists what to
-   re-measure on the maintainer's machine at `+S 18`.
-
-Follow-up issue (filed, not done here): `beamtalk-buccaneer` makes HTTP/2
-streams actors again, with 133.6k req/s as the figure to beat.
+Follow-up issue (filed, not done here): `beamtalk-buccaneer` makes HTTP/2 streams actors again, with 133.6k req/s as the figure to beat.
 
 ### Consequences for earlier ADRs
 
 | ADR | Amendment made by the implementation PR |
 |---|---|
-| [0005](0005-beam-object-model-pragmatic-hybrid.md) | "`allInstances` tracks actors via ETS" and "process monitors" stay true; add that cleanup is by batched monitor, rows are inserted by the caller, and supervised and named actors are included. |
-| [0009](0009-otp-application-structure.md) | Its coupling problem (core runtime calling `beamtalk_repl_actors:register_actor/4`) is now a table insert; note `beamtalk_repl_actors` is a view over `beamtalk_object_instances`' tables. |
-| [0069](0069-actor-observability-and-tracing.md) | The class-name lookup description is stale (a bag, `ets:match` by pid). Replace with `class_of/1` on the pid-keyed table, and note that a row may exist up to 50 ms after death. |
-| [0093](0093-announcements-event-substrate.md) | `ActorSpawned` / `ActorStopped` are unchanged; only the tracking that `maybe_announce_lifecycle` also did moves. |
-| [0123](0123-versioned-state-migration.md) | Hot-reload migration enumerates through the scan reader, so it now includes supervised and named actors. |
-| [0126](0126-distribution-location-transparent-actors.md) | `local_actors/0` and `local_actor_at/1` read the one table; erpc behaviour is unchanged. Update the `unknown` class note for a missing row. |
-| [0129](0129-class-side-system-facades.md) | `Node current actors` is "backed by `beamtalk_actor_registry`": now a view over the instance tables; the lifecycle-start tracking is an idempotent insert. |
-| `docs/beamtalk-ddd-model.md` ADR-5 | "ETS table with process monitors": now rows inserted by the caller and monitored in batches, with a reaper backstop. |
+| [0005](0005-beam-object-model-pragmatic-hybrid.md) | "`allInstances` tracks actors via ETS … process monitors" becomes a scan of the process marker (D), or batched monitors (C); supervised and named actors are included. |
+| [0009](0009-otp-application-structure.md) | `beamtalk_object_instances` / `beamtalk_repl_actors` leave the supervision tree (D) or become a view (C). |
+| [0069](0069-actor-observability-and-tracing.md) | The class lookup description (a bag, `ets:match` by pid) is already stale; replace with: the class travels with the reference, a bare pid reads the marker. |
+| [0079](0079-named-actor-registration.md) | The `'$beamtalk_actor'` marker was introduced for identification and `all_registered/0` filtering, not enumeration; it now also backs the scan. `'$beamtalk_actor_started_at'` is written by generated `init/1`. |
+| [0093](0093-announcements-event-substrate.md) | `ActorSpawned` / `ActorStopped` unchanged; they become the only incremental feed, and the source of `actor_spawned_hook`. |
+| [0123](0123-versioned-state-migration.md) | Hot-reload migration enumerates by one scan and includes supervised actors; a failed migration leaves a supervised actor suspended and a supervisor shutdown waits out its timeout. |
+| [0126](0126-distribution-location-transparent-actors.md) | `local_actors/0`, `local_actor_at/1` become scans; the `unknown` class note for a missing row goes away; `actor_started_at/1` returns values for compiled actors. |
+| [0129](0129-class-side-system-facades.md) | `Node current actors` "backed by `beamtalk_actor_registry`" (the process `beamtalk_repl_actors`) becomes a scan. |
+| `docs/beamtalk-ddd-model.md` ADR-5 | "ETS table with process monitors" becomes "process marker, enumerated on demand" (D). |
 
 ## References
-- Related issues: BT-4854, BT-4932 (rest of the start path), BT-4845, BT-4842,
-  BT-4871
-- Related ADRs: 0005, 0009, 0069, 0093, 0123, 0126, 0129, 0079, 0139
-- Research branches: `research/bt-4854-harness` (bench and open-loop tooling,
-  `benchmarks/vs-elixir/research-bt4854/`), `-insert-then-monitor`,
-  `-ets-reaper`, `-label-scan`, `-partition-link`, `-lazy-batch`, `-sharded`
+- Related issues: BT-4854, BT-4932 (rest of the start path), BT-4845, BT-4842, BT-4871
+- Related ADRs: 0005, 0009, 0069, 0079, 0093, 0123, 0126, 0129, 0139
+- Research branches: `research/bt-4854-harness` (`benchmarks/vs-elixir/research-bt4854/`), `-insert-then-monitor`, `-ets-reaper`, `-label-scan`, `-partition-link`, `-lazy-batch`, `-sharded`; WIP of the first draft on `bt-4854-registry-impl`
 - Measurements: BT-4854 phase 1 report and addendum (Linear comments, 2026-11-15)
