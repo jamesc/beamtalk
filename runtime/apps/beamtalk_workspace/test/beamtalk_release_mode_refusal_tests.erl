@@ -52,6 +52,7 @@ raised_kind(Fun) ->
     try Fun() of
         _ -> none
     catch
+        %% BT-4900: kept hand-written - value-returning helper / message prefix (offset 0) match
         error:#{error := #beamtalk_error{kind = Kind}} -> Kind;
         error:#beamtalk_error{kind = Kind} -> Kind;
         _:_ -> other
@@ -311,6 +312,7 @@ compile_source_refusal_names_the_method_test() ->
                 ),
                 ?assert(false)
             catch
+                %% BT-4900: kept hand-written - value-returning helper / message prefix (offset 0) match
                 error:#{error := #beamtalk_error{message = Message}} ->
                     ?assertMatch(
                         {0, _},
