@@ -4205,12 +4205,12 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
     let spawn0_body = &code[spawn0_start..spawn1_start];
     let spawn1_body = &code[spawn1_start..spawn1_end];
     assert_has(
-        "spawn/0 ok-branch must register the instance. Got spawn/0 body",
+        "spawn/0 ok-branch must register the instance (spawn/0 body)",
         spawn0_body,
         &["let _InstReg = try call 'beamtalk_object_instances':'register'("],
     );
     assert_has(
-        "spawn/1 ok-branch must register the instance. Got spawn/1 body",
+        "spawn/1 ok-branch must register the instance (spawn/1 body)",
         spawn1_body,
         &["let _InstReg = try call 'beamtalk_object_instances':'register'("],
     );

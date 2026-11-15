@@ -540,7 +540,7 @@ fn test_number_coercion_untyped_self_field_right_operand_is_guarded() {
         .to_pretty_string();
     assert_has(
         "an untyped self.field right operand must take \
-         the coercion try/catch —",
+         the coercion try/catch",
         &output,
         &["try ", "send_number_coercion"],
     );
@@ -559,7 +559,7 @@ fn test_number_coercion_untyped_self_fields_both_sides_are_guarded() {
         .unwrap()
         .to_pretty_string();
     assert_has(
-        "untyped fields must be guarded —",
+        "untyped fields must be guarded",
         &output,
         &["call 'erlang':'is_number'(", "send_number_coercion"],
     );
@@ -582,12 +582,12 @@ fn test_number_coercion_numeric_typed_self_fields_both_sides_stay_bare() {
         .unwrap()
         .to_pretty_string();
     assert_has(
-        "numeric-typed fields must stay bare —",
+        "numeric-typed fields must stay bare",
         &output,
         &["call 'erlang':'+'("],
     );
     assert_lacks(
-        "numeric-typed fields must stay bare —",
+        "numeric-typed fields must stay bare",
         &output,
         &["try ", "is_number"],
     );
@@ -1007,9 +1007,7 @@ fn test_comparison_guard_for_unknown_receiver() {
     // The test is inline `erlang` type-test BIFs, not a runtime-module call.
     let flat: String = output.split_whitespace().collect::<Vec<_>>().join(" ");
     assert_has(
-        &format!(
-            "unknown comparison receiver must emit the primitive-comparable guard; got: {output}"
-        ),
+        "unknown comparison receiver must emit the primitive-comparable guard",
         &flat,
         &[
             "case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft@1), \
