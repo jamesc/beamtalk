@@ -13,9 +13,6 @@ isolation, and concurrent reader during a write.
 
 -include_lib("eunit/include/eunit.hrl").
 
-%% Logger handler callback used by the miss-policy test to capture warnings.
--export([log/2]).
-
 %%====================================================================
 %% Setup / teardown
 %%====================================================================
@@ -1354,7 +1351,7 @@ miss_policy_fallback_test_() ->
                 %% loaded but unindexed, the exact miss the policy must catch.
                 ok = beamtalk_xref:purge_class(Class),
 
-                HandlerId = install_capture_handler(),
+                HandlerId = beamtalk_test_log:start_capture(all),
                 try
                     #{fallback_classes := Fallback1} = beamtalk_xref:senders_of_bt('isMeta'),
                     %% (1) The purged-but-loaded class is reported for source-scan.
@@ -1368,7 +1365,7 @@ miss_policy_fallback_test_() ->
                     ?assertEqual(sendersOf, maps:get(query, Meta)),
                     ?assertEqual([beamtalk, runtime], maps:get(domain, Meta))
                 after
-                    remove_capture_handler(HandlerId),
+                    beamtalk_test_log:stop_capture(HandlerId),
                     %% Restore the purged class so later tests sharing this VM do
                     %% not inherit the artificially broken (loaded-but-unindexed)
                     %% state and start seeing fallback scans / xref_miss warnings.
@@ -1461,7 +1458,7 @@ nav_query_miss_policy_test_() ->
                 %% --- Artificially purge: now loaded-but-unindexed. ---
                 ok = beamtalk_xref:purge_class(Class),
 
-                HandlerId = install_capture_handler(),
+                HandlerId = beamtalk_test_log:start_capture(all),
                 try
                     #{fallback_classes := RefFb1} =
                         beamtalk_xref:references_to_bt('Integer'),
@@ -1478,7 +1475,7 @@ nav_query_miss_policy_test_() ->
                     ?assert(lists:member(Class, SelFb1)),
                     assert_single_miss(Class, selectorsMatching)
                 after
-                    remove_capture_handler(HandlerId),
+                    beamtalk_test_log:stop_capture(HandlerId),
                     %% Restore so later tests in the same VM see a clean index.
                     ok = beamtalk_xref:register_class(Class, StubRows)
                 end
@@ -1642,7 +1639,7 @@ composite_query_aggregate_readers_test_() ->
                     %% --- Artificially purge: now loaded-but-unindexed. ---
                     ok = beamtalk_xref:purge_class(Class),
 
-                    HandlerId = install_capture_handler(),
+                    HandlerId = beamtalk_test_log:start_capture(all),
                     try
                         #{fallback_classes := SendFb1} = beamtalk_xref:all_sends_bt(),
                         ?assert(lists:member(Class, SendFb1)),
@@ -1653,7 +1650,7 @@ composite_query_aggregate_readers_test_() ->
                         ?assert(lists:member(Class, SentFb1)),
                         assert_single_miss(Class, unusedSelectors)
                     after
-                        remove_capture_handler(HandlerId)
+                        beamtalk_test_log:stop_capture(HandlerId)
                     end
                 after
                     %% Drop the synthetic rows so sibling tests are unaffected.
@@ -1819,52 +1816,12 @@ defines_methods(Pid) ->
 %% Drain the capture mailbox and return the metadata maps of every xref_miss
 %% warning whose `class` field matches `Class`.
 collect_xref_misses(Class) ->
-    receive
-        {captured_log, #{level := warning, msg := {report, Report}}} ->
-            case Report of
-                #{event := xref_miss, class := Class} ->
-                    [Report | collect_xref_misses(Class)];
-                _ ->
-                    collect_xref_misses(Class)
-            end;
-        {captured_log, _Other} ->
-            collect_xref_misses(Class)
-    after 200 ->
-        []
-    end.
-
-install_capture_handler() ->
-    HandlerId = beamtalk_xref_test_capture,
-    Self = self(),
-    %% Ensure the handler module's callback is exported and loaded before the
-    %% logger validates it at add time.
-    _ = code:ensure_loaded(?MODULE),
-    %% The test sys.config pins the primary logger level to `error` for clean
-    %% output, which drops warnings before any handler sees them. Open the gate
-    %% to `all` for the duration of the capture, remembering the old level so it
-    %% can be restored.
-    #{level := OldLevel} = logger:get_primary_config(),
-    put(saved_primary_level, OldLevel),
-    ok = logger:set_primary_config(level, all),
-    ok = logger:add_handler(HandlerId, ?MODULE, #{
-        level => all,
-        filter_default => log,
-        capture_pid => Self
-    }),
-    HandlerId.
-
-remove_capture_handler(HandlerId) ->
-    logger:remove_handler(HandlerId),
-    case get(saved_primary_level) of
-        undefined -> ok;
-        OldLevel -> logger:set_primary_config(level, OldLevel)
-    end,
-    ok.
-
-%% Logger handler callback — forwards log events to the capture pid.
-log(LogEvent, #{capture_pid := Pid}) ->
-    Pid ! {captured_log, LogEvent},
-    ok.
+    [
+        Report
+     || #{level := warning, msg := {report, #{event := xref_miss, class := C} = Report}} <-
+            beamtalk_test_log:drain(),
+        C =:= Class
+    ].
 
 %%====================================================================
 %% ADR 0115 Phase 3: senders_of/2 read path

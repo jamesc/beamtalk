@@ -19,9 +19,6 @@ Covers:
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
-%% logger handler callback (BT-3685 capture handler)
--export([log/2]).
-
 %%====================================================================
 %% Fixtures
 %%====================================================================
@@ -1533,37 +1530,17 @@ run_mode_does_not_warn() ->
     end),
     ?assertEqual([], Events).
 
-%% Capture warning-level events logged while Fun runs (handler callback below).
+%% Capture warning-level events logged while Fun runs. The test sys.config
+%% sets the primary level to error; with_capture/2 lowers it for the run.
 capture_warnings(Fun) ->
-    Id = beamtalk_changelog_capture,
-    %% The test sys.config sets the primary level to error, which would drop
-    %% warnings before they reach any handler.
-    #{level := OrigLevel} = logger:get_primary_config(),
-    ok = logger:set_primary_config(level, warning),
-    _ = logger:remove_handler(Id),
-    ok = logger:add_handler(Id, ?MODULE, #{config => #{parent => self()}, level => warning}),
-    try
+    beamtalk_test_log:with_capture(warning, fun() ->
         Fun(),
-        collect_events([])
-    after
-        _ = logger:remove_handler(Id),
-        ok = logger:set_primary_config(level, OrigLevel)
-    end.
-
-collect_events(Acc) ->
-    receive
-        {captured_log, Event} -> collect_events([Event | Acc])
-    after 200 -> lists:reverse(Acc)
-    end.
+        beamtalk_test_log:collect(200)
+    end).
 
 format_msg({string, S}) -> S;
 format_msg({report, R}) -> io_lib:format("~p", [R]);
 format_msg({Fmt, Args}) -> io_lib:format(Fmt, Args).
-
-%% logger handler callback
-log(Event, #{config := #{parent := Parent}}) ->
-    Parent ! {captured_log, Event},
-    ok.
 
 %%====================================================================
 %% Helpers

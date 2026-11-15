@@ -21,6 +21,7 @@ The capture handler forwards every event to the process that installed it, as
     stop_capture/1,
     await/2,
     drain/0,
+    collect/1,
     log/2
 ]).
 
@@ -93,6 +94,17 @@ drain(Acc) ->
     receive
         {?MODULE, Event} -> drain([Event | Acc])
     after 0 -> lists:reverse(Acc)
+    end.
+
+-doc """
+Collect captured events until none has arrived for `QuietMs`, oldest first. For
+events logged from another process, where `drain/0` could run too early.
+""".
+-spec collect(non_neg_integer()) -> [event()].
+collect(QuietMs) ->
+    receive
+        {?MODULE, Event} -> [Event | collect(QuietMs)]
+    after QuietMs -> []
     end.
 
 %% logger handler callback
