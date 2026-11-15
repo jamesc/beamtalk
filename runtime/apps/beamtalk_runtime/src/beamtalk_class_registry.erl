@@ -1146,7 +1146,7 @@ restarted class (whose new init already re-recorded a different pid) is not
 clobbered by the dying old process: only a row still pointing at `Pid` is
 removed. On a crash (an untrappable kill, or a callback exception: BT-4622)
 this is not called, so a dead row can linger;
-`loaded_class_names/0` / `loaded_class_entries/0` filter those out with a cheap
+`loaded_class_entries/0` filters those out with a cheap
 local `is_process_alive/1` (no messaging), exactly as `live_class_entries/0`
 drops dead pg members.
 """.
@@ -1185,10 +1185,9 @@ loaded_class_names() ->
 -doc """
 Return the live `{ClassName, Pid}` rows from the loaded-class index.
 
-The pid-carrying counterpart to `loaded_class_names/0`: dead-pid rows are
-filtered out with a local `is_process_alive/1` (no gen_server hop). The xref
-miss-policy uses the names for stale-drop and the pids to interrogate only the
-(typically empty) loaded-but-unindexed set.
+Dead-pid rows are filtered out with a local `is_process_alive/1` (no
+gen_server hop). The xref miss-policy uses the names for stale-drop and the
+pids to interrogate only the (typically empty) loaded-but-unindexed set.
 """.
 -spec loaded_class_entries() -> [{class_name(), pid()}].
 loaded_class_entries() ->
