@@ -270,8 +270,7 @@ test_migrate_typed_field_with_default_fails_when_init_unavailable() ->
             )
         end)
     after
-        code:purge(StubMod),
-        code:delete(StubMod)
+        beamtalk_test_module:unload(StubMod)
     end.
 
 test_migrate_drops_undeclared_field() ->
@@ -662,8 +661,7 @@ with_shape_chain_cart_meta(ShapeVersion, Migrations, Fun) ->
     try
         with_class_module_override('ShapeChainCart', StubMod, Fun)
     after
-        code:purge(StubMod),
-        code:delete(StubMod),
+        beamtalk_test_module:unload(StubMod),
         erase(bt_3536_shape_chain_cart_meta_override)
     end.
 

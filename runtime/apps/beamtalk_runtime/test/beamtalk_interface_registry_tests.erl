@@ -23,10 +23,6 @@ Tests the Phase 2 dispatch/3 interface for Beamtalk primitives:
 %% Fixtures
 %%====================================================================
 
-%% A fake Self value — Beamtalk primitives ignore Self entirely.
-fake_self() ->
-    {beamtalk_object, 'Beamtalk class', 'bt@stdlib@beamtalk', self()}.
-
 %%====================================================================
 %% Setup/Teardown
 %%====================================================================
@@ -128,19 +124,25 @@ all_classes_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             {"returns a non-empty list", fun() ->
-                Result = beamtalk_interface:dispatch(allClasses, [], fake_self()),
+                Result = beamtalk_interface:dispatch(
+                    allClasses, [], beamtalk_test_repl:fake_self(beamtalk, self())
+                ),
                 ?assert(is_list(Result)),
                 ?assert(length(Result) > 0)
             end},
             {"all entries are beamtalk_object tuples", fun() ->
-                Classes = beamtalk_interface:dispatch(allClasses, [], fake_self()),
+                Classes = beamtalk_interface:dispatch(
+                    allClasses, [], beamtalk_test_repl:fake_self(beamtalk, self())
+                ),
                 lists:foreach(
                     fun(C) -> ?assertMatch({beamtalk_object, _, _, _}, C) end,
                     Classes
                 )
             end},
             {"includes registered test classes", fun() ->
-                Classes = beamtalk_interface:dispatch(allClasses, [], fake_self()),
+                Classes = beamtalk_interface:dispatch(
+                    allClasses, [], beamtalk_test_repl:fake_self(beamtalk, self())
+                ),
                 ClassTags = [element(2, C) || C <- Classes],
                 ?assert(lists:member('Object class', ClassTags)),
                 ?assert(lists:member('Counter class', ClassTags))
@@ -157,7 +159,7 @@ class_named_test_() ->
         [
             {"atom name returns beamtalk_object for known class", fun() ->
                 Result = beamtalk_interface:dispatch(
-                    'classNamed:', ['Counter'], fake_self()
+                    'classNamed:', ['Counter'], beamtalk_test_repl:fake_self(beamtalk, self())
                 ),
                 ?assertMatch({beamtalk_object, 'Counter class', _, _}, Result),
                 {beamtalk_object, _, _, ClassPid} = Result,
@@ -166,24 +168,28 @@ class_named_test_() ->
             end},
             {"binary name returns beamtalk_object for known class", fun() ->
                 Result = beamtalk_interface:dispatch(
-                    'classNamed:', [<<"Counter">>], fake_self()
+                    'classNamed:', [<<"Counter">>], beamtalk_test_repl:fake_self(beamtalk, self())
                 ),
                 ?assertMatch({beamtalk_object, 'Counter class', _, _}, Result)
             end},
             {"atom name returns nil for unknown class", fun() ->
                 Result = beamtalk_interface:dispatch(
-                    'classNamed:', ['NoSuchClass'], fake_self()
+                    'classNamed:', ['NoSuchClass'], beamtalk_test_repl:fake_self(beamtalk, self())
                 ),
                 ?assertEqual(nil, Result)
             end},
             {"binary name returns nil for unknown class", fun() ->
                 Result = beamtalk_interface:dispatch(
-                    'classNamed:', [<<"NoSuchClassXYZ">>], fake_self()
+                    'classNamed:',
+                    [<<"NoSuchClassXYZ">>],
+                    beamtalk_test_repl:fake_self(beamtalk, self())
                 ),
                 ?assertEqual(nil, Result)
             end},
             {"integer argument returns type_error", fun() ->
-                Result = beamtalk_interface:dispatch('classNamed:', [42], fake_self()),
+                Result = beamtalk_interface:dispatch(
+                    'classNamed:', [42], beamtalk_test_repl:fake_self(beamtalk, self())
+                ),
                 ?assertMatch(
                     {error, #beamtalk_error{kind = type_error, class = 'Beamtalk'}}, Result
                 )
@@ -200,11 +206,11 @@ class_named_metaclass_tag_test_() ->
         [
             {"metaclass tag returns metaclass object for known class", fun() ->
                 ClassObj = beamtalk_interface:dispatch(
-                    'classNamed:', ['Counter'], fake_self()
+                    'classNamed:', ['Counter'], beamtalk_test_repl:fake_self(beamtalk, self())
                 ),
                 {beamtalk_object, _, _, ClassPid} = ClassObj,
                 MetaObj = beamtalk_interface:dispatch(
-                    'classNamed:', ['Counter class'], fake_self()
+                    'classNamed:', ['Counter class'], beamtalk_test_repl:fake_self(beamtalk, self())
                 ),
                 ?assertEqual(
                     {beamtalk_object, 'Metaclass', beamtalk_metaclass_bt, ClassPid},
@@ -298,26 +304,26 @@ help_test_() ->
         [
             {"returns a String for known class by atom", fun() ->
                 {beamtalk_string, Text} = beamtalk_interface:dispatch(
-                    'help:', ['Counter'], fake_self()
+                    'help:', ['Counter'], beamtalk_test_repl:fake_self(beamtalk, self())
                 ),
                 ?assert(byte_size(Text) > 0)
             end},
             {"returns a String for known class by binary name", fun() ->
                 Result = beamtalk_interface:dispatch(
-                    'help:', [<<"Counter">>], fake_self()
+                    'help:', [<<"Counter">>], beamtalk_test_repl:fake_self(beamtalk, self())
                 ),
                 ?assertMatch({beamtalk_string, _}, Result)
             end},
             {"help output includes class name", fun() ->
                 {beamtalk_string, Text} = beamtalk_interface:dispatch(
-                    'help:', ['Counter'], fake_self()
+                    'help:', ['Counter'], beamtalk_test_repl:fake_self(beamtalk, self())
                 ),
                 ?assertNotEqual(nomatch, binary:match(Text, <<"Counter">>))
             end},
             {"unknown class raises class_not_found", fun() ->
                 try
                     beamtalk_interface:dispatch(
-                        'help:', ['NoSuchClassABC'], fake_self()
+                        'help:', ['NoSuchClassABC'], beamtalk_test_repl:fake_self(beamtalk, self())
                     ),
                     ?assert(false)
                 catch
@@ -328,7 +334,9 @@ help_test_() ->
             end},
             {"invalid argument raises type_error", fun() ->
                 try
-                    beamtalk_interface:dispatch('help:', [42], fake_self()),
+                    beamtalk_interface:dispatch(
+                        'help:', [42], beamtalk_test_repl:fake_self(beamtalk, self())
+                    ),
                     ?assert(false)
                 catch
                     error:#{error := Err} ->
@@ -347,14 +355,18 @@ help_selector_test_() ->
         [
             {"returns a String for known class and selector", fun() ->
                 {beamtalk_string, Text} = beamtalk_interface:dispatch(
-                    'help:selector:', ['Counter', increment], fake_self()
+                    'help:selector:',
+                    ['Counter', increment],
+                    beamtalk_test_repl:fake_self(beamtalk, self())
                 ),
                 ?assertNotEqual(nomatch, binary:match(Text, <<"increment">>))
             end},
             {"unknown selector raises does_not_understand", fun() ->
                 try
                     beamtalk_interface:dispatch(
-                        'help:selector:', ['Counter', noSuchMethod], fake_self()
+                        'help:selector:',
+                        ['Counter', noSuchMethod],
+                        beamtalk_test_repl:fake_self(beamtalk, self())
                     ),
                     ?assert(false)
                 catch
@@ -365,7 +377,9 @@ help_selector_test_() ->
             {"unknown class raises class_not_found", fun() ->
                 try
                     beamtalk_interface:dispatch(
-                        'help:selector:', ['NoSuchClass', foo], fake_self()
+                        'help:selector:',
+                        ['NoSuchClass', foo],
+                        beamtalk_test_repl:fake_self(beamtalk, self())
                     ),
                     ?assert(false)
                 catch
@@ -384,18 +398,22 @@ version_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             {"returns a String", fun() ->
-                Result = beamtalk_interface:dispatch(version, [], fake_self()),
+                Result = beamtalk_interface:dispatch(
+                    version, [], beamtalk_test_repl:fake_self(beamtalk, self())
+                ),
                 ?assertMatch({beamtalk_string, _}, Result)
             end},
             {"returns non-empty String", fun() ->
                 {beamtalk_string, Text} = beamtalk_interface:dispatch(
-                    version, [], fake_self()
+                    version, [], beamtalk_test_repl:fake_self(beamtalk, self())
                 ),
                 ?assert(byte_size(Text) > 0)
             end},
             {"matches application vsn when app is loaded", fun() ->
                 _ = application:load(beamtalk_runtime),
-                Result = beamtalk_interface:dispatch(version, [], fake_self()),
+                Result = beamtalk_interface:dispatch(
+                    version, [], beamtalk_test_repl:fake_self(beamtalk, self())
+                ),
                 case application:get_key(beamtalk_runtime, vsn) of
                     {ok, Vsn} when is_list(Vsn) ->
                         ?assertEqual({beamtalk_string, list_to_binary(Vsn)}, Result);
@@ -418,7 +436,7 @@ unknown_selector_test_() ->
             {"unknown selector raises does_not_understand", fun() ->
                 try
                     beamtalk_interface:dispatch(
-                        unknownSelector, [], fake_self()
+                        unknownSelector, [], beamtalk_test_repl:fake_self(beamtalk, self())
                     ),
                     ?assert(false)
                 catch

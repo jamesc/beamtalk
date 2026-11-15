@@ -507,8 +507,7 @@ value_type_send_routes_to_class_module_test() ->
         Result = beamtalk_primitive:send(Self, 'getX', []),
         ?assertEqual(42, Result)
     after
-        code:purge(MockModule),
-        code:delete(MockModule)
+        beamtalk_test_module:unload(MockModule)
     end.
 
 value_type_send_falls_back_to_object_class_test() ->
@@ -519,8 +518,7 @@ value_type_send_falls_back_to_object_class_test() ->
         Result = beamtalk_primitive:send(Self, class, []),
         ?assertEqual('MockVTEmpty', Result)
     after
-        code:purge('bt@mock_vtempty'),
-        code:delete('bt@mock_vtempty')
+        beamtalk_test_module:unload('bt@mock_vtempty')
     end.
 
 value_type_send_does_not_understand_test() ->
@@ -535,8 +533,7 @@ value_type_send_does_not_understand_test() ->
             beamtalk_primitive:send(Self, 'nonexistent', [])
         )
     after
-        code:purge('bt@mock_vterr'),
-        code:delete('bt@mock_vterr')
+        beamtalk_test_module:unload('bt@mock_vterr')
     end.
 
 plain_map_still_routes_to_dictionary_test() ->
@@ -572,8 +569,7 @@ value_type_responds_to_class_method_test() ->
         ?assert(beamtalk_primitive:responds_to(Self, 'getX')),
         ?assertNot(beamtalk_primitive:responds_to(Self, 'nonexistent'))
     after
-        code:purge('bt@mock_vt_rt'),
-        code:delete('bt@mock_vt_rt')
+        beamtalk_test_module:unload('bt@mock_vt_rt')
     end.
 
 value_type_responds_to_object_methods_test() ->
@@ -584,8 +580,7 @@ value_type_responds_to_object_methods_test() ->
         ?assert(beamtalk_primitive:responds_to(Self, class)),
         ?assert(beamtalk_primitive:responds_to(Self, 'printString'))
     after
-        code:purge('bt@mock_vtobj'),
-        code:delete('bt@mock_vtobj')
+        beamtalk_test_module:unload('bt@mock_vtobj')
     end.
 
 %%% ============================================================================
@@ -604,8 +599,7 @@ value_type_inst_var_at_put_raises_immutable_value_test() ->
             beamtalk_primitive:send(Self, 'fieldAt:put:', [x, 99])
         )
     after
-        code:purge('bt@mock_vt_ivar'),
-        code:delete('bt@mock_vt_ivar')
+        beamtalk_test_module:unload('bt@mock_vt_ivar')
     end.
 
 value_type_field_at_put_hint_matches_shared_fixture_test() ->
@@ -633,8 +627,7 @@ value_type_field_at_put_hint_matches_shared_fixture_test() ->
             beamtalk_primitive:send(Self, 'fieldAt:put:', [x, 99])
         )
     after
-        code:purge('bt@mock_vt_ivar_hint'),
-        code:delete('bt@mock_vt_ivar_hint')
+        beamtalk_test_module:unload('bt@mock_vt_ivar_hint')
     end.
 
 value_type_inst_var_at_reads_slot_test() ->
@@ -647,8 +640,7 @@ value_type_inst_var_at_reads_slot_test() ->
         %% Non-existent field returns nil (Smalltalk-80 semantics)
         ?assertEqual(nil, beamtalk_primitive:send(Self, 'fieldAt:', [nonexistent]))
     after
-        code:purge('bt@mock_vt_ivar2'),
-        code:delete('bt@mock_vt_ivar2')
+        beamtalk_test_module:unload('bt@mock_vt_ivar2')
     end.
 
 %%% ============================================================================
@@ -1175,8 +1167,7 @@ value_type_field_at_read_allowed_test() ->
     try
         ?assertEqual(42, beamtalk_primitive:send(Self, 'fieldAt:', [x]))
     after
-        code:purge('bt@mock_vt_field_read'),
-        code:delete('bt@mock_vt_field_read')
+        beamtalk_test_module:unload('bt@mock_vt_field_read')
     end.
 
 %%% ============================================================================
@@ -1768,8 +1759,7 @@ value_type_module_info_is_not_a_method_test_() ->
             ok
         end,
         fun(_) ->
-            code:purge(Module),
-            code:delete(Module)
+            beamtalk_test_module:unload(Module)
         end,
         fun() ->
             Value = #{'$beamtalk_class' => 'ModInfoPlainValue'},

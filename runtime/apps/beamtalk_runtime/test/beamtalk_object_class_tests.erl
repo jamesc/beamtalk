@@ -2116,15 +2116,10 @@ get_class_var_undeclared_name_errors_without_crashing_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                Meta = #{class_field_kinds => #{count => eager}},
-                MetaAbstract = erl_parse:abstract(Meta, [{line, 3}]),
-                Forms = [
-                    {attribute, 1, module, bt3807_undeclared_classvar_mod},
-                    {attribute, 2, export, [{'__beamtalk_meta', 0}]},
-                    {function, 3, '__beamtalk_meta', 0, [{clause, 3, [], [], [MetaAbstract]}]}
-                ],
-                {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-                {module, Mod} = code:load_binary(Mod, "bt3807_undeclared_classvar_mod.erl", Bin),
+                Mod = beamtalk_test_module:meta_module(
+                    bt3807_undeclared_classvar_mod,
+                    #{class_field_kinds => #{count => eager}}
+                ),
                 try
                     ClassInfo = #{
                         name => 'BT3807UndeclaredClassVar',
@@ -2144,9 +2139,7 @@ get_class_var_undeclared_name_errors_without_crashing_test_() ->
                     ?assertEqual(3, gen_server:call(Pid, {set_class_var, count, 3})),
                     ?assertEqual(3, gen_server:call(Pid, {get_class_var, count}))
                 after
-                    _ = code:purge(Mod),
-                    _ = code:delete(Mod),
-                    _ = code:purge(Mod)
+                    beamtalk_test_module:unload(Mod)
                 end
             end)
         ]
@@ -2190,15 +2183,10 @@ get_class_var_declared_late_unassigned_errors_without_crashing_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                Meta = #{class_field_kinds => #{current => late}},
-                MetaAbstract = erl_parse:abstract(Meta, [{line, 3}]),
-                Forms = [
-                    {attribute, 1, module, bt3551_late_classvar_mod},
-                    {attribute, 2, export, [{'__beamtalk_meta', 0}]},
-                    {function, 3, '__beamtalk_meta', 0, [{clause, 3, [], [], [MetaAbstract]}]}
-                ],
-                {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-                {module, Mod} = code:load_binary(Mod, "bt3551_late_classvar_mod.erl", Bin),
+                Mod = beamtalk_test_module:meta_module(
+                    bt3551_late_classvar_mod,
+                    #{class_field_kinds => #{current => late}}
+                ),
                 try
                     ClassInfo = #{
                         name => 'BT3551LateClassVar',
@@ -2225,9 +2213,7 @@ get_class_var_declared_late_unassigned_errors_without_crashing_test_() ->
                     {ok, Snapshot} = beamtalk_class_registry:class_state_snapshot_lookup(Pid),
                     ?assertEqual(true, beamtalk_class_vars:has_value(Snapshot, current))
                 after
-                    _ = code:purge(Mod),
-                    _ = code:delete(Mod),
-                    _ = code:purge(Mod)
+                    beamtalk_test_module:unload(Mod)
                 end
             end)
         ]
@@ -2641,30 +2627,12 @@ bt2195_class_method_source_test_() ->
 %% present, else stands one up; clears all rows so each test starts empty.
 xref_setup() ->
     PgPid = setup(),
-    case whereis(beamtalk_xref) of
-        undefined -> {ok, _} = beamtalk_xref:start_link();
-        _ -> ok
-    end,
-    clear_xref_tables(),
+    ok = beamtalk_test_repl:ensure_xref(),
     PgPid.
 
 xref_teardown(PgPid) ->
-    clear_xref_tables(),
+    beamtalk_test_repl:clear_xref(),
     teardown(PgPid).
-
-clear_xref_tables() ->
-    try
-        sys:replace_state(beamtalk_xref, fun(S) ->
-            ets:delete_all_objects(beamtalk_xref_methods),
-            ets:delete_all_objects(beamtalk_xref_senders),
-            ets:delete_all_objects(beamtalk_xref_references),
-            ets:delete_all_objects(xref_class_gen),
-            S
-        end)
-    catch
-        _:_ -> ok
-    end,
-    ok.
 
 %% True when the compiler AST FFI walker that backs runtime xref send-parsing
 %% is loaded and the compiler server is reachable. In a bare EUnit node the

@@ -558,9 +558,7 @@ with_trace_fixture(Fun) ->
     try
         Fun(filename:join("test", "trace_fixture_test.bt"))
     after
-        code:purge(Mod),
-        code:delete(Mod),
-        code:purge(Mod)
+        beamtalk_test_module:unload(Mod)
     end.
 
 %% True when Bin contains a compiler-made name (ADR 0139) or a raw Erlang

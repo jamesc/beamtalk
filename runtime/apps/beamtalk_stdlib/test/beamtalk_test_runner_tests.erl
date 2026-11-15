@@ -630,8 +630,7 @@ live_teardown(_) ->
     stop_synth_class(?SYNTH_CLASS),
     stop_synth_class('BtTestRunnerSynthTest2'),
     stop_synth_class('BtTestRunnerSynthTest3'),
-    code:purge(?SYNTH_MODULE),
-    code:delete(?SYNTH_MODULE),
+    beamtalk_test_module:unload(?SYNTH_MODULE),
     ok.
 
 %% Stop a synthetic class gen_server if still registered. Its terminate/2
@@ -660,16 +659,8 @@ load_synth_module() ->
         "dispatch(testAlpha, _, Self) -> Self;\n"
         "dispatch(testBravo, _, _Self) -> beamtalk_test_case:fail(<<\"intentional failure\">>);\n"
         "dispatch(testCharlie, _, _Self) -> beamtalk_test_case:skip(<<\"intentional skip\">>).\n",
-    {ok, Tokens, _} = erl_scan:string(Src),
-    Forms = [
-        begin
-            {ok, Form} = erl_parse:parse_form(Ts),
-            Form
-        end
-     || Ts <- split_token_forms(Tokens)
-    ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    {module, Mod} = code:load_binary(Mod, "bt_test_runner_synth_mod.erl", Bin),
+    {Mod, Bin} = beamtalk_test_module:compile(Src),
+    ok = beamtalk_test_module:load_binary(Mod, Bin),
     ok.
 
 register_synth_class() ->
@@ -711,15 +702,6 @@ register_extra_class(Name) ->
         {ok, _Pid} -> ok;
         {error, {already_started, _Pid}} -> ok
     end.
-
-%% Split a flat token list into per-form token lists at each `dot`.
-split_token_forms(Tokens) -> split_token_forms(Tokens, [], []).
-split_token_forms([], _Cur, Acc) ->
-    lists:reverse(Acc);
-split_token_forms([{dot, _} = Dot | Rest], Cur, Acc) ->
-    split_token_forms(Rest, [], [lists:reverse([Dot | Cur]) | Acc]);
-split_token_forms([Tok | Rest], Cur, Acc) ->
-    split_token_forms(Rest, [Tok | Cur], Acc).
 
 %% A class-reference tuple for the synthetic class (element 2 = 'Name class').
 synth_class_ref() ->
@@ -853,16 +835,8 @@ inherited_setup() ->
         "dispatch(setUp, _, Self) -> Self#{ready => true};\n"
         "dispatch(testInherited, _, #{ready := true} = Self) -> Self;\n"
         "dispatch(helper, _, Self) -> Self.\n",
-    {ok, Tokens, _} = erl_scan:string(Src),
-    Forms = [
-        begin
-            {ok, Form} = erl_parse:parse_form(Ts),
-            Form
-        end
-     || Ts <- split_token_forms(Tokens)
-    ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    {module, Mod} = code:load_binary(Mod, "bt_test_runner_inh_mod.erl", Bin),
+    {Mod, Bin} = beamtalk_test_module:compile(Src),
+    ok = beamtalk_test_module:load_binary(Mod, Bin),
     start_inh_class(?INH_ABSTRACT, 'TestCase', true, #{
         setUp => #{arity => 0}, testInherited => #{arity => 0}
     }),
@@ -872,8 +846,7 @@ inherited_setup() ->
 inherited_teardown(_) ->
     stop_synth_class(?INH_CONCRETE),
     stop_synth_class(?INH_ABSTRACT),
-    code:purge(?INH_MODULE),
-    code:delete(?INH_MODULE),
+    beamtalk_test_module:unload(?INH_MODULE),
     ok.
 
 start_inh_class(Name, Superclass, IsAbstract, Methods) ->

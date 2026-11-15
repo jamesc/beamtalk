@@ -188,7 +188,7 @@ with_id_dead_returns_nil_test_() ->
             ?_test(begin
                 Pid = start_session(<<"prim-withid-dead">>),
                 beamtalk_repl_shell:stop(Pid),
-                wait_dead(Pid),
+                beamtalk_test_wait:dead(Pid),
                 %% Entry still in table but PID dead → liveness check returns nil.
                 ?assertEqual(nil, beamtalk_session_primitives:withId(<<"prim-withid-dead">>))
             end)
@@ -495,7 +495,7 @@ dead_session_raises_session_not_found_test_() ->
                 %% Build a view while alive, then kill the shell.
                 View = beamtalk_session_primitives:bindings(Session),
                 beamtalk_repl_shell:stop(Pid),
-                wait_dead(Pid),
+                beamtalk_test_wait:dead(Pid),
                 %% A read against the dead session raises rather than blocking.
                 ?assertBtError(session_not_found, beamtalk_session_primitives:at(View, x))
             end)
@@ -669,7 +669,7 @@ live_sessions_skips_dead_shell_test_() ->
                 {ok, AlivePid} = beamtalk_session_sup:start_session(<<"live-alive">>),
                 {ok, DeadPid} = beamtalk_session_sup:start_session(<<"live-dead">>),
                 exit(DeadPid, kill),
-                wait_dead(DeadPid),
+                beamtalk_test_wait:dead(DeadPid),
                 Sessions = beamtalk_session_primitives:liveSessions(),
                 Pids = [maps:get(pid, S) || S <- Sessions],
                 ?assert(lists:member(AlivePid, Pids)),
@@ -777,21 +777,4 @@ maybe_unregister_meta() ->
             ok;
         _ ->
             ok
-    end.
-
-wait_dead(Pid) ->
-    %% Bounded wait via monitor so an unterminated shell fails the test fast
-    %% instead of hanging the whole EUnit run on infinite recursion.
-    case is_process_alive(Pid) of
-        false ->
-            ok;
-        true ->
-            Ref = erlang:monitor(process, Pid),
-            receive
-                {'DOWN', Ref, process, Pid, _Reason} ->
-                    ok
-            after 5000 ->
-                erlang:demonitor(Ref, [flush]),
-                ?assert(false)
-            end
     end.

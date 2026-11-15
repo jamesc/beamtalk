@@ -426,7 +426,7 @@ reserved_sample(beamtalk_future) ->
 reserved_sample(beamtalk_object) ->
     beamtalk_class_registry:resolve_class_object('Integer');
 reserved_sample(beamtalk_supervisor) ->
-    {beamtalk_supervisor, 'Supervisor', 'bt@stdlib@supervisor', dead_pid()}.
+    {beamtalk_supervisor, 'Supervisor', 'bt@stdlib@supervisor', beamtalk_test_proc:dead_pid()}.
 
 %%% ============================================================================
 %%% Routing: target module, special selectors, dynamic_only
@@ -563,7 +563,9 @@ pid_special_selectors_bypass_target() ->
 supervisor_special_selectors_skip_lookup() ->
     lists:foreach(
         fun(#{<<"class">> := ClassBin} = Row) ->
-            Handle = {beamtalk_supervisor, class_atom(Row), 'bt@stdlib@supervisor', dead_pid()},
+            Handle =
+                {beamtalk_supervisor, class_atom(Row), 'bt@stdlib@supervisor',
+                    beamtalk_test_proc:dead_pid()},
             ?assertEqual(class_atom(Row), beamtalk_primitive:class_of(Handle)),
             lists:foreach(
                 fun(Selector) ->
@@ -685,12 +687,6 @@ error_shape(#beamtalk_error{kind = K, class = C, selector = S, message = M, hint
 
 arity(Selector) ->
     length([C || C <- atom_to_list(Selector), C =:= $:]).
-
-dead_pid() ->
-    {Pid, Ref} = spawn_monitor(fun() -> ok end),
-    receive
-        {'DOWN', Ref, process, Pid, _} -> Pid
-    end.
 
 eval(Source) ->
     {ok, Tokens, _} = erl_scan:string(Source ++ "."),

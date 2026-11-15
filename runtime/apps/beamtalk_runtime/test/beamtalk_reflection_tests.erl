@@ -215,9 +215,7 @@ load_source_module(Mod, Path) ->
     ok.
 
 unload_module(Mod) ->
-    code:purge(Mod),
-    code:delete(Mod),
-    code:purge(Mod),
+    beamtalk_test_module:unload(Mod),
     ok.
 
 %%% ============================================================================

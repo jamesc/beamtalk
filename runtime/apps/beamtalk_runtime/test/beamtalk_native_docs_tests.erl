@@ -550,7 +550,5 @@ create_beam_with_hidden_moduledoc() ->
 
 -doc "Clean up a fake beam file and purge the module.".
 cleanup_fake_beam(BeamPath, Module) ->
-    code:purge(Module),
-    code:delete(Module),
-    code:purge(Module),
+    beamtalk_test_module:unload(Module),
     file:delete(BeamPath).

@@ -23,10 +23,6 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
-%% Fake Self — Beamtalk primitives ignore Self entirely.
-fake_self() ->
-    {beamtalk_object, 'Beamtalk class', 'bt@stdlib@beamtalk', self()}.
-
 with_compiler_stopped(Fun) ->
     WasStarted = lists:keymember(beamtalk_compiler, 1, application:which_applications()),
     stop_compiler_if_started(WasStarted),
@@ -54,20 +50,26 @@ start_compiler_if_was_started(false) ->
 %%====================================================================
 
 erlang_help_dispatch_known_module_test() ->
-    Result = beamtalk_interface:dispatch('erlangHelp:', [<<"lists">>], fake_self()),
+    Result = beamtalk_interface:dispatch(
+        'erlangHelp:', [<<"lists">>], beamtalk_test_repl:fake_self(beamtalk, self())
+    ),
     {beamtalk_string, Raw} = Result,
     ?assertNotEqual(nomatch, binary:match(Raw, <<"lists">>)).
 
 erlang_help_dispatch_known_module_selector_atom_test() ->
     Result = beamtalk_interface:dispatch(
-        'erlangHelp:selector:', [<<"lists">>, reverse], fake_self()
+        'erlangHelp:selector:',
+        [<<"lists">>, reverse],
+        beamtalk_test_repl:fake_self(beamtalk, self())
     ),
     {beamtalk_string, Raw} = Result,
     ?assertNotEqual(nomatch, binary:match(Raw, <<"reverse">>)).
 
 erlang_help_dispatch_known_module_selector_binary_test() ->
     Result = beamtalk_interface:dispatch(
-        'erlangHelp:selector:', [<<"lists">>, <<"reverse">>], fake_self()
+        'erlangHelp:selector:',
+        [<<"lists">>, <<"reverse">>],
+        beamtalk_test_repl:fake_self(beamtalk, self())
     ),
     {beamtalk_string, Raw} = Result,
     ?assertNotEqual(nomatch, binary:match(Raw, <<"reverse">>)).
@@ -78,7 +80,9 @@ erlang_help_dispatch_known_module_selector_binary_test() ->
 
 erlang_help_dispatch_non_binary_module_raises_type_error_test() ->
     try
-        beamtalk_interface:dispatch('erlangHelp:', [42], fake_self()),
+        beamtalk_interface:dispatch(
+            'erlangHelp:', [42], beamtalk_test_repl:fake_self(beamtalk, self())
+        ),
         ?assert(false)
     catch
         error:#{error := Err} ->
@@ -88,7 +92,11 @@ erlang_help_dispatch_non_binary_module_raises_type_error_test() ->
 
 erlang_help_dispatch_unknown_module_raises_not_found_test() ->
     try
-        beamtalk_interface:dispatch('erlangHelp:', [<<"no_such_module_xyz99">>], fake_self()),
+        beamtalk_interface:dispatch(
+            'erlangHelp:',
+            [<<"no_such_module_xyz99">>],
+            beamtalk_test_repl:fake_self(beamtalk, self())
+        ),
         ?assert(false)
     catch
         error:#{error := Err} ->
@@ -97,7 +105,9 @@ erlang_help_dispatch_unknown_module_raises_not_found_test() ->
 
 erlang_help_selector_dispatch_non_binary_module_raises_type_error_test() ->
     try
-        beamtalk_interface:dispatch('erlangHelp:selector:', [42, reverse], fake_self()),
+        beamtalk_interface:dispatch(
+            'erlangHelp:selector:', [42, reverse], beamtalk_test_repl:fake_self(beamtalk, self())
+        ),
         ?assert(false)
     catch
         error:#{error := Err} ->
@@ -106,7 +116,11 @@ erlang_help_selector_dispatch_non_binary_module_raises_type_error_test() ->
 
 erlang_help_selector_dispatch_integer_selector_raises_type_error_test() ->
     try
-        beamtalk_interface:dispatch('erlangHelp:selector:', [<<"lists">>, 42], fake_self()),
+        beamtalk_interface:dispatch(
+            'erlangHelp:selector:',
+            [<<"lists">>, 42],
+            beamtalk_test_repl:fake_self(beamtalk, self())
+        ),
         ?assert(false)
     catch
         error:#{error := Err} ->

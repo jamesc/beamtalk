@@ -30,8 +30,7 @@ compile_core_erlang_loadable_test() ->
     {ok, ModuleName, Binary} = beamtalk_build_worker:compile_core_erlang(CoreErlang),
     {module, ModuleName} = code:load_binary(ModuleName, "", Binary),
     Result = ModuleName:hello(),
-    code:purge(ModuleName),
-    code:delete(ModuleName),
+    beamtalk_test_module:unload(ModuleName),
     ?assertEqual(world, Result).
 
 %% Invalid Core Erlang returns scan error.

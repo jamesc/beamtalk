@@ -1650,8 +1650,7 @@ handle_protocol_definition_register_class_failure_returns_structured_error_test(
         nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"registration_boom">>)
     ),
     %% Cleanup
-    code:purge(ModuleName),
-    code:delete(ModuleName).
+    beamtalk_test_module:unload(ModuleName).
 
 -doc """
 `register_class/0` RETURNING `{error, Reason}` (rather than
@@ -1683,8 +1682,7 @@ handle_protocol_definition_register_class_returns_error_tuple_test() ->
     ?assertNotEqual(
         nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"registration_declined">>)
     ),
-    code:purge(ModuleName),
-    code:delete(ModuleName).
+    beamtalk_test_module:unload(ModuleName).
 
 -doc "Test that successful protocol definition calls register_class/0.".
 handle_protocol_definition_success_test() ->
@@ -1718,8 +1716,7 @@ handle_protocol_definition_success_test() ->
     ?assertEqual(true, erlang:get('__bt_test_register_called')),
     %% Cleanup
     erlang:erase('__bt_test_register_called'),
-    code:purge(ModuleName),
-    code:delete(ModuleName).
+    beamtalk_test_module:unload(ModuleName).
 
 -doc "Test protocol definition success when register_class/0 is not exported.".
 handle_protocol_definition_no_register_class_test() ->
@@ -1739,8 +1736,7 @@ handle_protocol_definition_no_register_class_test() ->
     Result = beamtalk_repl_eval:handle_protocol_definition(ProtocolInfo, [], State),
     ?assertMatch({ok, <<"Protocol NoRegProto defined">>, <<>>, [], _}, Result),
     %% Cleanup
-    code:purge(ModuleName),
-    code:delete(ModuleName).
+    beamtalk_test_module:unload(ModuleName).
 
 -doc """
 BT-4864: a protocol whose `-on_load` hook parks a structured refusal and fails
@@ -1784,8 +1780,7 @@ handle_protocol_definition_surfaces_structured_load_refusal_test() ->
         Result = beamtalk_repl_eval:handle_protocol_definition(ProtocolInfo, [], State),
         ?assertMatch({error, #beamtalk_error{kind = stdlib_shadowing}, <<>>, [], _}, Result)
     after
-        code:purge(ModuleName),
-        code:delete(ModuleName)
+        beamtalk_test_module:unload(ModuleName)
     end.
 
 -doc """

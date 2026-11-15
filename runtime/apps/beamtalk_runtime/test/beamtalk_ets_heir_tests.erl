@@ -77,7 +77,7 @@ owner_death_survives_without_supervisor_message() ->
     with_supervisor_receive_trace(fun() ->
         Owner = spawn_table_owner(?TABLE, beamtalk_ets_heir:heir_option()),
         ets:insert(?TABLE, {key, value}),
-        kill_and_wait(Owner),
+        beamtalk_test_proc:kill_and_wait(Owner),
         sync_heir(),
         ?assertEqual(HeirPid, ets:info(?TABLE, owner)),
         ?assertEqual([{key, value}], ets:lookup(?TABLE, key))
@@ -87,7 +87,7 @@ owner_death_survives_without_supervisor_message() ->
 reclaim_hands_table_back() ->
     HeirPid = whereis(beamtalk_ets_heir),
     Owner = spawn_table_owner(?TABLE, beamtalk_ets_heir:heir_option()),
-    kill_and_wait(Owner),
+    beamtalk_test_proc:kill_and_wait(Owner),
     sync_heir(),
     ?assertEqual(HeirPid, ets:info(?TABLE, owner)),
     ?assertEqual(ok, beamtalk_ets_heir:reclaim(?TABLE)),
@@ -122,7 +122,7 @@ maybe_set_heir_skips_foreign_table() ->
     Owner = spawn_table_owner(?TABLE, []),
     ok = beamtalk_ets_heir:maybe_set_heir(?TABLE),
     ?assertEqual(none, ets:info(?TABLE, heir)),
-    kill_and_wait(Owner),
+    beamtalk_test_proc:kill_and_wait(Owner),
     ?assertEqual(undefined, ets:info(?TABLE)).
 
 adopt_owned_tables_sets_heir() ->
@@ -145,7 +145,7 @@ adopt_owned_tables_sets_heir() ->
             ?assertEqual(HeirPid, AnonHeir),
             %% Tables this process owns are untouched by another's adoption.
             ?assertNotEqual(Self, ets:info(?TABLE, owner)),
-            kill_and_wait(Worker),
+            beamtalk_test_proc:kill_and_wait(Worker),
             sync_heir(),
             ?assertEqual(HeirPid, ets:info(?TABLE, owner)),
             ?assertEqual(HeirPid, ets:info(Anon, owner)),
@@ -234,7 +234,7 @@ ensure_table_creates_then_reclaims() ->
     end,
     ets:insert(?TABLE, {survives, crash}),
     with_supervisor_receive_trace(fun() ->
-        kill_and_wait(First),
+        beamtalk_test_proc:kill_and_wait(First),
         sync_heir()
     end),
     ?assertEqual(HeirPid, ets:info(?TABLE, owner)),
@@ -247,7 +247,7 @@ ensure_table_creates_then_reclaims() ->
         ?assert(false)
     end,
     ?assertEqual([{survives, crash}], ets:lookup(?TABLE, survives)),
-    kill_and_wait(Second),
+    beamtalk_test_proc:kill_and_wait(Second),
     delete_test_table().
 
 trace_store_reclaims_after_crash() ->
@@ -307,7 +307,7 @@ instance_registry_reclaims_after_crash() ->
         ),
         %% The restarted server re-monitored the reclaimed pid: its death
         %% still cleans the registration up.
-        kill_and_wait(Actor),
+        beamtalk_test_proc:kill_and_wait(Actor),
         %% A synchronous call is processed after the queued 'DOWN'.
         _ = sys:get_state(beamtalk_object_instances),
         ?assertEqual([], beamtalk_object_instances:all(Class)),
@@ -339,7 +339,7 @@ owner_restart_reclaims(Name, Tables) ->
     OldPid = whereis(Name),
     ?assert(is_pid(OldPid)),
     with_supervisor_receive_trace(fun() ->
-        kill_and_wait(OldPid),
+        beamtalk_test_proc:kill_and_wait(OldPid),
         NewPid = wait_for_restart(Name, OldPid),
         lists:foreach(
             fun(T) ->
@@ -394,15 +394,6 @@ spawn_table_owner(Table, HeirOpts) ->
         {table_created, Pid} -> Pid
     after 1000 ->
         error(table_owner_timeout)
-    end.
-
-kill_and_wait(Pid) ->
-    MRef = erlang:monitor(process, Pid),
-    exit(Pid, kill),
-    receive
-        {'DOWN', MRef, process, Pid, _} -> ok
-    after 5000 ->
-        error(kill_timeout)
     end.
 
 %% A synchronous call is processed after the 'ETS-TRANSFER' already queued.

@@ -1374,8 +1374,7 @@ class_source_survives_restart_when_module_loaded_test() ->
         gen_server:stop(Pid2)
     after
         _ = file:delete(MetaFile),
-        _ = code:purge(ModuleAtom),
-        _ = code:delete(ModuleAtom)
+        beamtalk_test_module:unload(ModuleAtom)
     end.
 
 %% a class_sources entry for a class in a
@@ -1419,8 +1418,7 @@ class_source_survives_restart_for_packaged_project_test() ->
         application:unset_env(beamtalk_runtime, root_package),
         _ = file:delete(MetaFile),
         _ = file:del_dir_r(ProjectDir),
-        _ = code:purge(ModuleAtom),
-        _ = code:delete(ModuleAtom)
+        beamtalk_test_module:unload(ModuleAtom)
     end.
 
 %% a class_sources entry whose class never resolves to a loaded
@@ -1499,8 +1497,7 @@ class_source_dropped_when_source_file_newer_than_snapshot_test() ->
     after
         _ = file:delete(MetaFile),
         _ = file:del_dir_r(Tmp),
-        _ = code:purge(ModuleAtom),
-        _ = code:delete(ModuleAtom)
+        beamtalk_test_module:unload(ModuleAtom)
     end.
 
 %%% loaded_modules entries are also validated against code:is_loaded

@@ -534,9 +534,7 @@ class_ref_test_() ->
                 )
             after
                 stop_static_class(Pid),
-                _ = code:purge(ModB),
-                _ = code:delete(ModB),
-                _ = code:purge(ModB)
+                beamtalk_test_module:unload(ModB)
             end
         end},
         {"an install blocked on the tag lock completes, and a later erase removes it", fun() ->
@@ -816,20 +814,8 @@ compile_module(Module, Exports, Body) ->
         ]),
         Body
     ]),
-    {ok, Tokens, _} = erl_scan:string(Src),
-    Forms = [
-        begin
-            {ok, Form} = erl_parse:parse_form(FormTokens),
-            Form
-        end
-     || FormTokens <- split_forms(Tokens, [])
-    ],
-    {ok, Module, Bin} = compile:forms(Forms, []),
+    {Module, Bin} = beamtalk_test_module:compile(Src),
     Bin.
-
-split_forms([], []) -> [];
-split_forms([{dot, _} = Dot | Rest], Acc) -> [lists:reverse([Dot | Acc]) | split_forms(Rest, [])];
-split_forms([Token | Rest], Acc) -> split_forms(Rest, [Token | Acc]).
 
 load_module_binary(Module, Bin) ->
     {module, Module} = code:load_binary(Module, atom_to_list(Module) ++ ".erl", Bin),
@@ -1473,9 +1459,7 @@ static_call_target_test_() ->
                 after
                     _ = persistent_term:erase(Probe),
                     stop_static_class(Pid),
-                    _ = code:purge(Module),
-                    _ = code:delete(Module),
-                    _ = code:purge(Module)
+                    beamtalk_test_module:unload(Module)
                 end
             end}
     ]}.

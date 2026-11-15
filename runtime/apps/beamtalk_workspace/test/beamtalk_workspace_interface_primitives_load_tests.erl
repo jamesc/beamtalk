@@ -109,8 +109,8 @@ case_setup() ->
     }.
 
 case_teardown(#{clog_pid := ClogPid, meta_pid := MetaPid, tmp := Tmp, old_home := OldHome}) ->
-    stop_proc(MetaPid),
-    stop_proc(ClogPid),
+    beamtalk_test_proc:shutdown(MetaPid),
+    beamtalk_test_proc:shutdown(ClogPid),
     beamtalk_test_fs:restore_home(OldHome),
     _ = file:del_dir_r(Tmp),
     ok.
@@ -230,7 +230,7 @@ move_class_via_dispatch_success(#{tmp := Tmp, unique := U}) ->
     ClassName = list_to_binary("WiMoveDispatch" ++ U),
     {ClassObj, _OldPath} = define_project_class(Tmp, ClassName),
     NewPath = list_to_binary(filename:join(Tmp, binary_to_list(ClassName) ++ "_moved2.bt")),
-    Self = fake_self(self()),
+    Self = beamtalk_test_repl:fake_self(workspace, self()),
     Result = beamtalk_workspace_interface_primitives:dispatch(
         'moveClass:to:', [ClassObj, NewPath], Self
     ),
@@ -317,7 +317,7 @@ with_reloaded_meta(WorkspaceId, Tmp, Fun) ->
         Fun()
     after
         application:unset_env(beamtalk_runtime, root_package),
-        stop_proc(FreshMetaPid)
+        beamtalk_test_proc:shutdown(FreshMetaPid)
     end.
 
 %%====================================================================
@@ -525,7 +525,7 @@ with_bare_workspace_sup(Fun) ->
             try
                 Fun()
             after
-                stop_proc(SupPid)
+                beamtalk_test_proc:shutdown(SupPid)
             end;
         _ ->
             Fun()
@@ -534,9 +534,6 @@ with_bare_workspace_sup(Fun) ->
 %% supervisor init/1 callback used only by with_bare_workspace_sup/1.
 init(bare_sup) ->
     {ok, {#{strategy => one_for_one, intensity => 1, period => 5}, []}}.
-
-fake_self(Pid) ->
-    {beamtalk_object, 'Workspace', 'bt@stdlib@workspace', Pid}.
 
 wait_for_class(ClassAtom, N) ->
     try
@@ -549,21 +546,5 @@ wait_for_class(ClassAtom, N) ->
 stop_existing(Name) ->
     case whereis(Name) of
         undefined -> ok;
-        Pid -> stop_proc(Pid)
+        Pid -> beamtalk_test_proc:shutdown(Pid)
     end.
-
-stop_proc(Pid) when is_pid(Pid) ->
-    case is_process_alive(Pid) of
-        true ->
-            Ref = monitor(process, Pid),
-            unlink(Pid),
-            exit(Pid, shutdown),
-            receive
-                {'DOWN', Ref, process, Pid, _} -> ok
-            after 5000 -> ok
-            end;
-        false ->
-            ok
-    end;
-stop_proc(_) ->
-    ok.

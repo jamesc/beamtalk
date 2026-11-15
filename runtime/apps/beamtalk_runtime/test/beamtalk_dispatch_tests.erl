@@ -962,8 +962,7 @@ test_module_without_dispatch() ->
         ?assertMatch({error, #beamtalk_error{kind = does_not_understand}}, Result)
     after
         gen_server:stop(Pid),
-        code:purge(bt_test_no_dispatch_stub),
-        code:delete(bt_test_no_dispatch_stub)
+        beamtalk_test_module:unload(bt_test_no_dispatch_stub)
     end.
 
 %% Test that an Erlang exception thrown inside dispatch/4 is caught and
@@ -1004,8 +1003,7 @@ test_dispatch_throws_wrapped() ->
         ?assertBtErrorTuple(_, _, _, Result)
     after
         gen_server:stop(Pid),
-        code:purge(bt_test_dispatch_throws_stub),
-        code:delete(bt_test_dispatch_throws_stub)
+        beamtalk_test_module:unload(bt_test_dispatch_throws_stub)
     end.
 
 %% ADR 0094: the actor display bypass to beamtalk_object_ops only fires when the
@@ -1062,8 +1060,7 @@ test_actor_instance_bypass_throwing_module() ->
         ?assertBtErrorTuple(_, _, _, Result)
     after
         gen_server:stop(Pid),
-        code:purge(bt_test_actor_dispatch_throws_stub),
-        code:delete(bt_test_actor_dispatch_throws_stub)
+        beamtalk_test_module:unload(bt_test_actor_dispatch_throws_stub)
     end.
 
 %% ADR 0094: a default actor (no displayString override) resolves the selector at
@@ -1201,8 +1198,7 @@ test_continue_to_superclass_missing_registry() ->
         ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result)
     after
         gen_server:stop(Pid),
-        code:purge(bt_test_nodisp_leaf),
-        code:delete(bt_test_nodisp_leaf)
+        beamtalk_test_module:unload(bt_test_nodisp_leaf)
     end.
 
 %% Extension method that raises is caught and converted to a structured
@@ -1295,8 +1291,7 @@ test_invoke_method_module_undefined_continues() ->
         catch
             _:_ -> ok
         end),
-        code:purge(ParentModule),
-        code:delete(ParentModule)
+        beamtalk_test_module:unload(ParentModule)
     end.
 
 %% compiled dispatch/4 returning a 3-tuple error is normalized to
@@ -1346,8 +1341,7 @@ test_compiled_dispatch_returns_error_tuple() ->
         ?assertEqual(2, tuple_size(Result))
     after
         gen_server:stop(Pid),
-        code:purge(bt_test_dispatch_err_stub),
-        code:delete(bt_test_dispatch_err_stub)
+        beamtalk_test_module:unload(bt_test_dispatch_err_stub)
     end.
 
 %% super finds extension on superclass (covers super -> extension -> invoke).
@@ -1605,8 +1599,7 @@ bt3482_teardown_chain(#{names := Names, mods := Mods}) ->
     ),
     lists:foreach(
         fun(ModName) ->
-            code:purge(ModName),
-            code:delete(ModName)
+            beamtalk_test_module:unload(ModName)
         end,
         Mods
     ).
@@ -1899,8 +1892,7 @@ test_purged_module_recomputes_past_owner() ->
             {reply, bt3482_deep_result, _},
             beamtalk_dispatch:lookup(bt3482DeepMethod, [], Self, State, Leaf)
         ),
-        code:purge(BaseMod),
-        code:delete(BaseMod),
+        beamtalk_test_module:unload(BaseMod),
         ?assertNot(erlang:function_exported(BaseMod, dispatch, 4)),
         %% Twice: the guarded-stale row recomputes (correctly) every time.
         ?assertMatch(

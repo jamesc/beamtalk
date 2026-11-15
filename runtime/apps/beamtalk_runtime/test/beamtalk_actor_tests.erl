@@ -21,16 +21,11 @@ Tests all actor behaviors:
 -include("beamtalk.hrl").
 
 %% Logger handler callback for the stacktrace-capture tests below
--export([log/2]).
 -export([bt4657_wait/0, init/1]).
 %% BT-3582: `fun ?MODULE:F/A` external fun refs stored in `__methods__` maps
 %% resolve through the module's export table at call time, same as
 %% test_wirecheck_actor.erl's method funs — must be exported.
 -export([bt3582_invoke_block_fun4/4, bt3582_invoke_block_fun2/2]).
-
-log(LogEvent, #{config := #{parent := Parent}}) ->
-    Parent ! {log_event, LogEvent},
-    ok.
 
 %%% Tests
 
@@ -83,15 +78,7 @@ init_actor_started_log_omits_unassigned_late_slot_state_keys_test() ->
     %% duration, matching the same pattern beamtalk_hot_reload_tests.erl /
     %% beamtalk_shape_migration_tests.erl use for their own info-level log
     %% assertions.
-    OldLevel = logger:get_primary_config(),
-    ok = logger:set_primary_config(level, all),
-    Parent = self(),
-    HandlerId = bt_3548_actor_started_state_keys_test_handler,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{
-        config => #{parent => Parent},
-        level => all
-    }),
-    try
+    beamtalk_test_log:with_capture(all, fun() ->
         State = #{
             '$beamtalk_class' => 'LateSlotActor',
             '__methods__' => #{},
@@ -104,10 +91,7 @@ init_actor_started_log_omits_unassigned_late_slot_state_keys_test() ->
         {ok, Keys} = Found,
         ?assertNot(lists:member(proc, Keys)),
         ?assert(lists:member(count, Keys))
-    after
-        logger:remove_handler(HandlerId),
-        logger:set_primary_config(level, maps:get(level, OldLevel))
-    end.
+    end).
 
 %%% Sync message dispatch tests
 
@@ -2396,37 +2380,32 @@ safe_spawn_restores_trap_exit_test() ->
 %%% ============================================================================
 
 spawn_callback_crash_log_includes_stacktrace_test() ->
-    %% Install a capturing logger handler to verify stacktrace is logged
-    Parent = self(),
-    HandlerId = bt_1822_actor_test_handler,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{
-        config => #{parent => Parent},
-        level => all
-    }),
-    try
-        application:set_env(
-            beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests_crash_callback
-        ),
-        ok = ensure_crash_callback_module(),
+    %% Capture log events to verify the stacktrace is logged
+    beamtalk_test_log:with_capture(error, fun() ->
+        try
+            application:set_env(
+                beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests_crash_callback
+            ),
+            ok = ensure_crash_callback_module(),
 
-        FakePid = spawn(fun() ->
-            receive
-                _ -> ok
-            end
-        end),
-        _Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
-        exit(FakePid, kill),
+            FakePid = spawn(fun() ->
+                receive
+                    _ -> ok
+                end
+            end),
+            _Result = beamtalk_actor:register_spawned(FakePid, FakePid, 'Test', test_mod),
+            exit(FakePid, kill),
 
-        %% Collect log events and find the specific callback failure with stacktrace
-        Found = collect_log_with_stacktrace("Actor spawn callback failed", 500),
-        ?assertMatch({ok, _}, Found),
-        {ok, ST} = Found,
-        ?assert(is_list(ST)),
-        ?assert(length(ST) > 0)
-    after
-        application:unset_env(beamtalk_runtime, actor_spawn_callback),
-        logger:remove_handler(HandlerId)
-    end.
+            %% Collect log events and find the specific callback failure with stacktrace
+            Found = collect_log_with_stacktrace("Actor spawn callback failed", 500),
+            ?assertMatch({ok, _}, Found),
+            {ok, ST} = Found,
+            ?assert(is_list(ST)),
+            ?assert(length(ST) > 0)
+        after
+            application:unset_env(beamtalk_runtime, actor_spawn_callback)
+        end
+    end).
 
 -doc """
 Collect log events until we find one matching the expected message with stacktrace
@@ -2437,29 +2416,19 @@ collect_log_with_stacktrace(ExpectedMsg, Timeout) ->
 -doc """
 Collect log events until we find one matching `ExpectedMsg` whose metadata
 carries `MetaKey`, returning `{ok, Value}` for that key. Shared by every
-`log/2`-handler test in this module (AGENTS.md's no-duplicate-implementations
+log-capture test in this module (AGENTS.md's no-duplicate-implementations
 rule) — `collect_log_with_stacktrace/2` is this with `MetaKey = stacktrace`.
 """.
 collect_log_meta(ExpectedMsg, MetaKey, Timeout) ->
-    collect_log_meta(ExpectedMsg, MetaKey, Timeout, erlang:monotonic_time(millisecond)).
-
-collect_log_meta(ExpectedMsg, MetaKey, Timeout, Start) ->
-    Remaining = Timeout - (erlang:monotonic_time(millisecond) - Start),
-    case Remaining > 0 of
-        false ->
-            not_found;
-        true ->
-            receive
-                {log_event, #{msg := {string, Msg}, meta := Meta}} when Msg =:= ExpectedMsg ->
-                    case maps:find(MetaKey, Meta) of
-                        {ok, Value} -> {ok, Value};
-                        error -> collect_log_meta(ExpectedMsg, MetaKey, Timeout, Start)
-                    end;
-                {log_event, _} ->
-                    collect_log_meta(ExpectedMsg, MetaKey, Timeout, Start)
-            after Remaining ->
-                not_found
-            end
+    Matches = fun
+        (#{msg := {string, Msg}, meta := Meta}) ->
+            Msg =:= ExpectedMsg andalso maps:is_key(MetaKey, Meta);
+        (_) ->
+            false
+    end,
+    case beamtalk_test_log:await(Matches, Timeout) of
+        {ok, #{meta := Meta}} -> {ok, maps:get(MetaKey, Meta)};
+        timeout -> not_found
     end.
 
 %%% ============================================================================

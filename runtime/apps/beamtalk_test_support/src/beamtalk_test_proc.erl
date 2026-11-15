@@ -12,8 +12,10 @@ stop/kill. Every stop waits on a monitor `'DOWN'`, never a `timer:sleep`.
 
 -export([
     spawn_idle/0,
+    dead_pid/0,
     kill_and_wait/1,
     stop/1,
+    shutdown/1,
     await_down/2,
     stop_registered/1,
     restart/1
@@ -27,6 +29,13 @@ spawn_idle() ->
             stop -> ok
         end
     end).
+
+-doc "Return the pid of a process that has already exited.".
+-spec dead_pid() -> pid().
+dead_pid() ->
+    {Pid, MRef} = spawn_monitor(fun() -> ok end),
+    ok = await_down(MRef, Pid),
+    Pid.
 
 -doc "Kill `Pid` (`kill` reason) and block until it is dead. No-op on a dead pid.".
 -spec kill_and_wait(pid()) -> ok.
@@ -60,6 +69,29 @@ stop(Pid) when is_pid(Pid) ->
             await_down(MRef, Pid)
     end;
 stop(_) ->
+    ok.
+
+-doc """
+Unlink `Pid`, exit it with `shutdown`, and wait (5 s budget, then give up
+silently) for it to die. Ignores non-pids and dead pids. For test processes
+linked to the test process, where `stop/1`'s `gen_server:stop/3` would race
+the link.
+""".
+-spec shutdown(term()) -> ok.
+shutdown(Pid) when is_pid(Pid) ->
+    case is_process_alive(Pid) of
+        true ->
+            MRef = monitor(process, Pid),
+            unlink(Pid),
+            exit(Pid, shutdown),
+            receive
+                {'DOWN', MRef, process, Pid, _} -> ok
+            after 5000 -> ok
+            end;
+        false ->
+            ok
+    end;
+shutdown(_) ->
     ok.
 
 -doc """

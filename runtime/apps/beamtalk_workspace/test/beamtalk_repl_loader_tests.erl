@@ -784,22 +784,8 @@ loader_teardown(Proj) ->
     %% beamtalk_repl_eval_tests depend on it).
     _ = application:stop(beamtalk_compiler),
     %% Best-effort recursive cleanup of the temp project directory.
-    rm_rf(Proj),
+    beamtalk_test_fs:rm_rf(Proj),
     ok.
-
-rm_rf(Path) ->
-    case filelib:is_dir(Path) of
-        true ->
-            case file:list_dir(Path) of
-                {ok, Entries} ->
-                    lists:foreach(fun(E) -> rm_rf(filename:join(Path, E)) end, Entries),
-                    file:del_dir(Path);
-                {error, _} ->
-                    ok
-            end;
-        false ->
-            file:delete(Path)
-    end.
 
 %% Write a .bt file inside the project src dir and return its absolute path.
 write_bt(Proj, Name, Source) ->

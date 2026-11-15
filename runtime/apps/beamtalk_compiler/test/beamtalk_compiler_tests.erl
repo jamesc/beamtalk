@@ -191,8 +191,7 @@ compile_core_erlang_in_memory() ->
     {module, ModuleName} = code:load_binary(ModuleName, "", Binary),
     Result = ModuleName:eval(#{}),
     %% Clean up
-    code:purge(ModuleName),
-    code:delete(ModuleName),
+    beamtalk_test_module:unload(ModuleName),
     ?assertMatch({42, _}, Result).
 
 compile_core_erlang_invalid() ->
