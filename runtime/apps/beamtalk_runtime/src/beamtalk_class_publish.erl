@@ -37,7 +37,6 @@ plain map of the class fields they read that `beamtalk_object_class` builds with
     register_state_var_xref/2,
     refresh_xref/2,
     put_method_xref/4,
-    safe_xref/1,
     announce_class_lifecycle/2,
     notify_compiler_server_register/2,
     sync_identity/6,
@@ -206,28 +205,9 @@ put_method_xref(ClassName, ClassSide, Selector, Source) ->
     Entry = beamtalk_xref:build_method_entry(
         ClassSide, Selector, Source, indexed, put_method
     ),
-    safe_xref(fun() -> beamtalk_xref:put_method(ClassName, ClassSide, Selector, Entry) end).
-
--doc """
-Run a `beamtalk_xref` gen_server call best-effort.
-
-The xref index is advisory tooling state; a hot patch must not crash the class
-gen_server if it is unavailable. Catches the `noproc`/`{noproc, _}` /
-`{normal, _}` / `{{nodedown, _}, _}` exits raised by `gen_server:call/2`
-against a missing or restarting `beamtalk_xref`, degrading to a no-op. Other
-exits/errors propagate.
-""".
--spec safe_xref(fun(() -> ok)) -> ok.
-safe_xref(Fun) ->
-    %% bt-catcher-audit: not-applicable-no-block - Fun is a gen_server call to beamtalk_xref
-    try Fun() of
-        ok -> ok
-    catch
-        exit:{noproc, _} -> ok;
-        exit:noproc -> ok;
-        exit:{normal, _} -> ok;
-        exit:{{nodedown, _}, _} -> ok
-    end.
+    beamtalk_extensions:safe_xref(fun() ->
+        beamtalk_xref:put_method(ClassName, ClassSide, Selector, Entry)
+    end).
 
 %%====================================================================
 %% Compiler server
