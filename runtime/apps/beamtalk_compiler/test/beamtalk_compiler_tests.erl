@@ -553,6 +553,11 @@ assert_command_recognized(<<"module_name_for_path">>) ->
         {ok, <<"bt@bt4868pkg@test@sample">>},
         beamtalk_compiler:module_name_for_path(<<"sample.bt">>, <<"bt4868pkg">>, test)
     );
+assert_command_recognized(<<"scan_source_dependencies">>) ->
+    ?assertMatch(
+        {ok, #{classes := [#{name := <<"Bt4861Target">>}], native_refs := []}},
+        beamtalk_compiler:scan_source_dependencies(<<"Object subclass: Bt4861Target\n">>)
+    );
 assert_command_recognized(Command) ->
     %% A corpus entry with no dispatch clause is a test-authoring gap, not a
     %% vocabulary mismatch — fail loudly rather than silently skipping it.

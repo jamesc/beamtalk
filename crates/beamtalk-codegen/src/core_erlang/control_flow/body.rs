@@ -32,6 +32,39 @@ use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{Block, Expression};
 use beamtalk_core::source_analysis::Span;
 
+/// What every fold epilogue reads beyond its own `BodyKind` fields: the
+/// predicate variable the statements bound, the threading plan, whether the
+/// body mutated state, and the span the accumulator is tagged with.
+#[derive(Clone, Copy)]
+struct EpilogueCx<'a> {
+    pv: &'a str,
+    plan: &'a ThreadingPlan,
+    has_mutations: bool,
+    span: Span,
+}
+
+/// The fold-body statement a `lower_foldl_*` statement lowerer is lowering,
+/// and the frame, plan and body kind it is lowered in.
+#[derive(Clone, Copy)]
+struct FoldlStmtCx<'a> {
+    expr: &'a Expression,
+    i: usize,
+    is_last: bool,
+    span: Span,
+    frame: FrameId,
+    plan: &'a ThreadingPlan,
+    kind: &'a BodyKind,
+    pred_var: Option<&'a String>,
+}
+
+/// What the statements lowered so far did to the fold body, read by the
+/// statements after them and by the epilogue.
+#[derive(Default)]
+struct FoldlFlags {
+    has_mutations: bool,
+    has_plain_lets: bool,
+}
+
 impl CoreErlangGenerator {
     /// ADR 0111 Addendum 15 (Foldl migration): merges the fold's own
     /// per-iteration unpack (`TupleAccUnpack` in tuple-acc mode; the
@@ -750,8 +783,7 @@ impl CoreErlangGenerator {
         let filtered_body = super::super::util::collect_body_exprs(&body.body);
 
         let mut stmts: Vec<ThreadedStmt> = Vec::new();
-        let mut has_mutations = false;
-        let mut has_plain_lets = false;
+        let mut flags = FoldlFlags::default();
         let gate_split = fault!(SplitFoldStatementGate);
 
         // For predicate-based body kinds, allocate a pred_var upfront.
@@ -819,220 +851,33 @@ impl CoreErlangGenerator {
             // `reject_unthreadable_value_self_field_write`.
             self.reject_unthreadable_value_self_field_write(expr, plan.threads_value_self())?;
 
+            let cx = FoldlStmtCx {
+                expr,
+                i,
+                is_last,
+                span,
+                frame,
+                plan,
+                kind,
+                pred_var: pred_var.as_ref(),
+            };
             if self.is_field_assignment(expr) {
-                has_mutations = true;
-                // ADR 0111 Addendum 15: reuses the SAME `Bind` producer
-                // `lower_letrec_body` uses for its field-write statements —
-                // `lower_field_assignment_bind`'s doc comment documents it as
-                // byte-identical to
-                // `generate_field_assignment_open`'s hand-rolled `Document`
-                // (same helper calls, same mint order, including its own
-                // `thread_ahead` step).
-                let field_val_var =
-                    self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
-                if is_last {
-                    self.lower_field_assign_last_expr(
-                        &mut stmts,
-                        kind,
-                        pred_var.as_ref(),
-                        &field_val_var,
-                        span,
-                    );
-                }
+                self.lower_foldl_field_assignment(cx, &mut flags, &mut stmts)?;
             } else if self.is_actor_self_send(expr) {
-                has_mutations = true;
-                // Emit diagnostic for synchronous self-send in loop body.
-                self.emit_self_send_in_loop_diagnostic(expr, expr.span());
-                // BT-3809: the operands are sequenced ahead of the dispatch
-                // (the same producer `threaded_expression` and the Letrec body
-                // use), not compiled into a closed argument list.
-                let Expression::MessageSend {
-                    selector,
-                    arguments,
-                    ..
-                } = expr
-                else {
-                    return Err(CodeGenError::Internal(
-                        "is_actor_self_send accepted a non-MessageSend expression".to_string(),
-                    ));
-                };
-                let (prelude, dispatch_var) =
-                    self.sequenced_self_dispatch(selector, arguments, frame, span)?;
-                stmts.extend(prelude);
-                if is_last {
-                    self.lower_self_send_last_expr(
-                        &mut stmts,
-                        kind,
-                        pred_var.as_ref(),
-                        &dispatch_var,
-                        span,
-                    );
-                }
+                self.lower_foldl_actor_self_send(cx, &mut flags, &mut stmts)?;
             } else if self.is_tier2_value_call(expr) {
-                // a bare (non-assigned) Tier 2 `value(:...)` statement
-                // (field-stored or local-var-stored block) inside a foldl-based
-                // loop body (do:/collect:/select:/etc). Before this fix, such a
-                // statement fell through to `lower_non_assign_expr`, which treats
-                // it as an ordinary expression and emits a Tier-1-only apply —
-                // crashing with badarity for a genuinely Tier 2 (state-threading)
-                // stored block. `generate_tier2_value_call_doc` always returns a
-                // {Result, NewState} tuple — unpack it and thread the state
-                // forward, mirroring the already-working `Tier2ValueCall`
-                // handling in conditionals.rs and gen_server/methods.rs.
-                //
-                // Excluded for Letrec (whileTrue:/timesRepeat:) loop bodies:
-                // this construct's repro and matrix coverage are
-                // do:/collect:/nested-do: only.
-                has_mutations = true;
-                let tuple_var = self.fresh_temp_var("T2LoopTuple");
-                let expr_doc = self.generate_tier2_value_call_doc(expr)?;
-                let new_state = self.next_state_var();
-                stmts.push(ThreadedStmt::Statement(
-                    docvec![
-                        "let ",
-                        leaf::var(tuple_var.clone()),
-                        " = ",
-                        expr_doc,
-                        " in let ",
-                        leaf::var(new_state),
-                        " = call 'erlang':'element'(2, ",
-                        leaf::var(tuple_var.clone()),
-                        ") in ",
-                    ],
-                    span,
-                ));
-                if is_last {
-                    self.lower_tier2_value_call_last_expr(
-                        &mut stmts,
-                        kind,
-                        pred_var.as_ref(),
-                        &tuple_var,
-                        span,
-                    );
-                }
+                self.lower_foldl_tier2_value_call(cx, &mut flags, &mut stmts)?;
             } else if Self::is_local_var_assignment(expr) {
-                let version_before = self.state_version();
-                if let Some(let_stmts) =
-                    self.try_generate_block_local_plain_let(expr, is_last, &plan.threaded_locals)?
-                {
-                    has_plain_lets = true;
-                    // A producer in the value (ADR 0131 Phase 2b) advances the
-                    // `State` chain with its own prelude: the accumulator the
-                    // kind's epilogue returns is that new version, exactly as
-                    // after any other statement that mutates.
-                    if self.state_version() != version_before {
-                        has_mutations = true;
-                    }
-                    stmts.extend(let_stmts);
-                } else if plan.use_direct_params || plan.use_tuple_acc || plan.use_hybrid_params {
-                    // Direct-params, tuple-acc, or
-                    // hybrid mode. ADR 0111 Addendum 15: reuses the SAME
-                    // `Bind` producer `lower_letrec_local_var_assignment`'s
-                    // own direct-params/hybrid branch calls
-                    // (`lower_direct_var_update_in_loop_bind`, documented as
-                    // byte-identical to `generate_direct_var_update_in_loop`'s
-                    // hand-rolled `Document`). That producer binds the local
-                    // in generator scope exactly as its `Document`-returning
-                    // sibling does, so the newly-bound name is recovered via
-                    // `lookup_var` for the epilogue below instead of a
-                    // direct return value.
-                    has_mutations = true;
-                    self.lower_direct_var_update_in_loop_bind(expr, frame, span, &mut stmts)?;
-                    let new_var = if let Expression::Assignment { target, .. } = expr
-                        && let Expression::Identifier(id) = target.as_ref()
-                    {
-                        self.lookup_var(&id.name).cloned()
-                    } else {
-                        None
-                    };
-                    if is_last {
-                        self.lower_local_assign_last_expr(
-                            &mut stmts,
-                            kind,
-                            pred_var.as_ref(),
-                            plan,
-                            new_var.as_deref(),
-                            span,
-                        );
-                    }
-                } else {
-                    // ADR 0111 Addendum 15: reuses the SAME `Bind` producer
-                    // `lower_letrec_local_var_assignment`'s own `StateAcc`
-                    // branch calls (`lower_local_var_assignment_bind`).
-                    // The returned value var name is captured and
-                    // threaded through to `lower_local_assign_last_expr` (its
-                    // non-tuple-acc branch, below) — BT-3521: a StateAcc-mode
-                    // `FoldlCollect`/`FoldlInject`/predicate family that ends
-                    // on a bare local-var assignment needs the real bound
-                    // value to build its result, not a fictional literal
-                    // `_Val` (the generator only ever mints versioned
-                    // `_ValN` names — see `VariableContext::fresh_var`).
-                    has_mutations = true;
-                    let val_var =
-                        self.lower_local_var_assignment_bind(expr, frame, span, &mut stmts)?;
-                    if is_last {
-                        self.lower_local_assign_last_expr(
-                            &mut stmts,
-                            kind,
-                            pred_var.as_ref(),
-                            plan,
-                            Some(&val_var),
-                            span,
-                        );
-                    }
-                }
+                self.lower_foldl_local_var_assignment(cx, &mut flags, &mut stmts)?;
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                has_plain_lets = true;
-                // BT-4439: each name is written as the local-var assignment
-                // branch above writes `name := ...`.
-                let write_of =
-                    self.loop_body_local_write(plan, plan.use_tuple_acc || plan.use_hybrid_params);
-                let (rhs_var, wrote) = self
-                    .lower_destructure_bind(pattern, value, frame, span, &mut stmts, &write_of)?;
-                has_mutations |= wrote;
-                if is_last {
-                    self.lower_destructure_last_expr(
-                        &mut stmts,
-                        kind,
-                        pred_var.as_ref(),
-                        has_mutations,
-                        &rhs_var,
-                        span,
-                    );
-                }
+                self.lower_foldl_destructure_assignment(
+                    cx, pattern, value, &mut flags, &mut stmts,
+                )?;
             } else if !gate_split
                 && (self.local_producer_locals(expr).is_some()
                     || self.fold_statement_threads_ahead(expr))
             {
-                // ADR 0131 Phase 2b: a nested loop or fold is a local-threading
-                // producer in this fold's frame. `lower_non_assign_expr`
-                // threads it ahead (`thread_ahead` -> `threaded_expression`),
-                // splicing its construct tuple and one `LocalRebind` per
-                // threaded local lowered by this frame's mode, and reads its
-                // value back for the kind's last-expression tail.
-                //
-                // BT-4017: so is every statement `thread_ahead` registers
-                // already unwrapped (`thread_ahead_unwraps`: an inline-threaded
-                // conditional or `match:`, an exception or evaluated-block
-                // producer, a conditional whose receiver is sequenced ahead),
-                // exactly as the `Letrec` body lowers it
-                // (`lower_letrec_non_assign_expr`). Its prelude, the receiver's
-                // `Bind`s included, is this body's own statements, and its value
-                // is read back, never unpacked as a `{Value, StateAcc}` tuple:
-                // `(self done) ifTrue: blk` with a non-literal `blk` compiles to
-                // a plain `ifTrue:` send, whose `element(2, ...)` raised
-                // `badarg` at run time.
-                self.lower_non_assign_expr(
-                    &mut stmts,
-                    expr,
-                    i,
-                    is_last,
-                    &mut has_mutations,
-                    has_plain_lets,
-                    kind,
-                    pred_var.as_ref(),
-                    plan,
-                )?;
+                self.lower_foldl_nested_producer(cx, &mut flags, &mut stmts)?;
             } else if !gate_split
                 && (self.control_flow_has_mutations(expr)
                     || Self::inline_conditional_writes_threaded(
@@ -1041,121 +886,7 @@ impl CoreErlangGenerator {
                         &self.semantic_facts,
                     ))
             {
-                // A construct with mutations that answers {Result, NewStateAcc}
-                // (e.g. a nested loop or fold threading no local). Unpack element(2)
-                // so subsequent iterations see the updated StateAcc. BT-4017: a
-                // statement whose value `thread_ahead` registers unwrapped never
-                // reaches here (`fold_statement_threads_ahead` above).
-                // This applies to ALL foldl body kinds (do:, collect:, select:, reject:,
-                // inject:into:), not just do: — otherwise mutations inside conditionals
-                // nested within collect:/select:/etc. are silently lost.
-                has_mutations = true;
-                let tuple_var = self.fresh_temp_var("CondResult");
-                // BT-4462: the locals THIS construct threads, read before
-                // `generate_expression` below (which may push/pop scopes) so
-                // the lookup reflects this statement's own captured set. Every
-                // construct that threads a local of this body is a producer
-                // here (`local_producer_locals` / `fold_statement_threads_ahead`
-                // above), so an accepted program reaches this unwrap only with
-                // none; one that threads a local is reported
-                // (`ConstructLocalsNotRebound`) rather than reread out of the
-                // carrier, the legacy write-back BT-4462 deleted.
-                let in_place = self.construct_locals_in_place(expr, span);
-                let doc = self.generate_expression(expr)?;
-                let new_state = self.next_state_var();
-                stmts.push(ThreadedStmt::Statement(
-                    docvec![
-                        "let ",
-                        leaf::var(tuple_var.clone()),
-                        " = ",
-                        doc,
-                        " in let ",
-                        leaf::var(new_state),
-                        " = call 'erlang':'element'(2, ",
-                        leaf::var(tuple_var.clone()),
-                        ") in ",
-                    ],
-                    span,
-                ));
-                stmts.extend(in_place);
-                if is_last {
-                    match kind {
-                        BodyKind::FoldlDo => {
-                            // do: discards the result value, returns state only
-                            stmts.push(Self::fold_accumulator(
-                                FoldCarry::StateMap,
-                                leaf::var(self.current_state_var()),
-                                span,
-                            ));
-                        }
-                        BodyKind::FoldlCollect => {
-                            // collect: needs the result value for the list
-                            let result_var = self.fresh_temp_var("CondVal");
-                            stmts.push(Self::fold_accumulator(
-                                FoldCarry::StateMap,
-                                docvec![
-                                    "let ",
-                                    leaf::var(result_var.clone()),
-                                    " = call 'erlang':'element'(1, ",
-                                    leaf::var(tuple_var),
-                                    ") in {[",
-                                    leaf::var(result_var),
-                                    " | AccList], ",
-                                    leaf::var(self.current_state_var()),
-                                    "}",
-                                ],
-                                span,
-                            ));
-                        }
-                        BodyKind::FoldlFilter { .. }
-                        | BodyKind::FoldlBoolPredicate { .. }
-                        | BodyKind::FoldlDetect { .. }
-                        | BodyKind::FoldlCount
-                        | BodyKind::FoldlTakeWhile { .. }
-                        | BodyKind::FoldlDropWhile { .. }
-                        | BodyKind::FoldlPartition { .. }
-                        | BodyKind::FoldlGroupBy { .. }
-                        | BodyKind::FoldlSort { .. } => {
-                            // predicate-based selectors — bind predicate result
-                            if let Some(pv) = pred_var.as_ref() {
-                                let result_var = self.fresh_temp_var("CondVal");
-                                stmts.push(ThreadedStmt::Statement(
-                                    docvec![
-                                        "let ",
-                                        leaf::var(result_var.clone()),
-                                        " = call 'erlang':'element'(1, ",
-                                        leaf::var(tuple_var),
-                                        ") in let ",
-                                        leaf::var(pv.clone()),
-                                        " = ",
-                                        leaf::var(result_var),
-                                        " in ",
-                                    ],
-                                    span,
-                                ));
-                            }
-                        }
-                        BodyKind::FoldlInject => {
-                            // inject:into: — result is the new accumulator
-                            let result_var = self.fresh_temp_var("CondVal");
-                            stmts.push(Self::fold_accumulator(
-                                FoldCarry::StateMap,
-                                docvec![
-                                    "let ",
-                                    leaf::var(result_var.clone()),
-                                    " = call 'erlang':'element'(1, ",
-                                    leaf::var(tuple_var),
-                                    ") in {",
-                                    leaf::var(result_var),
-                                    ", ",
-                                    leaf::var(self.current_state_var()),
-                                    "}",
-                                ],
-                                span,
-                            ));
-                        }
-                    }
-                }
+                self.lower_foldl_control_flow_with_mutations(cx, &mut flags, &mut stmts)?;
             } else {
                 // Non-assignment expression: handling depends on BodyKind.
                 self.lower_non_assign_expr(
@@ -1163,8 +894,8 @@ impl CoreErlangGenerator {
                     expr,
                     i,
                     is_last,
-                    &mut has_mutations,
-                    has_plain_lets,
+                    &mut flags.has_mutations,
+                    flags.has_plain_lets,
                     kind,
                     pred_var.as_ref(),
                     plan,
@@ -1177,526 +908,1073 @@ impl CoreErlangGenerator {
         // `Document` text as before, tagged with what it carries.
         let epilogue_span = body.span;
 
-        // FoldlFilter: append the predicate case expression after all statements.
-        if let BodyKind::FoldlFilter { item_var, negate } = kind
-            && let Some(pv) = &pred_var
-        {
-            let condition_doc: Document<'static> = if *negate {
-                docvec!["call 'erlang':'not'(", leaf::var(pv.clone()), ")",]
-            } else {
-                leaf::var(pv.clone())
+        // At most one epilogue applies: `kind` is one `BodyKind`, and every
+        // epilogue reads the predicate variable the statements bound.
+        if let Some(pv) = &pred_var {
+            let cx = EpilogueCx {
+                pv,
+                plan,
+                has_mutations: flags.has_mutations,
+                span: epilogue_span,
             };
-            if plan.use_tuple_acc {
-                // Tuple mode — repack current var bindings into the result tuple.
-                let vars_doc = plan.current_vars_doc(self);
-                stmts.push(Self::fold_accumulator(
-                    plan.fold_carry(),
-                    docvec![
-                        "case ",
-                        condition_doc,
-                        " of <'true'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], ",
-                        vars_doc.clone(),
-                        "} <'false'> when 'true' -> {AccList, ",
-                        vars_doc,
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end",
-                    ],
-                    epilogue_span,
-                ));
-            } else {
-                let final_state = if has_mutations {
-                    self.current_state_var()
-                } else {
-                    "StateAcc".to_string()
-                };
-                stmts.push(Self::fold_accumulator(
-                    FoldCarry::StateMap,
-                    docvec![
-                        "case ",
-                        condition_doc,
-                        " of <'true'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], ",
-                        leaf::var(final_state.clone()),
-                        "} <'false'> when 'true' -> {AccList, ",
-                        leaf::var(final_state),
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end",
-                    ],
-                    epilogue_span,
-                ));
-            }
-        }
-
-        // FoldlBoolPredicate — update boolean accumulator based on predicate result.
-        // Match only 'true'/'false' explicitly (consistent with FoldlFilter and lists:any/all).
-        if let BodyKind::FoldlBoolPredicate { is_all } = kind
-            && let Some(pv) = &pred_var
-        {
-            if plan.use_tuple_acc {
-                let vars_doc = plan.current_vars_doc(self);
-                if *is_all {
-                    // allSatisfy: pred=false → set BoolAcc to false; pred=true → keep
-                    stmts.push(Self::fold_accumulator(
-                        plan.fold_carry(),
-                        docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'false'> when 'true' -> {'false', ",
-                            vars_doc.clone(),
-                            "} <'true'> when 'true' -> {BoolAcc, ",
-                            vars_doc,
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end",
-                        ],
-                        epilogue_span,
-                    ));
-                } else {
-                    // anySatisfy: pred=true → set BoolAcc to true; pred=false → keep
-                    stmts.push(Self::fold_accumulator(
-                        plan.fold_carry(),
-                        docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {'true', ",
-                            vars_doc.clone(),
-                            "} <'false'> when 'true' -> {BoolAcc, ",
-                            vars_doc,
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end",
-                        ],
-                        epilogue_span,
-                    ));
+            match kind {
+                BodyKind::FoldlFilter { item_var, negate } => {
+                    self.lower_foldl_epilogue_filter(item_var, *negate, cx, &mut stmts);
                 }
-            } else {
-                let final_state = if has_mutations {
-                    self.current_state_var()
-                } else {
-                    "StateAcc".to_string()
-                };
-                if *is_all {
-                    stmts.push(Self::fold_accumulator(
-                        FoldCarry::StateMap,
-                        docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'false'> when 'true' -> {'false', ",
-                            leaf::var(final_state.clone()),
-                            "} <'true'> when 'true' -> {BoolAcc, ",
-                            leaf::var(final_state),
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end",
-                        ],
-                        epilogue_span,
-                    ));
-                } else {
-                    stmts.push(Self::fold_accumulator(
-                        FoldCarry::StateMap,
-                        docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {'true', ",
-                            leaf::var(final_state.clone()),
-                            "} <'false'> when 'true' -> {BoolAcc, ",
-                            leaf::var(final_state),
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end",
-                        ],
-                        epilogue_span,
-                    ));
+                BodyKind::FoldlBoolPredicate { is_all } => {
+                    self.lower_foldl_epilogue_bool_predicate(*is_all, cx, &mut stmts);
                 }
+                BodyKind::FoldlDetect { item_var } => {
+                    self.lower_foldl_epilogue_detect(item_var, cx, &mut stmts);
+                }
+                BodyKind::FoldlCount => self.lower_foldl_epilogue_count(cx, &mut stmts),
+                BodyKind::FoldlTakeWhile { item_var } => {
+                    self.lower_foldl_epilogue_take_while(item_var, cx, &mut stmts);
+                }
+                BodyKind::FoldlDropWhile { item_var } => {
+                    self.lower_foldl_epilogue_drop_while(item_var, cx, &mut stmts);
+                }
+                BodyKind::FoldlPartition { item_var } => {
+                    self.lower_foldl_epilogue_partition(item_var, cx, &mut stmts);
+                }
+                BodyKind::FoldlGroupBy { item_var } => {
+                    self.lower_foldl_epilogue_group_by(item_var, cx, &mut stmts);
+                }
+                BodyKind::FoldlSort { state_key_var } => {
+                    self.lower_foldl_epilogue_sort(state_key_var, cx, &mut stmts);
+                }
+                _ => {}
             }
-        }
-
-        // FoldlDetect — update found-item accumulator on first match.
-        // Accumulator is {FoundItem, FoundFlag, StateVars...}.
-        // The fold lambda skips the body once FoundFlag is 'true' (`skip_when_decided`,
-        // BT-3805), so a predicate hit here is always the first match.
-        if let BodyKind::FoldlDetect { item_var } = kind
-            && let Some(pv) = &pred_var
-        {
-            if plan.use_tuple_acc {
-                let vars_doc = plan.current_vars_doc(self);
-                stmts.push(Self::fold_accumulator(
-                    plan.fold_carry(),
-                    docvec![
-                        "case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {",
-                        leaf::var(item_var.clone()),
-                        ", 'true', ",
-                        vars_doc.clone(),
-                        "} <'false'> when 'true' -> {FoundItem, FoundFlag, ",
-                        vars_doc,
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end",
-                    ],
-                    epilogue_span,
-                ));
-            } else {
-                let final_state = if has_mutations {
-                    self.current_state_var()
-                } else {
-                    "StateAcc".to_string()
-                };
-                stmts.push(Self::fold_accumulator(
-                    FoldCarry::StateMap,
-                    docvec![
-                        "case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {",
-                        leaf::var(item_var.clone()),
-                        ", 'true', ",
-                        leaf::var(final_state.clone()),
-                        "} <'false'> when 'true' -> {FoundItem, FoundFlag, ",
-                        leaf::var(final_state),
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end",
-                    ],
-                    epilogue_span,
-                ));
-            }
-        }
-
-        // FoldlCount — increment count accumulator on predicate match.
-        // Accumulator is {Count, StateVars...}.
-        if matches!(kind, BodyKind::FoldlCount)
-            && let Some(pv) = &pred_var
-        {
-            if plan.use_tuple_acc {
-                let vars_doc = plan.current_vars_doc(self);
-                stmts.push(Self::fold_accumulator(
-                    plan.fold_carry(),
-                    docvec![
-                        "case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
-                        vars_doc.clone(),
-                        "} <'false'> when 'true' -> {CountAcc, ",
-                        vars_doc,
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end",
-                    ],
-                    epilogue_span,
-                ));
-            } else {
-                let final_state = if has_mutations {
-                    self.current_state_var()
-                } else {
-                    "StateAcc".to_string()
-                };
-                stmts.push(Self::fold_accumulator(
-                    FoldCarry::StateMap,
-                    docvec![
-                        "case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
-                        leaf::var(final_state.clone()),
-                        "} <'false'> when 'true' -> {CountAcc, ",
-                        leaf::var(final_state),
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end",
-                    ],
-                    epilogue_span,
-                ));
-            }
-        }
-
-        // FoldlTakeWhile — include item while predicate holds.
-        // Once predicate returns false, StillTaking flips to false and all subsequent
-        // elements are excluded. Accumulator: {ResultList, StillTaking, StateVars...}.
-        if let BodyKind::FoldlTakeWhile { item_var } = kind
-            && let Some(pv) = &pred_var
-        {
-            if plan.use_tuple_acc {
-                let vars_doc = plan.current_vars_doc(self);
-                stmts.push(Self::fold_accumulator(
-                    plan.fold_carry(),
-                    docvec![
-                        "case StillTaking of \
-                             <'false'> when 'true' -> {AccList, 'false', ",
-                        vars_doc.clone(),
-                        "} <'true'> when 'true' -> case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], 'true', ",
-                        vars_doc.clone(),
-                        "} <'false'> when 'true' -> {AccList, 'false', ",
-                        vars_doc,
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end end",
-                    ],
-                    epilogue_span,
-                ));
-            } else {
-                let final_state = if has_mutations {
-                    self.current_state_var()
-                } else {
-                    "StateAcc".to_string()
-                };
-                stmts.push(Self::fold_accumulator(
-                    FoldCarry::StateMap,
-                    docvec![
-                        "case StillTaking of \
-                             <'false'> when 'true' -> {AccList, 'false', ",
-                        leaf::var(final_state.clone()),
-                        "} <'true'> when 'true' -> case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], 'true', ",
-                        leaf::var(final_state.clone()),
-                        "} <'false'> when 'true' -> {AccList, 'false', ",
-                        leaf::var(final_state),
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end end",
-                    ],
-                    epilogue_span,
-                ));
-            }
-        }
-
-        // FoldlDropWhile — drop items while predicate holds.
-        // Once predicate returns false, StillDropping flips to false and all subsequent
-        // elements are included. Accumulator: {ResultList, StillDropping, StateVars...}.
-        if let BodyKind::FoldlDropWhile { item_var } = kind
-            && let Some(pv) = &pred_var
-        {
-            if plan.use_tuple_acc {
-                let vars_doc = plan.current_vars_doc(self);
-                stmts.push(Self::fold_accumulator(
-                    plan.fold_carry(),
-                    docvec![
-                        "case StillDropping of \
-                             <'false'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], 'false', ",
-                        vars_doc.clone(),
-                        "} <'true'> when 'true' -> case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {AccList, 'true', ",
-                        vars_doc.clone(),
-                        "} <'false'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], 'false', ",
-                        vars_doc,
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end end",
-                    ],
-                    epilogue_span,
-                ));
-            } else {
-                let final_state = if has_mutations {
-                    self.current_state_var()
-                } else {
-                    "StateAcc".to_string()
-                };
-                stmts.push(Self::fold_accumulator(
-                    FoldCarry::StateMap,
-                    docvec![
-                        "case StillDropping of \
-                             <'false'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], 'false', ",
-                        leaf::var(final_state.clone()),
-                        "} <'true'> when 'true' -> case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {AccList, 'true', ",
-                        leaf::var(final_state.clone()),
-                        "} <'false'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | AccList], 'false', ",
-                        leaf::var(final_state),
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end end",
-                    ],
-                    epilogue_span,
-                ));
-            }
-        }
-
-        // FoldlPartition — route item to one of two lists based on predicate.
-        // Accumulator: {MatchList, NoMatchList, StateVars...}.
-        if let BodyKind::FoldlPartition { item_var } = kind
-            && let Some(pv) = &pred_var
-        {
-            if plan.use_tuple_acc {
-                let vars_doc = plan.current_vars_doc(self);
-                stmts.push(Self::fold_accumulator(
-                    plan.fold_carry(),
-                    docvec![
-                        "case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | MatchList], NoMatchList, ",
-                        vars_doc.clone(),
-                        "} <'false'> when 'true' -> {MatchList, [",
-                        leaf::var(item_var.clone()),
-                        " | NoMatchList], ",
-                        vars_doc,
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end",
-                    ],
-                    epilogue_span,
-                ));
-            } else {
-                let final_state = if has_mutations {
-                    self.current_state_var()
-                } else {
-                    "StateAcc".to_string()
-                };
-                stmts.push(Self::fold_accumulator(
-                    FoldCarry::StateMap,
-                    docvec![
-                        "case ",
-                        leaf::var(pv.clone()),
-                        " of <'true'> when 'true' -> {[",
-                        leaf::var(item_var.clone()),
-                        " | MatchList], NoMatchList, ",
-                        leaf::var(final_state.clone()),
-                        "} <'false'> when 'true' -> {MatchList, [",
-                        leaf::var(item_var.clone()),
-                        " | NoMatchList], ",
-                        leaf::var(final_state),
-                        "}",
-                        self.case_clause_fallback("_PredBad"),
-                        " end",
-                    ],
-                    epilogue_span,
-                ));
-            }
-        }
-
-        // FoldlGroupBy — group item by key.
-        // The pred_var holds the key result. Each element is added to the key's list in a map.
-        // Accumulator: {Map, StateVars...}.
-        if let BodyKind::FoldlGroupBy { item_var } = kind
-            && let Some(pv) = &pred_var
-        {
-            // Use maps:get/3 to get current list for key (default []), prepend item, put back.
-            let key_var = pv;
-            if plan.use_tuple_acc {
-                let vars_doc = plan.current_vars_doc(self);
-                let existing_var = self.fresh_temp_var("ExistingList");
-                let new_list_var = self.fresh_temp_var("NewList");
-                let new_map_var = self.fresh_temp_var("NewMap");
-                stmts.push(Self::fold_accumulator(
-                    plan.fold_carry(),
-                    docvec![
-                        "let ",
-                        leaf::var(existing_var.clone()),
-                        " = call 'maps':'get'(",
-                        leaf::var(key_var.clone()),
-                        ", GroupMap, []) in let ",
-                        leaf::var(new_list_var.clone()),
-                        " = [",
-                        leaf::var(item_var.clone()),
-                        " | ",
-                        leaf::var(existing_var),
-                        "] in let ",
-                        leaf::var(new_map_var.clone()),
-                        " = call 'maps':'put'(",
-                        leaf::var(key_var.clone()),
-                        ", ",
-                        leaf::var(new_list_var),
-                        ", GroupMap) in {",
-                        leaf::var(new_map_var),
-                        ", ",
-                        vars_doc,
-                        "}",
-                    ],
-                    epilogue_span,
-                ));
-            } else {
-                let final_state = if has_mutations {
-                    self.current_state_var()
-                } else {
-                    "StateAcc".to_string()
-                };
-                let existing_var = self.fresh_temp_var("ExistingList");
-                let new_list_var = self.fresh_temp_var("NewList");
-                let new_map_var = self.fresh_temp_var("NewMap");
-                stmts.push(Self::fold_accumulator(
-                    FoldCarry::StateMap,
-                    docvec![
-                        "let ",
-                        leaf::var(existing_var.clone()),
-                        " = call 'maps':'get'(",
-                        leaf::var(key_var.clone()),
-                        ", GroupMap, []) in let ",
-                        leaf::var(new_list_var.clone()),
-                        " = [",
-                        leaf::var(item_var.clone()),
-                        " | ",
-                        leaf::var(existing_var),
-                        "] in let ",
-                        leaf::var(new_map_var.clone()),
-                        " = call 'maps':'put'(",
-                        leaf::var(key_var.clone()),
-                        ", ",
-                        leaf::var(new_list_var),
-                        ", GroupMap) in {",
-                        leaf::var(new_map_var),
-                        ", ",
-                        leaf::var(final_state),
-                        "}",
-                    ],
-                    epilogue_span,
-                ));
-            }
-        }
-
-        // FoldlSort — write the comparator's final state back to its
-        // process-dictionary key, then answer the predicate to `lists:sort/2`.
-        // Always map mode (the generator builds the plan without a tuple
-        // accumulator), so the final state is a `StateAcc{N}`.
-        if let BodyKind::FoldlSort { state_key_var } = kind
-            && let Some(pv) = &pred_var
-        {
-            let final_state = if has_mutations {
-                self.current_state_var()
-            } else {
-                "StateAcc".to_string()
-            };
-            // The lambda answers the predicate; the `StateAcc{N}` leaves it
-            // through the process dictionary (`erlang:put`), and that map is
-            // what the tag records as carried.
-            stmts.push(Self::fold_accumulator(
-                FoldCarry::StateMap,
-                docvec![
-                    "let _ = call 'erlang':'put'(",
-                    leaf::var(state_key_var.clone()),
-                    ", ",
-                    leaf::var(final_state),
-                    ") in ",
-                    leaf::var(pv.clone()),
-                ],
-                epilogue_span,
-            ));
         }
 
         self.verify_frame_producer_sites(&stmts, &producer_sites, &filtered_body);
         self.check_repl_frame_producer_sites(&stmts, &repl_sites, Self::body_span(&filtered_body));
         Ok(stmts)
+    }
+
+    // FoldlFilter: append the predicate case expression after all statements.
+    fn lower_foldl_epilogue_filter(
+        &mut self,
+        item_var: &str,
+        negate: bool,
+        cx: EpilogueCx<'_>,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) {
+        let EpilogueCx {
+            pv,
+            plan,
+            has_mutations,
+            span: epilogue_span,
+        } = cx;
+        let condition_doc: Document<'static> = if negate {
+            docvec!["call 'erlang':'not'(", leaf::var(pv.to_string()), ")",]
+        } else {
+            leaf::var(pv.to_string())
+        };
+        if plan.use_tuple_acc {
+            // Tuple mode — repack current var bindings into the result tuple.
+            let vars_doc = plan.current_vars_doc(self);
+            stmts.push(Self::fold_accumulator(
+                plan.fold_carry(),
+                docvec![
+                    "case ",
+                    condition_doc,
+                    " of <'true'> when 'true' -> {[",
+                    leaf::var(item_var.to_string()),
+                    " | AccList], ",
+                    vars_doc.clone(),
+                    "} <'false'> when 'true' -> {AccList, ",
+                    vars_doc,
+                    "}",
+                    self.case_clause_fallback("_PredBad"),
+                    " end",
+                ],
+                epilogue_span,
+            ));
+        } else {
+            let final_state = if has_mutations {
+                self.current_state_var()
+            } else {
+                "StateAcc".to_string()
+            };
+            stmts.push(Self::fold_accumulator(
+                FoldCarry::StateMap,
+                docvec![
+                    "case ",
+                    condition_doc,
+                    " of <'true'> when 'true' -> {[",
+                    leaf::var(item_var.to_string()),
+                    " | AccList], ",
+                    leaf::var(final_state.clone()),
+                    "} <'false'> when 'true' -> {AccList, ",
+                    leaf::var(final_state),
+                    "}",
+                    self.case_clause_fallback("_PredBad"),
+                    " end",
+                ],
+                epilogue_span,
+            ));
+        }
+    }
+
+    // FoldlBoolPredicate — update boolean accumulator based on predicate result.
+    // Match only 'true'/'false' explicitly (consistent with FoldlFilter and lists:any/all).
+    fn lower_foldl_epilogue_bool_predicate(
+        &mut self,
+        is_all: bool,
+        cx: EpilogueCx<'_>,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) {
+        let EpilogueCx {
+            pv,
+            plan,
+            has_mutations,
+            span: epilogue_span,
+        } = cx;
+        if plan.use_tuple_acc {
+            let vars_doc = plan.current_vars_doc(self);
+            if is_all {
+                // allSatisfy: pred=false → set BoolAcc to false; pred=true → keep
+                stmts.push(Self::fold_accumulator(
+                    plan.fold_carry(),
+                    docvec![
+                        "case ",
+                        leaf::var(pv.to_string()),
+                        " of <'false'> when 'true' -> {'false', ",
+                        vars_doc.clone(),
+                        "} <'true'> when 'true' -> {BoolAcc, ",
+                        vars_doc,
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end",
+                    ],
+                    epilogue_span,
+                ));
+            } else {
+                // anySatisfy: pred=true → set BoolAcc to true; pred=false → keep
+                stmts.push(Self::fold_accumulator(
+                    plan.fold_carry(),
+                    docvec![
+                        "case ",
+                        leaf::var(pv.to_string()),
+                        " of <'true'> when 'true' -> {'true', ",
+                        vars_doc.clone(),
+                        "} <'false'> when 'true' -> {BoolAcc, ",
+                        vars_doc,
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end",
+                    ],
+                    epilogue_span,
+                ));
+            }
+        } else {
+            let final_state = if has_mutations {
+                self.current_state_var()
+            } else {
+                "StateAcc".to_string()
+            };
+            if is_all {
+                stmts.push(Self::fold_accumulator(
+                    FoldCarry::StateMap,
+                    docvec![
+                        "case ",
+                        leaf::var(pv.to_string()),
+                        " of <'false'> when 'true' -> {'false', ",
+                        leaf::var(final_state.clone()),
+                        "} <'true'> when 'true' -> {BoolAcc, ",
+                        leaf::var(final_state),
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end",
+                    ],
+                    epilogue_span,
+                ));
+            } else {
+                stmts.push(Self::fold_accumulator(
+                    FoldCarry::StateMap,
+                    docvec![
+                        "case ",
+                        leaf::var(pv.to_string()),
+                        " of <'true'> when 'true' -> {'true', ",
+                        leaf::var(final_state.clone()),
+                        "} <'false'> when 'true' -> {BoolAcc, ",
+                        leaf::var(final_state),
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end",
+                    ],
+                    epilogue_span,
+                ));
+            }
+        }
+    }
+
+    // FoldlDetect — update found-item accumulator on first match.
+    // Accumulator is {FoundItem, FoundFlag, StateVars...}.
+    // The fold lambda skips the body once FoundFlag is 'true' (`skip_when_decided`,
+    // BT-3805), so a predicate hit here is always the first match.
+    fn lower_foldl_epilogue_detect(
+        &mut self,
+        item_var: &str,
+        cx: EpilogueCx<'_>,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) {
+        let EpilogueCx {
+            pv,
+            plan,
+            has_mutations,
+            span: epilogue_span,
+        } = cx;
+        if plan.use_tuple_acc {
+            let vars_doc = plan.current_vars_doc(self);
+            stmts.push(Self::fold_accumulator(
+                plan.fold_carry(),
+                docvec![
+                    "case ",
+                    leaf::var(pv.to_string()),
+                    " of <'true'> when 'true' -> {",
+                    leaf::var(item_var.to_string()),
+                    ", 'true', ",
+                    vars_doc.clone(),
+                    "} <'false'> when 'true' -> {FoundItem, FoundFlag, ",
+                    vars_doc,
+                    "}",
+                    self.case_clause_fallback("_PredBad"),
+                    " end",
+                ],
+                epilogue_span,
+            ));
+        } else {
+            let final_state = if has_mutations {
+                self.current_state_var()
+            } else {
+                "StateAcc".to_string()
+            };
+            stmts.push(Self::fold_accumulator(
+                FoldCarry::StateMap,
+                docvec![
+                    "case ",
+                    leaf::var(pv.to_string()),
+                    " of <'true'> when 'true' -> {",
+                    leaf::var(item_var.to_string()),
+                    ", 'true', ",
+                    leaf::var(final_state.clone()),
+                    "} <'false'> when 'true' -> {FoundItem, FoundFlag, ",
+                    leaf::var(final_state),
+                    "}",
+                    self.case_clause_fallback("_PredBad"),
+                    " end",
+                ],
+                epilogue_span,
+            ));
+        }
+    }
+
+    // FoldlCount — increment count accumulator on predicate match.
+    // Accumulator is {Count, StateVars...}.
+    fn lower_foldl_epilogue_count(&mut self, cx: EpilogueCx<'_>, stmts: &mut Vec<ThreadedStmt>) {
+        let EpilogueCx {
+            pv,
+            plan,
+            has_mutations,
+            span: epilogue_span,
+        } = cx;
+        if plan.use_tuple_acc {
+            let vars_doc = plan.current_vars_doc(self);
+            stmts.push(Self::fold_accumulator(
+                plan.fold_carry(),
+                docvec![
+                    "case ",
+                    leaf::var(pv.to_string()),
+                    " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
+                    vars_doc.clone(),
+                    "} <'false'> when 'true' -> {CountAcc, ",
+                    vars_doc,
+                    "}",
+                    self.case_clause_fallback("_PredBad"),
+                    " end",
+                ],
+                epilogue_span,
+            ));
+        } else {
+            let final_state = if has_mutations {
+                self.current_state_var()
+            } else {
+                "StateAcc".to_string()
+            };
+            stmts.push(Self::fold_accumulator(
+                FoldCarry::StateMap,
+                docvec![
+                    "case ",
+                    leaf::var(pv.to_string()),
+                    " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
+                    leaf::var(final_state.clone()),
+                    "} <'false'> when 'true' -> {CountAcc, ",
+                    leaf::var(final_state),
+                    "}",
+                    self.case_clause_fallback("_PredBad"),
+                    " end",
+                ],
+                epilogue_span,
+            ));
+        }
+    }
+
+    // FoldlTakeWhile — include item while predicate holds.
+    // Once predicate returns false, StillTaking flips to false and all subsequent
+    // elements are excluded. Accumulator: {ResultList, StillTaking, StateVars...}.
+    fn lower_foldl_epilogue_take_while(
+        &mut self,
+        item_var: &str,
+        cx: EpilogueCx<'_>,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) {
+        let EpilogueCx {
+            pv,
+            plan,
+            has_mutations,
+            span: epilogue_span,
+        } = cx;
+        if plan.use_tuple_acc {
+            let vars_doc = plan.current_vars_doc(self);
+            stmts.push(Self::fold_accumulator(
+                plan.fold_carry(),
+                docvec![
+                    "case StillTaking of \
+                         <'false'> when 'true' -> {AccList, 'false', ",
+                    vars_doc.clone(),
+                    "} <'true'> when 'true' -> case ",
+                    leaf::var(pv.to_string()),
+                    " of <'true'> when 'true' -> {[",
+                    leaf::var(item_var.to_string()),
+                    " | AccList], 'true', ",
+                    vars_doc.clone(),
+                    "} <'false'> when 'true' -> {AccList, 'false', ",
+                    vars_doc,
+                    "}",
+                    self.case_clause_fallback("_PredBad"),
+                    " end end",
+                ],
+                epilogue_span,
+            ));
+        } else {
+            let final_state = if has_mutations {
+                self.current_state_var()
+            } else {
+                "StateAcc".to_string()
+            };
+            stmts.push(Self::fold_accumulator(
+                FoldCarry::StateMap,
+                docvec![
+                    "case StillTaking of \
+                         <'false'> when 'true' -> {AccList, 'false', ",
+                    leaf::var(final_state.clone()),
+                    "} <'true'> when 'true' -> case ",
+                    leaf::var(pv.to_string()),
+                    " of <'true'> when 'true' -> {[",
+                    leaf::var(item_var.to_string()),
+                    " | AccList], 'true', ",
+                    leaf::var(final_state.clone()),
+                    "} <'false'> when 'true' -> {AccList, 'false', ",
+                    leaf::var(final_state),
+                    "}",
+                    self.case_clause_fallback("_PredBad"),
+                    " end end",
+                ],
+                epilogue_span,
+            ));
+        }
+    }
+
+    // FoldlDropWhile — drop items while predicate holds.
+    // Once predicate returns false, StillDropping flips to false and all subsequent
+    // elements are included. Accumulator: {ResultList, StillDropping, StateVars...}.
+    fn lower_foldl_epilogue_drop_while(
+        &mut self,
+        item_var: &str,
+        cx: EpilogueCx<'_>,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) {
+        let EpilogueCx {
+            pv,
+            plan,
+            has_mutations,
+            span: epilogue_span,
+        } = cx;
+        if plan.use_tuple_acc {
+            let vars_doc = plan.current_vars_doc(self);
+            stmts.push(Self::fold_accumulator(
+                plan.fold_carry(),
+                docvec![
+                    "case StillDropping of \
+                         <'false'> when 'true' -> {[",
+                    leaf::var(item_var.to_string()),
+                    " | AccList], 'false', ",
+                    vars_doc.clone(),
+                    "} <'true'> when 'true' -> case ",
+                    leaf::var(pv.to_string()),
+                    " of <'true'> when 'true' -> {AccList, 'true', ",
+                    vars_doc.clone(),
+                    "} <'false'> when 'true' -> {[",
+                    leaf::var(item_var.to_string()),
+                    " | AccList], 'false', ",
+                    vars_doc,
+                    "}",
+                    self.case_clause_fallback("_PredBad"),
+                    " end end",
+                ],
+                epilogue_span,
+            ));
+        } else {
+            let final_state = if has_mutations {
+                self.current_state_var()
+            } else {
+                "StateAcc".to_string()
+            };
+            stmts.push(Self::fold_accumulator(
+                FoldCarry::StateMap,
+                docvec![
+                    "case StillDropping of \
+                         <'false'> when 'true' -> {[",
+                    leaf::var(item_var.to_string()),
+                    " | AccList], 'false', ",
+                    leaf::var(final_state.clone()),
+                    "} <'true'> when 'true' -> case ",
+                    leaf::var(pv.to_string()),
+                    " of <'true'> when 'true' -> {AccList, 'true', ",
+                    leaf::var(final_state.clone()),
+                    "} <'false'> when 'true' -> {[",
+                    leaf::var(item_var.to_string()),
+                    " | AccList], 'false', ",
+                    leaf::var(final_state),
+                    "}",
+                    self.case_clause_fallback("_PredBad"),
+                    " end end",
+                ],
+                epilogue_span,
+            ));
+        }
+    }
+
+    // FoldlPartition — route item to one of two lists based on predicate.
+    // Accumulator: {MatchList, NoMatchList, StateVars...}.
+    fn lower_foldl_epilogue_partition(
+        &mut self,
+        item_var: &str,
+        cx: EpilogueCx<'_>,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) {
+        let EpilogueCx {
+            pv,
+            plan,
+            has_mutations,
+            span: epilogue_span,
+        } = cx;
+        if plan.use_tuple_acc {
+            let vars_doc = plan.current_vars_doc(self);
+            stmts.push(Self::fold_accumulator(
+                plan.fold_carry(),
+                docvec![
+                    "case ",
+                    leaf::var(pv.to_string()),
+                    " of <'true'> when 'true' -> {[",
+                    leaf::var(item_var.to_string()),
+                    " | MatchList], NoMatchList, ",
+                    vars_doc.clone(),
+                    "} <'false'> when 'true' -> {MatchList, [",
+                    leaf::var(item_var.to_string()),
+                    " | NoMatchList], ",
+                    vars_doc,
+                    "}",
+                    self.case_clause_fallback("_PredBad"),
+                    " end",
+                ],
+                epilogue_span,
+            ));
+        } else {
+            let final_state = if has_mutations {
+                self.current_state_var()
+            } else {
+                "StateAcc".to_string()
+            };
+            stmts.push(Self::fold_accumulator(
+                FoldCarry::StateMap,
+                docvec![
+                    "case ",
+                    leaf::var(pv.to_string()),
+                    " of <'true'> when 'true' -> {[",
+                    leaf::var(item_var.to_string()),
+                    " | MatchList], NoMatchList, ",
+                    leaf::var(final_state.clone()),
+                    "} <'false'> when 'true' -> {MatchList, [",
+                    leaf::var(item_var.to_string()),
+                    " | NoMatchList], ",
+                    leaf::var(final_state),
+                    "}",
+                    self.case_clause_fallback("_PredBad"),
+                    " end",
+                ],
+                epilogue_span,
+            ));
+        }
+    }
+
+    // FoldlGroupBy — group item by key.
+    // The pred_var holds the key result. Each element is added to the key's list in a map.
+    // Accumulator: {Map, StateVars...}.
+    fn lower_foldl_epilogue_group_by(
+        &mut self,
+        item_var: &str,
+        cx: EpilogueCx<'_>,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) {
+        let EpilogueCx {
+            pv,
+            plan,
+            has_mutations,
+            span: epilogue_span,
+        } = cx;
+        // Use maps:get/3 to get current list for key (default []), prepend item, put back.
+        let key_var = pv;
+        if plan.use_tuple_acc {
+            let vars_doc = plan.current_vars_doc(self);
+            let existing_var = self.fresh_temp_var("ExistingList");
+            let new_list_var = self.fresh_temp_var("NewList");
+            let new_map_var = self.fresh_temp_var("NewMap");
+            stmts.push(Self::fold_accumulator(
+                plan.fold_carry(),
+                docvec![
+                    "let ",
+                    leaf::var(existing_var.clone()),
+                    " = call 'maps':'get'(",
+                    leaf::var(key_var),
+                    ", GroupMap, []) in let ",
+                    leaf::var(new_list_var.clone()),
+                    " = [",
+                    leaf::var(item_var.to_string()),
+                    " | ",
+                    leaf::var(existing_var),
+                    "] in let ",
+                    leaf::var(new_map_var.clone()),
+                    " = call 'maps':'put'(",
+                    leaf::var(key_var),
+                    ", ",
+                    leaf::var(new_list_var),
+                    ", GroupMap) in {",
+                    leaf::var(new_map_var),
+                    ", ",
+                    vars_doc,
+                    "}",
+                ],
+                epilogue_span,
+            ));
+        } else {
+            let final_state = if has_mutations {
+                self.current_state_var()
+            } else {
+                "StateAcc".to_string()
+            };
+            let existing_var = self.fresh_temp_var("ExistingList");
+            let new_list_var = self.fresh_temp_var("NewList");
+            let new_map_var = self.fresh_temp_var("NewMap");
+            stmts.push(Self::fold_accumulator(
+                FoldCarry::StateMap,
+                docvec![
+                    "let ",
+                    leaf::var(existing_var.clone()),
+                    " = call 'maps':'get'(",
+                    leaf::var(key_var),
+                    ", GroupMap, []) in let ",
+                    leaf::var(new_list_var.clone()),
+                    " = [",
+                    leaf::var(item_var.to_string()),
+                    " | ",
+                    leaf::var(existing_var),
+                    "] in let ",
+                    leaf::var(new_map_var.clone()),
+                    " = call 'maps':'put'(",
+                    leaf::var(key_var),
+                    ", ",
+                    leaf::var(new_list_var),
+                    ", GroupMap) in {",
+                    leaf::var(new_map_var),
+                    ", ",
+                    leaf::var(final_state),
+                    "}",
+                ],
+                epilogue_span,
+            ));
+        }
+    }
+
+    // FoldlSort — write the comparator's final state back to its
+    // process-dictionary key, then answer the predicate to `lists:sort/2`.
+    // Always map mode (the generator builds the plan without a tuple
+    // accumulator), so the final state is a `StateAcc{N}`.
+    fn lower_foldl_epilogue_sort(
+        &mut self,
+        state_key_var: &str,
+        cx: EpilogueCx<'_>,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) {
+        let EpilogueCx {
+            pv,
+            has_mutations,
+            span: epilogue_span,
+            ..
+        } = cx;
+        let final_state = if has_mutations {
+            self.current_state_var()
+        } else {
+            "StateAcc".to_string()
+        };
+        // The lambda answers the predicate; the `StateAcc{N}` leaves it
+        // through the process dictionary (`erlang:put`), and that map is
+        // what the tag records as carried.
+        stmts.push(Self::fold_accumulator(
+            FoldCarry::StateMap,
+            docvec![
+                "let _ = call 'erlang':'put'(",
+                leaf::var(state_key_var.to_string()),
+                ", ",
+                leaf::var(final_state),
+                ") in ",
+                leaf::var(pv.to_string()),
+            ],
+            epilogue_span,
+        ));
+    }
+
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one statement kind (a construct answering {Result, NewStateAcc}) of the fold body walker"
+    )]
+    fn lower_foldl_control_flow_with_mutations(
+        &mut self,
+        cx: FoldlStmtCx<'_>,
+        flags: &mut FoldlFlags,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let FoldlStmtCx {
+            expr,
+            is_last,
+            span,
+            kind,
+            pred_var,
+            ..
+        } = cx;
+        // A construct with mutations that answers {Result, NewStateAcc}
+        // (e.g. a nested loop or fold threading no local). Unpack element(2)
+        // so subsequent iterations see the updated StateAcc. BT-4017: a
+        // statement whose value `thread_ahead` registers unwrapped never
+        // reaches here (`fold_statement_threads_ahead` above).
+        // This applies to ALL foldl body kinds (do:, collect:, select:, reject:,
+        // inject:into:), not just do: — otherwise mutations inside conditionals
+        // nested within collect:/select:/etc. are silently lost.
+        flags.has_mutations = true;
+        let tuple_var = self.fresh_temp_var("CondResult");
+        // BT-4462: the locals THIS construct threads, read before
+        // `generate_expression` below (which may push/pop scopes) so
+        // the lookup reflects this statement's own captured set. Every
+        // construct that threads a local of this body is a producer
+        // here (`local_producer_locals` / `fold_statement_threads_ahead`
+        // above), so an accepted program reaches this unwrap only with
+        // none; one that threads a local is reported
+        // (`ConstructLocalsNotRebound`) rather than reread out of the
+        // carrier, the legacy write-back BT-4462 deleted.
+        let in_place = self.construct_locals_in_place(expr, span);
+        let doc = self.generate_expression(expr)?;
+        let new_state = self.next_state_var();
+        stmts.push(ThreadedStmt::Statement(
+            docvec![
+                "let ",
+                leaf::var(tuple_var.clone()),
+                " = ",
+                doc,
+                " in let ",
+                leaf::var(new_state),
+                " = call 'erlang':'element'(2, ",
+                leaf::var(tuple_var.clone()),
+                ") in ",
+            ],
+            span,
+        ));
+        stmts.extend(in_place);
+        if is_last {
+            match kind {
+                BodyKind::FoldlDo => {
+                    // do: discards the result value, returns state only
+                    stmts.push(Self::fold_accumulator(
+                        FoldCarry::StateMap,
+                        leaf::var(self.current_state_var()),
+                        span,
+                    ));
+                }
+                BodyKind::FoldlCollect => {
+                    // collect: needs the result value for the list
+                    let result_var = self.fresh_temp_var("CondVal");
+                    stmts.push(Self::fold_accumulator(
+                        FoldCarry::StateMap,
+                        docvec![
+                            "let ",
+                            leaf::var(result_var.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            leaf::var(tuple_var),
+                            ") in {[",
+                            leaf::var(result_var),
+                            " | AccList], ",
+                            leaf::var(self.current_state_var()),
+                            "}",
+                        ],
+                        span,
+                    ));
+                }
+                BodyKind::FoldlFilter { .. }
+                | BodyKind::FoldlBoolPredicate { .. }
+                | BodyKind::FoldlDetect { .. }
+                | BodyKind::FoldlCount
+                | BodyKind::FoldlTakeWhile { .. }
+                | BodyKind::FoldlDropWhile { .. }
+                | BodyKind::FoldlPartition { .. }
+                | BodyKind::FoldlGroupBy { .. }
+                | BodyKind::FoldlSort { .. } => {
+                    // predicate-based selectors — bind predicate result
+                    if let Some(pv) = pred_var {
+                        let result_var = self.fresh_temp_var("CondVal");
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(result_var.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                leaf::var(tuple_var),
+                                ") in let ",
+                                leaf::var(pv.clone()),
+                                " = ",
+                                leaf::var(result_var),
+                                " in ",
+                            ],
+                            span,
+                        ));
+                    }
+                }
+                BodyKind::FoldlInject => {
+                    // inject:into: — result is the new accumulator
+                    let result_var = self.fresh_temp_var("CondVal");
+                    stmts.push(Self::fold_accumulator(
+                        FoldCarry::StateMap,
+                        docvec![
+                            "let ",
+                            leaf::var(result_var.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            leaf::var(tuple_var),
+                            ") in {",
+                            leaf::var(result_var),
+                            ", ",
+                            leaf::var(self.current_state_var()),
+                            "}",
+                        ],
+                        span,
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn lower_foldl_nested_producer(
+        &mut self,
+        cx: FoldlStmtCx<'_>,
+        flags: &mut FoldlFlags,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let FoldlStmtCx {
+            expr,
+            i,
+            is_last,
+            plan,
+            kind,
+            pred_var,
+            ..
+        } = cx;
+        // ADR 0131 Phase 2b: a nested loop or fold is a local-threading
+        // producer in this fold's frame. `lower_non_assign_expr`
+        // threads it ahead (`thread_ahead` -> `threaded_expression`),
+        // splicing its construct tuple and one `LocalRebind` per
+        // threaded local lowered by this frame's mode, and reads its
+        // value back for the kind's last-expression tail.
+        //
+        // BT-4017: so is every statement `thread_ahead` registers
+        // already unwrapped (`thread_ahead_unwraps`: an inline-threaded
+        // conditional or `match:`, an exception or evaluated-block
+        // producer, a conditional whose receiver is sequenced ahead),
+        // exactly as the `Letrec` body lowers it
+        // (`lower_letrec_non_assign_expr`). Its prelude, the receiver's
+        // `Bind`s included, is this body's own statements, and its value
+        // is read back, never unpacked as a `{Value, StateAcc}` tuple:
+        // `(self done) ifTrue: blk` with a non-literal `blk` compiles to
+        // a plain `ifTrue:` send, whose `element(2, ...)` raised
+        // `badarg` at run time.
+        self.lower_non_assign_expr(
+            stmts,
+            expr,
+            i,
+            is_last,
+            &mut flags.has_mutations,
+            flags.has_plain_lets,
+            kind,
+            pred_var,
+            plan,
+        )?;
+        Ok(())
+    }
+
+    fn lower_foldl_destructure_assignment(
+        &mut self,
+        cx: FoldlStmtCx<'_>,
+        pattern: &beamtalk_core::ast::Pattern,
+        value: &Expression,
+        flags: &mut FoldlFlags,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let FoldlStmtCx {
+            is_last,
+            span,
+            frame,
+            plan,
+            kind,
+            pred_var,
+            ..
+        } = cx;
+        flags.has_plain_lets = true;
+        // BT-4439: each name is written as the local-var assignment
+        // branch above writes `name := ...`.
+        let write_of =
+            self.loop_body_local_write(plan, plan.use_tuple_acc || plan.use_hybrid_params);
+        let (rhs_var, wrote) =
+            self.lower_destructure_bind(pattern, value, frame, span, stmts, &write_of)?;
+        flags.has_mutations |= wrote;
+        if is_last {
+            self.lower_destructure_last_expr(
+                stmts,
+                kind,
+                pred_var,
+                flags.has_mutations,
+                &rhs_var,
+                span,
+            );
+        }
+        Ok(())
+    }
+
+    fn lower_foldl_local_var_assignment(
+        &mut self,
+        cx: FoldlStmtCx<'_>,
+        flags: &mut FoldlFlags,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let FoldlStmtCx {
+            expr,
+            is_last,
+            span,
+            frame,
+            plan,
+            kind,
+            pred_var,
+            ..
+        } = cx;
+        let version_before = self.state_version();
+        if let Some(let_stmts) =
+            self.try_generate_block_local_plain_let(expr, is_last, &plan.threaded_locals)?
+        {
+            flags.has_plain_lets = true;
+            // A producer in the value (ADR 0131 Phase 2b) advances the
+            // `State` chain with its own prelude: the accumulator the
+            // kind's epilogue returns is that new version, exactly as
+            // after any other statement that mutates.
+            if self.state_version() != version_before {
+                flags.has_mutations = true;
+            }
+            stmts.extend(let_stmts);
+        } else if plan.use_direct_params || plan.use_tuple_acc || plan.use_hybrid_params {
+            // Direct-params, tuple-acc, or
+            // hybrid mode. ADR 0111 Addendum 15: reuses the SAME
+            // `Bind` producer `lower_letrec_local_var_assignment`'s
+            // own direct-params/hybrid branch calls
+            // (`lower_direct_var_update_in_loop_bind`, documented as
+            // byte-identical to `generate_direct_var_update_in_loop`'s
+            // hand-rolled `Document`). That producer binds the local
+            // in generator scope exactly as its `Document`-returning
+            // sibling does, so the newly-bound name is recovered via
+            // `lookup_var` for the epilogue below instead of a
+            // direct return value.
+            flags.has_mutations = true;
+            self.lower_direct_var_update_in_loop_bind(expr, frame, span, stmts)?;
+            let new_var = if let Expression::Assignment { target, .. } = expr
+                && let Expression::Identifier(id) = target.as_ref()
+            {
+                self.lookup_var(&id.name).cloned()
+            } else {
+                None
+            };
+            if is_last {
+                self.lower_local_assign_last_expr(
+                    stmts,
+                    kind,
+                    pred_var,
+                    plan,
+                    new_var.as_deref(),
+                    span,
+                );
+            }
+        } else {
+            // ADR 0111 Addendum 15: reuses the SAME `Bind` producer
+            // `lower_letrec_local_var_assignment`'s own `StateAcc`
+            // branch calls (`lower_local_var_assignment_bind`).
+            // The returned value var name is captured and
+            // threaded through to `lower_local_assign_last_expr` (its
+            // non-tuple-acc branch, below) — BT-3521: a StateAcc-mode
+            // `FoldlCollect`/`FoldlInject`/predicate family that ends
+            // on a bare local-var assignment needs the real bound
+            // value to build its result, not a fictional literal
+            // `_Val` (the generator only ever mints versioned
+            // `_ValN` names — see `VariableContext::fresh_var`).
+            flags.has_mutations = true;
+            let val_var = self.lower_local_var_assignment_bind(expr, frame, span, stmts)?;
+            if is_last {
+                self.lower_local_assign_last_expr(
+                    stmts,
+                    kind,
+                    pred_var,
+                    plan,
+                    Some(&val_var),
+                    span,
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn lower_foldl_tier2_value_call(
+        &mut self,
+        cx: FoldlStmtCx<'_>,
+        flags: &mut FoldlFlags,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let FoldlStmtCx {
+            expr,
+            is_last,
+            span,
+            kind,
+            pred_var,
+            ..
+        } = cx;
+        // a bare (non-assigned) Tier 2 `value(:...)` statement
+        // (field-stored or local-var-stored block) inside a foldl-based
+        // loop body (do:/collect:/select:/etc). Before this fix, such a
+        // statement fell through to `lower_non_assign_expr`, which treats
+        // it as an ordinary expression and emits a Tier-1-only apply —
+        // crashing with badarity for a genuinely Tier 2 (state-threading)
+        // stored block. `generate_tier2_value_call_doc` always returns a
+        // {Result, NewState} tuple — unpack it and thread the state
+        // forward, mirroring the already-working `Tier2ValueCall`
+        // handling in conditionals.rs and gen_server/methods.rs.
+        //
+        // Excluded for Letrec (whileTrue:/timesRepeat:) loop bodies:
+        // this construct's repro and matrix coverage are
+        // do:/collect:/nested-do: only.
+        flags.has_mutations = true;
+        let tuple_var = self.fresh_temp_var("T2LoopTuple");
+        let expr_doc = self.generate_tier2_value_call_doc(expr)?;
+        let new_state = self.next_state_var();
+        stmts.push(ThreadedStmt::Statement(
+            docvec![
+                "let ",
+                leaf::var(tuple_var.clone()),
+                " = ",
+                expr_doc,
+                " in let ",
+                leaf::var(new_state),
+                " = call 'erlang':'element'(2, ",
+                leaf::var(tuple_var.clone()),
+                ") in ",
+            ],
+            span,
+        ));
+        if is_last {
+            self.lower_tier2_value_call_last_expr(stmts, kind, pred_var, &tuple_var, span);
+        }
+        Ok(())
+    }
+
+    fn lower_foldl_actor_self_send(
+        &mut self,
+        cx: FoldlStmtCx<'_>,
+        flags: &mut FoldlFlags,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let FoldlStmtCx {
+            expr,
+            is_last,
+            span,
+            frame,
+            kind,
+            pred_var,
+            ..
+        } = cx;
+        flags.has_mutations = true;
+        // Emit diagnostic for synchronous self-send in loop body.
+        self.emit_self_send_in_loop_diagnostic(expr, expr.span());
+        // BT-3809: the operands are sequenced ahead of the dispatch
+        // (the same producer `threaded_expression` and the Letrec body
+        // use), not compiled into a closed argument list.
+        let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = expr
+        else {
+            return Err(CodeGenError::Internal(
+                "is_actor_self_send accepted a non-MessageSend expression".to_string(),
+            ));
+        };
+        let (prelude, dispatch_var) =
+            self.sequenced_self_dispatch(selector, arguments, frame, span)?;
+        stmts.extend(prelude);
+        if is_last {
+            self.lower_self_send_last_expr(stmts, kind, pred_var, &dispatch_var, span);
+        }
+        Ok(())
+    }
+
+    fn lower_foldl_field_assignment(
+        &mut self,
+        cx: FoldlStmtCx<'_>,
+        flags: &mut FoldlFlags,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let FoldlStmtCx {
+            expr,
+            is_last,
+            span,
+            frame,
+            kind,
+            pred_var,
+            ..
+        } = cx;
+        flags.has_mutations = true;
+        // ADR 0111 Addendum 15: reuses the SAME `Bind` producer
+        // `lower_letrec_body` uses for its field-write statements —
+        // `lower_field_assignment_bind`'s doc comment documents it as
+        // byte-identical to
+        // `generate_field_assignment_open`'s hand-rolled `Document`
+        // (same helper calls, same mint order, including its own
+        // `thread_ahead` step).
+        let field_val_var = self.lower_field_assignment_bind(expr, frame, span, stmts)?;
+        if is_last {
+            self.lower_field_assign_last_expr(stmts, kind, pred_var, &field_val_var, span);
+        }
+        Ok(())
     }
 
     /// BT-3939 / BT-4014: reports a producer site of a Letrec or fold body

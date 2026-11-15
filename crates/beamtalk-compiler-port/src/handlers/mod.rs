@@ -23,7 +23,7 @@ mod source_queries;
 pub(crate) use categorize::handle_categorize_methods;
 pub(crate) use class_span::{
     handle_build_class_module_index_in_source, handle_class_state_field_defaults,
-    handle_resolve_class_span,
+    handle_resolve_class_span, handle_scan_source_dependencies,
 };
 pub(crate) use compile::handle_compile;
 pub(crate) use compile_method::handle_compile_method;

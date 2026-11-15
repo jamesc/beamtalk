@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{BinarySegment, Module, TypeAnnotation};
+use crate::ast::{Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
@@ -62,7 +62,9 @@ impl TypeChecker {
         }
     }
 
-    /// Recursively check protocol conformance in expressions.
+    /// Check protocol conformance for every message send in `expr`, nested
+    /// sends included (match arms and guards, collection literals, string
+    /// interpolation, cascade messages — whatever `walk_sends` reaches).
     ///
     /// **Receiver resolution:** the target method whose parameter
     /// annotations drive the check is resolved from the receiver's inferred
@@ -74,198 +76,104 @@ impl TypeChecker {
     ///
     /// Other receiver types (`Dynamic`, `Union`, …) are skipped conservatively
     /// per the checker's open-world gating conventions.
-    #[allow(clippy::too_many_lines)] // match over all Expression variants
     fn check_protocol_conformance_in_expr(
         &mut self,
         expr: &crate::ast::Expression,
         hierarchy: &ClassHierarchy,
         protocol_registry: &ProtocolRegistry,
     ) {
-        use crate::ast::Expression;
+        crate::ast_walker::walk_sends(expr, &mut |send| {
+            self.check_protocol_conformance_for_send(&send, hierarchy, protocol_registry);
+        });
+    }
 
-        match expr {
-            Expression::MessageSend {
-                receiver,
-                selector,
-                arguments,
-                span,
-                ..
-            } => {
-                // Check if the receiver's method has protocol-typed params.
-                // Instance-side receivers resolve against instance methods;
-                // Meta (class object) receivers against class-side methods.
-                let sel_name = selector.name();
-                let param_types: Option<Vec<Option<String>>> =
-                    match self.type_map.get(receiver.span()) {
-                        Some(InferredType::Known { class_name, .. }) => hierarchy
-                            .find_method(class_name, &sel_name)
-                            .map(|m| Self::param_type_strings(&m.param_types)),
-                        Some(InferredType::Meta { class_name, .. }) => hierarchy
-                            .find_class_method(class_name, &sel_name)
-                            .map(|m| Self::param_type_strings(&m.param_types)),
-                        // ADR 0144: a `P class` receiver's parameters come
-                        // from `P`'s matching `class` requirement.
-                        Some(InferredType::ProtocolMeta { protocol_name, .. }) => protocol_registry
-                            .get(protocol_name)
-                            .and_then(|info| {
-                                info.all_class_requirements(protocol_registry)
-                                    .into_iter()
-                                    .find(|req| req.selector == sel_name)
-                            })
-                            .map(|req| {
-                                req.param_types
-                                    .iter()
-                                    .map(|t| t.as_ref().map(ToString::to_string))
-                                    .collect()
-                            }),
-                        _ => None,
+    /// The per-send body of [`Self::check_protocol_conformance_in_expr`].
+    #[allow(clippy::too_many_lines)] // protocol-composition handling
+    fn check_protocol_conformance_for_send(
+        &mut self,
+        send: &crate::ast_walker::SendRef<'_>,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        let receiver = send.receiver;
+        let selector = send.selector;
+        let arguments = send.arguments;
+        let span = &send.span;
+        // Check if the receiver's method has protocol-typed params.
+        // Instance-side receivers resolve against instance methods;
+        // Meta (class object) receivers against class-side methods.
+        let sel_name = selector.name();
+        let param_types: Option<Vec<Option<String>>> = match self.type_map.get(receiver.span()) {
+            Some(InferredType::Known { class_name, .. }) => hierarchy
+                .find_method(class_name, &sel_name)
+                .map(|m| Self::param_type_strings(&m.param_types)),
+            Some(InferredType::Meta { class_name, .. }) => hierarchy
+                .find_class_method(class_name, &sel_name)
+                .map(|m| Self::param_type_strings(&m.param_types)),
+            // ADR 0144: a `P class` receiver's parameters come
+            // from `P`'s matching `class` requirement.
+            Some(InferredType::ProtocolMeta { protocol_name, .. }) => protocol_registry
+                .get(protocol_name)
+                .and_then(|info| {
+                    info.all_class_requirements(protocol_registry)
+                        .into_iter()
+                        .find(|req| req.selector == sel_name)
+                })
+                .map(|req| {
+                    req.param_types
+                        .iter()
+                        .map(|t| t.as_ref().map(ToString::to_string))
+                        .collect()
+                }),
+            _ => None,
+        };
+        if let Some(param_types) = param_types {
+            for (i, arg) in arguments.iter().enumerate() {
+                if let Some(Some(expected_ty)) = param_types.get(i) {
+                    let Some(arg_type) = self.type_map.get(arg.span()) else {
+                        continue;
                     };
-                if let Some(param_types) = param_types {
-                    for (i, arg) in arguments.iter().enumerate() {
-                        if let Some(Some(expected_ty)) = param_types.get(i) {
-                            let Some(arg_type) = self.type_map.get(arg.span()) else {
-                                continue;
-                            };
-                            let arg_type = arg_type.clone();
-                            // `split_intersection_type_string` / `is_protocol_type`
-                            // / `check_protocol_argument_conformance` key
-                            // protocol/hierarchy lookups by name string, not a
-                            // resolved `InferredType` — `Display` renders the
-                            // same text `type_name()` used to (byte-identical,
-                            // see `DeclaredType`'s doc), so this is a pure
-                            // representation swap, not a behaviour change.
-                            //
-                            // ADR 0068 §Protocol Composition / ADR 0102
-                            // §1/§3: a parameter declared
-                            // `:: P1 & P2` requires conformance to
-                            // *every* protocol part. The rendered form is
-                            // `"P1 & P2"`; split it and check each protocol
-                            // part independently instead of treating the
-                            // whole compound string as one (unregistered)
-                            // name.
-                            let expected_ty = expected_ty.clone();
-                            if let Some(parts) = Self::split_intersection_type_string(&expected_ty)
-                            {
-                                for part in parts {
-                                    if Self::is_protocol_type(part, hierarchy, protocol_registry) {
-                                        self.check_protocol_argument_conformance(
-                                            &arg_type,
-                                            part,
-                                            *span,
-                                            hierarchy,
-                                            protocol_registry,
-                                        );
-                                    }
-                                }
-                            } else if Self::is_protocol_type(
-                                &expected_ty,
-                                hierarchy,
-                                protocol_registry,
-                            ) {
+                    let arg_type = arg_type.clone();
+                    // `split_intersection_type_string` / `is_protocol_type`
+                    // / `check_protocol_argument_conformance` key
+                    // protocol/hierarchy lookups by name string, not a
+                    // resolved `InferredType` — `Display` renders the
+                    // same text `type_name()` used to (byte-identical,
+                    // see `DeclaredType`'s doc), so this is a pure
+                    // representation swap, not a behaviour change.
+                    //
+                    // ADR 0068 §Protocol Composition / ADR 0102
+                    // §1/§3: a parameter declared
+                    // `:: P1 & P2` requires conformance to
+                    // *every* protocol part. The rendered form is
+                    // `"P1 & P2"`; split it and check each protocol
+                    // part independently instead of treating the
+                    // whole compound string as one (unregistered)
+                    // name.
+                    let expected_ty = expected_ty.clone();
+                    if let Some(parts) = Self::split_intersection_type_string(&expected_ty) {
+                        for part in parts {
+                            if Self::is_protocol_type(part, hierarchy, protocol_registry) {
                                 self.check_protocol_argument_conformance(
                                     &arg_type,
-                                    &expected_ty,
+                                    part,
                                     *span,
                                     hierarchy,
                                     protocol_registry,
                                 );
                             }
                         }
-                    }
-                }
-
-                // Recurse into sub-expressions
-                self.check_protocol_conformance_in_expr(receiver, hierarchy, protocol_registry);
-                for arg in arguments {
-                    self.check_protocol_conformance_in_expr(arg, hierarchy, protocol_registry);
-                }
-            }
-            Expression::Block(block) => {
-                for stmt in &block.body {
-                    self.check_protocol_conformance_in_expr(
-                        &stmt.expression,
-                        hierarchy,
-                        protocol_registry,
-                    );
-                }
-            }
-            Expression::Assignment { value, .. }
-            | Expression::DestructureAssignment { value, .. }
-            | Expression::Return { value, .. } => {
-                self.check_protocol_conformance_in_expr(value, hierarchy, protocol_registry);
-            }
-            Expression::Parenthesized { expression, .. } => {
-                self.check_protocol_conformance_in_expr(expression, hierarchy, protocol_registry);
-            }
-            Expression::Cascade {
-                receiver, messages, ..
-            } => {
-                self.check_protocol_conformance_in_expr(receiver, hierarchy, protocol_registry);
-                for msg in messages {
-                    for arg in &msg.arguments {
-                        self.check_protocol_conformance_in_expr(arg, hierarchy, protocol_registry);
+                    } else if Self::is_protocol_type(&expected_ty, hierarchy, protocol_registry) {
+                        self.check_protocol_argument_conformance(
+                            &arg_type,
+                            &expected_ty,
+                            *span,
+                            hierarchy,
+                            protocol_registry,
+                        );
                     }
                 }
             }
-            Expression::FieldAccess { receiver, .. } => {
-                self.check_protocol_conformance_in_expr(receiver, hierarchy, protocol_registry);
-            }
-            Expression::Match { value, arms, .. } => {
-                self.check_protocol_conformance_in_expr(value, hierarchy, protocol_registry);
-                for arm in arms {
-                    self.check_protocol_conformance_in_expr(
-                        &arm.body,
-                        hierarchy,
-                        protocol_registry,
-                    );
-                }
-            }
-            Expression::StringInterpolation { segments, .. } => {
-                for seg in segments {
-                    if let crate::ast::StringSegment::Interpolation(expr) = seg {
-                        self.check_protocol_conformance_in_expr(expr, hierarchy, protocol_registry);
-                    }
-                }
-            }
-            Expression::BinaryConstruction { segments, .. } => {
-                for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                    self.check_protocol_conformance_in_expr(expr, hierarchy, protocol_registry);
-                }
-            }
-            Expression::ArrayLiteral { elements, .. }
-            | Expression::TupleLiteral { elements, .. } => {
-                for elem in elements {
-                    self.check_protocol_conformance_in_expr(elem, hierarchy, protocol_registry);
-                }
-            }
-            Expression::ListLiteral { elements, tail, .. } => {
-                for elem in elements {
-                    self.check_protocol_conformance_in_expr(elem, hierarchy, protocol_registry);
-                }
-                if let Some(tail_expr) = tail {
-                    self.check_protocol_conformance_in_expr(
-                        tail_expr,
-                        hierarchy,
-                        protocol_registry,
-                    );
-                }
-            }
-            Expression::MapLiteral { pairs, .. } => {
-                for pair in pairs {
-                    self.check_protocol_conformance_in_expr(
-                        &pair.key,
-                        hierarchy,
-                        protocol_registry,
-                    );
-                    self.check_protocol_conformance_in_expr(
-                        &pair.value,
-                        hierarchy,
-                        protocol_registry,
-                    );
-                }
-            }
-            // Leaf expressions — no sub-expressions to recurse into
-            _ => {}
         }
     }
 
@@ -647,184 +555,154 @@ impl TypeChecker {
         }
     }
 
-    /// Recursively check variance in expressions (for message send arguments).
-    #[allow(clippy::too_many_lines)] // class-type-param substitution adds length
+    /// Check generic variance for every message send in `expr`, nested sends
+    /// included (match arms and guards, collection literals, string
+    /// interpolation, cascade messages — whatever `walk_sends` reaches).
     fn check_variance_in_expr(
         &mut self,
         expr: &crate::ast::Expression,
         hierarchy: &ClassHierarchy,
         protocol_registry: &ProtocolRegistry,
     ) {
-        use crate::ast::Expression;
+        crate::ast_walker::walk_sends(expr, &mut |send| {
+            self.check_variance_for_send(&send, hierarchy, protocol_registry);
+        });
+    }
 
-        match expr {
-            Expression::MessageSend {
-                receiver,
-                selector,
-                arguments,
-                span,
+    /// The per-send body of [`Self::check_variance_in_expr`].
+    #[allow(clippy::too_many_lines)] // class-type-param substitution adds length
+    fn check_variance_for_send(
+        &mut self,
+        send: &crate::ast_walker::SendRef<'_>,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: &ProtocolRegistry,
+    ) {
+        let receiver = send.receiver;
+        let selector = send.selector;
+        let arguments = send.arguments;
+        let span = &send.span;
+        // Check if any argument has generic type args that need variance checking
+        if let Some(receiver_type) = self.type_map.get(receiver.span())
+            && let InferredType::Known {
+                class_name,
+                type_args: ref receiver_type_args,
                 ..
-            } => {
-                // Check if any argument has generic type args that need variance checking
-                if let Some(receiver_type) = self.type_map.get(receiver.span())
-                    && let InferredType::Known {
-                        class_name,
-                        type_args: ref receiver_type_args,
-                        ..
-                    } = receiver_type.clone()
-                {
-                    let sel_name = selector.name();
-                    let method = hierarchy.find_method(&class_name, &sel_name);
-                    if let Some(method) = method {
-                        // Substitution map from the receiver's own
-                        // class-level generic type-param names (e.g. `E` in
-                        // `List(E)`) to its concrete `receiver_type_args`
-                        // (e.g. `List(Integer)` gives `{E -> Integer}`).
-                        // Without this, a declared parameter type naming a
-                        // class type param (`List(E)`, `Dictionary(K, V)`)
-                        // never matched `class_subst`'s keys below and
-                        // `is_assignable_to_with_variance` compared the
-                        // argument against the literal unresolved param
-                        // name, which — like a bare `E`/`V`/`K` anywhere
-                        // else in the checker — is treated as a wildcard
-                        // and always passes.
-                        // Widen singleton (or union-of-singleton)
-                        // substitution values to `Symbol` — see the
-                        // identical widening and its doc in
-                        // `validation/`'s `check_argument_types`
-                        // (`widen_singleton_type_arg`). Without this, a
-                        // `Dictionary`/`List`/`Result` inferred from
-                        // symbol literals (`d1 merge: d2` with
-                        // differently-keyed dict literals, `#(#a, #b) ++
-                        // #(#c, #d)`, `Result ok: #active`) would compare
-                        // its narrow substituted type arg invariantly
-                        // against a different literal's singleton and
-                        // flag entirely correct code as a mismatch.
-                        let class_subst: HashMap<EcoString, InferredType> =
-                            TypeChecker::build_inherited_substitution_map(
-                                hierarchy,
+            } = receiver_type.clone()
+        {
+            let sel_name = selector.name();
+            let method = hierarchy.find_method(&class_name, &sel_name);
+            if let Some(method) = method {
+                // Substitution map from the receiver's own
+                // class-level generic type-param names (e.g. `E` in
+                // `List(E)`) to its concrete `receiver_type_args`
+                // (e.g. `List(Integer)` gives `{E -> Integer}`).
+                // Without this, a declared parameter type naming a
+                // class type param (`List(E)`, `Dictionary(K, V)`)
+                // never matched `class_subst`'s keys below and
+                // `is_assignable_to_with_variance` compared the
+                // argument against the literal unresolved param
+                // name, which — like a bare `E`/`V`/`K` anywhere
+                // else in the checker — is treated as a wildcard
+                // and always passes.
+                // Widen singleton (or union-of-singleton)
+                // substitution values to `Symbol` — see the
+                // identical widening and its doc in
+                // `validation/`'s `check_argument_types`
+                // (`widen_singleton_type_arg`). Without this, a
+                // `Dictionary`/`List`/`Result` inferred from
+                // symbol literals (`d1 merge: d2` with
+                // differently-keyed dict literals, `#(#a, #b) ++
+                // #(#c, #d)`, `Result ok: #active`) would compare
+                // its narrow substituted type arg invariantly
+                // against a different literal's singleton and
+                // flag entirely correct code as a mismatch.
+                let class_subst: HashMap<EcoString, InferredType> =
+                    TypeChecker::build_inherited_substitution_map(
+                        hierarchy,
+                        &class_name,
+                        receiver_type_args,
+                        &method.defined_in,
+                    )
+                    .into_iter()
+                    .map(|(param, ty)| (param, TypeChecker::widen_singleton_type_arg(&ty)))
+                    .collect();
+                for (i, arg) in arguments.iter().enumerate() {
+                    if let Some(Some(expected_declared)) = method.param_types.get(i) {
+                        // BT-4385: a list literal judged element
+                        // by element is not judged again whole.
+                        if self
+                            .list_literal_element_expectation(
+                                arg,
+                                expected_declared,
                                 &class_name,
-                                receiver_type_args,
-                                &method.defined_in,
+                                hierarchy,
                             )
-                            .into_iter()
-                            .map(|(param, ty)| (param, TypeChecker::widen_singleton_type_arg(&ty)))
-                            .collect();
-                        for (i, arg) in arguments.iter().enumerate() {
-                            if let Some(Some(expected_declared)) = method.param_types.get(i) {
-                                // BT-4385: a list literal judged element
-                                // by element is not judged again whole.
-                                if self
-                                    .list_literal_element_expectation(
-                                        arg,
-                                        expected_declared,
-                                        &class_name,
-                                        hierarchy,
-                                    )
-                                    .is_some()
-                                {
-                                    continue;
-                                }
-                                // `type_string_references_class_param` /
-                                // `is_assignable_to_with_variance` below are
-                                // string-level helpers (`DeclaredType`
-                                // is out of scope here) — render the structured type once
-                                // at this boundary (byte-identical to the
-                                // old stored string) and keep them
-                                // unchanged; `resolve_type_param` itself
-                                // takes the structured `DeclaredType`
-                                // directly.
-                                let expected_declared_str: EcoString =
-                                    expected_declared.to_string().into();
-                                let substituted_expected;
-                                let expected_ty = if !class_subst.is_empty()
-                                    && TypeChecker::type_string_references_class_param(
-                                        &expected_declared_str,
-                                        &class_subst,
-                                    ) {
-                                    substituted_expected = TypeChecker::resolve_type_param(
-                                        expected_declared,
-                                        &class_subst,
-                                        &HashMap::new(),
-                                        hierarchy,
-                                    )
-                                    .display_name();
-                                    &substituted_expected
-                                } else {
-                                    &expected_declared_str
-                                };
-                                // Only check when expected type is generic
-                                if expected_ty.contains('(')
-                                    && let Some(arg_type) = self.type_map.get(arg.span())
-                                    && let InferredType::Known { type_args, .. } = arg_type
-                                    && !type_args.is_empty()
-                                {
-                                    let arg_str = arg_type.display_annotation();
-                                    if !Self::is_assignable_to_with_variance(
-                                        &arg_str,
-                                        expected_ty,
-                                        hierarchy,
-                                        protocol_registry,
-                                    ) {
-                                        let param_pos = i + 1;
-                                        // Render `UndefinedObject` as `Nil` in user-facing messages.
-                                        let expected_display =
-                                            InferredType::class_name_for_diagnostic(
-                                                expected_ty.as_str(),
-                                            );
-                                        let arg_display = InferredType::class_name_for_diagnostic(
-                                            arg_str.as_str(),
-                                        );
-                                        self.diagnostics.push(
-                                                            Diagnostic::warning(
-                                                                format!(
-                                                                    "Argument {param_pos} of '{sel_name}' on {class_name} expects {expected_display}, got {arg_display}"
-                                                                ),
-                                                                *span,
-                                                            )
-                                                            .with_category(DiagnosticCategory::Type)
-                                                            .with_hint(format!(
-                                                                "Type arguments are not compatible: expected {expected_display}, got {arg_display}"
-                                                            )),
-                                                        );
-                                    }
-                                }
+                            .is_some()
+                        {
+                            continue;
+                        }
+                        // `type_string_references_class_param` /
+                        // `is_assignable_to_with_variance` below are
+                        // string-level helpers (`DeclaredType`
+                        // is out of scope here) — render the structured type once
+                        // at this boundary (byte-identical to the
+                        // old stored string) and keep them
+                        // unchanged; `resolve_type_param` itself
+                        // takes the structured `DeclaredType`
+                        // directly.
+                        let expected_declared_str: EcoString = expected_declared.to_string().into();
+                        let substituted_expected;
+                        let expected_ty = if !class_subst.is_empty()
+                            && TypeChecker::type_string_references_class_param(
+                                &expected_declared_str,
+                                &class_subst,
+                            ) {
+                            substituted_expected = TypeChecker::resolve_type_param(
+                                expected_declared,
+                                &class_subst,
+                                &HashMap::new(),
+                                hierarchy,
+                            )
+                            .display_name();
+                            &substituted_expected
+                        } else {
+                            &expected_declared_str
+                        };
+                        // Only check when expected type is generic
+                        if expected_ty.contains('(')
+                            && let Some(arg_type) = self.type_map.get(arg.span())
+                            && let InferredType::Known { type_args, .. } = arg_type
+                            && !type_args.is_empty()
+                        {
+                            let arg_str = arg_type.display_annotation();
+                            if !Self::is_assignable_to_with_variance(
+                                &arg_str,
+                                expected_ty,
+                                hierarchy,
+                                protocol_registry,
+                            ) {
+                                let param_pos = i + 1;
+                                // Render `UndefinedObject` as `Nil` in user-facing messages.
+                                let expected_display =
+                                    InferredType::class_name_for_diagnostic(expected_ty.as_str());
+                                let arg_display =
+                                    InferredType::class_name_for_diagnostic(arg_str.as_str());
+                                let message = format!(
+                                    "Argument {param_pos} of '{sel_name}' on {class_name} expects {expected_display}, got {arg_display}"
+                                );
+                                let hint = format!(
+                                    "Type arguments are not compatible: expected {expected_display}, got {arg_display}"
+                                );
+                                self.diagnostics.push(
+                                    Diagnostic::warning(message, *span)
+                                        .with_category(DiagnosticCategory::Type)
+                                        .with_hint(hint),
+                                );
                             }
                         }
                     }
                 }
-
-                // Recurse
-                self.check_variance_in_expr(receiver, hierarchy, protocol_registry);
-                for arg in arguments {
-                    self.check_variance_in_expr(arg, hierarchy, protocol_registry);
-                }
             }
-            Expression::Block(block) => {
-                for stmt in &block.body {
-                    self.check_variance_in_expr(&stmt.expression, hierarchy, protocol_registry);
-                }
-            }
-            Expression::Assignment { value, .. }
-            | Expression::DestructureAssignment { value, .. }
-            | Expression::Return { value, .. } => {
-                self.check_variance_in_expr(value, hierarchy, protocol_registry);
-            }
-            Expression::Parenthesized { expression, .. } => {
-                self.check_variance_in_expr(expression, hierarchy, protocol_registry);
-            }
-            Expression::Cascade {
-                receiver, messages, ..
-            } => {
-                self.check_variance_in_expr(receiver, hierarchy, protocol_registry);
-                for msg in messages {
-                    for arg in &msg.arguments {
-                        self.check_variance_in_expr(arg, hierarchy, protocol_registry);
-                    }
-                }
-            }
-            // Leaf expressions — no sub-expressions to recurse into
-            _ => {}
         }
     }
 }

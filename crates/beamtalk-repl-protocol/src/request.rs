@@ -1080,8 +1080,8 @@ mod tests {
     }
 
     /// Every op the builders emit, and every param they send, must exist in the
-    /// server's op table. The table is the Erlang `beamtalk_repl_op_table`,
-    /// consumed here through the shared fixture it is pinned to by
+    /// server's op table, and every required param of the op must be sent. The
+    /// table is the Erlang `beamtalk_repl_op_table`, consumed here through the shared fixture it is pinned to by
     /// `beamtalk_repl_op_table_tests:table_matches_shared_fixture_test/0` —
     /// no node boot needed. This is what stops a client builder (like the old
     /// `info`) from outliving the server op it targets.
@@ -1110,11 +1110,23 @@ mod tests {
                 problems.push(format!("op `{op}` is not in the server op table"));
                 continue;
             };
-            let known: Vec<String> = names(entry, "params")
-                .into_iter()
+            let required = names(entry, "params");
+            let known: Vec<String> = required
+                .iter()
+                .cloned()
                 .chain(names(entry, "optional"))
                 .collect();
-            for key in req.as_object().expect("request is an object").keys() {
+            let sent = req.as_object().expect("request is an object");
+            // Every builder must send the op's required params, even in its
+            // sparsest form; a request missing one is rejected by the server.
+            for key in &required {
+                if !sent.contains_key(key) {
+                    problems.push(format!(
+                        "op `{op}` builder request omits required param `{key}`"
+                    ));
+                }
+            }
+            for key in sent.keys() {
                 if !envelope.contains(&key.as_str()) && !known.contains(key) {
                     problems.push(format!(
                         "op `{op}` sends param `{key}` the server does not read"

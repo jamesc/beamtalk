@@ -216,6 +216,76 @@ pub(crate) fn handle_build_class_module_index_in_source(request: &Map) -> Term {
     ]))
 }
 
+/// Handle a `scan_source_dependencies` request (BT-4861).
+///
+/// Backs `beamtalk_workspace_project_sync`'s load-project ordering
+/// (`sort_bt_files_by_deps`) and native-module dependency scan
+/// (`extract_native_refs`), which previously ran whole-file regexes that
+/// matched inside `///` doc comments and string literals and saw only one
+/// class per file. This parses `source` with the real grammar instead.
+///
+/// Request fields:
+/// - `source` (binary): the `.bt` file's source text
+///
+/// Response: `#{status => ok, classes => [#{name => <<"C">>, superclass =>
+/// <<"S">>}, ...], native_refs => [<<"mod">>, ...]}`. Every declared class is
+/// listed in source order. `superclass` is absent for a root class and for a
+/// package-qualified superclass (`json@Parser subclass: X` names another
+/// package's class, which never orders against this project's files).
+/// `native_refs` is the sorted, deduplicated union of `native: module`
+/// class-header backing modules and `Erlang module` FFI receivers.
+/// Parse errors are tolerated: whatever parsed still contributes.
+pub(crate) fn handle_scan_source_dependencies(request: &Map) -> Term {
+    use beamtalk_core::ast_walker::{for_each_expr_seq, walk_expression};
+    use beamtalk_core::ffi_receiver::erlang_module_of_receiver;
+
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+    let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
+    let classes: Vec<Term> = module
+        .classes
+        .iter()
+        .map(|class| {
+            let mut entry = vec![(atom("name"), binary(&class.name.name))];
+            if let (Some(superclass), None) = (&class.superclass, &class.superclass_package) {
+                entry.push((atom("superclass"), binary(&superclass.name)));
+            }
+            Term::from(Map::from(
+                entry
+                    .into_iter()
+                    .collect::<std::collections::HashMap<Term, Term>>(),
+            ))
+        })
+        .collect();
+
+    let mut native_refs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for class in &module.classes {
+        if let Some(backing) = &class.backing_module {
+            native_refs.insert(backing.name.to_string());
+        }
+    }
+    for_each_expr_seq(&module, |seq| {
+        for stmt in seq {
+            walk_expression(&stmt.expression, &mut |expr| {
+                if let Some(name) = erlang_module_of_receiver(expr) {
+                    native_refs.insert(name.to_string());
+                }
+            });
+        }
+    });
+    let native_refs: Vec<Term> = native_refs.iter().map(|m| binary(m)).collect();
+
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("classes"), Term::from(List::from(classes))),
+        (atom("native_refs"), Term::from(List::from(native_refs))),
+    ]))
+}
+
 pub(crate) fn class_span_error_response(
     err: &beamtalk_core::source_analysis::ClassSpanResolveError,
 ) -> Term {

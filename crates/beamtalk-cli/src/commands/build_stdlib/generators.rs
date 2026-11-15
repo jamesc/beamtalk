@@ -345,6 +345,21 @@ pub(super) fn generate_builtins_rs(
     write_generated_file_if_changed(&dest, &code)
 }
 
+/// The `-define(BEAMTALK_RUNTIME_ONLY_BUILTIN_CLASSES, [...]).` block (with its
+/// comment) rendered from `ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES`. The one
+/// rendering, used by the generator and by the header agreement test.
+pub(super) fn runtime_only_builtins_define() -> String {
+    let list = beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES
+        .iter()
+        .map(|n| format!("'{n}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "%% Runtime-only built-ins (no .bt source); from ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES.\n\
+         -define(BEAMTALK_RUNTIME_ONLY_BUILTIN_CLASSES, [{list}])."
+    )
+}
+
 /// Generate the `beamtalk_generated_builtins.hrl` Erlang header from parsed
 /// stdlib class metadata.
 ///
@@ -388,16 +403,7 @@ pub(super) fn generate_erlang_builtins_hrl(class_metadata: &[ClassMeta]) -> Resu
 
     code.push_str("]).\n\n");
 
-    let runtime_only = beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES
-        .iter()
-        .map(|n| format!("'{n}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let _ = writeln!(
-        code,
-        "%% Runtime-only built-ins (no .bt source); from ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES.\n\
-         -define(BEAMTALK_RUNTIME_ONLY_BUILTIN_CLASSES, [{runtime_only}]).\n\n-endif."
-    );
+    let _ = writeln!(code, "{}\n\n-endif.", runtime_only_builtins_define());
 
     let dest = Utf8PathBuf::from(GENERATED_BUILTINS_HRL_PATH);
     write_generated_file_if_changed(&dest, &code)
