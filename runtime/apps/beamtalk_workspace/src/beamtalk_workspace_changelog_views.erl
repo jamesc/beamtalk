@@ -6,7 +6,7 @@
 %%% **DDD Context:** Workspace Context
 
 -moduledoc """
-Read-side views over the ChangeLog: the `Workspace diff`/`changeLog` value maps (per-entry `method_delta` against the on-disk body, whitespace-normalised body comparison) and the `dirtyMethods` selector list. Moved verbatim out of `beamtalk_workspace_changelog` (BT-4907); everything here reads through the changelog's public entry accessors.
+Read-side views over the ChangeLog: the `Workspace diff`/`changeLog` value maps (per-entry `method_delta` against the on-disk body, whitespace-normalised body comparison) and the `dirtyMethods` selector list. Moved verbatim out of `beamtalk_workspace_changelog` (BT-4907); the changelog's entries come from its public API, but `entry_to_value/2` and `method_delta/1` read the `#entry{}` fields directly via the shared header (hence the `no_opaque` exemption below).
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -46,7 +46,7 @@ The map is tagged `'$beamtalk_class' => 'ChangeLog'` and carries the full set
 of entries (as `ChangeEntry` maps) under `entries`, so the `change_log.bt`
 object can apply the active-vs-full filtering in Beamtalk. This is what
 `Workspace changes` returns. Called via
-`(Erlang beamtalk_workspace_changelog) changeLog`.
+`(Erlang beamtalk_workspace_changelog_views) changeLog`.
 """.
 %% The `'$beamtalk_class' := 'ChangeLog'` tag lets the type checker (via
 %% beamtalk_spec_reader) infer this FFI result as the `ChangeLog` Beamtalk
@@ -83,7 +83,7 @@ Only active entries (current epoch, not orphaned) contribute, matching the ADR's
 "dirty state" semantics. New-class entries (no selector) are recorded under the
 class with the placeholder selector `#'new-class'`, mirroring the ADR REPL example
 `DoubleCounterTest -> #'new-class'`. Called via
-`(Erlang beamtalk_workspace_changelog) dirtyMethods`.
+`(Erlang beamtalk_workspace_changelog_views) dirtyMethods`.
 """.
 -spec dirtyMethods() -> #{atom() => map()}.
 dirtyMethods() ->

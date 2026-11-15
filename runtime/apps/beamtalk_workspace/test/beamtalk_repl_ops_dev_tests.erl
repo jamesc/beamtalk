@@ -1370,21 +1370,21 @@ walk_mixed_chain_binary_lt_returns_boolean() ->
 resolve_plain_class_name_test() ->
     %% Plain class name that exists as an atom — should resolve normally.
     ?assertEqual(
-        {ok, 'Integer'}, beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"Integer">>)
+        {ok, 'Integer'}, beamtalk_repl_ops_dev_complete:resolve_qualified_class_name(<<"Integer">>)
     ).
 
 resolve_plain_class_name_nonexistent_test() ->
     %% Plain class name that does not exist as an atom.
     ?assertEqual(
         {error, badarg},
-        beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"XyzzyNonexistent99991">>)
+        beamtalk_repl_ops_dev_complete:resolve_qualified_class_name(<<"XyzzyNonexistent99991">>)
     ).
 
 resolve_qualified_class_nonexistent_package_test() ->
     %% Qualified class from a non-existent package.
     ?assertEqual(
         {error, badarg},
-        beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"xyzzy@Parser">>)
+        beamtalk_repl_ops_dev_complete:resolve_qualified_class_name(<<"xyzzy@Parser">>)
     ).
 
 resolve_qualified_class_stdlib_test() ->
@@ -1392,21 +1392,21 @@ resolve_qualified_class_stdlib_test() ->
     %% The module atom `bt@stdlib@integer` should exist after stdlib is loaded.
     ?assertEqual(
         {ok, 'Integer'},
-        beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"stdlib@Integer">>)
+        beamtalk_repl_ops_dev_complete:resolve_qualified_class_name(<<"stdlib@Integer">>)
     ).
 
 resolve_qualified_class_empty_class_test() ->
     %% "json@" — empty class name after @
     ?assertEqual(
         {error, badarg},
-        beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"json@">>)
+        beamtalk_repl_ops_dev_complete:resolve_qualified_class_name(<<"json@">>)
     ).
 
 resolve_qualified_class_empty_package_test() ->
     %% "@Parser" — empty package before @
     ?assertEqual(
         {error, badarg},
-        beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"@Parser">>)
+        beamtalk_repl_ops_dev_complete:resolve_qualified_class_name(<<"@Parser">>)
     ).
 
 %%====================================================================
@@ -2628,7 +2628,7 @@ resolve_qualified_consecutive_uppercase_test() ->
     %% but the conversion path is still walked.
     ?assertEqual(
         {error, badarg},
-        beamtalk_repl_ops_dev:resolve_qualified_class_name(<<"stdlib@ABCWidget">>)
+        beamtalk_repl_ops_dev_complete:resolve_qualified_class_name(<<"stdlib@ABCWidget">>)
     ).
 
 handle_list_classes_non_binary_filter_test() ->

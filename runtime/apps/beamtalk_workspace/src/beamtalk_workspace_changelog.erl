@@ -107,16 +107,9 @@ release nodes do not start a workspace, so this code is a no-op there.
     store_site_body/1
 ]).
 
-%% Beamtalk FFI surface (ADR 0082 Phase 1). These build the data the
-%% `change_log.bt` / `change_entry.bt` value objects wrap: each entry becomes a
-%% `$beamtalk_class`-tagged map and `dirtyMethods/0` returns the per-class set
-%% of dirty selectors. The FFI dispatches on the Beamtalk selector verbatim, so
-%% these entry points are named in camelCase (`changeLog`, `dirtyMethods`) to
-%% match the selectors used in `change_log.bt` / `workspace.bt`. Called
-%% via `(Erlang beamtalk_workspace_changelog) ...` from the compiled stdlib.
 %% The `Workspace changeLog` / `dirtyMethods` views live in
-%% `beamtalk_workspace_changelog_views`; they read the survivor/shadow state
-%% below.
+%% `beamtalk_workspace_changelog_views` (the Beamtalk FFI surface, ADR 0082
+%% Phase 1); these two helpers are exported for that module.
 -export([
     is_active/1,
     survivor_seqs/1

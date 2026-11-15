@@ -19,8 +19,7 @@ Extracted from beamtalk_repl_server.
     make_class_not_found_error/1,
     base_protocol_response/1,
     list_class_methods_for_ws/1,
-    list_inherited_methods_for_ws/1,
-    resolve_qualified_class_name/1
+    list_inherited_methods_for_ws/1
 ]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -648,7 +647,7 @@ the noproc exit is translated to a structured class_not_found error.
 ) -> beamtalk_repl_ops:op_result().
 show_codegen_class_method(ClassBin, SelectorBin) ->
     %% Support package-qualified class names (e.g. "json@Parser")
-    case resolve_qualified_class_name(ClassBin) of
+    case beamtalk_repl_ops_dev_complete:resolve_qualified_class_name(ClassBin) of
         {error, badarg} ->
             {error, make_class_not_found_error(ClassBin)};
         {ok, ClassAtom} ->
@@ -1032,7 +1031,7 @@ Each entry is a map with <<"name">>, <<"selector">>, <<"side">>, <<"line">>,
 -spec list_class_methods_for_ws(binary()) -> [map()].
 list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
     %% Support package-qualified class names (e.g. "json@Parser")
-    case resolve_qualified_class_name(ClassBin) of
+    case beamtalk_repl_ops_dev_complete:resolve_qualified_class_name(ClassBin) of
         {error, badarg} ->
             [];
         {ok, ClassName} ->
@@ -1073,7 +1072,7 @@ Each entry has the same shape as `method_ws_entry/4` plus a
 """.
 -spec list_inherited_methods_for_ws(binary()) -> [map()].
 list_inherited_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
-    case resolve_qualified_class_name(ClassBin) of
+    case beamtalk_repl_ops_dev_complete:resolve_qualified_class_name(ClassBin) of
         {error, badarg} ->
             [];
         {ok, ClassName} ->
@@ -1203,41 +1202,6 @@ list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
                         }
                      || V <- IVars
                     ]
-            end
-    end.
-
--doc """
-Resolve a class name that may be package-qualified (ADR 0070 Phase 6).
-
-Parses `<<"json@Parser">>` into `{ok, 'Parser'}` by looking up the
-package-qualified BEAM module name (`bt@json@parser`) in the class registry.
-Plain class names (`<<"Counter">>`) are resolved directly via `safe_to_existing_atom`.
-
-Returns `{ok, ClassAtom}` on success, or `{error, badarg}` if the class
-is not found (whether qualified or unqualified).
-""".
--spec resolve_qualified_class_name(binary()) -> {ok, atom()} | {error, badarg}.
-resolve_qualified_class_name(ClassBin) when is_binary(ClassBin) ->
-    case binary:match(ClassBin, <<"@">>) of
-        nomatch ->
-            %% Plain class name — existing behavior
-            beamtalk_repl_errors:safe_to_existing_atom(ClassBin);
-        {Pos, _Len} ->
-            %% Package-qualified: "json@Parser" → package=json, class=Parser
-            PkgBin = binary:part(ClassBin, 0, Pos),
-            ClassNameBin = binary:part(ClassBin, Pos + 1, byte_size(ClassBin) - Pos - 1),
-            %% Convert class name to snake_case module name: bt@{pkg}@{snake_case}
-            %% Delegates to beamtalk_module_name, the single
-            %% Erlang-side authority for the ClassName ⇄ bt@[pkg@]snake_case
-            %% convention. Never creates an atom for the untrusted ClassBin —
-            %% to_qualified_module_atom/2 only checks list_to_existing_atom.
-            SnakeCase = beamtalk_module_name:camel_to_snake(binary_to_list(ClassNameBin)),
-            case beamtalk_module_name:to_qualified_module_atom(SnakeCase, PkgBin) of
-                undefined ->
-                    {error, badarg};
-                _ModAtom ->
-                    %% Module name atom exists — now resolve the class name atom
-                    beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin)
             end
     end.
 
