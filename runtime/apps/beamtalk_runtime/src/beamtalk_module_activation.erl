@@ -652,7 +652,7 @@ is_user_class_module(ModName) ->
 -doc "Module-atom wrapper around `is_user_class_module/1`, for `lists:filter/2`.".
 -spec is_release_class_module(module()) -> boolean().
 is_release_class_module(Module) ->
-    is_user_class_module(atom_to_list(Module)).
+    beamtalk_module_name:is_user_class_module(Module).
 
 -doc "Validate that a module name contains only valid Beamtalk characters.".
 -spec is_valid_module_name(string()) -> boolean().
