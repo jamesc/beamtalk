@@ -39,6 +39,7 @@ pub mod lowering;
 pub(crate) mod method_validators;
 pub mod module_validator;
 pub mod name_resolver;
+mod namespace_collision;
 pub(crate) mod pattern_bindings;
 pub mod primitive_validator;
 pub mod protocol_registry;
@@ -530,18 +531,6 @@ impl<'a> AnalysisContext<'a> {
         pre_loaded_aliases: Vec<alias_registry::AliasInfo>,
     ) -> Self {
         self.pre_loaded_aliases = pre_loaded_aliases;
-        self
-    }
-
-    /// Known package names for package-qualifier validation (ADR 0070 Phase
-    /// 2). Unknown package qualifiers produce compile errors.
-    #[allow(clippy::implicit_hasher)] // concrete HashSet is simpler for callers
-    #[must_use]
-    pub fn with_known_packages(
-        mut self,
-        known_packages: std::collections::HashSet<String>,
-    ) -> Self {
-        self.known_packages = Some(known_packages);
         self
     }
 

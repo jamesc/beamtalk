@@ -78,7 +78,7 @@ pub fn unparse_method(method: &MethodDefinition) -> String {
     // structure, not part of the method. Emitting them here would
     // make the stored/compiled source diverge from disk, so a no-op cockpit
     // save/flush would duplicate the divider. Whole-file unparse
-    // (`unparse_class` / `unparse_module`) still preserves them in place.
+    // (`unparse_module`) still preserves them in place.
     // A future change will surface section dividers as first-class method
     // categories instead of free comments.
     //
@@ -98,17 +98,6 @@ fn class_prefix(method: &MethodDefinition) -> Document<'static> {
     } else {
         nil()
     }
-}
-
-/// Unparses a [`ClassDefinition`] to source text.
-///
-/// Its methods keep `|>` as written, since each carries its own record, but
-/// `state:` and `classState:` initialisers record theirs on the [`Module`]
-/// (ADR 0145), which a class alone does not reach: they print as the
-/// equivalent nested sends. Use [`unparse_module`] for a class as written.
-#[must_use]
-pub fn unparse_class(class: &ClassDefinition) -> String {
-    unparse_class_definition(class).to_pretty_string()
 }
 
 /// Re-lays-out a canonical (column-0) method source at `base_indent`, so the
