@@ -5,7 +5,7 @@
 //! pushes from the runtime, publishes the resulting diagnostics, and tracks
 //! which paths are currently open so publication can be safely deferred.
 
-use super::convert::{path_to_uri, to_lsp_diagnostic, uri_to_path};
+use super::convert::{LineIndex, path_to_uri, to_lsp_diagnostic, uri_to_path};
 use super::{NavCache, ReloadDiagnosticsByUriAndOrigin};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -415,9 +415,10 @@ pub(in crate::server) async fn publish_diagnostics_impl(
     let mut diagnostics: Vec<tower_lsp::lsp_types::Diagnostic> = {
         let svc = service.lock().expect("service lock poisoned");
         let source = svc.file_source(&path);
+        let index = source.as_deref().map(LineIndex::new);
         svc.diagnostics(&path)
             .into_iter()
-            .map(|d| to_lsp_diagnostic(&d, source.as_deref()))
+            .map(|d| to_lsp_diagnostic(&d, index.as_ref()))
             .collect()
     };
     {

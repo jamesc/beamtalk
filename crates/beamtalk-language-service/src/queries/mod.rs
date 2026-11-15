@@ -50,6 +50,7 @@ pub mod selector_rename_query;
 pub mod senders_query;
 pub(crate) mod shape_keys;
 pub mod signature_help_provider;
+pub(crate) mod signature_text;
 
 use beamtalk_core::ast::{Expression, Module};
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;

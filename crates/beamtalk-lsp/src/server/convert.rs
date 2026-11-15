@@ -38,63 +38,114 @@ pub(in crate::server) fn path_to_stdlib_uri(path: &Utf8PathBuf) -> Option<Url> {
     let filename = path.file_name()?;
     Url::parse(&format!("beamtalk-stdlib:///{filename}")).ok()
 }
-/// Converts an LSP `Position` (UTF-16 code units) to a beamtalk `Position` (byte offsets).
+/// Line-start offsets for one source text; backs every position conversion.
 ///
-/// LSP positions use UTF-16 code units for the character field.
-/// Beamtalk positions use byte offsets within the line.
-pub(in crate::server) fn to_bt_position(
-    pos: tower_lsp::lsp_types::Position,
-    source: &str,
-) -> BtPosition {
-    let target_line = pos.line;
-    let target_utf16_col = pos.character;
+/// LSP columns are UTF-16 code units, beamtalk columns are byte offsets within
+/// the line. Lines are split on `\n` only, so in CRLF text the `\r` is an
+/// ordinary one-unit column at the end of its line. Building the index is one
+/// scan; each conversion afterwards is a binary search plus a walk of one line,
+/// so converting many spans in a large file stays linear overall.
+pub(in crate::server) struct LineIndex<'a> {
+    source: &'a str,
+    /// Byte offset of the start of each line; `starts[0] == 0`.
+    starts: Vec<usize>,
+}
 
-    let mut current_line = 0u32;
-    let mut line_start = 0usize;
-
-    // Find the start of the target line
-    for (i, ch) in source.char_indices() {
-        if current_line == target_line {
-            break;
-        }
-        if ch == '\n' {
-            current_line += 1;
-            line_start = i + 1;
-        }
+impl<'a> LineIndex<'a> {
+    pub(in crate::server) fn new(source: &'a str) -> Self {
+        let mut starts = vec![0];
+        starts.extend(source.match_indices('\n').map(|(i, _)| i + 1));
+        Self { source, starts }
     }
 
-    // Walk the target line, counting UTF-16 code units until we reach the target column
-    let mut utf16_col = 0u32;
-    let mut byte_col = 0u32;
-    for ch in source[line_start..].chars() {
-        if ch == '\n' || utf16_col >= target_utf16_col {
-            break;
-        }
-        // UTF-16 len is always 1 or 2, safe to truncate
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "char::len_utf16() is always 1 or 2"
-        )]
-        {
-            utf16_col += ch.len_utf16() as u32;
-        }
-        // len_utf8 is always 1-4, safe to truncate
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "char::len_utf8() is always 1 to 4"
-        )]
-        {
-            byte_col += ch.len_utf8() as u32;
-        }
+    /// Sum of UTF-16 code units of `chars`, for columns (always fits `u32`).
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "char::len_utf16() is always 1 or 2"
+    )]
+    fn utf16_len(ch: char) -> u32 {
+        ch.len_utf16() as u32
     }
 
-    BtPosition::new(target_line, byte_col)
+    /// Converts an LSP `Position` (UTF-16 code units) to a beamtalk `Position`
+    /// (byte offsets within the line).
+    ///
+    /// A line past the end of the text resolves against the last line.
+    pub(in crate::server) fn to_bt_position(&self, pos: Position) -> BtPosition {
+        let line = (pos.line as usize).min(self.starts.len() - 1);
+        let line_start = self.starts[line];
+
+        // Walk the target line, counting UTF-16 code units until we reach the target column
+        let mut utf16_col = 0u32;
+        let mut byte_col = 0usize;
+        for ch in self.source[line_start..].chars() {
+            if ch == '\n' || utf16_col >= pos.character {
+                break;
+            }
+            utf16_col += Self::utf16_len(ch);
+            byte_col += ch.len_utf8();
+        }
+
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a column within a single line fits u32"
+        )]
+        BtPosition::new(pos.line, byte_col as u32)
+    }
+
+    /// Converts a byte offset to an LSP `Position` (0-based line/character in UTF-16 code units).
+    pub(in crate::server) fn offset_to_position(&self, offset: usize) -> Position {
+        let offset = offset.min(self.source.len());
+        // Line = number of line starts at or before `offset`, minus line 0.
+        let line = self.starts.partition_point(|&s| s <= offset) - 1;
+        let col = self.source[self.starts[line]..]
+            .char_indices()
+            .take_while(|&(i, ch)| self.starts[line] + i < offset && ch != '\n')
+            .map(|(_, ch)| Self::utf16_len(ch))
+            .sum();
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "a line number fits u32 for any LSP document"
+        )]
+        Position::new(line as u32, col)
+    }
+
+    /// Converts an LSP `Position` (line, UTF-16 column) to a byte offset.
+    ///
+    /// Returns `source.len()` when the line is beyond the end of the file, and
+    /// clamps to the end of the line when the column is past it.
+    pub(in crate::server) fn position_to_offset(&self, pos: Position) -> usize {
+        let Some(&line_start) = self.starts.get(pos.line as usize) else {
+            return self.source.len();
+        };
+        let mut col_utf16 = 0u32;
+        let mut offset = line_start;
+        for ch in self.source[line_start..].chars() {
+            if col_utf16 >= pos.character || ch == '\n' {
+                break;
+            }
+            col_utf16 += Self::utf16_len(ch);
+            offset += ch.len_utf8();
+        }
+        offset
+    }
+
+    /// Converts a beamtalk `Span` to an LSP `Range`.
+    pub(in crate::server) fn span_to_range(&self, span: Span) -> Range {
+        Range {
+            start: self.offset_to_position(span.start() as usize),
+            end: self.offset_to_position(span.end() as usize),
+        }
+    }
+}
+
+/// Converts an LSP `Position` to a beamtalk `Position`; see [`LineIndex::to_bt_position`].
+pub(in crate::server) fn to_bt_position(pos: Position, source: &str) -> BtPosition {
+    LineIndex::new(source).to_bt_position(pos)
 }
 /// Converts a beamtalk `Span` to an LSP `Range` using source text.
 pub(in crate::server) fn span_to_range(span: Span, source: &str) -> Range {
-    let start = offset_to_position(span.start() as usize, source);
-    let end = offset_to_position(span.end() as usize, source);
-    Range { start, end }
+    LineIndex::new(source).span_to_range(span)
 }
 /// Converts a [`Span`] to an LSP [`FoldingRange`].
 ///
@@ -114,80 +165,21 @@ pub(in crate::server) fn span_to_folding_range(span: Span, source: &str) -> Fold
         collapsed_text: None,
     }
 }
-/// Converts a byte offset to an LSP `Position` (0-based line/character in UTF-16 code units).
-pub(in crate::server) fn offset_to_position(
-    offset: usize,
-    source: &str,
-) -> tower_lsp::lsp_types::Position {
-    let offset = offset.min(source.len());
-    let mut line = 0u32;
-    let mut col = 0u32;
-    for (i, ch) in source.char_indices() {
-        if i >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            // UTF-16 len is always 1 or 2, safe to truncate
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "char::len_utf16() is always 1 or 2"
-            )]
-            {
-                col += ch.len_utf16() as u32;
-            }
-        }
-    }
-    tower_lsp::lsp_types::Position::new(line, col)
+/// Converts a byte offset to an LSP `Position`; see [`LineIndex::offset_to_position`].
+pub(in crate::server) fn offset_to_position(offset: usize, source: &str) -> Position {
+    LineIndex::new(source).offset_to_position(offset)
 }
-/// Converts an LSP `Position` (line, UTF-16 column) to a byte offset in `source`.
-///
-/// Returns `source.len()` when the position is beyond the end of the file.
-pub(in crate::server) fn position_to_offset(
-    pos: tower_lsp::lsp_types::Position,
-    source: &str,
-) -> usize {
-    let mut line = 0u32;
-    let mut line_start = 0usize;
-    for (i, ch) in source.char_indices() {
-        if line == pos.line {
-            // Walk UTF-16 columns within this line
-            let mut col_utf16 = 0u32;
-            let mut byte_offset = line_start;
-            for (j, c) in source[line_start..].char_indices() {
-                if col_utf16 >= pos.character {
-                    return line_start + j;
-                }
-                if c == '\n' {
-                    break;
-                }
-                #[expect(
-                    clippy::cast_possible_truncation,
-                    reason = "char::len_utf16() is always 1 or 2"
-                )]
-                {
-                    col_utf16 += c.len_utf16() as u32;
-                }
-                byte_offset = line_start + j + c.len_utf8();
-            }
-            return byte_offset;
-        }
-        if ch == '\n' {
-            line += 1;
-            line_start = i + 1;
-        }
-    }
-    source.len()
+/// Converts an LSP `Position` to a byte offset; see [`LineIndex::position_to_offset`].
+pub(in crate::server) fn position_to_offset(pos: Position, source: &str) -> usize {
+    LineIndex::new(source).position_to_offset(pos)
 }
 /// Converts a beamtalk `Diagnostic` to an LSP `Diagnostic`.
 pub(in crate::server) fn to_lsp_diagnostic(
     diag: &beamtalk_language_service::Diagnostic,
-    source: Option<&str>,
+    index: Option<&LineIndex<'_>>,
 ) -> tower_lsp::lsp_types::Diagnostic {
-    let range = source
-        .map(|src| span_to_range(diag.span, src))
+    let range = index
+        .map(|ix| ix.span_to_range(diag.span))
         .unwrap_or_default();
 
     tower_lsp::lsp_types::Diagnostic {
