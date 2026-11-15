@@ -346,7 +346,7 @@ stdlib_internal_alias_excluded_test() ->
     ).
 
 %% Fail-safe (not fail-open) on a row missing the `internal` key entirely —
-%% mirrors `beamtalk_repl_ops_browse:alias_visible/2`'s convention. Should
+%% mirrors `beamtalk_repl_ops_browse_aliases:alias_visible/2`'s convention. Should
 %% never happen against real `format_type_aliases_entry` output (which
 %% always emits `internal`), but a row shape this reader doesn't recognise
 %% must not default to seeding it as public.

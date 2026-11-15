@@ -133,7 +133,9 @@ handle_term(<<"nav-query">>, Params, _Msg, _SessionPid) ->
             %% share the `native_caller_row()` shape; `merge_native_caller_rows/2`
             %% de-duplicates by calling method and keeps a stable order.
             FfiRows = beamtalk_xref:callers_of_native_module(Module),
-            DelegateRows = beamtalk_repl_ops_browse:delegate_callers_of_native_module(Module),
+            DelegateRows = beamtalk_repl_ops_browse_native:delegate_callers_of_native_module(
+                Module
+            ),
             {value, native_callers_value(merge_native_caller_rows(FfiRows, DelegateRows))};
         {error, Reason} ->
             {error,

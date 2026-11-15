@@ -29,7 +29,7 @@ files).
 - List dependencies of a package (`dependencies/1`)
 - Find the OTP application hosting a package (`find_app_for_package/1`) —
   exported so other package-discovery consumers (e.g.
-  `beamtalk_repl_ops_browse:browse_type_aliases/0`) share this logic
+  `beamtalk_repl_ops_browse_aliases:browse_type_aliases/0`) share this logic
   instead of re-deriving it against only `classes`.
 
 See also: docs/ADR/0070-package-namespaces-and-dependencies.md Section 8
@@ -470,7 +470,7 @@ native_modules_of_app(App) ->
 Find the OTP application that hosts a given package name.
 
 Exported so other package-discovery consumers (e.g.
-`beamtalk_repl_ops_browse:browse_type_aliases/0`,
+`beamtalk_repl_ops_browse_aliases:browse_type_aliases/0`,
 `browse_native_modules/0`) can resolve a package name back to its OTP
 application without re-deriving the classes-or-type_aliases discovery
 signal themselves.

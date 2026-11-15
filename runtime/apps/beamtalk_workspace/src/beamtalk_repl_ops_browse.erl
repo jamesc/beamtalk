@@ -71,13 +71,7 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([handle/4, handle_term/4, describe_ops/0, source_origin_of/2]).
-
-%% The editable-native-target resolver, called by the save-native-source
-%% op (`beamtalk_repl_ops_load`) to re-derive — server-side, never trusting the
-%% client — whether a native module is a project-owned, editable `.erl` and where
-%% its source lives. Authorization seam: only `<<"project">>` is writable.
--export([native_module_editable_target/1]).
+-export([handle/4, handle_term/4, describe_ops/0]).
 
 %% `info_fields/1` (method_info() -> {Line, SourceStatus, Provenance}),
 %% `row_doc_signature/4` (the synthetic-only doc/signature
@@ -89,38 +83,14 @@ See `docs/ADR/0096-system-browser-data-source.md`.
 %% already does, instead of a second `source_status`-shaping implementation.
 -export([info_fields/1, row_doc_signature/4, side_to_binary/1]).
 
-%% The ADR 0056 `self delegate` callers of a native module — the
-%% complement of the explicit `(Erlang <module>)` FFI callers
-%% `beamtalk_xref:callers_of_native_module/1` reports. Called by the
-%% `callers_of_native_module` nav op (`beamtalk_repl_ops_nav`), which merges both
-%% sets, so a native module that backs an actor class lists that class's
-%% delegating methods under "Callers".
--export([delegate_callers_of_native_module/1]).
-
 -ifdef(TEST).
-%% Pure helpers exercised directly in EUnit: clause parsing and the
-%% delegate-source marker have no live-class dependency; the
-%% source_origin (classification) / package (name) split helpers; the
-%% `dispatch_<selector>` export → `self delegate` selector recovery; the
-%% seeding-boundary exclusion + row-shaping helpers behind
-%% `browse-type-aliases`; the alias-source param validator.
+%% Pure helpers exercised directly in EUnit: the class-definition skeleton
+%% builder plus the dead-pid resilience paths (class_row/2, state_slots/2).
+%% The native / alias / origin helpers are exported by their own modules.
 -export([
-    handle_call_clause_lines/1,
-    clause_selector/1,
-    delegate_exported/2,
-    self_delegate_selectors/1,
-    package_of/2,
-    alias_visible/2,
-    alias_row/3,
-    package_type_aliases/1,
     class_definition_text/7,
-    validate_alias/1,
-    safe_relative_path/1,
-    %% Dead-pid resilience (class_row/2, state_slots/2) and the
-    %% alias-field string-shape normaliser.
     class_row/2,
-    state_slots/2,
-    alias_field_binary/1
+    state_slots/2
 ]).
 -endif.
 
@@ -158,28 +128,28 @@ handle_term(<<"browse-protocols">>, Params, _Msg, _SessionPid) ->
         {ok, {ClassName, ClassSide}} ->
             browse_protocols(ClassName, ClassSide);
         {error, Reason} ->
-            arg_error(<<"browse-protocols">>, Reason)
+            beamtalk_repl_ops_browse_support:arg_error(<<"browse-protocols">>, Reason)
     end;
 handle_term(<<"browse-method-source">>, Params, _Msg, _SessionPid) ->
     case validate_class_side_selector(Params) of
         {ok, {ClassName, ClassSide, Selector}} ->
             browse_method_source(ClassName, ClassSide, Selector);
         {error, Reason} ->
-            arg_error(<<"browse-method-source">>, Reason)
+            beamtalk_repl_ops_browse_support:arg_error(<<"browse-method-source">>, Reason)
     end;
 handle_term(<<"browse-class-definition">>, Params, _Msg, _SessionPid) ->
     case validate_class(Params) of
         {ok, ClassName} ->
             browse_class_definition(ClassName);
         {error, Reason} ->
-            arg_error(<<"browse-class-definition">>, Reason)
+            beamtalk_repl_ops_browse_support:arg_error(<<"browse-class-definition">>, Reason)
     end;
 handle_term(<<"browse-categories">>, Params, _Msg, _SessionPid) ->
     case validate_class(Params) of
         {ok, ClassName} ->
             browse_categories(ClassName);
         {error, Reason} ->
-            arg_error(<<"browse-categories">>, Reason)
+            beamtalk_repl_ops_browse_support:arg_error(<<"browse-categories">>, Reason)
     end;
 handle_term(<<"browse-native-source">>, Params, _Msg, _SessionPid) ->
     %% The native pane can be keyed by a standalone native `module`
@@ -189,27 +159,31 @@ handle_term(<<"browse-native-source">>, Params, _Msg, _SessionPid) ->
     %% path (resolve a native class's backing module).
     case validate_module(Params) of
         {ok, ModuleName} ->
-            browse_native_module_source(ModuleName, optional_selector(Params));
+            beamtalk_repl_ops_browse_native:browse_native_module_source(
+                ModuleName, beamtalk_repl_ops_browse_native:optional_selector(Params)
+            );
         none ->
             case validate_class(Params) of
                 {ok, ClassName} ->
-                    browse_native_source(ClassName, optional_selector(Params));
+                    beamtalk_repl_ops_browse_native:browse_native_source(
+                        ClassName, beamtalk_repl_ops_browse_native:optional_selector(Params)
+                    );
                 {error, Reason} ->
-                    arg_error(<<"browse-native-source">>, Reason)
+                    beamtalk_repl_ops_browse_support:arg_error(<<"browse-native-source">>, Reason)
             end;
         {error, Reason} ->
-            arg_error(<<"browse-native-source">>, Reason)
+            beamtalk_repl_ops_browse_support:arg_error(<<"browse-native-source">>, Reason)
     end;
 handle_term(<<"browse-native-modules">>, _Params, _Msg, _SessionPid) ->
-    {value, browse_native_modules()};
+    {value, beamtalk_repl_ops_browse_native:browse_native_modules()};
 handle_term(<<"browse-type-aliases">>, _Params, _Msg, _SessionPid) ->
-    {value, browse_type_aliases()};
+    {value, beamtalk_repl_ops_browse_aliases:browse_type_aliases()};
 handle_term(<<"browse-alias-source">>, Params, _Msg, _SessionPid) ->
-    case validate_alias(Params) of
+    case beamtalk_repl_ops_browse_aliases:validate_alias(Params) of
         {ok, {Name, Package}} ->
-            browse_alias_source(Name, Package);
+            beamtalk_repl_ops_browse_aliases:browse_alias_source(Name, Package);
         {error, Reason} ->
-            arg_error(<<"browse-alias-source">>, Reason)
+            beamtalk_repl_ops_browse_support:arg_error(<<"browse-alias-source">>, Reason)
     end.
 
 -doc "Advertise the browse ops in `describe`.".
@@ -256,29 +230,41 @@ class_row(Pid, TestClasses) ->
     try
         Name = beamtalk_runtime_api:class_name(Pid),
         Super = beamtalk_runtime_api:superclass(Pid),
-        ModName = origin_module(Name, beamtalk_runtime_api:module_name(Pid)),
+        ModName = beamtalk_repl_ops_browse_origin:origin_module(
+            Name, beamtalk_runtime_api:module_name(Pid)
+        ),
         SourceFile = beamtalk_repl_row:source_file_of(ModName),
-        SourceOrigin = source_origin_of(ModName, SourceFile),
+        SourceOrigin = beamtalk_repl_ops_browse_origin:source_origin_of(ModName, SourceFile),
         {true, #{
             <<"name">> => atom_to_binary(Name, utf8),
-            <<"superclass">> => atom_or_null(Super),
+            <<"superclass">> => beamtalk_repl_ops_browse_support:atom_or_null(Super),
             <<"category">> => category_of(ModName),
             <<"comment">> => beamtalk_repl_row:first_line(class_doc(Pid)),
-            <<"sealed">> => safe_bool(fun() -> beamtalk_runtime_api:is_sealed(Pid) end),
-            <<"typed">> => safe_bool(fun() -> beamtalk_runtime_api:is_typed(Pid) end),
-            <<"abstract">> => safe_bool(fun() -> beamtalk_runtime_api:is_abstract(Pid) end),
-            <<"internal">> => safe_bool(fun() -> beamtalk_runtime_api:is_internal(Pid) end),
+            <<"sealed">> => beamtalk_repl_ops_browse_support:safe_bool(fun() ->
+                beamtalk_runtime_api:is_sealed(Pid)
+            end),
+            <<"typed">> => beamtalk_repl_ops_browse_support:safe_bool(fun() ->
+                beamtalk_runtime_api:is_typed(Pid)
+            end),
+            <<"abstract">> => beamtalk_repl_ops_browse_support:safe_bool(fun() ->
+                beamtalk_runtime_api:is_abstract(Pid)
+            end),
+            <<"internal">> => beamtalk_repl_ops_browse_support:safe_bool(fun() ->
+                beamtalk_runtime_api:is_internal(Pid)
+            end),
             <<"source_file">> => SourceFile,
-            <<"origin">> => origin_of(SourceFile),
+            <<"origin">> => beamtalk_repl_ops_browse_origin:origin_of(SourceFile),
             <<"source_origin">> => SourceOrigin,
-            <<"package">> => package_of(ModName, SourceOrigin),
+            <<"package">> => beamtalk_repl_ops_browse_origin:package_of(ModName, SourceOrigin),
             <<"is_test">> => sets:is_element(Name, TestClasses),
             %% Protocol class objects (ADR 0068) are sealed abstract
             %% subclasses of Protocol with no declared package, so they would
             %% otherwise fall into the "(uncategorized)" bucket. Flag them so the
             %% browser groups them under a dedicated "Protocols" category — pure
             %% registry reflection, mirroring the `is_test` → "Tests" treatment.
-            <<"is_protocol">> => safe_bool(fun() -> beamtalk_runtime_api:is_protocol(Name) end)
+            <<"is_protocol">> => beamtalk_repl_ops_browse_support:safe_bool(fun() ->
+                beamtalk_runtime_api:is_protocol(Name)
+            end)
         }}
     catch
         exit:{noproc, _} ->
@@ -308,7 +294,9 @@ browse_protocols(ClassName, ClassSide) ->
     %% Resolve the protocol's defining module (else the shared
     %% `beamtalk_protocol_object` dispatch module) so the method rows' source
     %% badges match where the protocol actually lives (stdlib vs project).
-    ModName = origin_module(ClassName, mod_name_for_class(ClassName)),
+    ModName = beamtalk_repl_ops_browse_origin:origin_module(
+        ClassName, mod_name_for_class(ClassName)
+    ),
     SourceFile = beamtalk_repl_row:source_file_of(ModName),
     %% Resolve the class pid once here (not per selector) so
     %% `selector_row` can enrich each `synthetic` row with its resolved
@@ -361,14 +349,14 @@ protocol_requirement_rows(ClassName, ClassSide, SourceFile, ModName) ->
 
 -spec requirement_row(atom(), binary() | null, atom()) -> map().
 requirement_row(Selector, SourceFile, ModName) ->
-    SourceOrigin = source_origin_of(ModName, SourceFile),
+    SourceOrigin = beamtalk_repl_ops_browse_origin:source_origin_of(ModName, SourceFile),
     #{
         <<"selector">> => atom_to_binary(Selector, utf8),
         <<"line">> => null,
         <<"source_status">> => <<"unindexed_runtime_fun">>,
         <<"origin">> => <<"runtime">>,
         <<"source_origin">> => SourceOrigin,
-        <<"package">> => package_of(ModName, SourceOrigin),
+        <<"package">> => beamtalk_repl_ops_browse_origin:package_of(ModName, SourceOrigin),
         %% A required member has no implemented method to resolve, so
         %% its hover carries null signature/doc — the same shape as an
         %% unenriched selector row (keeps the row shape uniform for the client).
@@ -383,15 +371,17 @@ requirement_row(Selector, SourceFile, ModName) ->
 selector_row(ClassName, ClassSide, Selector, SourceFile, ModName, ClassPid) ->
     Info = beamtalk_xref:method_info(ClassName, ClassSide, Selector),
     {Line, SourceStatus, Provenance} = info_fields(Info),
-    SourceOrigin = source_origin_of(ModName, SourceFile),
+    SourceOrigin = beamtalk_repl_ops_browse_origin:source_origin_of(ModName, SourceFile),
     {Doc, Signature} = row_doc_signature(ClassPid, ClassSide, Selector, SourceStatus),
     #{
         <<"selector">> => atom_to_binary(Selector, utf8),
         <<"line">> => Line,
         <<"source_status">> => atom_to_binary(SourceStatus, utf8),
-        <<"origin">> => origin_for_provenance(Provenance, SourceFile),
+        <<"origin">> => beamtalk_repl_ops_browse_origin:origin_for_provenance(
+            Provenance, SourceFile
+        ),
         <<"source_origin">> => SourceOrigin,
-        <<"package">> => package_of(ModName, SourceOrigin),
+        <<"package">> => beamtalk_repl_ops_browse_origin:package_of(ModName, SourceOrigin),
         %% Signature + first-line-of-doc feed the method-row hover so a
         %% hover conveys what the method is without a click. Resolved only for
         %% `synthetic` rows (see `row_doc_signature/4`) — the client renders the
@@ -399,7 +389,9 @@ selector_row(ClassName, ClassSide, Selector, SourceFile, ModName, ClassPid) ->
         <<"signature">> => Signature,
         <<"doc">> => Doc,
         %% carried internally for grouping; stripped before emit
-        '__protocol__' => protocol_for_selector(Selector, Info, Provenance, SourceStatus, ClassSide)
+        '__protocol__' => beamtalk_repl_ops_browse_origin:protocol_for_selector(
+            Selector, Info, Provenance, SourceStatus, ClassSide
+        )
     }.
 
 %% A selector row's hover signature + doc, resolved via the same
@@ -471,7 +463,7 @@ take_protocol(Row) ->
 browse_method_source(ClassName, ClassSide, Selector) ->
     case beamtalk_runtime_api:whereis_class(ClassName) of
         undefined ->
-            not_found_error(<<"browse-method-source">>, ClassName);
+            beamtalk_repl_ops_browse_support:not_found_error(<<"browse-method-source">>, ClassName);
         ClassPid ->
             {Line, SourceStatus, Provenance} = info_fields(
                 beamtalk_xref:method_info(ClassName, ClassSide, Selector)
@@ -480,7 +472,7 @@ browse_method_source(ClassName, ClassSide, Selector) ->
                 method_text_fields(ClassPid, ClassSide, Selector, SourceStatus),
             SourceFile = source_file_for_class(ClassName),
             ModName = beamtalk_runtime_api:module_name(ClassPid),
-            SourceOrigin = source_origin_of(ModName, SourceFile),
+            SourceOrigin = beamtalk_repl_ops_browse_origin:source_origin_of(ModName, SourceFile),
             {value, #{
                 <<"class">> => atom_to_binary(ClassName, utf8),
                 <<"side">> => side_to_binary(ClassSide),
@@ -494,7 +486,9 @@ browse_method_source(ClassName, ClassSide, Selector) ->
                 %% facade generates a `dispatch_<selector>` function ONLY for a
                 %% `self delegate` method (native_facade.rs), so its export is a
                 %% precise marker — no body-text heuristic.
-                <<"native_delegate">> => is_native_delegate(ModName, ClassSide, Selector),
+                <<"native_delegate">> => beamtalk_repl_ops_browse_native:is_native_delegate(
+                    ModName, ClassSide, Selector
+                ),
                 %% The method's `///` doc-comment and rendered
                 %% signature, carried alongside the editable source so the
                 %% System Browser can present a read-only documentation block.
@@ -506,9 +500,11 @@ browse_method_source(ClassName, ClassSide, Selector) ->
                 <<"signature">> => Signature,
                 <<"line">> => Line,
                 <<"source_status">> => atom_to_binary(SourceStatus, utf8),
-                <<"origin">> => origin_for_provenance(Provenance, SourceFile),
+                <<"origin">> => beamtalk_repl_ops_browse_origin:origin_for_provenance(
+                    Provenance, SourceFile
+                ),
                 <<"source_origin">> => SourceOrigin,
-                <<"package">> => package_of(ModName, SourceOrigin),
+                <<"package">> => beamtalk_repl_ops_browse_origin:package_of(ModName, SourceOrigin),
                 <<"disk_differs">> => disk_differs(SourceFile, ClassName, Source)
             }}
     end.
@@ -545,7 +541,7 @@ method_text_fields(ClassPid, ClassSide, Selector, _SourceStatus) ->
             true -> {class_method, Selector};
             false -> {method, Selector}
         end,
-    case safe_class_call(ClassPid, Call) of
+    case beamtalk_repl_ops_browse_support:safe_class_call(ClassPid, Call) of
         MethodObj when is_map(MethodObj) ->
             {
                 method_field(MethodObj, '__source__'),
@@ -580,15 +576,19 @@ method_field(MethodObj, Key) ->
 browse_class_definition(ClassName) ->
     case beamtalk_runtime_api:whereis_class(ClassName) of
         undefined ->
-            not_found_error(<<"browse-class-definition">>, ClassName);
+            beamtalk_repl_ops_browse_support:not_found_error(
+                <<"browse-class-definition">>, ClassName
+            );
         ClassPid ->
             Super = beamtalk_runtime_api:superclass(ClassPid),
             %% A protocol class object's dispatch module is the shared
             %% `beamtalk_protocol_object`; resolve its defining module so the
             %% definition pane's category/origin/source_origin are accurate.
-            ModName = origin_module(ClassName, beamtalk_runtime_api:module_name(ClassPid)),
+            ModName = beamtalk_repl_ops_browse_origin:origin_module(
+                ClassName, beamtalk_runtime_api:module_name(ClassPid)
+            ),
             SourceFile = beamtalk_repl_row:source_file_of(ModName),
-            SourceOrigin = source_origin_of(ModName, SourceFile),
+            SourceOrigin = beamtalk_repl_ops_browse_origin:source_origin_of(ModName, SourceFile),
             %% Native-backed classes (ADR 0056) carry their backing
             %% Erlang module name so the System Browser can badge them and offer
             %% `browse-native-source`. Read from the facade module's
@@ -597,10 +597,16 @@ browse_class_definition(ClassName) ->
             %% ADR 0070) and `field_types` (ADR 0067) — reused below to pick the
             %% `field:`/`state:` keyword and per-field `:: Type` annotations, so
             %% the skeleton is built from one `__beamtalk_meta/0` read.
-            Meta = native_meta_of(ModName),
-            IsTyped = safe_bool(fun() -> beamtalk_runtime_api:is_typed(ClassPid) end),
-            IsSealed = safe_bool(fun() -> beamtalk_runtime_api:is_sealed(ClassPid) end),
-            IsAbstract = safe_bool(fun() -> beamtalk_runtime_api:is_abstract(ClassPid) end),
+            Meta = beamtalk_repl_ops_browse_native:native_meta_of(ModName),
+            IsTyped = beamtalk_repl_ops_browse_support:safe_bool(fun() ->
+                beamtalk_runtime_api:is_typed(ClassPid)
+            end),
+            IsSealed = beamtalk_repl_ops_browse_support:safe_bool(fun() ->
+                beamtalk_runtime_api:is_sealed(ClassPid)
+            end),
+            IsAbstract = beamtalk_repl_ops_browse_support:safe_bool(fun() ->
+                beamtalk_runtime_api:is_abstract(ClassPid)
+            end),
             State = state_slots(ClassPid, Meta),
             %% `IsSealed`/`IsAbstract` are threaded into the skeleton
             %% itself (see `class_definition_text/7`), not just the sibling
@@ -612,14 +618,16 @@ browse_class_definition(ClassName) ->
             ),
             {value, #{
                 <<"class">> => atom_to_binary(ClassName, utf8),
-                <<"superclass">> => atom_or_null(Super),
+                <<"superclass">> => beamtalk_repl_ops_browse_support:atom_or_null(Super),
                 <<"category">> => category_of(ModName),
                 <<"definition">> => Definition,
                 <<"state">> => State,
                 <<"comment">> => class_doc(ClassPid),
-                <<"native">> => meta_is_native(Meta),
+                <<"native">> => beamtalk_repl_ops_browse_native:meta_is_native(Meta),
                 <<"backing_module">> =>
-                    atom_or_null(beamtalk_class_registry:meta_backing_module(Meta)),
+                    beamtalk_repl_ops_browse_support:atom_or_null(
+                        beamtalk_class_registry:meta_backing_module(Meta)
+                    ),
                 %% Reflected class modifiers for the IDE's editor-header
                 %% modifier badges. The synthesized `definition` skeleton
                 %% above also carries these as leading modifier keywords (round-
@@ -634,12 +642,12 @@ browse_class_definition(ClassName) ->
                 %% protocol-definition action row (Required methods / Conforming
                 %% classes). Mirrors the `is_protocol` field op 1
                 %% (`browse-classes`) already carries on each class row.
-                <<"is_protocol">> => safe_bool(fun() ->
+                <<"is_protocol">> => beamtalk_repl_ops_browse_support:safe_bool(fun() ->
                     beamtalk_runtime_api:is_protocol(ClassName)
                 end),
-                <<"origin">> => origin_of(SourceFile),
+                <<"origin">> => beamtalk_repl_ops_browse_origin:origin_of(SourceFile),
                 <<"source_origin">> => SourceOrigin,
-                <<"package">> => package_of(ModName, SourceOrigin),
+                <<"package">> => beamtalk_repl_ops_browse_origin:package_of(ModName, SourceOrigin),
                 %% The definition pane renders a *synthesized* class skeleton
                 %% (header + state slots), not the verbatim on-disk class source
                 %% — so a substring diff against the disk store would be unsound
@@ -667,8 +675,8 @@ class_definition_disk_differs(_SourceFile) ->
 %% shape diffing). Field reflection only — no user code run.
 -spec state_slots(pid(), map()) -> [map()].
 state_slots(ClassPid, Meta) ->
-    Fields = safe_class_call(ClassPid, instance_variables),
-    Defaults = safe_class_call(ClassPid, field_defaults),
+    Fields = beamtalk_repl_ops_browse_support:safe_class_call(ClassPid, instance_variables),
+    Defaults = beamtalk_repl_ops_browse_support:safe_class_call(ClassPid, field_defaults),
     FieldList =
         case Fields of
             L when is_list(L) -> L;
@@ -821,7 +829,7 @@ default_suffix(Default) -> [<<" = ">>, Default].
 browse_categories(ClassName) ->
     case beamtalk_runtime_api:whereis_class(ClassName) of
         undefined ->
-            not_found_error(<<"browse-categories">>, ClassName);
+            beamtalk_repl_ops_browse_support:not_found_error(<<"browse-categories">>, ClassName);
         _ClassPid ->
             %% Resolve the source file the SAME way
             %% `save-section` does (`beamtalk_repl_loader_changelog_entries:class_source_file/1`
@@ -861,7 +869,7 @@ categorize_from_source(Source, ClassName) ->
             %% `class_definition_disk_differs/1''s "nothing to compare" stance.
             {value, #{<<"has_dividers">> => false, <<"categories">> => []}};
         {error, Reason, Message} ->
-            arg_error(
+            beamtalk_repl_ops_browse_support:arg_error(
                 <<"browse-categories">>,
                 iolist_to_binary([atom_to_binary(Reason, utf8), <<": ">>, Message])
             )
@@ -894,995 +902,6 @@ method_row(#{selector := Selector, side := Side}) ->
         <<"selector">> => Selector,
         <<"side">> => atom_to_binary(Side, utf8)
     }.
-
-%%% ====================================================================
-%%% Op 5 — browse-native-source
-%%% ====================================================================
-
-%% The backing Erlang source for a `native:` class (ADR 0056). A native class
-%% only has Beamtalk *delegating* methods (`=> self delegate`); the real logic is
-%% gen_server callbacks (`handle_call/3`, `handle_info/2`) in a SEPARATE module
-%% (e.g. `Subprocess` → `beamtalk_subprocess`). So the reliable unit is the whole
-%% backing module, with a best-effort `handle_call` clause line-map and, when a
-%% `selector` is given, the matching clause (the selector↔clause mapping is loose
-%% — e.g. `Subprocess>>readLine` replies from `handle_info`, not its `handle_call`
-%% clause). Read-only; `editable` reflects `source_origin` (project-owned native
-%% is editable in a future R/W phase, stdlib/dependency never).
--spec browse_native_source(atom(), atom() | undefined) -> beamtalk_repl_ops:op_result().
-browse_native_source(ClassName, Selector) ->
-    case beamtalk_runtime_api:whereis_class(ClassName) of
-        undefined ->
-            not_found_error(<<"browse-native-source">>, ClassName);
-        ClassPid ->
-            ModName = beamtalk_runtime_api:module_name(ClassPid),
-            NativeMeta = native_meta_of(ModName),
-            case beamtalk_class_registry:meta_backing_module(NativeMeta) of
-                none ->
-                    arg_error(
-                        <<"browse-native-source">>,
-                        iolist_to_binary([
-                            <<"class `">>,
-                            atom_to_binary(ClassName, utf8),
-                            <<"` is not native-backed">>
-                        ])
-                    );
-                Backing when is_atom(Backing) ->
-                    native_source_value(ClassName, ModName, Backing, Selector)
-            end
-    end.
-
--spec native_source_value(atom(), atom(), atom(), atom() | undefined) ->
-    beamtalk_repl_ops:op_result().
-native_source_value(ClassName, ModName, Backing, Selector) ->
-    {BackingFile, Content} = backing_source(Backing),
-    %% `source_origin` keys editability off where the .erl lives: stdlib and
-    %% dependency native are read-only; project-owned native is the seam where a
-    %% future R/W phase enables editing (out of scope here). Also
-    %% require the source content to be present: a project class whose `.erl` was
-    %% stripped from the release (or is unreadable) has nothing to edit even
-    %% though its build-time path is known, so it must not advertise `editable`.
-    SourceOrigin = source_origin_of(ModName, BackingFile),
-    Clauses = handle_call_clause_lines(Content),
-    {value, #{
-        <<"class">> => atom_to_binary(ClassName, utf8),
-        <<"backing_module">> => atom_to_binary(Backing, utf8),
-        <<"source_file">> => BackingFile,
-        <<"source_origin">> => SourceOrigin,
-        <<"editable">> => SourceOrigin =:= <<"project">> andalso Content =/= null,
-        <<"content">> => Content,
-        <<"clauses">> => Clauses,
-        <<"selected_clause">> => selected_clause(Clauses, Selector)
-    }}.
-
-%% The read-only native pane keyed directly by a standalone native
-%% module (not a `native:` class's backing module). Reuses the exact same
-%% reader/clause machinery `native_source_value/4` uses — the only difference is
-%% the key (a module the `browse-native-modules` enumeration surfaced) and that
-%% there is no owning class, so `class` is `null` and `backing_module` is the
-%% module itself. A module with no readable on-disk source degrades to
-%% `content = null` (the "source not available" empty state), never an error.
--spec browse_native_module_source(atom(), atom() | undefined) ->
-    beamtalk_repl_ops:op_result().
-browse_native_module_source(Module, Selector) ->
-    {SourceFile, Content} = backing_source(Module),
-    SourceOrigin = native_module_origin(Module, SourceFile),
-    Clauses = handle_call_clause_lines(Content),
-    {value, #{
-        <<"class">> => null,
-        <<"backing_module">> => atom_to_binary(Module, utf8),
-        <<"source_file">> => SourceFile,
-        <<"source_origin">> => SourceOrigin,
-        %% Project-owned native modules are editable (edit → compile →
-        %% reload → write-back, gated to the Owner via the `save-native-source`
-        %% op's `:execute` capability). Deps/stdlib natives stay strictly
-        %% read-only. Require readable on-disk content too: a `.beam`-only
-        %% (release-stripped) module has nothing to edit even though its path is
-        %% known, so it must not advertise `editable`. The save op re-derives this
-        %% same predicate server-side (`native_module_editable_target/1`) — the
-        %% client flag is a UX hint, never the authority.
-        <<"editable">> =>
-            SourceOrigin =:= <<"project">> andalso SourceFile =/= null andalso Content =/= null,
-        <<"content">> => Content,
-        <<"clauses">> => Clauses,
-        <<"selected_clause">> => selected_clause(Clauses, Selector)
-    }}.
-
--doc """
-Resolve a native module to its editable on-disk `.erl` target.
-
-This is the **server-side authorization seam** for `save-native-source`: it
-re-derives — independently of any client-supplied path — where the module's
-source lives and whether it is a *project-owned* native that may be written. It
-NEVER trusts a path from the request; the path is read from the module's own
-compile info (`module_info(compile)` → `source`), so a crafted request cannot
-redirect a write outside the project tree.
-
-Returns:
-  - `{ok, SourceFile}` — `SourceFile` is the absolute `.erl` path, and the module
-    is project-owned (origin `<<"project">>`) with readable on-disk source.
-  - `{error, not_editable}` — a deps/stdlib native, or no readable on-disk source
-    (`.beam`-only / release-stripped). The caller maps this to a structured
-    `#beamtalk_error{}`.
-""".
--spec native_module_editable_target(atom()) -> {ok, string()} | {error, not_editable}.
-native_module_editable_target(Module) when is_atom(Module) ->
-    case backing_source_file(Module) of
-        undefined ->
-            {error, not_editable};
-        Path when is_list(Path) ->
-            SourceFileBin =
-                case unicode:characters_to_binary(Path) of
-                    B when is_binary(B) -> B;
-                    _ -> list_to_binary(Path)
-                end,
-            case native_module_origin(Module, SourceFileBin) of
-                <<"project">> -> {ok, Path};
-                _ -> {error, not_editable}
-            end
-    end.
-
-%%% ====================================================================
-%%% Op 6 — browse-native-modules
-%%% ====================================================================
-
-%% Enumerate the loaded packages' *hand-written* native Erlang modules so the
-%% System Browser can navigate to a dependency's `.erl` files even when no
-%% `native:` class backs them (the reported beamtalk-http case: a dependency
-%% loaded without instantiating its classes is invisible to the class-keyed
-%% `browse-classes`).
-%%
-%% **Filter rule (ADR 0072 `native_modules`):** a "native module" is a
-%% module a Beamtalk package *declares* it ships, never the whole code path:
-%%
-%%   1. Walk `beamtalk_package:all/0` — every loaded OTP application that is a
-%%      Beamtalk package (has a non-empty `classes` env, ADR 0070, or a
-%%      non-empty `type_aliases` env with no classes).
-%%   2. For each package's app, take its declared native modules:
-%%        * user / dependency packages: the generated `{native_modules, [...]}`
-%%          app-env key (ADR 0072 Phase 1; the `native/*.erl` stems);
-%%        * stdlib (whose `.app.src` carries no `native_modules` key): the app's
-%%          OTP `modules` list filtered to non-`bt@` modules — i.e. the
-%%          hand-written `beamtalk_*` backing modules, not the `bt@stdlib@*`
-%%          class facades.
-%%   3. EXCLUDE the auto-generated `bt@{pkg}@{class}` class facade modules by
-%%      construction: those live in the OTP `modules` key, never in
-%%      `native_modules`, and the stdlib filter drops the `bt@` prefix — so a
-%%      class facade is never duplicated here (it is already in browse-classes).
-%%
-%% Each row carries the module name, on-disk source path (compile-info `source`,
-%% like `backing_source/1`; `null` when no readable source → not openable),
-%% package name, and origin (`project`/`dependency`/`stdlib`). Rows are sorted by
-%% module name for a stable tree.
--spec browse_native_modules() -> [map()].
-browse_native_modules() ->
-    Packages =
-        try
-            %% BT-4173: all/0 answers Strings — rows are JSON-shaped
-            %% maps, so unwrap to the raw name bytes here.
-            [P || {beamtalk_string, P} <- beamtalk_package:all()]
-        catch
-            _:_ -> []
-        end,
-    Rows = lists:flatmap(fun native_modules_of_package/1, Packages),
-    %% Dedup by module name (a module declared by more than one app is listed
-    %% once) then sort for a stable tree.
-    Deduped = maps:values(
-        lists:foldl(
-            fun(#{<<"module">> := M} = Row, Acc) -> maps:put(M, Row, Acc) end,
-            #{},
-            Rows
-        )
-    ),
-    lists:sort(
-        fun(A, B) -> maps:get(<<"module">>, A) =< maps:get(<<"module">>, B) end,
-        Deduped
-    ).
-
-%% The native-module rows for one package: resolve its owning app, read the
-%% declared native modules, and build a row per module tagged with the package's
-%% name + origin. A package whose app cannot be resolved contributes nothing.
--spec native_modules_of_package(binary()) -> [map()].
-native_modules_of_package(PkgName) ->
-    case beamtalk_package:find_app_for_package(PkgName) of
-        {ok, App} ->
-            Origin = package_origin(App, PkgName),
-            [native_module_row(Mod, PkgName, Origin) || Mod <- package_native_modules(App)];
-        error ->
-            []
-    end.
-
-%% An app's declared native modules. User / dependency packages carry the
-%% generated `{native_modules, [...]}` env key (ADR 0072); stdlib has none, so
-%% fall back to the OTP `modules` list filtered to the non-`bt@` (hand-written)
-%% modules — which excludes the `bt@stdlib@*` class facades by construction.
--spec package_native_modules(atom()) -> [atom()].
-package_native_modules(App) ->
-    case beamtalk_package:native_modules_of_app(App) of
-        [] -> stdlib_fallback_native_modules(App);
-        Mods -> Mods
-    end.
-
-%% Stdlib (and any package with no `native_modules` env): the OTP `modules` list
-%% minus the `bt@*` class facades — i.e. the hand-written `beamtalk_*` backing
-%% modules. A non-stdlib app with no `native_modules` key (an older build) gets
-%% nothing rather than its facade modules misreported as native.
--spec stdlib_fallback_native_modules(atom()) -> [atom()].
-stdlib_fallback_native_modules(beamtalk_stdlib = App) ->
-    case application:get_key(App, modules) of
-        {ok, Mods} when is_list(Mods) ->
-            [M || M <- Mods, is_atom(M), not is_bt_module(M)];
-        _ ->
-            []
-    end;
-stdlib_fallback_native_modules(_App) ->
-    [].
-
-%% True for an auto-generated `bt@{pkg}@{class}` class facade module atom.
--spec is_bt_module(atom()) -> boolean().
-is_bt_module(Module) when is_atom(Module) ->
-    beamtalk_module_name:is_class_module(Module).
-
-%% Origin of a package's native modules: `stdlib` for the stdlib app, else the
-%% project/dependency split from the package name vs the workspace's own package.
--spec package_origin(atom(), binary()) -> binary().
-package_origin(beamtalk_stdlib, _PkgName) ->
-    <<"stdlib">>;
-package_origin(_App, PkgName) ->
-    case project_package_name() of
-        ProjectPkg when is_binary(ProjectPkg), ProjectPkg =:= PkgName ->
-            <<"project">>;
-        _ ->
-            <<"dependency">>
-    end.
-
-%% Source origin for a standalone native module's pane. A native module is not a
-%% `bt@{pkg}@{class}` atom, so `source_origin_of/2`'s package-segment path can't
-%% classify it; instead, badge stdlib by app membership (the stdlib app declares
-%% it) and fall back to the on-disk path check (`classify_origin/3`) for the
-%% project/dependency split.
--spec native_module_origin(atom(), binary() | null) -> binary().
-native_module_origin(Module, SourceFile) ->
-    case is_stdlib_native_module(Module) of
-        true -> <<"stdlib">>;
-        false -> path_origin(SourceFile)
-    end.
-
-%% True when `Module` is one of the stdlib app's hand-written native modules.
--spec is_stdlib_native_module(atom()) -> boolean().
-is_stdlib_native_module(Module) ->
-    lists:member(Module, stdlib_fallback_native_modules(beamtalk_stdlib)).
-
-%% One native-module row: module name, on-disk source path (compile-info
-%% `source`, `null` when no readable source → not openable), package, and origin.
--spec native_module_row(atom(), binary(), binary()) -> map().
-native_module_row(Module, PkgName, Origin) ->
-    %% Path only (no `file:read_file/1`) — enumeration just needs the path +
-    %% `openable` flag; the content is read lazily by `browse-native-source` when
-    %% a module is actually opened. Mirrors `backing_source/1`'s path
-    %% normalisation without the per-module read.
-    SourceFile =
-        case backing_source_file(Module) of
-            undefined ->
-                null;
-            Path ->
-                case unicode:characters_to_binary(Path) of
-                    B when is_binary(B) -> B;
-                    _ -> list_to_binary(Path)
-                end
-        end,
-    #{
-        <<"module">> => atom_to_binary(Module, utf8),
-        <<"source_file">> => SourceFile,
-        <<"package">> => PkgName,
-        <<"source_origin">> => Origin,
-        %% Openable iff a readable on-disk `.erl` was found (`.beam`-only /
-        %% release-stripped modules are listed but not openable — the existing
-        %% "Erlang source not available" path).
-        <<"openable">> => SourceFile =/= null
-    }.
-
-%% The backing module's on-disk `.erl` and its content. The source path comes
-%% from the module's own compile info (`module_info(compile)` → `source`), so a
-%% `.beam`-only release (no shipped source) degrades to `{null, null}` —
-%% "source not available" — rather than an error. A path that no longer exists
-%% (moved/release-stripped) returns its known path with `null` content.
--spec backing_source(atom()) -> {binary() | null, binary() | null}.
-backing_source(Backing) ->
-    case backing_source_file(Backing) of
-        undefined ->
-            {null, null};
-        Path ->
-            %% `unicode:characters_to_binary/1` returns an `{error, _, _}` /
-            %% `{incomplete, _, _}` tuple (not a binary) for a malformed path, which
-            %% must not leak into the result map as `source_file`. Fall back to a
-            %% raw Latin-1 binary so the field is always a binary. Build-machine
-            %% paths are virtually always UTF-8, so the fallback is pathological-only.
-            PathBin =
-                case unicode:characters_to_binary(Path) of
-                    B when is_binary(B) -> B;
-                    _ -> list_to_binary(Path)
-                end,
-            case file:read_file(Path) of
-                {ok, Bin} -> {PathBin, Bin};
-                {error, _} -> {PathBin, null}
-            end
-    end.
-
--spec backing_source_file(atom()) -> string() | undefined.
-backing_source_file(Backing) ->
-    %% bt-catcher-audit: not-applicable-no-block - module_info/1 BIF
-    try Backing:module_info(compile) of
-        Info when is_list(Info) ->
-            case lists:keyfind(source, 1, Info) of
-                {source, Path} when is_list(Path) -> Path;
-                _ -> undefined
-            end;
-        _ ->
-            undefined
-    catch
-        _:_ -> undefined
-    end.
-
-%%% ====================================================================
-%%% Op 7 — browse-type-aliases (ADR 0108 Phase 8)
-%%% ====================================================================
-
-%% Enumerate every loaded package's declared `type` aliases (ADR 0108).
-%%
-%% Aliases erase entirely at compile time — no BEAM module, no live process —
-%% so unlike `browse-classes` there is nothing to reflect on. The `.app`
-%% file's `{type_aliases, [...]}` env key (`app_file.rs`
-%% `AliasMetadata`/`format_type_aliases_entry`) is the only durable record of
-%% a package's declarations once compiled, so this walks `beamtalk_package:
-%% all/0` and reads each package's env, the same enumeration strategy
-%% `browse-native-modules` uses.
-%%
-%% **Seeding-boundary exclusion (ADR 0108 Implementation — "System Browser /
-%% LiveView IDE"):** an `internal` alias declared in a package other than the
-%% browsing session's current project package is dropped — the browse-op
-%% analogue of how `AliasRegistry::add_pre_loaded` never seeds a
-%% dependency's internal aliases into a consumer's alias table at compile
-%% time. There is no live "current compilation" alias table to consult here
-%% (this op runs against a loaded system, not a single in-flight compile), so
-%% the equivalent guarantee is reconstructed per row instead of per seeded
-%% table: an alias belonging to the current project package is visible
-%% regardless of `internal` (an internal alias is usable within its own
-%% package — ADR 0108 Semantics), and every other package's (including
-%% stdlib's) internal aliases are excluded, mirroring the ADR's explicit
-%% instruction that this filter "belongs at the seeding boundary ... not as a
-%% query-time filter over `browse-type-aliases`'s result set" — the entries
-%% are dropped during enumeration, before a row is ever built, not filtered
-%% out of an already-built result list.
-%%
-%% Unlike `browse-native-modules`, rows are **not** deduped by name: a native
-%% module atom is a genuine BEAM-global identity, but two independently
-%% loaded packages can each legally declare an alias of the same name (only a
-%% *consumer* of both would hit `add_pre_loaded`'s collision diagnostic) —
-%% deduping here would silently hide one package's real declaration instead
-%% of surfacing both, distinguished by their `package`/`source_origin` tags.
-%%
-%% **Types-only packages:** discovery walks `beamtalk_package:all/0`,
-%% which recognises a package via a non-empty `classes` app-env key (ADR 0070)
-%% *or* a non-empty `type_aliases` app-env key with no classes — a types-only
-%% "shared vocabulary" package with zero classes is enumerated the same as any
-%% other package, deriving its name from the OTP application's own atom name
-%% (app name == package name by construction). Its aliases (public ones, and
-%% internal ones from the current project) surface here the same as any other
-%% package's, subject to the seeding-boundary logic above.
--spec browse_type_aliases() -> [map()].
-browse_type_aliases() ->
-    Packages =
-        try
-            %% BT-4173: all/0 answers Strings — rows are JSON-shaped
-            %% maps, so unwrap to the raw name bytes here.
-            [P || {beamtalk_string, P} <- beamtalk_package:all()]
-        catch
-            _:_ -> []
-        end,
-    Rows = lists:flatmap(fun type_aliases_of_package/1, Packages),
-    lists:sort(
-        fun(A, B) ->
-            {maps:get(<<"name">>, A), maps:get(<<"package">>, A)} =<
-                {maps:get(<<"name">>, B), maps:get(<<"package">>, B)}
-        end,
-        Rows
-    ).
-
-%% The alias rows for one package: resolve its owning app, read its declared
-%% `type_aliases` env, drop internal aliases that fail the seeding-boundary
-%% check, and tag each surviving row with the package's name + origin.
-%%
-%% Wrapped in a try/catch — unlike `native_modules_of_package/1`, whose row
-%% builder only touches `module_info/1` reflection (itself already
-%% defensively wrapped in `backing_source_file/1`) — because `alias_row/3`
-%% assumes each `type_aliases` env entry is a map (`maps:get/2,3` raises
-%% `{badmap, _}` otherwise). That assumption holds for every entry this
-%% workspace's own `beamtalk build` ever writes (`app_file.rs`
-%% `format_type_aliases_entry`), but a hand-edited or toolchain-mismatched
-%% `.app` file is still just a text file on disk — one malformed package must
-%% not take down every other package's rows in the same response, mirroring
-%% `class_row/2`'s per-class isolation.
--spec type_aliases_of_package(binary()) -> [map()].
-type_aliases_of_package(PkgName) ->
-    try
-        case beamtalk_package:find_app_for_package(PkgName) of
-            {ok, App} ->
-                Origin = package_origin(App, PkgName),
-                [
-                    alias_row(Entry, PkgName, Origin)
-                 || Entry <- package_type_aliases(App),
-                    alias_visible(Entry, Origin)
-                ];
-            error ->
-                []
-        end
-    catch
-        Class:Reason ->
-            ?LOG_WARNING(
-                "browse-type-aliases: skipping package ~p: ~p:~p",
-                [PkgName, Class, Reason],
-                #{domain => [beamtalk, runtime]}
-            ),
-            []
-    end.
-
-%% An app's declared type aliases — the `.app` `{type_aliases, [...]}` env key.
-%% `[]` for a package with no `type` declarations (most packages),
-%% or one built before this key existed — no fallback reconstruction needed,
-%% unlike `package_native_modules/1`'s stdlib special case, since there is no
-%% legacy alias surface to recover data from.
--spec package_type_aliases(atom()) -> [map()].
-package_type_aliases(App) ->
-    case application:get_env(App, type_aliases) of
-        {ok, Aliases} when is_list(Aliases) -> Aliases;
-        _ -> []
-    end.
-
-%% Seeding-boundary exclusion (see `browse_type_aliases/0` doc): an internal
-%% alias is visible only from its own package (`Origin =:= project`) — every
-%% other package's internal aliases, including stdlib's, are dropped. A
-%% non-internal (public) alias is always visible.
--spec alias_visible(map(), binary()) -> boolean().
-alias_visible(#{internal := true}, Origin) ->
-    Origin =:= <<"project">>;
-alias_visible(#{internal := _}, _Origin) ->
-    true;
-alias_visible(_Entry, _Origin) ->
-    %% No `internal` key at all (should not happen — every entry the Rust
-    %% build pipeline emits carries it) — fail safe by treating as internal.
-    false.
-
-%% One AliasRow (ADR 0108: `name`, `expansion`, `doc`, `source_file`,
-%% `internal`), extended with `package`/`source_origin` the way `ClassRow`
-%% and `NativeModuleRow` are — the LiveView "Type Aliases" panel and the VS
-%% Code sidebar both group/badge by package the same way the Classes and
-%% Native panels already do.
--spec alias_row(map(), binary(), binary()) -> map().
-alias_row(Entry, PkgName, Origin) ->
-    #{
-        <<"name">> => alias_field_binary(maps:get(name, Entry, <<>>)),
-        <<"expansion">> => alias_field_binary(maps:get(expansion, Entry, <<>>)),
-        <<"doc">> => alias_field_or_null(maps:get(doc, Entry, undefined)),
-        <<"source_file">> => alias_field_binary(maps:get(source_file, Entry, <<>>)),
-        <<"internal">> => maps:get(internal, Entry, false),
-        <<"package">> => PkgName,
-        <<"source_origin">> => Origin
-    }.
-
-%% `.app`-file alias fields round-trip as atoms (`name`), Erlang strings
-%% (`expansion`/`source_file`/`doc`, via `escape_erlang_string` +
-%% `file:consult`), or `undefined` (`doc`) — never binaries, since
-%% `app_file.rs` emits a literal `.app` Erlang term, not a JSON payload.
-%% Normalise whichever shape comes back to the binary the term
-%% contract requires.
--spec alias_field_binary(atom() | binary() | string()) -> binary().
-alias_field_binary(V) when is_binary(V) ->
-    V;
-alias_field_binary(V) when is_atom(V) ->
-    atom_to_binary(V, utf8);
-alias_field_binary(V) when is_list(V) ->
-    case unicode:characters_to_binary(V) of
-        B when is_binary(B) -> B;
-        _ -> list_to_binary(V)
-    end;
-alias_field_binary(_) ->
-    <<>>.
-
--spec alias_field_or_null(undefined | atom() | binary() | string()) -> binary() | null.
-alias_field_or_null(undefined) ->
-    null;
-alias_field_or_null(V) ->
-    alias_field_binary(V).
-
-%%% ====================================================================
-%%% Op 8 — browse-alias-source
-%%% ====================================================================
-
-%% Read-only source view for a declared type alias, keyed by `name` +
-%% `package` (aliases are not deduped by name across packages —
-%% `browse_type_aliases/0`'s no-dedupe note — so both are needed to
-%% disambiguate a same-named alias declared by more than one package).
-%%
-%% Unlike a `native:` class or standalone native module, a `type Name = ...`
-%% declaration produces no BEAM module (aliases erase entirely), so there is
-%% no compiled-module attribute / `module_info(compile)` path to recover an
-%% absolute file location from at read time — `AliasMetadata.source_file`
-%% (`app_file.rs`) is a package-relative display path like
-%% `"src/restart_strategy.bt"`, not an absolute one. Project-owned aliases
-%% resolve against the workspace's own recorded project root
-%% (`beamtalk_workspace_meta:get_metadata/0`); stdlib/dependency aliases have
-%% no live path cache to resolve against (the stdlib source tree and a
-%% fetched dependency's checkout are Rust-CLI/build-time-only concepts) and
-%% degrade to the honest `content = null` empty state — the same pattern
-%% `browse-native-source` already uses for a `.beam`-only module. `editable`
-%% is always `false` — there is no `save-alias-source` op.
--spec browse_alias_source(binary(), binary() | undefined) -> beamtalk_repl_ops:op_result().
-browse_alias_source(Name, Package) ->
-    case find_alias_row(Name, Package) of
-        undefined ->
-            arg_error(<<"browse-alias-source">>, alias_not_found_message(Name, Package));
-        Row ->
-            {value, alias_source_value(Row)}
-    end.
-
-%% When `Package` is known (the common case — the UI's click always carries
-%% it), scan only that package's own rows via `type_aliases_of_package/1`
-%% (app resolution + the seeding-boundary visibility filter + row-building,
-%% all reused as-is) rather than recomputing and sorting the full
-%% cross-package `browse_type_aliases/0` catalog just to find one row. With no
-%% `Package` (REPL/MCP callers that haven't resolved one), there is no
-%% cheaper option than the full scan — no cross-package name index exists.
--spec find_alias_row(binary(), binary() | undefined) -> map() | undefined.
-find_alias_row(Name, undefined) ->
-    first_match(fun(R) -> maps:get(<<"name">>, R) =:= Name end, browse_type_aliases());
-find_alias_row(Name, Package) ->
-    first_match(fun(R) -> maps:get(<<"name">>, R) =:= Name end, type_aliases_of_package(Package)).
-
--spec first_match(fun((map()) -> boolean()), [map()]) -> map() | undefined.
-first_match(Pred, Rows) ->
-    case lists:filter(Pred, Rows) of
-        [Row | _] -> Row;
-        [] -> undefined
-    end.
-
--spec alias_not_found_message(binary(), binary() | undefined) -> binary().
-alias_not_found_message(Name, undefined) ->
-    iolist_to_binary([<<"type alias `">>, Name, <<"` not found">>]);
-alias_not_found_message(Name, Package) ->
-    iolist_to_binary([
-        <<"type alias `">>, Name, <<"` not found in package `">>, Package, <<"`">>
-    ]).
-
--spec alias_source_value(map()) -> map().
-alias_source_value(#{
-    <<"name">> := Name,
-    <<"source_file">> := SourceFile,
-    <<"source_origin">> := Origin,
-    <<"package">> := Package
-}) ->
-    #{
-        <<"name">> => Name,
-        <<"package">> => Package,
-        <<"source_file">> => SourceFile,
-        <<"source_origin">> => Origin,
-        <<"editable">> => false,
-        <<"content">> => alias_disk_content(Origin, SourceFile)
-    }.
-
-%% Project-owned aliases resolve against the workspace's own recorded project
-%% root; stdlib/dependency aliases have no live path cache to resolve against
-%% (see `browse_alias_source/2` doc), so they degrade to `null` — never an
-%% error.
-%%
-%% Security: `SourceFile` comes from a compiled `.app` file's `type_aliases`
-%% entry (`type_aliases_of_package/1`'s own doc already flags this as
-%% "still just a text file on disk" — a hand-edited or toolchain-mismatched
-%% one is not a from-source-only threat model). `filename:join/2` does NOT
-%% sanitize traversal: an absolute `SourceFile` silently discards the root
-%% entirely (`filename:join("/proj", "/etc/passwd") =:= "/etc/passwd"`), and a
-%% `..`-laden relative one escapes it at the OS level. `safe_relative_path/1`
-%% rejects both *before* any join/read is attempted, so a malformed entry
-%% degrades to the same `null` empty state as a merely-missing file, never a
-%% host-filesystem read outside the project tree.
--spec alias_disk_content(binary(), binary()) -> binary() | null.
-alias_disk_content(<<"project">>, SourceFile) when byte_size(SourceFile) > 0 ->
-    case safe_relative_path(SourceFile) of
-        false ->
-            null;
-        true ->
-            %% `safe_relative_path/1` already guarantees `SourceFile` has no
-            %% `..` component and is not itself absolute, so joining it onto
-            %% `ProjectPath` cannot resolve outside that root — no further
-            %% containment check (`beamtalk_workspace_file:path_inside/2`)
-            %% is needed.
-            case beamtalk_workspace_meta:get_metadata() of
-                {ok, #{project_path := ProjectPath}} when is_binary(ProjectPath) ->
-                    Path = filename:join(binary_to_list(ProjectPath), binary_to_list(SourceFile)),
-                    case file:read_file(Path) of
-                        {ok, Bin} -> Bin;
-                        {error, _} -> null
-                    end;
-                _ ->
-                    null
-            end
-    end;
-alias_disk_content(_Origin, _SourceFile) ->
-    null.
-
-%% True iff `SourceFile` is a relative path with no `..` component — i.e. it
-%% cannot escape whatever root it is later joined against. Rejects both an
-%% absolute path (which `filename:join/2` would let override the root
-%% entirely) and any `..` segment (which escapes the root at the OS level
-%% even though it survives a naive string-prefix containment check on the
-%% *unresolved* joined path).
--spec safe_relative_path(binary()) -> boolean().
-safe_relative_path(SourceFile) ->
-    Str = binary_to_list(SourceFile),
-    filename:pathtype(Str) =:= relative andalso
-        not lists:member("..", filename:split(Str)).
-
-%% `name` is required; `package` is optional (disambiguates a
-%% same-named alias declared by more than one package). Aliases are not
-%% runtime atoms/modules, so — unlike `validate_class`/`validate_module` —
-%% no atom resolution is needed, just non-empty binary validation.
--spec validate_alias(map()) -> {ok, {binary(), binary() | undefined}} | {error, binary()}.
-validate_alias(Params) ->
-    case maps:get(<<"name">>, Params, undefined) of
-        Name when is_binary(Name), byte_size(Name) > 0 ->
-            Package =
-                case maps:get(<<"package">>, Params, undefined) of
-                    P when is_binary(P), byte_size(P) > 0 -> P;
-                    _ -> undefined
-                end,
-            {ok, {Name, Package}};
-        _ ->
-            {error, <<"`name` (non-empty string) is required">>}
-    end.
-
-%% Best-effort `handle_call` clause line-map: each clause whose first message
-%% element is a concrete selector (a quoted atom like `'writeLine:'` or a bare
-%% lowercase atom like `readLine`) becomes `#{selector, line}`. Generic clauses
-%% — `handle_call({Selector, Args, _}, …)`, the catch-all `handle_call(Msg, …)`
-%% — bind variables (uppercase / `_`), match no selector, and are skipped.
-%% Matches single-line clause heads only; a head split across multiple lines is
-%% not captured (the selector and its trailing comma must appear on one line).
--spec handle_call_clause_lines(binary() | null) -> [map()].
-handle_call_clause_lines(null) ->
-    [];
-handle_call_clause_lines(Content) when is_binary(Content) ->
-    Lines = binary:split(Content, <<"\n">>, [global]),
-    {Rows, _} = lists:foldl(
-        fun(Line, {Acc, N}) ->
-            case clause_selector(Line) of
-                {ok, Sel} -> {[#{<<"selector">> => Sel, <<"line">> => N} | Acc], N + 1};
-                none -> {Acc, N + 1}
-            end
-        end,
-        {[], 1},
-        Lines
-    ),
-    lists:reverse(Rows).
-
-%% A line's `handle_call` selector, or `none`. The first tuple element of the
-%% call message, captured whether written as a quoted atom (`'writeLine:'`) or a
-%% bare lowercase atom (`readLine`). The lowercase-initial requirement excludes
-%% the generic clauses that bind variables (`{Selector, Args, _}`, `Msg`). A
-%% single capture group avoids `re`'s truncation of trailing unmatched groups.
-%%
-%% This is one half of a shared selector→clause-line definition. The
-%% Rust LSP mirrors this algorithm in
-%% `definition_provider::clause_selector` (so go-to-implementation lands on the
-%% same clause the System Browser jump does), and both are pinned to the shared
-%% conformance corpus
-%% `test/fixtures/handle_call_clause_corpus.json`
-%% (asserted here by `clause_selector_corpus_test/0` and on the Rust side by
-%% `definition_provider::tests::clause_selector_matches_shared_corpus`). Keep the
-%% regex and the Rust matcher in lockstep; extend the corpus when adding a case.
--spec clause_selector(binary()) -> {ok, binary()} | none.
-clause_selector(Line) ->
-    %% Anchored to line start (after optional indentation): a `handle_call`
-    %% mention mid-line — inside a comment (`%% see handle_call({foo, …`) or an
-    %% assignment (`R = handle_call({…`) — is not a clause head and must not
-    %% produce a spurious clause row.
-    Pattern = <<"^\\s*handle_call\\(\\{\\s*'?([a-z][A-Za-z0-9_:]*)'?\\s*,">>,
-    case re:run(Line, Pattern, [{capture, all_but_first, binary}]) of
-        {match, [Sel]} when byte_size(Sel) > 0 -> {ok, Sel};
-        _ -> none
-    end.
-
-%% The clause row for a requested selector, or `null` (no selector asked, or no
-%% matching `handle_call` clause — a delegate whose work lives elsewhere).
--spec selected_clause([map()], atom() | undefined) -> map() | null.
-selected_clause(_Clauses, undefined) ->
-    null;
-selected_clause(Clauses, Selector) ->
-    SelBin = atom_to_binary(Selector, utf8),
-    case lists:search(fun(#{<<"selector">> := S}) -> S =:= SelBin end, Clauses) of
-        {value, Row} -> Row;
-        false -> null
-    end.
-
-%% Native facade metadata (ADR 0056): the facade module exports
-%% `__beamtalk_meta/0` carrying `native => true` and `backing_module => atom()`.
-%% Non-native / non-Beamtalk modules don't export it → `#{}`.
--spec native_meta_of(atom()) -> map().
-native_meta_of(ModName) when is_atom(ModName) ->
-    case beamtalk_class_metadata:read_meta(ModName) of
-        {ok, Meta} -> Meta;
-        not_available -> #{}
-    end.
-
--spec meta_is_native(map()) -> boolean().
-meta_is_native(Meta) ->
-    maps:get(native, Meta, false) =:= true.
-
-%% True when `Selector` (instance side) is a `self delegate` method on the native
-%% facade `ModName`. The compiler emits a `dispatch_<selector>` function ONLY for
-%% a `self delegate` method (native_facade.rs collects `is_self_delegate()` methods
-%% and generates one dispatch fun each), so the presence of that export is the
-%% compiler's own decision surfaced at runtime — not a body-text guess. Class-side
-%% selectors are never delegated this way, so they are always `false`.
--spec is_native_delegate(atom(), boolean(), atom()) -> boolean().
-is_native_delegate(ModName, false, Selector) when is_atom(ModName) ->
-    delegate_exported(beamtalk_module_activation:safe_module_exports(ModName), Selector);
-is_native_delegate(_ModName, _ClassSide, _Selector) ->
-    false.
-
-%% Pure: does `Exports` contain a `dispatch_<Selector>` function (any arity)? The
-%% dispatch fun name embeds the selector verbatim, keyword colon included
-%% (`dispatch_readLine`, `'dispatch_writeLine:'`), so an exact name compare is
-%% exact — no arity arithmetic, no atom-table growth.
--spec delegate_exported([{atom(), arity()}], atom()) -> boolean().
-delegate_exported(Exports, Selector) ->
-    Target = "dispatch_" ++ atom_to_list(Selector),
-    lists:any(fun({Name, _Arity}) -> atom_to_list(Name) =:= Target end, Exports).
-
-%%% ====================================================================
-%%% Native-module delegate callers
-%%% ====================================================================
-
--doc """
-The Beamtalk methods that delegate into native module `Module` via ADR 0056
-`self delegate` — the complement of the explicit `(Erlang <module>)` FFI callers
-`beamtalk_xref:callers_of_native_module/1` reports.
-
-A `native:` class compiles each `self delegate` method into a `dispatch_<selector>`
-function on its facade module, routed through `beamtalk_actor:sync_send/3`. Those
-sends are generated dispatch, not `erlang_ffi` sends, so the xref FFI index never
-sees them and the reverse "Callers" view would miss the most common native module
-in a project — the gen_server that backs an actor class. Here we walk the loaded
-classes, keep those whose backing native module is `Module`, and surface each
-class's `self delegate` instance methods as `native_caller_row()`s anchored at the
-delegating method's own header line (the same shape the FFI callers use, so the
-IDE renders both together).
-
-Class-side selectors are never delegated this way, so every row is instance-side.
-Returns `[]` for a module that backs no loaded class (or the unresolved-module
-sentinel), so a module with neither FFI callers nor delegating classes keeps the
-honest empty state.
-
-The candidate class names come from `beamtalk_class_registry`'s
-backing-module reverse index — an O(1) ETS `lookup/2` keyed by `Module`,
-populated at class registration/reload time — instead of walking every loaded
-class via `all_classes/0` and probing `erlang:function_exported/3` on each.
-""".
--spec delegate_callers_of_native_module(atom()) -> [beamtalk_xref:native_caller_row()].
-delegate_callers_of_native_module(none) ->
-    %% `none` is `meta_backing_module/1`'s "no backing module" sentinel, never a
-    %% real native module name. Guarding it here keeps a `module="none"` query
-    %% from match-binding against that sentinel in `delegate_rows_for_class_name/2`
-    %% and mis-attributing the delegates of a class that reports no backing module.
-    [];
-delegate_callers_of_native_module(Module) when is_atom(Module) ->
-    ClassNames =
-        try
-            beamtalk_class_registry:classes_backing_module(Module)
-        catch
-            _:_ -> []
-        end,
-    lists:flatmap(
-        fun(ClassName) -> delegate_rows_for_class_name(ClassName, Module) end, ClassNames
-    ).
-
-%% One `native_caller_row()` per `self delegate` instance method of `ClassName`,
-%% but only when that class's backing native module is still `Module`. The
-%% index in `beamtalk_class_registry:classes_backing_module/1` only narrows the
-%% candidate set — this re-verifies against a live process (a class name in the
-%% index can be a stale row left by a hard crash, per
-%% `forget_backing_module_entries/2`'s doc) and degrades to `[]` on any
-%% reflection failure, mirroring `class_row/2`'s per-class isolation so the
-%% Callers view still lists the other classes' delegates.
--spec delegate_rows_for_class_name(atom(), atom()) -> [beamtalk_xref:native_caller_row()].
-delegate_rows_for_class_name(ClassName, Module) ->
-    try
-        case beamtalk_runtime_api:whereis_class(ClassName) of
-            undefined ->
-                [];
-            Pid ->
-                ModName = beamtalk_runtime_api:module_name(Pid),
-                case beamtalk_class_registry:meta_backing_module(native_meta_of(ModName)) of
-                    Module ->
-                        Exports = beamtalk_module_activation:safe_module_exports(ModName),
-                        [delegate_row(ClassName, Sel) || Sel <- self_delegate_selectors(Exports)];
-                    _ ->
-                        []
-                end
-        end
-    catch
-        _:_ -> []
-    end.
-
-%% The `self delegate` instance selectors a facade exposes, recovered from its
-%% `dispatch_<selector>` exports (the compiler's own `is_self_delegate` decision,
-%% native_facade.rs). The dispatch name embeds the selector verbatim — keyword
-%% colon included (`dispatch_readLine`, `'dispatch_writeLine:'`) — so stripping the
-%% `dispatch_` prefix recovers it exactly. `usort` collapses any duplicate export
-%% pair; a stripped name that is not already an interned atom (never true for a
-%% real, registered method) is skipped rather than growing the atom table.
--spec self_delegate_selectors([{atom(), arity()}]) -> [atom()].
-self_delegate_selectors(Exports) ->
-    lists:usort(lists:filtermap(fun dispatch_export_selector/1, Exports)).
-
--spec dispatch_export_selector({atom(), arity()}) -> {true, atom()} | false.
-dispatch_export_selector({Name, _Arity}) ->
-    case atom_to_list(Name) of
-        "dispatch_" ++ Rest when Rest =/= [] ->
-            case beamtalk_text:to_existing_atom(Rest) of
-                {ok, Selector} -> {true, Selector};
-                error -> false
-            end;
-        _ ->
-            false
-    end.
-
-%% A single delegate caller row: the delegating class + selector, anchored at the
-%% method's own header line from the xref index. A `self delegate` method is always
-%% registered, so `method_info/3` resolves its line; the line=1 fallback is purely
-%% defensive so the row stays clickable rather than being silently dropped.
--spec delegate_row(atom(), atom()) -> beamtalk_xref:native_caller_row().
-delegate_row(ClassName, Selector) ->
-    Line =
-        case beamtalk_repl_row:method_line(ClassName, false, Selector) of
-            null -> 1;
-            L -> L
-        end,
-    #{owner => ClassName, class_side => false, method => Selector, line => Line}.
-
-%% Optional `selector` param for `browse-native-source`: absent/empty → no clause
-%% selection; otherwise resolved to an existing atom (an unknown selector reads as
-%% a sentinel → no matching clause, never an atom-table growth).
--spec optional_selector(map()) -> atom() | undefined.
-optional_selector(Params) ->
-    case beamtalk_repl_params:nonempty_binary(Params, <<"selector">>) of
-        {ok, Sel} ->
-            {ok, Atom} = beamtalk_repl_params:existing_atom_param(Sel, sentinel),
-            Atom;
-        error ->
-            undefined
-    end.
-
-%%% ====================================================================
-%%% Divergence — origin / disk_differs
-%%% ====================================================================
-
-%% origin :: both | static | runtime (ADR 0096). A class/row with a backing disk
-%% source that is loaded in the image is `both`; a file-less / ClassBuilder class
-%% (no disk source) is `runtime`. The `static` case (on disk, not loaded) is the
-%% cold-mode answer and is produced by the static (Rust) layer, not here — a
-%% class enumerated by `all_classes/0` is loaded by definition.
--spec origin_of(binary() | null) -> binary().
-origin_of(null) -> <<"runtime">>;
-origin_of(SourceFile) when is_binary(SourceFile) -> <<"both">>.
-
-%% Class source origin: the *classification* of where a class comes from —
-%% `project`, `dependency`, or `stdlib`. Used for IDE badges. This is
-%% orthogonal to the *package name* (see `package_of/2`): the package is
-%% carried in a separate `package` row field, never packed into this value.
--spec source_origin_of(atom(), binary() | null) -> binary().
-source_origin_of(ModName, SourceFile) when is_atom(ModName) ->
-    %% Stdlib always wins first.
-    case beamtalk_class_registry:is_stdlib_module(ModName) of
-        true ->
-            <<"stdlib">>;
-        false ->
-            classify_origin(
-                beamtalk_module_name:package_of(ModName), project_package_name(), SourceFile
-            )
-    end.
-
-%% Classification rule: the module's package segment is the *primary*
-%% signal, not the filesystem path. `bt@{pkg}@{class}` encodes the owning package;
-%% comparing it to the project's own package name correctly labels dependency
-%% classes whose sources happen to resolve under the project tree, and avoids
-%% dumping everything into `project` when `project_path` metadata is missing.
-%%
-%%   - package present, ≠ project package         -> dependency
-%%   - package present, == project package        -> project
-%%   - package present but project package unknown -> path fallback (then project)
-%%   - no package segment                          -> path fallback (null -> project)
--spec classify_origin(binary() | undefined, binary() | null, binary() | null) -> binary().
-classify_origin(Pkg, ProjectPkg, _SourceFile) when
-    is_binary(Pkg), is_binary(ProjectPkg)
-->
-    case Pkg =:= ProjectPkg of
-        true -> <<"project">>;
-        false -> <<"dependency">>
-    end;
-classify_origin(Pkg, _ProjectPkg, SourceFile) when is_binary(Pkg) ->
-    %% Package known but project package unresolvable: defer to the path check.
-    path_origin(SourceFile);
-classify_origin(undefined, _ProjectPkg, SourceFile) ->
-    %% No package segment in the module atom: fall back to the path-prefix check.
-    path_origin(SourceFile).
-
-%% Secondary, path-prefix fallback used only when the package can't decide.
--spec path_origin(binary() | null) -> binary().
-path_origin(null) ->
-    <<"project">>;
-path_origin(SourceFile) when is_binary(SourceFile) ->
-    case classify_source_origin(SourceFile) of
-        project -> <<"project">>;
-        dependency -> <<"dependency">>
-    end.
-
-%% Package name a class lives in, for ALL origins: `stdlib` for stdlib
-%% classes, the dependency package for dependencies, and the project's own
-%% package name for project classes. Orthogonal to `source_origin_of/2`'s
-%% classification. The package comes from the module atom (`bt@{pkg}@{class}`)
-%% when encoded there; for project classes whose module carries no package
-%% segment, fall back to the workspace's configured package name. `null` when no
-%% package can be determined (e.g. unknown dependency, no workspace metadata).
--spec package_of(atom(), binary()) -> binary() | null.
-package_of(ModName, <<"stdlib">>) when is_atom(ModName) ->
-    <<"stdlib">>;
-package_of(ModName, <<"dependency">>) when is_atom(ModName) ->
-    case beamtalk_module_name:package_of(ModName) of
-        undefined -> null;
-        Pkg -> Pkg
-    end;
-package_of(ModName, <<"project">>) when is_atom(ModName) ->
-    case beamtalk_module_name:package_of(ModName) of
-        undefined -> project_package_name();
-        Pkg -> Pkg
-    end.
-
-%% The workspace's configured package name (project's own package), or `null`
-%% when no workspace metadata is available (startup, no project).
--spec project_package_name() -> binary() | null.
-project_package_name() ->
-    case beamtalk_workspace_meta:get_package_name() of
-        Name when is_binary(Name) -> Name;
-        _ -> null
-    end.
-
-%% Secondary fallback: determine if a source file belongs to the
-%% project or a dependency by filesystem path. Used only by `classify_origin/3`
-%% when the module's package segment can't decide. Falls back to `project` when
-%% metadata is unavailable (startup, no workspace) — a wrong "project" badge is
-%% less confusing than a wrong "dependency" badge.
--spec classify_source_origin(binary()) -> project | dependency.
-classify_source_origin(SourceFile) ->
-    SourceStr = binary_to_list(SourceFile),
-    AbsPath = filename:absname(SourceStr),
-    case beamtalk_workspace_meta:get_metadata() of
-        {ok, #{project_path := ProjectPath}} when is_binary(ProjectPath) ->
-            ProjectRoot = filename:absname(binary_to_list(ProjectPath)),
-            case beamtalk_workspace_file:path_inside(ProjectRoot, AbsPath) of
-                true -> project;
-                false -> dependency
-            end;
-        _ ->
-            project
-    end.
-
-%% Per-selector origin from xref provenance: a runtime-installed selector
-%% (put_method, class_builder) is runtime-only; a class_body / extension selector
-%% in a file-backed class is `both`.
--spec origin_for_provenance(beamtalk_xref:provenance(), binary() | null) -> binary().
-origin_for_provenance(put_method, _SourceFile) -> <<"runtime">>;
-origin_for_provenance(class_builder, _SourceFile) -> <<"runtime">>;
-origin_for_provenance(_Provenance, null) -> <<"runtime">>;
-origin_for_provenance(_Provenance, _SourceFile) -> <<"both">>.
 
 %% disk_differs (browse-method-source, op 3): true when the live per-method
 %% source is absent from the *current* on-disk class source — the signature of
@@ -2067,19 +1086,19 @@ validate_selector(Params) ->
 %% unknown class is a structured not-found error, not an atom-table growth.
 -spec resolve_class(binary()) -> {ok, atom()} | {error, binary()}.
 resolve_class(Cls) ->
-    case beamtalk_repl_params:existing_atom_param(Cls, {error, fun class_not_found_message/1}) of
+    case
+        beamtalk_repl_params:existing_atom_param(
+            Cls, {error, fun beamtalk_repl_ops_browse_support:class_not_found_message/1}
+        )
+    of
         {ok, Name} ->
             case beamtalk_runtime_api:whereis_class(Name) of
-                undefined -> {error, class_not_found_message(Cls)};
+                undefined -> {error, beamtalk_repl_ops_browse_support:class_not_found_message(Cls)};
                 _Pid -> {ok, Name}
             end;
         {error, _} = Err ->
             Err
     end.
-
--spec class_not_found_message(binary()) -> binary().
-class_not_found_message(Cls) ->
-    iolist_to_binary([<<"class `">>, Cls, <<"` not found">>]).
 
 %%% ====================================================================
 %%% Shared reflection helpers (all field-reflection only, no user code)
@@ -2099,24 +1118,6 @@ mod_name_for_class(ClassName) ->
         Pid -> beamtalk_runtime_api:module_name(Pid)
     end.
 
-%% The module whose package + on-disk source determine a class's origin badges
-%% (category, origin, source_origin). For an ordinary class this is its own
-%% dispatch module. A protocol class object (ADR 0068) is dispatched by the shared
-%% `beamtalk_protocol_object` module, which carries no package and no
-%% `beamtalk_source` — so origin would wrongly read "runtime"/"project" for every
-%% protocol, stdlib ones included. Resolve the protocol's *defining*
-%% module from the registry (recorded at registration via the codegen `module`
-%% key) so a stdlib protocol like `Printable` (`bt@stdlib@printable`) is badged
-%% stdlib and a project protocol is badged project. Falls back to the dispatch
-%% module for non-protocols and for protocols compiled before the `module` key
-%% existed.
--spec origin_module(atom(), atom()) -> atom().
-origin_module(ClassName, ModName) ->
-    case beamtalk_runtime_api:protocol_info(ClassName) of
-        #{module := M} when is_atom(M) -> M;
-        _ -> ModName
-    end.
-
 %% Class category = the declared package (ADR 0070), read via field reflection —
 %% never by sending the class a method. `null` when no package is declared (the
 %% browser groups these under "Uncategorized", Pharo convention).
@@ -2129,290 +1130,11 @@ category_of(ModName) ->
 
 -spec class_doc(pid()) -> binary() | null.
 class_doc(Pid) ->
-    case safe_class_call(Pid, get_doc) of
+    case beamtalk_repl_ops_browse_support:safe_class_call(Pid, get_doc) of
         D when is_binary(D) -> D;
         _ -> null
     end.
 
-%% Decide a selector's browser protocol bucket (ADR 0096 §"Protocol of a
-%% selector": *the xref row's provenance plus the method's declared protocol
-%% category*). The decision is layered, most-authoritative source first — a
-%% declared category is a fact, a provenance is a fact, a name match is a guess:
-%%
-%%   1. **Pragma** — the method's *declared* protocol category. This is the
-%%      ground truth a class author assigns (the spike's hand-written categories:
-%%      "operations", "accessing", "instance creation", …). Beamtalk method
-%%      metadata does not yet carry a category field — `beamtalk_xref:method_info/3`
-%%      returns only line / source_status / provenance (no category) — so
-%%      `declared_protocol/1` reads the (currently absent) `category` key off the
-%%      xref `method_info` map: it is the single wiring point for when xref adds
-%%      one (a `<category: ...>`-style pragma or an xref `category` field). Until
-%%      then the key is absent, the lookup is `undefined`, and the decision falls
-%%      through to the source-fact / name tiers.
-%%   2. **xref-extension source** — `provenance = extension` (ADR 0066 package
-%%      extension) is a *source* fact: the selector was added to this class from
-%%      another package, so it belongs in the "extensions" bucket regardless of
-%%      its name. This outranks the name heuristic (a fact beats a guess).
-%%   3. **Heuristic** — a Pharo-convention bucket derived from the *selector name*
-%%      (accessors → "accessing", `is`/`has` tests → "testing", `print*` →
-%%      "printing", …). This is what gives ordinary `class_body` methods a
-%%      meaningful protocol instead of collapsing every non-extension selector
-%%      into one bucket. Selectors that match no convention fall into Pharo's
-%%      "as yet unclassified".
--spec protocol_for_selector(
-    atom(),
-    beamtalk_xref:method_info() | undefined,
-    beamtalk_xref:provenance(),
-    beamtalk_xref:source_status(),
-    boolean()
-) -> binary().
-protocol_for_selector(Selector, Info, protocol, SourceStatus, ClassSide) ->
-    %% ADR 0127 §12 — a method flattened from a `uses:`d protocol is filed under
-    %% that protocol, "<Protocol> › <category>" when the provided method carries
-    %% its own category, else the protocol name alone. A class-body override or
-    %% an `excluding:`-ed selector has a different provenance and never gets here.
-    case protocol_origin(Info) of
-        Origin when is_binary(Origin) ->
-            case declared_protocol(Info) of
-                Category when is_binary(Category) ->
-                    <<Origin/binary, " › "/utf8, Category/binary>>;
-                undefined ->
-                    Origin
-            end;
-        undefined ->
-            %% Malformed row (protocol provenance without an origin): fall back,
-            %% still honouring the Tier-1 declared category like every other row.
-            case declared_protocol(Info) of
-                Declared when is_binary(Declared) -> Declared;
-                undefined -> protocol_from_source(Selector, protocol, SourceStatus, ClassSide)
-            end
-    end;
-protocol_for_selector(Selector, Info, Provenance, SourceStatus, ClassSide) ->
-    case declared_protocol(Info) of
-        Category when is_binary(Category) ->
-            %% Tier 1 — declared category (author ground truth).
-            Category;
-        undefined ->
-            protocol_from_source(Selector, Provenance, SourceStatus, ClassSide)
-    end.
-
-%% The protocol name a flattened method came from (xref `origin`), as a binary,
-%% or `undefined` when the row carries none.
--spec protocol_origin(beamtalk_xref:method_info() | undefined) -> binary() | undefined.
-protocol_origin(Info) when is_map(Info) ->
-    case maps:get(origin, Info, undefined) of
-        Origin when is_atom(Origin), Origin =/= undefined, Origin =/= nil ->
-            atom_to_binary(Origin, utf8);
-        _ ->
-            undefined
-    end;
-protocol_origin(_Info) ->
-    undefined.
-
-%% Tier 1 hook: the method's declared protocol category, or `undefined` when none
-%% is declared. Beamtalk's `beamtalk_xref:method_info/3` does not carry a category
-%% field today (see `protocol_for_selector/5`), so the `category` key is absent
-%% and this returns `undefined`. It is the one place to wire a real category once
-%% xref (or a method pragma) surfaces one — reading it here keeps the decision
-%% precedence (declared > provenance > name) in a single function with no other
-%% call-site change. ADR 0096 §"Protocol of a selector".
--spec declared_protocol(beamtalk_xref:method_info() | undefined) -> binary() | undefined.
-declared_protocol(Info) when is_map(Info) ->
-    case maps:get(category, Info, undefined) of
-        Cat when is_binary(Cat), byte_size(Cat) > 0 -> Cat;
-        _ -> undefined
-    end;
-declared_protocol(_Info) ->
-    undefined.
-
-%% Tiers 2–3: no declared category, so decide from the source facts we do have.
-%% A compiler-generated accessor (source_status = synthetic) is "accessing" by
-%% construction. An extension-provenance selector is "extensions" (source fact).
-%% Otherwise fall to the selector-name heuristic.
--spec protocol_from_source(
-    atom(), beamtalk_xref:provenance(), beamtalk_xref:source_status(), boolean()
-) -> binary().
-protocol_from_source(_Selector, _Provenance, synthetic, ClassSide) ->
-    %% Synthetic methods are compiler-generated. Today that means value-type
-    %% field accessors (ADR 0087), always instance-side, bucketed "accessing"
-    %% by construction. (The actor constructors `new`/`new:`/`spawn`/`spawn:`
-    %% are real, source-backed — hence `indexed`, not `synthetic` — class
-    %% methods on `Actor`, not synthetic entries.) The `class_side => true`
-    %% branch is kept for any future
-    %% class-side synthetic entry point (and is exercised directly by the
-    %% EUnit tests below with fabricated xref rows) — classify by
-    %% `class_side`, not the selector name, so an instance-side synthetic slot
-    %% that happens to be named `new`/`spawn` (e.g. `state: new :: Integer =
-    %% 0`) is not misclassified as "instance creation".
-    case ClassSide of
-        true -> <<"instance creation">>;
-        false -> <<"accessing">>
-    end;
-protocol_from_source(_Selector, extension, _SourceStatus, _ClassSide) ->
-    %% Tier 2 — package-extension provenance (ADR 0066) is a source fact that
-    %% outranks the name heuristic.
-    <<"extensions">>;
-protocol_from_source(Selector, _Provenance, _SourceStatus, _ClassSide) ->
-    %% Tier 3 — Pharo-convention name heuristic.
-    protocol_from_name(Selector).
-
-%% Pharo-convention protocol buckets derived from the selector name. Mirrors the
-%% category vocabulary the spike (`spikes/cockpit-ux-spike/image.js`) and Pharo's
-%% default protocols use. A guess, not a fact — only reached when no declared
-%% category and no source-fact bucket applies. Unrecognised selectors land in
-%% "as yet unclassified" (Pharo's name for the default bucket).
--spec protocol_from_name(atom()) -> binary().
-protocol_from_name(Selector) ->
-    Name = atom_to_binary(Selector, utf8),
-    classify_name(Name).
-
--spec classify_name(binary()) -> binary().
-classify_name(Name) ->
-    Keyword = binary:match(Name, <<":">>) =/= nomatch,
-    case Name of
-        %% Object protocol / printing.
-        _ when
-            Name =:= <<"printString">>;
-            Name =:= <<"displayString">>;
-            Name =:= <<"printOn:">>;
-            Name =:= <<"displayOn:">>
-        ->
-            <<"printing">>;
-        %% Equality / comparison.
-        _ when
-            Name =:= <<"=">>;
-            Name =:= <<"==">>;
-            Name =:= <<"~=">>;
-            Name =:= <<"hash">>;
-            Name =:= <<"<">>;
-            Name =:= <<">">>;
-            Name =:= <<"<=">>;
-            Name =:= <<">=">>;
-            Name =:= <<"<=>">>
-        ->
-            <<"comparing">>;
-        _ ->
-            classify_by_prefix(Name, Keyword)
-    end.
-
-%% Prefix / shape conventions (checked after the exact-name special cases).
-%%
-%% Prefix matches respect camelCase *word boundaries* via `has_word_prefix/2`:
-%% the prefix must be followed by an uppercase letter (`asString`, `toArray`) or
-%% end the selector (`do:`, `add:`). This avoids the classic false positives a
-%% naive `binary:match` prefix check produces — `toggle` is not a conversion,
-%% `address` is not adding, `island` / `issue` are not tests, `domain` is not
-%% enumeration. A guess remains a guess, but a disciplined one.
--spec classify_by_prefix(binary(), boolean()) -> binary().
-classify_by_prefix(Name, Keyword) ->
-    Prefixes = [
-        %% {prefix, protocol} — first boundary-respecting match wins.
-        {<<"is">>, <<"testing">>},
-        {<<"has">>, <<"testing">>},
-        {<<"includes">>, <<"testing">>},
-        {<<"respondsTo">>, <<"testing">>},
-        {<<"print">>, <<"printing">>},
-        {<<"display">>, <<"printing">>},
-        {<<"initialize">>, <<"initialization">>},
-        {<<"init">>, <<"initialization">>},
-        {<<"as">>, <<"converting">>},
-        {<<"to">>, <<"converting">>},
-        {<<"do">>, <<"enumerating">>},
-        {<<"collect">>, <<"enumerating">>},
-        {<<"select">>, <<"enumerating">>},
-        {<<"reject">>, <<"enumerating">>},
-        {<<"detect">>, <<"enumerating">>},
-        {<<"inject">>, <<"enumerating">>},
-        {<<"add">>, <<"adding">>},
-        {<<"remove">>, <<"removing">>}
-    ],
-    case match_prefix(Name, Prefixes) of
-        {ok, Protocol} -> Protocol;
-        nomatch -> classify_shape(Name, Keyword)
-    end.
-
-%% First prefix in the list that matches `Name` at a camelCase word boundary.
--spec match_prefix(binary(), [{binary(), binary()}]) -> {ok, binary()} | nomatch.
-match_prefix(_Name, []) ->
-    nomatch;
-match_prefix(Name, [{Prefix, Protocol} | Rest]) ->
-    case has_word_prefix(Name, Prefix) of
-        true -> {ok, Protocol};
-        false -> match_prefix(Name, Rest)
-    end.
-
-%% True when `Name` starts with `Prefix` AND the prefix is a whole camelCase
-%% word: the next character is an uppercase ASCII letter (a new word starts) or a
-%% `:` (a keyword selector like `do:`), or the prefix consumes the whole name
-%% (`add`, `remove` as bare unary words). A lowercase continuation (`toggle`,
-%% `address`) is NOT a boundary and does not match.
--spec has_word_prefix(binary(), binary()) -> boolean().
-has_word_prefix(Name, Prefix) ->
-    PLen = byte_size(Prefix),
-    case Name of
-        <<Prefix:PLen/binary>> ->
-            true;
-        <<Prefix:PLen/binary, Next, _/binary>> ->
-            (Next >= $A andalso Next =< $Z) orelse Next =:= $:;
-        _ ->
-            false
-    end.
-
-%% Final shape rule: a keyword selector (has a `:`) that matched no more specific
-%% convention reads as an "operations" message — the spike's default protocol for
-%% state-changing keyword sends (`setTo:`, `deposit:`). Everything else (a bare
-%% unary word, a binary operator) is left "as yet unclassified": guessing
-%% getter-vs-operation from a bare name like `increment` / `reset` / `value` is
-%% unreliable, so we do not (genuine field accessors are caught earlier via
-%% `source_status = synthetic`, which is a fact, not a guess). Pharo's default
-%% bucket name is "as yet unclassified".
--spec classify_shape(binary(), boolean()) -> binary().
-classify_shape(_Name, true) ->
-    <<"operations">>;
-classify_shape(_Name, false) ->
-    <<"as yet unclassified">>.
-
 -spec side_to_binary(boolean()) -> binary().
 side_to_binary(true) -> <<"class">>;
 side_to_binary(false) -> <<"instance">>.
-
--spec atom_or_null(atom() | none) -> binary() | null.
-atom_or_null(none) -> null;
-atom_or_null(A) when is_atom(A) -> atom_to_binary(A, utf8).
-
--spec safe_bool(fun(() -> boolean())) -> boolean().
-safe_bool(F) ->
-    %% bt-catcher-audit: not-applicable-no-block - F is an Erlang reflection predicate, not a
-    %% Beamtalk block
-    try F() of
-        B when is_boolean(B) -> B
-    catch
-        _:_ -> false
-    end.
-
-%% Reflection gen_server call with the same defensive guards list-classes uses —
-%% a dead / slow class object never crashes a browse.
--spec safe_class_call(pid(), term()) -> term().
-safe_class_call(Pid, Call) ->
-    try
-        gen_server:call(Pid, Call, 5000)
-    catch
-        exit:{noproc, _} -> undefined;
-        exit:{timeout, _} -> undefined;
-        _:_ -> undefined
-    end.
-
-%%% ====================================================================
-%%% Errors
-%%% ====================================================================
-
--spec arg_error(binary(), binary()) -> {error, #beamtalk_error{}}.
-arg_error(Op, Reason) ->
-    {error,
-        beamtalk_repl_errors:make(
-            argument_error, 'REPL', iolist_to_binary([Op, <<": ">>, Reason])
-        )}.
-
--spec not_found_error(binary(), atom()) -> {error, #beamtalk_error{}}.
-not_found_error(Op, ClassName) ->
-    arg_error(Op, class_not_found_message(atom_to_binary(ClassName, utf8))).

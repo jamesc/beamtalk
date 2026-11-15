@@ -1769,7 +1769,7 @@ native_module_editable_target_project_test() ->
         %% A project-owned, loaded native with readable source is editable.
         ?assertEqual(
             {ok, ErlPath},
-            beamtalk_repl_ops_browse:native_module_editable_target(Mod)
+            beamtalk_repl_ops_browse_native:native_module_editable_target(Mod)
         )
     after
         teardown_project_native(Dir, Mod)
@@ -1779,7 +1779,7 @@ native_module_editable_target_unknown_test() ->
     %% A module that is not even loaded has no compile-info source → not editable.
     ?assertEqual(
         {error, not_editable},
-        beamtalk_repl_ops_browse:native_module_editable_target(
+        beamtalk_repl_ops_browse_native:native_module_editable_target(
             bt_native_save_definitely_not_loaded_xyz
         )
     ).
@@ -1850,7 +1850,7 @@ save_native_source_second_save_targets_real_file_test() ->
         %% (not a deleted temp) — this is the property the bug violated.
         ?assertEqual(
             {ok, ErlPath},
-            beamtalk_repl_ops_browse:native_module_editable_target(Mod)
+            beamtalk_repl_ops_browse_native:native_module_editable_target(Mod)
         ),
         %% The second save must also write the real file and reload the module.
         Src3 = <<

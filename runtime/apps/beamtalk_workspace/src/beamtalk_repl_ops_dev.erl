@@ -505,7 +505,7 @@ handle_term(<<"list-classes">>, Params, _Msg, SessionPid) ->
                                             %% re-deriving it from `SourceFile`
                                             %% client-side.
                                             <<"source_origin">> =>
-                                                beamtalk_repl_ops_browse:source_origin_of(
+                                                beamtalk_repl_ops_browse_origin:source_origin_of(
                                                     ModName, SourceFile
                                                 )
                                         }};
