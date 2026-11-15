@@ -102,7 +102,12 @@ websocket_info(
     Msg =/= undefined
 ->
     Response = beamtalk_repl_protocol:encode_result(
-        Value, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings
+        Value,
+        Msg,
+        fun beamtalk_repl_json:term_to_json/1,
+        Output,
+        Warnings,
+        fun beamtalk_repl_json:value_type/1
     ),
     {[{text, Response}], State#ws_state{
         pending_eval = undefined,

@@ -85,6 +85,59 @@ fn snapshot_value_pid_ansi() {
     insta::assert_snapshot!(strip_ansi(&out), @"#Counter<0.1.0>");
 }
 
+/// BT-4912: a user `printString` answering `3.14` arrives as the string
+/// `"3.14"`; with the server's `object` tag it is coloured as an object
+/// (cyan), not as a float (yellow) the way the text heuristic would.
+#[test]
+fn snapshot_value_user_print_string_looks_like_float_is_object() {
+    let v = serde_json::json!("3.14");
+    let heuristic = format::format_value(&v, OutputMode::Ansi);
+    assert!(heuristic.contains("\x1b[33m"), "heuristic paints it YELLOW");
+
+    let out = format::format_value_typed(&v, Some("object"), OutputMode::Ansi);
+    assert!(out.contains("\x1b[36m"), "expected CYAN ANSI code: {out:?}");
+    assert!(!out.contains("\x1b[33m"));
+    insta::assert_snapshot!(strip_ansi(&out), @"3.14");
+}
+
+#[test]
+fn snapshot_value_typed_float_is_number() {
+    let v = serde_json::json!("3.14");
+    let out = format::format_value_typed(&v, Some("float"), OutputMode::Ansi);
+    assert!(out.contains("\x1b[33m"), "expected YELLOW ANSI code");
+}
+
+#[test]
+fn snapshot_value_typed_symbol_that_looks_like_object_is_green() {
+    let v = serde_json::json!("#X<1>");
+    let out = format::format_value_typed(&v, Some("symbol"), OutputMode::Ansi);
+    assert!(out.contains("\x1b[32m"), "expected GREEN ANSI code");
+}
+
+#[test]
+fn value_typed_without_tag_matches_heuristic() {
+    let v = serde_json::json!(["3.14", "#X<1>", 2]);
+    assert_eq!(
+        format::format_value_typed(&v, None, OutputMode::Ansi),
+        format::format_value(&v, OutputMode::Ansi)
+    );
+    // An unknown tag also falls back to the heuristic.
+    let s = serde_json::json!("3.14");
+    assert_eq!(
+        format::format_value_typed(&s, Some("something_new"), OutputMode::Ansi),
+        format::format_value(&s, OutputMode::Ansi)
+    );
+}
+
+#[test]
+fn value_typed_list_tag_keeps_element_heuristic() {
+    let v = serde_json::json!(["3.14", 2]);
+    insta::assert_snapshot!(
+        format::format_value_typed(&v, Some("list"), OutputMode::Plain),
+        @"#(3.14, 2)"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // format_diagnostic
 // ---------------------------------------------------------------------------
