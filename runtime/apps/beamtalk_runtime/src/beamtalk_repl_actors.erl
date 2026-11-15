@@ -273,7 +273,7 @@ count_actors_for_module(RegistryPid, ModuleName) ->
 -ifdef(TEST).
 -doc """
 Get PIDs of all actors using a specific module.
-Used by hot reload to trigger sys:change_code/4 after module reload.
+Test-only (BT-4903): no production caller.
 """.
 -spec get_pids_for_module(pid(), atom()) -> {ok, [pid()]} | {error, term()}.
 get_pids_for_module(RegistryPid, ModuleName) ->

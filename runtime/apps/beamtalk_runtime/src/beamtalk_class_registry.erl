@@ -403,8 +403,8 @@ drain_class_warnings_by_names(ClassNames) ->
 -doc """
 Drain collision warnings for the given {Package, ClassName} pairs.
 Package-aware drain that only removes warnings for the specified
-package, leaving other packages' warnings intact. Use this from reload
-handlers where the package context is known.
+package, leaving other packages' warnings intact. Test-only (BT-4903): no production
+caller.
 
 Atomic (`ets:take/2`) — stronger than
 `drain_class_warnings_by_names/1`'s match-then-delete, since the package

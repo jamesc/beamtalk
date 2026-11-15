@@ -379,16 +379,11 @@ set. A pending `'remove-class'` entry left out of the applied set because
     flush_kinds/2
 ]).
 
-%% Cross-module entry points (the workspace interface primitives and the LSP
-%% flush path call `complete_flush/5`).
--export([
-    complete_flush/5
-]).
-
 %% Exported for tests only (BT-4903): no production caller.
 -ifdef(TEST).
 -export([
     announce_flush_completed/2,
+    complete_flush/5,
     delete_staging_path/3,
     entry_tier/1,
     filter_shadowed_by_survivor/2,

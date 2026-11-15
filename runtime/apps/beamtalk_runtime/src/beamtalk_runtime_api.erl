@@ -290,8 +290,8 @@ Return all field names for a class, including inherited ones, by class
 name — no live instance or class pid required. Delegates to
 `beamtalk_behaviour_intrinsics:classAllFieldNamesByName/1`.
 
-BT-3531: the reconcile source for hot-reload field migration, which needs
-the flattened field set of a class it only has a `ClassName` atom for.
+Test-only (BT-4903): no production caller. (BT-3531 added it as a reconcile
+source for hot-reload field migration.)
 """.
 -spec all_field_names(atom()) -> [atom()].
 all_field_names(ClassName) ->
