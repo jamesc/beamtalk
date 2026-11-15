@@ -86,6 +86,12 @@ actor_pid_wrong_typed_param_is_invalid_pid_test_() ->
      || Value <- [42, 1.5, "0.1.0", [<<"a">>], #{<<"k">> => 1}, true, null]
     ].
 
+%% The rendered error must not itself crash on code points above 255.
+actor_pid_wrong_typed_unicode_value_test() ->
+    {error, #beamtalk_error{kind = invalid_pid, message = Msg}} =
+        beamtalk_repl_params:actor_pid(#{<<"actor">> => #{<<"k">> => [8364, 955]}}),
+    ?assertEqual({beamtalk_string, <<"Invalid actor PID: <not a string>">>}, Msg).
+
 nonempty_or_undefined_wrong_type_is_absent_test_() ->
     [
         ?_assertEqual(undefined, beamtalk_repl_params:nonempty_or_undefined(Value))

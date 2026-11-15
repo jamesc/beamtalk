@@ -91,11 +91,12 @@ actor_pid(Params) ->
         {error, Reason} -> {error, invalid_pid_error(Reason, PidStr)}
     end.
 
-%% A wrong-typed `actor` value is rendered for the error message; it can never
-%% parse as a pid, so `validate_actor_pid/1` answers `invalid_pid` for it.
+%% A wrong-typed `actor` value is never echoed (it can be arbitrarily large and
+%% hold code points `list_to_binary/1` rejects); the error shows a placeholder.
+%% It can never parse as a pid, so `validate_actor_pid/1` answers `invalid_pid`.
 -spec pid_param_string(term()) -> string().
 pid_param_string(Bin) when is_binary(Bin) -> binary_to_list(Bin);
-pid_param_string(Other) -> lists:flatten(io_lib:format("~tp", [Other])).
+pid_param_string(_Other) -> "<not a string>".
 
 -spec validate_actor_pid(string()) -> {ok, pid()} | {error, invalid_pid | unknown_actor}.
 validate_actor_pid(PidStr) ->
