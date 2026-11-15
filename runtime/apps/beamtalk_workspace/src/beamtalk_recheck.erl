@@ -107,7 +107,7 @@ same dependent re-check run against a *pending* edit that has not installed
 — so the cache still holds the old generation. `trigger_pending/5` bridges
 this by building a **local overlay** of the ambient classes with the pending
 signature spliced into the changed class's entry, and threading that overlay
-map through `do_trigger/4`/`recheck_owner/6` as each candidate's
+map through `do_trigger/4`/`recheck_owner/4` as each candidate's
 `class_hierarchy` request option (ADR 0105 Phase 3) — the compiler
 port sees the hypothetical signature for the duration of that one request
 only. `beamtalk_compiler_server`'s shared `classes` state is never written
@@ -140,7 +140,7 @@ notification / workspace UI) and persisting/clearing them across reloads is
 pure "what changed" computation. `result()`'s `checked_owners` field exists
 specifically for that consumer: it is the exact set of caller classes a
 diagnostics round-trip *completed* for this trigger (`ok` status in
-`recheck_owner/6`, regardless of whether that class turned out clean or
+`recheck_owner/4`, regardless of whether that class turned out clean or
 stale), which is what the findings-store consumer needs to know which owners' stored findings to
 replace — a clean re-check still has to `put_owner(Owner, [])` its way past
 a stale generation-A finding (`checked` alone can't answer "which classes",
@@ -163,7 +163,7 @@ looking freshly-verified.
 
 **`not_verified_owners`** widens that same treatment to two more
 ways a `Kept` candidate can end up with nothing to show for it:
-`recheck_owner/6` (and `recheck_owner_for_shape/4`) returns `{skipped, []}`
+`recheck_owner/4` returns `{skipped, []}`
 when `beamtalk_workspace_meta:get_class_source/1` has no live source for the
 owner, and `{failed, []}` when the `diagnostics/3` round-trip itself errors
 out or the compiler port call fails/times out. Both outcomes fall through
@@ -389,7 +389,7 @@ computed by compiling the pending edit (e.g.
 
 ## Mechanism: a per-request class-hierarchy overlay
 
-`recheck_owner/6` sees the changed class's signature
+`recheck_owner/4` sees the changed class's signature
 through the compiler port's class-hierarchy context, injected by
 `diagnostics/3`'s `class_hierarchy` option
 (`beamtalk_compiler_server:diagnostics/3`). Passed `true`, that option
@@ -407,13 +407,13 @@ option's value directly, never touching `beamtalk_compiler_server`'s state:
 3. Builds `Overlay = AmbientClasses#{ClassAtom => PendingMeta}` — the whole
    ambient class map with just the changed class's entry replaced — and
    passes `Overlay` as `do_trigger/4`'s `ClassHierarchy` argument, which
-   threads it through to every `recheck_owner/6` call this trigger makes as
+   threads it through to every `recheck_owner/4` call this trigger makes as
    `diagnostics/3`'s `class_hierarchy => Overlay` option
    (`beamtalk_compiler_server`'s `handle_call({diagnostics, ...})` clause
    uses a caller-supplied map verbatim instead of reading `State#state.classes`
    when one is given). Every other live class stays as ambient as of this
    trigger's start — `Overlay` is a single snapshot taken once via
-   `get_classes/0`, reused unchanged for every candidate's `recheck_owner/6`
+   `get_classes/0`, reused unchanged for every candidate's `recheck_owner/4`
    call in the loop, not re-read per candidate. A concurrent `register_class/2`
    for an *unrelated* class landing mid-loop is therefore invisible to later
    candidates in this same round (a narrower staleness window than the old
@@ -476,7 +476,7 @@ recheckImage` / `:recheck image` — the "complete but unbounded" path ADR
 0105's Alternatives section keeps out of the default per-reload trigger.
 Re-checks every live class the workspace has a recorded source for
 (`beamtalk_workspace_meta:all_class_sources/0`) against the **current**
-ambient class hierarchy — the same `diagnostics/3` call `recheck_owner/6`
+ambient class hierarchy — the same `diagnostics/3` call `recheck_owner/4`
 makes for one candidate, just applied to every live class rather than an
 xref-filtered subset, and against the class's own already-installed
 signature (unlike `trigger_pending/5`, there is nothing pending here).
@@ -542,7 +542,7 @@ different previously-leaf superclass) — this runs **one** whole-image sweep
 covering all of them, not one independent sweep per superclass. Each live
 class's source is compiled exactly once; a diagnostic naming any superclass
 in the batch is attributed to that specific superclass
-(`recheck_owner_for_leaf_change/3`), so the `result()`'s `findings` list can
+(`recheck_owner/4`), so the `result()`'s `findings` list can
 mix `changed_class` values when the batch has more than one entry. This
 matters because `trigger_leaf_change/1` is already "at least as expensive as
 `trigger_image/0`" per this module's own doc — paying for N independent
@@ -682,7 +682,7 @@ already accepts for every other selector-fan-out trigger (see
 ## Re-check re-runs `resolve_type_annotation` from scratch (AC3)
 
 Each candidate's re-check is the ordinary `beamtalk_compiler:diagnostics/3`
-round trip (`recheck_owner/6`-shaped: read the live source, compile it
+round trip (`recheck_owner/4`-shaped: read the live source, compile it
 fresh). Because `class_hierarchy => true` now also threads the *ambient
 session alias cache* (`beamtalk_compiler_server:get_aliases/0` — see
 `do_diagnostics/5`'s doc), and that cache reflects the alias's *just-
@@ -845,7 +845,7 @@ do_trigger_image() ->
 
 -doc """
 Re-check one live class's own current source against the ambient class
-hierarchy (mirrors `recheck_owner/6`'s compiler call, minus the xref
+hierarchy (mirrors `recheck_owner/4`'s compiler call, minus the xref
 site-cap/attribution machinery a single changed selector needs). Returns
 `{Status, Findings}` — `Status` is `ok` only when the diagnostics round-trip
 completed, so `do_trigger_image/0` can count `checked` accurately; a
@@ -857,36 +857,16 @@ rather than aborting the whole scan — a thousand-class image should not
 lose its entire sweep because one class's diagnostics call outlives the
 compiler port's 30s timeout.
 """.
--spec recheck_image_class(binary(), string()) -> {ok | failed, [image_finding()]}.
+-spec recheck_image_class(binary(), string()) -> {ok | skipped | failed, [image_finding()]}.
 recheck_image_class(OwnerBin, Source) ->
-    SourceBin = unicode:characters_to_binary(Source),
-    try beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{class_hierarchy => true}) of
-        {ok, Diagnostics} ->
-            Findings = [
-                image_finding(OwnerBin, D)
-             || D <- Diagnostics, relevant_image_diagnostic(D)
-            ],
-            {ok, Findings};
-        {error, Reason} ->
-            ?LOG_WARNING(
-                "Whole-image re-check compile failed for class (no findings reported)",
-                #{owner => OwnerBin, reason => Reason, domain => [beamtalk, runtime]}
-            ),
-            {failed, []}
-    catch
-        Class:Reason:Stack ->
-            ?LOG_WARNING(
-                "Whole-image re-check compiler-port call failed for class (no findings reported)",
-                #{
-                    owner => OwnerBin,
-                    error_class => Class,
-                    reason => Reason,
-                    stack => Stack,
-                    domain => [beamtalk, runtime]
-                }
-            ),
-            {failed, []}
-    end.
+    recheck_owner(
+        OwnerBin,
+        Source,
+        #{label => "Whole-image re-check", class_hierarchy => true, guard => true},
+        fun(_OwnerBin, Diagnostics) ->
+            [image_finding(OwnerBin, D) || D <- Diagnostics, relevant_image_diagnostic(D)]
+        end
+    ).
 
 -doc """
 Is `Diagnostic` relevant to a whole-image scan? Unlike `relevant_diagnostic/4`
@@ -975,39 +955,29 @@ do_trigger(ClassNameBin, SelectorBin, Side, Classification, ClassHierarchy) ->
     OwnerGroups = group_by_owner(Sites),
     Cap = recheck_caller_cap(),
     {Kept, NotChecked} = apply_cap(OwnerGroups, Cap),
+    FindFun = fun(OwnerSites) ->
+        SiteRefs = [site_ref(S) || S <- OwnerSites],
+        fun(OwnerBin, Diagnostics) ->
+            [
+                to_finding(OwnerBin, ClassNameBin, SelectorBin, Classification, SiteRefs, D)
+             || D <- Diagnostics,
+                relevant_diagnostic(D, ClassNameBin, SelectorBin, Classification)
+            ]
+        end
+    end,
+    %% `checked` counts candidates a diagnostics round-trip actually completed
+    %% for — see `build_result/4`.
     Outcomes = [
         {Owner,
             recheck_owner(
-                Owner, OwnerSites, ClassNameBin, SelectorBin, Classification, ClassHierarchy
+                atom_to_binary(Owner, utf8),
+                beamtalk_workspace_meta:get_class_source(atom_to_binary(Owner, utf8)),
+                #{label => "Re-check", class_hierarchy => ClassHierarchy},
+                FindFun(OwnerSites)
             )}
      || {Owner, OwnerSites} <- Kept
     ],
-    Findings = lists:flatmap(
-        fun({_Owner, {_Status, OwnerFindings}}) -> OwnerFindings end, Outcomes
-    ),
-    %% `checked` counts candidates a diagnostics round-trip actually completed
-    %% for — not every *kept* candidate: one with no recorded live source (a
-    %% stdlib/dependency class) or a compiler-port failure never ran a check,
-    %% so it must not inflate the "N callers checked" figure the ADR 0105 demo
-    %% reports ("2 callers re-checked, 1 stale"). `checked_owners` is the same
-    %% set, named rather than counted — the findings-store consumer
-    %% needs to know exactly *which* owners a check completed for (including
-    %% ones that came back clean), not just how many.
-    CheckedOwners = [
-        atom_to_binary(Owner, utf8)
-     || {Owner, {ok, _}} <- Outcomes
-    ],
-    NotCheckedOwners = not_checked_owners(OwnerGroups, Kept),
-    #{
-        findings => Findings,
-        checked => length(CheckedOwners),
-        total_candidates => length(OwnerGroups),
-        not_checked => NotChecked,
-        cap_note => cap_note(NotChecked),
-        checked_owners => CheckedOwners,
-        not_checked_owners => NotCheckedOwners,
-        not_verified_owners => not_verified_owners(NotCheckedOwners, Outcomes)
-    }.
+    build_result(Outcomes, length(OwnerGroups), NotChecked, not_checked_owners(OwnerGroups, Kept)).
 
 -doc """
 ADR 0115 Phase 4: each shape-dependent selector is filtered through
@@ -1039,28 +1009,29 @@ do_trigger_shape(ClassNameBin, FieldChanges) ->
     OwnerGroups = group_by_owner(Sites),
     Cap = recheck_caller_cap(),
     {Kept, NotChecked} = apply_cap(OwnerGroups, Cap),
+    FindFun = fun(OwnerSites) ->
+        SiteRefs = [site_ref(S) || S <- OwnerSites],
+        fun(OwnerBin, Diagnostics) ->
+            [
+                to_finding_shape(OwnerBin, ClassNameBin, SiteRefs, D, Matched, AmbiguousWith)
+             || D <- Diagnostics,
+                {true, Matched, AmbiguousWith} <- [
+                    relevant_diagnostic_shape(D, ClassNameBin, FieldChanges)
+                ]
+            ]
+        end
+    end,
     Outcomes = [
-        {Owner, recheck_owner_for_shape(Owner, OwnerSites, ClassNameBin, FieldChanges)}
+        {Owner,
+            recheck_owner(
+                atom_to_binary(Owner, utf8),
+                beamtalk_workspace_meta:get_class_source(atom_to_binary(Owner, utf8)),
+                #{label => "Shape re-check", class_hierarchy => true},
+                FindFun(OwnerSites)
+            )}
      || {Owner, OwnerSites} <- Kept
     ],
-    Findings = lists:flatmap(
-        fun({_Owner, {_Status, OwnerFindings}}) -> OwnerFindings end, Outcomes
-    ),
-    CheckedOwners = [
-        atom_to_binary(Owner, utf8)
-     || {Owner, {ok, _}} <- Outcomes
-    ],
-    NotCheckedOwners = not_checked_owners(OwnerGroups, Kept),
-    #{
-        findings => Findings,
-        checked => length(CheckedOwners),
-        total_candidates => length(OwnerGroups),
-        not_checked => NotChecked,
-        cap_note => cap_note(NotChecked),
-        checked_owners => CheckedOwners,
-        not_checked_owners => NotCheckedOwners,
-        not_verified_owners => not_verified_owners(NotCheckedOwners, Outcomes)
-    }.
+    build_result(Outcomes, length(OwnerGroups), NotChecked, not_checked_owners(OwnerGroups, Kept)).
 
 -doc """
 The candidates the caller cap dropped this trigger — `Candidates` (every
@@ -1076,7 +1047,7 @@ not_checked_owners(Candidates, Kept) ->
 
 -doc """
 `NotCheckedOwners` (the cap-dropped candidates) unioned with every `Kept`
-candidate whose `recheck_owner/6`/`recheck_owner_for_shape/4` outcome status
+candidate whose `recheck_owner/4` outcome status
 was not `ok` — i.e. `skipped` (no live source recorded) or `failed` (the
 diagnostics round-trip errored or the compiler port call itself failed).
 Both groups share the same defining property `result()`'s moduledoc
@@ -1088,14 +1059,59 @@ always disjoint (`Outcomes` only ever covers `Kept`, and `NotCheckedOwners`
 is exactly `Candidates -- Kept`), so `lists:usort/1` here is for
 deterministic ordering, not for deduplication across the two sources.
 """.
--spec not_verified_owners([binary()], [{atom(), {ok | skipped | failed, [finding()]}}]) ->
+-spec not_verified_owners([binary()], [{atom() | binary(), {ok | skipped | failed, [finding()]}}]) ->
     [binary()].
 not_verified_owners(NotCheckedOwners, Outcomes) ->
     UnverifiedFromOutcomes = [
-        atom_to_binary(Owner, utf8)
+        owner_bin(Owner)
      || {Owner, {Status, _}} <- Outcomes, Status =/= ok
     ],
     lists:usort(NotCheckedOwners ++ UnverifiedFromOutcomes).
+
+-doc """
+An outcome's owner as a binary — `trigger/4`/`trigger_shape/2` key their
+outcomes by caller-class atom (xref sites), the leaf-change/alias-change
+triggers by binary (`beamtalk_workspace_meta` / `beamtalk_alias_xref` store
+class names as binaries).
+""".
+-spec owner_bin(atom() | binary()) -> binary().
+owner_bin(Owner) when is_atom(Owner) -> atom_to_binary(Owner, utf8);
+owner_bin(Owner) when is_binary(Owner) -> Owner.
+
+-doc """
+The `result()` every trigger shares: `Outcomes` are the per-owner
+`{Owner, {Status, Findings}}` results for the kept candidates.
+
+`checked` counts candidates a diagnostics round-trip actually completed
+for — not every *kept* candidate: one with no recorded live source (a
+stdlib/dependency class) or a compiler-port failure never ran a check,
+so it must not inflate the "N callers checked" figure the ADR 0105 demo
+reports ("2 callers re-checked, 1 stale"). `checked_owners` is the same
+set, named rather than counted — the findings-store consumer needs to know
+exactly *which* owners a check completed for (including ones that came back
+clean), not just how many.
+""".
+-spec build_result(
+    [{atom() | binary(), {ok | skipped | failed, [finding()]}}],
+    non_neg_integer(),
+    non_neg_integer(),
+    [binary()]
+) -> result().
+build_result(Outcomes, TotalCandidates, NotChecked, NotCheckedOwners) ->
+    Findings = lists:flatmap(
+        fun({_Owner, {_Status, OwnerFindings}}) -> OwnerFindings end, Outcomes
+    ),
+    CheckedOwners = [owner_bin(Owner) || {Owner, {ok, _}} <- Outcomes],
+    #{
+        findings => Findings,
+        checked => length(CheckedOwners),
+        total_candidates => TotalCandidates,
+        not_checked => NotChecked,
+        cap_note => cap_note(NotChecked),
+        checked_owners => CheckedOwners,
+        not_checked_owners => NotCheckedOwners,
+        not_verified_owners => not_verified_owners(NotCheckedOwners, Outcomes)
+    }.
 
 -doc """
 ADR 0115 Phase 4: the `ChangedClass` argument `beamtalk_xref:
@@ -1274,64 +1290,89 @@ cap_note(N) ->
     beamtalk_error:chars_to_binary(io_lib:format("~tp more not checked", [N])).
 
 -doc """
-Re-check one candidate caller class: read its live source (never disk — a
-flagged caller may itself carry unflushed edits, ADR 0082), run diagnostics
-through the compiler port, and keep only the diagnostics attributable to
-this reload (`relevant_diagnostic/4`).
+The one owner-recheck skeleton all triggers share: run `Source` (the owner's
+live source — never disk, a flagged caller may itself carry unflushed edits,
+ADR 0082) through the compiler port's diagnostics and let `FindFun` turn the
+diagnostics into findings (it owns the trigger's relevance filter and
+finding builder).
 
 Returns `{Status, Findings}` — `Status` is `ok` only when a diagnostics
-round-trip actually completed for this candidate, so `do_trigger/3` can count
-`checked` accurately: a candidate with no live source recorded (never
-installed through `beamtalk_repl_loader`, e.g. a stdlib/dependency class) is
-`skipped` with a logged warning rather than falling back to disk, and a
-compiler-port failure for this one candidate is `failed` — both degrade to
-"no findings for this caller" rather than failing the whole reload's
-orchestration, but neither counts as a completed check.
-Accepts `ClassHierarchy` — the `class_hierarchy` option value
-passed straight through to `beamtalk_compiler:diagnostics/3`: `true` opts
-into the ambient class cache (`trigger/4`'s path), or a map threads a
-caller-built overlay for this one request only (`trigger_pending/5`'s path)
-without ever writing to `beamtalk_compiler_server` state.
+round-trip actually completed for this owner, so callers can count `checked`
+accurately: `Source` being `undefined` (never installed through
+`beamtalk_repl_loader`, e.g. a stdlib/dependency class) is `skipped` with a
+logged warning rather than falling back to disk, and a compiler-port failure
+for this one owner is `failed` — both degrade to "no findings for this
+owner" rather than failing the whole reload's orchestration, but neither
+counts as a completed check.
+
+`Opts`: `label` prefixes the log messages; `class_hierarchy` is the option
+value passed straight to `beamtalk_compiler:diagnostics/3` (`true` opts into
+the ambient class cache, a map threads a caller-built overlay for this one
+request only — `trigger_pending/5`'s path — without ever writing to
+`beamtalk_compiler_server` state); `guard` (default `false`) additionally
+catches the compiler port call itself exiting (`noproc`/`timeout`), used by
+the sweeps that must not lose a whole scan to one class.
 """.
+-type recheck_opts() :: #{
+    label := string(),
+    class_hierarchy := true | #{atom() => map()},
+    guard => boolean()
+}.
 -spec recheck_owner(
-    atom(), [map()], binary(), binary(), classification(), true | #{atom() => map()}
-) ->
-    {ok | skipped | failed, [finding()]}.
-recheck_owner(Owner, OwnerSites, ClassNameBin, SelectorBin, Classification, ClassHierarchy) ->
-    OwnerBin = atom_to_binary(Owner, utf8),
-    case beamtalk_workspace_meta:get_class_source(OwnerBin) of
-        undefined ->
+    binary(),
+    string() | undefined,
+    recheck_opts(),
+    fun((binary(), [map()]) -> [finding() | image_finding()])
+) -> {ok | skipped | failed, [finding() | image_finding()]}.
+recheck_owner(OwnerBin, undefined, #{label := Label}, _FindFun) ->
+    ?LOG_WARNING(
+        "~ts skipped: no live source recorded for candidate caller",
+        [Label],
+        #{owner => OwnerBin, domain => [beamtalk, runtime]}
+    ),
+    {skipped, []};
+recheck_owner(OwnerBin, Source, #{label := Label} = Opts, FindFun) ->
+    SourceBin = unicode:characters_to_binary(Source),
+    %% `class_hierarchy` opts into class context
+    %% (beamtalk_compiler_server:diagnostics/3) — the re-check is the one
+    %% caller that needs it; the keystroke-driven cockpit editor path stays
+    %% on the class-context-free default.
+    DiagOpts = #{class_hierarchy => maps:get(class_hierarchy, Opts)},
+    Result =
+        case maps:get(guard, Opts, false) of
+            false ->
+                beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, DiagOpts);
+            true ->
+                try
+                    beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, DiagOpts)
+                catch
+                    Class:CatchReason:Stack ->
+                        ?LOG_WARNING(
+                            "~ts compiler-port call failed (no findings reported)",
+                            [Label],
+                            #{
+                                owner => OwnerBin,
+                                error_class => Class,
+                                reason => CatchReason,
+                                stack => Stack,
+                                domain => [beamtalk, runtime]
+                            }
+                        ),
+                        caught
+                end
+        end,
+    case Result of
+        {ok, Diagnostics} ->
+            {ok, FindFun(OwnerBin, Diagnostics)};
+        {error, Reason} ->
             ?LOG_WARNING(
-                "Re-check skipped: no live source recorded for candidate caller",
-                #{owner => OwnerBin, domain => [beamtalk, runtime]}
+                "~ts compile failed (no findings reported)",
+                [Label],
+                #{owner => OwnerBin, reason => Reason, domain => [beamtalk, runtime]}
             ),
-            {skipped, []};
-        Source ->
-            SourceBin = unicode:characters_to_binary(Source),
-            %% `class_hierarchy => ClassHierarchy` opts into class context
-            %% (beamtalk_compiler_server:diagnostics/3) — this re-check is
-            %% the one caller that needs it; the keystroke-driven cockpit
-            %% editor path stays on the class-context-free default.
-            case
-                beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{
-                    class_hierarchy => ClassHierarchy
-                })
-            of
-                {ok, Diagnostics} ->
-                    SiteRefs = [site_ref(S) || S <- OwnerSites],
-                    Findings = [
-                        to_finding(OwnerBin, ClassNameBin, SelectorBin, Classification, SiteRefs, D)
-                     || D <- Diagnostics,
-                        relevant_diagnostic(D, ClassNameBin, SelectorBin, Classification)
-                    ],
-                    {ok, Findings};
-                {error, Reason} ->
-                    ?LOG_WARNING(
-                        "Re-check compile failed for candidate caller (no findings reported)",
-                        #{owner => OwnerBin, reason => Reason, domain => [beamtalk, runtime]}
-                    ),
-                    {failed, []}
-            end
+            {failed, []};
+        caught ->
+            {failed, []}
     end.
 
 -spec site_ref(map()) -> site_ref().
@@ -1403,52 +1444,6 @@ base_finding(
 %%====================================================================
 %% Shape-change re-check (ADR 0105 Phase 2)
 %%====================================================================
-
--doc """
-Re-check one candidate caller class against a shape change — structurally
-identical to `recheck_owner/6` (same live-source read, same
-`class_hierarchy => true` diagnostics round-trip, same `{Status, Findings}`
-contract) but filters/attributes via `relevant_diagnostic_shape/3` instead
-of `relevant_diagnostic/4`.
-""".
--spec recheck_owner_for_shape(atom(), [map()], binary(), [shape_field_change()]) ->
-    {ok | skipped | failed, [finding()]}.
-recheck_owner_for_shape(Owner, OwnerSites, ClassNameBin, FieldChanges) ->
-    OwnerBin = atom_to_binary(Owner, utf8),
-    case beamtalk_workspace_meta:get_class_source(OwnerBin) of
-        undefined ->
-            ?LOG_WARNING(
-                "Shape re-check skipped: no live source recorded for candidate caller",
-                #{owner => OwnerBin, domain => [beamtalk, runtime]}
-            ),
-            {skipped, []};
-        Source ->
-            SourceBin = unicode:characters_to_binary(Source),
-            case
-                beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{
-                    class_hierarchy => true
-                })
-            of
-                {ok, Diagnostics} ->
-                    SiteRefs = [site_ref(S) || S <- OwnerSites],
-                    Findings = [
-                        to_finding_shape(
-                            OwnerBin, ClassNameBin, SiteRefs, D, Matched, AmbiguousWith
-                        )
-                     || D <- Diagnostics,
-                        {true, Matched, AmbiguousWith} <- [
-                            relevant_diagnostic_shape(D, ClassNameBin, FieldChanges)
-                        ]
-                    ],
-                    {ok, Findings};
-                {error, Reason} ->
-                    ?LOG_WARNING(
-                        "Shape re-check compile failed for candidate caller (no findings reported)",
-                        #{owner => OwnerBin, reason => Reason, domain => [beamtalk, runtime]}
-                    ),
-                    {failed, []}
-            end
-    end.
 
 -doc """
 Is `Diagnostic` attributable to this shape change, and if so, which
@@ -1618,7 +1613,7 @@ Re-check every live class's own recorded source against the current
 (already-updated, per `trigger_leaf_change/1`'s doc) hierarchy, keeping only
 diagnostics attributable to one of `SuperclassBins` losing its leaf status
 (`relevant_diagnostic_leaf_change/2`, applied per superclass in the batch —
-see `recheck_owner_for_leaf_change/3`). Structurally mirrors
+see `recheck_owner/4`). Structurally mirrors
 `do_trigger_image/0` (same source, same per-class round trip, run **once**
 regardless of how many superclasses are in `SuperclassBins`) but
 returns a `result()` — not an `image_result()` — since `checked_owners`/
@@ -1635,74 +1630,23 @@ class with a recorded source is a candidate, unconditionally.
 do_trigger_leaf_change(SuperclassBins) ->
     Sources = beamtalk_workspace_meta:all_class_sources(),
     Owners = lists:keysort(1, maps:to_list(Sources)),
+    FindFun = fun(OwnerBin, Diagnostics) ->
+        lists:flatmap(
+            fun(D) -> findings_for_leaf_change_diagnostic(OwnerBin, SuperclassBins, D) end,
+            Diagnostics
+        )
+    end,
     Outcomes = [
-        {OwnerBin, recheck_owner_for_leaf_change(OwnerBin, Source, SuperclassBins)}
+        {OwnerBin,
+            recheck_owner(
+                OwnerBin,
+                Source,
+                #{label => "Leaf-change re-check", class_hierarchy => true, guard => true},
+                FindFun
+            )}
      || {OwnerBin, Source} <- Owners
     ],
-    Findings = lists:flatmap(
-        fun({_Owner, {_Status, OwnerFindings}}) -> OwnerFindings end, Outcomes
-    ),
-    CheckedOwners = [Owner || {Owner, {ok, _}} <- Outcomes],
-    NotVerifiedOwners = lists:usort([
-        Owner
-     || {Owner, {Status, _}} <- Outcomes, Status =/= ok
-    ]),
-    #{
-        findings => Findings,
-        checked => length(CheckedOwners),
-        total_candidates => length(Owners),
-        not_checked => 0,
-        cap_note => undefined,
-        checked_owners => CheckedOwners,
-        not_checked_owners => [],
-        not_verified_owners => NotVerifiedOwners
-    }.
-
--doc """
-Re-check one live class's own current source for diagnostics attributable
-to any superclass in `SuperclassBins` — mirrors `recheck_image_class/2`'s
-compiler-port call (same `class_hierarchy => true` diagnostics round trip,
-same `{ok | failed, ...}` degrade-on-failure contract) but filters/builds
-findings via `relevant_diagnostic_leaf_change/2` / `to_finding_leaf_change/3`
-instead of `image_finding/2`.
-
-One `diagnostics/3` round trip covers every superclass in the
-batch — a diagnostic that happens to name more than one batch member (not
-observed in practice; every shipped diagnostic message names exactly one
-class) contributes one finding per matching superclass, rather than picking
-just the first match, since each is an independently real, independently
-attributable finding.
-""".
--spec recheck_owner_for_leaf_change(binary(), string(), [binary()]) -> {ok | failed, [finding()]}.
-recheck_owner_for_leaf_change(OwnerBin, Source, SuperclassBins) ->
-    SourceBin = unicode:characters_to_binary(Source),
-    try beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{class_hierarchy => true}) of
-        {ok, Diagnostics} ->
-            Findings = lists:flatmap(
-                fun(D) -> findings_for_leaf_change_diagnostic(OwnerBin, SuperclassBins, D) end,
-                Diagnostics
-            ),
-            {ok, Findings};
-        {error, Reason} ->
-            ?LOG_WARNING(
-                "Leaf-change re-check compile failed for class (no findings reported)",
-                #{owner => OwnerBin, reason => Reason, domain => [beamtalk, runtime]}
-            ),
-            {failed, []}
-    catch
-        Class:Reason:Stack ->
-            ?LOG_WARNING(
-                "Leaf-change re-check compiler-port call failed for class (no findings reported)",
-                #{
-                    owner => OwnerBin,
-                    error_class => Class,
-                    reason => Reason,
-                    stack => Stack,
-                    domain => [beamtalk, runtime]
-                }
-            ),
-            {failed, []}
-    end.
+    build_result(Outcomes, length(Owners), 0, []).
 
 -spec findings_for_leaf_change_diagnostic(binary(), [binary()], map()) -> [finding()].
 findings_for_leaf_change_diagnostic(OwnerBin, SuperclassBins, Diagnostic) ->
@@ -1832,92 +1776,30 @@ do_trigger_alias_change(AliasNameBins) ->
     Candidates = alias_change_candidates(AliasNameBins),
     Cap = recheck_caller_cap(),
     {Kept, NotChecked} = apply_cap(Candidates, Cap),
+    %% AliasNameBins is 1 name for the overwhelmingly common single-alias
+    %% redefinition; a rename-affecting-a-chain caller can pass more, but the
+    %% *finding* is always attributed to the first (primary) name — the exact
+    %% redefined alias, not a transitively-affected one it happens to also
+    %% reference — mirroring how a `signature_change` finding names the one
+    %% changed selector, not every selector a caller's class exposes.
+    [PrimaryAliasBin | _] = AliasNameBins,
+    FindFun = fun(OwnerBin, Diagnostics) ->
+        [
+            to_finding_alias_change(OwnerBin, PrimaryAliasBin, D)
+         || D <- Diagnostics, relevant_diagnostic_alias_change(D)
+        ]
+    end,
     Outcomes = [
-        {OwnerBin, recheck_owner_for_alias_change(OwnerBin, AliasNameBins)}
+        {OwnerBin,
+            recheck_owner(
+                OwnerBin,
+                beamtalk_workspace_meta:get_class_source(OwnerBin),
+                #{label => "Alias-change re-check", class_hierarchy => true},
+                FindFun
+            )}
      || OwnerBin <- Kept
     ],
-    Findings = lists:flatmap(
-        fun({_Owner, {_Status, OwnerFindings}}) -> OwnerFindings end, Outcomes
-    ),
-    CheckedOwners = [OwnerBin || {OwnerBin, {ok, _}} <- Outcomes],
-    NotCheckedOwners = Candidates -- Kept,
-    #{
-        findings => Findings,
-        checked => length(CheckedOwners),
-        total_candidates => length(Candidates),
-        not_checked => NotChecked,
-        cap_note => cap_note(NotChecked),
-        checked_owners => CheckedOwners,
-        not_checked_owners => NotCheckedOwners,
-        not_verified_owners => not_verified_owners_alias_change(NotCheckedOwners, Outcomes)
-    }.
-
--doc """
-Same "not verified" widening `not_verified_owners/2` does for `trigger/4`/
-`trigger_shape/2` — `NotCheckedOwners` (cap-dropped) unioned with every
-`Kept` candidate whose `recheck_owner_for_alias_change/2` outcome status
-wasn't `ok`. Kept as its own small function (rather than reusing
-`not_verified_owners/2` directly) because this trigger's `Outcomes`/
-`NotCheckedOwners` are already plain binaries, not the `atom()`-keyed shape
-`not_verified_owners/2`'s spec expects (this trigger has no selector to
-convert candidate owners to atoms for — `beamtalk_alias_xref` stores class
-names as binaries throughout).
-""".
--spec not_verified_owners_alias_change([binary()], [
-    {binary(), {ok | skipped | failed, [finding()]}}
-]) ->
-    [binary()].
-not_verified_owners_alias_change(NotCheckedOwners, Outcomes) ->
-    UnverifiedFromOutcomes = [OwnerBin || {OwnerBin, {Status, _}} <- Outcomes, Status =/= ok],
-    lists:usort(NotCheckedOwners ++ UnverifiedFromOutcomes).
-
--doc """
-Re-check one candidate caller class for diagnostics attributable to a
-redefinition of any alias in `AliasNameBins` — mirrors `recheck_owner/6`'s
-live-source read and `class_hierarchy => true` diagnostics round trip (see
-`trigger_alias_change/1`'s doc for why that round trip now also resolves
-against the *current* ambient alias cache), but filters via
-`relevant_diagnostic_alias_change/1` instead of `relevant_diagnostic/4`.
-""".
--spec recheck_owner_for_alias_change(binary(), [binary()]) -> {ok | skipped | failed, [finding()]}.
-recheck_owner_for_alias_change(OwnerBin, AliasNameBins) ->
-    case beamtalk_workspace_meta:get_class_source(OwnerBin) of
-        undefined ->
-            ?LOG_WARNING(
-                "Alias-change re-check skipped: no live source recorded for candidate caller",
-                #{owner => OwnerBin, domain => [beamtalk, runtime]}
-            ),
-            {skipped, []};
-        Source ->
-            SourceBin = unicode:characters_to_binary(Source),
-            case
-                beamtalk_compiler:diagnostics(SourceBin, <<"expression">>, #{
-                    class_hierarchy => true
-                })
-            of
-                {ok, Diagnostics} ->
-                    %% AliasNameBins is 1 name for the overwhelmingly common
-                    %% single-alias redefinition; a rename-affecting-a-chain
-                    %% caller can pass more, but the *finding* is always
-                    %% attributed to the first (primary) name — the exact
-                    %% redefined alias, not a transitively-affected one it
-                    %% happens to also reference — mirroring how a
-                    %% `signature_change` finding names the one changed
-                    %% selector, not every selector a caller's class exposes.
-                    [PrimaryAliasBin | _] = AliasNameBins,
-                    Findings = [
-                        to_finding_alias_change(OwnerBin, PrimaryAliasBin, D)
-                     || D <- Diagnostics, relevant_diagnostic_alias_change(D)
-                    ],
-                    {ok, Findings};
-                {error, Reason} ->
-                    ?LOG_WARNING(
-                        "Alias-change re-check compile failed for candidate caller (no findings reported)",
-                        #{owner => OwnerBin, reason => Reason, domain => [beamtalk, runtime]}
-                    ),
-                    {failed, []}
-            end
-    end.
+    build_result(Outcomes, length(Candidates), NotChecked, Candidates -- Kept).
 
 -doc """
 Is `Diagnostic` relevant to an alias-change scan? Coarse, like
