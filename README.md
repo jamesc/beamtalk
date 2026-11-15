@@ -269,7 +269,7 @@ Docker image (`ghcr.io/jamesc/beamtalk-ide`) — separate from the toolchain bun
 **New to Beamtalk?** See the [REPL Tutorial](examples/repl-tutorial.md) for a complete beginner's guide!
 
 ```text
-Beamtalk v0.4.0
+Beamtalk v0.5.0
 Type :help for available commands, :exit to quit.
 
 > message := "Hello, Beamtalk!"

@@ -1104,7 +1104,7 @@ do_eval(Expression, State, Subscriber) ->
 ```beamtalk
 Beamtalk allClasses           // => #(Counter, Logger, Actor, Object, ...)
 Beamtalk classNamed: #Counter // => Counter
-Beamtalk version              // => '0.4.0'
+Beamtalk version              // => '0.5.0'
 Workspace isAvailable         // => true (in a workspace), false under `beamtalk test`
 ```
 
