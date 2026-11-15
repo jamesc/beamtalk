@@ -26,7 +26,7 @@ use crate::server::{validate_class_name, validate_erlang_module_name, validate_s
 use beamtalk_core::build_layout::BuildLayout;
 use beamtalk_package::dependency_classes::dependency_layout;
 use beamtalk_repl_protocol::format as fmt;
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::client::ReplClient;
 
@@ -51,6 +51,27 @@ fn discover_package_corpora() -> (
         Some(root) => discover_package_corpora_in(root),
         None => (Vec::new(), Vec::new()),
     }
+}
+
+/// The checkout roots of `root`'s dependencies: the declared graph
+/// ([`dependency_layout`]), or — when the manifest can't be read, so nothing
+/// is known about what it declares — every `_build/deps/*` checkout.
+fn dependency_roots(root: &Utf8Path) -> Vec<Utf8PathBuf> {
+    let layout = dependency_layout(root);
+    if !layout.manifest_unreadable {
+        return layout.found.into_iter().map(|dep| dep.root).collect();
+    }
+    let mut roots: Vec<Utf8PathBuf> = BuildLayout::new(root)
+        .deps_dir()
+        .read_dir_utf8()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path().to_path_buf())
+        .filter(|path| path.is_dir())
+        .collect();
+    roots.sort_unstable();
+    roots
 }
 
 /// [`discover_package_corpora`] for an explicit project `root`.
@@ -81,8 +102,8 @@ fn discover_package_corpora_in(
     // Dependency corpora. A dependency builds its corpus in its own
     // `_build/dev/` during compilation, but the corpus is also placed
     // alongside `ebin` in the checkout, so check both.
-    for dep in dependency_layout(root).found {
-        let search_dirs = [BuildLayout::new(&dep.root).profile_dir(), dep.root];
+    for dep_root in dependency_roots(root) {
+        let search_dirs = [BuildLayout::new(&dep_root).profile_dir(), dep_root];
         if let Some((dir, corpus)) = search_dirs.iter().find_map(|dir| {
             beamtalk_examples::load_corpus_from_file(dir.join("corpus.json").as_std_path())
                 .map(|corpus| (dir, corpus))
@@ -677,6 +698,19 @@ mod corpus_discovery_tests {
         assert_eq!(ids(&examples), ["root", "fetched", "sibling"]);
         assert_eq!(classes.len(), 1);
         assert_eq!(classes[0].entries[0].name, "SiblingClass");
+    }
+
+    #[test]
+    fn unreadable_manifest_falls_back_to_fetched_checkouts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = Utf8Path::from_path(tmp.path()).unwrap();
+        write(&app.join("beamtalk.toml"), "{ not toml");
+        let fetched = BuildLayout::new(app).dep_checkout_dir("fetched");
+        write(&fetched.join("corpus.json"), &corpus_json("fetched"));
+
+        let (examples, _) = discover_package_corpora_in(app);
+
+        assert_eq!(ids(&examples), ["fetched"]);
     }
 
     #[test]
