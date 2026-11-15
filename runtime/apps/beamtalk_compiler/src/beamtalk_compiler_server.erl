@@ -684,14 +684,9 @@ real grammar (BT-4861) — see `beamtalk_compiler_port:scan_source_dependencies/
 -spec scan_source_dependencies(binary()) ->
     {ok, #{classes := [map()], native_refs := [binary()]}} | {error, atom(), binary()}.
 scan_source_dependencies(Source) ->
-    try
-        gen_server:call(?MODULE, {scan_source_dependencies, Source}, ?CALL_TIMEOUT_MS)
-    catch
-        exit:{noproc, _} ->
-            {error, noproc, <<"Compiler server is not available">>};
-        exit:{timeout, _} ->
-            {error, timeout, <<"Compiler server timed out">>}
-    end.
+    safe_call(
+        {scan_source_dependencies, Source}, ?CALL_TIMEOUT_MS, ?SPAN_DOWN, ?SPAN_TIMEOUT
+    ).
 
 -doc """
 Field-level default-value presence for `ClassName''s `state:'/`field:'
