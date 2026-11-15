@@ -716,8 +716,8 @@ remove_protocol_provision(ProtocolBin, SelectorBin, instance) ->
                         ok -> {ok, ProtocolBin};
                         {error, _} = Err -> Err
                     end;
-                {error, Reason, _Msg} ->
-                    {error, {method_not_found, Reason}}
+                {error, Reason, Msg} ->
+                    {error, {method_span_unresolved, Reason, Msg}}
             end
     end.
 
