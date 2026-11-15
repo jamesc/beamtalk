@@ -90,7 +90,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
 -export([
     class_identity/1,
     prune_dead_class_pids/1,
-    %% No cross-module production caller (BT-4903).
+    %% No production caller; definitions are test-only too (BT-4903).
     loaded_class_names/0,
     drain_class_warnings_by_qualified_names/1
 ]).
