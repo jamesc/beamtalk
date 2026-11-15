@@ -37,7 +37,7 @@ would be dead code).
 -export(['asString'/1, 'asBinary'/1, version/1, 'printString'/1]).
 -export(['<'/2, '>'/2, '=<'/2, '>='/2, '<='/2]).
 
-%% FFI shims for (Erlang beamtalk_uuid) dispatch — also the functions
+%% Entry points for (Erlang beamtalk_uuid) dispatch — also the functions
 %% `self delegate` actually calls for keyword selectors (first keyword,
 %% colon stripped; see docs/beamtalk-native-erlang.md "The naming rule").
 

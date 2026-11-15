@@ -92,7 +92,7 @@ A use the table's protection forbids raises `access_denied`, never a raw
 %% Opt-out of the FFI proxy's ok/error -> Result coercion: Ets returns user data.
 -export([beamtalk_ffi_raw_results/0]).
 
-%% FFI shims for class methods: `(Erlang beamtalk_ets) new: name type: t` → `new/2`
+%% Entry points for class methods: `(Erlang beamtalk_ets) new: name type: t` → `new/2`
 
 -type t() :: #{'$beamtalk_class' := 'Ets', atom() => term()}.
 -export_type([t/0]).

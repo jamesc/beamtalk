@@ -72,8 +72,6 @@ story; inside the REPL prefer `Transcript`.
 
 -export([print/1, printLine/1, error/1, errorLine/1]).
 -export([flush/0, readLine/0, readLine/1]).
-%% FFI shims: the Erlang proxy strips the trailing colon from keyword
-%% selectors before dispatch, so `print:` arrives as `print`, etc.
 
 -ifdef(TEST).
 %% Expose pure internal helpers for EUnit testing.
@@ -140,10 +138,6 @@ Same return contract as `readLine`.
 -spec readLine(term()) -> binary() | 'nil'.
 readLine(Prompt) ->
     read(render(Prompt), 'readLine:').
-
-%%% ============================================================================
-%%% FFI shims (proxy strips the trailing colon before dispatch)
-%%% ============================================================================
 
 %%% ============================================================================
 %%% Internal helpers

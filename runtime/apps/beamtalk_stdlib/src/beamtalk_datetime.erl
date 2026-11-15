@@ -56,7 +56,7 @@ adopted.
 -export(['<'/2, '>'/2, '=<'/2, '>='/2, '=:='/2, '/='/2, '-'/2, '<='/2, 'sameInstant'/2]).
 -export(['toUtc'/1, toOffset/2, format/2]).
 
-%% FFI shims for (Erlang beamtalk_datetime) dispatch — also the functions
+%% Entry points for (Erlang beamtalk_datetime) dispatch — also the functions
 %% `self delegate` actually calls for keyword selectors (first keyword,
 %% colon stripped; see docs/beamtalk-native-erlang.md "The naming rule").
 -export([subtract/2]).

@@ -273,7 +273,7 @@ cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
     ).
 
 %%% ============================================================================
-%%% FFI Shims
+%%% FFI entry points (explicit renames: `sendAfter/3`, `sendEvery/3`)
 %%%
 %%% The (Erlang beamtalk_timer) FFI and `self delegate` resolve through
 %%% beamtalk_erlang_proxy:native_call, which names the function with

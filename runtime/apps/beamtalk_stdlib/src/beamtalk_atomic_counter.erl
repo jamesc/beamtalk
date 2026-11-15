@@ -59,8 +59,6 @@ AtomicCounter objects are represented as tagged maps:
 %% because the unary `value` selector is intercepted by block-evaluation codegen (see ADR-0101).
 -export([readValue/1]).
 
-%% FFI shims for class methods
-
 -type t() :: #{'$beamtalk_class' := 'AtomicCounter', atom() => term()}.
 -export_type([t/0]).
 

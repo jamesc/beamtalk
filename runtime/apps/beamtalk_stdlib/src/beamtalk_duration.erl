@@ -50,7 +50,7 @@ Erlang BIFs without dispatching (ADR 0002).
 -export(['+'/2, '-'/2, '*'/2]).
 -export(['<'/2, '>'/2, '=<'/2, '>='/2, '=:='/2, '/='/2, '<='/2]).
 
-%% FFI shims for (Erlang beamtalk_duration) dispatch
+%% Entry points for (Erlang beamtalk_duration) dispatch
 
 -export([add/2, subtract/2, multiply/2]).
 -export([lt/2, gt/2, lte/2, gte/2]).

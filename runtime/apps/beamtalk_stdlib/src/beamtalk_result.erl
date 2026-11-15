@@ -66,9 +66,7 @@ ok-value and error-reason types are known:
     'errReason' := ErrType | nil
 }.
 -export_type([t/0, t/2]).
-%% FFI shims: beamtalk_erlang_proxy:selector_to_function/1 strips the colon
-%% suffix from keyword selectors (e.g. 'ok:' → ok). Each shim delegates to
-%% the canonical quoted function that is the real implementation.
+%% Inline-FFI entry point for `Result unwrap`'s error branch.
 -export([unwrapError/1]).
 
 -doc """

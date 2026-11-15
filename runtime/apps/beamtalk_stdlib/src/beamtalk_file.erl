@@ -86,7 +86,7 @@ enforced — Beamtalk is a trusted developer tool (ADR 0058, 0063).
 -export([file_error/5]).
 -endif.
 
-%% FFI shims for (Erlang beamtalk_file) dispatch
+%% Entry points for (Erlang beamtalk_file) dispatch
 -export([open/2, handleLines/1]).
 
 -include_lib("kernel/include/logger.hrl").

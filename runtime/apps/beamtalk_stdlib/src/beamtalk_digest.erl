@@ -27,7 +27,7 @@ digest — callers convert to hex/base64 via `beamtalk_binary`.
 %% Class methods — quoted colon-suffixed names are the real implementations.
 -export([sha256/1, sha512/1, md5/1, hmacSha256/2, hmacSha512/2]).
 
-%% FFI shims for `(Erlang beamtalk_digest) sel: args` dispatch —
+%% Entry points for `(Erlang beamtalk_digest) sel: args` dispatch —
 %% selector_to_function/1 strips the first keyword's colon (see
 %% docs/beamtalk-native-erlang.md "The naming rule").
 
