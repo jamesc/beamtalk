@@ -1168,37 +1168,31 @@ pub fn find_all_references_in_source(method_source: &str) -> Vec<ReferenceHit> {
 
     let mut hits: Vec<(String, u32)> = Vec::new();
 
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for param in &method.parameters {
-                if let Some(ann) = &param.type_annotation {
-                    collect_all_type_refs(ann, &wrapped, &mut hits);
-                }
-            }
-            if let Some(ret) = &method.return_type {
-                collect_all_type_refs(ret, &wrapped, &mut hits);
-            }
-            for stmt in &method.body {
-                collect_all_references(&stmt.expression, &wrapped, &mut hits);
+    // Hit order is part of the result: inline methods, then the module's own
+    // expressions, then standalone definitions.
+    let collect_method = |method: &MethodDefinition, hits: &mut Vec<(String, u32)>| {
+        for param in &method.parameters {
+            if let Some(ann) = &param.type_annotation {
+                collect_all_type_refs(ann, &wrapped, hits);
             }
         }
+        if let Some(ret) = &method.return_type {
+            collect_all_type_refs(ret, &wrapped, hits);
+        }
+        for stmt in &method.body {
+            collect_all_references(&stmt.expression, &wrapped, hits);
+        }
+    };
+    for class in &module.classes {
+        for method in class.methods.iter().chain(class.class_methods.iter()) {
+            collect_method(method, &mut hits);
+        }
     }
-
     for stmt in &module.expressions {
         collect_all_references(&stmt.expression, &wrapped, &mut hits);
     }
     for smd in &module.method_definitions {
-        for param in &smd.method.parameters {
-            if let Some(ann) = &param.type_annotation {
-                collect_all_type_refs(ann, &wrapped, &mut hits);
-            }
-        }
-        if let Some(ret) = &smd.method.return_type {
-            collect_all_type_refs(ret, &wrapped, &mut hits);
-        }
-        for stmt in &smd.method.body {
-            collect_all_references(&stmt.expression, &wrapped, &mut hits);
-        }
+        collect_method(&smd.method, &mut hits);
     }
 
     hits.into_iter()

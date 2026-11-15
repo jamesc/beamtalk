@@ -77,13 +77,8 @@ where
     F: FnMut(&[ExpressionStatement]),
 {
     f(&module.expressions);
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            f(&method.body);
-        }
-    }
-    for standalone in &module.method_definitions {
-        f(&standalone.method.body);
+    for method in module.all_methods() {
+        f(&method.body);
     }
 }
 

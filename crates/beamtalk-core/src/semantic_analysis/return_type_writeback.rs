@@ -27,7 +27,7 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::type_checker::{
     InferredType, MethodReturnKey, NativeTypeRegistry, infer_method_return_types,
 };
-use crate::source_analysis::Span;
+use crate::source_analysis::{MethodSide, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
 
@@ -114,45 +114,19 @@ pub fn apply_return_type_writeback_from_map(
     module: &mut Module,
     inferred: &HashMap<MethodReturnKey, InferredType>,
 ) {
-    for class in &mut module.classes {
-        for method in &mut class.methods {
-            if method.return_type.is_some() {
-                continue;
-            }
-            let key = (class.name.name.clone(), method.selector.name(), false);
-            if let Some(inferred_ty) = inferred.get(&key)
-                && let Some(annotation) = writeback_annotation(inferred_ty, method.span)
-            {
-                method.return_type = Some(annotation);
-            }
-        }
-
-        for method in &mut class.class_methods {
-            if method.return_type.is_some() {
-                continue;
-            }
-            let key = (class.name.name.clone(), method.selector.name(), true);
-            if let Some(inferred_ty) = inferred.get(&key)
-                && let Some(annotation) = writeback_annotation(inferred_ty, method.span)
-            {
-                method.return_type = Some(annotation);
-            }
-        }
-    }
-
-    for standalone in &mut module.method_definitions {
-        if standalone.method.return_type.is_some() {
+    for (class_name, side, method) in module.methods_with_owner_mut() {
+        if method.return_type.is_some() {
             continue;
         }
         let key = (
-            standalone.class_name.name.clone(),
-            standalone.method.selector.name(),
-            standalone.is_class_method,
+            EcoString::from(class_name),
+            method.selector.name(),
+            side == MethodSide::Class,
         );
         if let Some(inferred_ty) = inferred.get(&key)
-            && let Some(annotation) = writeback_annotation(inferred_ty, standalone.method.span)
+            && let Some(annotation) = writeback_annotation(inferred_ty, method.span)
         {
-            standalone.method.return_type = Some(annotation);
+            method.return_type = Some(annotation);
         }
     }
 }
@@ -181,24 +155,13 @@ pub fn clear_return_type_writeback_for_keys(
     module: &mut Module,
     written_by: &HashMap<MethodReturnKey, InferredType>,
 ) {
-    for class in &mut module.classes {
-        for method in &mut class.methods {
-            let key = (class.name.name.clone(), method.selector.name(), false);
-            clear_return_type_writeback_for_key(method, &key, written_by);
-        }
-        for method in &mut class.class_methods {
-            let key = (class.name.name.clone(), method.selector.name(), true);
-            clear_return_type_writeback_for_key(method, &key, written_by);
-        }
-    }
-
-    for standalone in &mut module.method_definitions {
+    for (class_name, side, method) in module.methods_with_owner_mut() {
         let key = (
-            standalone.class_name.name.clone(),
-            standalone.method.selector.name(),
-            standalone.is_class_method,
+            EcoString::from(class_name),
+            method.selector.name(),
+            side == MethodSide::Class,
         );
-        clear_return_type_writeback_for_key(&mut standalone.method, &key, written_by);
+        clear_return_type_writeback_for_key(method, &key, written_by);
     }
 }
 
