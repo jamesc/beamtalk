@@ -845,6 +845,7 @@ test_class_name_from_unregistered_pid() ->
         try
             beamtalk_class_dispatch:class_send(self(), spawn, [])
         catch
+            %% BT-4900: kept hand-written - raises inside a spawned process and reports the error by message
             error:#{error := Error} ->
                 Parent ! {error_received, Error}
         end
@@ -1588,16 +1589,14 @@ test_send_dead_pid_unknown() ->
 test_send_dead_pid_structured_error() ->
     DeadPid = spawn(fun() -> ok end),
     beamtalk_test_wait:dead(DeadPid),
-    try
-        beamtalk_class_dispatch:class_send(DeadPid, testSelector, []),
-        ?assert(false)
-    catch
-        error:#{error := #beamtalk_error{kind = Kind, hint = Hint}} ->
-            ?assertEqual(class_not_found, Kind),
-            ?assertMatch({beamtalk_string, _}, Hint),
-            %% Hint should mention pid not found or not running.
-            ?assert(binary:match(element(2, Hint), <<"not">>) =/= nomatch)
-    end.
+    %% Hint should mention pid not found or not running.
+    ?assertBtErrorHintContains(
+        class_not_found,
+        _,
+        _,
+        <<"not">>,
+        beamtalk_class_dispatch:class_send(DeadPid, testSelector, [])
+    ).
 
 %%% ============================================================================
 %%% 15. metaclass_send extended tests

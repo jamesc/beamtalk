@@ -123,12 +123,7 @@ start(Init) ->
     Pid.
 
 raised_error(Fun) ->
-    try
-        Fun(),
-        no_error
-    catch
-        error:#{error := #beamtalk_error{} = E} -> E
-    end.
+    beamtalk_test_assert:raised_error(Fun).
 
 dictionary_has_cell(Pid) ->
     {dictionary, Dict} = process_info(Pid, dictionary),

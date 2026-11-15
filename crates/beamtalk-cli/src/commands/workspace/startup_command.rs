@@ -15,7 +15,7 @@ use std::process::{Command, Stdio};
 
 use crate::commands::util::to_forward_slash;
 
-use beamtalk_cli::repl_startup::{BeamPaths, beam_pa_args};
+use beamtalk_cli::repl_startup::{BeamPaths, beam_pa_args, pa_args};
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -101,9 +101,7 @@ pub(super) fn build_detached_node_command(
     cmd.args(&initial_args).args(beam_pa_args(beam_paths));
 
     // Add extra code paths (e.g. package ebin from auto-compile)
-    for path in extra_code_paths {
-        cmd.arg("-pa").arg(path_to_erlang_arg(path));
-    }
+    cmd.args(pa_args(extra_code_paths));
 
     cmd.arg("-eval").arg(eval_cmd);
 

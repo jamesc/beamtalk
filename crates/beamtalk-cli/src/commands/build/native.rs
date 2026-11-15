@@ -220,8 +220,7 @@ pub(crate) fn validate_native_class_references(
         .map(|(class, module)| (module.as_str(), class.as_str()))
         .collect();
 
-    let mut erl_files: Vec<Utf8PathBuf> = Vec::new();
-    collect_erl_files(&native_dir, &mut erl_files)?;
+    let erl_files = beamtalk_cli::path_util::erl_files_in(&native_dir)?;
 
     for erl_file in &erl_files {
         let Ok(source) = fs::read_to_string(erl_file) else {
@@ -922,7 +921,7 @@ pub(crate) fn compile_native_erlang_with_deps(
     // Root package
     let native_dir = project_root.join("native");
     if native_dir.exists() && native_dir.is_dir() {
-        collect_erl_files(&native_dir, &mut erl_files)?;
+        erl_files.extend(beamtalk_cli::path_util::erl_files_in(&native_dir)?);
         let include_dir = native_dir.join("include");
         if include_dir.exists() && include_dir.is_dir() {
             include_dirs.push(include_dir);
@@ -933,7 +932,7 @@ pub(crate) fn compile_native_erlang_with_deps(
     for dep in resolved_bt_deps {
         let dep_native = dep.root.join("native");
         if dep_native.exists() && dep_native.is_dir() {
-            collect_erl_files(&dep_native, &mut erl_files)?;
+            erl_files.extend(beamtalk_cli::path_util::erl_files_in(&dep_native)?);
             let dep_include = dep_native.join("include");
             if dep_include.exists() && dep_include.is_dir() {
                 include_dirs.push(dep_include);
@@ -983,23 +982,6 @@ pub(crate) fn compile_native_erlang_with_deps(
     eprintln!("Compiled {count} native Erlang file{plural}");
 
     Ok(Some(ebin_dir))
-}
-
-/// Collect `.erl` files from a directory (non-recursive).
-pub(crate) fn collect_erl_files(dir: &Utf8Path, out: &mut Vec<Utf8PathBuf>) -> Result<()> {
-    let entries = fs::read_dir(dir)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read directory '{dir}'"))?;
-    for entry in entries {
-        let entry = entry.into_diagnostic()?;
-        let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
-            let utf8 = Utf8PathBuf::from_path_buf(path)
-                .map_err(|p| miette::miette!("Non-UTF-8 path: {}", p.display()))?;
-            out.push(utf8);
-        }
-    }
-    Ok(())
 }
 
 /// Collect ebin directories from rebar3's output tree.

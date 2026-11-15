@@ -203,15 +203,12 @@ fn build_beam_test_command(
     if let Ok(cwd) = std::fs::canonicalize(".") {
         cmd.current_dir(cwd);
     }
-    cmd.arg("-noshell")
-        .arg("-pa")
-        .arg(util::to_forward_slash(pipeline.build_dir.as_str()));
+    cmd.arg("-noshell");
 
-    // Add all package ebin directories to code path
-    for ebin_dir in &pipeline.package_ebin_dirs {
-        cmd.arg("-pa")
-            .arg(util::to_forward_slash(ebin_dir.as_str()));
-    }
+    // The build dir, then every package ebin directory, on the code path
+    cmd.args(beamtalk_cli::repl_startup::pa_args(
+        std::iter::once(&pipeline.build_dir).chain(&pipeline.package_ebin_dirs),
+    ));
 
     for arg in pa_args {
         cmd.arg(arg);
@@ -337,9 +334,12 @@ fn bunit_cover_fragments(
 fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     debug!("Running BUnit tests with jobs={}", pipeline.jobs);
 
-    let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()
+    let beamtalk_cli::repl_startup::DiscoveredRuntime {
+        runtime_dir,
+        paths: beam_paths,
+        ..
+    } = beamtalk_cli::repl_startup::discover_beam_paths()
         .wrap_err("Cannot find Erlang runtime directory")?;
-    let beam_paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
     let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
 
     let load_cmd = build_load_command(pipeline)?;
@@ -560,9 +560,10 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
         "Running native EUnit tests"
     );
 
-    let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()
+    let beamtalk_cli::repl_startup::DiscoveredRuntime {
+        paths: beam_paths, ..
+    } = beamtalk_cli::repl_startup::discover_beam_paths()
         .wrap_err("Cannot find Erlang runtime directory")?;
-    let beam_paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
     let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
 
     // ADR 0072: Start hex dep OTP applications before tests

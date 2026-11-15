@@ -16,13 +16,11 @@ file I/O, and parallel worker management.
 %%% compile_core_erlang/1 — pure function, no port or binary needed
 %%% ---------------------------------------------------------------
 
-%% Valid Core Erlang compiles successfully.
-compile_core_erlang_valid_test() ->
-    CoreErlang = valid_core_erlang_source(),
-    {ok, ModuleName, Binary} = beamtalk_build_worker:compile_core_erlang(CoreErlang),
-    ?assertEqual(test_build_worker_mod, ModuleName),
-    ?assert(is_binary(Binary)),
-    ?assert(byte_size(Binary) > 0).
+compile_core_erlang_test_() ->
+    beamtalk_test_core_erlang:compile_tests(
+        fun beamtalk_build_worker:compile_core_erlang/1,
+        #{valid => test_build_worker_mod, unbound_var => bt_bw_unbound_var, warn => bt_bw_warn_test}
+    ).
 
 %% Compiled module is loadable and executable.
 compile_core_erlang_loadable_test() ->
@@ -32,22 +30,6 @@ compile_core_erlang_loadable_test() ->
     Result = ModuleName:hello(),
     beamtalk_test_module:unload(ModuleName),
     ?assertEqual(world, Result).
-
-%% Invalid Core Erlang returns scan error.
-compile_core_erlang_scan_error_test() ->
-    Result = beamtalk_build_worker:compile_core_erlang(<<"not valid core erlang @#$">>),
-    ?assertMatch({error, {core_scan_error, _}}, Result).
-
-%% Syntactically scannable but unparseable Core Erlang returns parse error.
-compile_core_erlang_parse_error_test() ->
-    %% Scannable tokens but not valid Core Erlang structure
-    Result = beamtalk_build_worker:compile_core_erlang(<<"module 'x' []\n">>),
-    ?assertMatch({error, {core_parse_error, _}}, Result).
-
-%% Empty input returns error.
-compile_core_erlang_empty_test() ->
-    Result = beamtalk_build_worker:compile_core_erlang(<<>>),
-    ?assertMatch({error, _}, Result).
 
 %% Core Erlang that scans and parses but fails compile:forms (exports foo/0,
 %% defines bar/0) → {error, Errors, _Warnings} → covers compile_core_forms line 313.
@@ -61,24 +43,6 @@ compile_core_erlang_compile_error_test() ->
         >>,
     Result = beamtalk_build_worker:compile_core_erlang(CoreErlang),
     ?assertMatch({error, {core_compile_error, _}}, Result).
-
-%% Core Erlang that scans, parses, and passes compile:forms'
-%% earlier passes, but fails core_lint — 'State' is referenced in 'foo'/1
-%% without ever being bound. Demonstrates the failure is caught (core_lint
-%% already runs unconditionally on the from_core pipeline — see
-%% beamtalk_compile_diagnostics' moduledoc) *and* reported with the
-%% offending variable name, not a raw `~p` term dump.
-compile_core_erlang_unbound_var_test() ->
-    CoreErlang = unbound_var_core_erlang_source(),
-    Result = beamtalk_build_worker:compile_core_erlang(CoreErlang),
-    ?assertMatch({error, {core_compile_error, #{message := _, raw := _}}}, Result),
-    {error, {core_compile_error, #{message := Message}}} = Result,
-    ?assert(is_binary(Message)),
-    %% Readable prose, not the raw {unbound_var, 'State', {foo, 1}} term.
-    ?assertEqual(nomatch, binary:match(Message, <<"{unbound_var,">>)),
-    ?assertNotEqual(nomatch, binary:match(Message, <<"unbound variable">>)),
-    ?assertNotEqual(nomatch, binary:match(Message, <<"'State'">>)),
-    ?assertNotEqual(nomatch, binary:match(Message, <<"foo/1">>)).
 
 %% Review finding (#3997): beamtalk_build_worker/beamtalk_compiler_server/
 %% compile.escript all drop Warnings on the error path, reasoning (in each
@@ -122,23 +86,6 @@ error_and_would_be_warning_core_erlang_source() ->
         "        'ok'\n"
         "end\n"
     >>.
-
-%% Core Erlang that compiles *successfully* but produces a
-%% compile:forms warning (sys_core_fold's "ignored result of a call"
-%% warning, triggered by a `do' whose first expression's value is
-%% discarded). Demonstrates the batch build-worker backend's warning
-%% reaches stderr via `return_warnings', matching compile.escript's
-%% handling — `report_warnings' would print via `io:fwrite' to the
-%% compiling process's default group leader (stdout), not stderr, and
-%% silently drop it here.
-compile_core_erlang_warning_reaches_stderr_test() ->
-    CoreErlang = warning_core_erlang_source(),
-    Captured = beamtalk_stderr_capture:capture(fun() ->
-        {ok, ModuleName, Binary} = beamtalk_build_worker:compile_core_erlang(CoreErlang),
-        ?assertEqual(bt_bw_warn_test, ModuleName),
-        ?assert(is_binary(Binary))
-    end),
-    ?assertNotEqual(nomatch, binary:match(Captured, <<"Warning:">>)).
 
 %%% ---------------------------------------------------------------
 %%% compile_core_file/2 — reads file, compiles, writes .beam
@@ -332,43 +279,14 @@ remove_dir_recursive(Dir) ->
             ok
     end.
 
-%% Minimal valid Core Erlang module with a hello/0 function.
 valid_core_erlang_source() ->
-    <<
-        "module 'test_build_worker_mod' ['hello'/0]\n"
-        "  attributes []\n"
-        "  'hello'/0 = fun () -> 'world'\n"
-        "end\n"
-    >>.
+    beamtalk_test_core_erlang:valid_source(test_build_worker_mod).
 
-%% Core Erlang whose 'foo'/1 references an unbound variable
-%% ('State' is never a parameter or let-bound) — a genuine core_lint
-%% unbound_var failure, a real codegen failure mode
-%% (docs/development/debugging.md § Codegen Debugging).
 unbound_var_core_erlang_source() ->
-    <<
-        "module 'bt_bw_unbound_var' ['foo'/1]\n"
-        "  attributes []\n"
-        "  'foo'/1 = fun (X) ->\n"
-        "    let Y = call 'erlang':'+' (X, State)\n"
-        "    in Y\n"
-        "end\n"
-    >>.
+    beamtalk_test_core_erlang:unbound_var_source(bt_bw_unbound_var).
 
-%% 'foo'/1 discards the result of `erlang:+/2' via a `do' sequence
-%% — a genuine `sys_core_fold' "ignored result of a call" warning, while
-%% still compiling successfully (the module returns X unchanged).
 warning_core_erlang_source() ->
-    <<
-        "module 'bt_bw_warn_test' ['foo'/1]\n"
-        "  attributes []\n"
-        "  'foo'/1 =\n"
-        "    fun (X) ->\n"
-        "        do\n"
-        "            call 'erlang':'+' (1, 2)\n"
-        "        X\n"
-        "end\n"
-    >>.
+    beamtalk_test_core_erlang:warning_source(bt_bw_warn_test).
 
 %% Generate a Core Erlang module with a given name.
 core_erlang_module(Name) ->

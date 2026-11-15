@@ -2089,6 +2089,7 @@ ffi_boundary_preserves_wrapped_error_test() ->
                 ),
                 no_raise
             catch
+                %% BT-4900: kept hand-written - value-returning helper (hands {Kind, Selector} back)
                 error:#{error := #beamtalk_error{kind = K, selector = S}} -> {K, S}
             end,
         ?assertEqual({dispatch_error, 'exists:'}, Got)

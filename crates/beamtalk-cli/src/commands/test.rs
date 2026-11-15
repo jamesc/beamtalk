@@ -1895,15 +1895,8 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
             // Discover native EUnit test modules (_test or _tests suffix)
             // from source files to avoid picking up stale .beam artifacts.
             // Skip duplicates (BEAM code path is global, first module wins).
-            for erl_file in fs::read_dir(&native_test_dir)
-                .into_diagnostic()
-                .wrap_err_with(|| format!("Failed to read {native_test_dir}"))?
-            {
-                let entry = erl_file.into_diagnostic()?;
-                let path = entry.path();
-                if path.is_file()
-                    && path.extension().is_some_and(|ext| ext == "erl")
-                    && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+            for erl_file in beamtalk_cli::path_util::erl_files_in(&native_test_dir)? {
+                if let Some(stem) = erl_file.file_stem()
                     && (stem.ends_with("_test") || stem.ends_with("_tests"))
                 {
                     let module = stem.to_string();
@@ -1935,26 +1928,12 @@ fn compile_native_test_erlang(
 ) -> Result<()> {
     use std::fs;
 
-    let mut erl_files: Vec<Utf8PathBuf> = Vec::new();
-    let entries = fs::read_dir(native_test_dir)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read {native_test_dir}"))?;
-    for entry in entries {
-        let entry = entry.into_diagnostic()?;
-        let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
-            let utf8 = Utf8PathBuf::from_path_buf(path)
-                .map_err(|p| miette::miette!("Non-UTF-8 path: {}", p.display()))?;
-            erl_files.push(utf8);
-        }
-    }
+    // Sorted by the lister, for deterministic compilation order across platforms.
+    let erl_files = beamtalk_cli::path_util::erl_files_in(native_test_dir)?;
 
     if erl_files.is_empty() {
         return Ok(());
     }
-
-    // Sort for deterministic compilation order across platforms.
-    erl_files.sort();
 
     let test_layout = BuildLayout::new(pkg_root);
     let ebin_dir = test_layout.native_ebin_dir();
@@ -2867,14 +2846,22 @@ mod tests {
         );
         let (_temp, dir) = temp_utf8_dir();
         fs::create_dir_all(dir.join("fixtures")).unwrap();
-        fs::create_dir_all(dir.join("Fixtures")).unwrap();
+        // On a case-insensitive filesystem (Windows, default macOS) `Fixtures`
+        // is the directory just created, so the two spellings cannot coexist
+        // and only the skipped-`fixtures` half of the check applies.
+        let case_sensitive = !dir.join("Fixtures").exists();
         fs::write(dir.join("fixtures/a.bt"), "").unwrap();
-        fs::write(dir.join("Fixtures/b.bt"), "").unwrap();
+        if case_sensitive {
+            fs::create_dir_all(dir.join("Fixtures")).unwrap();
+            fs::write(dir.join("Fixtures/b.bt"), "").unwrap();
+        }
         let found = find_test_files(&dir).unwrap();
-        assert!(
-            found.iter().any(|f| f.ends_with("Fixtures/b.bt")),
-            "{found:?}"
-        );
+        if case_sensitive {
+            assert!(
+                found.iter().any(|f| f.ends_with("Fixtures/b.bt")),
+                "{found:?}"
+            );
+        }
         assert!(
             !found.iter().any(|f| f.ends_with("fixtures/a.bt")),
             "{found:?}"
