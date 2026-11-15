@@ -38,9 +38,6 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     resolve_class_object/1,
     registry_name/1,
     ensure_pg_started/0,
-    ensure_hierarchy_table/0,
-    ensure_module_table/0,
-    ensure_methods_table/0,
     ensure_class_warnings_table/0,
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
@@ -330,40 +327,6 @@ ensure_pg_started() ->
     end.
 
 -doc """
-Ensure the unified class metadata ETS table exists.
-
-Delegates to `beamtalk_class_metadata:new/0`. The hierarchy, module, and
-method-selector columns now share one row, so all three `ensure_*` functions
-create the same table; the separate names are kept for the existing bootstrap
-and test call sites.
-""".
--spec ensure_hierarchy_table() -> ok.
-ensure_hierarchy_table() ->
-    beamtalk_class_metadata:new().
-
--doc """
-Ensure the unified class metadata ETS table exists.
-
-Alias for `ensure_hierarchy_table/0`; see its docs. Called from
-`beamtalk_object_class:init/1` and `beamtalk_runtime_app:start/2`.
-""".
--spec ensure_module_table() -> ok.
-ensure_module_table() ->
-    beamtalk_class_metadata:new().
-
--doc """
-Ensure the unified class metadata ETS table exists.
-
-Alias for `ensure_hierarchy_table/0`. Created (and heir-set) so the
-chain walker in `beamtalk_class_dispatch:find_class_method_in_ancestors/3`
-can resolve inherited class-method dispatch without any gen_server
-round-trips.
-""".
--spec ensure_methods_table() -> ok.
-ensure_methods_table() ->
-    beamtalk_class_metadata:new().
-
--doc """
 Ensure the class collision warnings ETS table exists.
 Stores collision warnings keyed by {Package, ClassName}.
 Uses bag type so multiple warnings per class are all captured.
@@ -374,27 +337,7 @@ Uses {heir, ...} to prevent table loss when owner dies.
 """.
 -spec ensure_class_warnings_table() -> ok.
 ensure_class_warnings_table() ->
-    case ets:info(beamtalk_class_warnings) of
-        undefined ->
-            try
-                ets:new(
-                    beamtalk_class_warnings,
-                    [
-                        bag,
-                        public,
-                        named_table,
-                        {write_concurrency, true}
-                        | beamtalk_ets_heir:heir_option()
-                    ]
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _ ->
-            beamtalk_ets_heir:maybe_set_heir(beamtalk_class_warnings),
-            ok
-    end.
+    beamtalk_ets_heir:ensure_shared_table(beamtalk_class_warnings, [bag, public, named_table, {write_concurrency, true}]).
 
 -doc """
 Record a class collision warning keyed by {Package, ClassName}.
@@ -673,27 +616,7 @@ Uses {heir, ...} to prevent table loss when owner dies.
 """.
 -spec ensure_pending_errors_table() -> ok.
 ensure_pending_errors_table() ->
-    case ets:info(beamtalk_pending_load_errors) of
-        undefined ->
-            try
-                ets:new(
-                    beamtalk_pending_load_errors,
-                    [
-                        set,
-                        public,
-                        named_table,
-                        {write_concurrency, true}
-                        | beamtalk_ets_heir:heir_option()
-                    ]
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _ ->
-            beamtalk_ets_heir:maybe_set_heir(beamtalk_pending_load_errors),
-            ok
-    end.
+    beamtalk_ets_heir:ensure_shared_table(beamtalk_pending_load_errors, [set, public, named_table, {write_concurrency, true}]).
 
 %%====================================================================
 %% Hierarchy Queries
@@ -869,27 +792,7 @@ Uses {heir, ...} to prevent table loss when owner dies.
 """.
 -spec ensure_pid_table() -> ok.
 ensure_pid_table() ->
-    case ets:info(beamtalk_class_pids) of
-        undefined ->
-            try
-                ets:new(
-                    beamtalk_class_pids,
-                    [
-                        set,
-                        public,
-                        named_table,
-                        {read_concurrency, true}
-                        | beamtalk_ets_heir:heir_option()
-                    ]
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _ ->
-            beamtalk_ets_heir:maybe_set_heir(beamtalk_class_pids),
-            ok
-    end.
+    beamtalk_ets_heir:ensure_shared_table(beamtalk_class_pids, [set, public, named_table, {read_concurrency, true}]).
 
 -doc """
 Record a class pid→classname mapping.
@@ -1089,27 +992,7 @@ Read-concurrency + `{heir, ...}` mirrors `ensure_pid_table/0`.
 """.
 -spec ensure_class_state_table() -> ok.
 ensure_class_state_table() ->
-    case ets:info(beamtalk_class_state_snapshot) of
-        undefined ->
-            try
-                ets:new(
-                    beamtalk_class_state_snapshot,
-                    [
-                        set,
-                        public,
-                        named_table,
-                        {read_concurrency, true}
-                        | beamtalk_ets_heir:heir_option()
-                    ]
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _ ->
-            beamtalk_ets_heir:maybe_set_heir(beamtalk_class_state_snapshot),
-            ok
-    end.
+    beamtalk_ets_heir:ensure_shared_table(beamtalk_class_state_snapshot, [set, public, named_table, {read_concurrency, true}]).
 
 -doc """
 Record the current `classState:` map for a class process.
@@ -1215,28 +1098,7 @@ overwrites its own row with the new pid.
 """.
 -spec ensure_loaded_classes_table() -> ok.
 ensure_loaded_classes_table() ->
-    case ets:info(beamtalk_loaded_classes) of
-        undefined ->
-            try
-                ets:new(
-                    beamtalk_loaded_classes,
-                    [
-                        set,
-                        public,
-                        named_table,
-                        {read_concurrency, true},
-                        {write_concurrency, true}
-                        | beamtalk_ets_heir:heir_option()
-                    ]
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _ ->
-            beamtalk_ets_heir:maybe_set_heir(beamtalk_loaded_classes),
-            ok
-    end.
+    beamtalk_ets_heir:ensure_shared_table(beamtalk_loaded_classes, [set, public, named_table, {read_concurrency, true}, {write_concurrency, true}]).
 
 -doc """
 Record a class as loaded in the fast loaded-class name index.
@@ -1358,28 +1220,7 @@ heir-protected so it survives the owner's death.
 """.
 -spec ensure_backing_module_index_table() -> ok.
 ensure_backing_module_index_table() ->
-    case ets:info(beamtalk_backing_module_index) of
-        undefined ->
-            try
-                ets:new(
-                    beamtalk_backing_module_index,
-                    [
-                        bag,
-                        public,
-                        named_table,
-                        {read_concurrency, true},
-                        {write_concurrency, true}
-                        | beamtalk_ets_heir:heir_option()
-                    ]
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _ ->
-            beamtalk_ets_heir:maybe_set_heir(beamtalk_backing_module_index),
-            ok
-    end.
+    beamtalk_ets_heir:ensure_shared_table(beamtalk_backing_module_index, [bag, public, named_table, {read_concurrency, true}, {write_concurrency, true}]).
 
 -doc """
 Record (or clear) a class's row in the backing-module reverse index.
@@ -1710,27 +1551,7 @@ tags without scanning every `persistent_term`. Public, heir-protected like
 """.
 -spec ensure_static_call_keys_table() -> ok.
 ensure_static_call_keys_table() ->
-    case ets:info(?STATIC_CALL_KEYS) of
-        undefined ->
-            try
-                ets:new(
-                    ?STATIC_CALL_KEYS,
-                    [
-                        set,
-                        public,
-                        named_table,
-                        {write_concurrency, true}
-                        | beamtalk_ets_heir:heir_option()
-                    ]
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _ ->
-            beamtalk_ets_heir:maybe_set_heir(?STATIC_CALL_KEYS),
-            ok
-    end.
+    beamtalk_ets_heir:ensure_shared_table(?STATIC_CALL_KEYS, [set, public, named_table, {write_concurrency, true}]).
 
 -doc """
 Record that the class tagged `Tag` may have a per-class static call key.
