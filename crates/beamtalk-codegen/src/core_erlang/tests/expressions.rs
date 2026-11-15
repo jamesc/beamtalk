@@ -163,11 +163,15 @@ fn test_arith_bare_bif_for_self_in_numeric_class() {
             .generate_binary_op("*", &left, &right)
             .unwrap()
             .to_pretty_string();
-        assert!(
-            output.contains("call 'erlang':'*'(")
-                && !output.contains("is_number")
-                && !output.contains("try "),
-            "`self * other` in {class} with other :: Number must be a bare BIF; got: {output}"
+        assert_has(
+            &format!("`self * other` in {class} with other :: Number must be a bare BIF"),
+            &output,
+            &["call 'erlang':'*'("],
+        );
+        assert_lacks(
+            &format!("`self * other` in {class} with other :: Number must be a bare BIF"),
+            &output,
+            &["is_number", "try "],
         );
     }
 }
@@ -225,9 +229,15 @@ fn test_arith_bare_bif_for_numeric_param() {
             .generate_binary_op("-", &left, &right)
             .unwrap()
             .to_pretty_string();
-        assert!(
-            output.contains("call 'erlang':'-'(") && !output.contains("is_number"),
-            "`other - 1` with other :: {ty} must be a bare BIF; got: {output}"
+        assert_has(
+            &format!("`other - 1` with other :: {ty} must be a bare BIF"),
+            &output,
+            &["call 'erlang':'-'("],
+        );
+        assert_lacks(
+            &format!("`other - 1` with other :: {ty} must be a bare BIF"),
+            &output,
+            &["is_number"],
         );
     }
 }
@@ -443,10 +453,13 @@ fn test_number_coercion_selector_per_operator() {
             .unwrap()
             .to_pretty_string();
         let expected_selector_atom = format!("'{selector}'");
-        assert!(
-            output.contains("call 'beamtalk_message_dispatch':'send_number_coercion'(")
-                && output.contains(&expected_selector_atom),
-            "operator {op} must dispatch to {selector}; got: {output}"
+        assert_has(
+            &format!("operator {op} must dispatch to {selector}"),
+            &output,
+            &[
+                "call 'beamtalk_message_dispatch':'send_number_coercion'(",
+                expected_selector_atom.as_str(),
+            ],
         );
     }
 }
@@ -521,10 +534,11 @@ fn test_number_coercion_untyped_self_field_right_operand_is_guarded() {
         .generate_binary_op("+", &left, &[right])
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("try ") && output.contains("send_number_coercion"),
+    assert_has(
         "an untyped self.field right operand must take \
-         the coercion try/catch — got: {output}"
+         the coercion try/catch —",
+        &output,
+        &["try ", "send_number_coercion"],
     );
 }
 
@@ -563,11 +577,15 @@ fn test_number_coercion_numeric_typed_self_fields_both_sides_stay_bare() {
         .generate_binary_op("+", &left, &[right])
         .unwrap()
         .to_pretty_string();
-    assert!(
-        !output.contains("try ")
-            && !output.contains("is_number")
-            && output.contains("call 'erlang':'+'("),
-        "numeric-typed fields must stay bare — got: {output}"
+    assert_has(
+        "numeric-typed fields must stay bare —",
+        &output,
+        &["call 'erlang':'+'("],
+    );
+    assert_lacks(
+        "numeric-typed fields must stay bare —",
+        &output,
+        &["try ", "is_number"],
     );
 }
 
@@ -696,9 +714,10 @@ fn test_bt3925_untyped_actor_counter_is_guarded_and_typed_counter_is_bare() {
          below: n => self.count < n\n",
     ] {
         let untyped = crate::core_erlang::tests::codegen(src);
-        assert!(
-            untyped.contains("call 'erlang':'is_number'(") && untyped.contains("'is_binary'("),
-            "an untyped counter must be guarded:\n{untyped}"
+        assert_has(
+            "an untyped counter must be guarded",
+            &untyped,
+            &["call 'erlang':'is_number'(", "'is_binary'("],
         );
     }
     let typed = crate::core_erlang::tests::codegen(
@@ -708,9 +727,15 @@ fn test_bt3925_untyped_actor_counter_is_guarded_and_typed_counter_is_bare() {
     );
     // Arithmetic on the `:: Integer` counter stays bare; its comparison keeps
     // a single `is_number` kind test (BT-4823), never the general guard.
-    assert!(
-        typed.contains("is_number") && !typed.contains("'is_binary'("),
-        "an `:: Integer` counter's arithmetic stays bare and its comparison tests only `is_number`:\n{typed}"
+    assert_has(
+        "an `:: Integer` counter's arithmetic stays bare and its comparison tests only `is_number`",
+        &typed,
+        &["is_number"],
+    );
+    assert_lacks(
+        "an `:: Integer` counter's arithmetic stays bare and its comparison tests only `is_number`",
+        &typed,
+        &["'is_binary'("],
     );
 }
 
@@ -833,9 +858,15 @@ fn test_comparison_bare_bif_for_literal_receivers() {
             .generate_binary_op("<", &left, &right)
             .unwrap()
             .to_pretty_string();
-        assert!(
-            output.contains(&format!("call 'erlang':'{erl}'(")) && !output.contains("is_binary"),
-            "literal receiver must skip the comparison guard; got: {output}"
+        assert_has(
+            "literal receiver must skip the comparison guard",
+            &output,
+            &[format!("call 'erlang':'{erl}'(").as_str()],
+        );
+        assert_lacks(
+            "literal receiver must skip the comparison guard",
+            &output,
+            &["is_binary"],
         );
     }
 }
@@ -868,9 +899,15 @@ fn test_comparison_bare_bif_for_self_in_comparable_class() {
             .generate_binary_op(">", &left, &right)
             .unwrap()
             .to_pretty_string();
-        assert!(
-            output.contains("call 'erlang':'>'(") && !output.contains("is_binary"),
-            "`self > x` in {class} must be a bare BIF; got: {output}"
+        assert_has(
+            &format!("`self > x` in {class} must be a bare BIF"),
+            &output,
+            &["call 'erlang':'>'("],
+        );
+        assert_lacks(
+            &format!("`self > x` in {class} must be a bare BIF"),
+            &output,
+            &["is_binary"],
         );
     }
 }
@@ -898,13 +935,19 @@ fn test_comparison_declared_param_gets_a_kind_test() {
             .generate_binary_op(">=", &left, &right)
             .unwrap()
             .to_pretty_string();
-        assert!(
-            output.contains(&format!("case call 'erlang':{test}"))
-                && output.contains("call 'erlang':'>='(")
-                && output.contains("call 'beamtalk_message_dispatch':'send'(")
-                && !output.contains(absent)
-                && !output.contains("'or'("),
-            "`other >= 1` with other :: {ty} must test only its declared kind; got: {output}"
+        assert_has(
+            &format!("`other >= 1` with other :: {ty} must test only its declared kind"),
+            &output,
+            &[
+                format!("case call 'erlang':{test}").as_str(),
+                "call 'erlang':'>='(",
+                "call 'beamtalk_message_dispatch':'send'(",
+            ],
+        );
+        assert_lacks(
+            &format!("`other >= 1` with other :: {ty} must test only its declared kind"),
+            &output,
+            &[absent, "'or'("],
         );
     }
 }
@@ -959,12 +1002,15 @@ fn test_comparison_guard_for_unknown_receiver() {
     // BT-3924: primitive-comparable test → bare BIF, everything else → send.
     // The test is inline `erlang` type-test BIFs, not a runtime-module call.
     let flat: String = output.split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(
-        flat.contains(
-            "case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft@1), \
-             call 'erlang':'is_binary'(_BinLeft@1)) of"
+    assert_has(
+        &format!(
+            "unknown comparison receiver must emit the primitive-comparable guard; got: {output}"
         ),
-        "unknown comparison receiver must emit the primitive-comparable guard; got: {output}"
+        &flat,
+        &[
+            "case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft@1), \
+             call 'erlang':'is_binary'(_BinLeft@1)) of",
+        ],
     );
     assert_lacks(
         "comparison guard must not call into the runtime",
@@ -1075,9 +1121,15 @@ fn test_comparison_numeric_typed_field_stays_bare() {
             .generate_binary_op("<", &left, &right)
             .unwrap()
             .to_pretty_string();
-        assert!(
-            output.contains("call 'erlang':'<'(") && !output.contains("is_binary"),
-            "field {field_name} ({fact:?}) comparison must stay bare; got: {output}"
+        assert_has(
+            &format!("field {field_name} ({fact:?}) comparison must stay bare"),
+            &output,
+            &["call 'erlang':'<'("],
+        );
+        assert_lacks(
+            &format!("field {field_name} ({fact:?}) comparison must stay bare"),
+            &output,
+            &["is_binary"],
         );
     }
 }
@@ -1157,9 +1209,15 @@ fn test_arith_numeric_typed_field_stays_bare() {
             .generate_binary_op("+", &left, &right)
             .unwrap()
             .to_pretty_string();
-        assert!(
-            output.contains("call 'erlang':'+'(") && !output.contains("is_number"),
-            "field {field_name} ({fact:?}) arithmetic must stay bare; got: {output}"
+        assert_has(
+            &format!("field {field_name} ({fact:?}) arithmetic must stay bare"),
+            &output,
+            &["call 'erlang':'+'("],
+        );
+        assert_lacks(
+            &format!("field {field_name} ({fact:?}) arithmetic must stay bare"),
+            &output,
+            &["is_number"],
         );
     }
 }
@@ -1509,9 +1567,10 @@ fn test_temp_vars_dont_shadow_user_identifiers() {
     let output = doc.to_pretty_string();
 
     // The identifier should resolve to the user's variable, not an internal temp
-    assert!(
-        output.contains(&user_loop_var),
-        "User identifier 'Loop' should resolve to user's binding {user_loop_var}, got: {output}"
+    assert_has(
+        &format!("User identifier 'Loop' should resolve to user's binding {user_loop_var}"),
+        &output,
+        &[user_loop_var.as_str()],
     );
 
     generator.pop_scope();
@@ -1545,20 +1604,15 @@ fn test_generate_map_literal_with_atoms() {
     let doc = generator.generate_map_literal(&pairs).unwrap();
     let output = doc.to_pretty_string();
     // Symbols become atoms in Core Erlang
-    assert!(
-        output.contains("'name'"),
-        "Output should contain 'name': {output}",
-    );
+    assert_has("Output should contain 'name'", &output, &["'name'"]);
     // Strings are represented as binaries with character codes
-    assert!(
-        output.contains("#<65>"),
-        "Output should contain character code for 'A': {output}",
+    assert_has(
+        "Output should contain character code for 'A'",
+        &output,
+        &["#<65>"],
     );
-    assert!(
-        output.contains("'age'"),
-        "Output should contain 'age': {output}",
-    );
-    assert!(output.contains("30"), "Output should contain 30: {output}");
+    assert_has("Output should contain 'age'", &output, &["'age'"]);
+    assert_has("Output should contain 30", &output, &["30"]);
 }
 
 #[test]
@@ -1586,9 +1640,10 @@ fn test_generate_tuple_literal_compiles() {
         &code,
         &["{'active', 'false'}"],
     );
-    assert!(
-        !code.contains("withAll:"),
-        "tuple literal must not desugar to a withAll: send:\n{code}"
+    assert_lacks(
+        "tuple literal must not desugar to a withAll: send",
+        &code,
+        &["withAll:"],
     );
     assert_compiles_through_erlc("test", &code);
 }
@@ -1605,10 +1660,7 @@ fn test_generate_map_literal_compiles() {
     let code = codegen("Object subclass: T\n  m => #{#key => \"value\"}");
 
     // Verify the generated Core Erlang contains the map literal syntax
-    assert!(
-        code.contains("~{"),
-        "Should contain Core Erlang map syntax ~{{"
-    );
+    assert_has("Should contain Core Erlang map syntax ~{", &code, &["~{"]);
     // Symbols become atoms in Core Erlang
     assert!(code.contains("'key'"));
     // Strings are represented as binaries with character codes
@@ -1852,10 +1904,7 @@ fn test_binary_pattern_utf16_utf32_segments() {
             BinarySegmentType::Utf16 => "'utf16'",
             _ => "'utf32'",
         };
-        assert!(
-            output.contains(expected),
-            "Expected {expected} type, got: {output}"
-        );
+        assert_has(&format!("Expected {expected} type"), &output, &[expected]);
         assert_has(
             "UTF segment should have 'undefined' size and unit",
             &output,
@@ -1995,9 +2044,10 @@ fn test_binary_pattern_string_literal_value_folds() {
         };
         let doc = generator.generate_binary_segment(&seg).unwrap();
         let output = doc.to_pretty_string();
-        assert!(
-            output.contains(&format!("#<{folded}>({bits},1,'integer'")),
-            "Expected folded string value for {text:?}, got: {output}"
+        assert_has(
+            &format!("Expected folded string value for {text:?}"),
+            &output,
+            &[format!("#<{folded}>({bits},1,'integer'").as_str()],
         );
     }
 }
@@ -2670,10 +2720,7 @@ fn test_binary_pattern_unbound_size_is_clean_error() {
         .generate_pattern(&pattern)
         .expect_err("unbound size variable must fail codegen");
     let message = err.to_string();
-    assert!(
-        message.contains('n'),
-        "Error should name the unbound variable, got: {message}"
-    );
+    assert_has("Error should name the unbound variable", &message, &["n"]);
 }
 
 #[test]

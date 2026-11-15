@@ -462,9 +462,10 @@ fn test_generate_spawn_function() {
     assert!(code.contains("<{'ok', Pid}> when 'true' ->"));
 
     // Check that it returns a #beamtalk_object{} record (class='Counter', class_mod='counter', pid=Pid)
-    assert!(
-        code.contains("{'beamtalk_object', 'Counter', 'counter', Pid}"),
-        "spawn functions should return #beamtalk_object{{}} record. Got: {code}"
+    assert_has(
+        "spawn functions should return #beamtalk_object{} record",
+        &code,
+        &["{'beamtalk_object', 'Counter', 'counter', Pid}"],
     );
 
     // Check that it handles errors
@@ -565,43 +566,47 @@ fn test_bt897_subdirectory_module_name_consistency() {
     let simplified_name = "bt@event_bus";
 
     // Module declaration must use the full name
-    assert!(
-        code.contains(&format!("module '{full_name}'")),
-        "Module declaration should use full path-qualified name. Got:\n{code}"
+    assert_has(
+        "Module declaration should use full path-qualified name",
+        &code,
+        &[format!("module '{full_name}'").as_str()],
     );
 
     // safe_spawn must use the full name
-    assert!(
-        code.contains(&format!(
-            "call 'beamtalk_actor':'safe_spawn'('{full_name}', ~{{}}~)"
-        )),
-        "safe_spawn in spawn/0 should use full module name, not '{simplified_name}'. Got:\n{code}"
+    assert_has(
+        &format!("safe_spawn in spawn/0 should use full module name, not '{simplified_name}'"),
+        &code,
+        &[format!("call 'beamtalk_actor':'safe_spawn'('{full_name}', ~{{}}~)").as_str()],
     );
 
     // safe_spawn in spawn/1 must also use full name
-    assert!(
-        code.contains(&format!(
-            "call 'beamtalk_actor':'safe_spawn'('{full_name}', InitArgs)"
-        )),
-        "safe_spawn in spawn/1 should use full module name. Got:\n{code}"
+    assert_has(
+        "safe_spawn in spawn/1 should use full module name",
+        &code,
+        &[format!("call 'beamtalk_actor':'safe_spawn'('{full_name}', InitArgs)").as_str()],
     );
 
     // init/1 method_table call must use the full name
-    assert!(
-        code.contains(&format!("call '{full_name}':'method_table'()")),
-        "method_table call in init should use full module name. Got:\n{code}"
+    assert_has(
+        "method_table call in init should use full module name",
+        &code,
+        &[format!("call '{full_name}':'method_table'()").as_str()],
     );
 
     // register_class moduleName must use the full name
-    assert!(
-        code.contains(&format!("'moduleName' => '{full_name}'")),
-        "register_class moduleName should use full module name. Got:\n{code}"
+    assert_has(
+        "register_class moduleName should use full module name",
+        &code,
+        &[format!("'moduleName' => '{full_name}'").as_str()],
     );
 
     // The simplified name should NOT appear anywhere
-    assert!(
-        !code.contains(&format!("'{simplified_name}'")),
-        "The simplified module name '{simplified_name}' should NOT appear in generated code. Got:\n{code}"
+    assert_lacks(
+        &format!(
+            "The simplified module name '{simplified_name}' should NOT appear in generated code"
+        ),
+        &code,
+        &[format!("'{simplified_name}'").as_str()],
     );
 }
 
@@ -903,15 +908,17 @@ fn test_value_keyword_unknown_receiver_emits_is_function_guard() {
         &output,
         &["apply"],
     );
-    assert!(
-        output.contains("beamtalk_message_dispatch':'send'"),
+    assert_has(
         "Should emit beamtalk_message_dispatch:send fallback (BT-3377) so a \
-         non-function receiver's reply is unwrapped correctly. Got: {output}"
+         non-function receiver's reply is unwrapped correctly",
+        &output,
+        &["beamtalk_message_dispatch':'send'"],
     );
-    assert!(
-        !output.contains("beamtalk_primitive':'send'"),
+    assert_lacks(
         "Must not fall back to beamtalk_primitive:send (BT-3377): it does not \
-         unwrap an actor's {{ok, Result}} gen_server reply. Got: {output}"
+         unwrap an actor's {ok, Result} gen_server reply",
+        &output,
+        &["beamtalk_primitive':'send'"],
     );
     assert_has(
         "Should pass 'value:' selector to send",
@@ -1594,17 +1601,20 @@ fn test_bt4075_error_on_untyped_receiver_guards_class_objects() {
     // anything else raises in place.
     let code = codegen("Object subclass: Probe\n  raise: msg via: obj => obj error: msg\n");
     let body = method_body(&code, "raise:via:");
-    assert!(
-        body.contains("'beamtalk_class_dispatch':'class_object_understands'("),
-        "untyped `error:` receiver must be guarded by class_object_understands:\n{body}"
+    assert_has(
+        "untyped `error:` receiver must be guarded by class_object_understands",
+        &body,
+        &["'beamtalk_class_dispatch':'class_object_understands'("],
     );
-    assert!(
-        body.contains("'beamtalk_message_dispatch':'send'(") && body.contains("'error:', ["),
-        "class-object branch must send `error:`:\n{body}"
+    assert_has(
+        "class-object branch must send `error:`",
+        &body,
+        &["'beamtalk_message_dispatch':'send'(", "'error:', ["],
     );
-    assert!(
-        body.contains("'user_error'"),
-        "instance branch must keep the user_error raise:\n{body}"
+    assert_has(
+        "instance branch must keep the user_error raise",
+        &body,
+        &["'user_error'"],
     );
 }
 
@@ -1612,13 +1622,15 @@ fn test_bt4075_error_on_untyped_receiver_guards_class_objects() {
 fn test_bt4075_self_error_in_instance_method_stays_unguarded_intrinsic() {
     let code = codegen("Object subclass: Probe\n  boom => self error: \"x\"\n");
     let body = method_body(&code, "boom");
-    assert!(
-        body.contains("'user_error'"),
-        "`self error:` in an instance method must raise user_error:\n{body}"
+    assert_has(
+        "`self error:` in an instance method must raise user_error",
+        &body,
+        &["'user_error'"],
     );
-    assert!(
-        !body.contains("class_object_understands"),
-        "`self` in an instance method is never a class object:\n{body}"
+    assert_lacks(
+        "`self` in an instance method is never a class object",
+        &body,
+        &["class_object_understands"],
     );
 }
 
@@ -1628,17 +1640,20 @@ fn test_bt4075_self_error_in_class_method_guards_class_side_send() {
     // class-side self-send, otherwise `Object>>error:` raises as before.
     let code = codegen("Object subclass: Probe\n  class boom => self error: \"x\"\n");
     let body = method_body(&code, "class_boom");
-    assert!(
-        body.contains("'beamtalk_class_dispatch':'class_object_understands'("),
-        "class-method `self error:` must be guarded:\n{body}"
+    assert_has(
+        "class-method `self error:` must be guarded",
+        &body,
+        &["'beamtalk_class_dispatch':'class_object_understands'("],
     );
-    assert!(
-        body.contains("'beamtalk_class_dispatch':'class_self_send'("),
-        "class-method `self error:` must self-send, not go through the class process:\n{body}"
+    assert_has(
+        "class-method `self error:` must self-send, not go through the class process",
+        &body,
+        &["'beamtalk_class_dispatch':'class_self_send'("],
     );
-    assert!(
-        body.contains("'user_error'"),
-        "class-method `self error:` without a class-side `error:` must still raise:\n{body}"
+    assert_has(
+        "class-method `self error:` without a class-side `error:` must still raise",
+        &body,
+        &["'user_error'"],
     );
 }
 
@@ -1655,21 +1670,24 @@ fn test_bt4075_actor_error_on_untyped_receiver_replies_with_its_answer() {
         .lines()
         .find(|l| l.contains("'class_object_understands'("))
         .unwrap_or_else(|| panic!("no guarded error: send:\n{code}"));
-    assert!(
-        guarded.contains("{'reply', _Result, "),
-        "`obj error:` as the last statement must reply with its answer:\n{guarded}"
+    assert_has(
+        "`obj error:` as the last statement must reply with its answer",
+        &guarded,
+        &["{'reply', _Result, "],
     );
-    assert!(
-        guarded.contains("'beamtalk_actor_state':'store'("),
-        "`obj error:` may run user code, so it must be bracketed:\n{guarded}"
+    assert_has(
+        "`obj error:` may run user code, so it must be bracketed",
+        &guarded,
+        &["'beamtalk_actor_state':'store'("],
     );
     let raise = code
         .lines()
         .find(|l| l.contains("'user_error'") && !l.contains("class_object_understands"))
         .unwrap_or_else(|| panic!("no bare `self error:` raise:\n{code}"));
-    assert!(
-        !raise.contains("'reply'"),
-        "`self error:` never returns, so it gets no reply tuple:\n{raise}"
+    assert_lacks(
+        "`self error:` never returns, so it gets no reply tuple",
+        &raise,
+        &["'reply'"],
     );
 }
 
@@ -1682,9 +1700,10 @@ fn test_bt4075_actor_logger_error_last_statement_replies() {
         .lines()
         .find(|l| l.contains("'beamtalk_logging_config':'log'"))
         .unwrap_or_else(|| panic!("no Logger log call:\n{code}"));
-    assert!(
-        line.contains("{'reply', _Result, "),
-        "`Logger error:` as the last statement must reply:\n{line}"
+    assert_has(
+        "`Logger error:` as the last statement must reply",
+        &line,
+        &["{'reply', _Result, "],
     );
 }
 
@@ -1818,10 +1837,13 @@ fn test_erlang_interop_direct_call_coercion_mode() {
             .unwrap();
         let output = doc.to_pretty_string();
 
-        assert!(
-            output.contains(&format!("'direct_call'('{module}', 'reverse', ["))
-                && output.contains(&format!("], '{mode}')")),
-            "Module {module} should emit mode '{mode}'. Got: {output}"
+        assert_has(
+            &format!("Module {module} should emit mode '{mode}'"),
+            &output,
+            &[
+                format!("'direct_call'('{module}', 'reverse', [").as_str(),
+                format!("], '{mode}')").as_str(),
+            ],
         );
     }
 }
@@ -2040,10 +2062,10 @@ Actor subclass: Processor
         generated.warnings
     );
     // The block should be passed directly to lists:map (Tier 1 path)
-    assert!(
-        generated.code.contains("'lists':'map'"),
-        "collect: should use lists:map. Got:\n{}",
-        generated.code
+    assert_has(
+        "collect: should use lists:map",
+        &generated.code,
+        &["'lists':'map'"],
     );
     // No BtBlock wrapper for pure blocks
     assert_lacks(
@@ -2377,11 +2399,8 @@ sealed Object subclass: Foo
     let result = generate_module_with_warnings(&module, options);
     let err = result.expect_err("unmapped quoted @primitive must fail the stdlib build");
     let msg = err.to_string();
-    assert!(
-        msg.contains("doIt"),
-        "error should name the selector: {msg}"
-    );
-    assert!(msg.contains("Foo"), "error should name the class: {msg}");
+    assert_has("error should name the selector", &msg, &["doIt"]);
+    assert_has("error should name the class", &msg, &["Foo"]);
 }
 
 #[test]
@@ -2948,23 +2967,26 @@ fn test_self_call_error_branch_handles_both_error_shapes() {
 
     // Clause 1: destructured triple routed through reraise/4 (with a
     // selector/class breadcrumb).
-    assert!(
-        code.contains("call 'beamtalk_exception_handler':'reraise'("),
+    assert_has(
         "Self-dispatch error branch must destructure the caught-exception \
-         triple via beamtalk_exception_handler:reraise/4. Got:\n{code}"
+         triple via beamtalk_exception_handler:reraise/4",
+        &code,
+        &["call 'beamtalk_exception_handler':'reraise'("],
     );
     // Clause 2: fallback for a plain #beamtalk_error{} returned (not caught).
-    assert!(
-        code.contains("call 'beamtalk_error':'raise'("),
+    assert_has(
         "Self-dispatch error branch must keep the plain-error fallback clause \
          (e.g. DNU returns from dispatch/4 that never reach safe_dispatch's \
-         try/catch). Got:\n{code}"
+         try/catch)",
+        &code,
+        &["call 'beamtalk_error':'raise'("],
     );
     // The buggy pre-fix form (raising the whole triple directly) must be gone.
-    assert!(
-        !code.contains("call 'beamtalk_error':'raise'(SelfError"),
-        "Self-dispatch must not pass the raw {{Type, Reason, Stacktrace}} \
-         triple straight to beamtalk_error:raise/1. Got:\n{code}"
+    assert_lacks(
+        "Self-dispatch must not pass the raw {Type, Reason, Stacktrace} \
+         triple straight to beamtalk_error:raise/1",
+        &code,
+        &["call 'beamtalk_error':'raise'(SelfError"],
     );
 }
 
@@ -3123,15 +3145,17 @@ fn test_self_call_error_branch_sealed_direct_call_breadcrumb() {
     // Confirm this actually reached the direct __sealed_setup standalone
     // function call — otherwise the test wouldn't be exercising
     // generate_direct_sealed_call at all.
-    assert!(
-        code.contains("'__sealed_setup'"),
+    assert_has(
         "Test setup must exercise generate_direct_sealed_call (direct \
-         __sealed_setup call), not a different self-dispatch path. Got:\n{code}"
+         __sealed_setup call), not a different self-dispatch path",
+        &code,
+        &["'__sealed_setup'"],
     );
-    assert!(
-        code.contains("call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'())"),
+    assert_has(
         "generate_direct_sealed_call's error branch must resolve the \
-         breadcrumb 'class' via a runtime lookup_class(self()) call. Got:\n{code}"
+         breadcrumb 'class' via a runtime lookup_class(self()) call",
+        &code,
+        &["call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'())"],
     );
     let reraise_with_breadcrumb = regex::Regex::new(
         r"call 'beamtalk_exception_handler':'reraise'\([\w@]+, [\w@]+, [\w@]+, ~\{'selector' => 'setup', 'class' => [\w@]+\}~\)",
@@ -3167,10 +3191,11 @@ fn test_sealed_method_logger_call_tags_own_selector() {
 
     // Confirm this actually reached the sealed-method-function codegen path
     // (generate_sealed_method_functions_doc), not some other shape.
-    assert!(
-        code.contains("'__sealed_setup'"),
+    assert_has(
         "Test setup must exercise generate_sealed_method_functions_doc \
-         (the '__sealed_setup' standalone function). Got:\n{code}"
+         (the '__sealed_setup' standalone function)",
+        &code,
+        &["'__sealed_setup'"],
     );
 
     assert!(
@@ -3179,11 +3204,12 @@ fn test_sealed_method_logger_call_tags_own_selector() {
          the method's own selector ('setup'), not fall back to 'unknown'. \
          Got:\n{code}"
     );
-    assert!(
-        !code.contains("'beamtalk_selector' => 'unknown'"),
+    assert_lacks(
         "Logger call inside a sealed method must not tag beamtalk_selector \
          as 'unknown' — that was the pre-MethodFrame regression this test \
-         pins. Got:\n{code}"
+         pins",
+        &code,
+        &["'beamtalk_selector' => 'unknown'"],
     );
 }
 
@@ -3285,10 +3311,11 @@ fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
         &code,
         &["StateAcc"],
     );
-    assert!(
-        code.contains("call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'())"),
+    assert_has(
         "The self-send's error branch must resolve the \
-         breadcrumb 'class' via a runtime lookup_class(self()) call. Got:\n{code}"
+         breadcrumb 'class' via a runtime lookup_class(self()) call",
+        &code,
+        &["call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'())"],
     );
     let reraise_with_breadcrumb = regex::Regex::new(
         r"call 'beamtalk_exception_handler':'reraise'\([\w@]+, [\w@]+, [\w@]+, ~\{'selector' => 'eachItem:', 'class' => [\w@]+\}~\)",
@@ -3312,11 +3339,12 @@ fn test_class_literal_reads_static_call_map() {
     let mut generator = CoreErlangGenerator::new("bt@my_app@main");
     let doc = generator.generate_class_reference("Point").unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains(
-            "case call 'persistent_term':'get'('Point class static calls', ~{}~) of <~{{'class_ref', 'Point class'} := "
-        ),
-        "class literal must read its {{class_ref, Tag}} entry. Got:\n{output}"
+    assert_has(
+        "class literal must read its {class_ref, Tag} entry",
+        &output,
+        &[
+            "case call 'persistent_term':'get'('Point class static calls', ~{}~) of <~{{'class_ref', 'Point class'} := ",
+        ],
     );
     assert_has(
         "a miss must ask the runtime, which installs the entry.",
@@ -3329,9 +3357,10 @@ fn test_class_literal_reads_static_call_map() {
         &["'class_not_found', 'Point'"],
     );
     for gone in ["whereis", "module_name_safe", "{'beamtalk_object'"] {
-        assert!(
-            !output.contains(gone),
-            "the compiled literal must not contain `{gone}`. Got:\n{output}"
+        assert_lacks(
+            &format!("the compiled literal must not contain `{gone}`"),
+            &output,
+            &[gone],
         );
     }
 }
@@ -3378,9 +3407,15 @@ fn test_builtin_class_literal_without_own_pinned_module_keeps_lookup() {
             .generate_class_reference(class)
             .unwrap()
             .to_pretty_string();
-        assert!(
-            output.contains("{'class_ref', ") && !output.contains("whereis"),
-            "{class} must read its reference from the static call map. Got:\n{output}"
+        assert_has(
+            &format!("{class} must read its reference from the static call map"),
+            &output,
+            &["{'class_ref', "],
+        );
+        assert_lacks(
+            &format!("{class} must read its reference from the static call map"),
+            &output,
+            &["whereis"],
         );
     }
 }
@@ -3637,16 +3672,18 @@ fn test_bt2276_class_methods_wrong_arity_block_rejected_table() {
                 actual,
                 hint,
             }) => {
-                assert!(
-                    selector.contains(selector_needle),
-                    "[{label}] error should name the selector, got: {selector}"
+                assert_has(
+                    &format!("[{label}] error should name the selector"),
+                    &selector,
+                    &[selector_needle],
                 );
                 assert_eq!(expected, want_expected, "[{label}] expected arity");
                 assert_eq!(actual, want_actual, "[{label}] declared parameter count");
                 if let Some(needle) = hint_needle {
-                    assert!(
-                        hint.contains(needle),
-                        "[{label}] hint should mention {needle}, got: {hint}"
+                    assert_has(
+                        &format!("[{label}] hint should mention {needle}"),
+                        &hint,
+                        &[needle],
                     );
                 }
             }
@@ -3770,9 +3807,10 @@ fn test_class_method_self_send_long_selector_uses_hashed_atom() {
     // The raw 'class_<selector>' atom (256 bytes) must NOT appear anywhere —
     // erlc's atom scanner rejects atoms > 255 bytes at BEAM-compile time.
     let raw_class_atom = format!("class_{long_sel}");
-    assert!(
-        !code.contains(&raw_class_atom),
-        "oversized 'class_<selector>' atom must not appear in generated code. Got:\n{code}"
+    assert_lacks(
+        "oversized 'class_<selector>' atom must not appear in generated code",
+        &code,
+        &[raw_class_atom.as_str()],
     );
     // The self-send call in `go` must use the hashed 'class_kw_<hex>' form,
     // not the raw oversized atom. codegen_source uses module name "test".
@@ -3790,9 +3828,10 @@ fn test_value_type_long_class_method_selector_exports_hashed_atom() {
     let long_sel = "a".repeat(250);
     let src = format!("Value subclass: LongVal\n  class {long_sel} => 42\n");
     let code = codegen_source(&src);
-    assert!(
-        !code.contains(&format!("class_{long_sel}")),
-        "oversized 'class_<selector>' atom must not appear. Got:\n{code}"
+    assert_lacks(
+        "oversized 'class_<selector>' atom must not appear",
+        &code,
+        &[format!("class_{long_sel}").as_str()],
     );
     assert_has("hashed export missing.", &code, &["'class_kw_"]);
     super::assert_compiles_through_erlc("test", &code);
@@ -3894,11 +3933,12 @@ fn test_class_method_explicit_class_reference_binds_the_named_class() {
         &code,
         &["call 'test':'class_foo'(ClassSelf)"],
     );
-    assert!(
-        code.contains(
-            "call 'beamtalk_class_dispatch':'class_self_dispatch_local'('OpenCls', 'foo', [], ClassSelf)"
-        ),
-        "the fallback resolves from the named class. Got:\n{code}"
+    assert_has(
+        "the fallback resolves from the named class",
+        &code,
+        &[
+            "call 'beamtalk_class_dispatch':'class_self_dispatch_local'('OpenCls', 'foo', [], ClassSelf)",
+        ],
     );
 }
 
@@ -4108,11 +4148,13 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
             "'spawn_monitored'/1 = fun (_InitArgs) ->",
         ],
     );
-    assert!(
-        code.contains("call 'beamtalk_error':'with_selector'(Error0, 'spawnMonitored')")
-            && code
-                .contains("call 'beamtalk_error':'with_selector'(Error0, 'spawnMonitoredWith:')"),
-        "spawn_monitored stubs must name the monitored selectors. Got:\n{code}"
+    assert_has(
+        "spawn_monitored stubs must name the monitored selectors.",
+        &code,
+        &[
+            "call 'beamtalk_error':'with_selector'(Error0, 'spawnMonitored')",
+            "call 'beamtalk_error':'with_selector'(Error0, 'spawnMonitoredWith:')",
+        ],
     );
     assert_lacks(
         "Abstract actor must NOT call safe_spawn_monitored.",
@@ -4162,13 +4204,15 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
     );
     let spawn0_body = &code[spawn0_start..spawn1_start];
     let spawn1_body = &code[spawn1_start..spawn1_end];
-    assert!(
-        spawn0_body.contains("let _InstReg = try call 'beamtalk_object_instances':'register'("),
-        "spawn/0 ok-branch must register the instance. Got spawn/0 body:\n{spawn0_body}"
+    assert_has(
+        "spawn/0 ok-branch must register the instance. Got spawn/0 body",
+        &spawn0_body,
+        &["let _InstReg = try call 'beamtalk_object_instances':'register'("],
     );
-    assert!(
-        spawn1_body.contains("let _InstReg = try call 'beamtalk_object_instances':'register'("),
-        "spawn/1 ok-branch must register the instance. Got spawn/1 body:\n{spawn1_body}"
+    assert_has(
+        "spawn/1 ok-branch must register the instance. Got spawn/1 body",
+        &spawn1_body,
+        &["let _InstReg = try call 'beamtalk_object_instances':'register'("],
     );
 }
 
@@ -4202,9 +4246,10 @@ fn test_spawn_with_args_validates_map_argument() {
     let dict_hint = beamtalk_cerl_doc::binary::binary_string_literal(
         "spawnWith: expects a Dictionary argument",
     );
-    assert!(
-        code.contains(dict_hint.as_str()),
-        "type_error must include the Dictionary hint. Got:\n{code}"
+    assert_has(
+        "type_error must include the Dictionary hint",
+        &code,
+        &[dict_hint.as_str()],
     );
 }
 
@@ -4246,19 +4291,21 @@ fn test_builder_super_and_self_send_pass_live_receiver() {
                classMethods: #{ #bump => [:self | super bump], #twice => [:self | self bump] }; \
                register";
     let code = try_codegen(src).expect("builder super/self-send must compile");
-    assert!(
-        code.contains(
+    assert_has(
+        "builder `super` must pass the live receiver",
+        &code,
+        &[
             "call 'beamtalk_class_dispatch':'class_super_dispatch'('BT3709Sup', 'bump', [], \
-             ClassSelf)"
-        ),
-        "builder `super` must pass the live receiver. Got:\n{code}"
+             ClassSelf)",
+        ],
     );
-    assert!(
-        code.contains(
+    assert_has(
+        "builder self-send must pass the live receiver",
+        &code,
+        &[
             "call 'beamtalk_class_dispatch':'class_self_dispatch_local'('BT3709Sup', 'bump', [], \
-             ClassSelf)"
-        ),
-        "builder self-send must pass the live receiver. Got:\n{code}"
+             ClassSelf)",
+        ],
     );
 }
 
@@ -4288,17 +4335,22 @@ fn test_class_method_super_uses_class_super_dispatch() {
             let src = format!("{header}\n  {body}\n");
             let code = super::compile(&src)
                 .unwrap_or_else(|e| panic!("class-side super must compile: {e}\n{src}"));
-            assert!(
-                code.contains(
-                    "call 'beamtalk_class_dispatch':'class_super_dispatch'('C', 'peek:', ["
-                ) && code.contains("], ClassSelf)"),
-                "class-side `super` must route through class_super_dispatch/4:\n{src}\n{code}"
+            assert_has(
+                &format!("class-side `super` must route through class_super_dispatch/4:\n{src}"),
+                &code,
+                &[
+                    "call 'beamtalk_class_dispatch':'class_super_dispatch'('C', 'peek:', [",
+                    "], ClassSelf)",
+                ],
             );
-            assert!(
-                !code.contains("'beamtalk_dispatch':'super'")
-                    && !code.contains("'beamtalk_dispatch':'super_reply'")
-                    && !code.contains("'beamtalk_dispatch':'super_value'"),
-                "class-side `super` must not take the instance super path:\n{src}\n{code}"
+            assert_lacks(
+                &format!("class-side `super` must not take the instance super path:\n{src}"),
+                &code,
+                &[
+                    "'beamtalk_dispatch':'super'",
+                    "'beamtalk_dispatch':'super_reply'",
+                    "'beamtalk_dispatch':'super_value'",
+                ],
             );
             assert_compiles_through_erlc("test", &code);
         }
@@ -4330,14 +4382,22 @@ fn test_class_method_behaviour_protocol_self_send_uses_class_self_send() {
                 let src = format!("{header}\n  {method} => {send}\n");
                 let code = super::compile(&src)
                     .unwrap_or_else(|e| panic!("class-side self-send must compile: {e}\n{src}"));
-                assert!(
-                    code.contains("call 'beamtalk_class_dispatch':'class_self_send'(")
-                        && code.contains(call_tail),
-                    "Behaviour-protocol self-send must route through class_self_send/3:\n{src}\n{code}"
+                assert_has(
+                    &format!(
+                        "Behaviour-protocol self-send must route through class_self_send/3:\n{src}"
+                    ),
+                    &code,
+                    &[
+                        "call 'beamtalk_class_dispatch':'class_self_send'(",
+                        call_tail,
+                    ],
                 );
-                assert!(
-                    !code.contains("call 'beamtalk_behaviour_intrinsics':"),
-                    "Behaviour-protocol self-send must not call an intrinsic directly:\n{src}\n{code}"
+                assert_lacks(
+                    &format!(
+                        "Behaviour-protocol self-send must not call an intrinsic directly:\n{src}"
+                    ),
+                    &code,
+                    &["call 'beamtalk_behaviour_intrinsics':"],
                 );
                 assert_compiles_through_erlc("test", &code);
             }
@@ -4360,17 +4420,21 @@ fn test_class_side_extension_super_is_keyed_on_the_target() {
             let src = format!("{host}{body}\n");
             let code = super::compile(&src)
                 .unwrap_or_else(|e| panic!("class-side extension super must compile: {e}\n{src}"));
-            assert!(
-                code.contains(
-                    "call 'beamtalk_class_dispatch':'class_super_dispatch'('Target', 'peek:', ["
-                ),
-                "extension `super` must be keyed on the target class:\n{src}\n{code}"
+            assert_has(
+                &format!("extension `super` must be keyed on the target class:\n{src}"),
+                &code,
+                &["call 'beamtalk_class_dispatch':'class_super_dispatch'('Target', 'peek:', ["],
             );
-            assert!(
-                !code.contains("class_super_dispatch'('Host'")
-                    && !code.contains("'beamtalk_dispatch':'super'")
-                    && !code.contains("'beamtalk_dispatch':'super_reply'"),
-                "extension `super` must not use the host class or the instance path:\n{src}\n{code}"
+            assert_lacks(
+                &format!(
+                    "extension `super` must not use the host class or the instance path:\n{src}"
+                ),
+                &code,
+                &[
+                    "class_super_dispatch'('Host'",
+                    "'beamtalk_dispatch':'super'",
+                    "'beamtalk_dispatch':'super_reply'",
+                ],
             );
             assert_compiles_through_erlc("test", &code);
         }
@@ -4426,11 +4490,15 @@ fn test_open_class_static_class_self_send_is_a_plain_direct_call() {
         let rest = &code[start..];
         let end = rest[1..].find("\n'").map_or(rest.len(), |e| e + 1);
         let baz = &rest[..end];
-        assert!(
-            baz.contains("call 'test':'class_bar'(")
-                && !baz.contains("ClassVars")
-                && !baz.contains("class_var_result"),
-            "static open-class call is a plain direct call. Got:\n{baz}"
+        assert_has(
+            "static open-class call is a plain direct call",
+            &baz,
+            &["call 'test':'class_bar'("],
+        );
+        assert_lacks(
+            "static open-class call is a plain direct call",
+            &baz,
+            &["ClassVars", "class_var_result"],
         );
     }
 }
@@ -4853,13 +4921,15 @@ fn test_explicit_ffi_class_new_bakes_direct_new() {
         "Value subclass: Q native: my_queue\n\n  class sealed new -> Q => self delegate\n",
     );
     for (what, module) in [("FFI forward", &code), ("native `self delegate`", &native)] {
-        assert!(
-            module.contains("'direct_constructors' => ['new']"),
-            "{what}: bakes a direct `new` verdict. Got:\n{module}"
+        assert_has(
+            &format!("{what}: bakes a direct `new` verdict"),
+            &module,
+            &["'direct_constructors' => ['new']"],
         );
-        assert!(
-            module.contains("'new'/0 = fun () ->\n    call 'test':'class_new'('undefined')"),
-            "{what}: `new/0` must delegate to `class_new('undefined')`. Got:\n{module}"
+        assert_has(
+            &format!("{what}: `new/0` must delegate to `class_new('undefined')`"),
+            &module,
+            &["'new'/0 = fun () ->\n    call 'test':'class_new'('undefined')"],
         );
     }
 
@@ -4883,10 +4953,12 @@ fn test_explicit_forwarding_class_new1_is_not_process_bound() {
     let code = codegen_source(
         "Object subclass: Bag2\n\n  class withAll: xs => (Erlang lists) reverse: xs\n\n  class new: xs => self withAll: xs\n",
     );
-    assert!(
-        code.contains(without) && !code.contains(full),
-        "a forwarding `new:` is not process-bound. Got:\n{code}"
+    assert_has(
+        "a forwarding `new:` is not process-bound",
+        &code,
+        &[without],
     );
+    assert_lacks("a forwarding `new:` is not process-bound", &code, &[full]);
     super::assert_compiles_through_erlc("test", &code);
     let basic = codegen_source("Object subclass: Tag\n\n  class new: xs => self basicNew\n");
     assert_has(
@@ -5096,9 +5168,10 @@ fn test_long_keyword_ctor_bakes_hashed_meta_key() {
         "test setup must build an over-long keyword (got {} chars)",
         raw_kw.len()
     );
-    assert!(
-        !code.contains(&raw_kw),
-        "over-long keyword ctor selector must not appear raw anywhere. Got:\n{code}"
+    assert_lacks(
+        "over-long keyword ctor selector must not appear raw anywhere",
+        &code,
+        &[raw_kw.as_str()],
     );
     assert_has(
         "baked direct entry must use the hashed 'kw_<hash>' key.",

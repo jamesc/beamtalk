@@ -422,10 +422,7 @@ fn routed_union_typed_param_sends_direct_with_guard_chain() {
         "<'Gadget'> when 'true'",
         "beamtalk_message_dispatch':'send'(",
     ] {
-        assert!(
-            code.contains(fragment),
-            "missing {fragment:?}. Got:\n{code}"
-        );
+        assert_has(&format!("missing {fragment:?}"), &code, &[fragment]);
     }
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -458,10 +455,11 @@ fn union_with_unrouted_member_stays_dynamic() {
         "Object subclass: Widget\n",
         "  ping => 1\n",
     ));
-    assert!(!code.contains("'dispatch'('ping'"), "{code}");
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "{code}"
+    assert_lacks("expected fragment", &code, &["'dispatch'('ping'"]);
+    assert_has(
+        "expected fragment",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -477,10 +475,11 @@ fn union_over_the_arm_cap_stays_dynamic() {
         "Object subclass: A4\n  ping => 1\n\n",
         "Object subclass: A5\n  ping => 1\n",
     ));
-    assert!(!code.contains("'dispatch'('ping'"), "{code}");
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "{code}"
+    assert_lacks("expected fragment", &code, &["'dispatch'('ping'"]);
+    assert_has(
+        "expected fragment",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -557,17 +556,20 @@ fn builtin_typed_params_send_direct_to_the_fixture_module() {
     ];
     for (ty, guard, module) in cases {
         let code = builtin_typed_send(ty);
-        assert!(
-            code.contains(&format!("call '{module}':'dispatch'('frobnicate'")),
-            "{ty} receiver should direct-call {module}. Got:\n{code}"
+        assert_has(
+            &format!("{ty} receiver should direct-call {module}"),
+            &code,
+            &[format!("call '{module}':'dispatch'('frobnicate'").as_str()],
         );
-        assert!(
-            code.contains(guard),
-            "{ty} direct call should stand behind its representation guard {guard:?}. Got:\n{code}"
+        assert_has(
+            &format!("{ty} direct call should stand behind its representation guard {guard:?}"),
+            &code,
+            &[guard],
         );
-        assert!(
-            code.contains("beamtalk_message_dispatch':'send'("),
-            "{ty} guard miss should fall back to the dynamic send. Got:\n{code}"
+        assert_has(
+            &format!("{ty} guard miss should fall back to the dynamic send"),
+            &code,
+            &["beamtalk_message_dispatch':'send'("],
         );
         super::assert_compiles_through_erlc("test", &code);
     }
@@ -586,9 +588,10 @@ fn tuple_guard_rejects_reserved_heads_at_every_size() {
         "beamtalk_object",
         "beamtalk_supervisor",
     ] {
-        assert!(
-            code.contains(&format!("<'{tag}'> when 'true' -> 'false'")),
-            "Tuple guard should reject the reserved head {tag}. Got:\n{code}"
+        assert_has(
+            &format!("Tuple guard should reject the reserved head {tag}"),
+            &code,
+            &[format!("<'{tag}'> when 'true' -> 'false'").as_str()],
         );
     }
     assert_has(
@@ -597,9 +600,10 @@ fn tuple_guard_rejects_reserved_heads_at_every_size() {
         &["tuple_size'(_TTaggedRecv"],
     );
     for size in [2, 4] {
-        assert!(
-            !code.contains(&format!("), {size}) of")),
-            "Tuple send guard must not be size-specific. Got:\n{code}"
+        assert_lacks(
+            "Tuple send guard must not be size-specific",
+            &code,
+            &[format!("), {size}) of").as_str()],
         );
     }
 }
@@ -648,10 +652,10 @@ fn builtin_special_selectors_stay_dynamic() {
                 row.class
             ));
             let module = row.target_module.expect("special rows have a module");
-            assert!(
-                !code.contains(&format!("call '{module}':'dispatch'('{special}'")),
-                "{}>>{special} must stay dynamic. Got:\n{code}",
-                row.class
+            assert_lacks(
+                &format!("{}>>{special} must stay dynamic", row.class),
+                &code,
+                &[format!("call '{module}':'dispatch'('{special}'").as_str()],
             );
             // Unary `await`/`awaitForever` are claimed earlier, by the await
             // intrinsics, which call `beamtalk_future` directly.
@@ -676,9 +680,10 @@ fn builtin_typed_keyword_send_to_pid_and_string_is_routed() {
         "    s frobnicate: 1\n",
     ));
     for module in ["bt@stdlib@pid", "bt@stdlib@string"] {
-        assert!(
-            code.contains(&format!("call '{module}':'dispatch'('frobnicate:', [")),
-            "keyword send should direct-call {module}. Got:\n{code}"
+        assert_has(
+            &format!("keyword send should direct-call {module}"),
+            &code,
+            &[format!("call '{module}':'dispatch'('frobnicate:', [").as_str()],
         );
     }
     super::assert_compiles_through_erlc("test", &code);
@@ -697,13 +702,15 @@ fn builtins_without_a_single_route_stay_dynamic() {
         "ErlangModule",
     ] {
         let code = builtin_typed_send(ty);
-        assert!(
-            !code.contains("'dispatch'('frobnicate'"),
-            "{ty} receiver must stay dynamic. Got:\n{code}"
+        assert_lacks(
+            &format!("{ty} receiver must stay dynamic"),
+            &code,
+            &["'dispatch'('frobnicate'"],
         );
-        assert!(
-            code.contains("beamtalk_message_dispatch':'send'("),
-            "{ty} receiver send should still exist as a dynamic send. Got:\n{code}"
+        assert_has(
+            &format!("{ty} receiver send should still exist as a dynamic send"),
+            &code,
+            &["beamtalk_message_dispatch':'send'("],
         );
     }
 }
@@ -743,10 +750,15 @@ fn binary_typed_send_routes_bare_binaries_and_strings() {
     // bare-binary route.
     let code =
         codegen("Object subclass: Caller\n  useIt: r :: Binary -> Object =>\n    r toBytes\n");
-    assert!(
-        code.contains("call 'bt@stdlib@binary':'dispatch'('toBytes'")
-            && !code.contains("call 'bt@stdlib@string':'dispatch'('toBytes'"),
-        "a String special selector must not direct-call bt@stdlib@string. Got:\n{code}"
+    assert_has(
+        "a String special selector must not direct-call bt@stdlib@string",
+        &code,
+        &["call 'bt@stdlib@binary':'dispatch'('toBytes'"],
+    );
+    assert_lacks(
+        "a String special selector must not direct-call bt@stdlib@string",
+        &code,
+        &["call 'bt@stdlib@string':'dispatch'('toBytes'"],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -760,9 +772,10 @@ fn rewritten_selector_on_typed_receiver_stays_dynamic() {
         let code = codegen(&format!(
             "Object subclass: Caller\n  useIt: r :: {ty} -> Object =>\n    r perform: #size withArguments: #() timeout: 100\n\nsealed Value subclass: SealedWidget\n  field: x :: Integer = 0\n"
         ));
-        assert!(
-            !code.contains("'dispatch'('perform:withArguments:timeout:'"),
-            "{ty}: a rewritten selector must stay dynamic. Got:\n{code}"
+        assert_lacks(
+            &format!("{ty}: a rewritten selector must stay dynamic"),
+            &code,
+            &["'dispatch'('perform:withArguments:timeout:'"],
         );
     }
 }
@@ -1610,9 +1623,15 @@ fn abstract_value_new_stays_a_plain_builder_for_subclass_chaining() {
         "abstract Value subclass: Shape\n",
         "  field: x :: Integer = 0\n",
     ));
-    assert!(
-        parent.contains("'new'/0 = fun () ->") && !parent.contains("instantiation_error"),
-        "abstract Value new/0 must remain a plain builder. Got:\n{parent}"
+    assert_has(
+        "abstract Value new/0 must remain a plain builder",
+        &parent,
+        &["'new'/0 = fun () ->"],
+    );
+    assert_lacks(
+        "abstract Value new/0 must remain a plain builder",
+        &parent,
+        &["instantiation_error"],
     );
     let child = codegen(concat!(
         "Shape subclass: Circle\n",
@@ -1643,13 +1662,15 @@ const CLASS_OF_OBJECT: &str = "call 'beamtalk_primitive':'class_of_object'(";
 /// Asserts `code` lowers `obj class` to the plain `class_of_object/1` call,
 /// with no inline class object.
 fn assert_plain_class_of(code: &str, why: &str) {
-    assert!(
-        code.contains(CLASS_OF_OBJECT),
-        "{why}: `class` should stay a class_of_object/1 call. Got:\n{code}"
+    assert_has(
+        &format!("{why}: `class` should stay a class_of_object/1 call"),
+        &code,
+        &[CLASS_OF_OBJECT],
     );
-    assert!(
-        !code.contains("TClassRecv"),
-        "{why}: `class` must not take the inline path. Got:\n{code}"
+    assert_lacks(
+        &format!("{why}: `class` must not take the inline path"),
+        &code,
+        &["TClassRecv"],
     );
 }
 
@@ -1667,11 +1688,12 @@ fn sealed_value_typed_class_is_inlined_behind_the_tag_guard() {
         &code,
         &["maps':'get'('$beamtalk_class', _TClassRecv"],
     );
-    assert!(
-        code.contains(
-            "<'SealedWidget'> when 'true' -> case call 'erlang':'whereis'('beamtalk_class_SealedWidget') of"
-        ),
-        "a tag match should look the class pid up by its compile-time registered name. Got:\n{code}"
+    assert_has(
+        "a tag match should look the class pid up by its compile-time registered name",
+        &code,
+        &[
+            "<'SealedWidget'> when 'true' -> case call 'erlang':'whereis'('beamtalk_class_SealedWidget') of",
+        ],
     );
     assert_has(
         "a live class should answer the class object with the pinned module.",
@@ -1845,11 +1867,10 @@ fn packaged_ambient_class_of_pins_the_qualified_module() {
         ),
         ambient_sealed_object(false, Some("live")),
     );
-    assert!(
-        code.contains(
-            "{'beamtalk_object', 'AmbientWidget class', 'bt@live@ambient_widget', _TClassPid"
-        ),
-        "packaged ambient receiver should pin the qualified module. Got:\n{code}"
+    assert_has(
+        "packaged ambient receiver should pin the qualified module",
+        &code,
+        &["{'beamtalk_object', 'AmbientWidget class', 'bt@live@ambient_widget', _TClassPid"],
     );
 }
 
@@ -1867,9 +1888,10 @@ fn interpolation_segment_display_string_uses_the_typed_route() {
         "    \"{x}\"\n",
     ));
     for module in ["bt@stdlib@integer", "bt@stdlib@string"] {
-        assert!(
-            code.contains(&format!("call '{module}':'dispatch'('displayString', []")),
-            "a typed segment should direct-call {module}. Got:\n{code}"
+        assert_has(
+            &format!("a typed segment should direct-call {module}"),
+            &code,
+            &[format!("call '{module}':'dispatch'('displayString', []").as_str()],
         );
     }
     assert_has(
