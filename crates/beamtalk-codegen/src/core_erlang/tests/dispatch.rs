@@ -2046,10 +2046,10 @@ Actor subclass: Processor
         generated.code
     );
     // No BtBlock wrapper for pure blocks
-    assert!(
-        !generated.code.contains("BtBlock"),
-        "Pure block should not have BtBlock wrapper. Got:\n{}",
-        generated.code
+    assert_lacks(
+        "Pure block should not have BtBlock wrapper.",
+        &generated.code,
+        &["BtBlock"],
     );
 }
 

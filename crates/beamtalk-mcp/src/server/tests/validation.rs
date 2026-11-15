@@ -8,13 +8,13 @@
 
 use super::*;
 
-/// Asserts `res` is `Ok` for every accepted input and an exact-message
+/// Asserts `f` returns `Ok` for every accepted input and an exact-message
 /// `invalid_params` error for every rejected one.
 fn check(
     validator: &str,
     f: fn(&str) -> Result<(), rmcp::ErrorData>,
     accepted: &[&str],
-    rejected: &[(&str, &str)],
+    rejected: &[(&str, String)],
 ) {
     for input in accepted {
         assert!(
@@ -52,7 +52,6 @@ fn validate_class_name_accepts_and_rejects() {
     .into_iter()
     .map(|n| (n, bad_class(n)))
     .collect();
-    let rejected: Vec<(&str, &str)> = rejected.iter().map(|(n, m)| (*n, m.as_str())).collect();
     check(
         "validate_class_name",
         validate_class_name,
@@ -74,7 +73,6 @@ fn validate_erlang_module_name_accepts_and_rejects() {
     .into_iter()
     .map(|n| (n, bad_module(n)))
     .collect();
-    let rejected: Vec<(&str, &str)> = rejected.iter().map(|(n, m)| (*n, m.as_str())).collect();
     check(
         "validate_erlang_module_name",
         validate_erlang_module_name,
@@ -92,13 +90,9 @@ fn validate_selector_accepts_and_rejects() {
         "#size",    // hash
         "bad selector!",
     ];
-    let messages: Vec<String> = rejected_inputs.iter().map(|s| invalid(s)).collect();
-    let mut rejected: Vec<(&str, &str)> = rejected_inputs
-        .iter()
-        .copied()
-        .zip(messages.iter().map(String::as_str))
-        .collect();
-    rejected.push(("", "selector must not be empty"));
+    let mut rejected: Vec<(&str, String)> =
+        rejected_inputs.iter().map(|s| (*s, invalid(s))).collect();
+    rejected.push(("", "selector must not be empty".to_string()));
     check(
         "validate_selector",
         validate_selector,
