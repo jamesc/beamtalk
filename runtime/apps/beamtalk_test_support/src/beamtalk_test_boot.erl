@@ -27,7 +27,7 @@ process is already registered, and `beamtalk_stdlib:init/0` is itself
 idempotent (a normal stdlib load skips a module whose on_load already ran).
 """.
 
--export([boot_real_stdlib/1, wait_for_class/2, registry/0, runtime/0, compiler/0, workspace/1]).
+-export([boot_real_stdlib/1, wait_for_class/2, registry/0, runtime/0, compiler/0, workspace/1, clear_compiler_classes/0]).
 
 -doc """
 Boot `beamtalk_runtime` + real stdlib, then block until `CanaryClass` is
@@ -171,10 +171,23 @@ workspace(#{workspace_id := WorkspaceId} = Opts) ->
         true -> beamtalk_test_repl:clear_xref();
         false -> ok
     end,
-    beamtalk_compiler_server:clear_classes(),
+    ok = clear_compiler_classes(),
     [{ok, _} = beamtalk_test_proc:restart(Name) || Name <- maps:get(restart, Opts, [])],
     case maps:get(announcements, Opts, false) of
         true -> ok = beamtalk_announcements:ensure_started();
         false -> ok
     end,
     ok.
+
+%% `beamtalk_compiler_server:clear_classes/0` is exported only under
+%% `-ifdef(TEST)`; this module lives in `src/` (compiled without TEST), so
+%% dialyzer cannot see it. The tests that call this run with TEST defined.
+-dialyzer({no_missing_calls, clear_compiler_classes/0}).
+
+-doc """
+Clear the compiler server's ambient class and alias caches (ADR 0108). Only
+callable from a test build, where `beamtalk_compiler_server` exports it.
+""".
+-spec clear_compiler_classes() -> ok.
+clear_compiler_classes() ->
+    beamtalk_compiler_server:clear_classes().

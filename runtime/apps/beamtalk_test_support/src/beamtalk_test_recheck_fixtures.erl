@@ -73,7 +73,7 @@ teardown(Opts) ->
     [beamtalk_test_proc:stop_registered(Name) || Name <- maps:get(restart, Opts, [])],
     case maps:get(clear_xref, Opts, true) of
         true -> beamtalk_test_repl:clear_xref();
-        false -> beamtalk_compiler_server:clear_classes()
+        false -> beamtalk_test_boot:clear_compiler_classes()
     end,
     _ = application:stop(beamtalk_compiler),
     ok.
