@@ -1879,7 +1879,7 @@ defmodule BtAttach.Workspace do
   unreachable or returns an unexpected shape.
   """
   def change_history do
-    case rpc(:beamtalk_workspace_changelog, :change_entries, []) do
+    case rpc(:beamtalk_workspace_changelog_views, :change_entries, []) do
       entries when is_list(entries) ->
         pending_rows(entries)
 
