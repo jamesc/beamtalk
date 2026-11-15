@@ -553,24 +553,4 @@ mod tests {
         let hits = find_all_references_in_source("greet => self name");
         assert!(hits.is_empty(), "got {hits:?}");
     }
-
-    // --- Expression walker: DestructureAssignment | Return ----------------
-
-    // --- Expression walker: FieldAccess -----------------------------------
-
-    // --- Expression walker: Match arm guard -------------------------------
-
-    // --- Expression walker: StringInterpolation ---------------------------
-
-    // --- Expression walker: BinaryConstruction ----------------------------
-
-    // --- Expression walker: ListLiteral tail ------------------------------
-
-    // --- Expression walker: ArrayLiteral / TupleLiteral -------------------
-
-    // --- Pattern walker: Tuple / Array / Map / Binary / Type --------------
-
-    // --- Type walker: Union / Generic base / Difference / Intersection / ClassOf ---
-
-    // --- Standalone method definitions (module.method_definitions) --------
 }

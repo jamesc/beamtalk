@@ -455,9 +455,13 @@ fn union_with_unrouted_member_stays_dynamic() {
         "Object subclass: Widget\n",
         "  ping => 1\n",
     ));
-    assert_lacks("expected fragment", &code, &["'dispatch'('ping'"]);
+    assert_lacks(
+        "a union with an unrouted member must not direct-call",
+        &code,
+        &["'dispatch'('ping'"],
+    );
     assert_has(
-        "expected fragment",
+        "a union with an unrouted member must stay on the dynamic send",
         &code,
         &["beamtalk_message_dispatch':'send'("],
     );
@@ -475,9 +479,13 @@ fn union_over_the_arm_cap_stays_dynamic() {
         "Object subclass: A4\n  ping => 1\n\n",
         "Object subclass: A5\n  ping => 1\n",
     ));
-    assert_lacks("expected fragment", &code, &["'dispatch'('ping'"]);
+    assert_lacks(
+        "a union over the arm cap must not direct-call",
+        &code,
+        &["'dispatch'('ping'"],
+    );
     assert_has(
-        "expected fragment",
+        "a union over the arm cap must stay on the dynamic send",
         &code,
         &["beamtalk_message_dispatch':'send'("],
     );

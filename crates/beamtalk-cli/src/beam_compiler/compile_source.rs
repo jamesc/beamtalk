@@ -722,7 +722,8 @@ mod tests {
         let msg = format!("{:#}", result.unwrap_err());
         assert!(
             msg.starts_with("Failed to read file '")
-                && msg.ends_with("nonexistent.bt': No such file or directory (os error 2)"),
+                && msg.contains("nonexistent.bt': ")
+                && msg.ends_with("(os error 2)"),
             "unexpected error: {msg}"
         );
     }

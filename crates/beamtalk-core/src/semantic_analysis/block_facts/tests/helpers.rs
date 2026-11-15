@@ -305,16 +305,6 @@ fn sbu_block_literal_any_ref_is_unsafe() {
     assert_eq!(stored_block_var_uses(&with_safe_send, "blk"), (true, false));
 }
 
-// --- Assignment ---
-
-// --- DestructureAssignment / Return ---
-
-// --- Cascade ---
-
-// --- Parenthesized ---
-
-// --- Match ---
-
 // --- TupleLiteral ---
 
 #[test]
@@ -326,8 +316,6 @@ fn sbu_tuple_literal_scans_elements() {
     assert_eq!(stored_block_var_uses(&without_var, "blk"), (false, false));
 }
 
-// --- ListLiteral ---
-
 // --- ArrayLiteral ---
 
 #[test]
@@ -338,9 +326,3 @@ fn sbu_array_literal_scans_elements() {
     let without_var = parse_first_expr("#[x, 1]");
     assert_eq!(stored_block_var_uses(&without_var, "blk"), (false, false));
 }
-
-// --- MapLiteral ---
-
-// --- StringInterpolation ---
-
-// --- BinaryConstruction ---
