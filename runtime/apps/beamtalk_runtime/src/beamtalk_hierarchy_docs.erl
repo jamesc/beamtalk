@@ -30,7 +30,7 @@ single shared implementation both callers delegate to, rather than the
 mirrored copies + "mirrors ..." comments that used to stand in for a test.
 
 Each helper delegates its walk (depth guard, cycle warning, advance-to-
-superclass) to `beamtalk_hierarchy:walk_ancestors/3`, supplying only the
+superclass) to `beamtalk_hierarchy:walk_or_warn/4`, supplying only the
 per-ancestor probe. Depth-exhaustion is intentionally uniform across all of
 them: an audit found `beamtalk_interface`'s copies silently swallowing a
 hierarchy cycle (returning the receiver's own class / an empty map) while

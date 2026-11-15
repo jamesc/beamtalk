@@ -2207,8 +2207,7 @@ each class's class-side extensions (BT-4307).
 
 Uses the ETS hierarchy and class-methods tables only (no `gen_server:call`),
 so it is safe from inside a class's own `handle_call`. The walk itself (depth
-guard, cycle warning, advance-to-superclass) is
-`beamtalk_hierarchy:walk_ancestors/3`.
+guard, advance-to-superclass) is `beamtalk_hierarchy:walk_or_warn/4`.
 """.
 -spec find_class_method_from_class(selector(), class_name()) ->
     {ok, class_name(), atom()} | not_found.

@@ -168,7 +168,7 @@ published_method_info(ClassName, Selector) ->
 Resolve a method, walking the superclass chain if not found locally.
 
 The walk itself (depth guard, cycle warning, advance-to-superclass)
-is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the
+is `beamtalk_hierarchy:walk_or_warn/4`; this function supplies only the
 per-class published-record probe.
 
 `ClassPid`'s own method table is checked here, outside the depth-counted

@@ -504,7 +504,7 @@ local node. The flattened table cache was removed to eliminate its race
 window and O(N) rebuild broadcast cascade.
 
 The walk itself (depth guard, cycle warning, advance-to-superclass)
-is `beamtalk_hierarchy:walk_ancestors/3`; `class_chain_step/6` supplies only
+is `beamtalk_hierarchy:walk_or_warn/4`; `class_chain_step/6` supplies only
 the per-class `has_method/2` + `superclass/1` probe and method invocation.
 """.
 -spec walk_in_class_chain(selector(), args(), bt_self(), state(), class_name()) ->

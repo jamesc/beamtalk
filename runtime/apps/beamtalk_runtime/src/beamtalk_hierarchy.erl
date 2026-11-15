@@ -18,8 +18,8 @@ name atom or a class process pid).
 
 `walk_ancestors/3` factors out the shared shape: start at a node, ask a
 caller-supplied `StepFun` what to do at that node, and either stop (found /
-not found) or advance to the next node — with the depth guard and cycle
-warning handled once, here.
+not found) or advance to the next node — with the depth guard handled once,
+here, and the cycle warning handled once by `walk_or_warn/4`.
 
 ## Design
 
@@ -35,11 +35,16 @@ early (mirrors "no superclass").
 - `{next, NextNode}` — advance to `NextNode` (may itself be `none`).
 - `not_found` — stop, nothing found anywhere in the chain.
 
-Callers that need caller-specific behaviour at the max-depth boundary (e.g.
-a structured `#beamtalk_error{}` naming the class that triggered it, or a
-contextual `?LOG_WARNING` naming the selector) inspect the
-`{max_depth_exceeded, LastNode}` return and build their own error/log line;
-this module only owns the depth guard itself, not the logging.
+## Two entry points
+
+- `walk_ancestors/3` owns only the depth guard and never logs. Callers that
+  treat a cycle as an ordinary miss, or that sit on a per-send path where a
+  warning would repeat, use it and handle `{max_depth_exceeded, LastNode}`
+  themselves.
+- `walk_or_warn/4` is `walk_ancestors/3` bounded by `?MAX_HIERARCHY_DEPTH`
+  plus the shared "possible cycle" warning (logged once per walk), returning
+  `{cycle, LastNode}`. Callers that need a structured `#beamtalk_error{}`
+  (e.g. `beamtalk_dispatch`) still build it from that return.
 
 ## Recovering state on `max_depth_exceeded`
 

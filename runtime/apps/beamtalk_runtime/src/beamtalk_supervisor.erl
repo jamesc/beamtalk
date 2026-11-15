@@ -3261,10 +3261,12 @@ child_class_from_children(SupClass, SupPid) ->
         is_pid(Pid),
         is_atom(M)
     ],
+    %% One read of the memoised map, not one per child (each read copies it).
+    ModClasses = beamtalk_class_registry:module_to_class_map(),
     Resolved = [
         {ClassName, M}
      || M <- Modules,
-        {ok, ClassName} <- [beamtalk_class_registry:class_name_for_module(M)]
+        {ok, ClassName} <- [maps:find(M, ModClasses)]
     ],
     case Resolved of
         [Entry | _] ->
