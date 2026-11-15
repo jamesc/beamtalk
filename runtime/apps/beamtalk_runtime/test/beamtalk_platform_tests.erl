@@ -106,7 +106,7 @@ with_env(Env, Fun) ->
 
 %% Shared Rust/Erlang conformance corpus:
 %% `crates/beamtalk-workspace/tests/beamtalk_root_dir_conformance.rs` asserts
-%% the same rows against `beamtalk_home::beamtalk_root_dir` /
+%% the same rows against `beamtalk_env::beamtalk_root_dir` /
 %% `beamtalk_workspace::workspaces_base_dir`.
 root_dir_conformance_matches_shared_corpus_test() ->
     Cases = beamtalk_test_corpus:load_json_fixture([

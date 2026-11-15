@@ -33,8 +33,7 @@
 //! (`Fault::RelayNoRelay`) every such row, and no other,
 //! fails with `VerifyError::EnsureCleanupLostOnNlr`.
 
-mod common;
-
+use crate::common::erlc_batched;
 use beamtalk_codegen::core_erlang::fault::{Fault, with as with_fault};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
@@ -44,7 +43,6 @@ use beamtalk_repl::codegen::{
     generate_repl_expressions, generate_repl_expressions_surfacing_verifier,
     generate_repl_expressions_traced,
 };
-use common::erlc_batched;
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};

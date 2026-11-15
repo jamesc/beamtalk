@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 [package]
-name = "beamtalk-home"
-description = "Shared leaf: Beamtalk global config directory (~/.beamtalk) resolution"
+name = "beamtalk-env"
+description = "Shared leaf: Beamtalk environment resolution (~/.beamtalk config dir and installation sysroot)"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

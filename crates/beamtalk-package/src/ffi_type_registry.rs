@@ -214,7 +214,7 @@ fn stub_inputs_hash(inputs: &[String]) -> String {
 /// layer 3), installed alongside the stdlib sources under
 /// `{sysroot}/share/beamtalk/stubs/` — the same sysroot convention used by
 /// `beamtalk --print-sysroot` and the LSP's `sysroot_stdlib_source_dir`,
-/// both backed by the shared [`beamtalk_sysroot`] leaf crate.
+/// both backed by the shared [`beamtalk_env`] leaf crate.
 /// `BEAMTALK_STUBS_DIR` overrides the sysroot-derived path for development.
 ///
 /// Unlike `BEAMTALK_RUNTIME_DIR` (which hard-errors when set to an invalid
@@ -239,7 +239,7 @@ pub fn distribution_stubs_dir() -> Option<Utf8PathBuf> {
         return None;
     }
 
-    let sysroot = beamtalk_sysroot::current_sysroot()?;
+    let sysroot = beamtalk_env::current_sysroot()?;
     let candidate = Utf8PathBuf::from_path_buf(sysroot.join("share/beamtalk/stubs")).ok()?;
     candidate.is_dir().then_some(candidate)
 }

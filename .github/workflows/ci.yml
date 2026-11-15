@@ -153,7 +153,7 @@ jobs:
           # `.workspace = true` deps from, the recipe and this workflow).
           # Defined once, here.
           desktop=$(flag matches 'desktop/*' 'crates/beamtalk-desktop-broker/*' \
-              'crates/beamtalk-desktop-shell/*' 'crates/beamtalk-home/*' 'crates/beamtalk-workspace/*' \
+              'crates/beamtalk-desktop-shell/*' 'crates/beamtalk-env/*' 'crates/beamtalk-workspace/*' \
               Cargo.toml Cargo.lock Justfile .github/workflows/ci.yml '.github/actions/test-desktop/*')
 
           {
