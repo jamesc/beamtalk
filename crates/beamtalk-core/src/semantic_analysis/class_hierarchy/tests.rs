@@ -969,63 +969,15 @@ fn cycle_detection_in_superclass_chain() {
     h.classes.insert(
         "A".into(),
         ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: "A".into(),
-            superclass: Some("B".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: None,
-            is_value: false,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
             methods: vec![builtin_method("methodA", 0, "A")],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("A", Some("B"))
         },
     );
     h.classes.insert(
         "B".into(),
         ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: "B".into(),
-            superclass: Some("A".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: None,
-            is_value: false,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
             methods: vec![builtin_method("methodB", 0, "B")],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("B", Some("A"))
         },
     );
     // Should not loop forever
@@ -2394,26 +2346,7 @@ fn sealed_override_checks_with_external_superclasses() {
 fn add_from_beam_meta_inserts_non_builtin_class() {
     let mut h = ClassHierarchy::with_builtins();
     let info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: EcoString::from("Counter"),
-        superclass: Some(EcoString::from("Actor")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![EcoString::from("count")],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: EcoString::from("value"),
             arity: 0,
@@ -2431,11 +2364,7 @@ fn add_from_beam_meta_inserts_non_builtin_class() {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Counter", Some("Actor"))
     };
     h.add_from_beam_meta(vec![info]);
     assert!(h.has_class("Counter"));
@@ -2449,26 +2378,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
     let mut h = ClassHierarchy::with_builtins();
     // Simulate AST-derived entry (from ClassHierarchy::build)
     let ast_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: EcoString::from("Counter"),
-        superclass: Some(EcoString::from("Actor")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![EcoString::from("count")],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: EcoString::from("increment"),
             arity: 0,
@@ -2486,35 +2396,11 @@ fn add_from_beam_meta_preserves_existing_entries() {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Counter", Some("Actor"))
     };
     h.classes.insert(EcoString::from("Counter"), ast_info);
     // Stale cache entry with different method
     let cache_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: EcoString::from("Counter"),
-        superclass: Some(EcoString::from("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: EcoString::from("old_method"),
             arity: 0,
@@ -2532,11 +2418,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Counter", Some("Object"))
     };
     h.add_from_beam_meta(vec![cache_info]);
     // AST-derived entry should win
@@ -2549,32 +2431,7 @@ fn add_from_beam_meta_skips_builtins() {
     let mut h = ClassHierarchy::with_builtins();
     let original_method_count = h.get_class("Integer").unwrap().methods.len();
     let stub = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: EcoString::from("Integer"),
-        superclass: None,
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Integer", None)
     };
     h.add_from_beam_meta(vec![stub]);
     // Built-in should be unchanged
@@ -2620,32 +2477,9 @@ fn classinfo_from_ast_defaults_is_internal_false() {
 /// elsewhere; the `stamp_package*` and `add_from_beam_meta` tests share it.
 fn remote_class_info(name: &str, is_internal: bool, package: &str) -> ClassInfo {
     ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: EcoString::from(name),
-        superclass: Some(EcoString::from("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
         is_internal,
         package: Some(EcoString::from(package)),
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test(name, Some("Object"))
     }
 }
 #[test]
@@ -3266,32 +3100,9 @@ fn cross_file_value_sub_subclass_finds_new() {
     };
     // Inject cross-file Base class (from another file: Value subclass: Base)
     let base_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: EcoString::from("Base"),
-        superclass: Some(EcoString::from("Value")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
         is_value: true,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![EcoString::from("x")],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Base", Some("Value"))
     };
     h.add_from_beam_meta(vec![base_info]);
     // Before propagation, Child should NOT be marked as Value
@@ -3353,31 +3164,12 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
     // Inject cross-file A: `late state: proc`, `state: id`,
     // `late classState: current`, `classState: total`.
     let a_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: EcoString::from("A"),
-        superclass: Some(EcoString::from("Object")),
-        is_sealed: false,
-        is_abstract: false,
         is_typed: true,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![EcoString::from("proc"), EcoString::from("id")],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
         state_kinds: HashMap::from([
             (EcoString::from("proc"), crate::ast::SlotKind::Late),
             (EcoString::from("id"), crate::ast::SlotKind::Eager),
         ]),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
         class_variables: vec![
             ClassVarInfo {
                 name: EcoString::from("current"),
@@ -3392,9 +3184,7 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
                 kind: crate::ast::SlotKind::Eager,
             },
         ],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("A", Some("Object"))
     };
     h.add_from_beam_meta(vec![a_info]);
 
@@ -3469,32 +3259,9 @@ fn cross_file_all_initialize_assigns_includes_parent_summary() {
     };
 
     let a_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: EcoString::from("A"),
-        superclass: Some(EcoString::from("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![EcoString::from("socket")],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
         initialize_assigns: BTreeSet::from([EcoString::from("socket")]),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("A", Some("Object"))
     };
     h.add_from_beam_meta(vec![a_info]);
 
@@ -3581,32 +3348,8 @@ fn all_initialize_assigns_native_ancestor_marks_incomplete() {
     }
 
     let native_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: EcoString::from("NativeParent"),
-        superclass: Some(EcoString::from("Actor")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
         is_native: true,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("NativeParent", Some("Actor"))
     };
     h.add_from_beam_meta(vec![native_info]);
 

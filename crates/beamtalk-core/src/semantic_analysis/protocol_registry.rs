@@ -1158,6 +1158,7 @@ mod tests {
         MethodDefinition, MethodKind, Module, ParameterDefinition, ProtocolDefinition,
         ProtocolMethodSignature, TypeAnnotation, TypeParamDecl,
     };
+    use crate::semantic_analysis::class_hierarchy::ClassInfo;
 
     use crate::test_helpers::test_support::unit_span as span;
 
@@ -1772,27 +1773,7 @@ Value subclass: Version
 
         let mut hierarchy = ClassHierarchy::with_builtins();
         let gadget = ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: "Gadget".into(),
-            superclass: Some("Object".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: None,
             is_value: true,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: std::collections::HashMap::new(),
-            state_has_default: std::collections::HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
-            methods: vec![],
             class_methods: selectors
                 .into_iter()
                 .map(|sel| MethodInfo {
@@ -1812,10 +1793,7 @@ Value subclass: Version
                     answers_receiver: false,
                 })
                 .collect(),
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("Gadget", Some("Object"))
         };
         hierarchy.add_from_beam_meta(vec![gadget]);
         hierarchy
@@ -1859,26 +1837,7 @@ Value subclass: Version
             use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
             let mut h = ClassHierarchy::with_builtins();
             h.add_from_beam_meta(vec![ClassInfo {
-                surface_incomplete: false,
-                in_caller_new1: false,
-                is_module_less: false,
-                name: "Gadget".into(),
-                superclass: Some("Object".into()),
-                is_sealed: false,
-                is_abstract: false,
-                is_typed: false,
-                is_internal: false,
-                package: None,
                 is_value: true,
-                is_native: false,
-                auto_ctors: None,
-                handle_scope: None,
-                state: vec![],
-                state_types: std::collections::HashMap::new(),
-                state_has_default: std::collections::HashMap::new(),
-                state_kinds: HashMap::new(),
-                initialize_assigns: std::collections::BTreeSet::new(),
-                has_dynamic_field_writer: false,
                 methods: vec![MethodInfo {
                     selector: "serialize".into(),
                     arity: 0,
@@ -1895,11 +1854,7 @@ Value subclass: Version
                     constant_value: None,
                     answers_receiver: false,
                 }],
-                class_methods: vec![],
-                class_variables: vec![],
-                type_params: vec![],
-                type_param_bounds: vec![],
-                superclass_type_args: vec![],
+                ..ClassInfo::test("Gadget", Some("Object"))
             }]);
             h
         };
@@ -2190,33 +2145,11 @@ Value subclass: Version
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.insert_class(
             "Printable".into(),
-            crate::semantic_analysis::class_hierarchy::ClassInfo {
-                surface_incomplete: false,
-                in_caller_new1: false,
-                is_module_less: false,
-                name: "Printable".into(),
-                superclass: Some("Protocol".into()),
+            ClassInfo {
                 is_sealed: true,
                 is_abstract: true,
                 is_typed: true,
-                is_internal: false,
-                package: None,
-                is_value: false,
-                is_native: false,
-                auto_ctors: None,
-                handle_scope: None,
-                state: vec![],
-                state_types: HashMap::new(),
-                state_has_default: HashMap::new(),
-                state_kinds: HashMap::new(),
-                initialize_assigns: std::collections::BTreeSet::new(),
-                has_dynamic_field_writer: false,
-                methods: vec![],
-                class_methods: vec![],
-                class_variables: vec![],
-                type_params: vec![],
-                type_param_bounds: vec![],
-                superclass_type_args: vec![],
+                ..ClassInfo::test("Printable", Some("Protocol"))
             },
         );
 
@@ -2264,33 +2197,11 @@ Value subclass: Version
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.insert_class(
             "Tickable".into(),
-            crate::semantic_analysis::class_hierarchy::ClassInfo {
-                surface_incomplete: false,
-                in_caller_new1: false,
-                is_module_less: false,
-                name: "Tickable".into(),
-                superclass: Some("Protocol".into()),
+            ClassInfo {
                 is_sealed: true,
                 is_abstract: true,
                 is_typed: true,
-                is_internal: false,
-                package: None,
-                is_value: false,
-                is_native: false,
-                auto_ctors: None,
-                handle_scope: None,
-                state: vec![],
-                state_types: HashMap::new(),
-                state_has_default: HashMap::new(),
-                state_kinds: HashMap::new(),
-                initialize_assigns: std::collections::BTreeSet::new(),
-                has_dynamic_field_writer: false,
-                methods: vec![],
-                class_methods: vec![],
-                class_variables: vec![],
-                type_params: vec![],
-                type_param_bounds: vec![],
-                superclass_type_args: vec![],
+                ..ClassInfo::test("Tickable", Some("Protocol"))
             },
         );
 
