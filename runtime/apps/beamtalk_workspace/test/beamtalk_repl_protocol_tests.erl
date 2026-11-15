@@ -126,6 +126,29 @@ encode_result_new_format_test() ->
     ?assertEqual(42, maps:get(<<"value">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
+%% BT-4912: `value_type` is an optional, additive top-level tag.
+encode_result_omits_value_type_by_default_test() ->
+    Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"msg-001">>, <<"alice">>),
+    Decoded = json:decode(beamtalk_repl_protocol:encode_result(42, Msg, fun identity/1)),
+    ?assertNot(maps:is_key(<<"value_type">>, Decoded)).
+
+encode_result_includes_value_type_when_classified_test() ->
+    Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"msg-001">>, <<"alice">>),
+    Result = beamtalk_repl_protocol:encode_result(
+        3.14, Msg, fun identity/1, <<>>, [], fun(_) -> <<"float">> end
+    ),
+    Decoded = json:decode(Result),
+    ?assertEqual(<<"float">>, maps:get(<<"value_type">>, Decoded)),
+    ?assertEqual(3.14, maps:get(<<"value">>, Decoded)),
+    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+encode_result_omits_value_type_when_undefined_test() ->
+    Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"msg-001">>, <<"alice">>),
+    Result = beamtalk_repl_protocol:encode_result(
+        1, Msg, fun identity/1, <<>>, [], fun(_) -> undefined end
+    ),
+    ?assertNot(maps:is_key(<<"value_type">>, json:decode(Result))).
+
 %% BT-4819 (ADR 0139 decision 4): the frames come from the raw eval_error
 %% reason, complete, both forms per frame, hidden frames flagged not removed.
 frames_metadata_carries_structured_frames_test() ->

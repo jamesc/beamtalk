@@ -22,7 +22,7 @@ requests, "type"-keyed responses) has been removed.
 
 -export([
     decode/1,
-    encode_result/3, encode_result/4, encode_result/5,
+    encode_result/3, encode_result/4, encode_result/5, encode_result/6,
     encode_script_exit/4,
     encode_error/3, encode_error/4, encode_error/5, encode_error/6,
     frames_metadata/1,
@@ -145,12 +145,39 @@ encode_result(Value, Msg, TermToJson, Output) ->
 -spec encode_result(term(), protocol_msg(), fun((term()) -> term()), binary(), [warning()]) ->
     binary().
 encode_result(Value, Msg, TermToJson, Output, Warnings) ->
+    encode_result(Value, Msg, TermToJson, Output, Warnings, fun(_) -> undefined end).
+
+-doc """
+Encode a successful result response carrying the optional top-level
+`value_type` tag (BT-4912).
+
+`ValueType` classifies the raw (pre-`TermToJson`) value as a binary tag such
+as `<<"string">>` or `<<"float">>`; clients use it to colour or format the
+rendered `value` without guessing from its text. The field is additive and
+optional: when `ValueType` returns `undefined` it is omitted, and clients
+fall back to inspecting `value`.
+""".
+-spec encode_result(
+    term(),
+    protocol_msg(),
+    fun((term()) -> term()),
+    binary(),
+    [warning()],
+    fun((term()) -> binary() | undefined)
+) -> binary().
+encode_result(Value, Msg, TermToJson, Output, Warnings, ValueType) ->
     JsonValue = TermToJson(Value),
     Base = base_response(Msg),
-    Full = Base#{<<"value">> => JsonValue, <<"status">> => [<<"done">>]},
+    Full = maybe_add_value_type(
+        Base#{<<"value">> => JsonValue, <<"status">> => [<<"done">>]}, ValueType(Value)
+    ),
     iolist_to_binary(
         json:encode(maybe_add_warnings(maybe_add_output(Full, Output), Warnings))
     ).
+
+-spec maybe_add_value_type(map(), binary() | undefined) -> map().
+maybe_add_value_type(Resp, undefined) -> Resp;
+maybe_add_value_type(Resp, Type) when is_binary(Type) -> Resp#{<<"value_type">> => Type}.
 
 -doc """
 Encode a connected-session `Program exit:` response(ADR 0099 §3).

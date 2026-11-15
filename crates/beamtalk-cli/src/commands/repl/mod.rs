@@ -85,7 +85,9 @@ pub mod bind;
 
 use bind::{resolve_bind_addr, validate_network_binding};
 use client::ReplClient;
-use display::{format_error, format_value, history_path, output_mode};
+#[cfg(test)]
+use display::format_value;
+use display::{format_error, history_path, output_mode};
 use helper::ReplHelper;
 use process::{
     BeamChildGuard, connect_with_retries, drain_child_stderr, read_port_from_child,
@@ -751,7 +753,10 @@ fn display_eval_response(response: &ReplResponse, raw_mfa: bool) {
             }
         }
     } else if let Some(ref value) = response.value {
-        println!("{}", format_value(value));
+        println!(
+            "{}",
+            display::format_value_typed(value, response.value_type.as_deref())
+        );
     }
 }
 

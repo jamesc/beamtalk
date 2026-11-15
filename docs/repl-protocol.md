@@ -92,6 +92,7 @@ For standalone BEAM nodes (no workspace), the default `~/.erlang.cookie` is used
 | `session` | string | Echoed from request (if provided) |
 | `status` | string[] | Status flags: `["done"]` for final message. Absent on intermediate streaming messages. |
 | `value` | any | Result value (for eval, clear, kill) |
+| `value_type` | string | Optional type tag for `value` on `eval` results (BT-4912): one of `string`, `integer`, `float`, `boolean`, `nil`, `symbol`, `character`, `list`, `block`, `actor`, `future`, `class`, `error`, `object` (a tagged value object). Additive: the protocol version stays `2.0`, and servers, ops that do not classify the value, and shapes with no useful tag (a plain Dictionary, a tuple) omit it. It describes the value, not the rendered text, so a user `printString` answering `3.14` is `object`, not `float`. Only the top-level value is tagged; the elements of a `list` are not. Clients that colour or format `value` should prefer the tag and fall back to inspecting `value` when it is absent or unrecognised (the CLI REPL does). |
 | `output` | string | Captured stdout from evaluation (omitted if empty). Present in the final message for backward compatibility. Streaming clients should prefer `out` messages. |
 | `out` | string | Streaming stdout chunk (BT-696). Sent as intermediate messages during eval, before the final `done` message. No `status` field. |
 | `error` | string | Error message (when status includes `"error"`) |

@@ -62,6 +62,16 @@ pub struct ReplResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<serde_json::Value>,
 
+    /// Optional type tag for `value` on eval results (BT-4912): `string`,
+    /// `integer`, `float`, `boolean`, `nil`, `symbol`, `character`, `list`,
+    /// `block`, `actor`, `future`, `class`, `error` or `object`. Additive:
+    /// absent from older servers and from ops that do not classify their
+    /// value. Clients that colour a value prefer it over inspecting the
+    /// rendered text. Only the top-level value is tagged; list elements are
+    /// not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_type: Option<String>,
+
     /// Captured stdout from evaluation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
