@@ -195,3 +195,29 @@ package_of_does_not_create_atoms_test() ->
     ),
     %% The package segment is a binary: no atom exists for it.
     ?assertError(badarg, binary_to_existing_atom(<<"bt4675_never_an_atom_pkg">>, utf8)).
+
+%%% ============================================================================
+%%% is_class_module/1, is_user_class_module/1 (BT-4902)
+%%% ============================================================================
+
+is_class_module_test() ->
+    ?assert(beamtalk_module_name:is_class_module('bt@counter')),
+    ?assert(beamtalk_module_name:is_class_module('bt@stdlib@integer')),
+    ?assert(beamtalk_module_name:is_class_module(<<"bt@pkg@thing">>)),
+    ?assertNot(beamtalk_module_name:is_class_module(lists)),
+    ?assertNot(beamtalk_module_name:is_class_module(beamtalk_actor)),
+    ?assertNot(beamtalk_module_name:is_class_module(<<"lists">>)),
+    ?assertNot(beamtalk_module_name:is_class_module("bt@x")),
+    ?assertNot(beamtalk_module_name:is_class_module(42)).
+
+is_user_class_module_test() ->
+    ?assert(beamtalk_module_name:is_user_class_module('bt@counter')),
+    ?assert(beamtalk_module_name:is_user_class_module('bt@pkg@thing')),
+    ?assertNot(beamtalk_module_name:is_user_class_module('bt@stdlib@integer')),
+    ?assertNot(beamtalk_module_name:is_user_class_module(lists)).
+
+is_user_class_module_binary_test() ->
+    ?assert(beamtalk_module_name:is_user_class_module(<<"bt@pkg@list">>)),
+    ?assertNot(beamtalk_module_name:is_user_class_module(<<"bt@stdlib@list">>)),
+    ?assertNot(beamtalk_module_name:is_user_class_module(<<"lists">>)),
+    ?assertNot(beamtalk_module_name:is_user_class_module(7)).

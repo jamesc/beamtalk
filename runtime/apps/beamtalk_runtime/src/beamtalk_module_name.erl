@@ -68,6 +68,8 @@ to this heuristic only when a module isn't a registered class.
     to_stdlib_module_atom/1,
     to_qualified_module_atom/2,
     is_stdlib_module/1,
+    is_class_module/1,
+    is_user_class_module/1,
     package_of/1,
     snake_to_class/1,
     repl_eval_module/1,
@@ -212,6 +214,29 @@ is_stdlib_module(Module) when is_atom(Module) ->
     end;
 is_stdlib_module(_) ->
     false.
+
+-doc """
+Whether a module atom (or module-name binary, so callers holding names need
+not create atoms) is a compiler-generated class module (`bt@` prefix), stdlib
+or not. Single source of truth for the `bt@` prefix check.
+""".
+-spec is_class_module(term()) -> boolean().
+is_class_module(Module) when is_atom(Module) ->
+    is_class_module(atom_to_binary(Module, utf8));
+is_class_module(<<"bt@", _/binary>>) ->
+    true;
+is_class_module(_) ->
+    false.
+
+-doc "Whether a module atom (or module-name binary) is a user-defined class module
+(`bt@` but not `bt@stdlib@`).".
+-spec is_user_class_module(term()) -> boolean().
+is_user_class_module(Module) when is_atom(Module) ->
+    is_user_class_module(atom_to_binary(Module, utf8));
+is_user_class_module(<<"bt@stdlib@", _/binary>>) ->
+    false;
+is_user_class_module(Name) ->
+    is_class_module(Name).
 
 %%====================================================================
 %% package_of/1

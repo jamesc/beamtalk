@@ -456,13 +456,13 @@ package_path(Module) ->
 class_segment(Module) ->
     %% The prefix test first: most loaded modules are OTP and runtime ones,
     %% and this runs over all of them.
-    case atom_to_binary(Module, utf8) of
-        <<"bt@", _/binary>> = Name ->
-            case binary:split(Name, <<"@">>, [global]) of
+    case beamtalk_module_name:is_class_module(Module) of
+        true ->
+            case binary:split(atom_to_binary(Module, utf8), <<"@">>, [global]) of
                 [_, _ | _] = Parts -> lists:last(Parts);
                 _ -> undefined
             end;
-        _ ->
+        false ->
             undefined
     end.
 
@@ -858,7 +858,7 @@ frame_file(_, _) ->
 
 -spec format_file_path(atom(), string()) -> string().
 format_file_path(Module, File) ->
-    case lists:prefix("bt@stdlib@", atom_to_list(Module)) of
+    case beamtalk_module_name:is_stdlib_module(Module) of
         true -> filename:basename(File);
         false -> make_relative(File)
     end.

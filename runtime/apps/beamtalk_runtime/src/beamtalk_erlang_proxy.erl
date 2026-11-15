@@ -167,18 +167,7 @@ dispatch(Selector, Args, Self) ->
                     validate_and_apply(Module, FunName, Args, Selector);
                 {error, FunStr} ->
                     %% Function name not in atom table — cannot be an export
-                    Error1 = beamtalk_error:new(does_not_understand, 'ErlangModule', Selector),
-                    Hint = iolist_to_binary([
-                        <<"This Erlang function does not exist. Check spelling and arity.">>
-                    ]),
-                    Error2 = beamtalk_error:with_hint(Error1, Hint),
-                    Error3 = beamtalk_error:with_details(Error2, #{
-                        module => Module,
-                        %% BT-4229: the name as typed is text, so a String.
-                        function => beamtalk_primitive:string_from_binary(FunStr),
-                        arity => length(Args)
-                    }),
-                    beamtalk_error:raise(Error3)
+                    raise_no_such_function(Module, FunStr, length(Args), Selector)
             end
     end.
 
@@ -797,6 +786,33 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
     apply_with_coercion(Module, FunName, Args, OrigSelector, none, coercion_mode(Module)).
 
 -doc """
+Raise `does_not_understand` for an Erlang function that does not exist.
+
+`FunName` is the name as an atom or as the UTF-8 binary typed by the caller.
+The `function` detail is always a `String` (BT-4229): the name is text, and
+both the not-in-atom-table and the not-exported paths report it identically.
+""".
+-spec raise_no_such_function(atom(), atom() | binary(), non_neg_integer(), atom()) -> no_return().
+raise_no_such_function(Module, FunName, Arity, Selector) ->
+    NameBin =
+        case is_atom(FunName) of
+            true -> atom_to_binary(FunName, utf8);
+            false -> FunName
+        end,
+    Error1 = beamtalk_error:new(does_not_understand, 'ErlangModule', Selector),
+    Error2 = beamtalk_error:with_hint(
+        Error1,
+        <<"This Erlang function does not exist. Check spelling and arity.">>
+    ),
+    beamtalk_error:raise(
+        beamtalk_error:with_details(Error2, #{
+            module => Module,
+            function => beamtalk_primitive:string_from_binary(NameBin),
+            arity => Arity
+        })
+    ).
+
+-doc """
 Raise an error for missing function or wrong arity.
 
 Used by `raise_missing_target/6` for inline FFI (`direct_call/3`, `validate_and_apply/4`).
@@ -808,18 +824,7 @@ raise_function_or_arity_error(Module, FunName, Arity, OrigSelector, Exports) ->
     MatchingArities = [A || {F, A} <- Exports, F =:= FunName],
     case MatchingArities of
         [] ->
-            Error1 = beamtalk_error:new(does_not_understand, 'ErlangModule', OrigSelector),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
-                <<"This Erlang function does not exist. Check spelling and arity.">>
-            ),
-            beamtalk_error:raise(
-                beamtalk_error:with_details(Error2, #{
-                    module => Module,
-                    function => FunName,
-                    arity => Arity
-                })
-            );
+            raise_no_such_function(Module, FunName, Arity, OrigSelector);
         _ ->
             %% Arity is the point of this hint, so name the target raw
             %% (`m:f/1, 2`), even when the target is a Beamtalk class module.
@@ -1344,8 +1349,8 @@ list results coerced from charlists to binaries.
 """.
 -spec is_beamtalk_module(atom()) -> boolean().
 is_beamtalk_module(Module) ->
-    ModStr = atom_to_list(Module),
-    lists:prefix("beamtalk_", ModStr) orelse lists:prefix("bt@", ModStr).
+    lists:prefix("beamtalk_", atom_to_list(Module)) orelse
+        beamtalk_module_name:is_class_module(Module).
 
 -doc """
 Coerce Erlang ok/error tuples to Beamtalk Result objects (ADR 0076).

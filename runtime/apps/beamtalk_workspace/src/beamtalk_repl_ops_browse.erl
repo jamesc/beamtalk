@@ -1120,10 +1120,7 @@ stdlib_fallback_native_modules(_App) ->
 %% True for an auto-generated `bt@{pkg}@{class}` class facade module atom.
 -spec is_bt_module(atom()) -> boolean().
 is_bt_module(Module) when is_atom(Module) ->
-    case atom_to_binary(Module, utf8) of
-        <<"bt@", _/binary>> -> true;
-        _ -> false
-    end.
+    beamtalk_module_name:is_class_module(Module).
 
 %% Origin of a package's native modules: `stdlib` for the stdlib app, else the
 %% project/dependency split from the package name vs the workspace's own package.

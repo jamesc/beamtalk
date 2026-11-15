@@ -118,8 +118,6 @@ should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKi
             end
     end;
 should_raise(Block, ExpectedKind) ->
-    Error0 = beamtalk_error:new(type_error, 'TestCase'),
-    Error1 = beamtalk_error:with_selector(Error0, 'should:raise:'),
     Message =
         case {is_function(Block, 0), is_atom(ExpectedKind)} of
             {false, _} ->
@@ -133,8 +131,7 @@ should_raise(Block, ExpectedKind) ->
                     ]
                 )
         end,
-    Error2 = beamtalk_error:with_message(Error1, Message),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error_message('TestCase', 'should:raise:', Message).
 
 -doc """
 Unconditionally fail with a message.
@@ -755,7 +752,7 @@ wrapped_entry(Wrapped) ->
         },
         1,
         beamtalk_stack_frame:frame_source_path(Wrapped),
-        is_stdlib_module(maps:get(module, Wrapped, undefined))
+        beamtalk_module_name:is_stdlib_module(maps:get(module, Wrapped, undefined))
     }.
 
 -doc """
@@ -822,12 +819,6 @@ collapse_repeats([]) ->
 collapse_repeats([{Line, Parts, N, Src, Std} | Rest]) ->
     {Same, Others} = lists:splitwith(fun({L, _, _, _, _}) -> L =:= Line end, Rest),
     [{Line, Parts, N + length(Same), Src, Std} | collapse_repeats(Others)].
-
--spec is_stdlib_module(term()) -> boolean().
-is_stdlib_module(Module) when is_atom(Module) ->
-    lists:prefix("bt@stdlib@", atom_to_list(Module));
-is_stdlib_module(_) ->
-    false.
 
 -doc """
 Select up to 3 representative frames from a filtered stacktrace.
