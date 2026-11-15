@@ -13,6 +13,8 @@ The macros that check message / hint text cannot be written as a pure
 pattern match, so they call `contains/2` here.
 """.
 
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
+
 -export([contains/2, raised_error/1]).
 
 -doc """
@@ -37,11 +39,11 @@ Run `Fun`; return the `#beamtalk_error{}` it raises (unwrapped from the
 Exception map), or `no_error` if it returns normally. For helpers that need
 the error value itself rather than an assertion.
 """.
--spec raised_error(fun(() -> term())) -> tuple() | no_error.
+-spec raised_error(fun(() -> term())) -> #beamtalk_error{} | no_error.
 raised_error(Fun) ->
     try
         _ = Fun(),
         no_error
     catch
-        error:#{error := {beamtalk_error, _, _, _, _, _, _} = Err} -> Err
+        error:#{error := #beamtalk_error{} = Err} -> Err
     end.
