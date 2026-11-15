@@ -1181,7 +1181,7 @@ impl InferredType {
     ///
     /// Used by the symbol-singleton arms of [`intersect`](Self::intersect) so
     /// `ProtoObject ∩ #foo` reduces to `#foo` instead of falling through to
-    /// the nominal arm (where `is_nominal_subtype(h, "#foo", "ProtoObject")`
+    /// the nominal arm (where `h.is_subclass_of("#foo", "ProtoObject")`
     /// is `false` — singletons are never hierarchy entries) and yielding a
     /// spurious `Never`. `Object` is already absorbed by the top-identity
     /// arms, so in practice the hierarchy case only fires for supertypes
@@ -1204,7 +1204,7 @@ impl InferredType {
         match ty {
             Self::Known { class_name, .. } => {
                 class_name == "Symbol"
-                    || hierarchy.is_some_and(|h| Self::is_nominal_subtype(h, "Symbol", class_name))
+                    || hierarchy.is_some_and(|h| h.is_subclass_of("Symbol", class_name))
             }
             _ => false,
         }
@@ -1397,7 +1397,7 @@ impl InferredType {
         protocol_registry: Option<&ProtocolRegistry>,
     ) -> Self {
         let is_dictionary = class_name == "Dictionary"
-            || hierarchy.is_some_and(|h| Self::is_nominal_subtype(h, "Dictionary", class_name));
+            || hierarchy.is_some_and(|h| h.is_subclass_of("Dictionary", class_name));
         if is_dictionary {
             shape.clone()
         } else if protocol_registry.is_some_and(|r| r.has_protocol(class_name)) {
@@ -1586,7 +1586,7 @@ impl InferredType {
             // Symbol-singleton membership: `#foo <: Symbol`, so the narrower
             // singleton is kept in both orders. Checked before the general
             // nominal case because singletons are not entries in the hierarchy
-            // — the nominal arm's `is_nominal_subtype(h, "#foo", …)` would
+            // — the nominal arm's `h.is_subclass_of("#foo", …)` would
             // always answer `false`. With a hierarchy, the same rule extends
             // to every nominal *supertype* of `Symbol` (e.g. `ProtoObject`):
             // `ProtoObject ∩ #foo = #foo`, matching the
@@ -1633,9 +1633,9 @@ impl InferredType {
             (Self::Known { class_name: an, .. }, Self::Known { class_name: bn, .. }) => {
                 match hierarchy {
                     Some(h) if an != bn => {
-                        if Self::is_nominal_subtype(h, bn, an) {
+                        if h.is_subclass_of(bn, an) {
                             b.clone()
-                        } else if Self::is_nominal_subtype(h, an, bn) {
+                        } else if h.is_subclass_of(an, bn) {
                             a.clone()
                         } else {
                             Self::Never
@@ -1706,20 +1706,6 @@ impl InferredType {
                 provenance,
             },
         }
-    }
-
-    /// Returns `true` if `sub` is `sup` or a (transitive) subclass of `sup` in
-    /// the nominal class hierarchy. Symbol singletons (`#foo`) are not entries in
-    /// the hierarchy, so this returns `false` for them (their membership is
-    /// handled by the explicit `Symbol`-singleton arms in
-    /// [`intersect`](Self::intersect)).
-    ///
-    /// The reflexive `sub == sup` short-circuit is unreachable from `intersect`
-    /// (its match arm guards on differing names) but is load-bearing for the
-    /// `:: Class` argument guard in `check_argument_types_impl` (BT-4599), where
-    /// an argument typed exactly `Class` must match.
-    pub(crate) fn is_nominal_subtype(hierarchy: &ClassHierarchy, sub: &str, sup: &str) -> bool {
-        sub == sup || hierarchy.superclass_chain(sub).iter().any(|c| c == sup)
     }
 
     /// Normalising **difference** `A \ B` (ADR 0102 §1, §5).
@@ -1826,10 +1812,10 @@ impl InferredType {
                     && hierarchy.is_some() =>
             {
                 let h = hierarchy.unwrap_or_else(|| unreachable!("checked by guard above"));
-                if Self::is_nominal_subtype(h, bn, an) {
+                if h.is_subclass_of(bn, an) {
                     // `B <: A` (proper, since `an != bn`).
                     Self::make_negation(a.clone(), b.clone(), provenance)
-                } else if Self::is_nominal_subtype(h, an, bn) {
+                } else if h.is_subclass_of(an, bn) {
                     // `A <: B` — every instance of `A` is also a `B`.
                     Self::Never
                 } else {

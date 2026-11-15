@@ -211,11 +211,7 @@ fn admits_nil_known_class(
     // `nil`'s nominal supertypes (`Object`, `ProtoObject`): the same chain
     // `is_assignable_to`/`is_type_compatible` walk to accept `nil` into an
     // `:: Object` slot.
-    if hierarchy
-        .superclass_chain(WellKnownClass::UndefinedObject.as_str())
-        .iter()
-        .any(|ancestor| ancestor == class_name)
-    {
+    if hierarchy.is_subclass_of(WellKnownClass::UndefinedObject.as_str(), class_name) {
         return true;
     }
     // A protocol `nil` provably satisfies admits `nil` as a value. A plain

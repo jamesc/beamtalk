@@ -733,10 +733,8 @@ pub fn receiver_statically_not_dictionary(
     self_is_dictionary: bool,
     hierarchy: &crate::semantic_analysis::ClassHierarchy,
 ) -> bool {
-    match receiver.unwrap_parens() {
-        Expression::Super(_) => return !self_is_dictionary,
-        Expression::Identifier(id) if id.name == "self" => return !self_is_dictionary,
-        _ => {}
+    if receiver.is_self() || matches!(receiver.unwrap_parens(), Expression::Super(_)) {
+        return !self_is_dictionary;
     }
     ty.is_some_and(|ty| excludes(ty, hierarchy))
 }
@@ -748,14 +746,8 @@ fn class_excludes_dictionary(
 ) -> bool {
     hierarchy.has_class(name)
         && name != "Dictionary"
-        && !hierarchy
-            .superclass_chain(name)
-            .iter()
-            .any(|c| c == "Dictionary")
-        && !hierarchy
-            .superclass_chain("Dictionary")
-            .iter()
-            .any(|c| c == name)
+        && !hierarchy.is_subclass_of(name, "Dictionary")
+        && !hierarchy.is_subclass_of("Dictionary", name)
 }
 /// [`class_excludes_dictionary`] over an inferred type.
 fn excludes(ty: &InferredType, hierarchy: &crate::semantic_analysis::ClassHierarchy) -> bool {

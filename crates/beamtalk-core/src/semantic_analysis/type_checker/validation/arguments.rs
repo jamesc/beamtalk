@@ -597,7 +597,7 @@ impl TypeChecker {
                     let class_shortcut_applies =
                         expected_structural.as_str() == "Class" && !is_class_ref_arg;
                     let instance_compat = if class_shortcut_applies {
-                        InferredType::is_nominal_subtype(hierarchy, actual_ty, "Class")
+                        hierarchy.is_subclass_of(actual_ty, "Class")
                     } else {
                         Self::is_type_compatible(actual_ty, &expected_structural, hierarchy)
                     };
@@ -1152,11 +1152,7 @@ impl TypeChecker {
         };
         let is_exception = |ty: Option<&InferredType>| {
             matches!(ty, Some(InferredType::Known { class_name, .. })
-                if class_name.as_str() == "Exception"
-                    || hierarchy
-                        .superclass_chain(class_name)
-                        .iter()
-                        .any(|s| s.as_str() == "Exception"))
+                if hierarchy.is_subclass_of(class_name, "Exception"))
         };
         let is_symbol_literal = |e: &Expression| {
             matches!(

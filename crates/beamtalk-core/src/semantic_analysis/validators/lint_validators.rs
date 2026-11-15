@@ -19,7 +19,7 @@ use crate::ast_walker::{
 };
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType, TypeMap};
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, MethodSide, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
 
@@ -319,13 +319,8 @@ pub fn check_effect_free_statements(
     if !skip_module_expression_lint {
         check_seq_for_effect_free(&module.expressions, diagnostics);
     }
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            check_seq_for_effect_free(&method.body, diagnostics);
-        }
-    }
-    for standalone in &module.method_definitions {
-        check_seq_for_effect_free(&standalone.method.body, diagnostics);
+    for method in module.all_methods() {
+        check_seq_for_effect_free(&method.body, diagnostics);
     }
 }
 
@@ -359,33 +354,16 @@ pub(crate) fn check_redundant_super_initialize(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for class in &module.classes {
-        let class_name = class.name.name.as_str();
-        if !hierarchy.is_actor_subclass(class_name) {
-            continue;
-        }
-        for method in &class.methods {
-            if !is_unary_initialize(&method.selector) {
-                continue;
-            }
+    // Instance-side only (inline and standalone Tonel-style definitions):
+    // class-side `initialize` is not auto-chained, so an explicit
+    // `super initialize` there is not redundant.
+    for (class_name, side, method) in module.methods_with_owner() {
+        if side == MethodSide::Instance
+            && hierarchy.is_actor_subclass(class_name)
+            && is_unary_initialize(&method.selector)
+        {
             check_method_body_for_super_initialize(&method.body, diagnostics);
         }
-    }
-    // Also check standalone (Tonel-style) method definitions — but only
-    // instance-side. Class-side `initialize` is not auto-chained, so an
-    // explicit `super initialize` there is not redundant.
-    for standalone in &module.method_definitions {
-        if standalone.is_class_method {
-            continue;
-        }
-        let class_name = standalone.class_name.name.as_str();
-        if !hierarchy.is_actor_subclass(class_name) {
-            continue;
-        }
-        if !is_unary_initialize(&standalone.method.selector) {
-            continue;
-        }
-        check_method_body_for_super_initialize(&standalone.method.body, diagnostics);
     }
 }
 
@@ -491,28 +469,12 @@ pub(crate) fn check_testcase_setup_drops_field_assignments(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for class in &module.classes {
-        let class_name = class.name.name.as_str();
-        if !hierarchy.is_testcase_subclass(class_name) {
-            continue;
-        }
-        for method in &class.methods {
-            if is_unary_setup(&method.selector) {
-                check_setup_body_returns_self(&method.body, diagnostics);
-            }
-        }
-    }
-    // Also check standalone (Tonel-style) method definitions.
-    for standalone in &module.method_definitions {
-        if standalone.is_class_method {
-            continue;
-        }
-        let class_name = standalone.class_name.name.as_str();
-        if !hierarchy.is_testcase_subclass(class_name) {
-            continue;
-        }
-        if is_unary_setup(&standalone.method.selector) {
-            check_setup_body_returns_self(&standalone.method.body, diagnostics);
+    for (class_name, side, method) in module.methods_with_owner() {
+        if side == MethodSide::Instance
+            && hierarchy.is_testcase_subclass(class_name)
+            && is_unary_setup(&method.selector)
+        {
+            check_setup_body_returns_self(&method.body, diagnostics);
         }
     }
 }

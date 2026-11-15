@@ -36,9 +36,7 @@ pub(crate) fn extract_variable_name(expr: &Expression) -> Option<EnvKey> {
         Expression::FieldAccess {
             receiver, field, ..
         } => {
-            if let Expression::Identifier(recv_id) = receiver.as_ref()
-                && recv_id.name == "self"
-            {
+            if receiver.is_self() {
                 return Some(EnvKey::self_field(field.name.clone()));
             }
             None

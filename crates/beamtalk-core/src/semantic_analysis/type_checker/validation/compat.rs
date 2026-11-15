@@ -141,10 +141,7 @@ impl TypeChecker {
             return true;
         }
         // Walk superclass chain: if expected is an ancestor of actual, it's compatible
-        let chain = hierarchy.superclass_chain(actual_base);
-        chain
-            .iter()
-            .any(|ancestor| ancestor.as_str() == expected_base)
+        hierarchy.is_subclass_of(actual_base, expected_base)
     }
 
     /// Is a *declared* return type `actual` an acceptable refinement of a
@@ -722,12 +719,7 @@ impl TypeChecker {
             return Self::type_args_match(value_type, declared_type, hierarchy);
         }
         // Check if value_type's base is a subclass of declared_type's base
-        let value_eco: EcoString = value_base.into();
-        let declared_eco: EcoString = declared_base.into();
-        hierarchy
-            .superclass_chain(&value_eco)
-            .iter()
-            .any(|ancestor| ancestor == &declared_eco)
+        hierarchy.is_subclass_of(value_base, declared_base)
     }
 
     /// Returns true if `value_type` is assignable to `declared_type` with

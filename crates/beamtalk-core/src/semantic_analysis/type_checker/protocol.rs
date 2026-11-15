@@ -98,7 +98,6 @@ impl TypeChecker {
         let receiver = send.receiver;
         let selector = send.selector;
         let arguments = send.arguments;
-        let span = &send.span;
         // Check if the receiver's method has protocol-typed params.
         // Instance-side receivers resolve against instance methods;
         // Meta (class object) receivers against class-side methods.
@@ -157,7 +156,7 @@ impl TypeChecker {
                                 self.check_protocol_argument_conformance(
                                     &arg_type,
                                     part,
-                                    *span,
+                                    send.span,
                                     hierarchy,
                                     protocol_registry,
                                 );
@@ -167,7 +166,7 @@ impl TypeChecker {
                         self.check_protocol_argument_conformance(
                             &arg_type,
                             &expected_ty,
-                            *span,
+                            send.span,
                             hierarchy,
                             protocol_registry,
                         );
@@ -580,7 +579,6 @@ impl TypeChecker {
         let receiver = send.receiver;
         let selector = send.selector;
         let arguments = send.arguments;
-        let span = &send.span;
         // Check if any argument has generic type args that need variance checking
         if let Some(receiver_type) = self.type_map.get(receiver.span())
             && let InferredType::Known {
@@ -694,7 +692,7 @@ impl TypeChecker {
                                     "Type arguments are not compatible: expected {expected_display}, got {arg_display}"
                                 );
                                 self.diagnostics.push(
-                                    Diagnostic::warning(message, *span)
+                                    Diagnostic::warning(message, send.span)
                                         .with_category(DiagnosticCategory::Type)
                                         .with_hint(hint),
                                 );

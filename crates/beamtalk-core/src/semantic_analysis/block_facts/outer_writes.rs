@@ -175,9 +175,7 @@ impl OuterWriteWalker<'_> {
     /// that takes `self` as a parameter (`[:self | self.n := ...]`, a
     /// class-builder method body) writes its own receiver's state instead.
     fn is_captured_self_field_write(&self, receiver: &Expression) -> bool {
-        self.blocks_entered > 0
-            && !self.bound_inside("self")
-            && matches!(receiver.unwrap_parens(), Expression::Identifier(r) if r.name == "self")
+        self.blocks_entered > 0 && !self.bound_inside("self") && receiver.is_self()
     }
 
     /// The target of an assignment at `span`: a local, a captured `self`'s
