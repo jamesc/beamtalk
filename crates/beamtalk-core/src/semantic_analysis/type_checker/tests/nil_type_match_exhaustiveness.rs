@@ -78,12 +78,13 @@ fn string_or_nil() -> InferredType {
 /// diagnostic produced by a plain `match:` (`exhaustive: false`).
 fn advisory_diagnostics(scrutinee_ty: InferredType, arms: Vec<MatchArm>) -> Vec<Diagnostic> {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    env.set_local("raw", scrutinee_ty);
+    let mut session = InferSession::new();
+    session.env.set_local("raw", scrutinee_ty);
     let expr = match_expr(false, var("raw"), arms);
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    checker
+
+    let _ = session.infer(&expr, &hierarchy);
+    session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("non-exhaustive"))
@@ -95,12 +96,11 @@ fn advisory_diagnostics(scrutinee_ty: InferredType, arms: Vec<MatchArm>) -> Vec<
 /// diagnostic produced by `matchExhaustive:` (`exhaustive: true`).
 fn asserted_diagnostics(scrutinee_ty: InferredType, arms: Vec<MatchArm>) -> Vec<Diagnostic> {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    env.set_local("raw", scrutinee_ty);
+
     let expr = match_expr(true, var("raw"), arms);
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    checker.diagnostics().to_vec()
+
+    let (_, diags) = infer_with_diags(&expr, &hierarchy, &[("raw", scrutinee_ty)]);
+    diags
 }
 
 // ── ADR 0107 headline example: `String | Nil` missing the `nil` arm ────
@@ -298,19 +298,21 @@ fn non_leaf_class_type_arm_is_not_closed() {
     let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
     let hierarchy = hierarchy.unwrap();
 
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "raw",
-        InferredType::simple_union(&["Shape", "UndefinedObject"]),
-    );
     let expr = match_expr(
         true,
         var("raw"),
         vec![nil_arm(int_lit(0)), type_arm("s", "Shape", var("s"))],
     );
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    let diags = checker.diagnostics();
+
+    let (_, diags) = infer_with_diags(
+        &expr,
+        &hierarchy,
+        &[(
+            "raw",
+            InferredType::simple_union(&["Shape", "UndefinedObject"]),
+        )],
+    );
+    let diags = diags;
     assert_eq!(diags.len(), 1, "expected one error, got: {diags:?}");
     assert_eq!(diags[0].severity, Severity::Error);
     assert!(
@@ -393,11 +395,9 @@ fn bare_generic_type_arm_narrows_to_the_parameterized_scrutinee() {
             type_arm("r", "Result", var("r")),
         ],
     ] {
-        let mut env = TypeEnv::new();
-        env.set_local("raw", scrutinee.clone());
         let expr = match_expr(false, var("raw"), arms);
-        let mut checker = TypeChecker::new();
-        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+        let ty = infer_with_locals(&expr, &hierarchy, &[("raw", scrutinee.clone())]);
         let InferredType::Known {
             class_name,
             type_args,

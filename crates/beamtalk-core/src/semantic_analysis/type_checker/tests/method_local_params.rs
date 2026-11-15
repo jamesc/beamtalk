@@ -68,41 +68,39 @@ fn method_local_params_block_regression() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_result_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "r",
-        InferredType::Known {
-            class_name: eco_string("GenResult"),
-            type_args: vec![
-                InferredType::known("Integer"),
-                InferredType::known("IOError"),
-            ],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
     // Simulate a block argument with type Block(Integer, String)
-    env.set_local(
-        "blk",
-        InferredType::Known {
-            class_name: eco_string("Block"),
-            type_args: vec![
-                InferredType::known("Integer"),
-                InferredType::known("String"),
-            ],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
 
-    let result_ty = checker.infer_expr(
+    let result_ty = infer_with_locals(
         &msg_send(
             var("r"),
             MessageSelector::Keyword(vec![KeywordPart::new("map:", span())]),
             vec![var("blk")],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[
+            (
+                "r",
+                InferredType::Known {
+                    class_name: eco_string("GenResult"),
+                    type_args: vec![
+                        InferredType::known("Integer"),
+                        InferredType::known("IOError"),
+                    ],
+                    provenance: TypeProvenance::Declared(span()),
+                },
+            ),
+            (
+                "blk",
+                InferredType::Known {
+                    class_name: eco_string("Block"),
+                    type_args: vec![
+                        InferredType::known("Integer"),
+                        InferredType::known("String"),
+                    ],
+                    provenance: TypeProvenance::Declared(span()),
+                },
+            ),
+        ],
     );
 
     // map: returns GenResult(R, E) where R=String (from block return type), E=IOError
@@ -138,30 +136,27 @@ fn method_local_params_from_result_type() {
     add_generic_result_class(&mut hierarchy);
     add_processor_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("p", InferredType::known("Processor"));
-    env.set_local(
-        "r",
-        InferredType::Known {
-            class_name: eco_string("GenResult"),
-            type_args: vec![
-                InferredType::known("Integer"),
-                InferredType::known("IOError"),
-            ],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
-    let result_ty = checker.infer_expr(
+    let result_ty = infer_with_locals(
         &msg_send(
             var("p"),
             MessageSelector::Keyword(vec![KeywordPart::new("processResult:", span())]),
             vec![var("r")],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[
+            ("p", InferredType::known("Processor")),
+            (
+                "r",
+                InferredType::Known {
+                    class_name: eco_string("GenResult"),
+                    type_args: vec![
+                        InferredType::known("Integer"),
+                        InferredType::known("IOError"),
+                    ],
+                    provenance: TypeProvenance::Declared(span()),
+                },
+            ),
+        ],
     );
 
     assert_eq!(
@@ -179,27 +174,24 @@ fn method_local_params_from_array_type() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_processor_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("p", InferredType::known("Processor"));
-    env.set_local(
-        "a",
-        InferredType::Known {
-            class_name: eco_string("Array"),
-            type_args: vec![InferredType::known("String")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
-    let result_ty = checker.infer_expr(
+    let result_ty = infer_with_locals(
         &msg_send(
             var("p"),
             MessageSelector::Keyword(vec![KeywordPart::new("processArray:", span())]),
             vec![var("a")],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[
+            ("p", InferredType::known("Processor")),
+            (
+                "a",
+                InferredType::Known {
+                    class_name: eco_string("Array"),
+                    type_args: vec![InferredType::known("String")],
+                    provenance: TypeProvenance::Declared(span()),
+                },
+            ),
+        ],
     );
 
     assert_eq!(

@@ -325,8 +325,7 @@ mod tests {
     use super::*;
     use crate::semantic_analysis::ClassHierarchy;
     use crate::source_analysis::Severity;
-    use crate::source_analysis::lex_with_eof;
-    use crate::source_analysis::parse;
+    use crate::test_helpers::test_support::parse_ok;
 
     // ── supervisionPolicy override validation ──────────────────────────────────
 
@@ -334,9 +333,7 @@ mod tests {
     #[test]
     fn supervision_policy_permanent_is_valid() {
         let src = "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #permanent\n  go => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_supervision_policy_override(&module, &mut diagnostics);
         assert!(
@@ -349,9 +346,7 @@ mod tests {
     #[test]
     fn supervision_policy_transient_is_valid() {
         let src = "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #transient\n  go => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_supervision_policy_override(&module, &mut diagnostics);
         assert!(
@@ -364,9 +359,7 @@ mod tests {
     #[test]
     fn supervision_policy_temporary_is_valid() {
         let src = "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #temporary\n  go => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_supervision_policy_override(&module, &mut diagnostics);
         assert!(
@@ -380,9 +373,7 @@ mod tests {
     fn supervision_policy_invalid_symbol_is_error() {
         let src =
             "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => #restart\n  go => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_supervision_policy_override(&module, &mut diagnostics);
         assert_eq!(
@@ -402,9 +393,7 @@ mod tests {
     #[test]
     fn supervision_policy_multi_expr_body_is_skipped() {
         let src = "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol =>\n    x := #invalid\n    x\n  go => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_supervision_policy_override(&module, &mut diagnostics);
         assert!(
@@ -419,9 +408,7 @@ mod tests {
     #[test]
     fn children_actor_without_policy_warns() {
         let src = "Actor subclass: Worker\n  go => nil\nSupervisor subclass: MySup\n  childSpecs => #(Worker)";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -443,9 +430,7 @@ mod tests {
     #[test]
     fn children_actor_with_policy_no_warning() {
         let src = "Actor subclass: Worker\n  class supervisionPolicy -> Symbol => #permanent\n  go => nil\nSupervisor subclass: MySup\n  childSpecs => #(Worker)";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -463,9 +448,7 @@ mod tests {
     #[test]
     fn standalone_supervision_policy_valid_symbol_no_diagnostics() {
         let src = "Actor subclass: MyActor\n  go => nil\nMyActor class >> supervisionPolicy -> Symbol => #permanent";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_supervision_policy_override(&module, &mut diagnostics);
         assert!(
@@ -479,9 +462,7 @@ mod tests {
     #[test]
     fn standalone_supervision_policy_invalid_symbol_is_error() {
         let src = "Actor subclass: MyActor\n  go => nil\nMyActor class >> supervisionPolicy -> Symbol => #restart";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_supervision_policy_override(&module, &mut diagnostics);
         assert_eq!(
@@ -497,9 +478,7 @@ mod tests {
     #[test]
     fn supervision_policy_non_symbol_single_expr_body_is_skipped() {
         let src = "Actor subclass: MyActor\n  class supervisionPolicy -> Symbol => 42\n  go => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_supervision_policy_override(&module, &mut diagnostics);
         assert!(
@@ -513,9 +492,7 @@ mod tests {
     #[test]
     fn non_children_class_method_is_skipped() {
         let src = "Supervisor subclass: MySup\n  other => 1";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -535,9 +512,7 @@ mod tests {
     #[test]
     fn standalone_children_method_actor_without_policy_warns() {
         let src = "Actor subclass: Worker\n  go => nil\nObject subclass: Other\n  go2 => nil\nSupervisor subclass: MySup\n  go3 => nil\nMySup class >> classHelper => nil\nOther >> childSpecs => #(Worker)\nMySup >> notChildSpecs => #(Worker)\nMySup >> childSpecs => #(Worker)";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -561,9 +536,7 @@ mod tests {
     #[test]
     fn children_non_literal_body_is_ignored() {
         let src = "Supervisor subclass: MySup\n  childSpecs => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -580,9 +553,7 @@ mod tests {
     #[test]
     fn children_list_mixed_element_kinds() {
         let src = "Actor subclass: Worker\n  go => nil\nObject subclass: PlainClass\n  go => nil\nSupervisor subclass: MySup\n  childSpecs => #(1, worker, PlainClass, Worker)";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -602,9 +573,7 @@ mod tests {
     // ── removed class-side supervisor configuration (ADR 0135 §2) ──────────────
 
     fn class_side_config_diagnostics(src: &str) -> Vec<Diagnostic> {
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -713,9 +682,7 @@ mod tests {
         for superclass in ["Supervisor", "DynamicSupervisor"] {
             for selector in ["isAlive", "stop"] {
                 let src = format!("{superclass} subclass: MySup\n  {selector} => nil");
-                let tokens = lex_with_eof(&src);
-                let (module, parse_diags) = parse(tokens);
-                assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+                let module = parse_ok(&src);
                 let (_, diagnostics) = ClassHierarchy::build(&module);
                 assert_eq!(diagnostics.len(), 1, "{src}: {diagnostics:?}");
                 let diag = &diagnostics[0];

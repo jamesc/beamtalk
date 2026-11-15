@@ -1094,6 +1094,7 @@ mod tests {
     use crate::source_analysis::Severity;
     use crate::source_analysis::lex_with_eof;
     use crate::source_analysis::parse;
+    use crate::test_helpers::test_support::parse_ok;
 
     // ── Effect-free statement tests ────────────────────────────────────────────
 
@@ -1101,9 +1102,7 @@ mod tests {
     #[test]
     fn single_literal_in_method_no_lint() {
         let src = "Object subclass: Foo\n  bar => 42";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_effect_free_statements(&module, &mut diagnostics, false);
         assert!(
@@ -1116,9 +1115,7 @@ mod tests {
     #[test]
     fn literal_non_last_statement_emits_lint() {
         let src = "Object subclass: Foo\n  bar =>\n    42\n    self doSomething";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_effect_free_statements(&module, &mut diagnostics, false);
         assert_eq!(
@@ -1142,9 +1139,7 @@ mod tests {
     #[test]
     fn string_literal_non_last_emits_lint() {
         let src = "Object subclass: Foo\n  bar =>\n    \"hello\"\n    self doSomething";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_effect_free_statements(&module, &mut diagnostics, false);
         assert_eq!(
@@ -1159,9 +1154,7 @@ mod tests {
     #[test]
     fn pure_binary_expr_non_last_emits_lint() {
         let src = "Object subclass: Foo\n  bar: x and: y =>\n    x + y\n    self doSomething";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_effect_free_statements(&module, &mut diagnostics, false);
         assert_eq!(
@@ -1181,9 +1174,7 @@ mod tests {
     #[test]
     fn effectful_send_no_lint() {
         let src = "Object subclass: Foo\n  bar =>\n    self doSomething\n    self doOtherThing";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_effect_free_statements(&module, &mut diagnostics, false);
         assert!(
@@ -1196,9 +1187,7 @@ mod tests {
     #[test]
     fn literal_in_block_non_last_emits_lint() {
         let src = "Object subclass: Foo\n  bar => [42. self doSomething] value";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_effect_free_statements(&module, &mut diagnostics, false);
         assert_eq!(
@@ -1213,9 +1202,7 @@ mod tests {
     #[test]
     fn multiple_effect_free_stmts_emit_multiple_lints() {
         let src = "Object subclass: Foo\n  bar =>\n    42\n    \"hello\"\n    self doSomething";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_effect_free_statements(&module, &mut diagnostics, false);
         assert_eq!(
@@ -1229,9 +1216,7 @@ mod tests {
     #[test]
     fn module_level_effect_free_linted_by_default() {
         let src = "42.\nself doSomething";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_effect_free_statements(&module, &mut diagnostics, false);
         assert_eq!(
@@ -1246,9 +1231,7 @@ mod tests {
     #[test]
     fn module_level_effect_free_skipped_with_flag() {
         let src = "42.\nself doSomething";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_effect_free_statements(&module, &mut diagnostics, true);
         assert!(
@@ -1261,9 +1244,7 @@ mod tests {
     #[test]
     fn standalone_method_effect_free_emits_lint() {
         let src = "Object subclass: Foo\nFoo >> bar =>\n  42\n  self doSomething";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         assert_eq!(
             module.method_definitions.len(),
             1,
@@ -1284,9 +1265,7 @@ mod tests {
     #[test]
     fn redundant_assignment_top_level_warns() {
         let src = "x := 1.\nx := x";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_redundant_assignment(&module, &mut diagnostics);
         assert_eq!(
@@ -1311,9 +1290,7 @@ mod tests {
     #[test]
     fn non_redundant_assignment_no_warn() {
         let src = "x := 1.\ny := 2.\nx := y";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_redundant_assignment(&module, &mut diagnostics);
         assert!(
@@ -1326,9 +1303,7 @@ mod tests {
     #[test]
     fn redundant_assignment_in_method_warns() {
         let src = "Object subclass: Foo\n  withX: x => x := x";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_redundant_assignment(&module, &mut diagnostics);
         assert_eq!(
@@ -1343,9 +1318,7 @@ mod tests {
     #[test]
     fn redundant_assignment_in_block_warns() {
         let src = "Object subclass: Foo\n  withX: x => [x := x] value";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_redundant_assignment(&module, &mut diagnostics);
         assert_eq!(
@@ -1361,9 +1334,7 @@ mod tests {
     #[test]
     fn field_access_assignment_not_flagged_as_redundant() {
         let src = "Object subclass: Foo\n  state: x = 0\n  noOp => self.x := self.x";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_redundant_assignment(&module, &mut diagnostics);
         assert!(
@@ -1376,9 +1347,7 @@ mod tests {
     #[test]
     fn redundant_assignment_in_standalone_method_warns() {
         let src = "Object subclass: Foo\n  value => 1\nFoo >> withX: x => x := x";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_redundant_assignment(&module, &mut diagnostics);
         assert_eq!(
@@ -1395,9 +1364,7 @@ mod tests {
     #[test]
     fn literal_true_if_true_warns() {
         let src = "true ifTrue: [42]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_literal_boolean_condition(&module, &mut diagnostics);
         assert_eq!(
@@ -1417,9 +1384,7 @@ mod tests {
     #[test]
     fn literal_false_if_false_warns() {
         let src = "false ifFalse: [42]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_literal_boolean_condition(&module, &mut diagnostics);
         assert_eq!(
@@ -1439,9 +1404,7 @@ mod tests {
     #[test]
     fn literal_true_if_false_warns() {
         let src = "true ifFalse: [42]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_literal_boolean_condition(&module, &mut diagnostics);
         assert_eq!(
@@ -1461,9 +1424,7 @@ mod tests {
     #[test]
     fn literal_false_if_true_warns() {
         let src = "false ifTrue: [42]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_literal_boolean_condition(&module, &mut diagnostics);
         assert_eq!(
@@ -1483,9 +1444,7 @@ mod tests {
     #[test]
     fn literal_true_if_true_if_false_warns() {
         let src = "true ifTrue: [1] ifFalse: [2]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_literal_boolean_condition(&module, &mut diagnostics);
         assert_eq!(
@@ -1513,9 +1472,7 @@ mod tests {
     #[test]
     fn literal_false_if_true_if_false_warns() {
         let src = "false ifTrue: [1] ifFalse: [2]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_literal_boolean_condition(&module, &mut diagnostics);
         assert_eq!(
@@ -1544,9 +1501,7 @@ mod tests {
     #[test]
     fn parenthesized_literal_true_if_true_warns() {
         let src = "(true) ifTrue: [42]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_literal_boolean_condition(&module, &mut diagnostics);
         assert_eq!(
@@ -1566,9 +1521,7 @@ mod tests {
     #[test]
     fn non_literal_receiver_no_warn() {
         let src = "x := true.\nx ifTrue: [42]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_literal_boolean_condition(&module, &mut diagnostics);
         assert!(
@@ -1581,9 +1534,7 @@ mod tests {
     #[test]
     fn non_conditional_selector_no_warn() {
         let src = "true printString";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_literal_boolean_condition(&module, &mut diagnostics);
         assert!(
@@ -1596,9 +1547,7 @@ mod tests {
     #[test]
     fn literal_bool_condition_in_method_warns() {
         let src = "Object subclass: Foo\n  run => true ifFalse: [42]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_literal_boolean_condition(&module, &mut diagnostics);
         assert_eq!(
@@ -1613,9 +1562,7 @@ mod tests {
     #[test]
     fn literal_bool_condition_in_block_warns() {
         let src = "Object subclass: Foo\n  run => [false ifTrue: [1]] value";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_literal_boolean_condition(&module, &mut diagnostics);
         assert_eq!(
@@ -1631,9 +1578,7 @@ mod tests {
     #[test]
     fn literal_bool_cascade_warns_for_each_message() {
         let src = "true ifTrue: [1]; ifFalse: [2]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_literal_boolean_condition(&module, &mut diagnostics);
         assert_eq!(

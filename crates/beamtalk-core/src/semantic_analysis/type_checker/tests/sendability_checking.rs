@@ -175,14 +175,6 @@ fn spawn_with_sendable_value_silent() {
 
 // --- @expect sendability suppression ---
 
-/// Parse `src`, build its hierarchy, run the full diagnostic pipeline
-/// (type check + `@expect` suppression via `apply_expect_directives`).
-fn check_source_with_expect(src: &str) -> Vec<Diagnostic> {
-    let module = parse_source(src);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-}
-
 #[test]
 fn expect_sendability_suppresses_actor_message_warning() {
     // A `Port` passed in an actor message is a sendability Warning (boundary #1,
@@ -197,7 +189,7 @@ fn expect_sendability_suppresses_actor_message_warning() {
         Object subclass: Main\n  \
         run: port :: Port with: worker :: Worker =>\n    \
         worker use: port\n";
-    let diags_without = check_source_with_expect(bare);
+    let diags_without = diags_with_expect(bare);
     assert_eq!(
         sendability_warnings(&diags_without).len(),
         1,
@@ -212,7 +204,7 @@ fn expect_sendability_suppresses_actor_message_warning() {
         run: port :: Port with: worker :: Worker =>\n    \
         @expect sendability\n    \
         worker use: port\n";
-    let diags_with = check_source_with_expect(suppressed);
+    let diags_with = diags_with_expect(suppressed);
     assert!(
         sendability_warnings(&diags_with).is_empty(),
         "@expect sendability must suppress the actor-message warning, got: {diags_with:?}"
