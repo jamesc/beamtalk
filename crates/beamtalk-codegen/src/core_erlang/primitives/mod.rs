@@ -320,50 +320,105 @@ pub(crate) fn doc_to_string(doc: Option<Document<'_>>) -> Option<String> {
     doc.map(|d| d.to_pretty_string())
 }
 
+/// A primitive generator under test: `(selector, params) -> Option<Document>`.
+#[cfg(test)]
+type BifGen = fn(&str, &[String]) -> Option<Document<'static>>;
+
+#[cfg(test)]
+fn owned_params(params: &[&str]) -> Vec<String> {
+    params.iter().map(|p| (*p).to_string()).collect()
+}
+
+/// Shared report for the table drivers: panics listing every failed row.
+#[cfg(test)]
+fn assert_no_row_failures(failures: &[String]) {
+    assert!(
+        failures.is_empty(),
+        "{} row(s) failed:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// Table driver (BT-4875): each row is `(name, selector, params, expected)`
+/// and asserts `gen(selector, params)` renders exactly `expected`. `name` is
+/// the former one-assert test's name, so a failing row is as easy to find as
+/// a failing test was. Every row runs; all mismatches are reported together.
+#[cfg(test)]
+pub(crate) fn assert_bif_table(generate: BifGen, rows: &[(&str, &str, &[&str], &str)]) {
+    let failures: Vec<String> = rows
+        .iter()
+        .filter_map(|(name, selector, params, expected)| {
+            let actual = doc_to_string(generate(selector, &owned_params(params)));
+            (actual.as_deref() != Some(*expected)).then(|| {
+                format!("[{name}] {selector} {params:?}\n  expected: {expected:?}\n  actual:   {actual:?}")
+            })
+        })
+        .collect();
+    assert_no_row_failures(&failures);
+}
+
+/// Table driver for selectors the generator must decline (`None`):
+/// rows are `(name, selector, params)`.
+#[cfg(test)]
+pub(crate) fn assert_bif_none_table(generate: BifGen, rows: &[(&str, &str, &[&str])]) {
+    let failures: Vec<String> = rows
+        .iter()
+        .filter_map(|(name, selector, params)| {
+            let actual = doc_to_string(generate(selector, &owned_params(params)));
+            actual.map(|a| {
+                format!("[{name}] {selector} {params:?}\n  expected: None\n  actual:   {a:?}")
+            })
+        })
+        .collect();
+    assert_no_row_failures(&failures);
+}
+
+/// Like [`assert_bif_table`] for [`generate_primitive_bif`], which also
+/// dispatches on class: rows are `(name, class, selector, params, expected)`.
+#[cfg(test)]
+pub(crate) fn assert_primitive_bif_table(rows: &[(&str, &str, &str, &[&str], &str)]) {
+    let failures: Vec<String> = rows
+        .iter()
+        .filter_map(|(name, class, selector, params, expected)| {
+            let actual = doc_to_string(generate_primitive_bif(
+                class,
+                selector,
+                &owned_params(params),
+            ));
+            (actual.as_deref() != Some(*expected)).then(|| {
+                format!("[{name}] {class}>>{selector} {params:?}\n  expected: {expected:?}\n  actual:   {actual:?}")
+            })
+        })
+        .collect();
+    assert_no_row_failures(&failures);
+}
+
+/// Like [`assert_bif_none_table`] for [`generate_primitive_bif`]:
+/// rows are `(name, class, selector, params)`.
+#[cfg(test)]
+pub(crate) fn assert_primitive_bif_none_table(rows: &[(&str, &str, &str, &[&str])]) {
+    let failures: Vec<String> = rows
+        .iter()
+        .filter_map(|(name, class, selector, params)| {
+            let actual = doc_to_string(generate_primitive_bif(
+                class,
+                selector,
+                &owned_params(params),
+            ));
+            actual.map(|a| {
+                format!(
+                    "[{name}] {class}>>{selector} {params:?}\n  expected: None\n  actual:   {a:?}"
+                )
+            })
+        })
+        .collect();
+    assert_no_row_failures(&failures);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_integer_plus() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "+",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'+'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_modulo() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "%",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'rem'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_as_string() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "asString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'integer_to_binary'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_length() {
-        let result = doc_to_string(generate_primitive_bif("String", "length", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'string':'length'(call 'beamtalk_primitive':'string_to_binary'(Self))"
-                    .to_string()
-            )
-        );
-    }
 
     #[test]
     fn test_string_concat() {
@@ -377,22 +432,6 @@ mod tests {
     }
 
     #[test]
-    fn test_unknown_class() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Counter",
-            "+",
-            &["Other".to_string()],
-        ));
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_unknown_selector() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "unknownMethod", &[]));
-        assert!(result.is_none());
-    }
-
-    #[test]
     fn test_proto_object_dnu_raises_error() {
         let result = doc_to_string(generate_primitive_bif(
             "ProtoObject",
@@ -403,70 +442,6 @@ mod tests {
         assert!(output.contains("'does_not_understand'"));
         assert!(output.contains("beamtalk_error':'with_selector'"));
         assert!(output.contains("beamtalk_error':'raise'"));
-    }
-
-    #[test]
-    fn test_float_as_string() {
-        let result = doc_to_string(generate_primitive_bif("Float", "asString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'float_to_binary'(Self, ['short']))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_float_rounded() {
-        let result = doc_to_string(generate_primitive_bif("Float", "rounded", &[]));
-        assert_eq!(result, Some("call 'erlang':'round'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_float_ceiling() {
-        let result = doc_to_string(generate_primitive_bif("Float", "ceiling", &[]));
-        assert_eq!(result, Some("call 'erlang':'ceil'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_float_floor() {
-        let result = doc_to_string(generate_primitive_bif("Float", "floor", &[]));
-        assert_eq!(result, Some("call 'erlang':'floor'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_float_truncated() {
-        let result = doc_to_string(generate_primitive_bif("Float", "truncated", &[]));
-        assert_eq!(result, Some("call 'erlang':'trunc'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_float_as_integer() {
-        let result = doc_to_string(generate_primitive_bif("Float", "asInteger", &[]));
-        assert_eq!(result, Some("call 'erlang':'trunc'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_symbol_as_string() {
-        let result = doc_to_string(generate_primitive_bif("Symbol", "asString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'atom_to_binary'(Self, 'utf8'))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_symbol_as_atom() {
-        let result = doc_to_string(generate_primitive_bif("Symbol", "asAtom", &[]));
-        assert_eq!(result, Some("Self".to_string()));
-    }
-
-    #[test]
-    fn test_symbol_equality() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Symbol",
-            "=:=",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'=:='(Self, Other)".to_string()));
     }
 
     #[test]
@@ -487,221 +462,6 @@ mod tests {
     }
 
     #[test]
-    fn test_symbol_hash() {
-        let result = doc_to_string(generate_primitive_bif("Symbol", "hash", &[]));
-        assert_eq!(result, Some("call 'erlang':'phash2'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_symbol_print_string() {
-        let result = doc_to_string(generate_primitive_bif("Symbol", "printString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_list_concat() {
-        let result = doc_to_string(generate_primitive_bif("List", "++", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'++'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_list_from_to() {
-        let result = doc_to_string(generate_primitive_bif(
-            "List",
-            "from:to:",
-            &["Start".to_string(), "End".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_list':'from_to'(Self, Start, End)".to_string())
-        );
-    }
-
-    // Character primitive tests
-
-    #[test]
-    fn test_character_as_integer() {
-        let result = doc_to_string(generate_primitive_bif("Character", "asInteger", &[]));
-        assert_eq!(result, Some("Self".to_string()));
-    }
-
-    #[test]
-    fn test_character_as_string() {
-        let result = doc_to_string(generate_primitive_bif("Character", "asString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_character':'as_string'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_character_print_string() {
-        let result = doc_to_string(generate_primitive_bif("Character", "printString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_character':'print_string'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_character_equality() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Character",
-            "=:=",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'=:='(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_character_is_letter() {
-        let result = doc_to_string(generate_primitive_bif("Character", "isLetter", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_letter'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_character_is_digit() {
-        let result = doc_to_string(generate_primitive_bif("Character", "isDigit", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_digit'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_character_value_factory() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Character",
-            "value:",
-            &["CP".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'value'(CP)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_character_hash() {
-        let result = doc_to_string(generate_primitive_bif("Character", "hash", &[]));
-        assert_eq!(result, Some("call 'erlang':'phash2'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_character_is_uppercase() {
-        let result = doc_to_string(generate_primitive_bif("Character", "isUppercase", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_uppercase'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_character_is_lowercase() {
-        let result = doc_to_string(generate_primitive_bif("Character", "isLowercase", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_lowercase'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_character_is_whitespace() {
-        let result = doc_to_string(generate_primitive_bif("Character", "isWhitespace", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_whitespace'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_character_uppercase() {
-        let result = doc_to_string(generate_primitive_bif("Character", "uppercase", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'to_uppercase'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_character_lowercase() {
-        let result = doc_to_string(generate_primitive_bif("Character", "lowercase", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'to_lowercase'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_character_comparison() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Character",
-            "<",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'<'(Self, Other)".to_string()));
-    }
-
-    // Pid primitive tests
-
-    #[test]
-    fn test_pid_is_alive() {
-        let result = doc_to_string(generate_primitive_bif("Pid", "isAlive", &[]));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'is_process_alive'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_pid_kill() {
-        let result = doc_to_string(generate_primitive_bif("Pid", "kill", &[]));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'exit'(Self, 'kill')".to_string())
-        );
-    }
-
-    #[test]
-    fn test_pid_exit() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Pid",
-            "exit:",
-            &["Reason".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'exit'(Self, Reason)".to_string())
-        );
-    }
-
-    // Integer character predicate tests
-
-    #[test]
-    fn test_integer_is_letter() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "isLetter", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_letter'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_integer_is_digit() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "isDigit", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_digit'(Self)".to_string())
-        );
-    }
-
-    #[test]
     fn test_call_self_p0_renders_correctly() {
         let doc = call_self_p0("beamtalk_list", "detect", "Block");
         assert_eq!(
@@ -714,1442 +474,6 @@ mod tests {
     fn test_call_p0_self_renders_correctly() {
         let doc = call_p0_self("lists", "map", "Block");
         assert_eq!(doc.to_pretty_string(), "call 'lists':'map'(Block, Self)");
-    }
-
-    // Array primitive tests
-
-    #[test]
-    fn test_array_size() {
-        let result = doc_to_string(generate_primitive_bif("Array", "size", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_array':'size'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_array_is_empty() {
-        let result = doc_to_string(generate_primitive_bif("Array", "isEmpty", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_array':'is_empty'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_array_do() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Array",
-            "do:",
-            &["Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_array':'do'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_array_at() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Array",
-            "at:",
-            &["Index".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_array':'at'(Self, Index)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_array_at_put() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Array",
-            "at:put:",
-            &["Index".to_string(), "Value".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_array':'at_put'(Self, Index, Value)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_array_with_all() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Array",
-            "withAll:",
-            &["List".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_array':'from_list'(List)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_array_collect() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Array",
-            "collect:",
-            &["Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_array':'collect'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_array_select() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Array",
-            "select:",
-            &["Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_array':'select'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_array_inject_into() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Array",
-            "inject:into:",
-            &["Init".to_string(), "Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_array':'inject_into'(Self, Init, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_array_includes() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Array",
-            "includes:",
-            &["Elem".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_array':'includes'(Self, Elem)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_array_print_string() {
-        let result = doc_to_string(generate_primitive_bif("Array", "printString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_array':'print_string'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_array_unknown_selector() {
-        let result = doc_to_string(generate_primitive_bif("Array", "notAMethod", &[]));
-        assert!(result.is_none());
-    }
-
-    // Dictionary primitive tests
-
-    #[test]
-    fn test_dictionary_size() {
-        let result = doc_to_string(generate_primitive_bif("Dictionary", "size", &[]));
-        assert_eq!(result, Some("call 'erlang':'map_size'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_dictionary_keys() {
-        let result = doc_to_string(generate_primitive_bif("Dictionary", "keys", &[]));
-        assert_eq!(result, Some("call 'maps':'keys'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_dictionary_values() {
-        let result = doc_to_string(generate_primitive_bif("Dictionary", "values", &[]));
-        assert_eq!(result, Some("call 'maps':'values'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_dictionary_at() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Dictionary",
-            "at:",
-            &["Key".to_string()],
-        ));
-        assert_eq!(result, Some("call 'maps':'get'(Key, Self)".to_string()));
-    }
-
-    #[test]
-    fn test_dictionary_at_if_absent() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Dictionary",
-            "at:ifAbsent:",
-            &["Key".to_string(), "Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_map':'at_if_absent'(Self, Key, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_dictionary_at_if_present() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Dictionary",
-            "at:ifPresent:",
-            &["Key".to_string(), "Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_map':'at_if_present'(Self, Key, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_dictionary_at_if_present_if_absent() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Dictionary",
-            "at:ifPresent:ifAbsent:",
-            &[
-                "Key".to_string(),
-                "Present".to_string(),
-                "Absent".to_string(),
-            ],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_map':'at_if_present_if_absent'(Self, Key, Present, Absent)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_dictionary_at_put() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Dictionary",
-            "at:put:",
-            &["Key".to_string(), "Value".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'maps':'put'(Key, Value, Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_dictionary_includes_key() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Dictionary",
-            "includesKey:",
-            &["Key".to_string()],
-        ));
-        assert_eq!(result, Some("call 'maps':'is_key'(Key, Self)".to_string()));
-    }
-
-    #[test]
-    fn test_dictionary_remove_key() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Dictionary",
-            "removeKey:",
-            &["Key".to_string()],
-        ));
-        assert_eq!(result, Some("call 'maps':'remove'(Key, Self)".to_string()));
-    }
-
-    #[test]
-    fn test_dictionary_merge() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Dictionary",
-            "merge:",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'maps':'merge'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_dictionary_do_with_key() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Dictionary",
-            "doWithKey:",
-            &["Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_map':'do_with_key'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_dictionary_do() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Dictionary",
-            "do:",
-            &["Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_map':'do'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_dictionary_includes() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Dictionary",
-            "includes:",
-            &["Elem".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_map':'includes'(Self, Elem)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_dictionary_print_string() {
-        let result = doc_to_string(generate_primitive_bif("Dictionary", "printString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_map':'print_string'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_dictionary_unknown_selector() {
-        let result = doc_to_string(generate_primitive_bif("Dictionary", "notAMethod", &[]));
-        assert!(result.is_none());
-    }
-
-    // String primitive tests — transform group
-
-    #[test]
-    fn test_string_at() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "at:",
-            &["Index".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'at'(Self, Index)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_uppercase() {
-        let result = doc_to_string(generate_primitive_bif("String", "uppercase", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'uppercase'(call 'beamtalk_primitive':'string_to_binary'(Self))))"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_string_lowercase() {
-        let result = doc_to_string(generate_primitive_bif("String", "lowercase", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'lowercase'(call 'beamtalk_primitive':'string_to_binary'(Self))))"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_string_capitalize() {
-        let result = doc_to_string(generate_primitive_bif("String", "capitalize", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'capitalize'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_trim() {
-        let result = doc_to_string(generate_primitive_bif("String", "trim", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'trim'(call 'beamtalk_primitive':'string_to_binary'(Self), 'both')))"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_string_trim_left() {
-        let result = doc_to_string(generate_primitive_bif("String", "trimLeft", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'trim'(call 'beamtalk_primitive':'string_to_binary'(Self), 'leading')))"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_string_trim_right() {
-        let result = doc_to_string(generate_primitive_bif("String", "trimRight", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'trim'(call 'beamtalk_primitive':'string_to_binary'(Self), 'trailing')))"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_string_reverse() {
-        let result = doc_to_string(generate_primitive_bif("String", "reverse", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'reverse'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_comma_concat() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            ",",
-            &["Other".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'iolist_to_binary'([call 'beamtalk_primitive':'string_to_binary'(Self), call 'beamtalk_primitive':'string_to_binary'(Other)]))".to_string())
-        );
-    }
-
-    // String primitive tests — search group
-
-    #[test]
-    fn test_string_includes() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "includes:",
-            &["Sub".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'includes'(Self, Sub)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_starts_with() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "startsWith:",
-            &["Prefix".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'starts_with'(Self, Prefix)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_ends_with() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "endsWith:",
-            &["Suffix".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'ends_with'(Self, Suffix)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_index_of() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "indexOf:",
-            &["Sub".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'index_of'(Self, Sub)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_split() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "split:",
-            &["Sep".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'split'(Self, Sep)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_split_on() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "splitOn:",
-            &["Sep".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'split_on'(Self, Sep)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_repeat() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "repeat:",
-            &["N".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'repeat'(Self, N)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_lines() {
-        let result = doc_to_string(generate_primitive_bif("String", "lines", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'lines'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_words() {
-        let result = doc_to_string(generate_primitive_bif("String", "words", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'words'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_replace_all_with() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "replaceAll:with:",
-            &["Pat".to_string(), "Repl".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'binary':'replace'(call 'beamtalk_primitive':'string_to_binary'(Self), call 'beamtalk_primitive':'string_to_binary'(Pat), call 'beamtalk_primitive':'string_to_binary'(Repl), ['global']))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_replace_first_with() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "replaceFirst:with:",
-            &["Pat".to_string(), "Repl".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'binary':'replace'(call 'beamtalk_primitive':'string_to_binary'(Self), call 'beamtalk_primitive':'string_to_binary'(Pat), call 'beamtalk_primitive':'string_to_binary'(Repl), []))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_take() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "take:",
-            &["N".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'take'(Self, N)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_drop() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "drop:",
-            &["N".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'drop'(Self, N)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_pad_left() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "padLeft:",
-            &["N".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'pad'(call 'beamtalk_primitive':'string_to_binary'(Self), N, 'leading')))"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_string_pad_right() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "padRight:",
-            &["N".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'pad'(call 'beamtalk_primitive':'string_to_binary'(Self), N, 'trailing')))"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_string_pad_left_with() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "padLeft:with:",
-            &["N".to_string(), "Ch".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'pad'(call 'beamtalk_primitive':'string_to_binary'(Self), N, 'leading', call 'beamtalk_primitive':'string_to_binary'(Ch))))"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_string_pad_right_with() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "padRight:with:",
-            &["N".to_string(), "Ch".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'pad'(call 'beamtalk_primitive':'string_to_binary'(Self), N, 'trailing', call 'beamtalk_primitive':'string_to_binary'(Ch))))"
-                    .to_string()
-            )
-        );
-    }
-
-    // String primitive tests — misc group
-
-    #[test]
-    fn test_string_is_blank() {
-        let result = doc_to_string(generate_primitive_bif("String", "isBlank", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'is_blank'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_is_digit() {
-        let result = doc_to_string(generate_primitive_bif("String", "isDigit", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'is_digit'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_is_alpha() {
-        let result = doc_to_string(generate_primitive_bif("String", "isAlpha", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'is_alpha'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_as_integer() {
-        let result = doc_to_string(generate_primitive_bif("String", "asInteger", &[]));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'binary_to_integer'(call 'beamtalk_primitive':'string_to_binary'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_as_float() {
-        let result = doc_to_string(generate_primitive_bif("String", "asFloat", &[]));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'binary_to_float'(call 'beamtalk_primitive':'string_to_binary'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_as_atom() {
-        let result = doc_to_string(generate_primitive_bif("String", "asAtom", &[]));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'binary_to_atom'(call 'beamtalk_primitive':'string_to_binary'(Self), 'utf8')".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_as_list() {
-        let result = doc_to_string(generate_primitive_bif("String", "asList", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'as_list'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_each() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "each:",
-            &["Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'each'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_collect() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "collect:",
-            &["Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'collect'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_select() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "select:",
-            &["Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'select'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_reject() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "reject:",
-            &["Block".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'reject'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_stream() {
-        let result = doc_to_string(generate_primitive_bif("String", "stream", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_stream':'on'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_with_all_factory() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "withAll:",
-            &["List".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'join'(List)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_from_code_point_factory() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "fromCodePoint:",
-            &["CP".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'from_code_point'(CP)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_from_code_points_factory() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "fromCodePoints:",
-            &["CPs".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'from_code_points'(CPs)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_from_iolist_factory() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "fromIolist:",
-            &["IoList".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'from_iolist'(IoList)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_unknown_selector() {
-        let result = doc_to_string(generate_primitive_bif("String", "notAStringMethod", &[]));
-        assert!(result.is_none());
-    }
-
-    // String primitive tests — comparison group
-
-    #[test]
-    fn test_string_equality() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "=:=",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'=:='(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_string_not_equal() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "/=",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'/='(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_string_strict_not_equal() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "=/=",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'=/='(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_string_less_than() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "<",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'<'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_string_greater_than() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            ">",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'>'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_string_less_than_or_equal() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "<=",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'=<'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_string_greater_than_or_equal() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            ">=",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'>='(Self, Other)".to_string()));
-    }
-
-    // String primitive tests — regex group
-
-    #[test]
-    fn test_string_matches_regex() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "matchesRegex:",
-            &["Pat".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_regex':'matches_regex'(Self, Pat)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_matches_regex_options() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "matchesRegex:options:",
-            &["Pat".to_string(), "Opts".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_regex':'matches_regex_options'(Self, Pat, Opts)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_first_match() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "firstMatch:",
-            &["Pat".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_regex':'first_match'(Self, Pat)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_all_matches() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "allMatches:",
-            &["Pat".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_regex':'all_matches'(Self, Pat)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_replace_regex_with() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "replaceRegex:with:",
-            &["Pat".to_string(), "Repl".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_regex':'replace_regex'(Self, Pat, Repl)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_replace_all_regex_with() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "replaceAllRegex:with:",
-            &["Pat".to_string(), "Repl".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_regex':'replace_all_regex'(Self, Pat, Repl)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_string_split_regex() {
-        let result = doc_to_string(generate_primitive_bif(
-            "String",
-            "splitRegex:",
-            &["Pat".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_regex':'split_regex'(Self, Pat)".to_string())
-        );
-    }
-
-    // CompiledMethod primitive tests
-
-    #[test]
-    fn test_compiled_method_selector() {
-        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "selector", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_compiled_method_ops':'dispatch'('selector', [], Self)".to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_compiled_method_source() {
-        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "source", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_compiled_method_ops':'dispatch'('source', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_compiled_method_doc() {
-        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "doc", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_compiled_method_ops':'dispatch'('doc', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_compiled_method_argument_count() {
-        let result = doc_to_string(generate_primitive_bif(
-            "CompiledMethod",
-            "argumentCount",
-            &[],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_compiled_method_ops':'dispatch'('argumentCount', [], Self)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_compiled_method_origin() {
-        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "origin", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_compiled_method_ops':'dispatch'('origin', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_compiled_method_print_string() {
-        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "printString", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_compiled_method_ops':'dispatch'('printString', [], Self)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_compiled_method_as_string() {
-        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "asString", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_compiled_method_ops':'dispatch'('asString', [], Self)".to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_compiled_method_unknown_selector() {
-        let result = doc_to_string(generate_primitive_bif("CompiledMethod", "notAMethod", &[]));
-        assert!(result.is_none());
-    }
-
-    // Integer arithmetic — remaining ops
-
-    #[test]
-    fn test_integer_minus() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "-",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'-'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_multiply() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "*",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'*'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_divide() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "/",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'/'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_integer_divide() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "div:",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'div'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_power() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "**",
-            &["Other".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'erlang':'round'(call 'math':'pow'(\
-                 call 'erlang':'float'(Self), call 'erlang':'float'(Other)))"
-                    .to_string()
-            )
-        );
-    }
-
-    // Integer comparisons — all 7 operators
-
-    #[test]
-    fn test_integer_eq() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "=:=",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'=:='(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_neq() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "/=",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'/='(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_strict_neq() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "=/=",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'=/='(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_lt() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "<",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'<'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_gt() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            ">",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'>'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_le() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "<=",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'=<'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_ge() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            ">=",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'>='(Self, Other)".to_string()));
-    }
-
-    // Integer conversions — asFloat and printString
-
-    #[test]
-    fn test_integer_as_float() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "asFloat", &[]));
-        assert_eq!(result, Some("call 'erlang':'float'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_print_string() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "printString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'integer_to_binary'(Self))".to_string())
-        );
-    }
-
-    // Integer bitwise operations
-
-    #[test]
-    fn test_integer_bit_and() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "bitAnd:",
-            &["Other".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'band'(Self, Other)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_integer_bit_or() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "bitOr:",
-            &["Other".to_string()],
-        ));
-        assert_eq!(result, Some("call 'erlang':'bor'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_bit_xor() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "bitXor:",
-            &["Other".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'bxor'(Self, Other)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_integer_bit_not() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "bitNot", &[]));
-        assert_eq!(result, Some("call 'erlang':'bnot'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_integer_bit_shift() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "bitShift:",
-            &["N".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "case call 'erlang':'>='(N, 0) of \
-                 'true' when 'true' -> call 'erlang':'bsl'(Self, N) \
-                 'false' when 'true' -> call 'erlang':'bsr'(Self, call 'erlang':'-'(0, N)) end"
-                    .to_string()
-            )
-        );
-    }
-
-    // Integer character predicates — remaining three
-
-    #[test]
-    fn test_integer_is_uppercase() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "isUppercase", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_uppercase'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_integer_is_lowercase() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "isLowercase", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_lowercase'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_integer_is_whitespace() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "isWhitespace", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_whitespace'(Self)".to_string())
-        );
-    }
-
-    // Integer math functions
-
-    #[test]
-    fn test_integer_sqrt() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "sqrt", &[]));
-        assert_eq!(
-            result,
-            Some("call 'math':'sqrt'(call 'erlang':'float'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_integer_log() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "log", &[]));
-        assert_eq!(
-            result,
-            Some("call 'math':'log'(call 'erlang':'float'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_integer_ln() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "ln", &[]));
-        assert_eq!(
-            result,
-            Some("call 'math':'log'(call 'erlang':'float'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_integer_log2() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "log2", &[]));
-        assert_eq!(
-            result,
-            Some("call 'math':'log2'(call 'erlang':'float'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_integer_log10() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "log10", &[]));
-        assert_eq!(
-            result,
-            Some("call 'math':'log10'(call 'erlang':'float'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_integer_exp() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "exp", &[]));
-        assert_eq!(
-            result,
-            Some("call 'math':'exp'(call 'erlang':'float'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_integer_raised_to() {
-        let result = doc_to_string(generate_primitive_bif(
-            "Integer",
-            "raisedTo:",
-            &["Exp".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "case call 'erlang':'is_integer'(Exp) of \
-                 'true' when 'true' -> \
-                   case call 'erlang':'>='(Exp, 0) of \
-                     'true' when 'true' -> \
-                       call 'erlang':'round'(call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(Exp))) \
-                     'false' when 'true' -> \
-                       call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(Exp)) \
-                   end \
-                 'false' when 'true' -> \
-                   call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(Exp)) \
-               end"
-                    .to_string()
-            )
-        );
-    }
-
-    // Integer edge cases
-
-    #[test]
-    fn test_integer_unknown_selector() {
-        let result = doc_to_string(generate_primitive_bif("Integer", "notAMethod", &[]));
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_integer_binary_op_missing_param() {
-        // binary_bif returns None when params is empty (uses `?` on params.first())
-        let result = doc_to_string(generate_primitive_bif("Integer", "+", &[]));
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_integer_power_missing_param() {
-        // power_bif returns None when params is empty
-        let result = doc_to_string(generate_primitive_bif("Integer", "**", &[]));
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_integer_bit_shift_missing_param() {
-        // bitShift: returns None when params is empty
-        let result = doc_to_string(generate_primitive_bif("Integer", "bitShift:", &[]));
-        assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_integer_raised_to_missing_param() {
-        // raisedTo: returns None when params is empty
-        let result = doc_to_string(generate_primitive_bif("Integer", "raisedTo:", &[]));
-        assert!(result.is_none());
     }
 
     #[test]
@@ -2477,5 +801,1166 @@ mod tests {
                 "REFLECTION_FACADES entry `{facade}` is stale: remove it"
             );
         }
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // one contiguous table; splitting hurts readability
+    fn generate_primitive_bif_table() {
+        assert_primitive_bif_table(&[
+            (
+                "test_integer_plus",
+                "Integer",
+                "+",
+                &["Other"],
+                "call 'erlang':'+'(Self, Other)",
+            ),
+            (
+                "test_integer_modulo",
+                "Integer",
+                "%",
+                &["Other"],
+                "call 'erlang':'rem'(Self, Other)",
+            ),
+            (
+                "test_integer_as_string",
+                "Integer",
+                "asString",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'integer_to_binary'(Self))",
+            ),
+            (
+                "test_string_length",
+                "String",
+                "length",
+                &[],
+                "call 'string':'length'(call 'beamtalk_primitive':'string_to_binary'(Self))",
+            ),
+            (
+                "test_float_as_string",
+                "Float",
+                "asString",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'float_to_binary'(Self, ['short']))",
+            ),
+            (
+                "test_float_rounded",
+                "Float",
+                "rounded",
+                &[],
+                "call 'erlang':'round'(Self)",
+            ),
+            (
+                "test_float_ceiling",
+                "Float",
+                "ceiling",
+                &[],
+                "call 'erlang':'ceil'(Self)",
+            ),
+            (
+                "test_float_floor",
+                "Float",
+                "floor",
+                &[],
+                "call 'erlang':'floor'(Self)",
+            ),
+            (
+                "test_float_truncated",
+                "Float",
+                "truncated",
+                &[],
+                "call 'erlang':'trunc'(Self)",
+            ),
+            (
+                "test_float_as_integer",
+                "Float",
+                "asInteger",
+                &[],
+                "call 'erlang':'trunc'(Self)",
+            ),
+            (
+                "test_symbol_as_string",
+                "Symbol",
+                "asString",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'atom_to_binary'(Self, 'utf8'))",
+            ),
+            ("test_symbol_as_atom", "Symbol", "asAtom", &[], "Self"),
+            (
+                "test_symbol_equality",
+                "Symbol",
+                "=:=",
+                &["Other"],
+                "call 'erlang':'=:='(Self, Other)",
+            ),
+            (
+                "test_symbol_hash",
+                "Symbol",
+                "hash",
+                &[],
+                "call 'erlang':'phash2'(Self)",
+            ),
+            (
+                "test_symbol_print_string",
+                "Symbol",
+                "printString",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))",
+            ),
+            (
+                "test_list_concat",
+                "List",
+                "++",
+                &["Other"],
+                "call 'erlang':'++'(Self, Other)",
+            ),
+            (
+                "test_list_from_to",
+                "List",
+                "from:to:",
+                &["Start", "End"],
+                "call 'beamtalk_list':'from_to'(Self, Start, End)",
+            ),
+            // Character primitive tests
+            (
+                "test_character_as_integer",
+                "Character",
+                "asInteger",
+                &[],
+                "Self",
+            ),
+            (
+                "test_character_as_string",
+                "Character",
+                "asString",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_character':'as_string'(Self))",
+            ),
+            (
+                "test_character_print_string",
+                "Character",
+                "printString",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_character':'print_string'(Self))",
+            ),
+            (
+                "test_character_equality",
+                "Character",
+                "=:=",
+                &["Other"],
+                "call 'erlang':'=:='(Self, Other)",
+            ),
+            (
+                "test_character_is_letter",
+                "Character",
+                "isLetter",
+                &[],
+                "call 'beamtalk_character':'is_letter'(Self)",
+            ),
+            (
+                "test_character_is_digit",
+                "Character",
+                "isDigit",
+                &[],
+                "call 'beamtalk_character':'is_digit'(Self)",
+            ),
+            (
+                "test_character_value_factory",
+                "Character",
+                "value:",
+                &["CP"],
+                "call 'beamtalk_character':'value'(CP)",
+            ),
+            (
+                "test_character_hash",
+                "Character",
+                "hash",
+                &[],
+                "call 'erlang':'phash2'(Self)",
+            ),
+            (
+                "test_character_is_uppercase",
+                "Character",
+                "isUppercase",
+                &[],
+                "call 'beamtalk_character':'is_uppercase'(Self)",
+            ),
+            (
+                "test_character_is_lowercase",
+                "Character",
+                "isLowercase",
+                &[],
+                "call 'beamtalk_character':'is_lowercase'(Self)",
+            ),
+            (
+                "test_character_is_whitespace",
+                "Character",
+                "isWhitespace",
+                &[],
+                "call 'beamtalk_character':'is_whitespace'(Self)",
+            ),
+            (
+                "test_character_uppercase",
+                "Character",
+                "uppercase",
+                &[],
+                "call 'beamtalk_character':'to_uppercase'(Self)",
+            ),
+            (
+                "test_character_lowercase",
+                "Character",
+                "lowercase",
+                &[],
+                "call 'beamtalk_character':'to_lowercase'(Self)",
+            ),
+            (
+                "test_character_comparison",
+                "Character",
+                "<",
+                &["Other"],
+                "call 'erlang':'<'(Self, Other)",
+            ),
+            // Pid primitive tests
+            (
+                "test_pid_is_alive",
+                "Pid",
+                "isAlive",
+                &[],
+                "call 'erlang':'is_process_alive'(Self)",
+            ),
+            (
+                "test_pid_kill",
+                "Pid",
+                "kill",
+                &[],
+                "call 'erlang':'exit'(Self, 'kill')",
+            ),
+            (
+                "test_pid_exit",
+                "Pid",
+                "exit:",
+                &["Reason"],
+                "call 'erlang':'exit'(Self, Reason)",
+            ),
+            // Integer character predicate tests
+            (
+                "test_integer_is_letter",
+                "Integer",
+                "isLetter",
+                &[],
+                "call 'beamtalk_character':'is_letter'(Self)",
+            ),
+            (
+                "test_integer_is_digit",
+                "Integer",
+                "isDigit",
+                &[],
+                "call 'beamtalk_character':'is_digit'(Self)",
+            ),
+            // Array primitive tests
+            (
+                "test_array_size",
+                "Array",
+                "size",
+                &[],
+                "call 'beamtalk_array':'size'(Self)",
+            ),
+            (
+                "test_array_is_empty",
+                "Array",
+                "isEmpty",
+                &[],
+                "call 'beamtalk_array':'is_empty'(Self)",
+            ),
+            (
+                "test_array_do",
+                "Array",
+                "do:",
+                &["Block"],
+                "call 'beamtalk_array':'do'(Self, Block)",
+            ),
+            (
+                "test_array_at",
+                "Array",
+                "at:",
+                &["Index"],
+                "call 'beamtalk_array':'at'(Self, Index)",
+            ),
+            (
+                "test_array_at_put",
+                "Array",
+                "at:put:",
+                &["Index", "Value"],
+                "call 'beamtalk_array':'at_put'(Self, Index, Value)",
+            ),
+            (
+                "test_array_with_all",
+                "Array",
+                "withAll:",
+                &["List"],
+                "call 'beamtalk_array':'from_list'(List)",
+            ),
+            (
+                "test_array_collect",
+                "Array",
+                "collect:",
+                &["Block"],
+                "call 'beamtalk_array':'collect'(Self, Block)",
+            ),
+            (
+                "test_array_select",
+                "Array",
+                "select:",
+                &["Block"],
+                "call 'beamtalk_array':'select'(Self, Block)",
+            ),
+            (
+                "test_array_inject_into",
+                "Array",
+                "inject:into:",
+                &["Init", "Block"],
+                "call 'beamtalk_array':'inject_into'(Self, Init, Block)",
+            ),
+            (
+                "test_array_includes",
+                "Array",
+                "includes:",
+                &["Elem"],
+                "call 'beamtalk_array':'includes'(Self, Elem)",
+            ),
+            (
+                "test_array_print_string",
+                "Array",
+                "printString",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_array':'print_string'(Self))",
+            ),
+            // Dictionary primitive tests
+            (
+                "test_dictionary_size",
+                "Dictionary",
+                "size",
+                &[],
+                "call 'erlang':'map_size'(Self)",
+            ),
+            (
+                "test_dictionary_keys",
+                "Dictionary",
+                "keys",
+                &[],
+                "call 'maps':'keys'(Self)",
+            ),
+            (
+                "test_dictionary_values",
+                "Dictionary",
+                "values",
+                &[],
+                "call 'maps':'values'(Self)",
+            ),
+            (
+                "test_dictionary_at",
+                "Dictionary",
+                "at:",
+                &["Key"],
+                "call 'maps':'get'(Key, Self)",
+            ),
+            (
+                "test_dictionary_at_if_absent",
+                "Dictionary",
+                "at:ifAbsent:",
+                &["Key", "Block"],
+                "call 'beamtalk_map':'at_if_absent'(Self, Key, Block)",
+            ),
+            (
+                "test_dictionary_at_if_present",
+                "Dictionary",
+                "at:ifPresent:",
+                &["Key", "Block"],
+                "call 'beamtalk_map':'at_if_present'(Self, Key, Block)",
+            ),
+            (
+                "test_dictionary_at_if_present_if_absent",
+                "Dictionary",
+                "at:ifPresent:ifAbsent:",
+                &["Key", "Present", "Absent"],
+                "call 'beamtalk_map':'at_if_present_if_absent'(Self, Key, Present, Absent)",
+            ),
+            (
+                "test_dictionary_at_put",
+                "Dictionary",
+                "at:put:",
+                &["Key", "Value"],
+                "call 'maps':'put'(Key, Value, Self)",
+            ),
+            (
+                "test_dictionary_includes_key",
+                "Dictionary",
+                "includesKey:",
+                &["Key"],
+                "call 'maps':'is_key'(Key, Self)",
+            ),
+            (
+                "test_dictionary_remove_key",
+                "Dictionary",
+                "removeKey:",
+                &["Key"],
+                "call 'maps':'remove'(Key, Self)",
+            ),
+            (
+                "test_dictionary_merge",
+                "Dictionary",
+                "merge:",
+                &["Other"],
+                "call 'maps':'merge'(Self, Other)",
+            ),
+            (
+                "test_dictionary_do_with_key",
+                "Dictionary",
+                "doWithKey:",
+                &["Block"],
+                "call 'beamtalk_map':'do_with_key'(Self, Block)",
+            ),
+            (
+                "test_dictionary_do",
+                "Dictionary",
+                "do:",
+                &["Block"],
+                "call 'beamtalk_map':'do'(Self, Block)",
+            ),
+            (
+                "test_dictionary_includes",
+                "Dictionary",
+                "includes:",
+                &["Elem"],
+                "call 'beamtalk_map':'includes'(Self, Elem)",
+            ),
+            (
+                "test_dictionary_print_string",
+                "Dictionary",
+                "printString",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_map':'print_string'(Self))",
+            ),
+            // String primitive tests — transform group
+            (
+                "test_string_at",
+                "String",
+                "at:",
+                &["Index"],
+                "call 'beamtalk_string':'at'(Self, Index)",
+            ),
+            (
+                "test_string_uppercase",
+                "String",
+                "uppercase",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'uppercase'(call 'beamtalk_primitive':'string_to_binary'(Self))))",
+            ),
+            (
+                "test_string_lowercase",
+                "String",
+                "lowercase",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'lowercase'(call 'beamtalk_primitive':'string_to_binary'(Self))))",
+            ),
+            (
+                "test_string_capitalize",
+                "String",
+                "capitalize",
+                &[],
+                "call 'beamtalk_string':'capitalize'(Self)",
+            ),
+            (
+                "test_string_trim",
+                "String",
+                "trim",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'trim'(call 'beamtalk_primitive':'string_to_binary'(Self), 'both')))",
+            ),
+            (
+                "test_string_trim_left",
+                "String",
+                "trimLeft",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'trim'(call 'beamtalk_primitive':'string_to_binary'(Self), 'leading')))",
+            ),
+            (
+                "test_string_trim_right",
+                "String",
+                "trimRight",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'trim'(call 'beamtalk_primitive':'string_to_binary'(Self), 'trailing')))",
+            ),
+            (
+                "test_string_reverse",
+                "String",
+                "reverse",
+                &[],
+                "call 'beamtalk_string':'reverse'(Self)",
+            ),
+            (
+                "test_string_comma_concat",
+                "String",
+                ",",
+                &["Other"],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'iolist_to_binary'([call 'beamtalk_primitive':'string_to_binary'(Self), call 'beamtalk_primitive':'string_to_binary'(Other)]))",
+            ),
+            // String primitive tests — search group
+            (
+                "test_string_includes",
+                "String",
+                "includes:",
+                &["Sub"],
+                "call 'beamtalk_string':'includes'(Self, Sub)",
+            ),
+            (
+                "test_string_starts_with",
+                "String",
+                "startsWith:",
+                &["Prefix"],
+                "call 'beamtalk_string':'starts_with'(Self, Prefix)",
+            ),
+            (
+                "test_string_ends_with",
+                "String",
+                "endsWith:",
+                &["Suffix"],
+                "call 'beamtalk_string':'ends_with'(Self, Suffix)",
+            ),
+            (
+                "test_string_index_of",
+                "String",
+                "indexOf:",
+                &["Sub"],
+                "call 'beamtalk_string':'index_of'(Self, Sub)",
+            ),
+            (
+                "test_string_split",
+                "String",
+                "split:",
+                &["Sep"],
+                "call 'beamtalk_string':'split'(Self, Sep)",
+            ),
+            (
+                "test_string_split_on",
+                "String",
+                "splitOn:",
+                &["Sep"],
+                "call 'beamtalk_string':'split_on'(Self, Sep)",
+            ),
+            (
+                "test_string_repeat",
+                "String",
+                "repeat:",
+                &["N"],
+                "call 'beamtalk_string':'repeat'(Self, N)",
+            ),
+            (
+                "test_string_lines",
+                "String",
+                "lines",
+                &[],
+                "call 'beamtalk_string':'lines'(Self)",
+            ),
+            (
+                "test_string_words",
+                "String",
+                "words",
+                &[],
+                "call 'beamtalk_string':'words'(Self)",
+            ),
+            (
+                "test_string_replace_all_with",
+                "String",
+                "replaceAll:with:",
+                &["Pat", "Repl"],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'binary':'replace'(call 'beamtalk_primitive':'string_to_binary'(Self), call 'beamtalk_primitive':'string_to_binary'(Pat), call 'beamtalk_primitive':'string_to_binary'(Repl), ['global']))",
+            ),
+            (
+                "test_string_replace_first_with",
+                "String",
+                "replaceFirst:with:",
+                &["Pat", "Repl"],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'binary':'replace'(call 'beamtalk_primitive':'string_to_binary'(Self), call 'beamtalk_primitive':'string_to_binary'(Pat), call 'beamtalk_primitive':'string_to_binary'(Repl), []))",
+            ),
+            (
+                "test_string_take",
+                "String",
+                "take:",
+                &["N"],
+                "call 'beamtalk_string':'take'(Self, N)",
+            ),
+            (
+                "test_string_drop",
+                "String",
+                "drop:",
+                &["N"],
+                "call 'beamtalk_string':'drop'(Self, N)",
+            ),
+            (
+                "test_string_pad_left",
+                "String",
+                "padLeft:",
+                &["N"],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'pad'(call 'beamtalk_primitive':'string_to_binary'(Self), N, 'leading')))",
+            ),
+            (
+                "test_string_pad_right",
+                "String",
+                "padRight:",
+                &["N"],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'pad'(call 'beamtalk_primitive':'string_to_binary'(Self), N, 'trailing')))",
+            ),
+            (
+                "test_string_pad_left_with",
+                "String",
+                "padLeft:with:",
+                &["N", "Ch"],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'pad'(call 'beamtalk_primitive':'string_to_binary'(Self), N, 'leading', call 'beamtalk_primitive':'string_to_binary'(Ch))))",
+            ),
+            (
+                "test_string_pad_right_with",
+                "String",
+                "padRight:with:",
+                &["N", "Ch"],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'unicode':'characters_to_binary'(call 'string':'pad'(call 'beamtalk_primitive':'string_to_binary'(Self), N, 'trailing', call 'beamtalk_primitive':'string_to_binary'(Ch))))",
+            ),
+            // String primitive tests — misc group
+            (
+                "test_string_is_blank",
+                "String",
+                "isBlank",
+                &[],
+                "call 'beamtalk_string':'is_blank'(Self)",
+            ),
+            (
+                "test_string_is_digit",
+                "String",
+                "isDigit",
+                &[],
+                "call 'beamtalk_string':'is_digit'(Self)",
+            ),
+            (
+                "test_string_is_alpha",
+                "String",
+                "isAlpha",
+                &[],
+                "call 'beamtalk_string':'is_alpha'(Self)",
+            ),
+            (
+                "test_string_as_integer",
+                "String",
+                "asInteger",
+                &[],
+                "call 'erlang':'binary_to_integer'(call 'beamtalk_primitive':'string_to_binary'(Self))",
+            ),
+            (
+                "test_string_as_float",
+                "String",
+                "asFloat",
+                &[],
+                "call 'erlang':'binary_to_float'(call 'beamtalk_primitive':'string_to_binary'(Self))",
+            ),
+            (
+                "test_string_as_atom",
+                "String",
+                "asAtom",
+                &[],
+                "call 'erlang':'binary_to_atom'(call 'beamtalk_primitive':'string_to_binary'(Self), 'utf8')",
+            ),
+            (
+                "test_string_as_list",
+                "String",
+                "asList",
+                &[],
+                "call 'beamtalk_string':'as_list'(Self)",
+            ),
+            (
+                "test_string_each",
+                "String",
+                "each:",
+                &["Block"],
+                "call 'beamtalk_string':'each'(Self, Block)",
+            ),
+            (
+                "test_string_collect",
+                "String",
+                "collect:",
+                &["Block"],
+                "call 'beamtalk_string':'collect'(Self, Block)",
+            ),
+            (
+                "test_string_select",
+                "String",
+                "select:",
+                &["Block"],
+                "call 'beamtalk_string':'select'(Self, Block)",
+            ),
+            (
+                "test_string_reject",
+                "String",
+                "reject:",
+                &["Block"],
+                "call 'beamtalk_string':'reject'(Self, Block)",
+            ),
+            (
+                "test_string_stream",
+                "String",
+                "stream",
+                &[],
+                "call 'beamtalk_stream':'on'(Self)",
+            ),
+            (
+                "test_string_with_all_factory",
+                "String",
+                "withAll:",
+                &["List"],
+                "call 'beamtalk_string':'join'(List)",
+            ),
+            (
+                "test_string_from_code_point_factory",
+                "String",
+                "fromCodePoint:",
+                &["CP"],
+                "call 'beamtalk_string':'from_code_point'(CP)",
+            ),
+            (
+                "test_string_from_code_points_factory",
+                "String",
+                "fromCodePoints:",
+                &["CPs"],
+                "call 'beamtalk_string':'from_code_points'(CPs)",
+            ),
+            (
+                "test_string_from_iolist_factory",
+                "String",
+                "fromIolist:",
+                &["IoList"],
+                "call 'beamtalk_string':'from_iolist'(IoList)",
+            ),
+            // String primitive tests — comparison group
+            (
+                "test_string_equality",
+                "String",
+                "=:=",
+                &["Other"],
+                "call 'erlang':'=:='(Self, Other)",
+            ),
+            (
+                "test_string_not_equal",
+                "String",
+                "/=",
+                &["Other"],
+                "call 'erlang':'/='(Self, Other)",
+            ),
+            (
+                "test_string_strict_not_equal",
+                "String",
+                "=/=",
+                &["Other"],
+                "call 'erlang':'=/='(Self, Other)",
+            ),
+            (
+                "test_string_less_than",
+                "String",
+                "<",
+                &["Other"],
+                "call 'erlang':'<'(Self, Other)",
+            ),
+            (
+                "test_string_greater_than",
+                "String",
+                ">",
+                &["Other"],
+                "call 'erlang':'>'(Self, Other)",
+            ),
+            (
+                "test_string_less_than_or_equal",
+                "String",
+                "<=",
+                &["Other"],
+                "call 'erlang':'=<'(Self, Other)",
+            ),
+            (
+                "test_string_greater_than_or_equal",
+                "String",
+                ">=",
+                &["Other"],
+                "call 'erlang':'>='(Self, Other)",
+            ),
+            // String primitive tests — regex group
+            (
+                "test_string_matches_regex",
+                "String",
+                "matchesRegex:",
+                &["Pat"],
+                "call 'beamtalk_regex':'matches_regex'(Self, Pat)",
+            ),
+            (
+                "test_string_matches_regex_options",
+                "String",
+                "matchesRegex:options:",
+                &["Pat", "Opts"],
+                "call 'beamtalk_regex':'matches_regex_options'(Self, Pat, Opts)",
+            ),
+            (
+                "test_string_first_match",
+                "String",
+                "firstMatch:",
+                &["Pat"],
+                "call 'beamtalk_regex':'first_match'(Self, Pat)",
+            ),
+            (
+                "test_string_all_matches",
+                "String",
+                "allMatches:",
+                &["Pat"],
+                "call 'beamtalk_regex':'all_matches'(Self, Pat)",
+            ),
+            (
+                "test_string_replace_regex_with",
+                "String",
+                "replaceRegex:with:",
+                &["Pat", "Repl"],
+                "call 'beamtalk_regex':'replace_regex'(Self, Pat, Repl)",
+            ),
+            (
+                "test_string_replace_all_regex_with",
+                "String",
+                "replaceAllRegex:with:",
+                &["Pat", "Repl"],
+                "call 'beamtalk_regex':'replace_all_regex'(Self, Pat, Repl)",
+            ),
+            (
+                "test_string_split_regex",
+                "String",
+                "splitRegex:",
+                &["Pat"],
+                "call 'beamtalk_regex':'split_regex'(Self, Pat)",
+            ),
+            // CompiledMethod primitive tests
+            (
+                "test_compiled_method_selector",
+                "CompiledMethod",
+                "selector",
+                &[],
+                "call 'beamtalk_compiled_method_ops':'dispatch'('selector', [], Self)",
+            ),
+            (
+                "test_compiled_method_source",
+                "CompiledMethod",
+                "source",
+                &[],
+                "call 'beamtalk_compiled_method_ops':'dispatch'('source', [], Self)",
+            ),
+            (
+                "test_compiled_method_doc",
+                "CompiledMethod",
+                "doc",
+                &[],
+                "call 'beamtalk_compiled_method_ops':'dispatch'('doc', [], Self)",
+            ),
+            (
+                "test_compiled_method_argument_count",
+                "CompiledMethod",
+                "argumentCount",
+                &[],
+                "call 'beamtalk_compiled_method_ops':'dispatch'('argumentCount', [], Self)",
+            ),
+            (
+                "test_compiled_method_origin",
+                "CompiledMethod",
+                "origin",
+                &[],
+                "call 'beamtalk_compiled_method_ops':'dispatch'('origin', [], Self)",
+            ),
+            (
+                "test_compiled_method_print_string",
+                "CompiledMethod",
+                "printString",
+                &[],
+                "call 'beamtalk_compiled_method_ops':'dispatch'('printString', [], Self)",
+            ),
+            (
+                "test_compiled_method_as_string",
+                "CompiledMethod",
+                "asString",
+                &[],
+                "call 'beamtalk_compiled_method_ops':'dispatch'('asString', [], Self)",
+            ),
+            // Integer arithmetic — remaining ops
+            (
+                "test_integer_minus",
+                "Integer",
+                "-",
+                &["Other"],
+                "call 'erlang':'-'(Self, Other)",
+            ),
+            (
+                "test_integer_multiply",
+                "Integer",
+                "*",
+                &["Other"],
+                "call 'erlang':'*'(Self, Other)",
+            ),
+            (
+                "test_integer_divide",
+                "Integer",
+                "/",
+                &["Other"],
+                "call 'erlang':'/'(Self, Other)",
+            ),
+            (
+                "test_integer_integer_divide",
+                "Integer",
+                "div:",
+                &["Other"],
+                "call 'erlang':'div'(Self, Other)",
+            ),
+            (
+                "test_integer_power",
+                "Integer",
+                "**",
+                &["Other"],
+                "call 'erlang':'round'(call 'math':'pow'(\
+                 call 'erlang':'float'(Self), call 'erlang':'float'(Other)))",
+            ),
+            // Integer comparisons — all 7 operators
+            (
+                "test_integer_eq",
+                "Integer",
+                "=:=",
+                &["Other"],
+                "call 'erlang':'=:='(Self, Other)",
+            ),
+            (
+                "test_integer_neq",
+                "Integer",
+                "/=",
+                &["Other"],
+                "call 'erlang':'/='(Self, Other)",
+            ),
+            (
+                "test_integer_strict_neq",
+                "Integer",
+                "=/=",
+                &["Other"],
+                "call 'erlang':'=/='(Self, Other)",
+            ),
+            (
+                "test_integer_lt",
+                "Integer",
+                "<",
+                &["Other"],
+                "call 'erlang':'<'(Self, Other)",
+            ),
+            (
+                "test_integer_gt",
+                "Integer",
+                ">",
+                &["Other"],
+                "call 'erlang':'>'(Self, Other)",
+            ),
+            (
+                "test_integer_le",
+                "Integer",
+                "<=",
+                &["Other"],
+                "call 'erlang':'=<'(Self, Other)",
+            ),
+            (
+                "test_integer_ge",
+                "Integer",
+                ">=",
+                &["Other"],
+                "call 'erlang':'>='(Self, Other)",
+            ),
+            // Integer conversions — asFloat and printString
+            (
+                "test_integer_as_float",
+                "Integer",
+                "asFloat",
+                &[],
+                "call 'erlang':'float'(Self)",
+            ),
+            (
+                "test_integer_print_string",
+                "Integer",
+                "printString",
+                &[],
+                "call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'integer_to_binary'(Self))",
+            ),
+            // Integer bitwise operations
+            (
+                "test_integer_bit_and",
+                "Integer",
+                "bitAnd:",
+                &["Other"],
+                "call 'erlang':'band'(Self, Other)",
+            ),
+            (
+                "test_integer_bit_or",
+                "Integer",
+                "bitOr:",
+                &["Other"],
+                "call 'erlang':'bor'(Self, Other)",
+            ),
+            (
+                "test_integer_bit_xor",
+                "Integer",
+                "bitXor:",
+                &["Other"],
+                "call 'erlang':'bxor'(Self, Other)",
+            ),
+            (
+                "test_integer_bit_not",
+                "Integer",
+                "bitNot",
+                &[],
+                "call 'erlang':'bnot'(Self)",
+            ),
+            (
+                "test_integer_bit_shift",
+                "Integer",
+                "bitShift:",
+                &["N"],
+                "case call 'erlang':'>='(N, 0) of \
+                 'true' when 'true' -> call 'erlang':'bsl'(Self, N) \
+                 'false' when 'true' -> call 'erlang':'bsr'(Self, call 'erlang':'-'(0, N)) end",
+            ),
+            // Integer character predicates — remaining three
+            (
+                "test_integer_is_uppercase",
+                "Integer",
+                "isUppercase",
+                &[],
+                "call 'beamtalk_character':'is_uppercase'(Self)",
+            ),
+            (
+                "test_integer_is_lowercase",
+                "Integer",
+                "isLowercase",
+                &[],
+                "call 'beamtalk_character':'is_lowercase'(Self)",
+            ),
+            (
+                "test_integer_is_whitespace",
+                "Integer",
+                "isWhitespace",
+                &[],
+                "call 'beamtalk_character':'is_whitespace'(Self)",
+            ),
+            // Integer math functions
+            (
+                "test_integer_sqrt",
+                "Integer",
+                "sqrt",
+                &[],
+                "call 'math':'sqrt'(call 'erlang':'float'(Self))",
+            ),
+            (
+                "test_integer_log",
+                "Integer",
+                "log",
+                &[],
+                "call 'math':'log'(call 'erlang':'float'(Self))",
+            ),
+            (
+                "test_integer_ln",
+                "Integer",
+                "ln",
+                &[],
+                "call 'math':'log'(call 'erlang':'float'(Self))",
+            ),
+            (
+                "test_integer_log2",
+                "Integer",
+                "log2",
+                &[],
+                "call 'math':'log2'(call 'erlang':'float'(Self))",
+            ),
+            (
+                "test_integer_log10",
+                "Integer",
+                "log10",
+                &[],
+                "call 'math':'log10'(call 'erlang':'float'(Self))",
+            ),
+            (
+                "test_integer_exp",
+                "Integer",
+                "exp",
+                &[],
+                "call 'math':'exp'(call 'erlang':'float'(Self))",
+            ),
+            (
+                "test_integer_raised_to",
+                "Integer",
+                "raisedTo:",
+                &["Exp"],
+                "case call 'erlang':'is_integer'(Exp) of \
+                 'true' when 'true' -> \
+                   case call 'erlang':'>='(Exp, 0) of \
+                     'true' when 'true' -> \
+                       call 'erlang':'round'(call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(Exp))) \
+                     'false' when 'true' -> \
+                       call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(Exp)) \
+                   end \
+                 'false' when 'true' -> \
+                   call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(Exp)) \
+               end",
+            ),
+        ]);
+    }
+
+    #[test]
+    fn generate_primitive_bif_none_table() {
+        assert_primitive_bif_none_table(&[
+            ("test_unknown_class", "Counter", "+", &["Other"]),
+            ("test_unknown_selector", "Integer", "unknownMethod", &[]),
+            ("test_array_unknown_selector", "Array", "notAMethod", &[]),
+            (
+                "test_dictionary_unknown_selector",
+                "Dictionary",
+                "notAMethod",
+                &[],
+            ),
+            (
+                "test_string_unknown_selector",
+                "String",
+                "notAStringMethod",
+                &[],
+            ),
+            (
+                "test_compiled_method_unknown_selector",
+                "CompiledMethod",
+                "notAMethod",
+                &[],
+            ),
+            // Integer edge cases
+            (
+                "test_integer_unknown_selector",
+                "Integer",
+                "notAMethod",
+                &[],
+            ),
+            // binary_bif returns None when params is empty (uses `?` on params.first())
+            ("test_integer_binary_op_missing_param", "Integer", "+", &[]),
+            // power_bif returns None when params is empty
+            ("test_integer_power_missing_param", "Integer", "**", &[]),
+            // bitShift: returns None when params is empty
+            (
+                "test_integer_bit_shift_missing_param",
+                "Integer",
+                "bitShift:",
+                &[],
+            ),
+            // raisedTo: returns None when params is empty
+            (
+                "test_integer_raised_to_missing_param",
+                "Integer",
+                "raisedTo:",
+                &[],
+            ),
+        ]);
     }
 }

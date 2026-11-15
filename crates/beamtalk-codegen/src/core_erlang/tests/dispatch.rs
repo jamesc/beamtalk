@@ -4330,6 +4330,7 @@ fn test_class_method_super_uses_class_super_dispatch() {
         "class sealed run => super peek: 1",
         "class sealed run => #(1, 2) collect: [:x | [super peek: x] on: Error do: [:e | 0]]",
     ];
+    let mut rows = Vec::new();
     for header in headers {
         for body in bodies {
             let src = format!("{header}\n  {body}\n");
@@ -4352,9 +4353,10 @@ fn test_class_method_super_uses_class_super_dispatch() {
                     "'beamtalk_dispatch':'super_value'",
                 ],
             );
-            assert_compiles_through_erlc("test", &code);
+            rows.push((src, code));
         }
     }
+    assert_all_compile_through_erlc(&rows);
 }
 
 /// BT-4252: a Behaviour-protocol selector self-sent from a class method
@@ -4376,6 +4378,7 @@ fn test_class_method_behaviour_protocol_self_send_uses_class_self_send() {
         ("self superclass", "'superclass', ["),
         ("self includesSelector: #foo", "'includesSelector:', ["),
     ];
+    let mut rows = Vec::new();
     for header in headers {
         for (send, call_tail) in sends {
             for method in ["class run", "class sealed run"] {
@@ -4399,10 +4402,11 @@ fn test_class_method_behaviour_protocol_self_send_uses_class_self_send() {
                     &code,
                     &["call 'beamtalk_behaviour_intrinsics':"],
                 );
-                assert_compiles_through_erlc("test", &code);
+                rows.push((src, code));
             }
         }
     }
+    assert_all_compile_through_erlc(&rows);
 }
 
 /// BT-4001: a `super` send in a class-side extension (`Target class >> sel`)
@@ -4415,6 +4419,7 @@ fn test_class_side_extension_super_is_keyed_on_the_target() {
         "Target class >> run => super peek: 1",
         "Target class >> run => #(1, 2) collect: [:x | super peek: x]",
     ];
+    let mut rows = Vec::new();
     for host in hosts {
         for body in bodies {
             let src = format!("{host}{body}\n");
@@ -4436,9 +4441,10 @@ fn test_class_side_extension_super_is_keyed_on_the_target() {
                     "'beamtalk_dispatch':'super_reply'",
                 ],
             );
-            assert_compiles_through_erlc("test", &code);
+            rows.push((src, code));
         }
     }
+    assert_all_compile_through_erlc(&rows);
 }
 
 /// A builder cascade lexically inside a block still lowers the fun as a class

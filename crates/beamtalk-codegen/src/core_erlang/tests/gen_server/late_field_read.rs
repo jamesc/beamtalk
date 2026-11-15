@@ -167,20 +167,6 @@ fn cross_file_inherited_late_field_read_is_guarded() {
     use std::collections::HashMap;
 
     let ancestor = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: ecow::EcoString::from("BaseActor"),
-        superclass: Some(ecow::EcoString::from("Actor")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![ecow::EcoString::from("proc")],
         state_types: {
             let mut m = HashMap::new();
@@ -203,14 +189,7 @@ fn cross_file_inherited_late_field_read_is_guarded() {
             );
             m
         },
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("BaseActor", Some("Actor"))
     };
 
     let src = "BaseActor subclass: CodexClient\n  useIt => self.proc\n";
