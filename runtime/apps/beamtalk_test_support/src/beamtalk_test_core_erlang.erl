@@ -16,6 +16,8 @@ stderr), so `compile_tests/2` builds the same six assertions against either,
 and the `*_source/1` helpers supply the Core Erlang fixtures.
 """.
 
+%% No auto-exported test/0 in this non-test module (keeps dialyzer quiet).
+-define(EUNIT_NOAUTO, true).
 -include_lib("eunit/include/eunit.hrl").
 
 -export([compile_tests/2, valid_source/1, unbound_var_source/1, warning_source/1]).
