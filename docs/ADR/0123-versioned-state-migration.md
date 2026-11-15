@@ -26,7 +26,7 @@ syntax (trailing `end`, no `=>`), never implemented.
 
 ### Current state
 
-`beamtalk_repl_loader:hot_reload_class/2` runs on every class reload:
+`beamtalk_repl_loader_activate:hot_reload_class/2` runs on every class reload:
 
 ```erlang
 IVars = fetch_instance_vars(ClassName),          % new field list, from the class registry

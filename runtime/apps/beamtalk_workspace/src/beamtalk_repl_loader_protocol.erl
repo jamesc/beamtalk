@@ -119,7 +119,7 @@ reload_protocol_fanout(ProtocolResult, Path, Source) ->
 reload_protocol_fanout(
     {ok, protocol_definition, ProtocolInfo} = ProtocolResult, Path, Source, BatchOpts
 ) ->
-    case beamtalk_repl_loader:is_stdlib_path(Path) of
+    case beamtalk_repl_loader_support:is_stdlib_path(Path) of
         true ->
             {error, stdlib_protocol_reload_read_only_error(ProtocolInfo)};
         false ->
@@ -163,7 +163,7 @@ reload_protocol_fanout(
 protocol_atoms_from_info(#{protocols := ProtocolNameBins}) ->
     lists:filtermap(
         fun(NameBin) ->
-            beamtalk_repl_loader:safe_atom_result(
+            beamtalk_repl_loader_support:safe_atom_result(
                 beamtalk_repl_errors:safe_to_existing_atom(NameBin)
             )
         end,
@@ -183,7 +183,7 @@ discover_fanout_targets(ProtocolAtoms) ->
     ),
     {TargetsRev, SkippedRev} = lists:foldl(
         fun(ClassAtom, {TargetsAcc, SkippedAcc}) ->
-            ClassNameBin = beamtalk_repl_loader:normalize_class_source_key(ClassAtom),
+            ClassNameBin = beamtalk_repl_loader_support:normalize_class_source_key(ClassAtom),
             case beamtalk_workspace_meta:get_class_source(ClassNameBin) of
                 undefined -> {TargetsAcc, [ClassNameBin | SkippedAcc]};
                 _Source -> {[ClassAtom | TargetsAcc], SkippedAcc}
@@ -253,7 +253,7 @@ compile_fanout_users(TargetAtoms, ProtocolSources, BatchOpts) ->
 -spec compile_fanout_user(atom(), #{binary() => binary()}, map()) ->
     {string(), {ok, compiled, binary(), [map()], atom()} | {error, term()}}.
 compile_fanout_user(ClassAtom, ProtocolSources, BatchOpts) ->
-    ClassNameBin = beamtalk_repl_loader:normalize_class_source_key(ClassAtom),
+    ClassNameBin = beamtalk_repl_loader_support:normalize_class_source_key(ClassAtom),
     %% Present by construction: `discover_fanout_targets/1` only lists a
     %% class here after confirming `get_class_source/1` returns a value.
     Source = beamtalk_workspace_meta:get_class_source(ClassNameBin),
@@ -267,7 +267,7 @@ compile_fanout_user(ClassAtom, ProtocolSources, BatchOpts) ->
         beamtalk_repl_compiler:build_class_indexes(),
         BatchOpts#{protocol_sources => ProtocolSources}
     ),
-    Compiled = beamtalk_repl_loader:compile_reload_source_by_path(
+    Compiled = beamtalk_repl_loader_reload:compile_reload_source_by_path(
         Source, Path, ClassAtom, PrebuiltIndexes
     ),
     {Path, Compiled}.
@@ -308,14 +308,14 @@ install_protocol_fanout(
     %% lives) so this install can be intercepted by `meck` — see
     %% `beamtalk_repl_loader_tests.erl`'s
     %% `t_protocol_reload_rollback_merges_ambient_protocol_sources`.
-    case beamtalk_repl_loader:install_reload_result(ProtocolResult, Path) of
+    case beamtalk_repl_loader_reload:install_reload_result(ProtocolResult, Path) of
         {error, Reason} ->
             {error, protocol_reload_install_failed_error(protocol, Reason)};
         {ok, ProtocolClassNames} ->
             %% Now that the NEW protocol module is actually live, this
             %% reload's own edit becomes the tracked source for any LATER
             %% cross-file `uses:` — see `track_protocol_source/2`'s doc.
-            beamtalk_repl_loader:track_protocol_source(ProtocolInfo, Source, Path),
+            beamtalk_repl_loader_support:track_protocol_source(ProtocolInfo, Source, Path),
             ProtocolInstalled = {protocol, Path, ProtocolClassNames},
             case install_fanout_users(CompiledUsers, [ProtocolInstalled]) of
                 {ok, InstalledRev} ->
@@ -339,7 +339,7 @@ install_fanout_users(
 ) ->
     %% Remote call into the loader — see `install_protocol_fanout/4`'s own call for why.
     case
-        beamtalk_repl_loader:install_reload_result(
+        beamtalk_repl_loader_reload:install_reload_result(
             {ok, compiled, Binary, ClassNames, ModuleName}, Path
         )
     of
@@ -375,18 +375,18 @@ rollback_one_install({protocol, Path, _ClassNames}, OldProtocolSources) ->
                 ok;
             ({_NameBin, OldSource}) ->
                 case
-                    beamtalk_repl_loader:compile_reload_source_by_path(
+                    beamtalk_repl_loader_reload:compile_reload_source_by_path(
                         OldSource, Path, undefined
                     )
                 of
                     {ok, protocol_definition, OldProtocolInfo} ->
                         case
-                            beamtalk_repl_loader:install_reload_result(
+                            beamtalk_repl_loader_reload:install_reload_result(
                                 {ok, protocol_definition, OldProtocolInfo}, Path
                             )
                         of
                             {ok, _} ->
-                                beamtalk_repl_loader:track_protocol_source(
+                                beamtalk_repl_loader_support:track_protocol_source(
                                     OldProtocolInfo, OldSource, Path
                                 );
                             {error, Reason} ->
@@ -399,7 +399,7 @@ rollback_one_install({protocol, Path, _ClassNames}, OldProtocolSources) ->
         maps:to_list(OldProtocolSources)
     );
 rollback_one_install({ClassAtom, Path, _ClassNames}, OldProtocolSources) ->
-    ClassNameBin = beamtalk_repl_loader:normalize_class_source_key(ClassAtom),
+    ClassNameBin = beamtalk_repl_loader_support:normalize_class_source_key(ClassAtom),
     case beamtalk_workspace_meta:get_class_source(ClassNameBin) of
         undefined ->
             %% Source vanished from tracking mid-batch (a concurrent
@@ -426,13 +426,13 @@ rollback_one_install({ClassAtom, Path, _ClassNames}, OldProtocolSources) ->
                 }
             ),
             case
-                beamtalk_repl_loader:compile_reload_source_by_path(
+                beamtalk_repl_loader_reload:compile_reload_source_by_path(
                     UserSource, Path, ClassAtom, PrebuiltIndexes
                 )
             of
                 {ok, compiled, Binary, ClassNames2, ModuleName2} ->
                     case
-                        beamtalk_repl_loader:install_reload_result(
+                        beamtalk_repl_loader_reload:install_reload_result(
                             {ok, compiled, Binary, ClassNames2, ModuleName2}, Path
                         )
                     of
@@ -642,7 +642,7 @@ patch_protocol_provision_headed(ProtocolBin, SelectorBin, MethodSource, Opts, Wa
                 author => maps:get(author, Opts, <<"repl">>),
                 author_kind => maps:get(author_kind, Opts, human)
             }),
-            beamtalk_repl_loader:maybe_autoflush(Intent),
+            beamtalk_repl_loader_methods:maybe_autoflush(Intent),
             Result = <<ProtocolBin/binary, ">>", SelectorBin/binary>>,
             {ok, Result, <<>>, Warnings, State};
         {error, Reason} ->
@@ -705,10 +705,10 @@ remove_protocol_provision(ProtocolBin, SelectorBin, instance) ->
             of
                 {ok, Span, _Body} ->
                     NewSource = unicode:characters_to_list(
-                        beamtalk_repl_loader:splice_out_span(SourceBin, Span)
+                        beamtalk_repl_loader_methods:splice_out_span(SourceBin, Span)
                     ),
                     Captures = protocol_user_captures(ProtocolBin, fun(UserBin) ->
-                        beamtalk_repl_loader:capture_signature_removal(
+                        beamtalk_repl_loader_methods:capture_signature_removal(
                             UserBin, SelectorBin, instance
                         )
                     end),
@@ -743,7 +743,7 @@ protocol_edit_target(ProtocolBin, SelectorBin, Verb) ->
                                 " (it must be loaded from a file to be patched)">>}}
             end;
         Source ->
-            case beamtalk_repl_loader:is_stdlib_path(Path) of
+            case beamtalk_repl_loader_support:is_stdlib_path(Path) of
                 true ->
                     {error, stdlib_protocol_patch_read_only_error(ProtocolBin, SelectorBin, Verb)};
                 false ->
@@ -811,12 +811,12 @@ patched_protocol_source(Source, ProtocolBin, SelectorBin, MethodSource) ->
     binary()
 ) -> ok | {error, term()}.
 apply_protocol_edit(ProtocolBin, Path, NewSource, Captures, SelectorBin) ->
-    PrebuiltIndexes = beamtalk_repl_loader:with_ambient_protocol_sources(
+    PrebuiltIndexes = beamtalk_repl_loader_support:with_ambient_protocol_sources(
         beamtalk_repl_compiler:build_class_indexes()
     ),
     Result =
         case
-            beamtalk_repl_loader:compile_reload_source_by_path(
+            beamtalk_repl_loader_reload:compile_reload_source_by_path(
                 NewSource, Path, undefined, PrebuiltIndexes
             )
         of
@@ -865,7 +865,8 @@ protocol_user_captures(ProtocolBin, CaptureFun) ->
             {Targets, _Skipped} = discover_fanout_targets([Protocol]),
             [
                 {UserBin, CaptureFun(UserBin)}
-             || User <- Targets, UserBin <- [beamtalk_repl_loader:normalize_class_source_key(User)]
+             || User <- Targets,
+                UserBin <- [beamtalk_repl_loader_support:normalize_class_source_key(User)]
             ];
         {error, _} ->
             []

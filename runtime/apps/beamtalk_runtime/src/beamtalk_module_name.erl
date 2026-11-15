@@ -12,7 +12,7 @@ naming convention (ADR 0016).
 Before this module, the CamelCase→snake_case conversion was re-typed four
 times: `beamtalk_primitive:camel_to_snake/1`, a byte-identical copy in
 `beamtalk_repl_ops_dev`, another in `beamtalk_test_case:class_name_to_snake/1`,
-and a *drifted* one in `beamtalk_repl_loader:to_snake_case/1` — the last of
+and a *drifted* one in `beamtalk_repl_loader_support:to_snake_case/1` — the last of
 which force-lowercased the first character unconditionally instead of
 tracking whether it actually started lowercase, and used Unicode
 `string:to_lower/1` where the other three used ASCII-only `$A..$Z`

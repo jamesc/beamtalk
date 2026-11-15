@@ -191,7 +191,7 @@ maybe_trigger_recheck(ClassNameBin, SelectorBin, Side, CaptureOutcome) ->
 %% Best-effort wrapper around `beamtalk_workspace_findings_store:clear_owner/1`
 %% (ADR 0105 Phase 1) — the store is REPL-mode-only (see
 %% `beamtalk_workspace_sup`'s `repl_child_specs/6`), so it is legitimately
-%% absent under `beamtalk_repl_loader:install_method/9`'s non-REPL callers
+%% absent under `beamtalk_repl_loader_methods:install_method/9`'s non-REPL callers
 %% (e.g. `beamtalk_repl_loader_tests.erl`'s unit fixtures, and — per the same
 %% reasoning `capture_signature_generation/1` already documents — a run-mode
 %% precompiled artifact never reaches this hook at all). Degrades to "nothing
@@ -482,7 +482,7 @@ prime_shape_capture(Classes) ->
         fun(#{name := Name}) ->
             try
                 ok = beamtalk_workspace_shape_store:prime(
-                    beamtalk_repl_loader:normalize_class_source_key(Name)
+                    beamtalk_repl_loader_support:normalize_class_source_key(Name)
                 )
             catch
                 Class:Reason:Stack ->
@@ -534,7 +534,7 @@ maybe_trigger_shape_recheck(Classes) ->
 
 -spec maybe_trigger_shape_recheck_for_class(map()) -> ok.
 maybe_trigger_shape_recheck_for_class(#{name := Name}) ->
-    ClassNameBin = beamtalk_repl_loader:normalize_class_source_key(Name),
+    ClassNameBin = beamtalk_repl_loader_support:normalize_class_source_key(Name),
     try
         {Prev, NewGen, DiffResult} = beamtalk_workspace_shape_store:capture(ClassNameBin),
         {Classification, FieldChanges} = DiffResult,

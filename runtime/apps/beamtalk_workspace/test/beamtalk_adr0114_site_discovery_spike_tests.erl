@@ -44,7 +44,7 @@ Two concerns, two groups of tests:
 gap is reachable via "every `>>`/`compile:source:` live patch". A live E2E
 check (`tests/repl-protocol/cases/adr_0114_live_patch_gap.btscript`) found
 this is NOT true of the current implementation — both `>>` and
-`compile:source:` route through `beamtalk_repl_loader:install_method/9` /
+`compile:source:` route through `beamtalk_repl_loader_methods:install_method/9` /
 `reload_method_definition/4`, which recompile the **whole class** via
 `beamtalk_repl_compiler:compile_method_reload/3` and `code:load_binary/3`,
 producing a complete compiler-computed `method_xref` (references included).

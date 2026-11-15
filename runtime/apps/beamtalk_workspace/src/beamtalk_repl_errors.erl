@@ -273,7 +273,7 @@ ensure_structured_error({method_not_found, ClassName, Selector}) ->
         ])
     );
 ensure_structured_error({class_not_found, Expected, Path, Defined}) when is_list(Defined) ->
-    %% beamtalk_repl_loader:verify_class_present/3: the file compiled but does
+    %% beamtalk_repl_loader_reload:verify_class_present/3: the file compiled but does
     %% not define the class the caller expected.
     DefinedText =
         case Defined of

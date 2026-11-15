@@ -25,7 +25,7 @@ only references the exported rewrite types (`rewrite_span()`, `rewrite_result()`
 
 -export([
     %% ADR 0114: the shared multi-site rewrite mechanism —
-    %% generalizes `beamtalk_repl_loader:remove_method/3` for
+    %% generalizes `beamtalk_repl_loader_methods:remove_method/3` for
     %% `renameTo:`/`renameSelector:to:` to call with different site lists. See
     %% rewrite_sites/2's doc for the in-memory atomicity protocol.
     rewrite_sites/2,
@@ -377,7 +377,7 @@ build_class_group(Class, Sites) ->
             SourceBin = unicode:characters_to_binary(Source),
             case validate_no_overlaps(Class, Sites, byte_size(SourceBin)) of
                 ok ->
-                    {ModuleNameOverride, SourcePath} = beamtalk_repl_loader:patch_module_target(
+                    {ModuleNameOverride, SourcePath} = beamtalk_repl_loader_support:patch_module_target(
                         Class
                     ),
                     {ok, #rewrite_class_group{
@@ -529,16 +529,16 @@ compile_rewrite_group(#rewrite_class_group{
     source_path = SourcePath,
     new_source = NewSourceBin
 }) ->
-    LoadPath = beamtalk_repl_loader:source_path_or_empty(SourcePath),
+    LoadPath = beamtalk_repl_loader_support:source_path_or_empty(SourcePath),
     NewSourceStr = unicode:characters_to_list(NewSourceBin),
     %% ADR 0127 §10a (BT-3650): same ambient `protocol_sources` merge
     %% `reload_compile_and_load/4` and `reload_protocol_fanout/3` do, so a
     %% rewritten class whose `uses:` names a protocol from a different,
     %% already-loaded file doesn't report "unknown protocol".
-    PrebuiltIndexes = beamtalk_repl_loader:with_ambient_protocol_sources(
+    PrebuiltIndexes = beamtalk_repl_loader_support:with_ambient_protocol_sources(
         beamtalk_repl_compiler:build_class_indexes()
     ),
-    beamtalk_repl_loader:compile_reload_source(
+    beamtalk_repl_loader_reload:compile_reload_source(
         NewSourceStr, LoadPath, ModuleNameOverride, undefined, PrebuiltIndexes
     ).
 
@@ -613,19 +613,19 @@ install_rewrite_groups([{Group, Compiled} | Rest], DefinitionSite, InstalledRev)
     | {error, {partial_install_failure, binary(), term(), [binary()]} | {stale_snapshot, binary()}}.
 install_rewrite_group(Group, Compiled, Rest, DefinitionSite, InstalledRev) ->
     #rewrite_class_group{class = Class, source_path = SourcePath, new_source = NewSource} = Group,
-    LoadPath = beamtalk_repl_loader:source_path_or_empty(SourcePath),
+    LoadPath = beamtalk_repl_loader_support:source_path_or_empty(SourcePath),
     %% A remote call into `beamtalk_repl_loader` (where `install_reload_result/2`
     %% lives) so `beamtalk_repl_loader_rewrite_sites_tests.erl`'s
     %% `partial_install_failure` coverage can intercept it via
-    %% `meck:new(beamtalk_repl_loader, [passthrough])` — see that test module's
+    %% `meck:new(beamtalk_repl_loader_reload, [passthrough])` — see that test module's
     %% own moduledoc for why.
-    case beamtalk_repl_loader:install_reload_result(Compiled, LoadPath) of
+    case beamtalk_repl_loader_reload:install_reload_result(Compiled, LoadPath) of
         {ok, ClassNames} ->
             NewSourceStr = unicode:characters_to_list(NewSource),
             lists:foreach(
                 fun(#{name := Name}) ->
                     beamtalk_workspace_meta:set_class_source(
-                        beamtalk_repl_loader:normalize_class_source_key(Name), NewSourceStr
+                        beamtalk_repl_loader_support:normalize_class_source_key(Name), NewSourceStr
                     )
                 end,
                 ClassNames

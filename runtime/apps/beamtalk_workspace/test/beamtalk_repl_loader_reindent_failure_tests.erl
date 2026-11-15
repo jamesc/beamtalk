@@ -111,7 +111,7 @@ new_method_reindent_failed_test_() ->
     {setup, fun setup_with_fault/0, fun teardown_with_fault/1, fun new_method_reindent_failed/1}.
 
 new_method_reindent_failed(#{state := State}) ->
-    Result = beamtalk_repl_loader:install_method(
+    Result = beamtalk_repl_loader_methods:install_method(
         <<"ReindentGadget">>,
         <<"bumped">>,
         <<"bumped -> Integer =>\n  self.v + 1">>,
@@ -149,7 +149,7 @@ existing_method_reindent_failed_test_() ->
         fun existing_method_reindent_failed/1}.
 
 existing_method_reindent_failed(#{state := State}) ->
-    Result = beamtalk_repl_loader:install_method(
+    Result = beamtalk_repl_loader_methods:install_method(
         <<"ReindentGadget">>,
         <<"value">>,
         <<"value -> Integer =>\n  self.v * 2">>,

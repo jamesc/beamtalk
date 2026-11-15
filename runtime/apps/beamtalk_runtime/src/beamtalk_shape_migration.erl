@@ -128,7 +128,7 @@ Same as `migrate/3`, with `Opts`. `skip_stray_warning => true` (default
 `false`) skips this call's own `warn_migrations_outside_table/2` check —
 for a caller that already ran it once at a class-wide granularity (BT-3543:
 `beamtalk_hot_reload`'s per-instance `code_change/3` path, via
-`check_stray_migrations/1` hoisted to `beamtalk_repl_loader:hot_reload_class/2`)
+`check_stray_migrations/1` hoisted to `beamtalk_repl_loader_activate:hot_reload_class/2`)
 and would otherwise repeat it, and its `?LOG_WARNING`, once per live instance.
 """.
 -spec migrate(Class :: atom(), FromVersion :: pos_integer(), Fields :: map(), Opts :: map()) ->
@@ -200,7 +200,7 @@ maybe_log_downgrade(_Class, _FromVersion, _ToVersion) ->
 
 -doc """
 Run `warn_migrations_outside_table/2` once for `Class` — the class-level
-call site BT-3543 hoists this check to (`beamtalk_repl_loader:hot_reload_class/2`,
+call site BT-3543 hoists this check to (`beamtalk_repl_loader_activate:hot_reload_class/2`,
 once per reload) instead of the `migrate/4` call inside it repeating the same
 two class-process round-trips, and any resulting `?LOG_WARNING`, once per live
 instance. Degrades to `ok` when `Class` is not a registered/compiled class —

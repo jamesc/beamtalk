@@ -674,7 +674,7 @@ precheck_class_shape_flags_dropped_field_before_install_test_() ->
                             "Actor subclass: LoaderShapePrecheckCounter\n"
                             "  state: count :: Integer = 0\n"
                         >>,
-                    {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
+                    {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
                         <<"LoaderShapePrecheckCounter">>, PendingSource
                     ),
                     Finding = find_finding(dropped_without_bump, Findings),
@@ -740,7 +740,7 @@ precheck_class_shape_waits_for_pending_capture_test_() ->
                             sys:resume(beamtalk_workspace_shape_recheck_worker)
                         end),
                         T0 = erlang:monotonic_time(millisecond),
-                        {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
+                        {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
                             <<"LoaderShapePrecheckRaceCounter">>,
                             <<
                                 "Actor subclass: LoaderShapePrecheckRaceCounter\n"
@@ -786,7 +786,7 @@ precheck_class_shape_reports_nothing_for_a_clean_edit_test_() ->
                     {ok, _, _State1} = beamtalk_repl_loader:handle_load(Path, state0()),
                     ok = wait_for_shape_capture(<<"LoaderShapePrecheckCleanCounter">>),
 
-                    {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
+                    {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
                         <<"LoaderShapePrecheckCleanCounter">>, Source
                     ),
                     ?assertEqual([], Findings)
@@ -828,19 +828,19 @@ precheck_class_shape_does_not_leak_atoms_test_() ->
                     %% Warm up once before measuring, so any atom a first
                     %% compile mints isn't counted against the repeated calls
                     %% below.
-                    {ok, _} = beamtalk_repl_loader:precheck_class_shape(
+                    {ok, _} = beamtalk_repl_loader_methods:precheck_class_shape(
                         <<"LoaderShapePrecheckLeakCounter">>, PendingSource
                     ),
                     AtomCountBefore = erlang:system_info(atom_count),
 
                     lists:foreach(
                         fun(_) ->
-                            {ok, _} = beamtalk_repl_loader:precheck_class_shape(
+                            {ok, _} = beamtalk_repl_loader_methods:precheck_class_shape(
                                 <<"LoaderShapePrecheckLeakCounter">>, PendingSource
                             ),
                             %% A syntactically-broken pending edit must not
                             %% leak an atom either.
-                            {ok, _} = beamtalk_repl_loader:precheck_class_shape(
+                            {ok, _} = beamtalk_repl_loader_methods:precheck_class_shape(
                                 <<"LoaderShapePrecheckLeakCounter">>, <<"not valid beamtalk (((">>
                             )
                         end,
@@ -892,7 +892,7 @@ precheck_class_shape_leaves_the_live_class_untouched_test_() ->
                             "\n"
                             "  count -> Integer => self.count\n"
                         >>,
-                    {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
+                    {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
                         <<"LoaderShapePrecheckLiveCounter">>, PendingSource
                     ),
                     %% The precheck still sees the pending shape...
@@ -959,7 +959,7 @@ concurrent_prechecks_each_see_their_own_pending_source_test_() ->
                         begin
                             Ref = make_ref(),
                             spawn_link(fun() ->
-                                {ok, Fs} = beamtalk_repl_loader:precheck_class_shape(
+                                {ok, Fs} = beamtalk_repl_loader_methods:precheck_class_shape(
                                     <<"LoaderShapePrecheckConcurrent">>, Pending
                                 ),
                                 Parent ! {Ref, Fs}
@@ -994,7 +994,7 @@ concurrent_prechecks_each_see_their_own_pending_source_test_() ->
 precheck_class_shape_with_no_baseline_reports_nothing_test_() ->
     {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
         ?_test(begin
-            {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
+            {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
                 <<"NeverCapturedClassXyz">>,
                 <<"Actor subclass: NeverCapturedClassXyz\n  state: count :: Integer = 0\n">>
             ),
@@ -1049,7 +1049,7 @@ precheck_class_shape_does_not_false_positive_on_shadowed_ancestor_field_test_() 
                     %% entirely — never installed via handle_load/2.
                     PendingSource =
                         <<"LoaderShapeAncestorSuper subclass: LoaderShapeAncestorSub\n">>,
-                    {ok, Findings} = beamtalk_repl_loader:precheck_class_shape(
+                    {ok, Findings} = beamtalk_repl_loader_methods:precheck_class_shape(
                         <<"LoaderShapeAncestorSub">>, PendingSource
                     ),
                     ?assertEqual([], Findings)

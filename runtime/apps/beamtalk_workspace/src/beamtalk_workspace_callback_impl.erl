@@ -36,7 +36,7 @@ removal) forward there.
 
 -spec reload_class_file(string(), atom()) -> {ok, [map()]} | {error, term()}.
 reload_class_file(Path, ExpectedClassName) ->
-    beamtalk_repl_loader:reload_class_file(Path, ExpectedClassName).
+    beamtalk_repl_loader_reload:reload_class_file(Path, ExpectedClassName).
 
 -spec eval_with_self(term(), binary() | string()) -> {ok, term()} | {error, term()}.
 eval_with_self(Self, Source) ->

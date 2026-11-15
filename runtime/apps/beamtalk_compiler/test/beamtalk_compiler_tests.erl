@@ -210,7 +210,7 @@ compile_core_erlang_parse_error() ->
     Result = beamtalk_compiler:compile_core_erlang(<<"module 'x' []\n">>),
     ?assertMatch({error, {core_parse_error, _}}, Result).
 
-%% BT-4285: `beamtalk_repl_loader:precheck_class_shape/2` reads a pending
+%% BT-4285: `beamtalk_repl_loader_methods:precheck_class_shape/2` reads a pending
 %% compile's meta with this instead of loading the module (loading runs the
 %% `on_load` registration). If codegen ever stopped emitting
 %% `__beamtalk_meta/0` as a constant map, the precheck would silently report

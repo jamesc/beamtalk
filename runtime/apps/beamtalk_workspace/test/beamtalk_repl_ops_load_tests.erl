@@ -2658,7 +2658,7 @@ handle_term_unload_success_test() ->
             binary_to_list(ClassName) ++ ".bt",
             iolist_to_binary([<<"Object subclass: ">>, ClassName, <<"\n  value => 1\n">>])
         ),
-        {ok, _} = beamtalk_repl_loader:reload_class_file(Path),
+        {ok, _} = beamtalk_repl_loader_reload:reload_class_file(Path),
         ClassAtom = binary_to_atom(ClassName, utf8),
         ?assert(is_pid(beamtalk_runtime_api:whereis_class(ClassAtom))),
         Result = beamtalk_repl_ops_load:handle_term(

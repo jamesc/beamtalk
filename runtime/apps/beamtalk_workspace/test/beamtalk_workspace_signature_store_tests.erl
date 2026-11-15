@@ -19,7 +19,7 @@ Covers:
 - __beamtalk_meta/0 seeding for a never-patched selector (both the "no meta
   exported" degrade and the real read path via beamtalk_signature_store_fixture)
 
-The end-to-end thread from a real install (`beamtalk_repl_loader:install_method/9`)
+The end-to-end thread from a real install (`beamtalk_repl_loader_methods:install_method/9`)
 through to a correctly-populated store entry is covered in
 `beamtalk_repl_loader_tests.erl`, not here — this module tests the store's own
 API contract in isolation.
