@@ -685,7 +685,7 @@ real grammar (BT-4861) — see `beamtalk_compiler_port:scan_source_dependencies/
     {ok, #{classes := [map()], native_refs := [binary()]}} | {error, atom(), binary()}.
 scan_source_dependencies(Source) ->
     try
-        gen_server:call(?MODULE, {scan_source_dependencies, Source}, 30000)
+        gen_server:call(?MODULE, {scan_source_dependencies, Source}, ?CALL_TIMEOUT_MS)
     catch
         exit:{noproc, _} ->
             {error, noproc, <<"Compiler server is not available">>};
