@@ -50,67 +50,50 @@ detecting the operating system and architecture, and querying process info.
 
 -doc "Read an environment variable. Returns nil if not set.".
 -spec getEnv(beamtalk_string:t() | binary()) -> beamtalk_string:t() | 'nil'.
-%% BT-4173: a tagged String unwraps to the same name bytes.
-getEnv({beamtalk_string, Name}) when is_binary(Name) ->
-    getEnv(Name);
-getEnv(Name) when is_binary(Name) ->
+getEnv(Arg) ->
+    Name = beamtalk_text:unwrap_or_raise(Arg, 'System', 'getEnv:', <<"Argument must be a String">>),
     case os:getenv(binary_to_list(Name)) of
         false -> nil;
         Value -> beamtalk_primitive:string_from_binary(list_to_binary(Value))
-    end;
-getEnv(_) ->
-    beamtalk_error:raise_type_error('System', 'getEnv:', <<"Argument must be a String">>).
+    end.
 
 -doc "Read an environment variable with a default fallback.".
 -spec getEnv(beamtalk_string:t() | binary(), Default :: beamtalk_string:t() | binary()) ->
     beamtalk_string:t() | binary().
-getEnv({beamtalk_string, Name}, Default) when is_binary(Name) ->
-    getEnv(Name, Default);
-getEnv(Name, {beamtalk_string, Default}) when is_binary(Name) ->
-    getEnv(Name, Default);
-getEnv(Name, Default) when is_binary(Name), is_binary(Default) ->
+getEnv(NameArg, DefaultArg) ->
+    Name = beamtalk_text:unwrap_or_raise(
+        NameArg, 'System', 'getEnv:default:', <<"Name argument must be a String">>
+    ),
+    Default = beamtalk_text:unwrap_or_raise(
+        DefaultArg, 'System', 'getEnv:default:', <<"Default argument must be a String">>
+    ),
     case os:getenv(binary_to_list(Name)) of
         %% BT-4173: the default was a String at the boundary — re-tag it.
         false -> beamtalk_primitive:string_from_binary(Default);
         Value -> beamtalk_primitive:string_from_binary(list_to_binary(Value))
-    end;
-getEnv(Name, _Default) when not is_binary(Name) ->
-    beamtalk_error:raise_type_error(
-        'System', 'getEnv:default:', <<"Name argument must be a String">>
-    );
-getEnv(_Name, _Default) ->
-    beamtalk_error:raise_type_error(
-        'System', 'getEnv:default:', <<"Default argument must be a String">>
-    ).
+    end.
 
 -doc "Set an environment variable. Returns true.".
 -spec setEnv(beamtalk_string:t() | binary(), Value :: beamtalk_string:t() | binary()) ->
     'true'.
-setEnv({beamtalk_string, Name}, Value) when is_binary(Name) ->
-    setEnv(Name, Value);
-setEnv(Name, {beamtalk_string, Value}) when is_binary(Name) ->
-    setEnv(Name, Value);
-setEnv(Name, Value) when is_binary(Name), is_binary(Value) ->
+setEnv(NameArg, ValueArg) ->
+    Name = beamtalk_text:unwrap_or_raise(
+        NameArg, 'System', 'setEnv:value:', <<"Name argument must be a String">>
+    ),
+    Value = beamtalk_text:unwrap_or_raise(
+        ValueArg, 'System', 'setEnv:value:', <<"Value argument must be a String">>
+    ),
     os:putenv(binary_to_list(Name), binary_to_list(Value)),
-    true;
-setEnv(Name, _Value) when not is_binary(Name) ->
-    beamtalk_error:raise_type_error(
-        'System', 'setEnv:value:', <<"Name argument must be a String">>
-    );
-setEnv(_Name, _Value) ->
-    beamtalk_error:raise_type_error(
-        'System', 'setEnv:value:', <<"Value argument must be a String">>
-    ).
+    true.
 
 -doc "Remove an environment variable. Returns true.".
 -spec unsetEnv(beamtalk_string:t() | binary()) -> 'true'.
-unsetEnv({beamtalk_string, Name}) when is_binary(Name) ->
-    unsetEnv(Name);
-unsetEnv(Name) when is_binary(Name) ->
+unsetEnv(Arg) ->
+    Name = beamtalk_text:unwrap_or_raise(
+        Arg, 'System', 'unsetEnv:', <<"Argument must be a String">>
+    ),
     os:unsetenv(binary_to_list(Name)),
-    true;
-unsetEnv(_) ->
-    beamtalk_error:raise_type_error('System', 'unsetEnv:', <<"Argument must be a String">>).
+    true.
 
 -doc """
 Return the OS platform name.

@@ -8,8 +8,8 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use tracing::{debug, error, info};
 
-use crate::commands::build_layout::BuildLayout;
-use crate::commands::manifest;
+use beamtalk_core::build_layout::BuildLayout;
+use beamtalk_package::manifest;
 
 use super::native::check_native_module_collisions;
 use super::sources::find_source_files;

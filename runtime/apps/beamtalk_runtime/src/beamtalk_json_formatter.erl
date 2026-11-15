@@ -60,7 +60,7 @@ format_json(Level, Msg, Meta) ->
     Fields1 = maybe_add(<<"domain">>, format_domain(Msg, Meta), Fields0),
     Fields2 = maybe_add(<<"class">>, maps:get(beamtalk_class, Meta, undefined), Fields1),
     Fields3 = maybe_add(<<"selector">>, maps:get(beamtalk_selector, Meta, undefined), Fields2),
-    Fields4 = maybe_add(<<"mfa">>, format_mfa(Msg, Meta), Fields3),
+    Fields4 = maybe_add(<<"mfa">>, beamtalk_log_format:format_mfa(Meta), Fields3),
     Fields5 = maybe_add(<<"pid">>, format_pid(Meta), Fields4),
     %% Append structured fields extracted from OTP reports
     Fields6 = lists:foldl(fun({K, V}, Acc) -> maybe_add(K, V, Acc) end, Fields5, ReportFields),
@@ -278,15 +278,7 @@ format_reason_concise(Reason) ->
 -doc "Format a report using the report callback or fallback.".
 -spec format_report_fallback(term(), map()) -> binary().
 format_report_fallback(Report, Meta) ->
-    case maps:get(report_cb, Meta, undefined) of
-        undefined ->
-            safe_to_binary(io_lib:format("~tp", [Report]));
-        Fun when is_function(Fun, 1) ->
-            {Format, Args} = Fun(Report),
-            safe_to_binary(io_lib:format(Format, Args));
-        Fun when is_function(Fun, 2) ->
-            safe_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
-    end.
+    safe_to_binary(beamtalk_log_format:report_chardata(Report, Meta)).
 
 -doc """
 Format the domain metadata as a dot-separated binary.
@@ -295,14 +287,16 @@ Uses explicit domain from metadata if present. Otherwise, infers domain
 from OTP report labels (gen_server, supervisor, proc_lib → "otp").
 """.
 -spec format_domain(term(), map()) -> binary() | undefined.
-format_domain(_Msg, #{domain := Domain}) when is_list(Domain) ->
-    iolist_to_binary(
-        lists:join($., [atom_to_list(D) || D <- Domain])
-    );
-format_domain({report, Report}, _Meta) when is_map(Report) ->
-    infer_domain_from_report(Report);
-format_domain(_Msg, _Meta) ->
-    undefined.
+format_domain(Msg, Meta) ->
+    case beamtalk_log_format:format_domain(Meta) of
+        undefined ->
+            case Msg of
+                {report, Report} when is_map(Report) -> infer_domain_from_report(Report);
+                _ -> undefined
+            end;
+        Domain ->
+            Domain
+    end.
 
 -doc "Infer domain from OTP report labels.".
 -spec infer_domain_from_report(map()) -> binary() | undefined.
@@ -311,18 +305,6 @@ infer_domain_from_report(#{label := {supervisor, _}}) -> <<"otp">>;
 infer_domain_from_report(#{label := {proc_lib, _}}) -> <<"otp">>;
 infer_domain_from_report(#{label := {application_controller, _}}) -> <<"otp">>;
 infer_domain_from_report(_) -> undefined.
-
--doc """
-Format the MFA metadata as a binary.
-
-Uses explicit mfa from log event metadata. Does not infer mfa from OTP
-report fields — registered names belong in the "name" field, not "mfa".
-""".
--spec format_mfa(term(), map()) -> binary() | undefined.
-format_mfa(_Msg, #{mfa := {M, F, A} = Mfa}) when is_atom(M), is_atom(F), is_integer(A) ->
-    beamtalk_stack_frame:raw_mfa(Mfa);
-format_mfa(_Msg, _Meta) ->
-    undefined.
 
 -doc "Format the PID metadata as a binary.".
 -spec format_pid(map()) -> binary() | undefined.

@@ -616,7 +616,7 @@ fn run_create_background(
     // BT-3651: record the project's root package from the Rust-parsed manifest.
     let root_package: Option<String> = camino::Utf8Path::from_path(&project_root)
         .and_then(|root| {
-            crate::commands::manifest::find_manifest(root)
+            beamtalk_package::manifest::find_manifest(root)
                 .ok()
                 .flatten()
         })

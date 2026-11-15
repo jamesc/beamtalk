@@ -8,16 +8,10 @@
 //! Parses `beamtalk.toml` manifests that define a package's identity and metadata.
 //! See ADR 0026 for the package definition and manifest format.
 //!
-//! This module lives in the `beamtalk_cli` **library** crate (not
-//! the `beamtalk` binary) so `beamtalk-mcp` can depend on it too. The
-//! `beamtalk` binary's `crate::commands::manifest` is a `pub use
-//! beamtalk_cli::manifest;` re-export (see `commands/mod.rs`) that keeps
-//! existing `crate::commands::manifest`/`super::manifest` call sites
-//! throughout `commands/` compiling unchanged. Every item this module
-//! exposes to those call sites must therefore be `pub`, not `pub(crate)` —
-//! `pub(crate)` here would scope to the *library* crate only and become
-//! invisible to the binary crate, producing a confusing "private item"
-//! error far from this file.
+//! This module lives in `beamtalk-package` (not the `beamtalk` binary) so
+//! `beamtalk-mcp` can depend on it too; the CLI imports
+//! `beamtalk_package::manifest` directly. Every item the CLI uses must be
+//! `pub`, not `pub(crate)`.
 
 mod hex;
 mod native;
@@ -391,13 +385,10 @@ pub struct PackageManifest {
 // (`beamtalk_core::compilation::diagnostics_policy`) so that `beamtalk-lsp`
 // can apply the same table `beamtalk build` does without depending on
 // `beamtalk-cli` (dependencies flow downward only — see
-// `docs/development/architecture-principles.md`). Re-exported here so
-// existing `crate::commands::manifest::{DiagnosticsTable,
-// DiagnosticSeverityOverride}` references throughout this crate keep working
-// unchanged. `DiagnosticSeverityOverride` is referenced from test code in
-// both this lib crate and the `beamtalk` bin crate's own `#[cfg(test)]`
-// modules (e.g. `beam_compiler.rs`); the bin crate depends on this lib built
-// *without* `cfg(test)`, so the re-export must be unconditional.
+// `docs/development/architecture-principles.md`). `DiagnosticSeverityOverride`
+// stays re-exported here because `manifest::DiagnosticsTable` /
+// `manifest::DiagnosticSeverityOverride` are the paths manifest consumers
+// (including the CLI's tests) use.
 pub use beamtalk_core::compilation::DiagnosticSeverityOverride;
 pub use beamtalk_core::compilation::DiagnosticsTable;
 

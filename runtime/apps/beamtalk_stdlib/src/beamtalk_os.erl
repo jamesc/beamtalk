@@ -46,13 +46,9 @@ Raises `#beamtalk_error{kind = timeout}` on timeout,
 `output_too_large` if stdout exceeds 10 MB.
 """.
 -spec run(beamtalk_string:t() | binary()) -> beamtalk_string:t().
-%% BT-4173: a bare binary spells the same command (pre-flip calls stay valid).
-run(Cmd) when is_binary(Cmd) ->
-    run({beamtalk_string, Cmd});
-run({beamtalk_string, Cmd}) when is_binary(Cmd) ->
-    run_cmd(Cmd, ?DEFAULT_TIMEOUT_MS, 'run:');
-run(_) ->
-    beamtalk_error:raise_type_error('OS', 'run:', <<"Argument must be a String">>).
+run(Arg) ->
+    Cmd = beamtalk_text:unwrap_or_raise(Arg, 'OS', 'run:', <<"Argument must be a String">>),
+    run_cmd(Cmd, ?DEFAULT_TIMEOUT_MS, 'run:').
 
 -doc """
 Execute a shell command with an explicit timeout in milliseconds.
@@ -63,16 +59,15 @@ within `TimeoutMs` milliseconds.
 """.
 -spec run(beamtalk_string:t() | binary(), Timeout :: pos_integer()) ->
     beamtalk_string:t().
-run(Cmd, TimeoutMs) when is_binary(Cmd) ->
-    run({beamtalk_string, Cmd}, TimeoutMs);
-run({beamtalk_string, Cmd}, TimeoutMs) when
-    is_binary(Cmd), is_integer(TimeoutMs), TimeoutMs > 0
-->
-    run_cmd(Cmd, TimeoutMs, 'run:timeout:');
-run({beamtalk_string, _}, _TimeoutMs) ->
-    beamtalk_error:raise_type_error('OS', 'run:timeout:', <<"Timeout must be a positive Integer">>);
-run(_, _) ->
-    beamtalk_error:raise_type_error('OS', 'run:timeout:', <<"Argument must be a String">>).
+run(Arg, TimeoutMs) ->
+    Cmd = beamtalk_text:unwrap_or_raise(
+        Arg, 'OS', 'run:timeout:', <<"Argument must be a String">>
+    ),
+    (is_integer(TimeoutMs) andalso TimeoutMs > 0) orelse
+        beamtalk_error:raise_type_error(
+            'OS', 'run:timeout:', <<"Timeout must be a positive Integer">>
+        ),
+    run_cmd(Cmd, TimeoutMs, 'run:timeout:').
 
 %%% ============================================================================
 %%% Internal helpers

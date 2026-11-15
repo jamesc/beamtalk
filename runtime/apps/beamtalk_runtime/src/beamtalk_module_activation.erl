@@ -647,12 +647,12 @@ beam_file_to_module(File) ->
 -doc "Returns true if ModName is a user-defined class module.".
 -spec is_user_class_module(string()) -> boolean().
 is_user_class_module(ModName) ->
-    lists:prefix("bt@", ModName) andalso not lists:prefix("bt@stdlib@", ModName).
+    beamtalk_module_name:is_user_class_module(ModName).
 
 -doc "Module-atom wrapper around `is_user_class_module/1`, for `lists:filter/2`.".
 -spec is_release_class_module(module()) -> boolean().
 is_release_class_module(Module) ->
-    is_user_class_module(atom_to_list(Module)).
+    beamtalk_module_name:is_user_class_module(Module).
 
 -doc "Validate that a module name contains only valid Beamtalk characters.".
 -spec is_valid_module_name(string()) -> boolean().

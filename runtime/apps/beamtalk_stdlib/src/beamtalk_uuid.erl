@@ -94,10 +94,10 @@ Accepts upper- or lower-case hex digits. Returns `Result ok: uuid` on
 success, `Result error:` if `Str` isn't a syntactically valid Uuid string.
 """.
 -spec fromString(binary() | beamtalk_string:t()) -> beamtalk_result:t().
-%% BT-4173: strings arrive tagged from Beamtalk — unwrap to bytes.
-fromString({beamtalk_string, Str}) when is_binary(Str) ->
-    fromString(Str);
-fromString(Str) when is_binary(Str) ->
+fromString(Arg) ->
+    Str = beamtalk_text:unwrap_or_raise(
+        Arg, 'Uuid', 'fromString:', <<"Argument must be a String">>
+    ),
     case parse_uuid_string(Str) of
         {ok, Bytes} ->
             beamtalk_result:from_tagged_tuple({ok, make_uuid(Bytes)});
@@ -112,9 +112,7 @@ fromString(Str) when is_binary(Str) ->
                 >>
             ),
             beamtalk_result:from_tagged_tuple({error, Error2})
-    end;
-fromString(_) ->
-    beamtalk_error:raise_type_error('Uuid', 'fromString:', <<"Argument must be a String">>).
+    end.
 
 -doc """
 True if `Str` is a syntactically valid canonical Uuid string.
@@ -123,15 +121,14 @@ Checks format only (hex digits and hyphen placement) — does not require the
 version/variant bits to be one this class would generate.
 """.
 -spec isValid(binary() | beamtalk_string:t()) -> boolean().
-isValid({beamtalk_string, Str}) when is_binary(Str) ->
-    isValid(Str);
-isValid(Str) when is_binary(Str) ->
+isValid(Arg) ->
+    Str = beamtalk_text:unwrap_or_raise(
+        Arg, 'Uuid', 'isValid:', <<"Argument must be a String">>
+    ),
     case parse_uuid_string(Str) of
         {ok, _Bytes} -> true;
         error -> false
-    end;
-isValid(_) ->
-    beamtalk_error:raise_type_error('Uuid', 'isValid:', <<"Argument must be a String">>).
+    end.
 
 %%% ============================================================================
 %%% Instance Methods — Conversion

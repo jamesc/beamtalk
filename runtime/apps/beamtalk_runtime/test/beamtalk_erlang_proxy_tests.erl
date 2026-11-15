@@ -385,7 +385,7 @@ dispatch_missing_function_details_test() ->
         does_not_understand,
         _,
         _,
-        #{module := math, function := init, arity := 0},
+        #{module := math, function := {beamtalk_string, <<"init">>}, arity := 0},
         beamtalk_erlang_proxy:dispatch('init', [], Proxy)
     ).
 
@@ -1180,7 +1180,7 @@ direct_call_wrong_arity_error_unchanged_test() ->
             ?assertEqual(
                 #{
                     module => lists,
-                    function => reverse,
+                    function => {beamtalk_string, <<"reverse">>},
                     expected_arities => [1, 2],
                     actual_arity => 3
                 },
@@ -1203,7 +1203,11 @@ direct_call_missing_function_error_unchanged_test() ->
             } = Inner
         ) ->
             ?assertEqual(
-                #{module => lists, function => nonexistent_xyz, arity => 1},
+                #{
+                    module => lists,
+                    function => {beamtalk_string, <<"nonexistent_xyz">>},
+                    arity => 1
+                },
                 Inner#beamtalk_error.details
             )
         end,
@@ -1279,7 +1283,11 @@ backtrace_depth_zero_keeps_ffi_errors_test() ->
             _,
             fun(Inline) ->
                 ?assertEqual(
-                    #{module => lists, function => nonexistent_xyz, arity => 1},
+                    #{
+                        module => lists,
+                        function => {beamtalk_string, <<"nonexistent_xyz">>},
+                        arity => 1
+                    },
                     Inline#beamtalk_error.details
                 )
             end,
@@ -1327,7 +1335,11 @@ dispatch_call_args_errors_unchanged_test() ->
         'call:args:',
         fun(Missing) ->
             ?assertEqual(
-                #{module => lists, function => nonexistent_xyz, arity => 1},
+                #{
+                    module => lists,
+                    function => {beamtalk_string, <<"nonexistent_xyz">>},
+                    arity => 1
+                },
                 Missing#beamtalk_error.details
             )
         end,
@@ -1366,7 +1378,7 @@ direct_call_handle_undefined_function_test() ->
             _,
             fun(Inner) ->
                 ?assertEqual(
-                    #{module => Mod, function => other, arity => 1},
+                    #{module => Mod, function => {beamtalk_string, <<"other">>}, arity => 1},
                     Inner#beamtalk_error.details
                 )
             end,
@@ -1410,7 +1422,7 @@ direct_call_tracks_hot_reload_and_purge_test() ->
             _,
             fun(Missing) ->
                 ?assertEqual(
-                    #{module => Mod, function => gone, arity => 0},
+                    #{module => Mod, function => {beamtalk_string, <<"gone">>}, arity => 0},
                     Missing#beamtalk_error.details
                 )
             end,

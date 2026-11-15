@@ -27,10 +27,10 @@ use tracing::{info, instrument};
 use beamtalk_cli::repl_startup;
 
 use super::beam_environment::BeamEnvironment;
-use super::build_layout::BuildLayout;
-use super::manifest;
 use super::util::to_forward_slash;
 use super::workspace;
+use beamtalk_core::build_layout::BuildLayout;
+use beamtalk_package::manifest;
 
 /// Compile and run a beamtalk package.
 ///
@@ -440,9 +440,7 @@ fn run_connected(
         );
     }
 
-    let cookie = workspace::read_workspace_cookie(&workspace_id)?
-        .trim()
-        .to_string();
+    let cookie = workspace::read_workspace_cookie(&workspace_id)?;
     let host = node_info.connect_host().to_string();
     let port = node_info.port;
 
@@ -737,7 +735,6 @@ fn probe_running_workspace_app(project_root: &std::path::Path, app_name: &str) -
     let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout().ok()?;
     let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
     let cookie = workspace::read_workspace_cookie(&workspace_id).ok()?;
-    let cookie = cookie.trim().to_string();
     let pid = std::process::id();
     let client_node = format!("beamtalk_run_probe_{pid}@localhost");
 
@@ -787,7 +784,6 @@ fn ensure_otp_app_in_workspace(
     project_root: &std::path::Path,
 ) -> Result<bool> {
     let cookie = workspace::read_workspace_cookie(workspace_id)?;
-    let cookie = cookie.trim();
 
     let pid = std::process::id();
     let client_node = format!("beamtalk_run_rpc_{pid}@localhost");

@@ -12,7 +12,7 @@
 //! built-ins without a single route, exception kin, `Character` literals)
 //! lock in the dynamic behavior so the handler cannot steal those sends.
 
-use super::codegen;
+use super::{assert_has, assert_lacks, codegen};
 
 // ---------------------------------------------------------------------------
 // Positive: sealed receivers take the guarded direct path
@@ -34,18 +34,21 @@ fn sealed_value_typed_param_sends_direct_with_tag_guard() {
     // module's own `dispatch/3` definition also mentions
     // `bt@sealed_widget':'dispatch'` (its `perform:` arm), but always with a
     // variable selector — the `('x'` literal pins this to the send site.
-    assert!(
-        code.contains("call 'bt@sealed_widget':'dispatch'('x'"),
-        "sealed typed receiver should direct-call the class module. Got:\n{code}"
+    assert_has(
+        "sealed typed receiver should direct-call the class module.",
+        &code,
+        &["call 'bt@sealed_widget':'dispatch'('x'"],
     );
     // Tag guard on '$beamtalk_class' with a dynamic-send fallback.
-    assert!(
-        code.contains("maps':'get'('$beamtalk_class'"),
-        "direct call should be guarded on the runtime class tag. Got:\n{code}"
+    assert_has(
+        "direct call should be guarded on the runtime class tag.",
+        &code,
+        &["maps':'get'('$beamtalk_class'"],
     );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "guard mismatch should fall back to the dynamic send. Got:\n{code}"
+    assert_has(
+        "guard mismatch should fall back to the dynamic send.",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -62,13 +65,15 @@ fn destructured_tuple_local_sends_direct_with_tag_guard() {
         "sealed Value subclass: SealedWidget\n",
         "  field: x :: Integer = 0\n",
     ));
-    assert!(
-        code.contains("call 'bt@sealed_widget':'dispatch'('x'"),
-        "destructured typed local should direct-call the class module. Got:\n{code}"
+    assert_has(
+        "destructured typed local should direct-call the class module.",
+        &code,
+        &["call 'bt@sealed_widget':'dispatch'('x'"],
     );
-    assert!(
-        code.contains("maps':'get'('$beamtalk_class'"),
-        "direct call should be guarded on the runtime class tag. Got:\n{code}"
+    assert_has(
+        "direct call should be guarded on the runtime class tag.",
+        &code,
+        &["maps':'get'('$beamtalk_class'"],
     );
 }
 
@@ -81,13 +86,15 @@ fn sealed_object_typed_param_sends_direct() {
         "sealed Object subclass: SealedCounter\n",
         "  answer -> Integer => 42\n",
     ));
-    assert!(
-        code.contains("call 'bt@sealed_counter':'dispatch'('answer'"),
-        "sealed Object-kind receiver should direct-call too (same tagged-map representation). Got:\n{code}"
+    assert_has(
+        "sealed Object-kind receiver should direct-call too (same tagged-map representation).",
+        &code,
+        &["call 'bt@sealed_counter':'dispatch'('answer'"],
     );
-    assert!(
-        code.contains("maps':'get'('$beamtalk_class'"),
-        "direct call should be guarded on the runtime class tag. Got:\n{code}"
+    assert_has(
+        "direct call should be guarded on the runtime class tag.",
+        &code,
+        &["maps':'get'('$beamtalk_class'"],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -107,13 +114,15 @@ fn sealed_value_keyword_send_binds_args_once() {
         "sealed Value subclass: SealedWidget\n",
         "  field: x :: Integer = 0\n",
     ));
-    assert!(
-        code.contains("call 'bt@sealed_widget':'dispatch'('withX:', ["),
-        "sealed keyword send should direct-call with args. Got:\n{code}"
+    assert_has(
+        "sealed keyword send should direct-call with args.",
+        &code,
+        &["call 'bt@sealed_widget':'dispatch'('withX:', ["],
     );
-    assert!(
-        code.contains("maps':'get'('$beamtalk_class'"),
-        "direct call should be guarded on the runtime class tag. Got:\n{code}"
+    assert_has(
+        "direct call should be guarded on the runtime class tag.",
+        &code,
+        &["maps':'get'('$beamtalk_class'"],
     );
     // Exactly one `let` binding per operand: the single argument temp is
     // bound once and read three times (direct args list + both fallback
@@ -144,9 +153,10 @@ fn sealed_value_typed_param_sends_direct_class_side() {
         "sealed Value subclass: SealedWidget\n",
         "  field: x :: Integer = 0\n",
     ));
-    assert!(
-        code.contains("call 'bt@sealed_widget':'dispatch'('x'"),
-        "sealed typed receiver should direct-call from class side too. Got:\n{code}"
+    assert_has(
+        "sealed typed receiver should direct-call from class side too.",
+        &code,
+        &["call 'bt@sealed_widget':'dispatch'('x'"],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -165,9 +175,10 @@ fn sealed_value_typed_param_sends_direct_actor_side() {
         "sealed Value subclass: SealedWidget\n",
         "  field: x :: Integer = 0\n",
     ));
-    assert!(
-        code.contains("call 'bt@sealed_widget':'dispatch'('x'"),
-        "sealed typed receiver should direct-call from actor side too. Got:\n{code}"
+    assert_has(
+        "sealed typed receiver should direct-call from actor side too.",
+        &code,
+        &["call 'bt@sealed_widget':'dispatch'('x'"],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -202,9 +213,10 @@ fn sealed_value_field_send_as_server_match_scrutinee_is_bracketed() {
         "  field: timeout :: Integer = 0\n",
         "  field: reason :: Object = nil\n",
     ));
-    assert!(
-        code.contains("call 'bt@handler_result':'dispatch'('kind'"),
-        "the scrutinee should take the sealed direct path. Got:\n{code}"
+    assert_has(
+        "the scrutinee should take the sealed direct path.",
+        &code,
+        &["call 'bt@handler_result':'dispatch'('kind'"],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -221,17 +233,20 @@ fn open_value_typed_param_sends_direct_with_tag_guard() {
         "Value subclass: OpenWidget\n",
         "  field: x :: Integer = 0\n",
     ));
-    assert!(
-        code.contains("call 'bt@open_widget':'dispatch'('x'"),
-        "open Value receiver should direct-call the class module. Got:\n{code}"
+    assert_has(
+        "open Value receiver should direct-call the class module.",
+        &code,
+        &["call 'bt@open_widget':'dispatch'('x'"],
     );
-    assert!(
-        code.contains("<'OpenWidget'> when 'true' ->"),
-        "the direct call should be guarded on the exact class tag. Got:\n{code}"
+    assert_has(
+        "the direct call should be guarded on the exact class tag.",
+        &code,
+        &["<'OpenWidget'> when 'true' ->"],
     );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "guard mismatch should fall back to the dynamic send. Got:\n{code}"
+    assert_has(
+        "guard mismatch should fall back to the dynamic send.",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -245,9 +260,10 @@ fn open_object_typed_param_sends_direct() {
         "Object subclass: OpenCounter\n",
         "  answer -> Integer => 42\n",
     ));
-    assert!(
-        code.contains("call 'bt@open_counter':'dispatch'('answer'"),
-        "open Object-kind receiver should direct-call too. Got:\n{code}"
+    assert_has(
+        "open Object-kind receiver should direct-call too.",
+        &code,
+        &["call 'bt@open_counter':'dispatch'('answer'"],
     );
 }
 
@@ -265,14 +281,18 @@ fn open_value_with_subclass_guards_on_the_declared_class() {
         "OpenBase subclass: OpenSub\n",
         "  x -> Integer => 7\n",
     ));
-    assert!(
-        code.contains("<'OpenBase'> when 'true' ->")
-            && code.contains("call 'bt@open_base':'dispatch'('x'"),
-        "parent-typed receiver should guard on the parent's tag. Got:\n{code}"
+    assert_has(
+        "parent-typed receiver should guard on the parent's tag",
+        &code,
+        &[
+            "<'OpenBase'> when 'true' ->",
+            "call 'bt@open_base':'dispatch'('x'",
+        ],
     );
-    assert!(
-        !code.contains("<'OpenSub'> when 'true' ->"),
-        "the guard must name the declared class only. Got:\n{code}"
+    assert_lacks(
+        "the guard must name the declared class only.",
+        &code,
+        &["<'OpenSub'> when 'true' ->"],
     );
 }
 
@@ -289,9 +309,10 @@ fn open_value_self_send_sends_direct() {
         "  doubled -> Integer => self x * 2\n",
     ));
     // BT-4473: the own class's arm is called directly, as a local call.
-    assert!(
-        code.contains("<'OpenPoint'> when 'true' ->") && code.contains("apply 'x'/1("),
-        "an open Value self-send should take the guarded direct call. Got:\n{code}"
+    assert_has(
+        "an open Value self-send should take the guarded direct call",
+        &code,
+        &["<'OpenPoint'> when 'true' ->", "apply 'x'/1("],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -306,13 +327,15 @@ fn abstract_value_typed_param_stays_dynamic() {
         "abstract Value subclass: Shape\n",
         "  area -> Integer => 0\n",
     ));
-    assert!(
-        !code.contains("'dispatch'('area'"),
-        "abstract receiver must stay dynamic. Got:\n{code}"
+    assert_lacks(
+        "abstract receiver must stay dynamic.",
+        &code,
+        &["'dispatch'('area'"],
     );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "abstract receiver send should still exist as a dynamic send. Got:\n{code}"
+    assert_has(
+        "abstract receiver send should still exist as a dynamic send.",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -328,9 +351,10 @@ fn abstract_builtin_typed_param_stays_dynamic() {
         "  useValue: v :: Value -> Object =>\n",
         "    v frobnicate\n",
     ));
-    assert!(
-        !code.contains("'dispatch'('frobnicate'"),
-        "abstract builtin receivers must stay dynamic. Got:\n{code}"
+    assert_lacks(
+        "abstract builtin receivers must stay dynamic.",
+        &code,
+        &["'dispatch'('frobnicate'"],
     );
 }
 
@@ -351,13 +375,15 @@ fn supervisor_subclass_typed_param_stays_dynamic() {
         "  class childSpecs => #()\n\n",
         "DynamicSupervisor(Object) subclass: AppPool\n",
     ));
-    assert!(
-        !code.contains("'dispatch'('frobnicate'"),
-        "supervisor-family receivers must stay dynamic. Got:\n{code}"
+    assert_lacks(
+        "supervisor-family receivers must stay dynamic.",
+        &code,
+        &["'dispatch'('frobnicate'"],
     );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "supervisor sends should still exist as dynamic sends. Got:\n{code}"
+    assert_has(
+        "supervisor sends should still exist as dynamic sends.",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -368,9 +394,10 @@ fn untyped_param_stays_dynamic() {
         "  useIt: w =>\n",
         "    w ping\n",
     ));
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "untyped receiver send should stay dynamic. Got:\n{code}"
+    assert_has(
+        "untyped receiver send should stay dynamic.",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -564,9 +591,10 @@ fn tuple_guard_rejects_reserved_heads_at_every_size() {
             "Tuple guard should reject the reserved head {tag}. Got:\n{code}"
         );
     }
-    assert!(
-        code.contains("tuple_size'(_TTaggedRecv"),
-        "Tuple guard should check for the empty tuple. Got:\n{code}"
+    assert_has(
+        "Tuple guard should check for the empty tuple.",
+        &code,
+        &["tuple_size'(_TTaggedRecv"],
     );
     for size in [2, 4] {
         assert!(
@@ -586,9 +614,10 @@ fn builtin_typed_keyword_send_binds_args_once() {
         "  useIt: d :: Dictionary(Symbol, Integer) -> Object =>\n",
         "    d frobnicate: 1 with: 2\n",
     ));
-    assert!(
-        code.contains("call 'bt@stdlib@dictionary':'dispatch'('frobnicate:with:', ["),
-        "keyword send to a Dictionary should direct-call. Got:\n{code}"
+    assert_has(
+        "keyword send to a Dictionary should direct-call.",
+        &code,
+        &["call 'bt@stdlib@dictionary':'dispatch'('frobnicate:with:', ["],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -686,19 +715,26 @@ fn binary_typed_send_routes_bare_binaries_and_strings() {
     // `bt@stdlib@string`), so a `Binary`-typed send guards on each in turn
     // before the dynamic send.
     let code = builtin_typed_send("Binary");
-    assert!(
-        code.contains("call 'erlang':'is_binary'(")
-            && code.contains("call 'bt@stdlib@binary':'dispatch'('frobnicate'"),
-        "a bare binary should direct-call bt@stdlib@binary. Got:\n{code}"
+    assert_has(
+        "a bare binary should direct-call bt@stdlib@binary",
+        &code,
+        &[
+            "call 'erlang':'is_binary'(",
+            "call 'bt@stdlib@binary':'dispatch'('frobnicate'",
+        ],
     );
-    assert!(
-        code.contains("'beamtalk_string'")
-            && code.contains("call 'bt@stdlib@string':'dispatch'('frobnicate'"),
-        "a String should direct-call bt@stdlib@string. Got:\n{code}"
+    assert_has(
+        "a String should direct-call bt@stdlib@string",
+        &code,
+        &[
+            "'beamtalk_string'",
+            "call 'bt@stdlib@string':'dispatch'('frobnicate'",
+        ],
     );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "anything else should take the dynamic send. Got:\n{code}"
+    assert_has(
+        "anything else should take the dynamic send.",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
     super::assert_compiles_through_erlc("test", &code);
 
@@ -742,13 +778,15 @@ fn sealed_exception_subclass_stays_dynamic() {
         "sealed typed Exception subclass: SealedBoom\n",
         "  answer -> Integer => 42\n",
     ));
-    assert!(
-        !code.contains("call 'bt@sealed_boom':'dispatch'('frobnicate'"),
-        "exception-kin receiver must stay dynamic. Got:\n{code}"
+    assert_lacks(
+        "exception-kin receiver must stay dynamic.",
+        &code,
+        &["call 'bt@sealed_boom':'dispatch'('frobnicate'"],
     );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "exception-kin send should still exist as a dynamic send. Got:\n{code}"
+    assert_has(
+        "exception-kin send should still exist as a dynamic send.",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -765,9 +803,10 @@ fn field_at_put_on_sealed_receiver_never_direct() {
         "sealed Value subclass: SealedWidget\n",
         "  field: x :: Integer = 0\n",
     ));
-    assert!(
-        !code.contains("call 'bt@sealed_widget':'dispatch'('fieldAt:put:'"),
-        "fieldAt:put: must never take the direct path. Got:\n{code}"
+    assert_lacks(
+        "fieldAt:put: must never take the direct path.",
+        &code,
+        &["call 'bt@sealed_widget':'dispatch'('fieldAt:put:'"],
     );
 }
 
@@ -782,9 +821,10 @@ fn binary_send_on_sealed_receiver_never_direct() {
         "sealed Value subclass: SealedWidget\n",
         "  field: x :: Integer = 0\n",
     ));
-    assert!(
-        !code.contains("call 'bt@sealed_widget':'dispatch'('+"),
-        "binary selector must never take the direct path. Got:\n{code}"
+    assert_lacks(
+        "binary selector must never take the direct path.",
+        &code,
+        &["call 'bt@sealed_widget':'dispatch'('+"],
     );
 }
 
@@ -798,13 +838,15 @@ fn erlang_module_typed_param_stays_dynamic() {
         "  useIt: m :: ErlangModule -> Object =>\n",
         "    m frobnicate\n",
     ));
-    assert!(
-        !code.contains("'dispatch'('frobnicate'"),
-        "native-proxied receiver must stay dynamic. Got:\n{code}"
+    assert_lacks(
+        "native-proxied receiver must stay dynamic.",
+        &code,
+        &["'dispatch'('frobnicate'"],
     );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "native-proxied receiver send should still exist as a dynamic send. Got:\n{code}"
+    assert_has(
+        "native-proxied receiver send should still exist as a dynamic send.",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -817,13 +859,15 @@ fn class_object_typed_param_stays_dynamic() {
         "  useIt: c :: Class -> Object =>\n",
         "    c frobnicate\n",
     ));
-    assert!(
-        !code.contains("'dispatch'('frobnicate'"),
-        "record receiver must stay dynamic. Got:\n{code}"
+    assert_lacks(
+        "record receiver must stay dynamic.",
+        &code,
+        &["'dispatch'('frobnicate'"],
     );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "record receiver send should still exist as a dynamic send. Got:\n{code}"
+    assert_has(
+        "record receiver send should still exist as a dynamic send.",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -836,9 +880,10 @@ fn sealed_stdlib_result_sends_direct() {
         "  useIt: r :: Result(Integer, Symbol) -> Object =>\n",
         "    r isOk\n",
     ));
-    assert!(
-        code.contains("call 'bt@stdlib@result':'dispatch'('isOk'"),
-        "sealed stdlib receiver should direct-call. Got:\n{code}"
+    assert_has(
+        "sealed stdlib receiver should direct-call.",
+        &code,
+        &["call 'bt@stdlib@result':'dispatch'('isOk'"],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -860,18 +905,21 @@ fn value_to_a_typed_non_block_receiver_is_a_typed_send_not_block_evaluation() {
         "  field: x :: Integer = 0\n",
         "  value: n :: Integer -> Integer => n\n",
     ));
-    assert!(
-        code.contains("call 'bt@stdlib@result':'dispatch'('value', []"),
-        "Result-typed `value` should direct-call bt@stdlib@result. Got:\n{code}"
+    assert_has(
+        "Result-typed `value` should direct-call bt@stdlib@result.",
+        &code,
+        &["call 'bt@stdlib@result':'dispatch'('value', []"],
     );
-    assert!(
-        code.contains("call 'bt@sealed_widget':'dispatch'('value:', ["),
-        "SealedWidget-typed `value:` should direct-call its module. Got:\n{code}"
+    assert_has(
+        "SealedWidget-typed `value:` should direct-call its module.",
+        &code,
+        &["call 'bt@sealed_widget':'dispatch'('value:', ["],
     );
     // A `Block`-typed receiver keeps the intrinsic's fun application.
-    assert!(
-        code.contains("call 'erlang':'is_function'(") && code.contains("apply "),
-        "Block-typed `value` should keep block evaluation. Got:\n{code}"
+    assert_has(
+        "Block-typed `value` should keep block evaluation",
+        &code,
+        &["call 'erlang':'is_function'(", "apply "],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -886,13 +934,15 @@ fn future_typed_param_stays_dynamic() {
         "  useIt: f :: Future -> Object =>\n",
         "    f frobnicate\n",
     ));
-    assert!(
-        !code.contains("'dispatch'('frobnicate'"),
-        "runtime-only receiver must stay dynamic. Got:\n{code}"
+    assert_lacks(
+        "runtime-only receiver must stay dynamic.",
+        &code,
+        &["'dispatch'('frobnicate'"],
     );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "runtime-only receiver send should still exist as a dynamic send. Got:\n{code}"
+    assert_has(
+        "runtime-only receiver send should still exist as a dynamic send.",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -963,13 +1013,15 @@ fn module_less_ambient_sealed_class_stays_dynamic() {
         ),
         ambient_sealed_object(true, None),
     );
-    assert!(
-        !code.contains("'dispatch'('frobnicate'"),
-        "module-less receiver must stay dynamic. Got:\n{code}"
+    assert_lacks(
+        "module-less receiver must stay dynamic.",
+        &code,
+        &["'dispatch'('frobnicate'"],
     );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "module-less receiver send should still exist as a dynamic send. Got:\n{code}"
+    assert_has(
+        "module-less receiver send should still exist as a dynamic send.",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -987,9 +1039,10 @@ fn module_ful_ambient_sealed_class_sends_direct() {
         ),
         ambient_sealed_object(false, None),
     );
-    assert!(
-        code.contains("call 'bt@ambient_widget':'dispatch'('frobnicate'"),
-        "module-ful ambient receiver should direct-call. Got:\n{code}"
+    assert_has(
+        "module-ful ambient receiver should direct-call.",
+        &code,
+        &["call 'bt@ambient_widget':'dispatch'('frobnicate'"],
     );
 }
 
@@ -1005,9 +1058,10 @@ fn packaged_ambient_sealed_class_resolves_qualified_module() {
         ),
         ambient_sealed_object(false, Some("live")),
     );
-    assert!(
-        code.contains("call 'bt@live@ambient_widget':'dispatch'('frobnicate'"),
-        "packaged ambient receiver should direct-call the qualified module. Got:\n{code}"
+    assert_has(
+        "packaged ambient receiver should direct-call the qualified module.",
+        &code,
+        &["call 'bt@live@ambient_widget':'dispatch'('frobnicate'"],
     );
 }
 
@@ -1035,13 +1089,15 @@ fn packaged_sealed_class_with_unqualified_index_entry_resolves_emitted_module() 
             .with_class_module_index(index),
     )
     .expect("codegen should succeed");
-    assert!(
-        code.contains("call 'bt@ambient_widget':'dispatch'('frobnicate'"),
-        "packaged receiver with an unqualified index entry should direct-call the emitted module. Got:\n{code}"
+    assert_has(
+        "packaged receiver with an unqualified index entry should direct-call the emitted module.",
+        &code,
+        &["call 'bt@ambient_widget':'dispatch'('frobnicate'"],
     );
-    assert!(
-        !code.contains("bt@buccaneer@ambient_widget"),
-        "must not target the never-emitted qualified module. Got:\n{code}"
+    assert_lacks(
+        "must not target the never-emitted qualified module.",
+        &code,
+        &["bt@buccaneer@ambient_widget"],
     );
 }
 
@@ -1070,9 +1126,10 @@ fn packaged_sealed_class_with_index_entry_keeps_package_mode_target() {
             .with_class_module_index(index),
     )
     .expect("codegen should succeed");
-    assert!(
-        code.contains("call 'bt@sicp@scheme@env':'dispatch'('frobnicate'"),
-        "package-mode receiver should direct-call the indexed module. Got:\n{code}"
+    assert_has(
+        "package-mode receiver should direct-call the indexed module.",
+        &code,
+        &["call 'bt@sicp@scheme@env':'dispatch'('frobnicate'"],
     );
 }
 
@@ -1109,13 +1166,15 @@ fn sealed_class_exported_by_two_packages_stays_dynamic() {
         ambient_sealed_object(false, Some("json")),
         ambient_sealed_object(false, Some("xml")),
     ]);
-    assert!(
-        !code.contains("'dispatch'('frobnicate'"),
-        "a class name exported by two packages must stay dynamic. Got:\n{code}"
+    assert_lacks(
+        "a class name exported by two packages must stay dynamic.",
+        &code,
+        &["'dispatch'('frobnicate'"],
     );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'("),
-        "the shadowed receiver send should be a dynamic send. Got:\n{code}"
+    assert_has(
+        "the shadowed receiver send should be a dynamic send.",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -1127,9 +1186,10 @@ fn sealed_class_shadowing_a_package_less_class_stays_dynamic() {
         ambient_sealed_object(false, None),
         ambient_sealed_object(false, Some("json")),
     ]);
-    assert!(
-        !code.contains("'dispatch'('frobnicate'"),
-        "a class name shared with a package-less class must stay dynamic. Got:\n{code}"
+    assert_lacks(
+        "a class name shared with a package-less class must stay dynamic.",
+        &code,
+        &["'dispatch'('frobnicate'"],
     );
 }
 
@@ -1151,9 +1211,10 @@ fn own_sealed_class_shadowed_by_a_dependency_stays_dynamic() {
             .with_class_hierarchy(vec![ambient_sealed_object(false, Some("json"))]),
     )
     .expect("codegen should succeed");
-    assert!(
-        !code.contains("'dispatch'('frobnicate'"),
-        "an own class shadowed by a dependency must stay dynamic. Got:\n{code}"
+    assert_lacks(
+        "an own class shadowed by a dependency must stay dynamic.",
+        &code,
+        &["'dispatch'('frobnicate'"],
     );
 }
 
@@ -1168,9 +1229,10 @@ fn own_sealed_class_without_a_rival_sends_direct() {
         "  poke: w :: AmbientWidget -> Object =>\n",
         "    w frobnicate\n",
     ));
-    assert!(
-        code.contains("apply 'frobnicate'/1("),
-        "an unshadowed own sealed class should direct-call. Got:\n{code}"
+    assert_has(
+        "an unshadowed own sealed class should direct-call.",
+        &code,
+        &["apply 'frobnicate'/1("],
     );
 }
 
@@ -1193,9 +1255,10 @@ fn own_sealed_class_recompiled_over_its_live_self_sends_direct() {
             .with_class_hierarchy(vec![ambient_sealed_object(false, Some("live"))]),
     )
     .expect("codegen should succeed");
-    assert!(
-        code.contains("apply 'frobnicate'/1("),
-        "recompiling a class over its own live entry should still direct-call. Got:\n{code}"
+    assert_has(
+        "recompiling a class over its own live entry should still direct-call.",
+        &code,
+        &["apply 'frobnicate'/1("],
     );
 }
 
@@ -1212,9 +1275,10 @@ fn sealed_class_repeated_within_one_package_sends_direct() {
         ambient_sealed_object(false, Some("json")),
         other,
     ]);
-    assert!(
-        code.contains("call 'bt@json@ambient_widget':'dispatch'('frobnicate'"),
-        "a single package's sealed class should still direct-call. Got:\n{code}"
+    assert_has(
+        "a single package's sealed class should still direct-call.",
+        &code,
+        &["call 'bt@json@ambient_widget':'dispatch'('frobnicate'"],
     );
 }
 
@@ -1429,13 +1493,15 @@ fn character_literal_keeps_character_dispatch() {
         "  m -> Object =>\n",
         "    $A uppercase\n",
     ));
-    assert!(
-        code.contains("call 'bt@stdlib@character':'dispatch'('uppercase'"),
-        "Character literal should still reach the Character module. Got:\n{code}"
+    assert_has(
+        "Character literal should still reach the Character module.",
+        &code,
+        &["call 'bt@stdlib@character':'dispatch'('uppercase'"],
     );
-    assert!(
-        !code.contains("beamtalk_message_dispatch':'send'("),
-        "Character literal send should not go dynamic. Got:\n{code}"
+    assert_lacks(
+        "Character literal send should not go dynamic.",
+        &code,
+        &["beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -1465,13 +1531,15 @@ fn own_class_redefined_into_new_module_targets_the_emitted_module() {
     )
     .expect("codegen should succeed");
     // BT-4473: a local call of the arm's function, so always this module.
-    assert!(
-        code.contains("apply 'x'/1("),
-        "typed send must target the unit's own emitted module. Got:\n{code}"
+    assert_has(
+        "typed send must target the unit's own emitted module.",
+        &code,
+        &["apply 'x'/1("],
     );
-    assert!(
-        !code.contains("bt@pkg@pt"),
-        "must not target the stale module from the pre-load index. Got:\n{code}"
+    assert_lacks(
+        "must not target the stale module from the pre-load index.",
+        &code,
+        &["bt@pkg@pt"],
     );
 }
 
@@ -1496,9 +1564,10 @@ fn stale_compiled_metadata_for_module_less_redefinition_stays_dynamic() {
             .with_class_module_index(index),
     )
     .expect("codegen should succeed");
-    assert!(
-        !code.contains("'dispatch'('frobnicate'"),
-        "index says module-less: must stay dynamic despite stale metadata. Got:\n{code}"
+    assert_lacks(
+        "index says module-less: must stay dynamic despite stale metadata.",
+        &code,
+        &["'dispatch'('frobnicate'"],
     );
 }
 
@@ -1522,9 +1591,10 @@ fn stale_module_less_metadata_for_compiled_redefinition_goes_direct() {
             .with_class_module_index(index),
     )
     .expect("codegen should succeed");
-    assert!(
-        code.contains("call 'bt@ambient_widget':'dispatch'('frobnicate'"),
-        "index says compiled: should direct-call. Got:\n{code}"
+    assert_has(
+        "index says compiled: should direct-call.",
+        &code,
+        &["call 'bt@ambient_widget':'dispatch'('frobnicate'"],
     );
 }
 
@@ -1550,9 +1620,10 @@ fn abstract_value_new_stays_a_plain_builder_for_subclass_chaining() {
         "abstract Value subclass: Shape\n",
         "  field: x :: Integer = 0\n",
     ));
-    assert!(
-        child.contains(":'new'() in"),
-        "subclass new/0 must chain through the superclass module's new/0. Got:\n{child}"
+    assert_has(
+        "subclass new/0 must chain through the superclass module's new/0.",
+        &child,
+        &[":'new'() in"],
     );
 }
 
@@ -1591,9 +1662,10 @@ fn sealed_value_typed_class_is_inlined_behind_the_tag_guard() {
         "sealed Value subclass: SealedWidget\n",
         "  field: x :: Integer = 0\n",
     ));
-    assert!(
-        code.contains("maps':'get'('$beamtalk_class', _TClassRecv"),
-        "inline class should be guarded on the runtime class tag. Got:\n{code}"
+    assert_has(
+        "inline class should be guarded on the runtime class tag.",
+        &code,
+        &["maps':'get'('$beamtalk_class', _TClassRecv"],
     );
     assert!(
         code.contains(
@@ -1601,9 +1673,10 @@ fn sealed_value_typed_class_is_inlined_behind_the_tag_guard() {
         ),
         "a tag match should look the class pid up by its compile-time registered name. Got:\n{code}"
     );
-    assert!(
-        code.contains("{'beamtalk_object', 'SealedWidget class', 'bt@sealed_widget', _TClassPid"),
-        "a live class should answer the class object with the pinned module. Got:\n{code}"
+    assert_has(
+        "a live class should answer the class object with the pinned module.",
+        &code,
+        &["{'beamtalk_object', 'SealedWidget class', 'bt@sealed_widget', _TClassPid"],
     );
     // Miss arms: the inner tag mismatch, the non-map arm and a removed class
     // (`whereis` answers 'undefined') each fall back to the dynamic call.
@@ -1613,9 +1686,10 @@ fn sealed_value_typed_class_is_inlined_behind_the_tag_guard() {
         3,
         "every miss arm should fall back to class_of_object/1. Got:\n{code}"
     );
-    assert!(
-        !code.contains("class_of_object_by_name") && !code.contains("class_object_tag"),
-        "the inline path builds no tag at runtime. Got:\n{code}"
+    assert_lacks(
+        "the inline path builds no tag at runtime",
+        &code,
+        &["class_of_object_by_name", "class_object_tag"],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -1653,9 +1727,10 @@ fn open_value_typed_class_is_inlined() {
         "Value subclass: OpenWidget\n",
         "  field: x :: Integer = 0\n",
     ));
-    assert!(
-        code.contains("{'beamtalk_object', 'OpenWidget class', 'bt@open_widget', _TClassPid"),
-        "open typed receiver should inline the class object too. Got:\n{code}"
+    assert_has(
+        "open typed receiver should inline the class object too.",
+        &code,
+        &["{'beamtalk_object', 'OpenWidget class', 'bt@open_widget', _TClassPid"],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -1672,9 +1747,10 @@ fn typed_class_inside_an_actor_is_verifier_clean() {
         "sealed Value subclass: SealedWidget\n",
         "  field: x :: Integer = 0\n",
     ));
-    assert!(
-        code.contains("{'beamtalk_object', 'SealedWidget class', 'bt@sealed_widget', _TClassPid"),
-        "actor-side typed receiver should inline the class object. Got:\n{code}"
+    assert_has(
+        "actor-side typed receiver should inline the class object.",
+        &code,
+        &["{'beamtalk_object', 'SealedWidget class', 'bt@sealed_widget', _TClassPid"],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -1729,9 +1805,10 @@ fn module_less_ambient_class_of_stays_plain() {
     // Positive control: the same class with a compiled module is inlined, so
     // the negative above cannot pass vacuously.
     let code = codegen_with_ambient(src, ambient_sealed_object(false, None));
-    assert!(
-        code.contains("{'beamtalk_object', 'AmbientWidget class', 'bt@ambient_widget', _TClassPid"),
-        "module-ful ambient receiver should inline the class object. Got:\n{code}"
+    assert_has(
+        "module-ful ambient receiver should inline the class object.",
+        &code,
+        &["{'beamtalk_object', 'AmbientWidget class', 'bt@ambient_widget', _TClassPid"],
     );
 }
 
@@ -1795,9 +1872,10 @@ fn interpolation_segment_display_string_uses_the_typed_route() {
             "a typed segment should direct-call {module}. Got:\n{code}"
         );
     }
-    assert!(
-        code.contains("'displayString', [])"),
-        "the untyped segment (and every miss arm) keeps the dynamic send. Got:\n{code}"
+    assert_has(
+        "the untyped segment (and every miss arm) keeps the dynamic send.",
+        &code,
+        &["'displayString', [])"],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -1853,15 +1931,19 @@ fn extracted_provenance_is_trusted_for_union_members_only() {
         .expect("codegen should succeed")
     };
     let union = compile("either");
-    assert!(
-        union.contains("'bt@stdlib@integer':'dispatch'('frobnicate'")
-            && union.contains("'bt@stdlib@list':'dispatch'('frobnicate'"),
-        "extracted union receiver should take the guard chain. Got:\n{union}"
+    assert_has(
+        "extracted union receiver should take the guard chain",
+        &union,
+        &[
+            "'bt@stdlib@integer':'dispatch'('frobnicate'",
+            "'bt@stdlib@list':'dispatch'('frobnicate'",
+        ],
     );
     let single = compile("one");
-    assert!(
-        !single.contains("'bt@stdlib@integer':'dispatch'('frobnicate'"),
-        "single-class extracted receiver must stay dynamic. Got:\n{single}"
+    assert_lacks(
+        "single-class extracted receiver must stay dynamic.",
+        &single,
+        &["'bt@stdlib@integer':'dispatch'('frobnicate'"],
     );
 }
 

@@ -105,12 +105,8 @@ dead_stats(PidBin) ->
 %% Render an {M, F, A} current-function tuple to a readable "m:f/a" binary; nil
 %% when the VM reports no current function.
 -spec format_mfa(undefined | {atom(), atom(), arity()}) -> binary() | nil.
-format_mfa(undefined) ->
-    nil;
-format_mfa({M, F, A} = Mfa) when is_atom(M), is_atom(F), is_integer(A) ->
-    beamtalk_stack_frame:raw_mfa(Mfa);
-format_mfa(_) ->
-    nil.
+format_mfa(Mfa) ->
+    beamtalk_log_format:format_mfa_or(Mfa, nil).
 
 %%====================================================================
 %% Op descriptors for dynamic describe
