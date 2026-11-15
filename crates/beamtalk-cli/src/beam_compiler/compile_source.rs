@@ -701,7 +701,11 @@ mod tests {
         let options = beamtalk_core::CompilerOptions::default();
         let result = compile_source(&source_file, "bad", &core_file, &options);
 
-        assert!(result.is_err());
+        let msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            msg.starts_with("Failed to compile '") && msg.ends_with("bad.bt'"),
+            "unexpected error: {msg}"
+        );
     }
 
     #[test]
@@ -715,7 +719,12 @@ mod tests {
         let options = beamtalk_core::CompilerOptions::default();
         let result = compile_source(&source_file, "nonexistent", &core_file, &options);
 
-        assert!(result.is_err());
+        let msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            msg.starts_with("Failed to read file '")
+                && msg.ends_with("nonexistent.bt': No such file or directory (os error 2)"),
+            "unexpected error: {msg}"
+        );
     }
 
     #[test]
