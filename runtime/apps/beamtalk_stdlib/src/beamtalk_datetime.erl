@@ -184,9 +184,10 @@ DateTime fromString: "2026-07-25T14:30:00+02:00"
 """.
 -spec fromString(binary() | beamtalk_string:t()) -> t().
 %% BT-4173: strings arrive tagged from Beamtalk — unwrap to bytes.
-fromString({beamtalk_string, Str}) when is_binary(Str) ->
-    fromString(Str);
-fromString(Str) when is_binary(Str) ->
+fromString(Arg) ->
+    Str = beamtalk_text:unwrap_or_raise(
+        Arg, 'DateTime', 'fromString:', <<"Argument must be a String">>
+    ),
     case parse_iso8601(Str) of
         {ok, Y, Mo, D, H, Mi, S, Off} ->
             validate_offset(Off, 'fromString:'),
@@ -197,9 +198,7 @@ fromString(Str) when is_binary(Str) ->
                 'fromString:',
                 <<"Expected ISO 8601 format: YYYY-MM-DDThh:mm:ss(Z|+hh:mm|-hh:mm)">>
             )
-    end;
-fromString(_) ->
-    beamtalk_error:raise_type_error('DateTime', 'fromString:', <<"Argument must be a String">>).
+    end.
 
 -doc """
 Parse `Str` using the pattern language documented at `format:` (the inverse
@@ -222,11 +221,10 @@ DateTime parse: "2026-07-25 14:30:00" format: "yyyy-MM-dd HH:mm:ss"
 """.
 -spec parse(binary() | beamtalk_string:t(), binary() | beamtalk_string:t()) ->
     beamtalk_result:t().
-parse({beamtalk_string, Str}, Pattern) when is_binary(Str) ->
-    parse(Str, Pattern);
-parse(Str, {beamtalk_string, Pattern}) when is_binary(Pattern) ->
-    parse(Str, Pattern);
-parse(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
+parse(StrArg, PatternArg) ->
+    ArgHint = <<"Both arguments must be Strings">>,
+    Str = beamtalk_text:unwrap_or_raise(StrArg, 'DateTime', 'parse:format:', ArgHint),
+    Pattern = beamtalk_text:unwrap_or_raise(PatternArg, 'DateTime', 'parse:format:', ArgHint),
     case parse_with_pattern(Str, Pattern) of
         {ok, Y, Mo, D, H, Mi, S} ->
             beamtalk_result:from_tagged_tuple({ok, make_datetime(Y, Mo, D, H, Mi, S, 0)});
@@ -235,11 +233,7 @@ parse(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
             Error1 = beamtalk_error:with_selector(Error0, 'parse:format:'),
             Error2 = beamtalk_error:with_hint(Error1, Hint),
             beamtalk_result:from_tagged_tuple({error, Error2})
-    end;
-parse(_, _) ->
-    beamtalk_error:raise_type_error(
-        'DateTime', 'parse:format:', <<"Both arguments must be Strings">>
-    ).
+    end.
 
 %%% ============================================================================
 %%% Instance Methods — Accessors
@@ -367,15 +361,14 @@ numeric tokens (e.g. `M/d`, not `Md`) — without one, an unpadded field's
 ```
 """.
 -spec format(t(), Pattern :: binary() | beamtalk_string:t()) -> beamtalk_string:t().
-format(Self, {beamtalk_string, Pattern}) when is_binary(Pattern) ->
-    format(Self, Pattern);
-format(Self, Pattern) when is_binary(Pattern) ->
+format(Self, PatternArg) ->
+    Pattern = beamtalk_text:unwrap_or_raise(
+        PatternArg, 'DateTime', 'format:', <<"Argument must be a String pattern">>
+    ),
     Tokens = tokenize_pattern(Pattern),
     beamtalk_primitive:string_from_binary(
         iolist_to_binary([render_pattern_token(Token, Self) || Token <- Tokens])
-    );
-format(_, _) ->
-    beamtalk_error:raise_type_error('DateTime', 'format:', <<"Argument must be a String pattern">>).
+    ).
 
 %%% ============================================================================
 %%% Instance Methods — Arithmetic
