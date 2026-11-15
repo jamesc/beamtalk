@@ -210,10 +210,7 @@ multiple_subscribers_each_notified_test_() ->
 
 publish_no_server_is_safe_test() ->
     %% No setup: directly assert the absent-server path never crashes.
-    case whereis(beamtalk_object_watch) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_object_watch),
     Actor = spawn_dummy(),
     ?assertEqual(ok, beamtalk_object_watch:publish_change(Actor, 'Counter', [a])),
     ?assertNot(beamtalk_object_watch:is_watched(Actor)),

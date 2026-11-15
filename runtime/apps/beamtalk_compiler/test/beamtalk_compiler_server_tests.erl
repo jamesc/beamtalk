@@ -1159,11 +1159,7 @@ api_resolve_method_span() ->
     ?assertEqual(Prev, binary:part(Source, Start, End - Start)).
 
 start_compiler() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end.
+    beamtalk_test_boot:compiler().
 
 stop_compiler(_) ->
     ok.

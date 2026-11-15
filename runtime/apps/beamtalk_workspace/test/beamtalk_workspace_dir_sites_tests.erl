@@ -43,10 +43,7 @@ tmp_home() ->
     Dir.
 
 stop_meta() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end.
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta).
 
 %% Exercise every Erlang site once and return the resolved paths. The file
 %% logger site mutates VM-global logger state (primary level and the

@@ -75,12 +75,8 @@ primitives_load_test_() ->
         ]}}.
 
 suite_setup() ->
-    {ok, _} = application:ensure_all_started(compiler),
+    beamtalk_test_boot:compiler(),
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
     %% Let the runtime register bootstrap classes before compiling user code.
     ok = beamtalk_test_wait:class('Object'),
     ok.
@@ -93,11 +89,7 @@ suite_teardown(_) ->
 %% tree so files written there classify as in-project.
 case_setup() ->
     Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary("wi-load-e2e-" ++ Unique),
-    Tmp = filename:join(beamtalk_test_fs:base_dir(), "bt-wi-load-e2e-" ++ Unique),
-    ok = filelib:ensure_path(Tmp),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", Tmp),
+    {WorkspaceId, Tmp, OldHome} = beamtalk_test_fs:changelog_workspace(),
     stop_existing(beamtalk_workspace_changelog),
     stop_existing(beamtalk_workspace_meta),
     {ok, ClogPid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),

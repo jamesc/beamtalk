@@ -43,18 +43,11 @@ alias_xref_test_() ->
     ]}.
 
 setup() ->
-    case whereis(beamtalk_alias_xref) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end,
-    {ok, _} = beamtalk_alias_xref:start_link(),
+    {ok, _} = beamtalk_test_proc:restart(beamtalk_alias_xref),
     ok.
 
 cleanup(_) ->
-    case whereis(beamtalk_alias_xref) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end.
+    beamtalk_test_proc:stop_registered(beamtalk_alias_xref).
 
 %%====================================================================
 %% Tests (server running)
@@ -150,7 +143,4 @@ register_class_when_not_running_test() ->
 %%====================================================================
 
 stop_server_if_running() ->
-    case whereis(beamtalk_alias_xref) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end.
+    beamtalk_test_proc:stop_registered(beamtalk_alias_xref).

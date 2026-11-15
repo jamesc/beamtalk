@@ -353,15 +353,11 @@ compile_file_core_class_extraction_test() ->
 %%====================================================================
 
 setup_compiler() ->
-    application:ensure_all_started(compiler),
+    beamtalk_test_boot:compiler(),
     %% Start the runtime so the class-hierarchy ETS table is populated; this
     %% lets build_class_superclass_index/0 and build_class_module_index/0
     %% return non-empty maps and add_class_indexes/1 take its populated branches.
     application:ensure_all_started(beamtalk_runtime),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
     %% Give the runtime a moment to register its bootstrap classes.
     ok = beamtalk_test_wait:class('Object'),
     ok.

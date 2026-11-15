@@ -93,16 +93,9 @@ setup() ->
     ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
     %% BT-4792: the runtime reaches the workspace pipeline through this callback.
     ok = beamtalk_workspace_callback:register(beamtalk_workspace_callback_impl),
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-rename-to-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
@@ -151,10 +144,7 @@ teardown(_) ->
     ),
     ok = beamtalk_workspace_callback:unregister(),
     ok = beamtalk_capability:clear(),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     ok.
 
 widget_class_object() ->
@@ -238,45 +228,10 @@ rename_to_changelog_test_() ->
 
 setup_with_changelog() ->
     Fixture = setup(),
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    %% A real (non-run-mode) ChangeLog needs a `workspace_id` AND a HOME it
-    %% can resolve `<home>/.beamtalk/workspaces/<id>/changes/` under — mirrors
-    %% beamtalk_repl_loader_rewrite_sites_tests.erl's identical setup.
-    %%
-    %% `Unique` uses `beamtalk_test_unique:id/0` rather than a bare
-    %% `erlang:unique_integer/1` — see `beamtalk_test_unique`'s moduledoc for
-    %% why: in short, `erlang:unique_integer/1`'s counter resets every fresh `rebar3
-    %% eunit` invocation, so two SEPARATE test runs reaching this
-    %% deterministic call site can compute the IDENTICAL `WorkspaceId`/
-    %% `ChangelogHome`. Observed directly (review follow-up, PR #3523): the
-    %% real `~/.beamtalk/workspaces/<id>/changes/changes.jsonl` these resolve
-    %% to persists across runs, so `beamtalk_workspace_changelog`'s own
-    %% intentional `load_from_disk` restores a PRIOR run's leftover entries
-    %% into this run's ETS table, and `[Entry] = entries()` intermittently
-    %% sees more than one.
-    Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary("bt-rename-to-changelog-" ++ Unique),
-    ChangelogHome = filename:join(
-        beamtalk_test_fs:base_dir(), "bt-rename-to-changelog-home-" ++ Unique
-    ),
-    ok = filelib:ensure_path(ChangelogHome),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", ChangelogHome),
-    {ok, _} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
-    Fixture#{old_home => OldHome}.
+    Fixture#{changelog_ws => beamtalk_test_fs:start_changelog_workspace()}.
 
-teardown_with_changelog(#{old_home := OldHome} = Fixture) ->
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    case OldHome of
-        false -> os:unsetenv("HOME");
-        _ -> os:putenv("HOME", OldHome)
-    end,
+teardown_with_changelog(#{changelog_ws := Ws} = Fixture) ->
+    beamtalk_test_fs:stop_changelog_workspace(Ws),
     teardown(Fixture).
 
 rename_to_changelog(_Fixture) ->
@@ -426,16 +381,9 @@ setup_dynamic_with_reference() ->
     ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
     %% BT-4792: the runtime reaches the workspace pipeline through this callback.
     ok = beamtalk_workspace_callback:register(beamtalk_workspace_callback_impl),
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-rename-to-dyn-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
@@ -471,10 +419,7 @@ teardown_dynamic_with_reference(_Fixture) ->
     ),
     ok = beamtalk_workspace_callback:unregister(),
     ok = beamtalk_capability:clear(),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     ok.
 
 dynamic_class_rename_orders_identity_move_before_reference_rewrite_test_() ->
@@ -561,32 +506,10 @@ bt3278_drain_call_order(Acc) ->
 
 setup_dynamic_with_reference_and_changelog() ->
     Fixture = setup_dynamic_with_reference(),
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`,
-    %% same entropy fix `setup_with_changelog/0` documents.
-    Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary("bt-rename-to-dyn-changelog-" ++ Unique),
-    ChangelogHome = filename:join(
-        beamtalk_test_fs:base_dir(), "bt-rename-to-dyn-changelog-home-" ++ Unique
-    ),
-    ok = filelib:ensure_path(ChangelogHome),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", ChangelogHome),
-    {ok, _} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
-    Fixture#{old_home => OldHome}.
+    Fixture#{changelog_ws => beamtalk_test_fs:start_changelog_workspace()}.
 
-teardown_dynamic_with_reference_and_changelog(#{old_home := OldHome} = Fixture) ->
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    case OldHome of
-        false -> os:unsetenv("HOME");
-        _ -> os:putenv("HOME", OldHome)
-    end,
+teardown_dynamic_with_reference_and_changelog(#{changelog_ws := Ws} = Fixture) ->
+    beamtalk_test_fs:stop_changelog_workspace(Ws),
     teardown_dynamic_with_reference(Fixture).
 
 dynamic_class_rename_revert_orders_identity_move_before_reference_rewrite_test_() ->

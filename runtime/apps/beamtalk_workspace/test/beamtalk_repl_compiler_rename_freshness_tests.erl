@@ -38,11 +38,7 @@ machinery (already covered by that other module), so no
 %%====================================================================
 
 setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
     %% BT-4792: renameTo: classifies the class through the workspace callback.
     ok = beamtalk_workspace_callback:register(beamtalk_workspace_callback_impl),

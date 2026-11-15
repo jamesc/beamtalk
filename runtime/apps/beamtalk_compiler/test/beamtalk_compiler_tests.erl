@@ -17,11 +17,7 @@ and the compile (file) command.
 %% Start the compiler application for integration tests.
 setup() ->
     %% Ensure compiler app and dependencies are started
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end.
+    beamtalk_test_boot:compiler().
 
 teardown(_) ->
     ok.

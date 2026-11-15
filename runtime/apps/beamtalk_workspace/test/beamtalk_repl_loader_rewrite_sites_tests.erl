@@ -93,16 +93,9 @@ sub_counter_source() ->
 %%====================================================================
 
 setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
     Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-rewrite-sites-" ++ Unique),
@@ -129,10 +122,7 @@ setup() ->
     #{proj_dir => ProjDir, counter_path => CounterPath, sub_counter_path => SubCounterPath}.
 
 teardown(_) ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     ok.
 
 %%====================================================================
@@ -384,37 +374,10 @@ emit_rewrite_change_entry_test_() ->
 
 setup_with_changelog() ->
     Fixture = setup(),
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    %% A real (non-run-mode) ChangeLog needs a `workspace_id` AND a HOME it
-    %% can resolve `<home>/.beamtalk/workspaces/<id>/changes/` under — mirrors
-    %% `beamtalk_workspace_changelog_tests:fresh_workspace/0`'s isolation
-    %% pattern (a unique id + a temp HOME) so `store_site_body/1` actually
-    %% persists a ref file instead of degrading to `undefined` (run mode).
-    %%
-    %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
-    Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary("bt-rewrite-sites-changelog-" ++ Unique),
-    ChangelogHome = filename:join(
-        beamtalk_test_fs:base_dir(), "bt-rewrite-sites-changelog-home-" ++ Unique
-    ),
-    ok = filelib:ensure_path(ChangelogHome),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", ChangelogHome),
-    {ok, _} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
-    Fixture#{old_home => OldHome}.
+    Fixture#{changelog_ws => beamtalk_test_fs:start_changelog_workspace()}.
 
-teardown_with_changelog(#{old_home := OldHome} = Fixture) ->
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    case OldHome of
-        false -> os:unsetenv("HOME");
-        _ -> os:putenv("HOME", OldHome)
-    end,
+teardown_with_changelog(#{changelog_ws := Ws} = Fixture) ->
+    beamtalk_test_fs:stop_changelog_workspace(Ws),
     teardown(Fixture).
 
 emit_rewrite_change_entry_case(#{counter_path := CounterPath, sub_counter_path := SubCounterPath}) ->
