@@ -203,20 +203,6 @@ beamtalk_actor_classified_test() ->
         beamtalk_test_class:stop(ClassName)
     end.
 
-%% Register the class the navigation tests above and below classify actors as.
--define(NAV_CLASS, 'BT4892NavTestClass').
--spec start_nav_class() -> atom().
-start_nav_class() ->
-    beamtalk_test_boot:registry(),
-    beamtalk_test_class:start_or_get(?NAV_CLASS, #{
-        name => ?NAV_CLASS,
-        module => test_class,
-        superclass => 'Object',
-        instance_methods => #{},
-        instance_variables => []
-    }),
-    ?NAV_CLASS.
-
 beamtalk_actor_unknown_class_has_nil_behaviour_test() ->
     application:ensure_all_started(beamtalk_runtime),
     Self = self(),
@@ -335,6 +321,20 @@ deny_list_parity_test() ->
         end,
         InfraNames
     ).
+
+%% Register the class the navigation tests above and below classify actors as.
+-define(NAV_CLASS, 'BT4892NavTestClass').
+-spec start_nav_class() -> atom().
+start_nav_class() ->
+    beamtalk_test_boot:registry(),
+    beamtalk_test_class:start_or_get(?NAV_CLASS, #{
+        name => ?NAV_CLASS,
+        module => test_class,
+        superclass => 'Object',
+        instance_methods => #{},
+        instance_variables => []
+    }),
+    ?NAV_CLASS.
 
 %% True when `Pid` was started under `beamtalk_runtime_sup` (proc_lib records
 %% the starting supervisors, by registered name, in `$ancestors`).
