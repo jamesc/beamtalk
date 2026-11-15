@@ -993,14 +993,14 @@ assert_comment_span_case(#{
 compile_expr_noproc_test() ->
     %% Covers exit:{noproc, _} clause (line 341-342)
     Result = beamtalk_repl_compiler:compile_expression_via_port("1+2", test_mod, #{}),
-    ?assertMatch({error, _}, Result).
+    ?assertMatch({error, <<"Compiler not available", _/binary>>}, Result).
 
 compile_expr_noproc_with_env_test() ->
     %% compile_expression_via_port calls beamtalk_compiler which isn't started,
     %% so it hits exit:{noproc, _} rather than the timeout path.
     %% This test verifies the function handles a missing compiler gracefully.
     Result = beamtalk_repl_compiler:compile_expression_via_port("hello", test_mod2, #{x => 1}),
-    ?assertMatch({error, _}, Result).
+    ?assertMatch({error, <<"Compiler not available", _/binary>>}, Result).
 
 %% ===================================================================
 %% compile_file_via_port catch clauses
@@ -1009,14 +1009,14 @@ compile_expr_noproc_with_env_test() ->
 compile_file_noproc_test() ->
     %% Covers exit:{noproc, _} clause (line 380-381)
     Result = beamtalk_repl_compiler:compile_file_via_port("x := 1", "/test.bt", false, undefined),
-    ?assertMatch({error, _}, Result).
+    ?assertMatch({error, {compile_error, <<"Compiler not available", _/binary>>}}, Result).
 
 compile_file_noproc_stdlib_test() ->
     %% Covers stdlib_mode path too
     Result = beamtalk_repl_compiler:compile_file_via_port(
         "Object subclass: Foo", "/stdlib/src/Foo.bt", true, undefined
     ),
-    ?assertMatch({error, _}, Result).
+    ?assertMatch({error, {compile_error, <<"Compiler not available", _/binary>>}}, Result).
 
 %% ===================================================================
 %% to_snake_case
