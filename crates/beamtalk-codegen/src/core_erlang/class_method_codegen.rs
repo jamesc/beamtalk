@@ -13,6 +13,7 @@
 
 use super::method_frame::{CLASS_SELF_VAR, MethodBoundary, MethodFrame};
 use super::selector_mangler::safe_class_method_fn_name;
+use super::value_type_codegen::VtBodyExprKind;
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, threaded_ir};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::fname;
@@ -735,46 +736,49 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
-        if Self::is_local_var_assignment(expr) {
-            self.generate_class_method_local_var_binding(expr)
-        } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-            let binding_docs = self.generate_destructure_bindings(pattern, value)?;
-            Ok(Document::Vec(binding_docs))
-        } else if self.is_do_with_vt_local_threading(expr) {
-            // Non-last `do:` loop that mutates captured outer locals.
-            self.generate_value_type_do_open(expr)
-        } else if self.is_counted_loop_with_vt_local_threading(expr) {
-            // Non-last counted loop (to:do:/to:by:do:/timesRepeat:) that
-            // mutates captured outer locals. Extracts the threaded locals from the
-            // `{'nil', StateAcc}` tuple so subsequent statements see the updates.
-            self.generate_vt_counted_loop_open(expr)
-        } else if self.is_while_with_vt_local_threading(expr) {
-            // Non-last whileTrue:/whileFalse: that mutates captured outer locals.
-            self.generate_vt_while_open(expr)
-        } else if self.is_foldl_list_op_with_vt_local_threading(expr) {
-            // Non-last collect:/select:/reject:/inject:into: that mutates captured
-            // outer locals. Extracts the threaded locals from the `{value, StateAcc}` tuple
-            // (the logical value is discarded in non-last position).
-            self.generate_vt_foldl_list_op_open(expr)
-        } else if self.is_conditional_with_vt_local_threading(expr) {
-            // Non-last conditional that mutates captured outer locals.
-            self.generate_vt_conditional_open(expr)
-        } else if self.is_exception_construct_with_vt_local_threading(expr) {
-            // Non-last on:do:/ensure: that mutates captured outer
-            // locals. Extracts the threaded locals from the returned
-            // `{Result, StateAcc}` tuple, same idiom as the loop/conditional
-            // arms above.
-            self.generate_vt_exception_construct_open(expr)
-        } else {
-            // Bind the result to the seq temp so subsequent code can
-            // sequence after it.
-            let tmp_var = self.fresh_temp_var("seq");
-            let expr_doc = self.expression_doc(expr)?;
-            Ok(docvec!["let ", leaf::var(tmp_var), " = ", expr_doc, " in ",])
+        // The same classification a value-type method body uses
+        // (`classify_vt_body_expr`), so the two cannot drift on which
+        // predicate wins. A class method has no `Self` fields to thread: a
+        // class-variable write is an in-place `put` (ADR 0130), so the kinds
+        // that exist only for `Self` field threading are plain statements here.
+        match self.classify_vt_body_expr(expr) {
+            VtBodyExprKind::LocalAssignment => self.generate_class_method_local_var_binding(expr),
+            VtBodyExprKind::DestructureAssignment => {
+                let Expression::DestructureAssignment { pattern, value, .. } = expr else {
+                    return Err(CodeGenError::Internal(
+                        "class method statement classified DestructureAssignment is not one"
+                            .to_string(),
+                    ));
+                };
+                let binding_docs = self.generate_destructure_bindings(pattern, value)?;
+                Ok(Document::Vec(binding_docs))
+            }
+            VtBodyExprKind::DoWithLocalThreading => self.generate_value_type_do_open(expr),
+            VtBodyExprKind::CountedLoopWithLocalThreading => {
+                self.generate_vt_counted_loop_open(expr)
+            }
+            VtBodyExprKind::WhileWithLocalThreading => self.generate_vt_while_open(expr),
+            VtBodyExprKind::FoldlListOpWithLocalThreading => {
+                self.generate_vt_foldl_list_op_open(expr)
+            }
+            VtBodyExprKind::ConditionalWithLocalThreading => {
+                self.generate_vt_conditional_open(expr)
+            }
+            VtBodyExprKind::ExceptionConstructWithThreading => {
+                self.generate_vt_exception_construct_open(expr)
+            }
+            VtBodyExprKind::EarlyReturn
+            | VtBodyExprKind::FieldAssignment
+            | VtBodyExprKind::ConditionalWithSelfFieldThreading
+            | VtBodyExprKind::BlockWithCapturedMutations(_)
+            | VtBodyExprKind::Pure => {
+                let tmp_var = self.fresh_temp_var("seq");
+                let expr_doc = self.expression_doc(expr)?;
+                Ok(docvec!["let ", leaf::var(tmp_var), " = ", expr_doc, " in ",])
+            }
         }
     }
 
-    /// Local variable assignment in class method — create a proper `let` binding.
     fn generate_class_method_local_var_binding(
         &mut self,
         expr: &Expression,

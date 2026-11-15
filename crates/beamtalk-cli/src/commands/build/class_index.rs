@@ -906,18 +906,6 @@ pub(crate) fn collect_project_protocol_infos(
     collect_project_protocol_and_alias_infos(source_files, "").protocol_infos
 }
 
-/// Extracts full ASTs of every carried protocol declared in any
-/// project source file (ADR 0127 §10a; BT-3591) — the trait-flattening
-/// counterpart to [`collect_project_protocol_infos`]. Standalone wrapper for
-/// tests; the production path calls
-/// [`collect_project_protocol_and_alias_infos`] directly (see its doc).
-#[allow(dead_code)] // Used by tests; production path uses the combined extractor above
-pub(crate) fn collect_project_protocol_defs(
-    source_files: &[Utf8PathBuf],
-) -> Vec<beamtalk_core::ast::ProtocolDefinition> {
-    collect_project_protocol_and_alias_infos(source_files, "").protocol_defs
-}
-
 /// Extracts both protocol and type-alias declarations from every project
 /// source file in a single lex/parse pass per file.
 ///

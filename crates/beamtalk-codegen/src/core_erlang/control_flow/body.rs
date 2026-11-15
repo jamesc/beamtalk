@@ -564,6 +564,12 @@ impl CoreErlangGenerator {
             // See `reject_unthreadable_value_self_field_write`.
             self.reject_unthreadable_value_self_field_write(expr, plan.threads_value_self())?;
 
+            // This ladder is deliberately not `classify_body_expr`: a loop or fold
+            // body tests `is_actor_self_send` (every self-send, not only a
+            // dispatching one) and has no `BodyExprKind` sub-classification by
+            // right-hand side, because its locals thread through the loop's
+            // accumulator rather than through the state map a method body
+            // re-extracts from.
             if self.is_field_assignment(expr) {
                 let _ = self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
             } else if self.is_actor_self_send(expr) {
@@ -861,6 +867,12 @@ impl CoreErlangGenerator {
                 kind,
                 pred_var: pred_var.as_ref(),
             };
+            // This ladder is deliberately not `classify_body_expr`: a loop or fold
+            // body tests `is_actor_self_send` (every self-send, not only a
+            // dispatching one) and has no `BodyExprKind` sub-classification by
+            // right-hand side, because its locals thread through the loop's
+            // accumulator rather than through the state map a method body
+            // re-extracts from.
             if self.is_field_assignment(expr) {
                 self.lower_foldl_field_assignment(cx, &mut flags, &mut stmts)?;
             } else if self.is_actor_self_send(expr) {
