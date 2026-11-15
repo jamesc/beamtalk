@@ -815,7 +815,9 @@ all_encoder_responses() ->
         tests => [#{name => t, status => pass}]
     },
     Encoded = [
-        beamtalk_repl_protocol:encode_result(1, Msg, TJ, <<"out">>, Warn, fun(_) -> <<"integer">> end),
+        beamtalk_repl_protocol:encode_result(1, Msg, TJ, <<"out">>, Warn, fun(_) ->
+            <<"integer">>
+        end),
         beamtalk_repl_protocol:encode_script_exit(0, Msg, <<"out">>, Warn),
         beamtalk_repl_protocol:encode_error(boom, Msg, fun format_err/1, <<"out">>, Warn, Meta),
         beamtalk_repl_protocol:encode_status(ok, Msg, TJ),
