@@ -17,8 +17,7 @@ Actor subclass: Bt4919DestructureFieldWriteActor
     a + b
 
   // Last position: the method answers the assigned value (the tuple).
-  writeLast: x and: y =>
-    {_a, _b} := (self.pair := {x, y})
+  writeLast: x and: y => {_a, _b} := (self.pair := {x, y})
 
   pair => self.pair
 
