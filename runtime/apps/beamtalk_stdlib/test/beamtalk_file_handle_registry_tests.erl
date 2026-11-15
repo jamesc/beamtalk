@@ -41,7 +41,7 @@ teardown(_) ->
 
 -doc "A unique relative temp path — never /tmp, per testing-strategy.md.".
 temp_path(Tag) ->
-    Tag ++ "_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".tmp".
+    Tag ++ "_" ++ beamtalk_test_unique:id() ++ ".tmp".
 
 -doc "Open a real file and wrap it as a FileHandle — genuinely closeable.".
 open_handle() ->

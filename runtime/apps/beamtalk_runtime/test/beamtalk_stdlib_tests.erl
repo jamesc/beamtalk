@@ -583,7 +583,7 @@ discover_and_load_fallback_missing_dir_test() ->
 discover_and_load_fallback_empty_dir_test() ->
     %% Create an empty temp directory — should list it successfully with no modules.
     TmpDir = filename:join(
-        "_bt_eunit_stdlib_fallback", integer_to_list(erlang:unique_integer([positive]))
+        "_bt_eunit_stdlib_fallback", beamtalk_test_unique:id()
     ),
     try
         ok = filelib:ensure_path(TmpDir),

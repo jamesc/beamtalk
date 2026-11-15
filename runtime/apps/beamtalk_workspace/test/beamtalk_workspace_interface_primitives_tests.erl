@@ -34,7 +34,7 @@ tmp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 %% Create a unique empty directory under tmp_dir().
 make_empty_tmp_dir(Prefix) ->
     Dir = filename:join(
-        tmp_dir(), Prefix ++ integer_to_list(erlang:unique_integer([positive]))
+        tmp_dir(), Prefix ++ beamtalk_test_unique:id()
     ),
     ok = filelib:ensure_dir(filename:join(Dir, "dummy")),
     Dir.
@@ -672,7 +672,7 @@ revert_method_unknown_selector_does_not_leak_atoms_test() ->
     %% structured error, but interns no atom.
     Selectors = [
         <<"nonexistent_selector_", (integer_to_binary(I))/binary, "_",
-            (integer_to_binary(erlang:unique_integer([positive])))/binary>>
+            (list_to_binary(beamtalk_test_unique:id()))/binary>>
      || I <- lists:seq(1, 50)
     ],
     lists:foreach(
@@ -1209,7 +1209,7 @@ stop_proc(_) ->
 %%====================================================================
 
 dependencies_with_package_name_returns_map_test() ->
-    Unique = integer_to_list(erlang:unique_integer([positive])),
+    Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("test-ws-deps-" ++ Unique),
     Tmp = filename:join(beamtalk_test_fs:base_dir(), "bt-deps-" ++ Unique),
     ok = filelib:ensure_path(Tmp),

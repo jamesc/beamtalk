@@ -188,10 +188,10 @@ removing_a_state_slot_flags_the_real_dependent_test_() ->
             [
                 ?_test(begin
                     subscribe_self_to_reload_check(),
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_counter_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_counter_~s.bt", [UniqueId])
                     ),
 
                     %% Generation 1: count + name. First-ever install of this
@@ -299,10 +299,10 @@ adding_an_unrelated_field_with_no_stale_dependents_still_announces_test_() ->
             [
                 ?_test(begin
                     subscribe_self_to_reload_check(),
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_clean_counter_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_clean_counter_~s.bt", [UniqueId])
                     ),
 
                     %% Generation 1: first-ever install this session — no_op,
@@ -399,10 +399,10 @@ skipped_candidate_shape_change_marks_existing_finding_stale_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_skipped_counter_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_skipped_counter_~s.bt", [UniqueId])
                     ),
 
                     %% Generation 1: first-ever install this session — no_op,
@@ -510,10 +510,10 @@ row1_dropped_without_bump_test_() ->
             [
                 ?_test(begin
                     subscribe_self_to_reload_check(),
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_row1_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_row1_~s.bt", [UniqueId])
                     ),
                     Gen1 =
                         <<
@@ -549,10 +549,10 @@ row2_added_only_test_() ->
             [
                 ?_test(begin
                     subscribe_self_to_reload_check(),
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_row2_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_row2_~s.bt", [UniqueId])
                     ),
                     Gen1 =
                         <<
@@ -587,10 +587,10 @@ row3_bumped_without_migration_test_() ->
             [
                 ?_test(begin
                     subscribe_self_to_reload_check(),
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_row3_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_row3_~s.bt", [UniqueId])
                     ),
                     Gen1 =
                         <<
@@ -624,10 +624,10 @@ row4_version_decreased_test_() ->
             [
                 ?_test(begin
                     subscribe_self_to_reload_check(),
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_row4_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_row4_~s.bt", [UniqueId])
                     ),
                     Gen1 =
                         <<
@@ -669,10 +669,10 @@ row5_instances_suspended_test_() ->
             [
                 ?_test(begin
                     subscribe_self_to_reload_check(),
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_row5_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_row5_~s.bt", [UniqueId])
                     ),
                     Gen1 =
                         <<
@@ -722,10 +722,10 @@ precheck_class_shape_flags_dropped_field_before_install_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_precheck_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_precheck_~s.bt", [UniqueId])
                     ),
                     Gen1 =
                         <<
@@ -785,10 +785,10 @@ precheck_class_shape_waits_for_pending_capture_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_precheck_race_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_precheck_race_~s.bt", [UniqueId])
                     ),
                     Gen1 =
                         <<
@@ -843,10 +843,10 @@ precheck_class_shape_reports_nothing_for_a_clean_edit_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_precheck_clean_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_precheck_clean_~s.bt", [UniqueId])
                     ),
                     Source =
                         <<
@@ -876,10 +876,10 @@ precheck_class_shape_does_not_leak_atoms_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_precheck_leak_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_precheck_leak_~s.bt", [UniqueId])
                     ),
                     Source =
                         <<
@@ -935,10 +935,10 @@ precheck_class_shape_leaves_the_live_class_untouched_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_precheck_live_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_precheck_live_~s.bt", [UniqueId])
                     ),
                     Source =
                         <<
@@ -1005,10 +1005,10 @@ concurrent_prechecks_each_see_their_own_pending_source_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_precheck_concurrent_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_precheck_concurrent_~s.bt", [UniqueId])
                     ),
                     Source =
                         <<
@@ -1089,14 +1089,14 @@ precheck_class_shape_does_not_false_positive_on_shadowed_ancestor_field_test_() 
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    UniqueId = erlang:unique_integer([positive]),
+                    UniqueId = beamtalk_test_unique:id(),
                     SuperPath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_ancestor_super_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_ancestor_super_~s.bt", [UniqueId])
                     ),
                     SubPath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("loader_shape_ancestor_sub_~p.bt", [UniqueId])
+                        io_lib:format("loader_shape_ancestor_sub_~s.bt", [UniqueId])
                     ),
                     SuperSource =
                         <<

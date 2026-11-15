@@ -67,8 +67,8 @@ find_project_root_no_cargo_toml_raises_test() ->
     %% Walking up to the filesystem root triggers line 213:
     %%   error({exec_not_found, "could not locate project root..."}).
     {ok, Cwd} = file:get_cwd(),
-    Unique = erlang:unique_integer([positive, monotonic]),
-    TmpDir = filename:join(tmp_dir(), io_lib:format("bt_no_cargo_~p", [Unique])),
+    Unique = beamtalk_test_unique:id(),
+    TmpDir = filename:join(tmp_dir(), io_lib:format("bt_no_cargo_~s", [Unique])),
     ok = file:make_dir(TmpDir),
     try
         ok = file:set_cwd(TmpDir),
@@ -99,8 +99,8 @@ find_in_project_release_path_test() ->
     %% No target/debug/bt-fake exists, so find_in_project/1 steps through the
     %% debug check (false) and picks up the release binary (lines 194-197).
     {ok, Cwd} = file:get_cwd(),
-    Unique = erlang:unique_integer([positive, monotonic]),
-    FakeRoot = filename:join(tmp_dir(), io_lib:format("bt_fake_proj_~p", [Unique])),
+    Unique = beamtalk_test_unique:id(),
+    FakeRoot = filename:join(tmp_dir(), io_lib:format("bt_fake_proj_~s", [Unique])),
     ReleaseDir = filename:join([FakeRoot, "target", "release"]),
     FakeBin = filename:join(ReleaseDir, "bt-fake-exec"),
     ok = filelib:ensure_dir(FakeBin),

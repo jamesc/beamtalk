@@ -33,10 +33,7 @@ an xref-filtered candidate set — see that function's doc).
 was_leaf_class_false_for_never_loaded_class_test() ->
     ?assertNot(
         beamtalk_repl_loader_recheck:was_leaf_class(
-            <<"LeafHelperNeverLoadedClass_",
-                (integer_to_binary(
-                    erlang:unique_integer([positive])
-                ))/binary>>
+            <<"LeafHelperNeverLoadedClass_", (list_to_binary(beamtalk_test_unique:id()))/binary>>
         )
     ).
 
@@ -71,8 +68,8 @@ superclasses_losing_leaf_status_dedupes_test_() ->
                 ?_test(begin
                     ShapePath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_helper_shape_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("leaf_helper_shape_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(ShapePath, <<"Object subclass: LeafHelperShape\n">>),
@@ -106,8 +103,8 @@ superclasses_losing_leaf_status_accepts_binary_superclass_test_() ->
                 ?_test(begin
                     ShapePath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_helper_binary_shape_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("leaf_helper_binary_shape_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(
@@ -238,8 +235,8 @@ gaining_a_first_subclass_does_not_flag_a_plain_type_pattern_dependent_test_() ->
                     %% `LeafRecheckShape` — leaf, zero subclasses.
                     ShapePath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_shape_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("leaf_recheck_shape_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(ShapePath, shape_source()),
@@ -265,8 +262,8 @@ gaining_a_first_subclass_does_not_flag_a_plain_type_pattern_dependent_test_() ->
                     %% asynchronously, off this call's own return.
                     CirclePath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_circle_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("leaf_recheck_circle_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(CirclePath, circle_source()),
@@ -297,8 +294,8 @@ reloading_the_same_subclass_again_does_not_refire_test_() ->
                 ?_test(begin
                     ShapePath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_shape2_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("leaf_recheck_shape2_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(ShapePath, <<"Object subclass: LeafRecheckShape2\n">>),
@@ -307,8 +304,8 @@ reloading_the_same_subclass_again_does_not_refire_test_() ->
 
                     CirclePath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_circle2_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("leaf_recheck_circle2_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(
@@ -358,8 +355,8 @@ clean_leaf_change_recheck_does_not_announce_test_() ->
                     %% and no owner has a stored finding to clear either.
                     ShapePath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_clean_shape_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("leaf_recheck_clean_shape_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(
@@ -370,8 +367,8 @@ clean_leaf_change_recheck_does_not_announce_test_() ->
 
                     CirclePath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_clean_circle_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("leaf_recheck_clean_circle_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(
@@ -498,8 +495,8 @@ gaining_a_first_subclass_invalidates_a_matchexhaustive_proof_test_() ->
 
                     ShapePath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_exhaustive_shape_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("leaf_recheck_exhaustive_shape_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(ShapePath, exhaustive_source()),
@@ -522,8 +519,8 @@ gaining_a_first_subclass_invalidates_a_matchexhaustive_proof_test_() ->
 
                     CirclePath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("leaf_recheck_exhaustive_circle_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("leaf_recheck_exhaustive_circle_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(CirclePath, exhaustive_circle_source()),

@@ -1035,7 +1035,7 @@ api_diagnostics() ->
 api_diagnostics_source_path_applies_project_table() ->
     Root = filename:join(
         binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
-        "bt4325_" ++ integer_to_list(erlang:unique_integer([positive]))
+        "bt4325_" ++ beamtalk_test_unique:id()
     ),
     SourcePath = filename:join([Root, "src", "bad.bt"]),
     ok = filelib:ensure_dir(SourcePath),

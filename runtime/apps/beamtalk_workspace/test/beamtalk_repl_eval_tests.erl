@@ -220,10 +220,10 @@ handle_load_read_error_directory_test() ->
 handle_load_compile_error_test() ->
     %% Test with a file that exists but will fail compilation
     %% Use unique filename to avoid collisions in concurrent test runs
-    UniqueId = erlang:unique_integer([positive]),
+    UniqueId = beamtalk_test_unique:id(),
     TempFile = filename:join(
         beamtalk_test_fs:base_dir(),
-        io_lib:format("test_invalid_bt_~p.bt", [UniqueId])
+        io_lib:format("test_invalid_bt_~s.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<"invalid beamtalk syntax @@@ ###">>),
 
@@ -600,10 +600,10 @@ do_eval_counter_increments_on_each_call_test() ->
 
 handle_load_empty_file_test() ->
     %% Empty file should attempt compile (and fail without compiler)
-    UniqueId = erlang:unique_integer([positive]),
+    UniqueId = beamtalk_test_unique:id(),
     TempFile = filename:join(
         beamtalk_test_fs:base_dir(),
-        io_lib:format("test_empty_~p.bt", [UniqueId])
+        io_lib:format("test_empty_~s.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<>>),
     State = beamtalk_repl_state:new(undefined, 0),
@@ -706,10 +706,10 @@ handle_io_request_put_chars_mfa_error_test() ->
 %%% handle_load with real file but no compiler
 
 handle_load_valid_file_no_compiler_test() ->
-    UniqueId = erlang:unique_integer([positive]),
+    UniqueId = beamtalk_test_unique:id(),
     TempFile = filename:join(
         beamtalk_test_fs:base_dir(),
-        io_lib:format("test_valid_~p.bt", [UniqueId])
+        io_lib:format("test_valid_~s.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<"Object subclass: MyTest [\n]\n">>),
     State = beamtalk_repl_state:new(undefined, 0),
@@ -1504,10 +1504,10 @@ reload_class_file_not_found_test() ->
 reload_class_file_no_compiler_test() ->
     %% reload_class_file with a real file but no compiler available.
     %% This exercises the code path that now includes compute_package_module_name.
-    UniqueId = erlang:unique_integer([positive]),
+    UniqueId = beamtalk_test_unique:id(),
     TempFile = filename:join(
         beamtalk_test_fs:base_dir(),
-        io_lib:format("test_reload_~p.bt", [UniqueId])
+        io_lib:format("test_reload_~s.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<"Actor subclass: TestActor [\n]\n">>),
     Result = beamtalk_repl_eval:reload_class_file(TempFile, 'TestActor'),
