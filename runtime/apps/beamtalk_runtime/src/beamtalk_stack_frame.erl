@@ -908,7 +908,7 @@ path_is_absolute([C, $: | _], true) when
     (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z)
 ->
     true;
-path_is_absolute([S | _], true) when S =:= $/; S =:= $\ ->
+path_is_absolute([S | _], true) when S =:= $/; S =:= $\  ->
     true;
 path_is_absolute(_, true) ->
     false;
