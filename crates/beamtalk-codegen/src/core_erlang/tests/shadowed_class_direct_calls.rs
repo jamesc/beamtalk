@@ -22,27 +22,8 @@ use beamtalk_core::source_analysis::Span;
 /// what `compute_direct_call_eligible` makes direct-call eligible.
 fn sealed_parser(package: Option<&str>) -> ClassInfo {
     ClassInfo {
-        name: "Parser".into(),
-        superclass: Some("Object".into()),
         is_sealed: true,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
         package: package.map(Into::into),
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: std::collections::HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
         class_methods: vec![MethodInfo {
             selector: "parse:".into(),
             arity: 1,
@@ -59,10 +40,7 @@ fn sealed_parser(package: Option<&str>) -> ClassInfo {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Parser", Some("Object"))
     }
 }
 

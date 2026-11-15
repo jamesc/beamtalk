@@ -151,6 +151,7 @@ pub(crate) fn generate_file_handle_bif(
 #[cfg(test)]
 mod tests {
     use super::super::doc_to_string;
+    use super::super::{assert_bif_none_table, assert_bif_table};
     use super::*;
 
     // Registry wrapper entry points: assert each wrapper threads the
@@ -242,92 +243,89 @@ mod tests {
         assert_eq!(result, Some("call 'erlang':'/='(Self, Other)".to_string()));
     }
 
-    // generate_future_bif tests
-
     #[test]
-    fn test_future_await() {
-        let result = doc_to_string(generate_future_bif("await", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_future':'await'(Self)".to_string())
+    #[allow(clippy::too_many_lines)] // one contiguous table; splitting hurts readability
+    fn generate_future_bif_table() {
+        assert_bif_table(
+            generate_future_bif,
+            &[
+                // generate_future_bif tests
+                (
+                    "test_future_await",
+                    "await",
+                    &[],
+                    "call 'beamtalk_future':'await'(Self)",
+                ),
+                (
+                    "test_future_await_forever",
+                    "awaitForever",
+                    &[],
+                    "call 'beamtalk_future':'await_forever'(Self)",
+                ),
+                (
+                    "test_future_await_with_timeout",
+                    "await:",
+                    &["Timeout"],
+                    "call 'beamtalk_future':'await'(Self, Timeout)",
+                ),
+                (
+                    "test_future_when_resolved",
+                    "whenResolved:",
+                    &["Block"],
+                    "call 'beamtalk_future':'when_resolved'(Self, Block)",
+                ),
+                (
+                    "test_future_when_rejected",
+                    "whenRejected:",
+                    &["Block"],
+                    "call 'beamtalk_future':'when_rejected'(Self, Block)",
+                ),
+                (
+                    "test_future_print_string",
+                    "printString",
+                    &[],
+                    "call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))",
+                ),
+            ],
         );
     }
 
     #[test]
-    fn test_future_await_forever() {
-        let result = doc_to_string(generate_future_bif("awaitForever", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_future':'await_forever'(Self)".to_string())
+    fn generate_future_bif_none_table() {
+        assert_bif_none_table(
+            generate_future_bif,
+            &[("test_future_unknown_returns_none", "unknown", &[])],
         );
     }
 
     #[test]
-    fn test_future_await_with_timeout() {
-        let result = doc_to_string(generate_future_bif("await:", &["Timeout".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_future':'await'(Self, Timeout)".to_string())
+    #[allow(clippy::too_many_lines)] // one contiguous table; splitting hurts readability
+    fn generate_file_handle_bif_table() {
+        assert_bif_table(
+            generate_file_handle_bif,
+            &[
+                // generate_file_handle_bif tests
+                (
+                    "test_file_handle_lines",
+                    "lines",
+                    &[],
+                    "call 'beamtalk_file':'handle_lines'(Self)",
+                ),
+                (
+                    "test_file_handle_print_string",
+                    "printString",
+                    &[],
+                    "call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))",
+                ),
+            ],
         );
     }
 
     #[test]
-    fn test_future_when_resolved() {
-        let result = doc_to_string(generate_future_bif("whenResolved:", &["Block".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_future':'when_resolved'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_future_when_rejected() {
-        let result = doc_to_string(generate_future_bif("whenRejected:", &["Block".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_future':'when_rejected'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_future_print_string() {
-        let result = doc_to_string(generate_future_bif("printString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_future_unknown_returns_none() {
-        assert_eq!(doc_to_string(generate_future_bif("unknown", &[])), None);
-    }
-
-    // generate_file_handle_bif tests
-
-    #[test]
-    fn test_file_handle_lines() {
-        let result = doc_to_string(generate_file_handle_bif("lines", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_file':'handle_lines'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_file_handle_print_string() {
-        let result = doc_to_string(generate_file_handle_bif("printString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_file_handle_unknown_returns_none() {
-        assert_eq!(
-            doc_to_string(generate_file_handle_bif("unknown", &[])),
-            None
+    fn generate_file_handle_bif_none_table() {
+        assert_bif_none_table(
+            generate_file_handle_bif,
+            &[("test_file_handle_unknown_returns_none", "unknown", &[])],
         );
     }
 }
