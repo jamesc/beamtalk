@@ -22,5 +22,6 @@
   "find_selector_send_spans",
   "find_definition_selector_spans",
   "build_class_module_index_in_source",
+  "module_name_for_path",
   "scan_source_dependencies"
 ]

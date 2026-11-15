@@ -31,6 +31,7 @@
 //! design rationale, prior art, and the open questions left for later phases.
 
 use crate::ast::to_module_name;
+use crate::file_walker::FIXTURES_DIR_NAME;
 use camino::Utf8Path;
 use std::collections::HashMap;
 
@@ -162,12 +163,23 @@ pub enum ClassModuleRegistryError {
     /// ASCII alphanumerics and underscores (mirrors `to_module_name`'s
     /// input contract).
     #[error(
-        "invalid directory name '{segment}' in source path '{path}': must contain only \
+        "invalid path segment '{segment}' in source path '{path}': must contain only \
          alphanumeric characters and underscores"
     )]
     InvalidPathSegment {
         /// The offending path segment.
         segment: String,
+        /// The full path it was found in.
+        path: String,
+    },
+    /// A file under a package's `src/test/` directory would get the module
+    /// name `bt@{package}@test@{path}`, the name `test/{path}` has, so one
+    /// would silently replace the other at load time.
+    #[error(
+        "source path '{path}' is in a directory named 'test' under src/: its module name \
+         would collide with the package's test/ modules (rename the directory)"
+    )]
+    ReservedTestDirectory {
         /// The full path it was found in.
         path: String,
     },
@@ -231,6 +243,98 @@ pub fn relative_module_segments(
             Ok(to_module_name(segment))
         })
         .collect()
+}
+
+/// Which root a file's path is relative to when deriving its module name
+/// ([`module_name_for_path`], ADR 0026 § Test files).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleRootKind {
+    /// The path is relative to the package's `src/` directory:
+    /// `bt@{package}@{path}`.
+    Src,
+    /// The path is relative to the package's `test/` directory:
+    /// `bt@{package}@test@{path}`. A file in a directory named `fixtures` (at
+    /// any depth, the directories `beamtalk test` skips when it looks for test
+    /// files) is a fixture and is named `bt@{stem}`, like an out-of-tree file.
+    Test,
+    /// The file is under neither root (`examples/`, a fixture, a loose
+    /// file): `bt@{stem}` from the file name alone.
+    OutOfTree,
+}
+
+impl ModuleRootKind {
+    /// Parses the wire spelling (`src` | `test` | `none`).
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "src" => Some(Self::Src),
+            "test" => Some(Self::Test),
+            "none" => Some(Self::OutOfTree),
+            _ => None,
+        }
+    }
+}
+
+/// The Erlang module name of a source file: the one path-to-module rule the
+/// build, `beamtalk test` and the REPL loader share (ADR 0026, ADR 0119).
+///
+/// - [`ModuleRootKind::Src`]: `bt@{package}@{segments}` for `path` relative
+///   to `src/`.
+/// - [`ModuleRootKind::Test`]: `bt@{package}@test@{segments}` for `path`
+///   relative to `test/`.
+/// - [`ModuleRootKind::OutOfTree`]: `bt@{stem}`; only the file name is used and
+///   `package` is ignored.
+///
+/// Built on [`relative_module_segments`], so an invalid segment is rejected
+/// the same way everywhere.
+///
+/// # Errors
+///
+/// Returns [`ClassModuleRegistryError::InvalidPathSegment`] if a segment
+/// contains a character other than an ASCII alphanumeric or `_`, or if the
+/// path names no file, and [`ClassModuleRegistryError::ReservedTestDirectory`]
+/// for a [`ModuleRootKind::Src`] path inside a directory named `test`.
+pub fn module_name_for_path(
+    path: &Utf8Path,
+    package: &str,
+    root: ModuleRootKind,
+) -> Result<String, ClassModuleRegistryError> {
+    let empty = || ClassModuleRegistryError::InvalidPathSegment {
+        segment: String::new(),
+        path: path.to_string(),
+    };
+    // A fixture under `test/` is named like an out-of-tree file, `bt@{stem}`.
+    // Decided on the raw directory names (what `FileWalker::test_files` compares),
+    // before any segment is normalised or validated: `beamtalk test` accepts
+    // `test/fixtures/sub-dir/X.bt` and does not treat `test/Fixtures/` as fixtures.
+    if root == ModuleRootKind::Test
+        && path
+            .parent()
+            .is_some_and(|dir| dir.components().any(|c| c.as_str() == FIXTURES_DIR_NAME))
+    {
+        return module_name_for_path(path, package, ModuleRootKind::OutOfTree);
+    }
+    let segments = match root {
+        ModuleRootKind::Src | ModuleRootKind::Test => relative_module_segments(path)?,
+        ModuleRootKind::OutOfTree => {
+            let file_name = path.file_name().ok_or_else(empty)?;
+            relative_module_segments(Utf8Path::new(file_name))?
+        }
+    };
+    if segments.is_empty() {
+        return Err(empty());
+    }
+    if root == ModuleRootKind::Src && segments.len() > 1 && segments[0] == "test" {
+        return Err(ClassModuleRegistryError::ReservedTestDirectory {
+            path: path.to_string(),
+        });
+    }
+    let joined = segments.join("@");
+    Ok(match root {
+        ModuleRootKind::Src => format!("bt@{package}@{joined}"),
+        ModuleRootKind::Test => format!("bt@{package}@test@{joined}"),
+        ModuleRootKind::OutOfTree => format!("bt@{joined}"),
+    })
 }
 
 /// Validates a stdlib class's path-derived module name against the
@@ -732,6 +836,97 @@ mod tests {
             err,
             ClassModuleRegistryError::InvalidPathSegment { .. }
         ));
+    }
+
+    #[test]
+    fn module_name_for_path_covers_every_root_kind() {
+        let name = |p: &str, k| module_name_for_path(Utf8Path::new(p), "web", k);
+        assert_eq!(
+            name("counter.bt", ModuleRootKind::Src).unwrap(),
+            "bt@web@counter"
+        );
+        assert_eq!(
+            name("util/HttpResponse.bt", ModuleRootKind::Src).unwrap(),
+            "bt@web@util@http_response"
+        );
+        assert_eq!(
+            name("foo.bt", ModuleRootKind::Test).unwrap(),
+            "bt@web@test@foo"
+        );
+        assert_eq!(
+            name("sub/Foo.bt", ModuleRootKind::Test).unwrap(),
+            "bt@web@test@sub@foo"
+        );
+        assert_eq!(
+            name("/abs/examples/MyCounter.bt", ModuleRootKind::OutOfTree).unwrap(),
+            "bt@my_counter"
+        );
+    }
+
+    #[test]
+    fn module_name_for_path_rejects_invalid_and_empty_paths() {
+        for (path, kind) in [
+            ("my-class.bt", ModuleRootKind::Src),
+            ("bad-dir/ok.bt", ModuleRootKind::Test),
+            ("/x/my-class.bt", ModuleRootKind::OutOfTree),
+            ("", ModuleRootKind::Src),
+        ] {
+            assert!(
+                matches!(
+                    module_name_for_path(Utf8Path::new(path), "web", kind),
+                    Err(ClassModuleRegistryError::InvalidPathSegment { .. })
+                ),
+                "{path:?} {kind:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn module_name_for_path_names_test_fixtures_by_stem() {
+        let test = |p: &str| module_name_for_path(Utf8Path::new(p), "web", ModuleRootKind::Test);
+        assert_eq!(test("fixtures/Helper.bt").unwrap(), "bt@helper");
+        assert_eq!(test("http1/fixtures/Helper.bt").unwrap(), "bt@helper");
+        // Decided on the raw directory name, before validation: an invalid
+        // directory below a fixtures directory is fine, `Fixtures` is not one.
+        assert_eq!(test("fixtures/sub-dir/Helper.bt").unwrap(), "bt@helper");
+        assert_eq!(test("Fixtures/Foo.bt").unwrap(), "bt@web@test@fixtures@foo");
+        assert!(test("fixtures/Foo-Bar.bt").is_err());
+        // A file called fixtures.bt, or a src/ file in a fixtures directory, is not one.
+        assert_eq!(test("fixtures.bt").unwrap(), "bt@web@test@fixtures");
+        assert_eq!(
+            module_name_for_path(Utf8Path::new("fixtures/a.bt"), "web", ModuleRootKind::Src)
+                .unwrap(),
+            "bt@web@fixtures@a"
+        );
+    }
+
+    #[test]
+    fn module_name_for_path_rejects_test_directory_under_src() {
+        let src = |p: &str| module_name_for_path(Utf8Path::new(p), "web", ModuleRootKind::Src);
+        assert!(matches!(
+            src("test/foo.bt"),
+            Err(ClassModuleRegistryError::ReservedTestDirectory { .. })
+        ));
+        // A file named test.bt, or a deeper `test` directory, cannot collide.
+        assert_eq!(src("test.bt").unwrap(), "bt@web@test");
+        assert_eq!(src("util/test/foo.bt").unwrap(), "bt@web@util@test@foo");
+        // The same path under the test root is the normal case.
+        assert_eq!(
+            module_name_for_path(Utf8Path::new("test/foo.bt"), "web", ModuleRootKind::Test)
+                .unwrap(),
+            "bt@web@test@test@foo"
+        );
+    }
+
+    #[test]
+    fn module_root_kind_parses_wire_spelling() {
+        assert_eq!(ModuleRootKind::parse("src"), Some(ModuleRootKind::Src));
+        assert_eq!(ModuleRootKind::parse("test"), Some(ModuleRootKind::Test));
+        assert_eq!(
+            ModuleRootKind::parse("none"),
+            Some(ModuleRootKind::OutOfTree)
+        );
+        assert_eq!(ModuleRootKind::parse("lib"), None);
     }
 
     #[test]

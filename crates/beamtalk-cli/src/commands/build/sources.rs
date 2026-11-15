@@ -89,6 +89,18 @@ pub(crate) fn package_module_name(
     source_root: Option<&Utf8Path>,
     pkg_name: &str,
 ) -> Result<String> {
+    // BT-4868: under the source root this is the shared `module_name_for_path`
+    // (also used by `beamtalk test` and the REPL loader's compiler-port command).
+    if let Some(root) = source_root
+        && let Ok(relative) = file.strip_prefix(root)
+    {
+        return beamtalk_core::semantic_analysis::module_name_for_path(
+            relative,
+            pkg_name,
+            beamtalk_core::semantic_analysis::ModuleRootKind::Src,
+        )
+        .into_diagnostic();
+    }
     let relative_module = compute_relative_module(file, source_root)?;
     Ok(crate::commands::util::bt_qualified_module_name(
         pkg_name,
