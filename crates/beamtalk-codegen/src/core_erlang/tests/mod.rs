@@ -106,7 +106,7 @@ pub(crate) fn assert_all_compile_through_erlc<N: AsRef<str>, C: AsRef<str>>(rows
 pub(crate) fn erlc_rejected_rows<N: AsRef<str>, C: AsRef<str>>(
     rows: &[(N, C)],
 ) -> std::result::Result<(), (Vec<usize>, String)> {
-    use beamtalk_core::test_helpers::test_support::erlc_batched_in_temp_dir;
+    use beamtalk_core::test_helpers::test_support::{ERLC_BATCH, erlc_batched_in_temp_dir};
     if rows.is_empty() {
         return Ok(());
     }
@@ -146,12 +146,19 @@ pub(crate) fn erlc_rejected_rows<N: AsRef<str>, C: AsRef<str>>(
     // for the exact list.
     let mut rejected = Vec::new();
     let mut output = String::new();
-    for (i, module) in modules.iter().enumerate() {
-        if let Err(why) = erlc_batched_in_temp_dir("codegen_erlc_row", std::slice::from_ref(module))
-        {
-            rejected.push(i);
-            output.push_str(&why);
-            output.push('\n');
+    // Only the chunks (of `ERLC_BATCH`) that fail need the row-by-row pass.
+    for (c, chunk) in modules.chunks(ERLC_BATCH).enumerate() {
+        if erlc_batched_in_temp_dir("codegen_erlc_chunk", chunk).is_ok() {
+            continue;
+        }
+        for (j, module) in chunk.iter().enumerate() {
+            if let Err(why) =
+                erlc_batched_in_temp_dir("codegen_erlc_row", std::slice::from_ref(module))
+            {
+                rejected.push(c * ERLC_BATCH + j);
+                output.push_str(&why);
+                output.push('\n');
+            }
         }
     }
     if rejected.is_empty() {

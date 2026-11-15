@@ -434,14 +434,16 @@ pub mod test_support {
     /// Whether both `erlc` and `erl` can be invoked.
     #[must_use]
     pub fn erlang_available() -> bool {
-        erlc_available() && tool_available("erl", "-version")
+        // Cached like `erlc_available`: `erl -version` boots a VM too.
+        static ERL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ERL.get_or_init(|| erlc_available() && tool_available("erl", "-version"))
     }
 
     /// Modules per `erlc` invocation. Windows caps a command line at ~32K
     /// characters and these corpora are hundreds of modules, so one `erlc`
     /// call with every path overflows it (`Os { code: 206 }`, BT-4224).
     /// Batches of 32 keep every invocation to a few kilobytes on every platform.
-    const ERLC_BATCH: usize = 32;
+    pub const ERLC_BATCH: usize = 32;
 
     /// Compiles `modules` (`(module name, Core Erlang source)`) with
     /// `erlc +from_core` into `dir`, in batches of [`ERLC_BATCH`].
