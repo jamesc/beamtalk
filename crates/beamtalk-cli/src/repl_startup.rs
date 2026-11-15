@@ -261,7 +261,7 @@ pub fn build_release_console_eval_cmd(
 /// On Windows, converts backslashes to forward slashes since Erlang expects
 /// Unix-style paths in `-pa` arguments.
 pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
-    let dirs = [
+    pa_args([
         &paths.runtime_ebin,
         &paths.workspace_ebin,
         &paths.compiler_ebin,
@@ -272,13 +272,55 @@ pub fn beam_pa_args(paths: &BeamPaths) -> Vec<OsString> {
         &paths.telemetry_poller_ebin,
         &paths.stdlib_ebin,
         &paths.stdlib_erlang_ebin,
-    ];
-    let mut args = Vec::with_capacity(dirs.len() * 2);
+    ])
+}
+
+/// The one `-pa` argument builder: `["-pa", "<dir>", "-pa", "<dir>", ...]` for
+/// any list of directories, with paths rendered as forward slashes (see
+/// [`beam_pa_args`]). [`beam_pa_args`] and `BeamEnvironment::pa_args` are this
+/// function over their own directory lists.
+pub fn pa_args<I, P>(dirs: I) -> Vec<OsString>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<std::path::Path>,
+{
+    let mut args = Vec::new();
     for dir in dirs {
         args.push(OsString::from("-pa"));
-        args.push(OsString::from(to_forward_slash(&dir.to_string_lossy())));
+        args.push(OsString::from(to_forward_slash(
+            &dir.as_ref().to_string_lossy(),
+        )));
     }
     args
+}
+
+/// A located runtime: its directory, the detected [`RuntimeLayout`], and the
+/// [`BeamPaths`] (`-pa` directories) for that layout.
+#[derive(Debug, Clone)]
+pub struct DiscoveredRuntime {
+    /// The runtime root directory.
+    pub runtime_dir: std::path::PathBuf,
+    /// Whether it is a development or an installed layout.
+    pub layout: RuntimeLayout,
+    /// `-pa` directories for `layout`.
+    pub paths: BeamPaths,
+}
+
+/// Locate the runtime and compute its `-pa` directories in one step — the
+/// prelude every command that starts a BEAM node needs.
+///
+/// # Errors
+///
+/// Returns an error if no valid runtime directory is found (see
+/// [`find_runtime_dir_with_layout`]).
+pub fn discover_beam_paths() -> miette::Result<DiscoveredRuntime> {
+    let (runtime_dir, layout) = find_runtime_dir_with_layout()?;
+    let paths = beam_paths_for_layout(&runtime_dir, layout);
+    Ok(DiscoveredRuntime {
+        runtime_dir,
+        layout,
+        paths,
+    })
 }
 
 #[cfg(test)]

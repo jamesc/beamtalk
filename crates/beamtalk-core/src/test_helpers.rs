@@ -13,11 +13,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 ///
 /// Panics if the system clock is set before the Unix epoch.
 pub fn unique_temp_dir(prefix: &str) -> PathBuf {
+    // The counter keeps names unique between threads of one process that read
+    // the same clock tick (coarse clocks on Windows/macOS).
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time")
         .as_nanos();
-    std::env::temp_dir().join(format!("{prefix}_{}_{}", std::process::id(), nanos))
+    let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!("{prefix}_{}_{}_{n}", std::process::id(), nanos))
 }
 
 // BT-3705 (ADR 0130 Phase 1): generated class-variable programs and the
@@ -421,13 +425,107 @@ pub mod test_support {
     /// instead of silently skipping it.
     #[must_use]
     pub fn erlc_available() -> bool {
-        tool_available("erlc", "-v")
+        // `erlc -v` boots the Erlang VM; probe once per test process, not per
+        // call (hundreds of tests ask).
+        static ERLC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ERLC.get_or_init(|| tool_available("erlc", "-v"))
     }
 
     /// Whether both `erlc` and `erl` can be invoked.
     #[must_use]
     pub fn erlang_available() -> bool {
-        erlc_available() && tool_available("erl", "-version")
+        // Cached like `erlc_available`: `erl -version` boots a VM too.
+        static ERL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ERL.get_or_init(|| erlc_available() && tool_available("erl", "-version"))
+    }
+
+    /// Modules per `erlc` invocation. Windows caps a command line at ~32K
+    /// characters and these corpora are hundreds of modules, so one `erlc`
+    /// call with every path overflows it (`Os { code: 206 }`, BT-4224).
+    /// Batches of 32 keep every invocation to a few kilobytes on every platform.
+    pub const ERLC_BATCH: usize = 32;
+
+    /// Compiles `modules` (`(module name, Core Erlang source)`) with
+    /// `erlc +from_core` into `dir`, in batches of [`ERLC_BATCH`].
+    ///
+    /// `Ok(())` when `erlc` accepts every module, or when `erlc` is not
+    /// installed (`NotFound` only — any other spawn failure, such as the
+    /// Windows command-line overflow that motivated the batching, is an
+    /// `Err`, never a silent pass). Every batch runs even after one fails, and
+    /// the `Err` carries the output of every failing batch (BT-4379). `erlc`
+    /// prefixes each diagnostic with the failing `<module name>.core` path, so
+    /// the `Err` names the offending rows. A module name may carry a
+    /// sub-directory (`row3/mymod`) so that rows sharing a module name can sit
+    /// side by side; `erlc` requires the `.core` file stem to equal the module
+    /// name.
+    ///
+    /// # Errors
+    ///
+    /// Returns the combined `erlc` output when any module is rejected or
+    /// `erlc` cannot be spawned.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a `.core` file cannot be written into `dir`.
+    pub fn erlc_batched(dir: &std::path::Path, modules: &[(String, String)]) -> Result<(), String> {
+        let mut files = Vec::new();
+        for (name, code) in modules {
+            let file = dir.join(format!("{name}.core"));
+            // A name may carry a sub-directory (`row3/mymod`): `erlc +from_core`
+            // requires the file stem to equal the module name, so rows that
+            // share a module name need a directory each.
+            if let Some(parent) = file.parent() {
+                std::fs::create_dir_all(parent).expect("create core dir");
+            }
+            std::fs::write(&file, code).expect("write core");
+            files.push(file);
+        }
+        let mut errors = Vec::new();
+        for chunk in files.chunks(ERLC_BATCH) {
+            let output = std::process::Command::new("erlc")
+                .arg("+from_core")
+                .arg("-o")
+                .arg(dir)
+                .args(chunk)
+                .output();
+            match output {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(e) => errors.push(format!("failed to invoke erlc: {e}")),
+                Ok(o) if o.status.success() => {}
+                Ok(o) => errors.push(format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&o.stdout),
+                    String::from_utf8_lossy(&o.stderr)
+                )),
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("\n"))
+        }
+    }
+
+    /// [`erlc_batched`] into a fresh temporary directory (named after
+    /// `prefix`), removed afterwards — for callers that only need the verdict,
+    /// not the `.beam` files.
+    ///
+    /// # Errors
+    ///
+    /// As [`erlc_batched`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the temporary directory cannot be created.
+    pub fn erlc_batched_in_temp_dir(
+        prefix: &str,
+        modules: &[(String, String)],
+    ) -> Result<(), String> {
+        let dir = super::unique_temp_dir(prefix);
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let result = erlc_batched(&dir, modules);
+        let _ = std::fs::remove_dir_all(&dir);
+        result
     }
 
     fn tool_available(tool: &str, flag: &str) -> bool {

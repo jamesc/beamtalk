@@ -825,7 +825,13 @@ coerce_result_bare_error_atom_test() ->
     ?assertEqual(nil, maps:get('okValue', Result)),
     %% errReason wraps nil via ensure_wrapped
     ErrReason = maps:get('errReason', Result),
-    ?assert(is_map(ErrReason)).
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{kind = runtime_error, details = #{reason := nil}}
+        },
+        ErrReason
+    ).
 
 coerce_result_three_element_ok_tuple_passthrough_test() ->
     %% {ok, V1, V2} passes through unchanged (3+ elements)
@@ -863,7 +869,15 @@ coerce_result_error_charlist_normalized_to_string_test() ->
     ?assertEqual(false, maps:get('isOk', Result)),
     %% The error reason is wrapped as an Exception; check the inner value
     ErrReason = maps:get('errReason', Result),
-    ?assert(is_map(ErrReason)).
+    ?assertMatch(
+        #{
+            '$beamtalk_class' := 'RuntimeError',
+            error := #beamtalk_error{
+                kind = runtime_error, details = #{reason := {beamtalk_string, <<"not found">>}}
+            }
+        },
+        ErrReason
+    ).
 
 coerce_result_ok_non_charlist_unchanged_test() ->
     %% {ok, NonCharlist} should not be affected by normalization

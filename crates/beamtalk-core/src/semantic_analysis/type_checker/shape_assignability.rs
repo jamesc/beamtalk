@@ -390,10 +390,7 @@ impl TypeChecker {
         if matches!(expected, InferredType::Shape { .. }) {
             if !Self::is_type_compatible(aname, &"Dictionary".into(), hierarchy)
                 || (!is_dictionary(aname) && hierarchy.has_class(aname))
-                    && !hierarchy
-                        .superclass_chain(aname)
-                        .iter()
-                        .any(|c| is_dictionary(c))
+                    && !hierarchy.is_subclass_of(aname, "Dictionary")
             {
                 return Err(ShapeMismatch::Incompatible);
             }

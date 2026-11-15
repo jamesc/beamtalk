@@ -674,7 +674,7 @@ maps_get_form(Name, Field) ->
 
 print_string_float_test() ->
     Result = beamtalk_primitive:print_string(3.14),
-    ?assert(is_binary(Result)).
+    ?assertEqual(<<"3.14">>, Result).
 
 print_string_non_utf8_binary_output_is_valid_utf8_test() ->
     %% The invariant that keeps json:encode/1 and the logger from blowing up.
@@ -1396,12 +1396,12 @@ display_string_class_object_test_() ->
 display_string_tuple_fallback_test() ->
     %% Tuples go through the catch-all io_lib:format path
     Result = beamtalk_primitive:display_string({a, b, c}),
-    ?assert(is_binary(Result)).
+    ?assertEqual(<<"{a, b, c}">>, Result).
 
 display_string_reference_fallback_test() ->
     Ref = make_ref(),
     Result = beamtalk_primitive:display_string(Ref),
-    ?assert(is_binary(Result)).
+    ?assertEqual(list_to_binary(ref_to_list(Ref)), Result).
 
 %%% ============================================================================
 %%% responds_to/2 — Additional primitive types

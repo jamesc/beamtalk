@@ -318,6 +318,8 @@ fn class_side_operand_producers_pre_fix_lowering_is_never_silent() {
     let fault = Fault::ClassSendOperandsInPlace;
     let mut silent = Vec::new();
     let mut reported = 0;
+    // (row label, source, pre-fix Core Erlang) for rows the verifier misses.
+    let mut unreported: Vec<(String, String, String)> = Vec::new();
     for ctx in CONTEXTS.iter().filter(|c| c.class_side) {
         for (name, stmt) in rows(ctx) {
             let src = module(ctx, &method(ctx, 0, &stmt));
@@ -328,15 +330,23 @@ fn class_side_operand_producers_pre_fix_lowering_is_never_silent() {
                 reported += 1;
                 continue;
             }
-            let compiles = catch_unwind(AssertUnwindSafe(|| {
-                crate::core_erlang::fault::with(fault, || {
-                    assert_compiles_through_erlc("test", &codegen(&src));
-                });
-            }))
-            .is_ok();
-            if !compiles {
-                silent.push(format!("{} / {name}:\n{src}", ctx.name));
+            let label = format!("{} / {name}", ctx.name);
+            match catch_unwind(AssertUnwindSafe(|| {
+                crate::core_erlang::fault::with(fault, || codegen(&src))
+            })) {
+                Ok(code) => unreported.push((label, src, code)),
+                Err(_) => silent.push(format!("{label}:\n{src}")),
             }
+        }
+    }
+    // One batched `erlc` run over the unreported rows.
+    let erlc_rows: Vec<(&str, &str)> = unreported
+        .iter()
+        .map(|(l, _, c)| (l.as_str(), c.as_str()))
+        .collect();
+    if let Err((rejected, _)) = super::erlc_rejected_rows(&erlc_rows) {
+        for i in rejected {
+            silent.push(format!("{}:\n{}", unreported[i].0, unreported[i].1));
         }
     }
     assert!(reported >= 200, "only {reported} row(s) reported");

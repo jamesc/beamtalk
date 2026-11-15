@@ -100,15 +100,8 @@ pub(crate) fn check_block_capture_sendability(
         }
     };
 
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            for stmt in &method.body {
-                walk_expression(&stmt.expression, &mut visit);
-            }
-        }
-    }
-    for standalone in &module.method_definitions {
-        for stmt in &standalone.method.body {
+    for method in module.all_methods() {
+        for stmt in &method.body {
             walk_expression(&stmt.expression, &mut visit);
         }
     }

@@ -382,7 +382,7 @@ Seed a fresh session's alias table from stdlib's own compiled `type Name =
 Reads `beamtalk_stdlib`'s `.app` `{type_aliases, [...]}` env key (ADR 0108
 Phase 8, written by `build_stdlib.rs`'s `generate_app_file`/
 `generate_app_src_file` from `app_file::AliasMetadata`) — the same durable
-record `beamtalk_repl_ops_browse:package_type_aliases/1` reads for
+record `beamtalk_repl_ops_browse_aliases:package_type_aliases/1` reads for
 `browse-type-aliases`. Without this, a stdlib alias like `SupervisionStrategy`
 (`stdlib/src/supervisor.bt`) has no live BEAM class/process the way a stdlib
 *class* does (`beamtalk_class_registry`, populated at boot from the same
@@ -467,7 +467,7 @@ stdlib_alias_fold(_Entry, Acc) ->
 %% never JSON — `app_file.rs` emits a literal `.app` Erlang term consulted
 %% via `application:get_env/2`, not a wire payload) to the binary
 %% `alias_entry()` uses. Deliberately not shared with
-%% `beamtalk_repl_ops_browse:alias_field_binary/1` (that helper is
+%% `beamtalk_repl_ops_browse_aliases:alias_field_binary/1` (that helper is
 %% `-ifdef(TEST)`-exported only, and maps an absent `doc` to `null`, a
 %% term-op/JSON convention this module's `undefined` doesn't want).
 -spec app_env_binary(atom() | string() | binary()) -> binary().

@@ -53,14 +53,8 @@ pub(crate) fn check_non_overridable_operator_methods(
     module: &Module,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for class in &module.classes {
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            check_method(method, diagnostics);
-        }
-    }
-
-    for standalone in &module.method_definitions {
-        check_method(&standalone.method, diagnostics);
+    for method in module.all_methods() {
+        check_method(method, diagnostics);
     }
 }
 

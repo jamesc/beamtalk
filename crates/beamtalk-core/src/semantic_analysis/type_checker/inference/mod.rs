@@ -729,9 +729,7 @@ impl TypeChecker {
                 receiver, field, ..
             } => {
                 let mut result = InferredType::Dynamic(DynamicReason::Unknown);
-                if let Expression::Identifier(recv_id) = receiver.as_ref()
-                    && recv_id.name == "self"
-                {
+                if receiver.is_self() {
                     // Check for a narrowed type in the env
                     // first. Inside `self.field isNil ifFalse: [...]`, the
                     // block env will have `SelfField("field")` → narrowed

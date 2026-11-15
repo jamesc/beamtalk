@@ -209,6 +209,7 @@ fn bt3791_class_methods_state_mutating_computed_value_threads_state() {
         "classMethods: #{#k => (self bump)}; addClassMethod: #j body: self.n; register",
         "classMethods: #{#k => (self bump), #m => (self bump), #answer => [:self | self k]}; addClassMethod: #j body: self.n; register",
     ];
+    let mut rows = Vec::new();
     for (i, body) in bodies.iter().enumerate() {
         let src = format!(
             "Actor subclass: P\n  state: n = 0\n  bump -> Integer =>\n    self.n := self.n + 1\n    self.n\n  probe => Object classBuilder name: #PB; superclass: Object; {body}\n"
@@ -249,8 +250,9 @@ fn bt3791_class_methods_state_mutating_computed_value_threads_state() {
             !probe[map_start..map_end].contains("safe_dispatch"),
             "self-send must not be nested in the map literal. Got:\n{probe}"
         );
-        assert_compiles_through_erlc(&name, &code);
+        rows.push((name, code));
     }
+    assert_all_compile_through_erlc(&rows);
 }
 
 /// BT-1213: an inline Tier 2 `[...] value` in an actor method threads a

@@ -1733,8 +1733,8 @@ state0() ->
 do_eval_arithmetic_value() ->
     {ok, Value, Output, Warnings, _State} = beamtalk_repl_eval:do_eval("1 + 1", state0()),
     ?assertEqual(2, Value),
-    ?assert(is_binary(Output)),
-    ?assert(is_list(Warnings)).
+    ?assertEqual(<<>>, Output),
+    ?assertEqual([], Warnings).
 
 do_eval_output_is_binary() ->
     %% A non-printing expression yields an empty captured output binary.
@@ -1863,9 +1863,8 @@ do_eval_with_undefined_subscriber() ->
 
 do_show_codegen_success() ->
     {ok, CoreErlang, Warnings, _State} = beamtalk_repl_eval:do_show_codegen("1 + 2", state0()),
-    ?assert(is_binary(CoreErlang)),
-    ?assert(byte_size(CoreErlang) > 0),
-    ?assert(is_list(Warnings)).
+    ?assert(binary:match(CoreErlang, <<"'erlang':'+'">>) =/= nomatch),
+    ?assertEqual([], Warnings).
 
 do_show_codegen_error() ->
     {error, _Reason, Warnings, _State} = beamtalk_repl_eval:do_show_codegen("+++", state0()),
@@ -1874,7 +1873,7 @@ do_show_codegen_error() ->
 do_eval_trace_single() ->
     {ok, Steps, Output, _Warnings, _State} = beamtalk_repl_eval:do_eval_trace("21 * 2", state0()),
     ?assertMatch([{_Src, 42}], Steps),
-    ?assert(is_binary(Output)).
+    ?assertEqual(<<>>, Output).
 
 do_eval_trace_multi() ->
     {ok, Steps, _Output, _Warnings, _State} =

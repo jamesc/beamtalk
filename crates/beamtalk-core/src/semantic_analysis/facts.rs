@@ -488,120 +488,27 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
     facts
 }
 
-/// Recursively collect facts from an expression tree.
+/// Collect per-node facts (block profiles, dispatch kinds) from an expression
+/// tree. The traversal is the shared [`crate::ast_walker::walk_expression`]; only
+/// `Block` and `MessageSend` nodes carry facts.
 fn collect_expression_facts(expr: &Expression, facts: &mut SemanticFacts) {
-    match expr {
+    crate::ast_walker::walk_expression(expr, &mut |e| match e {
         Expression::Block(block) => {
-            // Compute block profile for this block node
-            let profile = analyze_block(block);
-            facts.block_profiles.insert(block.id, profile);
-            // Recurse into block body
-            for stmt in &block.body {
-                collect_expression_facts(&stmt.expression, facts);
-            }
+            facts.block_profiles.insert(block.id, analyze_block(block));
         }
-
         Expression::MessageSend {
             receiver,
             selector,
-            arguments,
             is_cast,
             span,
             ..
         } => {
-            // Classify this message send.
-            let kind = classify_dispatch(receiver, selector, *is_cast);
-            facts.dispatch_kinds.insert(*span, kind);
-            // Recurse
-            collect_expression_facts(receiver, facts);
-            for arg in arguments {
-                collect_expression_facts(arg, facts);
-            }
+            facts
+                .dispatch_kinds
+                .insert(*span, classify_dispatch(receiver, selector, *is_cast));
         }
-
-        Expression::Assignment { target, value, .. } => {
-            collect_expression_facts(target, facts);
-            collect_expression_facts(value, facts);
-        }
-
-        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-            collect_expression_facts(value, facts);
-        }
-
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            collect_expression_facts(receiver, facts);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    collect_expression_facts(arg, facts);
-                }
-            }
-        }
-
-        Expression::Parenthesized { expression, .. } => {
-            collect_expression_facts(expression, facts);
-        }
-
-        Expression::Match { value, arms, .. } => {
-            collect_expression_facts(value, facts);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    collect_expression_facts(guard, facts);
-                }
-                collect_expression_facts(&arm.body, facts);
-            }
-        }
-
-        Expression::FieldAccess { receiver, .. } => {
-            collect_expression_facts(receiver, facts);
-        }
-
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                collect_expression_facts(&pair.key, facts);
-                collect_expression_facts(&pair.value, facts);
-            }
-        }
-
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                collect_expression_facts(elem, facts);
-            }
-            if let Some(t) = tail {
-                collect_expression_facts(t, facts);
-            }
-        }
-
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for elem in elements {
-                collect_expression_facts(elem, facts);
-            }
-        }
-
-        Expression::StringInterpolation { segments, .. } => {
-            for seg in segments {
-                if let crate::ast::StringSegment::Interpolation(e) = seg {
-                    collect_expression_facts(e, facts);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                collect_expression_facts(e, facts);
-            }
-        }
-
-        // Leaf nodes: no sub-expressions to recurse into
-        Expression::Literal(..)
-        | Expression::Identifier(_)
-        | Expression::ClassReference { .. }
-        | Expression::Primitive { .. }
-        | Expression::Super(_)
-        | Expression::Error { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. } => {}
-    }
+        _ => {}
+    });
 }
 
 /// Classify a message send based on static AST information.
@@ -611,9 +518,7 @@ fn classify_dispatch(
     is_cast: bool,
 ) -> DispatchKind {
     // Self-send classification
-    if let Expression::Identifier(id) = receiver
-        && id.name == "self"
-    {
+    if receiver.is_self() {
         return if is_cast {
             DispatchKind::ActorCast
         } else {

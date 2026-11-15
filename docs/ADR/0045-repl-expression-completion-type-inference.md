@@ -100,7 +100,7 @@ The return-type lookup (`get_method_return_type/2`) must walk the superclass cha
 
 ### Completion Engine Changes
 
-`beamtalk_repl_ops_dev:get_context_completions/2` is extended with the chain path:
+`beamtalk_repl_ops_dev_complete:get_context_completions/2` is extended with the chain path:
 
 ```erlang
 get_context_completions(Code, Bindings) ->

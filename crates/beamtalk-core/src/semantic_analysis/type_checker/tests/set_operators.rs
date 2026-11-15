@@ -240,7 +240,7 @@ fn intersect_distinct_singletons_are_disjoint() {
 /// `Object` (in the builtin hierarchy: `ProtoObject`) also admits singletons —
 /// `ProtoObject ∩ #foo = #foo` in both orders, matching the pre-ADR-0102
 /// hierarchy walk. Without this, the nominal arm would answer `Never`
-/// (`is_nominal_subtype(h, "#foo", "ProtoObject")` is false — singletons are
+/// (`h.is_subclass_of("#foo", "ProtoObject")` is false — singletons are
 /// never hierarchy entries).
 #[test]
 fn intersect_symbol_supertype_with_singleton_keeps_singleton() {

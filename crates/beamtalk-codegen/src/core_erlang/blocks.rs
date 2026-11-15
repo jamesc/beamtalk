@@ -19,6 +19,7 @@
 
 use super::control_flow::ArmFrame;
 use super::threaded_ir::{self, ThreadedStmt, ValueRef, VersionPrefix, VersionedVar};
+use super::threaded_rebind::RebindNaming;
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::Document;
@@ -353,33 +354,17 @@ impl CoreErlangGenerator {
     /// parameter (falling back to the creation-site value), binding its
     /// Core var. Shared by the legacy and merged Tier 2 funs (BT-4122).
     fn tier2_entry_unpack_doc(&mut self, var_name: &str) -> Document<'static> {
-        let core_var = Self::to_core_erlang_var(var_name);
         let key = Self::local_state_key(var_name);
         // Look up the outer binding BEFORE rebinding so the fallback refers to the
         // value at block-definition time (not the newly introduced inner binding).
         // If no outer binding exists (e.g. REPL mode where vars come from state dict),
         // fall back to maps:get/2 (original behavior) to avoid referencing unbound vars.
         let outer_binding = self.lookup_var(var_name).cloned();
-        self.bind_var(var_name, &core_var);
-        if let Some(outer_var) = outer_binding {
-            docvec![
-                "let ",
-                leaf::var(core_var),
-                " = call 'maps':'get'(",
-                leaf::atom(key),
-                ", StateAcc, ",
-                leaf::var(outer_var),
-                ") in "
-            ]
-        } else {
-            docvec![
-                "let ",
-                leaf::var(core_var),
-                " = call 'maps':'get'(",
-                leaf::atom(key),
-                ", StateAcc) in "
-            ]
-        }
+        let core_var = self.rebind_local_name(var_name, RebindNaming::Canonical);
+        docvec![
+            Self::state_get_let_doc(core_var, key, "StateAcc", outer_binding),
+            " in "
+        ]
     }
 
     /// [`Self::generate_block_stateful`] without the capture binding.
@@ -624,10 +609,7 @@ impl CoreErlangGenerator {
         for var_name in captured {
             // The entry unpack bound every captured local; nested scopes
             // rebind by shadowing, so the innermost binding is the live value.
-            let core_var = self
-                .lookup_var(var_name)
-                .cloned()
-                .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+            let core_var = self.resolve_local_core_var(var_name);
             let next = self.fresh_temp_var("T2Acc");
             parts.push(docvec![
                 "let ",
@@ -782,19 +764,11 @@ impl CoreErlangGenerator {
                     } else {
                         // Non-last assignment: refresh scope binding so subsequent reads
                         // of this variable see the updated value (not the initial unpack).
-                        let fresh = self.fresh_temp_var("Refreshed");
-                        self.bind_var(&id.name, &fresh);
+                        let fresh =
+                            self.rebind_local_name(&id.name, RebindNaming::FreshTemp("Refreshed"));
                         let state = self.current_state_var();
                         stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "let ",
-                                leaf::var(fresh),
-                                " = call 'maps':'get'(",
-                                leaf::atom(key),
-                                ", ",
-                                leaf::var(state),
-                                ") in "
-                            ],
+                            docvec![Self::state_get_let_doc(fresh, key, &state, None), " in "],
                             span,
                         ));
                     }
@@ -1062,9 +1036,7 @@ impl CoreErlangGenerator {
         // Determine the Core Erlang variable name:
         // - If the variable is already bound (e.g. block parameter), reuse that Core var.
         // - Otherwise, create a new Core Erlang variable name.
-        let core_var = self
-            .lookup_var(var_name)
-            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+        let core_var = self.resolve_local_core_var(var_name);
         // Capture the value expression (preserves side effects)
         // Important: capture BEFORE updating the mapping,
         // so that any uses of the variable in the RHS see the previous binding.

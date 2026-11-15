@@ -91,7 +91,7 @@ sync() ->
 -spec changes() -> term().
 changes() ->
     ok = beamtalk_capability:require_workspace(changes),
-    beamtalk_workspace_changelog:changeLog().
+    beamtalk_workspace_changelog_views:changeLog().
 
 -doc "`Workspace load:`, guarded by `require_workspace/1`.".
 -spec load(term()) -> term().

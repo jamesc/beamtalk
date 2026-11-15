@@ -147,7 +147,7 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
 -type scope() :: default | system.
 %% A `SupervisionNode` value record (tagged map). The exact `'$beamtalk_class'`
 %% field lets the Beamtalk type checker infer FFI results as `SupervisionNode`
-%% (the same mechanism `beamtalk_workspace_changelog:changeLog/0` uses for
+%% (the same mechanism `beamtalk_workspace_changelog_views:changeLog/0` uses for
 %% `ChangeLog`), so `Node processes` types as `List(SupervisionNode)`.
 -type node_map() :: #{
     '$beamtalk_class' := 'SupervisionNode',

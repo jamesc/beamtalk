@@ -215,6 +215,39 @@ impl Module {
             .flat_map(|c| c.methods.iter().chain(c.class_methods.iter()))
             .chain(self.method_definitions.iter().map(|s| &s.method))
     }
+
+    /// Iterate every method in this module with its owning class name and
+    /// side: inline instance and class methods, then standalone Tonel-style
+    /// definitions (`Foo >> bar`, `Foo class >> bar`).
+    ///
+    /// The one place that pairs the two method homes with their owner, so a
+    /// per-method check cannot cover one home and forget the other (the
+    /// BT-4863 shape). Use [`Self::all_methods`] when the owner is not needed.
+    pub fn methods_with_owner(
+        &self,
+    ) -> impl Iterator<Item = (&str, crate::source_analysis::MethodSide, &MethodDefinition)> {
+        use crate::source_analysis::MethodSide;
+        let inline = self.classes.iter().flat_map(|c| {
+            let name = c.name.name.as_str();
+            c.methods
+                .iter()
+                .map(move |m| (name, MethodSide::Instance, m))
+                .chain(
+                    c.class_methods
+                        .iter()
+                        .map(move |m| (name, MethodSide::Class, m)),
+                )
+        });
+        let standalone = self.method_definitions.iter().map(|s| {
+            let side = if s.is_class_method {
+                MethodSide::Class
+            } else {
+                MethodSide::Instance
+            };
+            (s.class_name.name.as_str(), side, &s.method)
+        });
+        inline.chain(standalone)
+    }
 }
 
 /// A comment in the source code.
@@ -494,6 +527,30 @@ mod tests {
                 "to_module_name({input:?}) mismatch"
             );
         }
+    }
+
+    #[test]
+    fn methods_with_owner_covers_inline_and_standalone_on_both_sides() {
+        use crate::source_analysis::{MethodSide, lex_with_eof, parse};
+        let src = "Object subclass: Foo\n  a => 1\n  class b => 2\n\
+                   Foo >> c => 3\n\
+                   Foo class >> d => 4\n";
+        let (module, diagnostics) = parse(lex_with_eof(src));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let seen: Vec<_> = module
+            .methods_with_owner()
+            .map(|(owner, side, m)| (owner, side, m.selector.name().to_string()))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                ("Foo", MethodSide::Instance, "a".to_string()),
+                ("Foo", MethodSide::Class, "b".to_string()),
+                ("Foo", MethodSide::Instance, "c".to_string()),
+                ("Foo", MethodSide::Class, "d".to_string()),
+            ]
+        );
+        assert_eq!(module.all_methods().count(), seen.len());
     }
 
     #[test]

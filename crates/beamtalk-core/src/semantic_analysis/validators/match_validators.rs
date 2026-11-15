@@ -174,13 +174,8 @@ pub(crate) fn warn_assignment_in_match_arms(module: &Module, diagnostics: &mut V
         ));
     }
     let mut bodies: Vec<(Vec<EcoString>, &[ExpressionStatement])> = Vec::new();
-    for class in &module.classes {
-        for method in class.methods.iter().chain(&class.class_methods) {
-            add_method(&mut bodies, method);
-        }
-    }
-    for standalone in &module.method_definitions {
-        add_method(&mut bodies, &standalone.method);
+    for method in module.all_methods() {
+        add_method(&mut bodies, method);
     }
     bodies.push((Vec::new(), module.expressions.as_slice()));
     for (params, body) in bodies {

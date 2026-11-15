@@ -54,7 +54,7 @@ source_origin_of(ClassName) ->
             <<"project">>;
         ClassPid ->
             ModName = beamtalk_object_class:module_name_safe(ClassPid),
-            beamtalk_repl_ops_browse:source_origin_of(ModName, source_file_of(ModName))
+            beamtalk_repl_ops_browse_origin:source_origin_of(ModName, source_file_of(ModName))
     end.
 
 -doc """

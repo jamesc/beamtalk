@@ -132,7 +132,7 @@ append_assigns_sequential_seqs(_Ctx) ->
 
 append_writes_two_part_layout(#{workspace_id := WsId}) ->
     {ok, Seq} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
-    Dir = beamtalk_workspace_changelog:changes_dir(WsId),
+    Dir = beamtalk_workspace_changelog_log:changes_dir(WsId),
     LogPath = filename:join(Dir, "changes.jsonl"),
     SourcePath = filename:join([Dir, "sources", seq_file(Seq, "-source.bt")]),
     PrevPath = filename:join([Dir, "sources", seq_file(Seq, "-prev.bt")]),
@@ -159,7 +159,7 @@ append_metadata_line_bounded_regardless_of_body_size(#{workspace_id := WsId}) ->
     HugeBody = binary:copy(<<"x">>, 50000),
     Input = (durable_input(<<"Counter">>, <<"inc">>))#{source => HugeBody},
     {ok, _} = beamtalk_workspace_changelog:append(Input),
-    Dir = beamtalk_workspace_changelog:changes_dir(WsId),
+    Dir = beamtalk_workspace_changelog_log:changes_dir(WsId),
     {ok, LogBin} = file:read_file(filename:join(Dir, "changes.jsonl")),
     [Line | _] = binary:split(LogBin, <<"\n">>, [global, trim_all]),
     SourcePath = filename:join([Dir, "sources", seq_file(0, "-source.bt")]),
@@ -172,7 +172,7 @@ append_metadata_line_bounded_regardless_of_body_size(#{workspace_id := WsId}) ->
 
 append_no_tmp_leftovers(#{workspace_id := WsId}) ->
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
-    Dir = beamtalk_workspace_changelog:changes_dir(WsId),
+    Dir = beamtalk_workspace_changelog_log:changes_dir(WsId),
     {ok, SourceFiles} = file:list_dir(filename:join(Dir, "sources")),
     Tmps = [F || F <- SourceFiles, lists:suffix(".tmp", F)],
     [?_assertEqual([], Tmps)].
@@ -189,7 +189,7 @@ append_new_class_has_no_prev_or_span(#{workspace_id := WsId}) ->
         source_file => <<"/proj/src/new_thing.bt">>
     },
     {ok, Seq} = beamtalk_workspace_changelog:append(Input),
-    Dir = beamtalk_workspace_changelog:changes_dir(WsId),
+    Dir = beamtalk_workspace_changelog_log:changes_dir(WsId),
     PrevPath = filename:join([Dir, "sources", seq_file(Seq, "-prev.bt")]),
     {ok, LogBin} = file:read_file(filename:join(Dir, "changes.jsonl")),
     [Line | _] = binary:split(LogBin, <<"\n">>, [global, trim_all]),
@@ -211,14 +211,14 @@ append_new_class_has_no_prev_or_span(#{workspace_id := WsId}) ->
 body_delta_clean_modulo_trailing_whitespace_test() ->
     ?assertEqual(
         {true, undefined},
-        beamtalk_workspace_changelog:body_delta(
+        beamtalk_workspace_changelog_views:body_delta(
             <<"inc => self.v + 1\n">>, <<"inc => self.v + 1">>
         )
     ).
 
 %% A real content change is dirty and carries the on-disk → in-memory diff.
 body_delta_dirty_emits_diff_test() ->
-    {Clean, Diff} = beamtalk_workspace_changelog:body_delta(
+    {Clean, Diff} = beamtalk_workspace_changelog_views:body_delta(
         <<"inc => self.v + 1">>, <<"inc => self.v + 2">>
     ),
     ?assertEqual(false, Clean),
@@ -231,7 +231,7 @@ body_delta_dirty_emits_diff_test() ->
 body_delta_clean_modulo_indentation_test() ->
     ?assertEqual(
         {true, undefined},
-        beamtalk_workspace_changelog:body_delta(
+        beamtalk_workspace_changelog_views:body_delta(
             <<"  /// Increase by one.\n  inc => self.v + 1\n">>,
             <<"/// Increase by one.\ninc => self.v + 1">>
         )
@@ -241,7 +241,7 @@ body_delta_clean_modulo_indentation_test() ->
 body_delta_new_method_all_added_test() ->
     ?assertEqual(
         {false, <<"+ doubled => self.v * 2\n">>},
-        beamtalk_workspace_changelog:body_delta(<<>>, <<"doubled => self.v * 2">>)
+        beamtalk_workspace_changelog_views:body_delta(<<>>, <<"doubled => self.v * 2">>)
     ).
 
 %%====================================================================
@@ -251,9 +251,9 @@ body_delta_new_method_all_added_test() ->
 json_round_trip(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
     [Entry] = beamtalk_workspace_changelog:entries(),
-    Json = beamtalk_workspace_changelog:entry_to_json(Entry),
-    Decoded = beamtalk_workspace_changelog:entry_from_json(Json),
-    Reencoded = beamtalk_workspace_changelog:entry_to_json(Decoded),
+    Json = beamtalk_workspace_changelog_codec:entry_to_json(Entry),
+    Decoded = beamtalk_workspace_changelog_codec:entry_from_json(Json),
+    Reencoded = beamtalk_workspace_changelog_codec:entry_to_json(Decoded),
     [?_assertEqual(Json, Reencoded)].
 
 %%====================================================================
@@ -274,7 +274,7 @@ active_excludes_nothing_in_fresh_session(_Ctx) ->
 
 change_entries_builds_tagged_maps(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
-    [Entry] = beamtalk_workspace_changelog:change_entries(),
+    [Entry] = beamtalk_workspace_changelog_views:change_entries(),
     [
         ?_assertEqual('ChangeEntry', maps:get('$beamtalk_class', Entry)),
         ?_assertEqual('Counter', maps:get(className, Entry)),
@@ -294,7 +294,7 @@ change_entries_builds_tagged_maps(_Ctx) ->
 change_log_wraps_all_entries(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"dec">>)),
-    Log = beamtalk_workspace_changelog:changeLog(),
+    Log = beamtalk_workspace_changelog_views:changeLog(),
     Entries = maps:get(entries, Log),
     [
         ?_assertEqual('ChangeLog', maps:get('$beamtalk_class', Log)),
@@ -317,7 +317,7 @@ change_entries_marks_active_flag(_Ctx) ->
         source_file => <<"/proj/src/new_thing.bt">>
     },
     {ok, _} = beamtalk_workspace_changelog:append(NewClassInput),
-    [Entry] = beamtalk_workspace_changelog:change_entries(),
+    [Entry] = beamtalk_workspace_changelog_views:change_entries(),
     [
         ?_assertEqual(nil, maps:get(selector, Entry)),
         ?_assertEqual('new-class', maps:get(kind, Entry)),
@@ -334,7 +334,7 @@ change_entries_marks_shadowed(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"dec">>)),
-    [E0, E1, E2] = beamtalk_workspace_changelog:change_entries(),
+    [E0, E1, E2] = beamtalk_workspace_changelog_views:change_entries(),
     [
         %% Oldest Counter>>inc: active but shadowed by the newer inc entry.
         ?_assertEqual(0, maps:get(seq, E0)),
@@ -351,7 +351,9 @@ change_entries_marks_shadowed(_Ctx) ->
         %% dirtyMethods is unchanged: the Set already collapses inc to one entry.
         ?_assertEqual(
             [dec, inc],
-            maps:get(elements, maps:get('Counter', beamtalk_workspace_changelog:dirtyMethods()))
+            maps:get(
+                elements, maps:get('Counter', beamtalk_workspace_changelog_views:dirtyMethods())
+            )
         )
     ].
 
@@ -387,7 +389,7 @@ class_def_entry_does_not_shadow_pending_new_class_entry(_Ctx) ->
     },
     {ok, _} = beamtalk_workspace_changelog:append(NewClassInput),
     {ok, _} = beamtalk_workspace_changelog:append(ClassDefInput),
-    [NewClassEntry, ClassDefEntry] = beamtalk_workspace_changelog:change_entries(),
+    [NewClassEntry, ClassDefEntry] = beamtalk_workspace_changelog_views:change_entries(),
     [
         ?_assertEqual('new-class', maps:get(kind, NewClassEntry)),
         ?_assertEqual(false, maps:get(shadowed, NewClassEntry)),
@@ -399,7 +401,7 @@ dirty_methods_groups_active_by_class(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"dec">>)),
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Widget">>, <<"render">>)),
-    Dirty = beamtalk_workspace_changelog:dirtyMethods(),
+    Dirty = beamtalk_workspace_changelog_views:dirtyMethods(),
     CounterSet = maps:get('Counter', Dirty),
     WidgetSet = maps:get('Widget', Dirty),
     [
@@ -422,7 +424,7 @@ dirty_methods_uses_new_class_placeholder(_Ctx) ->
         source_file => <<"/proj/src/double_counter.bt">>
     },
     {ok, _} = beamtalk_workspace_changelog:append(NewClassInput),
-    Dirty = beamtalk_workspace_changelog:dirtyMethods(),
+    Dirty = beamtalk_workspace_changelog_views:dirtyMethods(),
     Set = maps:get('DoubleCounter', Dirty),
     [
         ?_assertEqual(['new-class'], maps:get(elements, Set))
@@ -430,17 +432,17 @@ dirty_methods_uses_new_class_placeholder(_Ctx) ->
 
 change_entries_empty_when_table_absent() ->
     ok = ensure_no_changelog_table(),
-    ?assertEqual([], beamtalk_workspace_changelog:change_entries()).
+    ?assertEqual([], beamtalk_workspace_changelog_views:change_entries()).
 
 change_log_empty_when_table_absent() ->
     ok = ensure_no_changelog_table(),
-    Log = beamtalk_workspace_changelog:changeLog(),
+    Log = beamtalk_workspace_changelog_views:changeLog(),
     ?assertEqual('ChangeLog', maps:get('$beamtalk_class', Log)),
     ?assertEqual([], maps:get(entries, Log)).
 
 dirty_methods_empty_when_table_absent() ->
     ok = ensure_no_changelog_table(),
-    ?assertEqual(#{}, beamtalk_workspace_changelog:dirtyMethods()).
+    ?assertEqual(#{}, beamtalk_workspace_changelog_views:dirtyMethods()).
 
 %%====================================================================
 %% error path
@@ -448,7 +450,7 @@ dirty_methods_empty_when_table_absent() ->
 
 append_returns_error_on_unwritable_dir(#{pid := Pid, workspace_id := WsId}) ->
     %% Make the sources dir a regular file so ensure_path fails.
-    Dir = beamtalk_workspace_changelog:changes_dir(WsId),
+    Dir = beamtalk_workspace_changelog_log:changes_dir(WsId),
     ok = filelib:ensure_dir(filename:join(Dir, "dummy")),
     SourcesPath = filename:join(Dir, "sources"),
     ok = file:write_file(SourcesPath, <<"not a dir">>),
@@ -464,7 +466,7 @@ clear_empties_log(#{workspace_id := WsId}) ->
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
     {ok, _} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"dec">>)),
     ok = beamtalk_workspace_changelog:clear(),
-    Dir = beamtalk_workspace_changelog:changes_dir(WsId),
+    Dir = beamtalk_workspace_changelog_log:changes_dir(WsId),
     {ok, LogBin} = file:read_file(filename:join(Dir, "changes.jsonl")),
     [
         ?_assertEqual(0, beamtalk_workspace_changelog:size()),
@@ -783,7 +785,7 @@ new_class_value_has_nil_source_file(_Ctx) ->
         %% No source_file key ⇒ source_file = undefined.
     },
     {ok, _} = beamtalk_workspace_changelog:append(NewClassInput),
-    [Entry] = beamtalk_workspace_changelog:change_entries(),
+    [Entry] = beamtalk_workspace_changelog_views:change_entries(),
     [
         ?_assertEqual(nil, maps:get(sourceFile, Entry))
     ].
@@ -797,9 +799,9 @@ new_class_value_has_nil_source_file(_Ctx) ->
 rename_class_json_round_trip(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(rename_class_input()),
     [Entry] = beamtalk_workspace_changelog:entries(),
-    Json = beamtalk_workspace_changelog:entry_to_json(Entry),
-    Decoded = beamtalk_workspace_changelog:entry_from_json(Json),
-    Reencoded = beamtalk_workspace_changelog:entry_to_json(Decoded),
+    Json = beamtalk_workspace_changelog_codec:entry_to_json(Entry),
+    Decoded = beamtalk_workspace_changelog_codec:entry_from_json(Json),
+    Reencoded = beamtalk_workspace_changelog_codec:entry_to_json(Decoded),
     [
         ?_assertEqual(Json, Reencoded),
         ?_assertEqual('rename-class', beamtalk_workspace_changelog:entry_kind(Decoded)),
@@ -812,9 +814,9 @@ rename_class_json_round_trip(_Ctx) ->
 rename_method_json_round_trip(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(rename_method_input()),
     [Entry] = beamtalk_workspace_changelog:entries(),
-    Json = beamtalk_workspace_changelog:entry_to_json(Entry),
-    Decoded = beamtalk_workspace_changelog:entry_from_json(Json),
-    Reencoded = beamtalk_workspace_changelog:entry_to_json(Decoded),
+    Json = beamtalk_workspace_changelog_codec:entry_to_json(Entry),
+    Decoded = beamtalk_workspace_changelog_codec:entry_from_json(Json),
+    Reencoded = beamtalk_workspace_changelog_codec:entry_to_json(Decoded),
     [
         ?_assertEqual(Json, Reencoded),
         ?_assertEqual('rename-method', beamtalk_workspace_changelog:entry_kind(Decoded)),
@@ -833,7 +835,7 @@ rename_method_json_round_trip(_Ctx) ->
 rename_method_decode_drops_malformed_candidate_site(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(rename_method_input()),
     [Entry] = beamtalk_workspace_changelog:entries(),
-    Json = beamtalk_workspace_changelog:entry_to_json(Entry),
+    Json = beamtalk_workspace_changelog_codec:entry_to_json(Entry),
     Map = json:decode(Json),
     Corrupted = Map#{
         <<"candidate_sites">> => [
@@ -849,7 +851,7 @@ rename_method_decode_drops_malformed_candidate_site(_Ctx) ->
         ]
     },
     CorruptedJson = json:encode(Corrupted),
-    Decoded = beamtalk_workspace_changelog:entry_from_json(iolist_to_binary(CorruptedJson)),
+    Decoded = beamtalk_workspace_changelog_codec:entry_from_json(iolist_to_binary(CorruptedJson)),
     [
         ?_assertEqual('rename-method', beamtalk_workspace_changelog:entry_kind(Decoded)),
         ?_assertEqual(<<"increment">>, beamtalk_workspace_changelog:entry_old_selector(Decoded)),
@@ -906,7 +908,7 @@ rename_class_does_not_shadow_pending_new_class_entry(_Ctx) ->
     },
     {ok, _} = beamtalk_workspace_changelog:append(NewClassInput),
     {ok, _} = beamtalk_workspace_changelog:append(rename_class_input()),
-    [NewClassEntry, RenameClassEntry] = beamtalk_workspace_changelog:change_entries(),
+    [NewClassEntry, RenameClassEntry] = beamtalk_workspace_changelog_views:change_entries(),
     [
         ?_assertEqual('new-class', maps:get(kind, NewClassEntry)),
         ?_assertEqual(false, maps:get(shadowed, NewClassEntry)),
@@ -919,7 +921,7 @@ rename_class_does_not_shadow_pending_new_class_entry(_Ctx) ->
 %% placeholder.
 dirty_methods_uses_rename_class_placeholder(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(rename_class_input()),
-    Dirty = beamtalk_workspace_changelog:dirtyMethods(),
+    Dirty = beamtalk_workspace_changelog_views:dirtyMethods(),
     Set = maps:get('Accumulator', Dirty),
     [
         ?_assertEqual(['rename-class'], maps:get(elements, Set))
@@ -929,7 +931,7 @@ dirty_methods_uses_rename_class_placeholder(_Ctx) ->
 %% multi-site entry — `method_delta/1`'s catch-all degrades to "no diff".
 change_entries_handles_rename_class_without_crashing(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(rename_class_input()),
-    [Entry] = beamtalk_workspace_changelog:change_entries(),
+    [Entry] = beamtalk_workspace_changelog_views:change_entries(),
     [
         ?_assertEqual('rename-class', maps:get(kind, Entry)),
         ?_assertEqual(nil, maps:get(selector, Entry)),
@@ -947,7 +949,7 @@ change_entries_handles_rename_class_without_crashing(_Ctx) ->
 %% is not a rename-class).
 change_entries_handles_rename_method_without_crashing(_Ctx) ->
     {ok, _} = beamtalk_workspace_changelog:append(rename_method_input()),
-    [Entry] = beamtalk_workspace_changelog:change_entries(),
+    [Entry] = beamtalk_workspace_changelog_views:change_entries(),
     [
         ?_assertEqual('rename-method', maps:get(kind, Entry)),
         ?_assertEqual(incrementBy, maps:get(selector, Entry)),
@@ -1152,7 +1154,7 @@ rotation_archives_overflow() ->
             end,
             lists:seq(1, Total)
         ),
-        Dir = beamtalk_workspace_changelog:changes_dir(WsId),
+        Dir = beamtalk_workspace_changelog_log:changes_dir(WsId),
         ArchiveDir = filename:join(Dir, "archive"),
         {ok, ArchiveFiles} = file:list_dir(ArchiveDir),
         MetaArchives = [F || F <- ArchiveFiles, lists:suffix(".jsonl.gz", F)],
@@ -1184,7 +1186,7 @@ rotation_keeps_state_when_archive_fails() ->
             end,
             lists:seq(1, Total)
         ),
-        Dir = beamtalk_workspace_changelog:changes_dir(WsId),
+        Dir = beamtalk_workspace_changelog_log:changes_dir(WsId),
         %% After a healthy rotation the ring is bounded and an archive exists.
         ?assertEqual(1000, beamtalk_workspace_changelog:size()),
         %% Now sabotage the archive dir: make it a regular file so the next
@@ -1234,7 +1236,7 @@ archive_filenames_unique_within_same_second() ->
             end,
             lists:seq(1, 5)
         ),
-        Dir = beamtalk_workspace_changelog:changes_dir(WsId),
+        Dir = beamtalk_workspace_changelog_log:changes_dir(WsId),
         ArchiveDir = filename:join(Dir, "archive"),
         {ok, ArchiveFiles} = file:list_dir(ArchiveDir),
         MetaArchives = [F || F <- ArchiveFiles, lists:suffix(".jsonl.gz", F)],
@@ -1252,16 +1254,16 @@ load_enforces_ring_bound_when_disk_exceeds_max() ->
     %% bound on startup, not left unbounded until the next append.
     {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     try
-        Dir = beamtalk_workspace_changelog:changes_dir(WsId),
+        Dir = beamtalk_workspace_changelog_log:changes_dir(WsId),
         ok = filelib:ensure_path(Dir),
         %% Hand-write 1005 metadata lines straight to disk (no source bodies
         %% needed for this test — entries with source_file=null are non-orphan).
         Lines = [
             begin
-                Entry = beamtalk_workspace_changelog:entry_from_json(
+                Entry = beamtalk_workspace_changelog_codec:entry_from_json(
                     line_json(N)
                 ),
-                [beamtalk_workspace_changelog:entry_to_json(Entry), $\n]
+                [beamtalk_workspace_changelog_codec:entry_to_json(Entry), $\n]
             end
          || N <- lists:seq(0, 1004)
         ],
@@ -1332,20 +1334,20 @@ load_flush_file_kind_wire_corpus() ->
     ]).
 
 known_intents_decode_to_atoms() ->
-    Durable = beamtalk_workspace_changelog:entry_from_json(
+    Durable = beamtalk_workspace_changelog_codec:entry_from_json(
         line_json_with(#{<<"intent">> => <<"durable">>})
     ),
-    Ephemeral = beamtalk_workspace_changelog:entry_from_json(
+    Ephemeral = beamtalk_workspace_changelog_codec:entry_from_json(
         line_json_with(#{<<"intent">> => <<"ephemeral">>})
     ),
     ?assertEqual(durable, beamtalk_workspace_changelog:entry_intent(Durable)),
     ?assertEqual(ephemeral, beamtalk_workspace_changelog:entry_intent(Ephemeral)).
 
 known_author_kinds_decode_to_atoms() ->
-    Human = beamtalk_workspace_changelog:entry_from_json(
+    Human = beamtalk_workspace_changelog_codec:entry_from_json(
         line_json_with(#{<<"author_kind">> => <<"human">>})
     ),
-    Agent = beamtalk_workspace_changelog:entry_from_json(
+    Agent = beamtalk_workspace_changelog_codec:entry_from_json(
         line_json_with(#{<<"author_kind">> => <<"agent">>})
     ),
     ?assertEqual(human, beamtalk_workspace_changelog:entry_author_kind(Human)),
@@ -1353,40 +1355,40 @@ known_author_kinds_decode_to_atoms() ->
 
 unknown_intent_preserved_as_unknown() ->
     Json = line_json_with(#{<<"intent">> => <<"future-intent">>}),
-    Entry = beamtalk_workspace_changelog:entry_from_json(Json),
+    Entry = beamtalk_workspace_changelog_codec:entry_from_json(Json),
     ?assertEqual(unknown, beamtalk_workspace_changelog:entry_intent(Entry)).
 
 unknown_author_kind_preserved_as_unknown() ->
     Json = line_json_with(#{<<"author_kind">> => <<"future-author">>}),
-    Entry = beamtalk_workspace_changelog:entry_from_json(Json),
+    Entry = beamtalk_workspace_changelog_codec:entry_from_json(Json),
     ?assertEqual(unknown, beamtalk_workspace_changelog:entry_author_kind(Entry)).
 
 unknown_kind_preserved_not_dropped() ->
     %% A newer writer may emit a kind this beam doesn't know. Decoding must keep
     %% the line (map unknown to 'unknown') rather than throw and drop history.
     Json = line_json_with(#{<<"kind">> => <<"future-kind">>}),
-    Entry = beamtalk_workspace_changelog:entry_from_json(Json),
+    Entry = beamtalk_workspace_changelog_codec:entry_from_json(Json),
     ?assertEqual(unknown, beamtalk_workspace_changelog:entry_kind(Entry)).
 
 known_kinds_decode_to_atoms() ->
-    Instance = beamtalk_workspace_changelog:entry_from_json(
+    Instance = beamtalk_workspace_changelog_codec:entry_from_json(
         line_json_with(#{<<"kind">> => <<"instance">>})
     ),
-    Class = beamtalk_workspace_changelog:entry_from_json(
+    Class = beamtalk_workspace_changelog_codec:entry_from_json(
         line_json_with(#{<<"kind">> => <<"class">>})
     ),
-    NewClass = beamtalk_workspace_changelog:entry_from_json(
+    NewClass = beamtalk_workspace_changelog_codec:entry_from_json(
         line_json_with(#{<<"kind">> => <<"new-class">>})
     ),
     %% Redefining an *existing* class's whole definition.
-    ClassDef = beamtalk_workspace_changelog:entry_from_json(
+    ClassDef = beamtalk_workspace_changelog_codec:entry_from_json(
         line_json_with(#{<<"kind">> => <<"class-def">>})
     ),
     %% ADR 0114.
-    RenameClass = beamtalk_workspace_changelog:entry_from_json(
+    RenameClass = beamtalk_workspace_changelog_codec:entry_from_json(
         line_json_with(#{<<"kind">> => <<"rename-class">>})
     ),
-    RenameMethod = beamtalk_workspace_changelog:entry_from_json(
+    RenameMethod = beamtalk_workspace_changelog_codec:entry_from_json(
         line_json_with(#{<<"kind">> => <<"rename-method">>})
     ),
     ?assertEqual(instance, beamtalk_workspace_changelog:entry_kind(Instance)),
@@ -1483,7 +1485,7 @@ run_mode_is_memory_only() ->
         {ok, Seq} = beamtalk_workspace_changelog:append(durable_input(<<"Counter">>, <<"inc">>)),
         ?assertEqual(0, Seq),
         ?assertEqual(1, beamtalk_workspace_changelog:size()),
-        ?assertEqual(undefined, beamtalk_workspace_changelog:changes_dir(undefined))
+        ?assertEqual(undefined, beamtalk_workspace_changelog_log:changes_dir(undefined))
     after
         stop(Pid)
     end.
@@ -1501,7 +1503,7 @@ no_home_warns_once_and_stays_memory_only() ->
                 {ok, _} = beamtalk_workspace_changelog:append(
                     durable_input(<<"Counter">>, <<"inc">>)
                 ),
-                ?assertEqual(undefined, beamtalk_workspace_changelog:changes_dir(WsId)),
+                ?assertEqual(undefined, beamtalk_workspace_changelog_log:changes_dir(WsId)),
                 ?assertEqual(1, beamtalk_workspace_changelog:size())
             after
                 stop(Pid)

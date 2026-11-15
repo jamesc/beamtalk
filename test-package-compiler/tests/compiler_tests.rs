@@ -312,18 +312,29 @@ fn test_diagnostics_snapshot(
         .filter(|d| d.severity == severity)
         .collect();
 
-    let mut output = String::new();
+    let snapshot_name = format!("{case_name}_{snapshot_suffix}");
     if diagnostics.is_empty() {
-        output.push_str(none_text);
-        output.push('\n');
-    } else {
-        output.push_str(&format!("{} ({}):\n", heading, diagnostics.len()));
-        for diag in &diagnostics {
-            output.push_str(&format!("  - {}\n", diag.message));
-        }
+        // Clean cases assert inline instead of snapshotting `none_text`: a
+        // snapshot exists only for cases that have diagnostics. A leftover
+        // snapshot means the case used to report diagnostics and now silently
+        // reports none, so fail loudly rather than let it go stale.
+        let stale = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("snapshots")
+            .join(format!("compiler_tests__{snapshot_name}.snap"));
+        assert!(
+            !stale.exists(),
+            "{none_text} for '{case_name}', but a stale snapshot exists at {stale}; \
+             delete it (the clean result is asserted inline)"
+        );
+        return;
     }
 
-    insta::assert_snapshot!(format!("{}_{}", case_name, snapshot_suffix), output);
+    let mut output = format!("{} ({}):\n", heading, diagnostics.len());
+    for diag in &diagnostics {
+        output.push_str(&format!("  - {}\n", diag.message));
+    }
+    insta::assert_snapshot!(snapshot_name, output);
 }
 
 /// Test semantic analysis error diagnostics for a given test case.

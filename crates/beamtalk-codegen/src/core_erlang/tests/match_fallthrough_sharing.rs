@@ -13,7 +13,7 @@
 //! counts how many copies of that arm the chain emitted.
 
 use super::match_fallthrough_goto::assert_goto_labels_in_tail_position;
-use super::{assert_compiles_through_erlc, codegen};
+use super::{assert_all_compile_through_erlc, assert_compiles_through_erlc, codegen};
 
 /// Occurrences of the integer literal `n` as a whole token in `out`.
 fn copies(out: &str, n: u32) -> usize {
@@ -131,13 +131,15 @@ fn threaded_matches_over_shared_fallthrough_compile() {
     );
     let plain =
         format!("Object subclass: Foo\n  run: x =>\n    t := 0\n    x match: {arms}\n    t\n");
-    for src in [actor, plain] {
+    let mut rows = Vec::new();
+    for (name, src) in [("actor", actor), ("plain", plain)] {
         let out = codegen(&src);
         assert!(
             out.contains("letrec '_Fallthrough"),
             "expected a shared label:\n{out}"
         );
-        assert_compiles_through_erlc("test", &out);
         assert_goto_labels_in_tail_position(&out);
+        rows.push((name, out));
     }
+    assert_all_compile_through_erlc(&rows);
 }

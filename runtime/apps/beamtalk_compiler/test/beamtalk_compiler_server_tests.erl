@@ -967,18 +967,18 @@ api_compile_expression_opts() ->
     Options = #{class_module_index => #{<<"Counter">> => <<"bt@app@counter">>}},
     {ok, Core, _, _} =
         beamtalk_compiler_server:compile_expression(<<"1 + 2">>, <<"m">>, [], Options),
-    ?assert(is_binary(Core)).
+    ?assert(binary:match(Core, <<"'erlang':'+'">>) =/= nomatch).
 
 api_compile_trace() ->
     {ok, Core, [], _} =
         beamtalk_compiler_server:compile_expression_trace(<<"1 + 2">>, <<"m">>, []),
-    ?assert(is_binary(Core)).
+    ?assert(binary:match(Core, <<"'erlang':'+'">>) =/= nomatch).
 
 api_compile_trace_opts() ->
     Options = #{class_hierarchy => #{'Counter' => #{superclass => 'Object'}}},
     {ok, Core, _, _} =
         beamtalk_compiler_server:compile_expression_trace(<<"1 + 2">>, <<"m">>, [], Options),
-    ?assert(is_binary(Core)).
+    ?assert(binary:match(Core, <<"'erlang':'+'">>) =/= nomatch).
 
 api_compile() ->
     Source = <<"Object subclass: TmpServerC\n\n  foo => 1\n">>,
@@ -1099,11 +1099,22 @@ api_find_field_writers() ->
     ?assert(lists:member(1, Lines)).
 
 api_find_ffi_sites() ->
-    {ok, Lines} =
-        beamtalk_compiler_server:find_ffi_sites_in_source(
-            <<"(Erlang lists) reverse: x">>, lists, reverse, any
-        ),
-    ?assert(is_list(Lines)).
+    %% BT-4908: the source must be a method definition (the port wraps it in a
+    %% synthetic class); a bare expression has no method to scope the call to and
+    %% yields no sites.
+    Source = <<"rev: x => (Erlang lists) reverse: x">>,
+    ?assertEqual(
+        {ok, [1]},
+        beamtalk_compiler_server:find_ffi_sites_in_source(Source, lists, reverse, any)
+    ),
+    ?assertEqual(
+        {ok, [1]},
+        beamtalk_compiler_server:find_ffi_sites_in_source(Source, lists, reverse, 1)
+    ),
+    ?assertEqual(
+        {ok, []},
+        beamtalk_compiler_server:find_ffi_sites_in_source(Source, lists, reverse, 2)
+    ).
 
 api_resolve_method_span() ->
     Source = <<

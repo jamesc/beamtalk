@@ -85,7 +85,7 @@ site_paths_inner() ->
     Signal = beamtalk_logging_config:mcp_signal_path(),
     gen_server:stop(Meta),
     #{
-        changes => beamtalk_workspace_changelog:changes_dir(?WS),
+        changes => beamtalk_workspace_changelog_log:changes_dir(?WS),
         signal => Signal
     }.
 

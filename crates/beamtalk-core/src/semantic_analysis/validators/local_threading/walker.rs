@@ -1344,11 +1344,10 @@ impl<'d> Walker<'d> {
                 r.hierarchy
                     .class_reference_send_runs_in_caller(&name.name, selector)
             })),
-            Expression::Identifier(id) if id.name == "self" && self.context == Class => receivers
-                .map(|r| {
-                    r.hierarchy
-                        .runs_class_method_in_caller(&r.class_name, selector)
-                }),
+            _ if receiver.is_self() && self.context == Class => receivers.map(|r| {
+                r.hierarchy
+                    .runs_class_method_in_caller(&r.class_name, selector)
+            }),
             _ => None,
         };
         match runs_in_caller {

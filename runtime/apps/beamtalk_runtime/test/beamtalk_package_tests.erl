@@ -357,7 +357,7 @@ all_excludes_app_with_no_classes_or_aliases_test() ->
 
 %% find_app_for_package/1 resolves a types-only package's name back to its
 %% OTP application — exercised by `browse-type-aliases`
-%% (`beamtalk_repl_ops_browse:type_aliases_of_package/1`).
+%% (`beamtalk_repl_ops_browse_aliases:type_aliases_of_package/1`).
 find_app_for_package_resolves_types_only_app_test() ->
     setup(),
     App = bt_fake_types_only_pkg2,

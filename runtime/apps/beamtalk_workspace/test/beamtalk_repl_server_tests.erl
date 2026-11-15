@@ -1105,79 +1105,79 @@ is_known_actor_no_registry_test() ->
 %%% get_completions/1 tests
 
 get_completions_empty_prefix_test() ->
-    ?assertEqual([], beamtalk_repl_ops_dev:get_completions(<<>>)).
+    ?assertEqual([], beamtalk_repl_ops_dev_complete:get_completions(<<>>)).
 
 get_completions_no_match_test() ->
     %% No class registry running, only keywords should match
-    Result = beamtalk_repl_ops_dev:get_completions(<<"zzzzz">>),
+    Result = beamtalk_repl_ops_dev_complete:get_completions(<<"zzzzz">>),
     ?assertEqual([], Result).
 
 get_completions_keyword_match_test() ->
-    Result = beamtalk_repl_ops_dev:get_completions(<<"self">>),
+    Result = beamtalk_repl_ops_dev_complete:get_completions(<<"self">>),
     ?assert(lists:member(<<"self">>, Result)).
 
 get_completions_keyword_prefix_test() ->
-    Result = beamtalk_repl_ops_dev:get_completions(<<"su">>),
+    Result = beamtalk_repl_ops_dev_complete:get_completions(<<"su">>),
     ?assert(lists:member(<<"super">>, Result)),
     ?assert(lists:member(<<"subclass:">>, Result)).
 
 get_completions_workspace_binding_test() ->
     %% Workspace bindings (Transcript, Beamtalk, Workspace) should appear
-    Result = beamtalk_repl_ops_dev:get_completions(<<"Transcri">>),
+    Result = beamtalk_repl_ops_dev_complete:get_completions(<<"Transcri">>),
     ?assert(lists:member(<<"Transcript">>, Result)).
 
 get_completions_workspace_binding_prefix_test() ->
     %% "Work" should match the Workspace binding
-    Result = beamtalk_repl_ops_dev:get_completions(<<"Work">>),
+    Result = beamtalk_repl_ops_dev_complete:get_completions(<<"Work">>),
     ?assert(lists:member(<<"Workspace">>, Result)).
 
 %%% parse_receiver_and_prefix/1 tests
 
 parse_receiver_float_literal_no_completions_test() ->
     %% Float literal like "3.14" is not an Integer — returns no completions
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"3.14 s">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"3.14 s">>),
     ?assertEqual([], Result).
 
 %%% get_context_completions/1 tests
 
 context_completions_empty_test() ->
-    ?assertEqual([], beamtalk_repl_ops_dev:get_context_completions(<<>>)).
+    ?assertEqual([], beamtalk_repl_ops_dev_complete:get_context_completions(<<>>)).
 
 context_completions_no_receiver_falls_back_test() ->
     %% With no class registry running, bare prefix should still match keywords
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"su">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"su">>),
     ?assert(lists:member(<<"super">>, Result)),
     ?assert(lists:member(<<"subclass:">>, Result)).
 
 context_completions_unknown_receiver_returns_empty_test() ->
     %% Unknown class receiver returns no methods
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"NoSuchClass123 s">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"NoSuchClass123 s">>),
     ?assertEqual([], Result).
 
 context_completions_binding_actor_no_registry_test() ->
     %% Binding with #beamtalk_object{} but no class registry → empty (no crash)
     Binding = #beamtalk_object{class = 'NoSuchClass123', class_mod = undefined, pid = self()},
     Bindings = #{c => Binding},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"c in">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"c in">>, Bindings),
     ?assertEqual([], Result).
 
 context_completions_binding_reference_returns_object_methods_test() ->
     %% All values are now classifiable via class_of/1.
     %% Even Erlang references inherit Object methods like `class`, `inspect`.
     Bindings = #{x => make_ref()},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"x cl">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"x cl">>, Bindings),
     ?assert(lists:member(<<"class">>, Result)).
 
 %% BT: Symbol binding (atom value) now correctly returns Symbol instance methods
 context_completions_symbol_binding_returns_instance_methods_test() ->
     Bindings = #{x => some_atom},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"x cl">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"x cl">>, Bindings),
     %% `class` is inherited from Object; available on Symbol instances
     ?assert(lists:member(<<"class">>, Result)).
 
 context_completions_with_bindings_empty_line_test() ->
     %% Empty line with bindings returns empty
-    ?assertEqual([], beamtalk_repl_ops_dev:get_context_completions(<<>>, #{a => 1})).
+    ?assertEqual([], beamtalk_repl_ops_dev_complete:get_context_completions(<<>>, #{a => 1})).
 
 %% Class receiver returns both class-side and instance methods
 context_completions_class_receiver_returns_class_methods_test() ->
@@ -1187,7 +1187,7 @@ context_completions_class_receiver_returns_class_methods_test() ->
         ]
     ),
     try
-        Result = beamtalk_repl_ops_dev:get_context_completions(
+        Result = beamtalk_repl_ops_dev_complete:get_context_completions(
             <<"TestCompletionClassA sp">>, #{}
         ),
         %% Class-side methods matching "sp" should appear
@@ -1206,7 +1206,7 @@ context_completions_class_receiver_excludes_instance_methods_test() ->
         increment, inspect, decrement
     ]),
     try
-        Result = beamtalk_repl_ops_dev:get_context_completions(
+        Result = beamtalk_repl_ops_dev_complete:get_context_completions(
             <<"TestCompletionClassA2 in">>, #{}
         ),
         %% Instance methods must NOT appear for class-name receivers
@@ -1229,7 +1229,7 @@ context_completions_instance_binding_returns_instance_methods_test() ->
             class = 'TestCompletionClassB', class_mod = undefined, pid = self()
         },
         Bindings = #{c => Binding},
-        Result = beamtalk_repl_ops_dev:get_context_completions(<<"c in">>, Bindings),
+        Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"c in">>, Bindings),
         %% Instance methods matching "in" should appear
         ?assert(lists:member(<<"increment">>, Result)),
         ?assert(lists:member(<<"inspect">>, Result)),
@@ -1244,7 +1244,7 @@ context_completions_instance_binding_returns_instance_methods_test() ->
 %% must not appear in instance completions regardless of prefix.
 context_completions_instance_hides_meta_protocol_methods_test() ->
     Bindings = #{i => 42},
-    ResultAll = beamtalk_repl_ops_dev:get_context_completions(<<"i ">>, Bindings),
+    ResultAll = beamtalk_repl_ops_dev_complete:get_context_completions(<<"i ">>, Bindings),
     ?assertNot(lists:member(<<"subclassResponsibility">>, ResultAll)),
     ?assertNot(lists:member(<<"notImplemented">>, ResultAll)),
     ?assertNot(lists:member(<<"doesNotUnderstand:args:">>, ResultAll)),
@@ -1264,7 +1264,7 @@ context_completions_class_receiver_new_methods_visible_test() ->
         'TestCompletionNewClass', #{'new' => ok, 'new:' => ok}, []
     ),
     try
-        Result = beamtalk_repl_ops_dev:get_context_completions(
+        Result = beamtalk_repl_ops_dev_complete:get_context_completions(
             <<"TestCompletionNewClass n">>, #{}
         ),
         ?assert(lists:member(<<"new">>, Result)),
@@ -1286,7 +1286,9 @@ context_completions_uppercase_global_binding_returns_instance_methods_test() ->
             class = 'TestCompletionClassD', class_mod = undefined, pid = self()
         },
         Bindings = #{'TestCompletionClassD_inst' => Binding, 'TranscriptMock' => Binding},
-        Result = beamtalk_repl_ops_dev:get_context_completions(<<"TranscriptMock s">>, Bindings),
+        Result = beamtalk_repl_ops_dev_complete:get_context_completions(
+            <<"TranscriptMock s">>, Bindings
+        ),
         %% Instance methods matching "s" should appear
         ?assert(lists:member(<<"show">>, Result)),
         ?assert(lists:member(<<"subscribe">>, Result)),
@@ -1308,7 +1310,7 @@ context_completions_value_type_binding_returns_instance_methods_test() ->
         %% Value-type instances are tagged maps with '$beamtalk_class' key
         Binding = #{'$beamtalk_class' => 'TestCompletionClassC'},
         Bindings = #{s => Binding},
-        Result = beamtalk_repl_ops_dev:get_context_completions(<<"s p">>, Bindings),
+        Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"s p">>, Bindings),
         %% Instance methods matching "p" should appear
         ?assert(lists:member(<<"parse">>, Result)),
         ?assert(lists:member(<<"pairOf">>, Result)),
@@ -1324,7 +1326,7 @@ context_completions_value_type_binding_returns_instance_methods_test() ->
 %% Uses the real Integer class which is always registered in the test environment.
 context_completions_integer_binding_returns_instance_methods_test() ->
     Bindings = #{i => 42},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"i cl">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"i cl">>, Bindings),
     %% `class` is inherited from Object; available on every Integer instance
     ?assert(lists:member(<<"class">>, Result)).
 
@@ -1332,63 +1334,63 @@ context_completions_integer_binding_returns_instance_methods_test() ->
 %% Uses the real String class which is always registered in the test environment.
 context_completions_string_binding_returns_instance_methods_test() ->
     Bindings = #{s => <<"hello">>},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"s cl">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"s cl">>, Bindings),
     %% `class` is inherited from Object; available on every String instance
     ?assert(lists:member(<<"class">>, Result)).
 
 %% BT: nil binding returns UndefinedObject instance methods
 context_completions_nil_binding_returns_instance_methods_test() ->
     Bindings = #{n => nil},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"n cl">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"n cl">>, Bindings),
     %% `class` is inherited from Object; available on UndefinedObject instances
     ?assert(lists:member(<<"class">>, Result)).
 
 %% BT: true binding returns True instance methods (not Boolean — Boolean is abstract)
 context_completions_true_binding_returns_instance_methods_test() ->
     Bindings = #{t => true},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"t cl">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"t cl">>, Bindings),
     %% `class` is inherited from Object; available on True instances
     ?assert(lists:member(<<"class">>, Result)).
 
 %% BT: false binding returns False instance methods (not Boolean — Boolean is abstract)
 context_completions_false_binding_returns_instance_methods_test() ->
     Bindings = #{f => false},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"f cl">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"f cl">>, Bindings),
     %% `class` is inherited from Object; available on False instances
     ?assert(lists:member(<<"class">>, Result)).
 
 %% BT: Float binding (e.g. f := 3.14) returns Float instance methods
 context_completions_float_binding_returns_instance_methods_test() ->
     Bindings = #{f => 3.14},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"f cl">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"f cl">>, Bindings),
     ?assert(lists:member(<<"class">>, Result)).
 
 %% BT: List binding (e.g. l := #(1 2 3)) returns List instance methods
 context_completions_list_binding_returns_instance_methods_test() ->
     Bindings = #{l => [1, 2, 3]},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"l cl">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"l cl">>, Bindings),
     ?assert(lists:member(<<"class">>, Result)).
 
 %% BT: Block/closure binding returns Block instance methods
 context_completions_block_binding_returns_instance_methods_test() ->
     Bindings = #{b => fun() -> ok end},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"b cl">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"b cl">>, Bindings),
     ?assert(lists:member(<<"class">>, Result)).
 
 %% BT: Unbound variable (not in bindings map) returns empty
 context_completions_unbound_variable_returns_empty_test() ->
     Bindings = #{other => 42},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"x ">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"x ">>, Bindings),
     ?assertEqual([], Result).
 
 %% BT: String literal receiver (e.g. "hello" up) returns String instance methods
 context_completions_string_literal_receiver_test() ->
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"\"hello\" cl">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"\"hello\" cl">>),
     ?assert(lists:member(<<"class">>, Result)).
 
 %% BT: Non-existent atom receiver returns empty (safe_to_existing_atom fails)
 context_completions_nonexistent_atom_receiver_returns_empty_test() ->
-    Result = beamtalk_repl_ops_dev:get_context_completions(
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(
         <<"thisAtomDoesNotExistInTheVM ">>, #{}
     ),
     ?assertEqual([], Result).
@@ -1536,7 +1538,7 @@ resolve_chain_type_single_hop_test() ->
     try
         ?assertEqual(
             {ok, 'Integer', instance},
-            beamtalk_repl_ops_dev:resolve_chain_type(<<"counter getValue">>, #{
+            beamtalk_repl_ops_dev_complete:resolve_chain_type(<<"counter getValue">>, #{
                 counter => #beamtalk_object{
                     class = 'ResolveChainTestA', class_mod = undefined, pid = self()
                 }
@@ -1557,7 +1559,7 @@ resolve_chain_type_multi_hop_test() ->
     try
         ?assertEqual(
             {ok, 'String', instance},
-            beamtalk_repl_ops_dev:resolve_chain_type(
+            beamtalk_repl_ops_dev_complete:resolve_chain_type(
                 <<"counter getValue reversed">>,
                 #{
                     counter => #beamtalk_object{
@@ -1577,7 +1579,7 @@ resolve_chain_type_broken_chain_returns_undefined_test() ->
     %% and binary_to_existing_atom fails on the unknown selector before reaching the registry.
     ?assertEqual(
         undefined,
-        beamtalk_repl_ops_dev:resolve_chain_type(
+        beamtalk_repl_ops_dev_complete:resolve_chain_type(
             <<"\"hello\" noSuchAnnotation">>, #{}
         )
     ).
@@ -1586,14 +1588,14 @@ resolve_chain_type_keyword_mid_chain_returns_undefined_test() ->
     %% Keyword sends mid-chain cannot be tokenised — returns undefined
     ?assertEqual(
         undefined,
-        beamtalk_repl_ops_dev:resolve_chain_type(<<"myList inject: 0">>, #{})
+        beamtalk_repl_ops_dev_complete:resolve_chain_type(<<"myList inject: 0">>, #{})
     ).
 
 resolve_chain_type_single_token_returns_undefined_test() ->
     %% Single token cannot be chain-resolved (must be at least receiver + selector)
     ?assertEqual(
         undefined,
-        beamtalk_repl_ops_dev:resolve_chain_type(<<"hello">>, #{})
+        beamtalk_repl_ops_dev_complete:resolve_chain_type(<<"hello">>, #{})
     ).
 
 %%% get_context_completions chain resolution tests
@@ -1610,7 +1612,7 @@ context_completions_chained_no_annotation_returns_empty_test() ->
                 class = 'ChainCompletionTestA', class_mod = undefined, pid = self()
             }
         },
-        Result = beamtalk_repl_ops_dev:get_context_completions(
+        Result = beamtalk_repl_ops_dev_complete:get_context_completions(
             <<"myObj size cl">>, Bindings
         ),
         ?assertEqual([], Result)
@@ -1629,7 +1631,7 @@ context_completions_chained_with_return_type_test() ->
                 class = 'ChainCompletionTestB', class_mod = undefined, pid = self()
             }
         },
-        Result = beamtalk_repl_ops_dev:get_context_completions(
+        Result = beamtalk_repl_ops_dev_complete:get_context_completions(
             <<"myObj getValue cl">>, Bindings
         ),
         %% `class` is an Integer (Object) method — should appear in completions

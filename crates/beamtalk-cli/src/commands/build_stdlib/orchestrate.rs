@@ -456,19 +456,7 @@ pub(super) fn stdlib_erlang_modules(src_dir: &Utf8Path) -> Result<Vec<String>> {
     if !src_dir.is_dir() {
         return Ok(Vec::new());
     }
-    let mut modules = Vec::new();
-    for entry in fs::read_dir(src_dir)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read '{src_dir}'"))?
-    {
-        let path = entry.into_diagnostic()?.path();
-        if path.extension().is_some_and(|ext| ext == "erl")
-            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-        {
-            modules.push(stem.to_string());
-        }
-    }
-    Ok(modules)
+    beamtalk_cli::path_util::erl_module_names_in(src_dir)
 }
 
 /// Discover the runtime/stdlib-Erlang/workspace/compiler `ebin/` directories
@@ -488,8 +476,7 @@ pub(super) fn stdlib_erlang_modules(src_dir: &Utf8Path) -> Result<Vec<String>> {
 /// unit tests can hand it a synthetic list of temp directories directly.
 pub(super) fn discover_runtime_ebin_dirs() -> Option<Vec<std::path::PathBuf>> {
     use beamtalk_cli::repl_startup;
-    let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout().ok()?;
-    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+    let repl_startup::DiscoveredRuntime { paths, .. } = repl_startup::discover_beam_paths().ok()?;
     Some(vec![
         paths.runtime_ebin,
         paths.stdlib_erlang_ebin,
