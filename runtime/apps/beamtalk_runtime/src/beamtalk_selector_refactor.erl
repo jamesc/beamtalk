@@ -312,7 +312,7 @@ rename_selector_shape_mismatch_error(ClassName, OldSelectorBin, NewSelectorBin) 
 %% A dynamic (ClassBuilder) class has no tracked `.bt` source to splice a
 %% definition rewrite against — see `definition_selector_sites/4`'s own doc
 %% for why this is a hard refusal rather than a silent no-op, mirroring
-%% `beamtalk_repl_loader:remove_method/3`'s existing "class source not
+%% `beamtalk_repl_loader_methods:remove_method/3`'s existing "class source not
 %% available" behavior for the identical shape.
 -spec rename_selector_dynamic_no_source_error(atom(), binary()) -> #beamtalk_error{}.
 rename_selector_dynamic_no_source_error(ClassName, OldSelectorBin) ->
@@ -573,7 +573,7 @@ selector_override_free(OldSelector, IsClassSide, ClassName, HierarchySet) ->
 %% splice `.bt` SOURCE TEXT and recompile, which a sourceless class has
 %% none of. This is surfaced as `{error, dynamic_class_no_source}` — a hard
 %% refusal, not a silent no-op-success — deliberately mirroring
-%% `beamtalk_repl_loader:remove_method/3`'s OWN existing behavior for this
+%% `beamtalk_repl_loader_methods:remove_method/3`'s OWN existing behavior for this
 %% exact shape (`removeSelector:` on a dynamic class already fails today
 %% with "Class source not available ... (cannot remove method)"; nothing
 %% in this codebase currently mutates a dynamic class's method table

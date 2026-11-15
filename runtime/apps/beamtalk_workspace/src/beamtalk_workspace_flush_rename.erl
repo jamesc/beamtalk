@@ -359,7 +359,7 @@ derive_new_path(OldPath, OldClassBin, NewClassBin) ->
     NewStem =
         case OldClassBin =/= undefined andalso list_to_binary(OldBase) =:= OldClassBin of
             true -> binary_to_list(NewClassBin);
-            false -> beamtalk_repl_loader:to_snake_case(binary_to_list(NewClassBin))
+            false -> beamtalk_repl_loader_support:to_snake_case(binary_to_list(NewClassBin))
         end,
     % NOTE: deliberately not filename:join/2 — on win32 it lower-cases a
     % leading drive letter (e.g. "C:" -> "c:") while raw_dirname/1 above

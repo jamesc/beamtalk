@@ -5,7 +5,7 @@
 
 -moduledoc """
 Workspace-level tests for structured load refusals on the REPL reload path
-(BT-3773, split from BT-3722): `beamtalk_repl_loader:install_reload_result/2`
+(BT-3773, split from BT-3722): `beamtalk_repl_loader_reload:install_reload_result/2`
 and the pending-load-error table it drains.
 
 * A refusal parked by a load that nothing drained (`beamtalk_module_activation`,
@@ -110,7 +110,7 @@ stale_entries_test_() ->
                 ok = beamtalk_class_registry:record_pending_load_error(
                     'BT3773StaleAbi', abi_error('BT3773StaleAbi')
                 ),
-                Result = beamtalk_repl_loader:install_reload_result(
+                Result = beamtalk_repl_loader_reload:install_reload_result(
                     {ok, compiled, badfile_binary(), classes('BT3773StaleAbi'),
                         'bt3773_wrong_name'},
                     "bt3773.bt"
@@ -121,7 +121,7 @@ stale_entries_test_() ->
                 ok = beamtalk_class_registry:record_pending_load_error(
                     'BT3773StaleAbi', beamtalk_error:new(stdlib_shadowing, 'BT3773StaleAbi')
                 ),
-                Result = beamtalk_repl_loader:install_reload_result(
+                Result = beamtalk_repl_loader_reload:install_reload_result(
                     {ok, compiled, badfile_binary(), classes('BT3773StaleAbi'),
                         'bt3773_wrong_name'},
                     "bt3773.bt"
@@ -157,7 +157,7 @@ stale_abi_reload_test_() ->
         [
             {"a stale-ABI module reloads as a structured abi_mismatch, not on_load_failure",
                 fun() ->
-                    Result = beamtalk_repl_loader:install_reload_result(
+                    Result = beamtalk_repl_loader_reload:install_reload_result(
                         {ok, compiled, stale_abi_binary(), classes('BT3773StaleAbi'),
                             'bt@bt3773_stale_abi'},
                         "bt3773_stale.bt"

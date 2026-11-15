@@ -348,7 +348,7 @@ references an `added` slot's accessor before the slot exists). Every other
 step — receiver-type filtering by re-checking the whole candidate class
 (reusing the same `class_hierarchy => true` ambient-cache trick, since the
 reload that triggered this already installed the new shape before this runs
-— see `beamtalk_repl_loader:activate_module/3`), the per-reload caller cap,
+— see `beamtalk_repl_loader_activate:activate_module/3`), the per-reload caller cap,
 `checked_owners` for the findings-store consumer — is identical to
 `trigger/4`; see this module's moduledoc.
 

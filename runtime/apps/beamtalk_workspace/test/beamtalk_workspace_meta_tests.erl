@@ -479,7 +479,7 @@ stale_metadata_project_path_does_not_override_launcher_test() ->
         ?assertEqual(list_to_binary(RealDir), maps:get(project_path, Meta)),
         ?assertEqual(
             {ok, <<"bt@mypkg@lib_thing">>},
-            beamtalk_repl_loader:compute_package_module_name(
+            beamtalk_repl_loader_reload:compute_package_module_name(
                 filename:join([RealDir, "src", "lib_thing.bt"])
             )
         )

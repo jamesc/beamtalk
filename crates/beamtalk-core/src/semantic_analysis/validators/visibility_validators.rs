@@ -28,7 +28,7 @@ use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::DiagnosticCategory;
-use crate::source_analysis::{Diagnostic, Span};
+use crate::source_analysis::{Diagnostic, MethodSide, Span};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
 
@@ -153,6 +153,40 @@ pub fn check_class_visibility(
         for stmt in &method_def.method.body {
             check_expression_cross_package(&stmt.expression, current_pkg, hierarchy, diagnostics);
         }
+
+        check_standalone_signature_leaked(
+            method_def,
+            current_pkg,
+            hierarchy,
+            alias_registry,
+            diagnostics,
+        );
+    }
+}
+
+/// E0402 for a standalone `Foo >> sel` method (BT-4923): the extension is a
+/// method of its target class, so an internal class in its signature leaks
+/// exactly as it would inline. All methods of an internal class are internal,
+/// and an unknown target is not ours to judge.
+fn check_standalone_signature_leaked(
+    method_def: &crate::ast::StandaloneMethodDefinition,
+    current_pkg: &str,
+    hierarchy: &ClassHierarchy,
+    alias_registry: &AliasRegistry,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if hierarchy
+        .get_class(&method_def.class_name.name)
+        .is_some_and(|info| !info.is_internal)
+    {
+        check_method_signature_leaked(
+            &method_def.method,
+            &method_def.class_name.name,
+            current_pkg,
+            hierarchy,
+            alias_registry,
+            diagnostics,
+        );
     }
 }
 
@@ -410,31 +444,40 @@ fn check_leaked_visibility_class(
 
     // Check method signatures (only non-internal methods on a public class)
     for method in class.methods.iter().chain(class.class_methods.iter()) {
-        if method.is_internal {
-            // Internal method on public class — its signature can reference
-            // internal classes from the same package without leaking.
-            continue;
-        }
+        check_method_signature_leaked(
+            method,
+            class_name,
+            current_pkg,
+            hierarchy,
+            alias_registry,
+            diagnostics,
+        );
+    }
+}
 
-        let selector = method.selector.name();
+/// E0402 for one method's signature: an internal class of the current package
+/// in a parameter or return type of a non-`internal` method. Shared by the
+/// inline methods of a public class and by standalone `Foo >> sel` methods
+/// (BT-4923), so both forms report the same message.
+fn check_method_signature_leaked(
+    method: &MethodDefinition,
+    class_name: &EcoString,
+    current_pkg: &str,
+    hierarchy: &ClassHierarchy,
+    alias_registry: &AliasRegistry,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if method.is_internal {
+        // Internal method on public class — its signature can reference
+        // internal classes from the same package without leaking.
+        return;
+    }
 
-        // Parameter types
-        for param in &method.parameters {
-            if let Some(ref ty) = param.type_annotation {
-                check_type_annotation_leaked(
-                    ty,
-                    class_name,
-                    Some(&selector),
-                    current_pkg,
-                    hierarchy,
-                    alias_registry,
-                    diagnostics,
-                );
-            }
-        }
+    let selector = method.selector.name();
 
-        // Return type
-        if let Some(ref ty) = method.return_type {
+    // Parameter types
+    for param in &method.parameters {
+        if let Some(ref ty) = param.type_annotation {
             check_type_annotation_leaked(
                 ty,
                 class_name,
@@ -445,6 +488,19 @@ fn check_leaked_visibility_class(
                 diagnostics,
             );
         }
+    }
+
+    // Return type
+    if let Some(ref ty) = method.return_type {
+        check_type_annotation_leaked(
+            ty,
+            class_name,
+            Some(&selector),
+            current_pkg,
+            hierarchy,
+            alias_registry,
+            diagnostics,
+        );
     }
 }
 
@@ -955,6 +1011,9 @@ fn check_alias_leak_ref(
     // Protocols have no `is_internal` flag yet — nothing to check.
 }
 
+/// Selector and span of each `internal` method on one side of a class.
+type InternalMethods = Vec<(EcoString, Span)>;
+
 /// E0402: Emit error when an internal method satisfies a public protocol.
 ///
 /// If a class implements a selector required by a public protocol but declares
@@ -976,28 +1035,28 @@ pub fn check_leaked_method_visibility(
         return;
     };
 
-    for class in &module.classes {
-        let class_name = &class.name.name;
-
-        // Pre-compute selector names for internal methods to avoid repeated
-        // allocations inside the protocol × requirement loops.
-        let internal_instance: Vec<_> = class
-            .methods
-            .iter()
-            .filter(|m| m.is_internal)
-            .map(|m| (m.selector.name(), m.span))
-            .collect();
-        let internal_class: Vec<_> = class
-            .class_methods
-            .iter()
-            .filter(|m| m.is_internal)
-            .map(|m| (m.selector.name(), m.span))
-            .collect();
-
-        if internal_instance.is_empty() && internal_class.is_empty() {
+    // Internal methods per owning class, inline and standalone together
+    // (BT-4923), in order of first appearance.
+    let mut by_class: Vec<(&str, InternalMethods, InternalMethods)> = Vec::new();
+    for (class_name, side, method) in module.methods_with_owner() {
+        if !method.is_internal {
             continue;
         }
+        let idx = by_class
+            .iter()
+            .position(|(n, _, _)| *n == class_name)
+            .unwrap_or_else(|| {
+                by_class.push((class_name, Vec::new(), Vec::new()));
+                by_class.len() - 1
+            });
+        let entry = (method.selector.name(), method.span);
+        match side {
+            MethodSide::Instance => by_class[idx].1.push(entry),
+            MethodSide::Class => by_class[idx].2.push(entry),
+        }
+    }
 
+    for (class_name, internal_instance, internal_class) in &by_class {
         // Check each protocol the class might conform to
         // (Protocols don't have is_internal yet, so all protocols are treated as public)
         for (_proto_name, proto_info) in protocol_registry.protocols() {

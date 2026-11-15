@@ -1868,7 +1868,7 @@ handle_load(Other) ->
 %% short-circuits without falling through to reload_class_file/1.
 -spec handle_load_after_native(string()) -> term() | {error, #beamtalk_error{}}.
 handle_load_after_native(Path) ->
-    case beamtalk_repl_loader:reload_class_file(Path) of
+    case beamtalk_repl_loader_reload:reload_class_file(Path) of
         {ok, ClassNames} ->
             %% Record class source so subsequent `Class >> selector => body`
             %% method-patch syntax (which depends on workspace_meta:get_class_source/1)

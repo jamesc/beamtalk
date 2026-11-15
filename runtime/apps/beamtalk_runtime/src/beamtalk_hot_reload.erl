@@ -200,7 +200,7 @@ the same suspend-on-failure contract the migration hook napkin spike
 (BT-3535) exercised, generalised here to the whole chain.
 
 **`SkipStrayWarning`** (BT-3543): `true` when the class-level reload
-orchestration (`beamtalk_repl_loader:hot_reload_class/2`) already ran
+orchestration (`beamtalk_repl_loader_activate:hot_reload_class/2`) already ran
 `beamtalk_shape_migration:check_stray_migrations/1` once for this class
 before triggering `code_change/3` across its live instances — passed through
 so this per-instance call does not repeat that same class-process check (and

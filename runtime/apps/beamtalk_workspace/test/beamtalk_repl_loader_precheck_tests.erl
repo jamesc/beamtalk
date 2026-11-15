@@ -5,7 +5,7 @@
 
 -moduledoc """
 Tests for the pre-save advisory precheck (ADR 0105 Phase 3):
-`beamtalk_repl_loader:precheck_method/4`, the read-only sibling of
+`beamtalk_repl_loader_methods:precheck_method/4`, the read-only sibling of
 `install_method_with_source/10` that backs `Behaviour>>precheckCompile:
 source:`.
 
@@ -101,7 +101,7 @@ precheck_flags_stale_caller_without_installing_test_() ->
                     ),
 
                     %% Pending edit: size -> String. Not yet saved.
-                    {ok, Result} = beamtalk_repl_loader:precheck_method(
+                    {ok, Result} = beamtalk_repl_loader_methods:precheck_method(
                         <<"PrecheckCounter">>,
                         <<"size">>,
                         <<"size -> String => \"forty-two\"">>,
@@ -174,7 +174,7 @@ precheck_flags_stale_caller_class_side_test_() ->
                     %% Pending edit: class size -> String. Not yet saved.
                     %% `IsClassMethod = true` — the class-side sibling of
                     %% `precheck_flags_stale_caller_without_installing_test_`.
-                    {ok, Result} = beamtalk_repl_loader:precheck_method(
+                    {ok, Result} = beamtalk_repl_loader_methods:precheck_method(
                         <<"PrecheckClassCounter">>,
                         <<"size">>,
                         <<"class size -> String => \"forty-two\"">>,
@@ -210,7 +210,7 @@ precheck_no_op_signature_reports_empty_test_() ->
                     %% Same declared signature (still -> Integer), only the
                     %% body's literal changes — beamtalk_signature_diff:diff/2
                     %% classifies this `no_op`.
-                    {ok, Result} = beamtalk_repl_loader:precheck_method(
+                    {ok, Result} = beamtalk_repl_loader_methods:precheck_method(
                         <<"PrecheckCounter">>,
                         <<"size">>,
                         <<"size -> Integer => 43">>,
@@ -244,7 +244,7 @@ precheck_unknown_class_is_compile_error_test_() ->
                 ?_test(
                     ?assertMatch(
                         {error, {compile_error, _}},
-                        beamtalk_repl_loader:precheck_method(
+                        beamtalk_repl_loader_methods:precheck_method(
                             <<"PrecheckNeverLoadedClass">>,
                             <<"foo">>,
                             <<"foo => 1">>,
