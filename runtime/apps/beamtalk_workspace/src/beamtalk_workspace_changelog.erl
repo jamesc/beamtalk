@@ -724,8 +724,8 @@ conflated into a false shadow relationship purely because they share a
 file: only a genuinely repeated edit of the *same* rename at the *same*
 location collides.
 
-Exported for the future multi-site rewrite mechanism and for
-tests. Not yet wired into `survivor_seqs/1`/the `ChangeEntry` `shadowed`
+Compiled in test builds only (BT-4903): no production caller yet. Not
+yet wired into `survivor_seqs/1`/the `ChangeEntry` `shadowed`
 flag — `'rename-class'`/`'rename-method'` flush and dirty-view integration
 is out of scope here (schema only).
 """.
