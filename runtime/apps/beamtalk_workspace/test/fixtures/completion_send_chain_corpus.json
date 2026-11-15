@@ -1,0 +1,488 @@
+[
+  {
+    "expr": "\"hello\" size",
+    "tokens": [
+      "string",
+      "identifier"
+    ],
+    "unary": {
+      "receiver": "\"hello\"",
+      "selectors": [
+        "size"
+      ]
+    },
+    "binary": {
+      "receiver": "\"hello\"",
+      "hops": [
+        [
+          "unary",
+          "size"
+        ]
+      ]
+    },
+    "why": "a literal receiver and one unary selector"
+  },
+  {
+    "expr": "\"hello\" size abs",
+    "tokens": [
+      "string",
+      "identifier",
+      "identifier"
+    ],
+    "unary": {
+      "receiver": "\"hello\"",
+      "selectors": [
+        "size",
+        "abs"
+      ]
+    },
+    "binary": {
+      "receiver": "\"hello\"",
+      "hops": [
+        [
+          "unary",
+          "size"
+        ],
+        [
+          "unary",
+          "abs"
+        ]
+      ]
+    },
+    "why": "unary hops chain left to right"
+  },
+  {
+    "expr": "counter value",
+    "tokens": [
+      "identifier",
+      "identifier"
+    ],
+    "unary": {
+      "receiver": "counter",
+      "selectors": [
+        "value"
+      ]
+    },
+    "binary": {
+      "receiver": "counter",
+      "hops": [
+        [
+          "unary",
+          "value"
+        ]
+      ]
+    },
+    "why": "a variable receiver"
+  },
+  {
+    "expr": "Integer",
+    "tokens": [
+      "identifier"
+    ],
+    "unary": null,
+    "binary": null,
+    "why": "a single token has no send to walk"
+  },
+  {
+    "expr": "",
+    "tokens": [],
+    "unary": null,
+    "binary": null,
+    "why": "empty input"
+  },
+  {
+    "expr": "3.14 abs",
+    "tokens": [
+      "float",
+      "identifier"
+    ],
+    "unary": {
+      "receiver": "3.14",
+      "selectors": [
+        "abs"
+      ]
+    },
+    "binary": {
+      "receiver": "3.14",
+      "hops": [
+        [
+          "unary",
+          "abs"
+        ]
+      ]
+    },
+    "why": "a float literal is one token"
+  },
+  {
+    "expr": "#foo size",
+    "tokens": [
+      "symbol",
+      "identifier"
+    ],
+    "unary": {
+      "receiver": "#foo",
+      "selectors": [
+        "size"
+      ]
+    },
+    "binary": {
+      "receiver": "#foo",
+      "hops": [
+        [
+          "unary",
+          "size"
+        ]
+      ]
+    },
+    "why": "a symbol literal receiver"
+  },
+  {
+    "expr": "$a size",
+    "tokens": [
+      "character",
+      "identifier"
+    ],
+    "unary": {
+      "receiver": "$a",
+      "selectors": [
+        "size"
+      ]
+    },
+    "binary": {
+      "receiver": "$a",
+      "hops": [
+        [
+          "unary",
+          "size"
+        ]
+      ]
+    },
+    "why": "a character literal receiver"
+  },
+  {
+    "expr": "counter value + 1",
+    "tokens": [
+      "identifier",
+      "identifier",
+      "binary_selector",
+      "integer"
+    ],
+    "unary": null,
+    "binary": {
+      "receiver": "counter",
+      "hops": [
+        [
+          "unary",
+          "value"
+        ],
+        [
+          "binary",
+          "+"
+        ]
+      ]
+    },
+    "why": "a binary operator consumes the next token as its argument; the unary walker stops at it"
+  },
+  {
+    "expr": "x + 1 * 2",
+    "tokens": [
+      "identifier",
+      "binary_selector",
+      "integer",
+      "binary_selector",
+      "integer"
+    ],
+    "unary": null,
+    "binary": {
+      "receiver": "x",
+      "hops": [
+        [
+          "binary",
+          "+"
+        ],
+        [
+          "binary",
+          "*"
+        ]
+      ]
+    },
+    "why": "binary hops chain left to right with no precedence"
+  },
+  {
+    "expr": "\"foo\" , \"bar\"",
+    "tokens": [
+      "string",
+      "binary_selector",
+      "string"
+    ],
+    "unary": null,
+    "binary": {
+      "receiver": "\"foo\"",
+      "hops": [
+        [
+          "binary",
+          ","
+        ]
+      ]
+    },
+    "why": "`,` is a binary selector"
+  },
+  {
+    "expr": "x +",
+    "tokens": [
+      "identifier",
+      "binary_selector"
+    ],
+    "unary": null,
+    "binary": null,
+    "why": "a binary operator with no argument is malformed"
+  },
+  {
+    "expr": "x + 1 abs",
+    "tokens": [
+      "identifier",
+      "binary_selector",
+      "integer",
+      "identifier"
+    ],
+    "unary": null,
+    "binary": {
+      "receiver": "x",
+      "hops": [
+        [
+          "binary",
+          "+"
+        ],
+        [
+          "unary",
+          "abs"
+        ]
+      ]
+    },
+    "why": "a unary hop may follow a binary hop's argument"
+  },
+  {
+    "expr": "\"hello\" |> size abs",
+    "tokens": [
+      "string",
+      "pipe_gt",
+      "identifier",
+      "identifier"
+    ],
+    "unary": {
+      "receiver": "\"hello\"",
+      "selectors": [
+        "size",
+        "abs"
+      ]
+    },
+    "binary": {
+      "receiver": "\"hello\"",
+      "hops": [
+        [
+          "unary",
+          "size"
+        ],
+        [
+          "unary",
+          "abs"
+        ]
+      ]
+    },
+    "why": "ADR 0145: `a |> m1 m2` is the same chain as `a m1 m2`"
+  },
+  {
+    "expr": "\"hello\" size |> abs",
+    "tokens": [
+      "string",
+      "identifier",
+      "pipe_gt",
+      "identifier"
+    ],
+    "unary": {
+      "receiver": "\"hello\"",
+      "selectors": [
+        "size",
+        "abs"
+      ]
+    },
+    "binary": {
+      "receiver": "\"hello\"",
+      "hops": [
+        [
+          "unary",
+          "size"
+        ],
+        [
+          "unary",
+          "abs"
+        ]
+      ]
+    },
+    "why": "a pipe mid-chain is dropped"
+  },
+  {
+    "expr": "x + 1 |> abs",
+    "tokens": [
+      "identifier",
+      "binary_selector",
+      "integer",
+      "pipe_gt",
+      "identifier"
+    ],
+    "unary": null,
+    "binary": {
+      "receiver": "x",
+      "hops": [
+        [
+          "binary",
+          "+"
+        ],
+        [
+          "unary",
+          "abs"
+        ]
+      ]
+    },
+    "why": "a pipe after a binary hop is dropped"
+  },
+  {
+    "expr": "(myList size)",
+    "tokens": [
+      "left_paren",
+      "identifier",
+      "identifier",
+      "right_paren"
+    ],
+    "unary": null,
+    "binary": null,
+    "why": "a parenthesised subexpression is not a simple chain"
+  },
+  {
+    "expr": "x >> y",
+    "tokens": [
+      "identifier",
+      "gt_gt",
+      "identifier"
+    ],
+    "unary": null,
+    "binary": null,
+    "why": "`>>` is the method-reference operator, not a chain hop"
+  },
+  {
+    "expr": "list inject: 0 into:",
+    "tokens": [
+      "identifier",
+      "keyword",
+      "integer",
+      "keyword"
+    ],
+    "unary": null,
+    "binary": null,
+    "why": "a keyword send is not a unary or binary chain"
+  },
+  {
+    "expr": "x + inject:",
+    "tokens": [
+      "identifier",
+      "binary_selector",
+      "keyword"
+    ],
+    "unary": null,
+    "binary": null,
+    "why": "a keyword part cannot be a binary argument"
+  },
+  {
+    "expr": "  counter   value ",
+    "tokens": [
+      "identifier",
+      "identifier"
+    ],
+    "unary": {
+      "receiver": "counter",
+      "selectors": [
+        "value"
+      ]
+    },
+    "binary": {
+      "receiver": "counter",
+      "hops": [
+        [
+          "unary",
+          "value"
+        ]
+      ]
+    },
+    "why": "surrounding and repeated whitespace is not part of any token"
+  },
+  {
+    "expr": "\"a b\" size",
+    "tokens": [
+      "string",
+      "identifier"
+    ],
+    "unary": null,
+    "binary": null,
+    "lexer_view": {
+      "unary": {
+        "receiver": "\"a b\"",
+        "selectors": [
+          "size"
+        ]
+      },
+      "binary": {
+        "receiver": "\"a b\"",
+        "hops": [
+          [
+            "unary",
+            "size"
+          ]
+        ]
+      }
+    },
+    "divergence": "Erlang splits on whitespace, so a space inside a string literal tears the receiver apart and the chain is rejected (completion falls back to the compiler port). The lexer sees one string token.",
+    "why": "whitespace inside a string literal"
+  },
+  {
+    "expr": "x+1 abs",
+    "tokens": [
+      "identifier",
+      "binary_selector",
+      "integer",
+      "identifier"
+    ],
+    "unary": {
+      "receiver": "x+1",
+      "selectors": [
+        "abs"
+      ]
+    },
+    "binary": {
+      "receiver": "x+1",
+      "hops": [
+        [
+          "unary",
+          "abs"
+        ]
+      ]
+    },
+    "lexer_view": {
+      "unary": null,
+      "binary": {
+        "receiver": "x",
+        "hops": [
+          [
+            "binary",
+            "+"
+          ],
+          [
+            "unary",
+            "abs"
+          ]
+        ]
+      }
+    },
+    "divergence": "Erlang reads `x+1` as one receiver token because there is no whitespace; the resulting receiver is not a binding or class so completion yields nothing. The lexer sees three tokens.",
+    "why": "binary operator written without surrounding spaces"
+  }
+]

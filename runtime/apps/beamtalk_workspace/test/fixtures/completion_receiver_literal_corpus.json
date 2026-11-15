@@ -1,0 +1,136 @@
+[
+  {
+    "receiver": "42",
+    "class": "Integer",
+    "tokens": [
+      "integer"
+    ],
+    "why": "an all-digit token is an Integer"
+  },
+  {
+    "receiver": "0",
+    "class": "Integer",
+    "tokens": [
+      "integer"
+    ],
+    "why": "zero"
+  },
+  {
+    "receiver": "007",
+    "class": "Integer",
+    "tokens": [
+      "integer"
+    ],
+    "why": "leading zeros are still all digits"
+  },
+  {
+    "receiver": "\"hello\"",
+    "class": "String",
+    "tokens": [
+      "string"
+    ],
+    "why": "a string literal"
+  },
+  {
+    "receiver": "\"\"",
+    "class": "String",
+    "tokens": [
+      "string"
+    ],
+    "why": "the empty string"
+  },
+  {
+    "receiver": "\"a b\"",
+    "class": "String",
+    "tokens": [
+      "string"
+    ],
+    "why": "a space inside a string literal"
+  },
+  {
+    "receiver": "\"a {b} c\"",
+    "class": "String",
+    "tokens": [
+      "string_start",
+      "identifier",
+      "string_end"
+    ],
+    "why": "an interpolated string is still a String"
+  },
+  {
+    "receiver": "3.14",
+    "class": null,
+    "tokens": [
+      "float"
+    ],
+    "why": "a float must not be misread as an Integer"
+  },
+  {
+    "receiver": "1e10",
+    "class": null,
+    "tokens": [
+      "float"
+    ],
+    "why": "an exponent literal is a float"
+  },
+  {
+    "receiver": "$a",
+    "class": null,
+    "tokens": [
+      "character"
+    ],
+    "why": "a character literal is not classified"
+  },
+  {
+    "receiver": "#foo",
+    "class": null,
+    "tokens": [
+      "symbol"
+    ],
+    "why": "a symbol literal is not classified"
+  },
+  {
+    "receiver": "counter",
+    "class": null,
+    "tokens": [
+      "identifier"
+    ],
+    "why": "an identifier is not a literal"
+  },
+  {
+    "receiver": "",
+    "class": null,
+    "tokens": [],
+    "why": "empty"
+  },
+  {
+    "receiver": "16rFF",
+    "class": null,
+    "tokens": [
+      "integer"
+    ],
+    "lexer_class": "Integer",
+    "divergence": "The lexer reads a radix literal as an Integer; the Erlang rule only accepts an all-digit token, so `16rFF ` completes nothing. Conservative gap, not a crash.",
+    "why": "radix integer literal"
+  },
+  {
+    "receiver": "-5",
+    "class": null,
+    "tokens": [
+      "integer"
+    ],
+    "lexer_class": "Integer",
+    "divergence": "The lexer folds the sign into the Integer token; the Erlang rule requires a leading digit, so `-5 ` completes nothing. Conservative gap, not a crash.",
+    "why": "negative integer literal"
+  },
+  {
+    "receiver": "\"hello",
+    "class": "String",
+    "tokens": [
+      "error"
+    ],
+    "lexer_class": null,
+    "divergence": "Completion runs on half-typed lines: an unterminated string still completes as a String, whereas the lexer reports an error token.",
+    "why": "unterminated string literal"
+  }
+]
