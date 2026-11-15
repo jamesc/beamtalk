@@ -229,18 +229,20 @@ with_captured_logs(Fun) ->
     ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{parent => self()}, level => all}),
     try
         Result = Fun(),
-        {Result, drain_log_events([])}
+        {Result, drain_log_events(self(), [])}
     after
         logger:remove_handler(HandlerId),
         logger:set_primary_config(level, OldLevel)
     end.
 
-drain_log_events(Acc) ->
+%% Only events logged by `Self` (walk_or_warn/4 logs from the caller's
+%% process): other runtime processes logging during the window are not ours.
+drain_log_events(Self, Acc) ->
     receive
-        {hierarchy_log_event, #{meta := #{domain := [beamtalk, runtime]}} = E} ->
-            drain_log_events([E | Acc]);
+        {hierarchy_log_event, #{meta := #{domain := [beamtalk, runtime], pid := Self}} = E} ->
+            drain_log_events(Self, [E | Acc]);
         {hierarchy_log_event, _} ->
-            drain_log_events(Acc)
+            drain_log_events(Self, Acc)
     after 100 ->
         lists:reverse(Acc)
     end.

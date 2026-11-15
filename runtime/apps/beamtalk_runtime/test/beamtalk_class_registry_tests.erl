@@ -262,11 +262,12 @@ module_to_class_lookup_test_() ->
                 %% check if another process (a class from an earlier test
                 %% terminating late) flushed the cache in between.
                 ets:delete_all_objects(beamtalk_class_metadata),
+                Map2 = beamtalk_class_registry:module_to_class_map(),
+                %% Checked after the fetch: an unchanged generation means the
+                %% fetch hit the entry stored at `Gen`.
                 case beamtalk_class_derived_cache:generation() of
-                    Gen ->
-                        ?assertEqual(Map, beamtalk_class_registry:module_to_class_map());
-                    _ ->
-                        ok
+                    Gen -> ?assertEqual(Map, Map2);
+                    _ -> ok
                 end
             end},
             {"insert, module change and delete are seen on the next call", fun() ->
