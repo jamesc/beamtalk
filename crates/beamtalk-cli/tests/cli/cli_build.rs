@@ -830,3 +830,40 @@ fn build_check_and_lint_accept_declared_current_and_stdlib_package_qualifiers() 
         }
     }
 }
+
+#[test]
+fn dependency_qualifiers_are_checked_against_the_dependencys_own_packages() {
+    // root `app` -> `mid` -> `leaf`. `mid` names `leaf@Leaf` (its own
+    // dependency, which the root does not declare), `mid@Mid` and
+    // `stdlib@Object`; none may fail the root's build.
+    let root = tempfile::tempdir().expect("create tempdir");
+    let package = |name: &str, class: &str, deps: &str, source: &str| {
+        let dir = root.path().join(name);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n\n[dependencies]\n{deps}"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(format!("src/{class}.bt")), source).unwrap();
+    };
+    package("leaf", "Leaf", "", "Object subclass: Leaf\n  size => 1\n");
+    package(
+        "mid",
+        "Mid",
+        "leaf = { path = \"../leaf\" }\n",
+        "Object subclass: Mid\n  a => leaf@Leaf\n  b => mid@Mid\n  c => stdlib@Object\n",
+    );
+    package(
+        "app",
+        "App",
+        "mid = { path = \"../mid\" }\n",
+        "Object subclass: App\n  make => mid@Mid\n",
+    );
+
+    cli_common::beamtalk()
+        .current_dir(root.path().join("app"))
+        .arg("build")
+        .assert()
+        .success();
+}

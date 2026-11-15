@@ -670,16 +670,19 @@ fn resolve_project_context(root: PathBuf, batch: Option<&str>) -> Option<FilePro
 
     // ADR 0070 Phase 2: a `pkg@Class` qualifier must name a declared
     // dependency, the package itself or the stdlib - the declared names
-    // only, as `PackageCheckerScope` does (not the transitive `dep_roots`).
-    // A manifest with no `[package] name` has no package to validate for.
-    let known_packages = (!package_name.is_empty()).then(|| {
-        beamtalk_core::semantic_analysis::known_qualifier_packages(
-            Some(&package_name),
-            declared_dependency_names_from_manifest_toml(&manifest)
-                .iter()
-                .map(String::as_str),
-        )
-    });
+    // only, read by the same strict parser `PackageCheckerScope` reads them
+    // with (not the transitive `dep_roots`). A manifest with no `[package]
+    // name`, or whose `[dependencies]` that parser rejects, has no package
+    // set, so the check is skipped, as on `build`.
+    let known_packages = (!package_name.is_empty())
+        .then(|| parse_manifest_dependencies(&manifest, &utf8_root.join("beamtalk.toml")).ok())
+        .flatten()
+        .map(|declared| {
+            beamtalk_core::semantic_analysis::known_qualifier_packages(
+                Some(&package_name),
+                declared.keys().map(String::as_str),
+            )
+        });
     let context = FileProjectContext {
         diagnostics_table,
         analysis_project: ProjectAnalysisContext {
