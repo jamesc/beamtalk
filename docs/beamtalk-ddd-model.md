@@ -615,7 +615,7 @@ impl LanguageService {
 
 **Purpose:** Offline package analysis shared by tooling (CLI, MCP) without pulling in CLI-only dependencies (BT-4689)
 
-**Crate:** `beamtalk-package` — a leaf crate below `beamtalk-cli` and `beamtalk-mcp`; depends on `beamtalk-core`, `beamtalk-project`, `beamtalk-language-service`, `beamtalk-lint` and `beamtalk-sysroot`, never on `beamtalk-cli`.
+**Crate:** `beamtalk-package` — a leaf crate below `beamtalk-cli` and `beamtalk-mcp`; depends on `beamtalk-core`, `beamtalk-project`, `beamtalk-language-service`, `beamtalk-lint` and `beamtalk-env`, never on `beamtalk-cli`.
 
 **Modules:**
 - `manifest`: `beamtalk.toml` parsing and validation

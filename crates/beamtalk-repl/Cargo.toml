@@ -3,6 +3,7 @@
 
 [package]
 name = "beamtalk-repl"
+autotests = false
 description = "REPL-specific Core Erlang code generation (workspace bindings, trace mode)"
 version.workspace = true
 authors.workspace = true
@@ -25,6 +26,11 @@ beamtalk-codegen.workspace = true
 # API (BT-3343, ADR 0117 step 4) — REPL module assembly builds `Document`
 # values directly rather than only through `CoreErlangGenerator`.
 beamtalk-cerl-doc.workspace = true
+
+# BT-4909: one integration-test binary (tests/main.rs + submodules) instead of one per file.
+[[test]]
+name = "main"
+path = "tests/main.rs"
 
 [dev-dependencies]
 ecow.workspace = true

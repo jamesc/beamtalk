@@ -57,7 +57,7 @@ doctor:
 # decides when this tier runs (scripts/ci/corpus-gate.sh) watches these three
 # crates plus the stdlib/ and examples/ sources the corpora compile and the
 # runtime's shared conformance fixtures the `*_matches_shared_corpus` tests read.
-corpus_tests := "package(/^beamtalk-(core|codegen|repl)$/) & (test(/agreement|_corpus/) | binary(/agreement|repl_local_producer/))"
+corpus_tests := "package(/^beamtalk-(core|codegen|repl)$/) & (test(/agreement|_corpus|^repl_local_producer::/))"
 
 # Run local CI checks (combination of GitHub Actions check + test jobs)
 # Matches: just build clippy fmt-check test (check job)
