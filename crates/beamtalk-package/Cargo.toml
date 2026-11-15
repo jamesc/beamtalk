@@ -21,7 +21,7 @@ beamtalk-language-service.workspace = true
 beamtalk-lint.workspace = true
 beamtalk-project.workspace = true
 # why: `ffi_type_registry` locates the installation sysroot for FFI stubs.
-beamtalk-sysroot.workspace = true
+beamtalk-env.workspace = true
 # why: `content_hash` reuses the workspace hex encoder.
 beamtalk-workspace.workspace = true
 camino.workspace = true
