@@ -160,8 +160,8 @@ const CEILINGS: &[(&str, usize)] = &[
     // method body's last statement (`ends_with_self_field_write`, BT-4235), and
     // `operand_loop_constructs` (BT-4310): a statement, its assignment or `^`
     // value, and a cascade's shared receiver.
-    // (BT-4696: split from `block_facts.rs`; the five `block_facts/`
-    // ceilings below sum to 37 (`unguarded_late_read_validators.rs` is a
+    // (BT-4696: split from `block_facts.rs`; the four `block_facts/`
+    // ceilings below sum to 36 (`unguarded_late_read_validators.rs` is a
     // separate file) and each file keeps the calls it already held.)
     (
         "beamtalk-core/src/semantic_analysis/block_facts/escape.rs",
