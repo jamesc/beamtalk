@@ -1498,6 +1498,15 @@ superclass_name(ClassName) ->
         _:_ -> none
     end.
 
+-spec literal_instance('Integer' | 'String' | undefined) -> {instance, atom()} | undefined.
+literal_instance(undefined) ->
+    undefined;
+literal_instance(Class) ->
+    case maybe_class(Class) of
+        undefined -> undefined;
+        ClassName -> {instance, ClassName}
+    end.
+
 -spec classify_receiver_token(binary(), map()) ->
     {class, atom()} | {instance, atom()} | undefined.
 classify_receiver_token(<<>>, _Bindings) ->
@@ -1525,23 +1534,10 @@ classify_receiver_token(<<H, _/binary>> = Receiver, Bindings) when H >= $A, H =<
             undefined
     end;
 classify_receiver_token(<<H, _/binary>> = Receiver, _Bindings) when H >= $0, H =< $9 ->
-    %% Only treat as Integer when the whole token is digits (guards against
-    %% float literals like "3.14" being misclassified as Integer).
-    case lists:all(fun(C) -> C >= $0 andalso C =< $9 end, binary_to_list(Receiver)) of
-        true ->
-            case maybe_class('Integer') of
-                undefined -> undefined;
-                ClassName -> {instance, ClassName}
-            end;
-        false ->
-            undefined
-    end;
-classify_receiver_token(<<$", _/binary>>, _Bindings) ->
+    literal_instance(beamtalk_repl_editor_context:receiver_literal_class(Receiver));
+classify_receiver_token(<<$", _/binary>> = Receiver, _Bindings) ->
     %% String literal — complete String instance methods
-    case maybe_class('String') of
-        undefined -> undefined;
-        ClassName -> {instance, ClassName}
-    end;
+    literal_instance(beamtalk_repl_editor_context:receiver_literal_class(Receiver));
 classify_receiver_token(Receiver, Bindings) ->
     %% Check for package-qualified class name (e.g. "json@Parser")
     case binary:match(Receiver, <<"@">>) of
