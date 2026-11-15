@@ -1178,3 +1178,28 @@ fn compile_file_accepts_declared_current_and_stdlib_package_qualifiers() {
         );
     }
 }
+
+/// A transitive dependency is not a declared one: `build` rejects
+/// `transitive@Class`, so `load_project` must too.
+#[test]
+fn compile_file_rejects_transitive_only_package_qualifier() {
+    let (dir, _state_path) = write_parity_project();
+    // `fakedep` depends on `deeper`, which the project does not declare.
+    write_dep_graph_snapshot_with_edges(dir.path(), &[("fakedep", &["deeper"]), ("deeper", &[])]);
+    let path = dir.path().join("src/parity_qualified.bt");
+    let source = "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Value subclass: ParityQualified\n\
+         \x20 make => deeper@Thing new\n";
+    fs::write(&path, source).expect("fixture parity_qualified.bt");
+
+    let response = handle_compile(&load_like_compile_request(source, &path));
+    let messages = error_diagnostic_messages(&response);
+    assert!(
+        messages
+            .iter()
+            .any(|msg| msg.contains("Unknown package 'deeper'")),
+        "a transitive-only package qualifier must be an error: {messages:?}"
+    );
+}

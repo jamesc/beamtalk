@@ -734,7 +734,7 @@ error "Unknown package 'pkg' in qualified reference …".
 | REPL `load_project` / compile | yes | `ProjectAnalysisContext::known_packages` from the file's manifest |
 | LSP diagnostics | **no** | the language service has no view of the manifest's dependencies; its `$project` placeholder package is not a real one. A reference the build rejects shows no squiggle. Not `surface-specific` — a known gap. |
 
-A file with no manifest has no package set and is never checked.
+A file with no manifest has no package set and is never checked. A dependency's own files are not checked when it is built as a dependency (`compile_dependency_at`); they would need that dependency's own manifest set. A transitive dependency is not in the set on any surface.
 
 ### Dependency extensions and the dependency guard (ADR 0070 WS3, ADR 0100, BT-4608)
 
