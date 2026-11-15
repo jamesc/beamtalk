@@ -399,15 +399,14 @@ impl CoreErlangGenerator {
     /// at element 3 of its `{Value, StateAcc, Self}` result tuple
     /// is extracted and rebound — shared by every construct whose extra
     /// slot sits at that same position: the value-type/class-method Letrec
-    /// loop's three extraction sites
+    /// loop's extraction sites
     /// (the local-threading producer's construct tuple —
     /// `lower_local_threading_construct`, ADR 0131 — in last, `^` and
     /// assignment-RHS position, [`Self::emit_vt_loop_open_extraction`]'s non-last-position
-    /// open chain, [`Self::emit_vt_threaded_local_assignment`]'s
-    /// assignment-RHS threading inside a conditional branch) AND `on:do:`/`ensure:`'s own three mirror
+    /// open chain) AND `on:do:`/`ensure:`'s own mirror
     /// sites (BT-3506: [`Self::emit_vt_exception_tuple_unwrap_to_var`],
     /// [`Self::generate_vt_exception_construct_open`],
-    /// [`Self::emit_vt_exception_assign_rhs`]) — so none of the six can
+    /// [`Self::emit_vt_exception_assign_rhs`]) — so none of them can
     /// independently drift on which family maps to which rebind (AGENTS.md's
     /// no-duplicate-implementations rule).
     ///
@@ -493,10 +492,9 @@ impl CoreErlangGenerator {
     ///   element 1 is the meaningful collected/folded result.
     ///
     /// Used both to unwrap such a construct as a method's last expression
-    /// ([`Self::emit_vt_last_expr`]) and to detect a threading-construct assignment RHS
-    /// ([`Self::emit_vt_threaded_local_assignment`]). All branches use the same predicates
-    /// that route these to their `VtBodyExprKind`, so detection and the open-extraction path
-    /// stay consistent.
+    /// ([`Self::emit_vt_last_expr`]) and to detect a threading-construct assignment
+    /// RHS. All branches use the same predicates that route these to their
+    /// `VtBodyExprKind`, so detection and the open-extraction path stay consistent.
     ///
     /// `do:` is excluded — its value-type codegen already returns a bare `nil`.
     pub(in crate::core_erlang) fn expr_yields_vt_threaded_tuple(&self, expr: &Expression) -> bool {
@@ -1400,9 +1398,10 @@ impl CoreErlangGenerator {
     /// construct that yields a `{value, StateAcc}` tuple (a `whileTrue:`/`whileFalse:` or
     /// counted loop, or a `collect:`/`select:`/`reject:`/`inject:into:` foldl list-op).
     ///
-    /// Used by [`Self::emit_vt_threaded_local_assignment`] to rebind the threaded locals
-    /// after extracting them from the `StateAcc`. Returns the same set the construct's
-    /// codegen packed into the `StateAcc` (`loop_threaded_locals`).
+    /// Used by the callers of [`Self::emit_vt_loop_open_extraction`] (the loop / fold opens and
+    /// the conditional branch builder) to rebind the threaded locals after extracting them
+    /// from the `StateAcc`. Returns the same set the construct's codegen packed into the
+    /// `StateAcc` (`loop_threaded_locals`).
     pub(in crate::core_erlang) fn vt_construct_threaded_locals(
         &self,
         expr: &Expression,
@@ -1421,92 +1420,6 @@ impl CoreErlangGenerator {
                 .map(|_| self.producer_threaded_locals(expr))
                 .unwrap_or_default()
         }
-    }
-
-    /// Emits a value-type local assignment whose RHS is a threading construct
-    /// returning a `{value, StateAcc}` tuple (a loop or foldl list-op).
-    ///
-    /// Binds the target variable to element 1 (the construct's logical value), then rebinds
-    /// each threaded local from the `StateAcc` map at element 2 — so both the assigned value
-    /// and the mutated locals are visible to subsequent method-body expressions. Without
-    /// this, the target would be bound to the raw `{value, StateAcc}` tuple and the threaded
-    /// locals would keep their pre-construct values.
-    ///
-    /// ADR 0131 Phase 2 (BT-3749): at the method root this is the
-    /// local-threading producer's job (`lower_root_statement_with_producer`);
-    /// the remaining callers are statements inside a conditional branch
-    /// (`build_vt_conditional_branch_value_parts` and the open-branch
-    /// builder), branch-arm frames that ADR 0131 Phase 3 (`BranchArm`)
-    /// lowers, deleting this.
-    ///
-    /// Returns the Core Erlang variable bound to the assignment target.
-    pub(in crate::core_erlang) fn emit_vt_threaded_local_assignment(
-        &mut self,
-        var_name: &str,
-        value: &Expression,
-        body_parts: &mut Vec<Document<'static>>,
-    ) -> Result<String> {
-        // ADR 0122 Decision 3: which extra trailing slot `value` carries as an
-        // explicit 3rd tuple element, when it is a Letrec-shaped construct
-        // (while/counted loop) or a field-writing `do:`/`collect:`/
-        // `inject:into:` fold (BT-3827) — see `vt_loop_threaded_families`.
-        let families = self.vt_loop_threaded_families(value);
-        let span = value.span();
-        let rhs_doc =
-            self.with_fold_self_slot_consumer(value, |this| this.expression_doc(value))?;
-        let tuple_var = self.fresh_temp_var("AssignThreaded");
-
-        // Bind the {value, StateAcc} tuple.
-        body_parts.push(docvec![
-            "    let ",
-            leaf::var(tuple_var.clone()),
-            " = ",
-            rhs_doc,
-            " in\n",
-        ]);
-        // Bind the assignment target to element 1 (the logical value).
-        let core_var = self.resolve_local_core_var(var_name);
-        body_parts.push(docvec![
-            "    let ",
-            leaf::var(core_var.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(tuple_var.clone()),
-            ") in\n",
-        ]);
-        self.bind_var(var_name, &core_var);
-
-        // Extract the StateAcc (element 2) and rebind each threaded local from it.
-        let threaded_locals = self.vt_construct_threaded_locals(value);
-        let rebind: Vec<&String> = threaded_locals
-            .iter()
-            .filter(|tl| *tl != var_name)
-            .collect();
-        if !rebind.is_empty() {
-            let state_var = self.fresh_temp_var("AssignThreadedState");
-            body_parts.push(docvec![
-                "    let ",
-                leaf::var(state_var.clone()),
-                " = call 'erlang':'element'(2, ",
-                leaf::var(tuple_var.clone()),
-                ") in\n",
-            ]);
-            body_parts.extend(self.rebind_threaded_locals(
-                rebind,
-                |_, v| Self::local_state_key(v),
-                &state_var,
-                RebindNaming::FreshBound,
-                RebindLayout::Line,
-            ));
-        }
-
-        // extract the loop's own trailing slot from element
-        // 3 and rebind it, same as the non-last-statement / last-position
-        // consumers.
-        if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
-            body_parts.push(docvec!["    ", rebind_doc, "\n"]);
-        }
-
-        Ok(core_var)
     }
 
     /// Returns `true` if `expr` is a `to:do:` / `to:by:do:` / `timesRepeat:`
