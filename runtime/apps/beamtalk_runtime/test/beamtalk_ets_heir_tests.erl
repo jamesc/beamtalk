@@ -193,10 +193,10 @@ ensure_shared_table_tolerates_race() ->
         end
      || Pid <- Pids
     ],
-    ?assertEqual(lists:duplicate(20, ok), Results),
-    ?assertNotEqual(undefined, ets:whereis(?TABLE)),
+    %% Release the workers before asserting, so a failure leaves none blocked.
     [P ! stop || P <- Pids],
-    ok.
+    ?assertEqual(lists:duplicate(20, ok), Results),
+    ?assertNotEqual(undefined, ets:whereis(?TABLE)).
 
 ensure_table_owned_skips_heir_call() ->
     HeirPid = whereis(beamtalk_ets_heir),
