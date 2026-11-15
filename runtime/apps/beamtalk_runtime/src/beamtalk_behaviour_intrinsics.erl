@@ -1934,11 +1934,11 @@ reachable via an actual hierarchy cycle or a legitimately
 `?MAX_HIERARCHY_DEPTH`-level-deep hierarchy.
 
 The walk itself (depth guard, cycle warning, advance-to-superclass)
-is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the
+is `beamtalk_hierarchy:walk_or_warn/4`; this function supplies only the
 per-ancestor registry lookup and threads Acc through the walk. Since
-`walk_ancestors/3` only threads a bare node id between steps (not a
+the walker only threads a bare node id between steps (not a
 separate accumulator), Acc rides along inside the node as `{ClassName, Acc}`.
-this is also why `max_depth_exceeded` carries `LastNode` back to
+This is also why `{cycle, LastNode}` carries `LastNode` back to
 the caller — it's the only way to recover the partial `Acc` folded up to
 that point, since it rode along inside the node the whole time.
 """.
@@ -1965,15 +1965,11 @@ walk_hierarchy(ClassName, Fun, Acc) ->
                 end
         end
     end,
-    case beamtalk_hierarchy:walk_ancestors({ClassName, Acc}, StepFun, ?MAX_HIERARCHY_DEPTH) of
+    Ctx = #{node_name => fun({Name, _Acc}) -> Name end},
+    case beamtalk_hierarchy:walk_or_warn({ClassName, Acc}, StepFun, walk_hierarchy, Ctx) of
         {found, {result, Result}} ->
             Result;
-        {max_depth_exceeded, {CycleClassName, PartialAcc}} ->
-            ?LOG_WARNING(
-                "walk_hierarchy: max hierarchy depth ~p exceeded at ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, CycleClassName],
-                #{domain => [beamtalk, runtime]}
-            ),
+        {cycle, {_CycleClassName, PartialAcc}} ->
             PartialAcc;
         not_found ->
             %% Unreachable: StepFun above always resolves to {found, _} — a

@@ -24,6 +24,13 @@ independently of any particular caller's own test coverage.
 
 -include_lib("eunit/include/eunit.hrl").
 
+-export([log/2]).
+
+%% logger handler callback: forward events to the capturing test process.
+log(LogEvent, #{config := #{parent := Parent}}) ->
+    Parent ! {hierarchy_log_event, LogEvent},
+    ok.
+
 %%% ============================================================================
 %%% StartNode = none — walk never invokes StepFun
 %%% ============================================================================
@@ -147,3 +154,95 @@ max_depth_exceeded_carries_rider_accumulator_test() ->
     StepFun = fun({Name, Acc}, _Depth) -> {next, {Name, [Name | Acc]}} end,
     Result = beamtalk_hierarchy:walk_ancestors({a, []}, StepFun, 2),
     ?assertMatch({max_depth_exceeded, {a, [a, a, a]}}, Result).
+
+%%% ============================================================================
+%%% walk_or_warn/4 — the shared "warn on cycle" epilogue
+%%% ============================================================================
+
+walk_or_warn_found_does_not_log_test() ->
+    StepFun = fun
+        (a, _) -> {next, b};
+        (b, _) -> {found, hit}
+    end,
+    {Result, Events} = with_captured_logs(fun() ->
+        beamtalk_hierarchy:walk_or_warn(a, StepFun, walk_label, #{})
+    end),
+    ?assertEqual({found, hit}, Result),
+    ?assertEqual([], Events).
+
+walk_or_warn_not_found_and_none_do_not_log_test() ->
+    {Results, Events} = with_captured_logs(fun() ->
+        [
+            beamtalk_hierarchy:walk_or_warn(none, fun(_, _) -> {found, x} end, walk_label, #{}),
+            beamtalk_hierarchy:walk_or_warn(a, fun(_, _) -> not_found end, walk_label, #{})
+        ]
+    end),
+    ?assertEqual([not_found, not_found], Results),
+    ?assertEqual([], Events).
+
+walk_or_warn_cycle_logs_once_with_label_and_context_test() ->
+    StepFun = fun(a, _) -> {next, a} end,
+    {Result, Events} = with_captured_logs(fun() ->
+        beamtalk_hierarchy:walk_or_warn(a, StepFun, my_walk, #{start => a, selector => foo})
+    end),
+    ?assertEqual({cycle, a}, Result),
+    ?assertEqual(1, length(Events)),
+    [#{level := warning, msg := {Fmt, Args}}] = Events,
+    Line = lists:flatten(io_lib:format(Fmt, Args)),
+    ?assertNotEqual(nomatch, string:find(Line, "my_walk: max hierarchy depth")),
+    ?assertNotEqual(nomatch, string:find(Line, "selector=foo")),
+    ?assertNotEqual(nomatch, string:find(Line, "start=a")).
+
+walk_or_warn_uses_max_hierarchy_depth_budget_test() ->
+    %% Same budget as walk_ancestors/3 with ?MAX_HIERARCHY_DEPTH (20): the
+    %% guard trips on the depth-21 node.
+    StepFun = fun(N, _) -> {next, N + 1} end,
+    {Result, _} = with_captured_logs(fun() ->
+        beamtalk_hierarchy:walk_or_warn(0, StepFun, walk_label, #{})
+    end),
+    ?assertEqual({cycle, 21}, Result).
+
+walk_or_warn_node_name_renders_rider_and_returns_partial_acc_test() ->
+    StepFun = fun({Name, Acc}, _) -> {next, {Name, [Name | Acc]}} end,
+    Ctx = #{node_name => fun({Name, _Acc}) -> Name end},
+    {Result, Events} = with_captured_logs(fun() ->
+        beamtalk_hierarchy:walk_or_warn({rider, []}, StepFun, rider_walk, Ctx)
+    end),
+    ?assertMatch({cycle, {rider, [_ | _]}}, Result),
+    {cycle, {rider, Acc}} = Result,
+    ?assertEqual(21, length(Acc)),
+    [#{msg := {Fmt, Args}}] = Events,
+    Line = lists:flatten(io_lib:format(Fmt, Args)),
+    %% The line names `rider`, not the whole `{rider, [rider, ...]}` rider.
+    ?assertNotEqual(nomatch, string:find(Line, "exceeded at rider")),
+    ?assertEqual(nomatch, string:find(Line, "node_name")).
+
+%% Run `Fun` with a logger handler forwarding this test process's events;
+%% returns `{FunResult, [LogEvent]}`.
+with_captured_logs(Fun) ->
+    OldLevel = maps:get(level, logger:get_primary_config()),
+    ok = logger:set_primary_config(level, all),
+    % elp:fixme W0023 intentional atom creation
+    HandlerId = list_to_atom(
+        "bt4892_hierarchy_" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{parent => self()}, level => all}),
+    try
+        Result = Fun(),
+        {Result, drain_log_events(self(), [])}
+    after
+        logger:remove_handler(HandlerId),
+        logger:set_primary_config(level, OldLevel)
+    end.
+
+%% Only events logged by `Self` (walk_or_warn/4 logs from the caller's
+%% process): other runtime processes logging during the window are not ours.
+drain_log_events(Self, Acc) ->
+    receive
+        {hierarchy_log_event, #{meta := #{domain := [beamtalk, runtime], pid := Self}} = E} ->
+            drain_log_events(Self, [E | Acc]);
+        {hierarchy_log_event, _} ->
+            drain_log_events(Self, Acc)
+    after 100 ->
+        lists:reverse(Acc)
+    end.

@@ -221,6 +221,79 @@ class_metadata_new_test_() ->
         end}.
 
 %%% ============================================================================
+%%% class_name_for_module / module_to_class_map (BT-4892: memoised, O(1))
+%%% ============================================================================
+
+module_to_class_lookup_test_() ->
+    {setup,
+        fun() ->
+            beamtalk_class_metadata:new(),
+            Saved = {
+                ets:tab2list(beamtalk_class_metadata),
+                ets:tab2list(beamtalk_class_subclass_index)
+            },
+            ets:delete_all_objects(beamtalk_class_metadata),
+            Saved
+        end,
+        fun({Saved, SavedEdges}) ->
+            ets:delete_all_objects(beamtalk_class_metadata),
+            ets:insert(beamtalk_class_metadata, Saved),
+            %% The test inserts write subclass edges too; restore the index.
+            ets:delete_all_objects(beamtalk_class_subclass_index),
+            ets:insert(beamtalk_class_subclass_index, SavedEdges),
+            beamtalk_class_derived_cache:invalidate()
+        end,
+        [
+            {"known and unknown modules", fun() ->
+                beamtalk_class_metadata:insert('BT4892A', bt4892_mod_a, [], 'Object', false),
+                ?assertEqual(
+                    {ok, 'BT4892A'}, beamtalk_class_registry:class_name_for_module(bt4892_mod_a)
+                ),
+                ?assertEqual(not_found, beamtalk_class_registry:class_name_for_module(bt4892_nope)),
+                ?assertEqual(not_found, beamtalk_class_registry:class_name_for_module("string"))
+            end},
+            {"the map is served from the cache until a class write", fun() ->
+                beamtalk_class_metadata:insert('BT4892B', bt4892_mod_b, [], 'Object', false),
+                Map = beamtalk_class_registry:module_to_class_map(),
+                ?assertEqual('BT4892B', maps:get(bt4892_mod_b, Map)),
+                Gen = beamtalk_class_derived_cache:generation(),
+                %% A raw row wipe bypasses the metadata API, so it does not
+                %% flush the cache: the memoised map is still served. Skip the
+                %% check if another process (a class from an earlier test
+                %% terminating late) flushed the cache in between.
+                ets:delete_all_objects(beamtalk_class_metadata),
+                Map2 = beamtalk_class_registry:module_to_class_map(),
+                %% Checked after the fetch: an unchanged generation means the
+                %% fetch hit the entry stored at `Gen`.
+                case beamtalk_class_derived_cache:generation() of
+                    Gen -> ?assertEqual(Map, Map2);
+                    _ -> ok
+                end
+            end},
+            {"insert, module change and delete are seen on the next call", fun() ->
+                beamtalk_class_derived_cache:invalidate(),
+                beamtalk_class_metadata:insert('BT4892C', bt4892_mod_c1, [], 'Object', false),
+                ?assertEqual(
+                    {ok, 'BT4892C'}, beamtalk_class_registry:class_name_for_module(bt4892_mod_c1)
+                ),
+                %% A reload moving the class to another module.
+                beamtalk_class_metadata:merge_identity(
+                    'BT4892C', bt4892_mod_c2, [], 'Object', false
+                ),
+                ?assertEqual(
+                    not_found, beamtalk_class_registry:class_name_for_module(bt4892_mod_c1)
+                ),
+                ?assertEqual(
+                    {ok, 'BT4892C'}, beamtalk_class_registry:class_name_for_module(bt4892_mod_c2)
+                ),
+                beamtalk_class_metadata:delete('BT4892C'),
+                ?assertEqual(
+                    not_found, beamtalk_class_registry:class_name_for_module(bt4892_mod_c2)
+                )
+            end}
+        ]}.
+
+%%% ============================================================================
 %%% inherits_from tests
 %%% ============================================================================
 
