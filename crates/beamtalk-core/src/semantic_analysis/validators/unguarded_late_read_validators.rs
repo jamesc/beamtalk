@@ -19,9 +19,10 @@
 //! [`check_unguarded_late_reads_in_lifecycle_hooks`] is a **per-class,
 //! syntactic** walk — no dataflow, cheap by design (ADR 0124 §4d): for every
 //! class with at least one `late` slot, it looks at that class's own
-//! `terminate:`/`handleInfo:` method body, plus (one level only) the body of
+//! `terminate:`/`handleInfo:` method body (declared in the class body or as a
+//! standalone `Foo >> terminate: reason => ...` definition), plus (one level only) the body of
 //! any `self`-sent unary/keyword message that resolves to another of the
-//! class's own instance methods, and reports every direct `self.slot` read
+//! class's own instance methods (inline or standalone), and reports every direct `self.slot` read
 //! of a `late` slot that is not lexically inside the `ifTrue:` (true) arm of
 //! `(self hasField: #slot) ifTrue: [...]` / `... ifTrue: [...] ifFalse:
 //! [...]` for that same slot. A `self.slot := value` **assignment target**
@@ -51,8 +52,7 @@
 //! guard is the fix, not a suppression.
 
 use crate::ast::{
-    ClassDefinition, Expression, ExpressionStatement, Literal, MethodDefinition, Module, SlotKind,
-    WellKnownSelector,
+    Expression, ExpressionStatement, Literal, MethodDefinition, Module, SlotKind, WellKnownSelector,
 };
 use crate::ast_walker::walk_expression;
 use crate::semantic_analysis::ClassHierarchy;
@@ -64,15 +64,41 @@ use std::collections::BTreeSet;
 /// raised error, `handleInfo:` crashes the server with it (ADR 0134).
 const LIFECYCLE_SELECTORS: [&str; 2] = ["terminate:", "handleInfo:"];
 
-/// Runs the ADR 0124 §4d unguarded-`late`-read check over every class in
-/// `module` that declares (or inherits) at least one `late` slot.
+/// Runs the ADR 0124 §4d unguarded-`late`-read check over every class that
+/// declares (or inherits) at least one `late` slot and has a `terminate:` /
+/// `handleInfo:` instance method — declared in the class body or as a
+/// standalone `Foo >> terminate: reason => ...` definition (BT-4863).
 pub(crate) fn check_unguarded_late_reads_in_lifecycle_hooks(
     module: &Module,
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // Instance-side methods per class name, inline and standalone together,
+    // in source order of first appearance. `class.methods` never holds
+    // class-side methods (the parser routes those to `class.class_methods`),
+    // so only the standalone list needs an `is_class_method` filter.
+    let mut by_class: Vec<(&str, Vec<&MethodDefinition>)> = Vec::new();
+
     for class in &module.classes {
-        let class_name = class.name.name.as_str();
+        let name = class.name.name.as_str();
+        let idx = by_class.iter().position(|(n, _)| *n == name);
+        match idx {
+            Some(i) => by_class[i].1.extend(class.methods.iter()),
+            None => by_class.push((name, class.methods.iter().collect())),
+        }
+    }
+    for standalone in &module.method_definitions {
+        if standalone.is_class_method || standalone.method.is_class_method {
+            continue;
+        }
+        let name = standalone.class_name.name.as_str();
+        match by_class.iter().position(|(n, _)| *n == name) {
+            Some(i) => by_class[i].1.push(&standalone.method),
+            None => by_class.push((name, vec![&standalone.method])),
+        }
+    }
+
+    for (class_name, methods) in &by_class {
         let late_slots: BTreeSet<EcoString> = hierarchy
             .all_state(class_name)
             .into_iter()
@@ -82,27 +108,25 @@ pub(crate) fn check_unguarded_late_reads_in_lifecycle_hooks(
             continue;
         }
 
-        for method in &class.methods {
-            if method.is_class_method {
-                continue;
-            }
+        for method in methods {
             let selector_name = method.selector.name();
             if !LIFECYCLE_SELECTORS.contains(&selector_name.as_str()) {
                 continue;
             }
-            check_entry_method(method, &selector_name, &late_slots, class, diagnostics);
+            check_entry_method(method, &selector_name, &late_slots, methods, diagnostics);
         }
     }
 }
 
 /// Checks one `terminate:`/`handleInfo:` method: its own body, plus (one
-/// level only) the body of every distinct instance method of `class` that it
-/// sends to `self`.
+/// level only) the body of every distinct instance method of the class that
+/// it sends to `self`. `siblings` is every instance method of the class,
+/// whether declared inline or standalone.
 fn check_entry_method(
     entry_method: &MethodDefinition,
     entry_selector: &str,
     late_slots: &BTreeSet<EcoString>,
-    class: &ClassDefinition,
+    siblings: &[&MethodDefinition],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     report_unguarded_reads(&entry_method.body, entry_selector, late_slots, diagnostics);
@@ -127,10 +151,9 @@ fn check_entry_method(
             if callee_selector == *entry_selector || !followed.insert(callee_selector.clone()) {
                 return;
             }
-            if let Some(callee) = class
-                .methods
+            if let Some(callee) = siblings
                 .iter()
-                .find(|m| !m.is_class_method && m.selector.name() == callee_selector)
+                .find(|m| m.selector.name() == callee_selector)
             {
                 report_unguarded_reads(&callee.body, entry_selector, late_slots, diagnostics);
             }
@@ -457,5 +480,75 @@ mod tests {
                       self.proc close";
         let diags = unguarded_findings(src);
         assert_eq!(diags.len(), 1, "got: {diags:?}");
+    }
+
+    // ── standalone `Foo >> selector => ...` definitions (BT-4863) ───────
+
+    #[test]
+    fn unguarded_read_in_standalone_terminate_warns() {
+        let src = "typed Actor subclass: CodexClient\n\
+                    late state: proc :: Subprocess\n\n\
+                    CodexClient >> terminate: reason => self.proc close";
+        let diags = unguarded_findings(src);
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert!(diags[0].message.contains("`proc`"));
+        assert!(diags[0].message.contains("terminate:"));
+    }
+
+    #[test]
+    fn unguarded_read_in_standalone_handle_info_warns() {
+        let src = "typed Server subclass: Watcher\n\
+                    late state: sock :: Socket\n\n\
+                    Watcher >> handleInfo: msg => self.sock close";
+        let diags = unguarded_findings(src);
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert!(diags[0].message.contains("handleInfo:"));
+    }
+
+    #[test]
+    fn guarded_read_in_standalone_terminate_is_silent() {
+        let src = "typed Actor subclass: CodexClient\n\
+                    late state: proc :: Subprocess\n\n\
+                    CodexClient >> terminate: reason =>\n  \
+                      (self hasField: #proc)\n    \
+                        ifTrue: [self.proc close]\n  \
+                      nil";
+        assert!(unguarded_findings(src).is_empty());
+    }
+
+    #[test]
+    fn standalone_terminate_follows_inline_helper() {
+        let src = "typed Actor subclass: CodexClient\n\
+                    late state: proc :: Subprocess\n\n\
+                    stopProcess => self.proc close\n\n\
+                    CodexClient >> terminate: reason => self stopProcess";
+        let diags = unguarded_findings(src);
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+    }
+
+    #[test]
+    fn inline_terminate_follows_standalone_helper() {
+        let src = "typed Actor subclass: CodexClient\n\
+                    late state: proc :: Subprocess\n\n\
+                    terminate: reason => self stopProcess\n\n\
+                    CodexClient >> stopProcess => self.proc close";
+        let diags = unguarded_findings(src);
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+    }
+
+    #[test]
+    fn standalone_terminate_on_eager_slot_class_is_silent() {
+        let src = "typed Actor subclass: Logger\n\
+                    state: logFile :: LogHandle\n\n\
+                    Logger >> terminate: reason => self.logFile close";
+        assert!(unguarded_findings(src).is_empty());
+    }
+
+    #[test]
+    fn standalone_class_side_terminate_is_not_checked() {
+        let src = "typed Actor subclass: CodexClient\n\
+                    late state: proc :: Subprocess\n\n\
+                    CodexClient class >> terminate: reason => reason";
+        assert!(unguarded_findings(src).is_empty());
     }
 }
