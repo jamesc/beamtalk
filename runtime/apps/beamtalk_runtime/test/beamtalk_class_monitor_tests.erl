@@ -141,12 +141,48 @@ kill_and_wait(Pid, Reason) ->
 timed(Fun) ->
     {timeout, ?TEST_TIMEOUT_S, Fun}.
 
+%% Install a `restart_class/1` mock that reports every call to `Self` as
+%% `{restart_class_called, Name}` before returning a fresh idle pid, so a test
+%% synchronises on the monitor actually having run the restart instead of
+%% polling meck's call counter against a timeout (BT-4915). The message is sent
+%% from the monitor process while it handles the 'DOWN'.
+expect_restart_reports_to(Self, Result) ->
+    meck:expect(beamtalk_class_registry, restart_class, fun(Name) ->
+        Self ! {restart_class_called, Name},
+        Result()
+    end).
+
+fresh_idle_pid() ->
+    {ok, beamtalk_test_proc:spawn_idle()}.
+
+%% Block until the mock reported a restart of `Name` (an event, not a poll).
+await_restart_called(Name) ->
+    receive
+        {restart_class_called, Name} -> ok
+    after ?KILL_WAIT_MS -> error({restart_class_not_called, Name})
+    end.
+
+%% Count (and consume) the `restart_class/1` reports still in the mailbox. Call
+%% only after a sync with the monitor (`sys:get_state/1`, whose reply follows
+%% every earlier message from the monitor): meck's own call history is written
+%% by an asynchronous cast, so `meck:num_calls/3` can lag behind the call.
+drain_restart_calls(Name) ->
+    receive
+        {restart_class_called, Name} -> 1 + drain_restart_calls(Name)
+    after 0 -> 0
+    end.
+
 %% Whether the registered monitor currently watches Pid. Matches the
 %% `#state{}` tuple positionally, so a change to the record's shape fails
 %% this match loudly instead of reading the wrong field.
 is_watched(Pid) ->
     {state, _Max, _Window, Watched, _Refs, _History} = sys:get_state(beamtalk_class_monitor),
     maps:is_key(Pid, Watched).
+
+%% How many monitor refs the registered monitor holds for ClassName.
+watch_count(ClassName) ->
+    {state, _Max, _Window, _Watched, Refs, _History} = sys:get_state(beamtalk_class_monitor),
+    length([R || R := N <- Refs, N =:= ClassName]).
 
 %%====================================================================
 %% watch/2, unwatch/1 — no monitor registered at all
@@ -214,9 +250,7 @@ watch_dedup_test_() ->
         {"watching the same live pid twice installs only one monitor ref",
             timed(fun() ->
                 meck:new(beamtalk_class_registry, [passthrough]),
-                meck:expect(beamtalk_class_registry, restart_class, fun(_Name) ->
-                    {ok, beamtalk_test_proc:spawn_idle()}
-                end),
+                expect_restart_reports_to(self(), fun fresh_idle_pid/0),
                 try
                     Dummy = beamtalk_test_proc:spawn_idle(),
                     ok = beamtalk_class_monitor:watch('DedupClass', Dummy),
@@ -225,21 +259,17 @@ watch_dedup_test_() ->
                     %% otherwise this pid's death would fire two independent
                     %% 'DOWN' messages and restart_class/1 would run twice.
                     ok = beamtalk_class_monitor:watch('DedupClass', Dummy),
+                    %% Structural check, no waiting: the second watch/2 above is a
+                    %% synchronous call, so the monitor holds exactly one ref now.
+                    ?assertEqual(1, watch_count('DedupClass')),
                     kill_and_wait(Dummy, kill),
-                    ?assertEqual(
-                        ok,
-                        beamtalk_test_wait:until(fun() ->
-                            meck:num_calls(beamtalk_class_registry, restart_class, ['DedupClass']) >
-                                0
-                        end)
-                    ),
-                    %% Give a wrongly-duplicated second 'DOWN' time to arrive.
-                    %% sleep: asserts nothing more happens within a window (class 4)
-                    %% sleep: asserts nothing happens within a window (class 4)
-                    timer:sleep(200),
-                    ?assertEqual(
-                        1, meck:num_calls(beamtalk_class_registry, restart_class, ['DedupClass'])
-                    )
+                    ok = await_restart_called('DedupClass'),
+                    %% A wrongly-duplicated ref would have queued a second 'DOWN'
+                    %% (and a second restart message) at the same exit; sys:get_state
+                    %% is served after the monitor has handled everything already in
+                    %% its mailbox, so by here a duplicate would have been counted.
+                    ?assertEqual(0, watch_count('DedupClass')),
+                    ?assertEqual(0, drain_restart_calls('DedupClass'))
                 after
                     meck:unload(beamtalk_class_registry)
                 end
@@ -266,16 +296,16 @@ deliberate_stop_shutdown_test_() ->
 
 assert_no_restart_on_exit(ClassName, ExitReason) ->
     meck:new(beamtalk_class_registry, [passthrough]),
-    meck:expect(beamtalk_class_registry, restart_class, fun(_Name) ->
-        {ok, beamtalk_test_proc:spawn_idle()}
-    end),
+    expect_restart_reports_to(self(), fun fresh_idle_pid/0),
     try
         Dummy = beamtalk_test_proc:spawn_idle(),
         ok = beamtalk_class_monitor:watch(ClassName, Dummy),
         kill_and_wait(Dummy, ExitReason),
-        %% Give a wrongly-triggered restart time to happen, then assert none did.
-        timer:sleep(200),
-        ?assertEqual(0, meck:num_calls(beamtalk_class_registry, restart_class, [ClassName]))
+        %% The 'DOWN' handler drops Dummy from `watched` in the same step that
+        %% decides whether to restart, so once it is gone the decision is final:
+        %% no fixed sleep to hope a wrong restart would have shown up by then.
+        ?assertEqual(ok, beamtalk_test_wait:until(fun() -> not is_watched(Dummy) end)),
+        ?assertEqual(0, drain_restart_calls(ClassName))
     after
         meck:unload(beamtalk_class_registry)
     end.
@@ -291,21 +321,15 @@ restart_failure_test_() ->
             {"restart_class returning {error, _} is logged; the monitor survives",
                 timed(fun() ->
                     meck:new(beamtalk_class_registry, [passthrough]),
-                    meck:expect(beamtalk_class_registry, restart_class, fun(_Name) ->
-                        {error, injected_failure}
-                    end),
+                    expect_restart_reports_to(self(), fun() -> {error, injected_failure} end),
                     try
                         Dummy = beamtalk_test_proc:spawn_idle(),
                         ok = beamtalk_class_monitor:watch('RestartFailClass', Dummy),
                         kill_and_wait(Dummy, kill),
-                        ?assertEqual(
-                            ok,
-                            beamtalk_test_wait:until(fun() ->
-                                meck:num_calls(
-                                    beamtalk_class_registry, restart_class, ['RestartFailClass']
-                                ) > 0
-                            end)
-                        ),
+                        ok = await_restart_called('RestartFailClass'),
+                        % Synchronise with the monitor finishing the 'DOWN' handler
+                        % (which logs and swallows the failure) before checking it lives.
+                        _ = sys:get_state(MonPid),
                         ?assert(is_process_alive(MonPid))
                     after
                         meck:unload(beamtalk_class_registry)
@@ -314,21 +338,15 @@ restart_failure_test_() ->
             {"restart_class raising an exception is caught; the monitor survives",
                 timed(fun() ->
                     meck:new(beamtalk_class_registry, [passthrough]),
-                    meck:expect(beamtalk_class_registry, restart_class, fun(_Name) ->
-                        error(injected_crash)
-                    end),
+                    expect_restart_reports_to(self(), fun() -> error(injected_crash) end),
                     try
                         Dummy = beamtalk_test_proc:spawn_idle(),
                         ok = beamtalk_class_monitor:watch('RestartCrashClass', Dummy),
                         kill_and_wait(Dummy, kill),
-                        ?assertEqual(
-                            ok,
-                            beamtalk_test_wait:until(fun() ->
-                                meck:num_calls(
-                                    beamtalk_class_registry, restart_class, ['RestartCrashClass']
-                                ) > 0
-                            end)
-                        ),
+                        ok = await_restart_called('RestartCrashClass'),
+                        % Synchronise with the monitor finishing the 'DOWN' handler
+                        % (which logs and swallows the failure) before checking it lives.
+                        _ = sys:get_state(MonPid),
                         ?assert(is_process_alive(MonPid))
                     after
                         meck:unload(beamtalk_class_registry)
@@ -346,20 +364,17 @@ restart_budget_exhausted_test_() ->
         {"a second crash inside the window is not retried once the budget is spent",
             timed(fun() ->
                 meck:new(beamtalk_class_registry, [passthrough]),
-                meck:expect(beamtalk_class_registry, restart_class, fun(_Name) ->
-                    {ok, beamtalk_test_proc:spawn_idle()}
-                end),
+                expect_restart_reports_to(self(), fun fresh_idle_pid/0),
                 try
                     Dummy1 = beamtalk_test_proc:spawn_idle(),
                     ok = beamtalk_class_monitor:watch('BudgetClass', Dummy1),
                     kill_and_wait(Dummy1, kill),
-                    ?assertEqual(
-                        ok,
-                        beamtalk_test_wait:until(fun() ->
-                            meck:num_calls(beamtalk_class_registry, restart_class, ['BudgetClass']) =:=
-                                1
-                        end)
-                    ),
+                    %% Wait for the event, not a meck call counter: the monitor
+                    %% reports from inside restart_class/1 itself (BT-4915).
+                    ok = await_restart_called('BudgetClass'),
+                    %% Let the 'DOWN' handler finish so the restart is counted in
+                    %% the budget history before the second crash is delivered.
+                    _ = sys:get_state(beamtalk_class_monitor),
                     %% The mock's {ok, NewPid} return doesn't itself re-invoke watch/2
                     %% the way the real restart_class/1 -> beamtalk_object_class:start
                     %% chain would — re-watch a fresh dummy to stand in for "the
@@ -374,9 +389,7 @@ restart_budget_exhausted_test_() ->
                     %% step that decides (here: refuses) the restart, so once it
                     %% is gone the restart count is final (BT-4382).
                     ?assertEqual(ok, beamtalk_test_wait:until(fun() -> not is_watched(Dummy2) end)),
-                    ?assertEqual(
-                        1, meck:num_calls(beamtalk_class_registry, restart_class, ['BudgetClass'])
-                    )
+                    ?assertEqual(0, drain_restart_calls('BudgetClass'))
                 after
                     meck:unload(beamtalk_class_registry)
                 end
