@@ -17,8 +17,7 @@ use crate::compilation::diagnostics_policy::{
 use crate::source_analysis::Severity;
 
 fn diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_ok(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let (module, hierarchy) = parse_and_build(source);
     let mut checker = check(&module, &hierarchy);
     let mut diags = checker.take_diagnostics();
     apply_expect_directives(&module, &mut diags);

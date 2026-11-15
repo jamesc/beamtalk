@@ -10,22 +10,12 @@
 //! subtyping, and no false-positive diagnostics on class values flowing through
 //! variables).
 
-use super::super::*;
 use super::common::*;
 use ecow::EcoString;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Lex + parse + build a hierarchy for a full source string.
-fn parse_and_build(source: &str) -> (Module, ClassHierarchy) {
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
-    (module, hierarchy)
-}
 
 /// Type-check `source` and return every does-not-understand (DNU) diagnostic.
 fn dnu_diags(source: &str) -> Vec<EcoString> {

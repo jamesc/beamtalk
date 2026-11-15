@@ -474,12 +474,7 @@ Object subclass: Box(T)
   value -> T => x
   wrapped -> T => self value
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -511,10 +506,7 @@ Object subclass: Box(T)
   value -> T => x
   wrapped -> T => self value
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let class = module
         .classes
@@ -563,10 +555,7 @@ Object subclass: Pair(K, V)
   second -> V => v
   rewrap -> V => self second
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let class = module
         .classes
@@ -618,10 +607,7 @@ Object subclass: Base(E)
 Base(R) subclass: Sub(R)
   borrow -> R => super peek
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let sub = module
         .classes
@@ -669,10 +655,7 @@ Object subclass: Base(E)
 Base(Integer) subclass: IntBase
   borrow -> Integer => super peek
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let int_base = module
         .classes
@@ -721,10 +704,7 @@ Object subclass: Box(T)
   state: x :: T = nil
   metatype => self class
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let class = module
         .classes

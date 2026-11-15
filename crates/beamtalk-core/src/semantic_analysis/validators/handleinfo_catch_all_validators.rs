@@ -140,11 +140,10 @@ fn build_diagnostic(value: &Expression, span: Span) -> Diagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_helpers::test_support::parse_ok;
+    use crate::semantic_analysis::test_helpers::parse_and_build;
 
     fn findings(src: &str) -> Vec<Diagnostic> {
-        let module = parse_ok(src);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
         check_handle_info_catch_all(&module, &hierarchy, &mut diagnostics);
         diagnostics

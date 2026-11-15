@@ -912,9 +912,7 @@ mod tests {
     // ── ADR 0107 Phase A: `Pattern::Type` class validation ───────────────────
 
     fn hierarchy_for(src: &str) -> (crate::ast::Module, ClassHierarchy) {
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = crate::test_helpers::test_support::parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, false);
         (module, hierarchy.unwrap())
     }

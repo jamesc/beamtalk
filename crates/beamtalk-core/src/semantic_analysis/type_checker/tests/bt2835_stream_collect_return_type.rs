@@ -28,10 +28,7 @@ typed Object subclass: Repro
   shout -> List(String) =>
     ^(((Stream on: #(1, 2, 3)) collect: [:n | n printString]) select: [:s | s isEmpty not]) asList
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 

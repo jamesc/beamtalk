@@ -147,13 +147,12 @@ fn check_late_slot_declaration(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantic_analysis::ClassHierarchy;
+    use crate::semantic_analysis::test_helpers::parse_and_build;
+
     use crate::source_analysis::Severity;
-    use crate::test_helpers::test_support::parse_ok;
 
     fn diagnostics_for(src: &str) -> Vec<Diagnostic> {
-        let module = parse_ok(src);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (module, hierarchy) = parse_and_build(src);
         // Mirror `analyse_full`'s registration order (protocols, then
         // aliases) so alias- and protocol-typed `late` slots resolve as
         // they do in a real compile.

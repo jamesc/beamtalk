@@ -22,10 +22,7 @@ typed Object subclass: WidgetFactory
   class new: arg :: Object -> Nil =>
     self error: \"use named constructors\"
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -61,10 +58,7 @@ typed Object subclass: ExduraWorker
   doWork -> Nil =>
     registry valueOrDo: [:e | self error: \"failed\"]
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 

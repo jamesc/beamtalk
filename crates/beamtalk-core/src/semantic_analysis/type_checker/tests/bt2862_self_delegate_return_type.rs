@@ -20,12 +20,6 @@
 
 use super::common::*;
 
-fn build(source: &str) -> (Module, ClassHierarchy) {
-    let module = parse_ok(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    (module, hierarchy)
-}
-
 /// Look up the inferred type recorded for a method's `self delegate` body
 /// expression (the method's single statement, per `is_self_delegate`).
 fn self_delegate_body_ty<'a>(
@@ -71,7 +65,7 @@ fn class_method_self_delegate_body_ty<'a>(
 
 #[test]
 fn actor_backed_self_delegate_trusts_declared_return_type() {
-    let (module, hierarchy) = build(
+    let (module, hierarchy) = parse_and_build(
         "Actor subclass: HTTPServer native: beamtalk_http_server\n\
          \x20\x20port -> Integer => self delegate\n\
          \x20\x20printString -> String => self delegate\n",
@@ -95,7 +89,7 @@ fn actor_backed_self_delegate_trusts_declared_return_type() {
 /// `Dynamic` — no regression from the fix.
 #[test]
 fn actor_backed_self_delegate_without_annotation_still_dynamic() {
-    let (module, hierarchy) = build(
+    let (module, hierarchy) = parse_and_build(
         "Actor subclass: HTTPServer native: beamtalk_http_server\n\
          \x20\x20raw => self delegate\n",
     );
@@ -122,7 +116,7 @@ fn actor_backed_self_delegate_without_annotation_still_dynamic() {
 
 #[test]
 fn object_backed_self_delegate_trusts_declared_return_type() {
-    let (module, hierarchy) = build(
+    let (module, hierarchy) = parse_and_build(
         "Object subclass: Widget native: my_widget\n\
          \x20\x20asList -> List(Integer) => self delegate\n",
     );
@@ -141,7 +135,7 @@ fn object_backed_self_delegate_trusts_declared_return_type() {
 /// annotation of its own.
 #[test]
 fn object_backed_self_delegate_without_annotation_unchanged() {
-    let (module, hierarchy) = build(
+    let (module, hierarchy) = parse_and_build(
         "Object subclass: Widget native: my_widget\n\
          \x20\x20raw => self delegate\n",
     );
@@ -160,7 +154,7 @@ fn object_backed_self_delegate_without_annotation_unchanged() {
 
 #[test]
 fn class_side_self_delegate_trusts_declared_return_type() {
-    let (module, hierarchy) = build(
+    let (module, hierarchy) = parse_and_build(
         "Object subclass: Widget native: my_widget\n\
          \x20\x20class make -> Widget => self delegate\n",
     );
@@ -178,7 +172,7 @@ fn class_side_self_delegate_trusts_declared_return_type() {
 
 #[test]
 fn self_delegate_with_self_return_type_resolves_to_receiver_class() {
-    let (module, hierarchy) = build(
+    let (module, hierarchy) = parse_and_build(
         "Object subclass: Widget native: my_widget\n\
          \x20\x20copy -> Self => self delegate\n",
     );
@@ -199,7 +193,7 @@ fn self_delegate_with_self_return_type_resolves_to_receiver_class() {
 /// this fix — only the true marker pattern is special-cased.
 #[test]
 fn method_with_extra_statement_after_self_delegate_not_special_cased() {
-    let (module, hierarchy) = build(
+    let (module, hierarchy) = parse_and_build(
         "Actor subclass: HTTPServer native: beamtalk_http_server\n\
          \x20\x20port -> Integer =>\n\
          \x20\x20\x20\x20self delegate\n\

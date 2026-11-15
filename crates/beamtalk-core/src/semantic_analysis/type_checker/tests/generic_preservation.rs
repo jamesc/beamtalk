@@ -32,10 +32,7 @@ typed Object subclass: Driver
     r :: Result(List(String), Error) := Box wrap: #()
     r
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes
@@ -72,10 +69,7 @@ typed Object subclass: Driver
     r := Box wrap: #()
     r
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes
@@ -113,10 +107,7 @@ typed Object subclass: Driver
     files := r unwrap
     files frobnicate
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
     let checker = check(&module, &hierarchy);
 
     // `files` must be `List(String)`, not Dynamic — `List` does not
@@ -234,10 +225,7 @@ typed Object subclass: Driver
     events := store readEvents
     events
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes
@@ -305,10 +293,7 @@ typed Object subclass: Driver
     first := events first
     first xyzzyNonsense
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -345,10 +330,7 @@ typed Object subclass: Driver
     kids := Sup children
     kids
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes
@@ -404,10 +386,7 @@ typed Object subclass: Driver
     m := store readMap
     m
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes
@@ -464,10 +443,7 @@ typed Object subclass: Driver
     s := store readSet
     s
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes

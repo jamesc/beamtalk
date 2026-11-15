@@ -29,10 +29,7 @@ typed Object subclass: Repro
       ifNil: [42]
       ifNotNil: [:snap | "got one"]
 "#;
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -64,10 +61,7 @@ typed Object subclass: Repro
       ifNotNil: [:snap | "got one"]
       ifNil: [42]
 "#;
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -97,10 +91,7 @@ typed Object subclass: Repro
       ifNil: ["none"]
       ifNotNil: [:snap | "some"]
 "#;
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -132,10 +123,7 @@ typed Object subclass: Repro
       ifNil: [^"early"]
       ifNotNil: [:snap | "got one"]
 "#;
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -165,10 +153,7 @@ typed Object subclass: Repro
       ifNil: [^42]
       ifNotNil: [:snap | "got one"]
 "#;
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -207,10 +192,7 @@ typed Object subclass: Repro
   go -> String =>
     ^self.name ifNil: [""]
 "#;
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -242,10 +224,7 @@ typed Object subclass: Repro
   go =>
     self.count ifNil: ["none"]
 "#;
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -272,10 +251,7 @@ typed Object subclass: Repro
   go =>
     self.name ifNotNil: [:n | n size]
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -302,10 +278,7 @@ typed Object subclass: Repro
   go =>
     self.name ifNotNil: [:n | n size]
 "#;
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -334,10 +307,7 @@ typed Object subclass: Repro
   go =>
     self.count ifNil: ["none"]
 "#;
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -365,10 +335,7 @@ typed Object subclass: Repro
   go =>
     self.value ifNil: [true]
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -396,10 +363,7 @@ typed Object subclass: Repro
   go -> String =>
     ^self.name ifNil: [^"early"]
 "#;
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -423,10 +387,7 @@ typed Object subclass: Repro
   go -> Nil =>
     ^self.name ifNotNil: [:n | ^n size]
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -452,10 +413,7 @@ typed Object subclass: Repro
   go: aBlock =>
     self.name ifNil: aBlock
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
     // No panic is the primary assertion; also sanity-check a type was recorded.
@@ -481,10 +439,7 @@ typed Object subclass: Repro
   go =>
     nil ifNil: ["a"]
 "#;
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 

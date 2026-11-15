@@ -97,6 +97,7 @@ pub(super) fn assign(name: &str, value: Expression) -> Expression {
     }
 }
 
+pub(super) use crate::semantic_analysis::test_helpers::parse_and_build;
 pub(super) use crate::test_helpers::test_support::{parse_ok, parse_source};
 
 // Helper: run the full diagnostic pipeline (type check + @expect suppression).
@@ -155,8 +156,7 @@ pub(super) fn return_types_and_diags(
     std::collections::HashMap<MethodReturnKey, InferredType>,
     Vec<Diagnostic>,
 ) {
-    let module = parse_ok(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let (module, hierarchy) = parse_and_build(source);
     let mut checker = check(&module, &hierarchy);
     let diagnostics = checker.take_diagnostics();
     (checker.take_method_return_types(), diagnostics)

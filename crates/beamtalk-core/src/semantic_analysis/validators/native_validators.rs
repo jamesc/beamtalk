@@ -279,6 +279,7 @@ fn emit_delegate_return_type_warning(
 mod tests {
     use super::*;
     use crate::semantic_analysis::ClassHierarchy;
+    use crate::semantic_analysis::test_helpers::parse_and_build;
     use crate::source_analysis::Severity;
     use crate::test_helpers::test_support::parse_ok;
 
@@ -288,8 +289,7 @@ mod tests {
     #[test]
     fn native_actor_state_field_is_error() {
         let src = "Actor subclass: MyActor native: my_mod\n  state: count = 0\n  increment => self delegate";
-        let module = parse_ok(src);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
         check_native_state_fields(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -315,8 +315,7 @@ mod tests {
     #[test]
     fn native_actor_late_state_field_is_error() {
         let src = "typed Actor subclass: MyActor native: my_mod\n  late state: proc :: Subprocess\n  increment => self delegate";
-        let module = parse_ok(src);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
         check_native_state_fields(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -336,8 +335,7 @@ mod tests {
     #[test]
     fn native_actor_multiple_state_fields_multiple_errors() {
         let src = "Actor subclass: MyActor native: my_mod\n  state: x = 0\n  state: y = 0\n  get => self delegate";
-        let module = parse_ok(src);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
         check_native_state_fields(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -351,8 +349,7 @@ mod tests {
     #[test]
     fn non_native_actor_state_fields_ok() {
         let src = "Actor subclass: Counter\n  state: count = 0\n  increment => self.count := self.count + 1";
-        let module = parse_ok(src);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
         check_native_state_fields(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -365,8 +362,7 @@ mod tests {
     #[test]
     fn native_actor_class_state_ok() {
         let src = "Actor subclass: MyActor native: my_mod\n  classState: instances = 0\n  get => self delegate";
-        let module = parse_ok(src);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
         check_native_state_fields(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -477,8 +473,7 @@ mod tests {
     #[test]
     fn native_object_state_field_no_error() {
         let src = "Object subclass: MyObj native: my_mod\n  state: count = 0\n  get -> Integer => self delegate";
-        let module = parse_ok(src);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
         check_native_state_fields(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -492,8 +487,7 @@ mod tests {
     #[test]
     fn native_object_reserved_word_first_keyword_is_error() {
         let src = "Object subclass: MyObj native: my_mod\n  receive: x :: Object -> Object => self delegate";
-        let module = parse_ok(src);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
         check_native_delegate_reserved_word(&module, &hierarchy, &mut diagnostics);
         assert_eq!(
@@ -509,8 +503,7 @@ mod tests {
     #[test]
     fn native_object_non_reserved_first_keyword_ok() {
         let src = "Object subclass: MyObj native: my_mod\n  select: x :: Object -> Object => self delegate";
-        let module = parse_ok(src);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
         check_native_delegate_reserved_word(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -524,8 +517,7 @@ mod tests {
     #[test]
     fn native_actor_reserved_word_exempt() {
         let src = "Actor subclass: MyActor native: my_mod\n  receive: x :: Object -> Object => self delegate";
-        let module = parse_ok(src);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
         check_native_delegate_reserved_word(&module, &hierarchy, &mut diagnostics);
         assert!(
@@ -537,8 +529,7 @@ mod tests {
     // ── BT-4577: Beamtalk-bodied instance methods on native actors ─────────────
 
     fn instance_body_diagnostics(src: &str) -> Vec<Diagnostic> {
-        let module = parse_ok(src);
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
         check_native_actor_instance_method_bodies(&module, &hierarchy, &mut diagnostics);
         diagnostics

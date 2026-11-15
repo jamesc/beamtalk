@@ -24,10 +24,7 @@ typed Object subclass: Repro
   shout -> String =>
     ^"abc" collect: [:c | c uppercase]
 "#;
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -71,10 +68,7 @@ typed Object subclass: Repro
   watch: w :: Worker -> Symbol =>
     ^w onExit: [:reason | reason printString]
 ";
-    let module = parse_ok(source);
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 

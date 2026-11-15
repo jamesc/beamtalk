@@ -585,8 +585,8 @@ mod tests {
         MethodDefinition, MethodKind, TypeParamDecl,
     };
     use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+    use crate::semantic_analysis::test_helpers::parse_and_build;
     use crate::source_analysis::{Severity, Span};
-    use crate::test_helpers::test_support::parse_ok;
 
     fn test_span() -> Span {
         Span::new(0, 10)
@@ -730,12 +730,6 @@ mod tests {
     // `analyse_full` — `check_unresolved_type_aliases` has no internal
     // cross-file gate of its own (see its doc: callers are responsible for
     // gating on `has_cross_file_classes`, exactly like `check_unresolved_classes`).
-
-    fn parse_and_build(source: &str) -> (Module, ClassHierarchy) {
-        let module = parse_ok(source);
-        let (hierarchy, _) = ClassHierarchy::build(&module);
-        (module, hierarchy.unwrap())
-    }
 
     fn registered_aliases(
         module: &Module,
