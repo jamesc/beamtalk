@@ -48,7 +48,7 @@ start_fixture(Prefix, Files) ->
     %% `no_workspace` unless this node records a workspace capability.
     ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
     %% BT-4792: the runtime reaches the workspace pipeline through this callback.
-    ok = beamtalk_workspace_callback:register(beamtalk_repl_eval),
+    ok = beamtalk_workspace_callback:register(beamtalk_workspace_callback_impl),
     application:ensure_all_started(compiler),
     case application:ensure_all_started(beamtalk_compiler) of
         {ok, _} -> ok;

@@ -651,7 +651,7 @@ capability_guard_registers_workspace_callback_test() ->
         {ok, Pid} = beamtalk_workspace_capability_guard:start_link(#{
             mode => workspace, include_compiler => true
         }),
-        ?assertEqual({ok, beamtalk_repl_eval}, beamtalk_workspace_callback:registered_module()),
+        ?assertEqual({ok, beamtalk_workspace_callback_impl}, beamtalk_workspace_callback:registered_module()),
         ok = gen_server:stop(Pid),
         ?assertEqual(none, beamtalk_workspace_callback:registered_module()),
         ?assertEqual(none, beamtalk_capability:recorded())
@@ -676,7 +676,7 @@ capability_guard_restores_previous_callback_test() ->
         {ok, Pid} = beamtalk_workspace_capability_guard:start_link(#{
             mode => workspace, include_compiler => true
         }),
-        ?assertEqual({ok, beamtalk_repl_eval}, beamtalk_workspace_callback:registered_module()),
+        ?assertEqual({ok, beamtalk_workspace_callback_impl}, beamtalk_workspace_callback:registered_module()),
         ok = gen_server:stop(Pid),
         ?assertEqual({ok, ?MODULE}, beamtalk_workspace_callback:registered_module())
     after
