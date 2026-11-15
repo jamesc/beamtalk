@@ -265,7 +265,7 @@ term_to_json_function_arity0_test() ->
 term_to_json_beamtalk_error_test() ->
     Error = beamtalk_error:new(does_not_understand, 'Integer'),
     Result = beamtalk_repl_json:term_to_json(Error),
-    ?assert(is_binary(Result)).
+    ?assertEqual(<<"Integer does not understand message">>, Result).
 
 %%% ============================================================================
 %%% format_error_message tests
@@ -274,7 +274,7 @@ term_to_json_beamtalk_error_test() ->
 format_error_message_beamtalk_error_test() ->
     Error = beamtalk_error:new(does_not_understand, 'Integer'),
     Result = beamtalk_repl_json:format_error_message(Error),
-    ?assert(is_binary(Result)).
+    ?assertEqual(<<"Integer does not understand message">>, Result).
 
 format_error_message_runtime_error_test() ->
     Error = beamtalk_error:new(type_error, 'String'),
@@ -308,7 +308,7 @@ format_error_message_eval_error_test() ->
 format_error_message_eval_error_with_beamtalk_error_test() ->
     Error = beamtalk_error:new(type_error, 'Integer'),
     Result = beamtalk_repl_json:format_error_message({eval_error, error, Error}),
-    ?assert(is_binary(Result)).
+    ?assertEqual(<<"Type error in Integer">>, Result).
 
 format_error_message_eval_error_with_runtime_error_test() ->
     Error = beamtalk_error:new(type_error, 'Integer'),
@@ -404,15 +404,14 @@ format_error_generic_tuple_test() ->
     Decoded = json:decode(Response),
     ?assertEqual(<<"error">>, maps:get(<<"type">>, Decoded)),
     Message = maps:get(<<"message">>, Decoded),
-    ?assert(is_binary(Message)).
+    ?assertEqual(<<"{unknown_error_type,\"details\"}">>, Message).
 
 format_error_generic_atom_test() ->
     Response = beamtalk_repl_json:format_error(some_unknown_error),
     Decoded = json:decode(Response),
     Message = maps:get(<<"message">>, Decoded),
     %% Generic errors are formatted with ~p, so should contain the atom name
-    ?assert(is_binary(Message)),
-    ?assert(byte_size(Message) > 0).
+    ?assertEqual(<<"some_unknown_error">>, Message).
 
 %% format_error with #beamtalk_error{} record (with selector)
 format_error_beamtalk_error_with_selector_test() ->
@@ -475,11 +474,11 @@ term_to_json_map_with_list_keys_test() ->
 
 term_to_json_map_with_non_printable_list_key_test() ->
     Result = beamtalk_repl_json:term_to_json(#{[1, 2, 3] => <<"val">>}),
-    ?assert(is_binary(Result)).
+    ?assertEqual(<<"#{#(1, 2, 3) => \"val\"}">>, Result).
 
 term_to_json_map_with_integer_key_test() ->
     Result = beamtalk_repl_json:term_to_json(#{99 => <<"val">>}),
-    ?assert(is_binary(Result)).
+    ?assertEqual(<<"#{99 => \"val\"}">>, Result).
 
 term_to_json_dead_pid_test() ->
     Pid = spawn(fun() -> ok end),

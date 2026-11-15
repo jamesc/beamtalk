@@ -86,9 +86,10 @@ fn test_generate_binary_op_no_wrap_for_literals() {
     ] {
         let doc = generator.generate_binary_op(op, &l, &[r]).unwrap();
         let output = doc.to_pretty_string();
-        assert!(
-            !output.contains("maybe_await"),
-            "literal operands should not be wrapped in maybe_await; got: {output}"
+        assert_lacks(
+            "literal operands should not be wrapped in maybe_await",
+            &output,
+            &["maybe_await"],
         );
     }
 }
@@ -106,13 +107,15 @@ fn test_generate_binary_op_no_wrap_for_identifiers() {
     let right = vec![Expression::Literal(Literal::Integer(1), Span::new(4, 5))];
     let doc = generator.generate_binary_op("+", &left, &right).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        !output.contains("maybe_await"),
-        "no operand should be wrapped in maybe_await; got: {output}"
+    assert_lacks(
+        "no operand should be wrapped in maybe_await",
+        &output,
+        &["maybe_await"],
     );
-    assert!(
-        output.contains("call 'erlang':'+'("),
-        "should still generate erlang:'+' call; got: {output}"
+    assert_has(
+        "should still generate erlang:'+' call",
+        &output,
+        &["call 'erlang':'+'("],
     );
 }
 
@@ -131,9 +134,10 @@ fn test_arith_bare_bif_for_numeric_literal_receiver() {
         .unwrap()
         .to_pretty_string();
     assert_eq!(output, "call 'erlang':'+'(3, 4)");
-    assert!(
-        !output.contains("is_number"),
-        "numeric literal receiver must skip the guard; got: {output}"
+    assert_lacks(
+        "numeric literal receiver must skip the guard",
+        &output,
+        &["is_number"],
     );
 }
 
@@ -187,18 +191,23 @@ fn test_arith_coercion_try_for_self_in_numeric_class_unknown_right() {
         .generate_binary_op("*", &left, &right)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("try call 'erlang':'*'("),
-        "unknown right operand must wrap the bare BIF in try/catch; got: {output}"
+    assert_has(
+        "unknown right operand must wrap the bare BIF in try/catch",
+        &output,
+        &["try call 'erlang':'*'("],
     );
-    assert!(
-        output.contains("call 'erlang':'is_number'("),
-        "coercion try must re-check is_number on the right operand; got: {output}"
+    assert_has(
+        "coercion try must re-check is_number on the right operand",
+        &output,
+        &["call 'erlang':'is_number'("],
     );
-    assert!(
-        output.contains("call 'beamtalk_message_dispatch':'send_number_coercion'(")
-            && output.contains("'timesFromNumber:'"),
-        "non-numeric right operand must dispatch to timesFromNumber:; got: {output}"
+    assert_has(
+        "non-numeric right operand must dispatch to timesFromNumber:",
+        &output,
+        &[
+            "call 'beamtalk_message_dispatch':'send_number_coercion'(",
+            "'timesFromNumber:'",
+        ],
     );
 }
 
@@ -244,17 +253,20 @@ fn test_arith_guard_for_unknown_receiver_numeric_right_no_try() {
         .unwrap()
         .to_pretty_string();
     // Runtime guard: is_number → BIF, else dispatch (no try/catch, no bare BIF).
-    assert!(
-        output.contains("call 'erlang':'is_number'("),
-        "unknown receiver must emit an is_number guard; got: {output}"
+    assert_has(
+        "unknown receiver must emit an is_number guard",
+        &output,
+        &["call 'erlang':'is_number'("],
     );
-    assert!(
-        output.contains("call 'beamtalk_message_dispatch':'send'(") && output.contains("'+'"),
-        "guard must dispatch '+' as a message on the false arm; got: {output}"
+    assert_has(
+        "guard must dispatch '+' as a message on the false arm",
+        &output,
+        &["call 'beamtalk_message_dispatch':'send'(", "'+'"],
     );
-    assert!(
-        !output.contains("try "),
-        "statically-numeric right operand must not enter the coercion try; got: {output}"
+    assert_lacks(
+        "statically-numeric right operand must not enter the coercion try",
+        &output,
+        &["try "],
     );
 }
 
@@ -275,22 +287,28 @@ fn test_arith_guard_for_unknown_receiver_and_unknown_right_uses_coercion_try() {
         .generate_binary_op("+", &left, &right)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("call 'erlang':'is_number'("),
-        "unknown receiver must emit an is_number guard; got: {output}"
+    assert_has(
+        "unknown receiver must emit an is_number guard",
+        &output,
+        &["call 'erlang':'is_number'("],
     );
-    assert!(
-        output.contains("call 'beamtalk_message_dispatch':'send'(") && output.contains("'+'"),
-        "guard must dispatch '+' as a message on the false arm; got: {output}"
+    assert_has(
+        "guard must dispatch '+' as a message on the false arm",
+        &output,
+        &["call 'beamtalk_message_dispatch':'send'(", "'+'"],
     );
-    assert!(
-        output.contains("try call 'erlang':'+'("),
-        "unknown right operand must wrap the guard's bare-BIF branch in try/catch; got: {output}"
+    assert_has(
+        "unknown right operand must wrap the guard's bare-BIF branch in try/catch",
+        &output,
+        &["try call 'erlang':'+'("],
     );
-    assert!(
-        output.contains("call 'beamtalk_message_dispatch':'send_number_coercion'(")
-            && output.contains("'plusFromNumber:'"),
-        "coercion try must dispatch to plusFromNumber: when right isn't a number; got: {output}"
+    assert_has(
+        "coercion try must dispatch to plusFromNumber: when right isn't a number",
+        &output,
+        &[
+            "call 'beamtalk_message_dispatch':'send_number_coercion'(",
+            "'plusFromNumber:'",
+        ],
     );
 }
 
@@ -309,9 +327,10 @@ fn test_arith_guard_for_self_in_non_numeric_class() {
         .generate_binary_op("+", &left, &right)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("call 'erlang':'is_number'("),
-        "`self + x` in a non-numeric class must be guarded; got: {output}"
+    assert_has(
+        "`self + x` in a non-numeric class must be guarded",
+        &output,
+        &["call 'erlang':'is_number'("],
     );
 }
 
@@ -336,31 +355,39 @@ fn test_number_coercion_try_for_literal_left_unknown_right() {
         .generate_binary_op("+", &left, &right)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("try call 'erlang':'+'("),
-        "numeric literal left with unknown right must wrap in try/catch; got: {output}"
+    assert_has(
+        "numeric literal left with unknown right must wrap in try/catch",
+        &output,
+        &["try call 'erlang':'+'("],
     );
-    assert!(
-        output.contains("of <") && output.contains("> -> "),
-        "try must use the mandatory `of <Var> -> Var` clause; got: {output}"
+    assert_has(
+        "try must use the mandatory `of <Var> -> Var` clause",
+        &output,
+        &["of <", "> -> "],
     );
-    assert!(
-        output.contains("catch <") && output.contains("case_clause"),
-        "catch must bind Type/Error/Stack and include the BT-3163 case_clause fallback; got: {output}"
+    assert_has(
+        "catch must bind Type/Error/Stack and include the BT-3163 case_clause fallback",
+        &output,
+        &["catch <", "case_clause"],
     );
-    assert!(
-        output.contains("call 'erlang':'is_number'("),
-        "badarith arm must re-check is_number on the right operand; got: {output}"
+    assert_has(
+        "badarith arm must re-check is_number on the right operand",
+        &output,
+        &["call 'erlang':'is_number'("],
     );
-    assert!(
-        output.contains("primop 'raw_raise'("),
-        "a genuinely numeric badarith (e.g. div-by-zero) must re-raise unchanged; got: {output}"
+    assert_has(
+        "a genuinely numeric badarith (e.g. div-by-zero) must re-raise unchanged",
+        &output,
+        &["primop 'raw_raise'("],
     );
-    assert!(
-        output.contains("call 'beamtalk_message_dispatch':'send_number_coercion'(")
-            && output.contains("'plusFromNumber:'")
-            && output.contains(", '+')"),
-        "non-numeric right must dispatch via send_number_coercion/4 with the '+' op symbol; got: {output}"
+    assert_has(
+        "non-numeric right must dispatch via send_number_coercion/4 with the '+' op symbol",
+        &output,
+        &[
+            "call 'beamtalk_message_dispatch':'send_number_coercion'(",
+            "'plusFromNumber:'",
+            ", '+')",
+        ],
     );
 }
 
@@ -383,9 +410,10 @@ fn test_number_coercion_bare_bif_unaffected_for_total_plus_delta() {
         .generate_binary_op("+", &left, &right)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        !output.contains("try "),
-        "a statically-numeric right operand must never enter the coercion try; got: {output}"
+    assert_lacks(
+        "a statically-numeric right operand must never enter the coercion try",
+        &output,
+        &["try "],
     );
     assert!(
         output.starts_with("call 'erlang':'+'("),
@@ -512,9 +540,10 @@ fn test_number_coercion_untyped_self_fields_both_sides_are_guarded() {
         .generate_binary_op("+", &left, &[right])
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("call 'erlang':'is_number'(") && output.contains("send_number_coercion"),
-        "untyped fields must be guarded — got: {output}"
+    assert_has(
+        "untyped fields must be guarded —",
+        &output,
+        &["call 'erlang':'is_number'(", "send_number_coercion"],
     );
 }
 
@@ -937,9 +966,10 @@ fn test_comparison_guard_for_unknown_receiver() {
         ),
         "unknown comparison receiver must emit the primitive-comparable guard; got: {output}"
     );
-    assert!(
-        !output.contains("beamtalk_primitive"),
-        "comparison guard must not call into the runtime; got: {output}"
+    assert_lacks(
+        "comparison guard must not call into the runtime",
+        &output,
+        &["beamtalk_primitive"],
     );
     let bif = flat
         .find("<'true'> when 'true' -> call 'erlang':'<'(")
@@ -951,10 +981,7 @@ fn test_comparison_guard_for_unknown_receiver() {
         bif < send,
         "BIF arm must precede the send arm; got: {output}"
     );
-    assert!(
-        !output.contains("try "),
-        "guard must not use try/catch; got: {output}"
-    );
+    assert_lacks("guard must not use try/catch", &output, &["try "]);
 }
 
 #[test]
@@ -972,9 +999,10 @@ fn test_comparison_guard_for_self_in_non_comparable_class() {
         .generate_binary_op("<", &left, &right)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("call 'erlang':'is_binary'("),
-        "`self < x` in a non-comparable class must be guarded; got: {output}"
+    assert_has(
+        "`self < x` in a non-comparable class must be guarded",
+        &output,
+        &["call 'erlang':'is_binary'("],
     );
 }
 
@@ -1015,9 +1043,10 @@ fn test_comparison_object_typed_field_is_guarded() {
         .generate_binary_op("<", &left, &right)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("call 'erlang':'is_binary'("),
-        "object-typed self.<field> comparison must be guarded; got: {output}"
+    assert_has(
+        "object-typed self.<field> comparison must be guarded",
+        &output,
+        &["call 'erlang':'is_binary'("],
     );
 }
 
@@ -1071,9 +1100,10 @@ fn test_arith_object_typed_field_is_guarded() {
         .generate_binary_op("+", &left, &right)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("call 'erlang':'is_number'("),
-        "object-typed self.<field> arithmetic must be guarded; got: {output}"
+    assert_has(
+        "object-typed self.<field> arithmetic must be guarded",
+        &output,
+        &["call 'erlang':'is_number'("],
     );
 }
 
@@ -1093,17 +1123,19 @@ fn test_untyped_field_is_guarded_for_arith_and_comparison() {
         .generate_binary_op("+", &left, &one)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        arith.contains("call 'erlang':'is_number'("),
-        "untyped field arithmetic must be guarded; got: {arith}"
+    assert_has(
+        "untyped field arithmetic must be guarded",
+        &arith,
+        &["call 'erlang':'is_number'("],
     );
     let compare = generator
         .generate_binary_op("<", &left, &one)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        compare.contains("call 'erlang':'is_binary'("),
-        "untyped field comparison must be guarded; got: {compare}"
+    assert_has(
+        "untyped field comparison must be guarded",
+        &compare,
+        &["call 'erlang':'is_binary'("],
     );
 }
 
@@ -1141,9 +1173,10 @@ fn test_generate_power_op_no_wrap() {
     let right = vec![Expression::Literal(Literal::Integer(8), Span::new(4, 5))];
     let doc = generator.generate_binary_op("**", &left, &right).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        !output.contains("maybe_await"),
-        "literal operands in ** should not be wrapped; got: {output}"
+    assert_lacks(
+        "literal operands in ** should not be wrapped",
+        &output,
+        &["maybe_await"],
     );
 
     // Non-literal operands: also no maybe_await (ADR-0043: all sends are sync).
@@ -1156,9 +1189,10 @@ fn test_generate_power_op_no_wrap() {
         .generate_binary_op("**", &left_var, &right_lit)
         .unwrap();
     let output2 = doc2.to_pretty_string();
-    assert!(
-        !output2.contains("maybe_await"),
-        "no operand in ** should be wrapped with maybe_await; got: {output2}"
+    assert_lacks(
+        "no operand in ** should be wrapped with maybe_await",
+        &output2,
+        &["maybe_await"],
     );
 }
 
@@ -1174,9 +1208,10 @@ fn test_generate_concat_op_no_wrap() {
     )];
     let doc = generator.generate_binary_op("++", &left, &right).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        !output.contains("maybe_await"),
-        "literal string operands in ++ should not be wrapped; got: {output}"
+    assert_lacks(
+        "literal string operands in ++ should not be wrapped",
+        &output,
+        &["maybe_await"],
     );
 
     // Non-literal right operand: also no maybe_await (ADR-0043: all sends are sync).
@@ -1189,9 +1224,10 @@ fn test_generate_concat_op_no_wrap() {
         .generate_binary_op("++", &left_lit, &right_var)
         .unwrap();
     let output2 = doc2.to_pretty_string();
-    assert!(
-        !output2.contains("maybe_await"),
-        "no operand in ++ should be wrapped with maybe_await; got: {output2}"
+    assert_lacks(
+        "no operand in ++ should be wrapped with maybe_await",
+        &output2,
+        &["maybe_await"],
     );
 }
 
@@ -1205,22 +1241,26 @@ fn test_generate_string_concatenation_operator() {
     )];
     let doc = generator.generate_binary_op("++", &left, &right).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("iolist_to_binary"),
-        "Should use iolist_to_binary for string concatenation. Got: {output}",
+    assert_has(
+        "Should use iolist_to_binary for string concatenation",
+        &output,
+        &["iolist_to_binary"],
     );
     // BT-4173: tagged operands unwrap to bytes; the result re-tags.
-    assert!(
-        output.contains("string_to_binary"),
-        "Should unwrap tagged operands. Got: {output}",
+    assert_has(
+        "Should unwrap tagged operands",
+        &output,
+        &["string_to_binary"],
     );
-    assert!(
-        output.contains("string_from_binary"),
-        "Should tag the concatenated result as a String. Got: {output}",
+    assert_has(
+        "Should tag the concatenated result as a String",
+        &output,
+        &["string_from_binary"],
     );
-    assert!(
-        !output.contains("binary_to_list"),
-        "Binaries are iodata; no binary_to_list needed. Got: {output}",
+    assert_lacks(
+        "Binaries are iodata; no binary_to_list needed",
+        &output,
+        &["binary_to_list"],
     );
 }
 
@@ -1231,9 +1271,10 @@ fn test_generate_strict_equality_operator() {
     let right = vec![Expression::Literal(Literal::Integer(42), Span::new(6, 8))];
     let doc = generator.generate_binary_op("=:=", &left, &right).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("call 'erlang':'=:='"),
-        "Should use strict equality =:=. Got: {output}",
+    assert_has(
+        "Should use strict equality =:=",
+        &output,
+        &["call 'erlang':'=:='"],
     );
 }
 
@@ -1244,9 +1285,10 @@ fn test_generate_loose_inequality_operator() {
     let right = vec![Expression::Literal(Literal::Integer(99), Span::new(7, 9))];
     let doc = generator.generate_binary_op("/=", &left, &right).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("call 'erlang':'/='"),
-        "Should use loose inequality /= (negation of ==). Got: {output}",
+    assert_has(
+        "Should use loose inequality /= (negation of ==)",
+        &output,
+        &["call 'erlang':'/='"],
     );
 }
 
@@ -1257,9 +1299,10 @@ fn test_generate_loose_equality_operator() {
     let right = vec![Expression::Literal(Literal::Integer(5), Span::new(6, 7))];
     let doc = generator.generate_binary_op("==", &left, &right).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("call 'erlang':'=='"),
-        "Should use loose equality ==. Got: {output}",
+    assert_has(
+        "Should use loose equality ==",
+        &output,
+        &["call 'erlang':'=='"],
     );
     // Literal operands are provably non-future: no maybe_await wrapping needed.
     assert_eq!(output, "call 'erlang':'=='(5, 5)");
@@ -1306,13 +1349,15 @@ fn test_concat_op_list_literal_uses_list_append() {
     )];
     let doc = generator.generate_binary_op("++", &left, &right).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("'erlang':'++'"),
-        "List ++ should use 'erlang':'++', got: {output}"
+    assert_has(
+        "List ++ should use 'erlang':'++'",
+        &output,
+        &["'erlang':'++'"],
     );
-    assert!(
-        !output.contains("iolist_to_binary"),
-        "List ++ must not use iolist_to_binary, got: {output}"
+    assert_lacks(
+        "List ++ must not use iolist_to_binary",
+        &output,
+        &["iolist_to_binary"],
     );
 }
 
@@ -1332,17 +1377,20 @@ fn test_concat_op_identifier_left_uses_runtime_dispatch() {
     })];
     let doc = generator.generate_binary_op("++", &left, &right).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("is_list"),
-        "Non-literal ++ should emit a runtime is_list type check, got: {output}"
+    assert_has(
+        "Non-literal ++ should emit a runtime is_list type check",
+        &output,
+        &["is_list"],
     );
-    assert!(
-        output.contains("'erlang':'++'"),
-        "Runtime dispatch must include the list path 'erlang':'++', got: {output}"
+    assert_has(
+        "Runtime dispatch must include the list path 'erlang':'++'",
+        &output,
+        &["'erlang':'++'"],
     );
-    assert!(
-        output.contains("iolist_to_binary"),
-        "Runtime dispatch must include the binary path iolist_to_binary, got: {output}"
+    assert_has(
+        "Runtime dispatch must include the binary path iolist_to_binary",
+        &output,
+        &["iolist_to_binary"],
     );
 }
 
@@ -1533,9 +1581,10 @@ fn test_generate_tuple_literal_compiles() {
     let code = codegen(
         "Object subclass: T\n  m => #(#binary, {#active, false}, {#backlog, 1024}, {}, {#ok})",
     );
-    assert!(
-        code.contains("{'active', 'false'}"),
-        "expected a direct Core Erlang tuple, got:\n{code}"
+    assert_has(
+        "expected a direct Core Erlang tuple",
+        &code,
+        &["{'active', 'false'}"],
     );
     assert!(
         !code.contains("withAll:"),
@@ -1563,10 +1612,7 @@ fn test_generate_map_literal_compiles() {
     // Symbols become atoms in Core Erlang
     assert!(code.contains("'key'"));
     // Strings are represented as binaries with character codes
-    assert!(
-        code.contains("#<"),
-        "String should be represented as binary"
-    );
+    assert_has("String should be represented as binary", &code, &["#<"]);
 
     // Verify the generated code compiles through erlc. Module name must
     // match `codegen()`'s hardcoded module name ("test"), not an arbitrary
@@ -1596,9 +1642,10 @@ fn test_dictionary_at_on_identifier() {
     let output = doc.to_pretty_string();
 
     // Unified dispatch
-    assert!(
-        output.contains("beamtalk_message_dispatch") && output.contains("'at:'"),
-        "Should generate unified dispatch for at:. Got: {output}"
+    assert_has(
+        "Should generate unified dispatch for at:",
+        &output,
+        &["beamtalk_message_dispatch", "'at:'"],
     );
 }
 
@@ -1625,9 +1672,10 @@ fn test_dictionary_at_put_on_identifier() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("beamtalk_message_dispatch") && output.contains("'at:put:'"),
-        "Should generate unified dispatch for at:put:. Got: {output}"
+    assert_has(
+        "Should generate unified dispatch for at:put:",
+        &output,
+        &["beamtalk_message_dispatch", "'at:put:'"],
     );
 }
 
@@ -1647,9 +1695,10 @@ fn test_dictionary_size_on_identifier() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("beamtalk_message_dispatch") && output.contains("'size'"),
-        "Should generate unified dispatch for size. Got: {output}"
+    assert_has(
+        "Should generate unified dispatch for size",
+        &output,
+        &["beamtalk_message_dispatch", "'size'"],
     );
 }
 
@@ -1670,13 +1719,15 @@ fn test_as_type_erasure() {
         .unwrap();
     let output = doc.to_pretty_string();
     // asType: should be erased — no dispatch, no beamtalk_message_dispatch
-    assert!(
-        !output.contains("beamtalk_message_dispatch"),
-        "asType: should be erased, not dispatched. Got: {output}"
+    assert_lacks(
+        "asType: should be erased, not dispatched",
+        &output,
+        &["beamtalk_message_dispatch"],
     );
-    assert!(
-        !output.contains("asType"),
-        "asType: should not appear in generated code. Got: {output}"
+    assert_lacks(
+        "asType: should not appear in generated code",
+        &output,
+        &["asType"],
     );
     // The output should just be the variable reference
     assert!(
@@ -1704,22 +1755,10 @@ fn test_binary_pattern_integer_segment() {
     let doc = generator.generate_binary_segment(&seg).unwrap();
     let output = doc.to_pretty_string();
     // Must contain: #<Version>(8,1,'integer',['unsigned'|['big']])
-    assert!(
-        output.contains("#<"),
-        "Expected #< in binary segment, got: {output}"
-    );
-    assert!(
-        output.contains("'integer'"),
-        "Expected 'integer' type, got: {output}"
-    );
-    assert!(
-        output.contains("'unsigned'"),
-        "Expected 'unsigned' signedness, got: {output}"
-    );
-    assert!(
-        output.contains("'big'"),
-        "Expected 'big' endianness, got: {output}"
-    );
+    assert_has("Expected #< in binary segment", &output, &["#<"]);
+    assert_has("Expected 'integer' type", &output, &["'integer'"]);
+    assert_has("Expected 'unsigned' signedness", &output, &["'unsigned'"]);
+    assert_has("Expected 'big' endianness", &output, &["'big'"]);
 }
 
 #[test]
@@ -1737,14 +1776,8 @@ fn test_binary_pattern_binary_segment() {
     };
     let doc = generator.generate_binary_segment(&seg).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("'all'"),
-        "Expected 'all' size, got: {output}"
-    );
-    assert!(
-        output.contains("'binary'"),
-        "Expected 'binary' type, got: {output}"
-    );
+    assert_has("Expected 'all' size", &output, &["'all'"]);
+    assert_has("Expected 'binary' type", &output, &["'binary'"]);
 }
 
 #[test]
@@ -1763,17 +1796,12 @@ fn test_binary_pattern_bitstring_segment() {
     };
     let doc = generator.generate_binary_segment(&seg).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("'all'"),
-        "Expected 'all' size, got: {output}"
-    );
-    assert!(
-        output.contains("'binary'"),
-        "Expected 'binary' type (unit 1), got: {output}"
-    );
-    assert!(
-        !output.contains("'bitstring'"),
-        "Core patterns have no 'bitstring' type, got: {output}"
+    assert_has("Expected 'all' size", &output, &["'all'"]);
+    assert_has("Expected 'binary' type (unit 1)", &output, &["'binary'"]);
+    assert_lacks(
+        "Core patterns have no 'bitstring' type",
+        &output,
+        &["'bitstring'"],
     );
 }
 
@@ -1792,14 +1820,12 @@ fn test_binary_pattern_utf8_segment() {
     };
     let doc = generator.generate_binary_segment(&seg).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("'undefined'"),
-        "UTF-8 segment should have 'undefined' size, got: {output}"
+    assert_has(
+        "UTF-8 segment should have 'undefined' size",
+        &output,
+        &["'undefined'"],
     );
-    assert!(
-        output.contains("'utf8'"),
-        "Expected 'utf8' type, got: {output}"
-    );
+    assert_has("Expected 'utf8' type", &output, &["'utf8'"]);
 }
 
 #[test]
@@ -1830,9 +1856,10 @@ fn test_binary_pattern_utf16_utf32_segments() {
             output.contains(expected),
             "Expected {expected} type, got: {output}"
         );
-        assert!(
-            output.contains("'undefined'"),
-            "UTF segment should have 'undefined' size and unit, got: {output}"
+        assert_has(
+            "UTF segment should have 'undefined' size and unit",
+            &output,
+            &["'undefined'"],
         );
     }
 }
@@ -1856,9 +1883,10 @@ fn test_binary_pattern_explicit_unit_segment() {
     let doc = generator.generate_binary_segment(&seg).unwrap();
     let output = doc.to_pretty_string();
     // erlc: #<V>(2,8,'integer',['unsigned'|['big']])
-    assert!(
-        output.contains("(2,8,'integer'"),
-        "Expected (2,8,'integer' size/unit/type, got: {output}"
+    assert_has(
+        "Expected (2,8,'integer' size/unit/type",
+        &output,
+        &["(2,8,'integer'"],
     );
 }
 
@@ -1878,13 +1906,11 @@ fn test_binary_pattern_float_literal_value() {
     let doc = generator.generate_binary_segment(&seg).unwrap();
     let output = doc.to_pretty_string();
     // erlc: #<1.5...e+00>(64,1,'float',['unsigned'|['big']])
-    assert!(
-        output.contains("1.5"),
-        "Expected float literal value, got: {output}"
-    );
-    assert!(
-        output.contains("(64,1,'float'"),
-        "Expected (64,1,'float' size/unit/type, got: {output}"
+    assert_has("Expected float literal value", &output, &["1.5"]);
+    assert_has(
+        "Expected (64,1,'float' size/unit/type",
+        &output,
+        &["(64,1,'float'"],
     );
 }
 
@@ -1936,9 +1962,10 @@ fn test_binary_pattern_sizeless_binary_with_unit() {
         .generate_binary_segment(&seg)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains(">('all',16,'binary'"),
-        "Expected ('all',16,'binary' size/unit/type, got: {output}"
+    assert_has(
+        "Expected ('all',16,'binary' size/unit/type",
+        &output,
+        &[">('all',16,'binary'"],
     );
 }
 
@@ -1991,9 +2018,10 @@ fn test_binary_pattern_integer_literal_with_utf16() {
     };
     let doc = generator.generate_binary_segment(&seg).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("#<65>('undefined','undefined','utf16'"),
-        "Expected utf16 integer segment, got: {output}"
+    assert_has(
+        "Expected utf16 integer segment",
+        &output,
+        &["#<65>('undefined','undefined','utf16'"],
     );
 }
 
@@ -2015,13 +2043,15 @@ fn test_binary_pattern_utf_string_expands_per_character() {
         .generate_binary_pattern(std::slice::from_ref(&seg))
         .unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("#<104>('undefined','undefined','utf16',['unsigned'|['little']])"),
-        "Expected first character segment, got: {output}"
+    assert_has(
+        "Expected first character segment",
+        &output,
+        &["#<104>('undefined','undefined','utf16',['unsigned'|['little']])"],
     );
-    assert!(
-        output.contains("#<105>('undefined','undefined','utf16',['unsigned'|['little']])"),
-        "Expected second character segment, got: {output}"
+    assert_has(
+        "Expected second character segment",
+        &output,
+        &["#<105>('undefined','undefined','utf16',['unsigned'|['little']])"],
     );
 }
 
@@ -2041,9 +2071,10 @@ fn test_binary_pattern_character_literal_value() {
     };
     let doc = generator.generate_binary_segment(&seg).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("#<65>(8,1,'integer'"),
-        "Expected codepoint segment value, got: {output}"
+    assert_has(
+        "Expected codepoint segment value",
+        &output,
+        &["#<65>(8,1,'integer'"],
     );
 }
 
@@ -2065,14 +2096,8 @@ fn test_binary_pattern_signed_little_segment() {
     };
     let doc = generator.generate_binary_segment(&seg).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("'signed'"),
-        "Expected 'signed', got: {output}"
-    );
-    assert!(
-        output.contains("'little'"),
-        "Expected 'little', got: {output}"
-    );
+    assert_has("Expected 'signed'", &output, &["'signed'"]);
+    assert_has("Expected 'little'", &output, &["'little'"]);
 }
 
 #[test]
@@ -2114,14 +2139,8 @@ fn test_binary_pattern_whole_pattern() {
     );
     assert!(output.ends_with("}#"), "Expected }}# suffix, got: {output}");
     // Should contain both segments
-    assert!(
-        output.contains("'integer'"),
-        "Expected integer segment, got: {output}"
-    );
-    assert!(
-        output.contains("'binary'"),
-        "Expected binary segment, got: {output}"
-    );
+    assert_has("Expected integer segment", &output, &["'integer'"]);
+    assert_has("Expected binary segment", &output, &["'binary'"]);
 }
 
 #[test]
@@ -2193,13 +2212,15 @@ fn test_binary_pattern_outer_size_stays_inline() {
     };
     let doc = generator.generate_pattern(&pattern).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("#<Payload@>(N,"),
-        "Expected size to reference outer variable N, got: {output}"
+    assert_has(
+        "Expected size to reference outer variable N",
+        &output,
+        &["#<Payload@>(N,"],
     );
-    assert!(
-        !output.contains("maps:get"),
-        "Size must not compile to a field read, got: {output}"
+    assert_lacks(
+        "Size must not compile to a field read",
+        &output,
+        &["maps:get"],
     );
 }
 
@@ -2372,13 +2393,15 @@ fn test_segmented_binary_arm_splits() {
         output.matches("case ").count() >= 3,
         "Expected nested cases for the split arm, got: {output}"
     );
-    assert!(
-        output.contains("'all',1,'binary'"),
-        "Expected an ('all',1,'binary') split tail, got: {output}"
+    assert_has(
+        "Expected an ('all',1,'binary') split tail",
+        &output,
+        &["'all',1,'binary'"],
     );
-    assert!(
-        output.contains("#<Payload@>(N@,"),
-        "Expected the inner chunk to use N bound by the outer match, got: {output}"
+    assert_has(
+        "Expected the inner chunk to use N bound by the outer match",
+        &output,
+        &["#<Payload@>(N@,"],
     );
 }
 
@@ -2444,13 +2467,15 @@ fn test_segmented_binary_arm_hoists_size_expression_under_try() {
     let scrutinee = Expression::Identifier(Identifier::new("bin", Span::new(0, 3)));
     let doc = generator.generate_match(&scrutinee, &arms).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("try ") && output.contains("catch <"),
-        "Expected the hoisted size under try/catch, got: {output}"
+    assert_has(
+        "Expected the hoisted size under try/catch",
+        &output,
+        &["try ", "catch <"],
     );
-    assert!(
-        !output.contains("let _Size"),
-        "Hoists must not use bare lets (a raise would crash), got: {output}"
+    assert_lacks(
+        "Hoists must not use bare lets (a raise would crash)",
+        &output,
+        &["let _Size"],
     );
 }
 
@@ -2503,13 +2528,15 @@ fn test_trivial_parenthesized_size_stays_inline() {
     let scrutinee = Expression::Identifier(Identifier::new("bin", Span::new(0, 3)));
     let doc = generator.generate_match(&scrutinee, &arms).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        !output.contains("_Size"),
-        "Trivial parenthesized sizes must not hoist, got: {output}"
+    assert_lacks(
+        "Trivial parenthesized sizes must not hoist",
+        &output,
+        &["_Size"],
     );
-    assert!(
-        output.contains("'beamtalk_string'"),
-        "Binary arm should unwrap a String scrutinee. Got: {output}"
+    assert_has(
+        "Binary arm should unwrap a String scrutinee",
+        &output,
+        &["'beamtalk_string'"],
     );
 }
 
@@ -2664,13 +2691,11 @@ fn test_multiple_wildcards_in_tuple_pattern() {
     };
     let doc = generator.generate_pattern(&pattern).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        !output.contains(", _, "),
-        "Wildcards must be freshened, got: {output}"
-    );
-    assert!(
-        output.contains("_Wildcard"),
-        "Expected freshened wildcard variables, got: {output}"
+    assert_lacks("Wildcards must be freshened", &output, &[", _, "]);
+    assert_has(
+        "Expected freshened wildcard variables",
+        &output,
+        &["_Wildcard"],
     );
 }
 
@@ -2696,9 +2721,10 @@ fn test_multiple_wildcards_nested_pattern() {
     };
     let doc = generator.generate_pattern(&pattern).unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        !output.contains(", _, ") && !output.contains("{_, ") && !output.contains(", _}"),
-        "All wildcards must be freshened, got: {output}"
+    assert_lacks(
+        "All wildcards must be freshened",
+        &output,
+        &[", _, ", "{_, ", ", _}"],
     );
     assert_eq!(
         output.matches("_Wildcard").count(),

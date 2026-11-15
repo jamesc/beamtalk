@@ -1186,32 +1186,9 @@ mod tests {
         };
         // Add an internal class from another package
         let info = ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: EcoString::from(internal_class),
-            superclass: Some(EcoString::from("Object")),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
             is_internal: true,
             package: Some(EcoString::from(internal_pkg)),
-            is_value: false,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test(internal_class, Some("Object"))
         };
         h.add_from_beam_meta(vec![info]);
         h
@@ -1282,32 +1259,8 @@ mod tests {
         };
         // Add a public class from another package
         let info = ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: EcoString::from("Parser"),
-            superclass: Some(EcoString::from("Object")),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
             package: Some(EcoString::from("json")),
-            is_value: false,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("Parser", Some("Object"))
         };
         h.add_from_beam_meta(vec![info]);
         let mut diags = Vec::new();
@@ -2012,26 +1965,7 @@ mod tests {
         // Parent has internal method `helper`, Child redefines `helper`
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.add_from_beam_meta(vec![ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: "Parent".into(),
-            superclass: Some("Object".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
             package: Some("lib".into()),
-            is_value: false,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
             methods: vec![MethodInfo {
                 selector: "helper".into(),
                 arity: 0,
@@ -2049,11 +1983,7 @@ mod tests {
                 constant_value: None,
                 answers_receiver: false,
             }],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("Parent", Some("Object"))
         }]);
 
         let module = make_module_with_classes(vec![make_class_with_methods(
@@ -2079,26 +2009,7 @@ mod tests {
         // Parent has a public method `helper` — Child overriding it is fine (no warning)
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.add_from_beam_meta(vec![ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: "Parent".into(),
-            superclass: Some("Object".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
             package: Some("lib".into()),
-            is_value: false,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
             methods: vec![MethodInfo {
                 selector: "helper".into(),
                 arity: 0,
@@ -2116,11 +2027,7 @@ mod tests {
                 constant_value: None,
                 answers_receiver: false,
             }],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("Parent", Some("Object"))
         }]);
 
         let module = make_module_with_classes(vec![make_class_with_methods(
@@ -2147,32 +2054,8 @@ mod tests {
         // Child defines a new method that doesn't exist on superclass — no warning
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.add_from_beam_meta(vec![ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: "Parent".into(),
-            superclass: Some("Object".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
             package: Some("lib".into()),
-            is_value: false,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("Parent", Some("Object"))
         }]);
 
         let module = make_module_with_classes(vec![make_class_with_methods(

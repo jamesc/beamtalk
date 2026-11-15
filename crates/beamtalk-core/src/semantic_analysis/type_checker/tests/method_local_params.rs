@@ -16,26 +16,8 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 
     let info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("Processor"),
-        superclass: Some(eco_string("Value")),
         is_sealed: true,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
         is_value: true,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: eco_string("processResult:"),
@@ -72,11 +54,7 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
                 answers_receiver: false,
             },
         ],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Processor", Some("Value"))
     };
 
     hierarchy.add_from_beam_meta(vec![info]);

@@ -134,32 +134,9 @@ fn bt_2020_result_is_ok_if_true_if_false_preserves_my_val() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     // Register a `MyVal` class so `MyVal new` yields `Known(MyVal)`.
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "MyVal".into(),
-        superclass: Some("Object".into()),
-        is_sealed: false,
-        is_abstract: false,
         is_typed: true,
-        is_internal: false,
-        package: None,
         is_value: true,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("MyVal", Some("Object"))
     }]);
 
     let class = {
@@ -722,26 +699,6 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
 
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("Weird"),
-        superclass: Some(eco_string("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: eco_string("ifTrue:"),
             arity: 1,
@@ -759,11 +716,7 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Weird", Some("Object"))
     }]);
 
     let mut checker = TypeChecker::new();

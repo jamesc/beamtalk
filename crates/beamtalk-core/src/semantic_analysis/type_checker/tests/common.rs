@@ -551,6 +551,23 @@ pub(super) fn method_info(
     }
 }
 
+/// An `Object` subclass `name` with one primary instance method `selector`
+/// taking a single `param_type` parameter and answering `return_type`.
+pub(super) fn class_with_method(
+    name: &str,
+    selector: &str,
+    param_type: &str,
+    return_type: &str,
+) -> crate::semantic_analysis::class_hierarchy::ClassInfo {
+    crate::semantic_analysis::class_hierarchy::ClassInfo {
+        methods: vec![MethodInfo {
+            defined_in: name.into(),
+            ..method_info(selector, vec![Some(param_type)], Some(return_type))
+        }],
+        ..crate::semantic_analysis::class_hierarchy::ClassInfo::test(name, Some("Object"))
+    }
+}
+
 /// Build a `GenResult(T, E)` class in the hierarchy for generic tests.
 ///
 /// Uses `GenResult` instead of `Result` to avoid collision with the
@@ -560,20 +577,8 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 
     let result_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("GenResult"),
-        superclass: Some(eco_string("Value")),
         is_sealed: true,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
         is_value: true,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![eco_string("okValue"), eco_string("errReason")],
         state_types: {
             let mut m = std::collections::HashMap::new();
@@ -581,10 +586,6 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
             m.insert(eco_string("errReason"), DeclaredType::parse("E"));
             m
         },
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: eco_string("unwrap"),
@@ -691,10 +692,9 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 answers_receiver: false,
             },
         ],
-        class_variables: vec![],
         type_params: vec![eco_string("T"), eco_string("E")],
         type_param_bounds: vec![None, None],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("GenResult", Some("Value"))
     };
 
     hierarchy.add_from_beam_meta(vec![result_info]);
