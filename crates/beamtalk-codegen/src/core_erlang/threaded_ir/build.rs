@@ -117,10 +117,11 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
 /// established backfill technique, generalized from "backfill everything
 /// before the one Bind under test" to "backfill exactly the gaps between
 /// this body's real Binds": walk the IR in order, tracking the last
-/// `State`-prefix version produced at [`FrameId::ROOT`] (BT-3816: and the
-/// value-type `SelfVt` one, which `generate_vt_field_assignment_open` and the
-/// other value-type open-chain builders advance the same invisible way), and
-/// insert a synthetic `Direct('_')` `Bind` chain for any versions an opaque
+/// version of each family [`opaque_gap_families`] names for `scope` produced
+/// at [`FrameId::ROOT`] (`State` for an instance/REPL body; `SelfVt` for a
+/// value-type body, which `generate_vt_field_assignment_open` and the other
+/// value-type open-chain builders advance the same invisible way; none for a
+/// class-method body), and insert a synthetic `Direct('_')` `Bind` chain for any versions an opaque
 /// statement consumed. The backfill is verification-fixture-only — the real
 /// IR (and therefore [`render`]'s output) is untouched.
 ///
@@ -199,9 +200,10 @@ pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
 ) -> Vec<ThreadedStmt> {
     let mut fixture: Vec<ThreadedStmt> = Vec::with_capacity(ir.len());
     // `families` are the families whose versions an opaque statement can
-    // advance unrecorded in this body. A method body passes `State` and
-    // `SelfVt` (BT-3816: `generate_vt_field_assignment_open`'s `Self{N}`); a
-    // loop/fold body at a non-root frame passes `State` only, so a real
+    // advance unrecorded in this body. A method body passes
+    // `opaque_gap_families(scope)` (BT-4926: `State` for instance/REPL, `SelfVt`
+    // for value-type — BT-3816: `generate_vt_field_assignment_open`'s `Self{N}` —
+    // nothing for class-method); a loop/fold body at a non-root frame passes `State` only, so a real
     // `SelfVt` `UnboundVersion` there is still reported.
     let mut last_versions: Vec<(VersionPrefix, usize)> =
         families.iter().map(|p| (p.clone(), 0usize)).collect();
