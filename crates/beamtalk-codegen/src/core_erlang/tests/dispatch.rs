@@ -1603,17 +1603,17 @@ fn test_bt4075_error_on_untyped_receiver_guards_class_objects() {
     let body = method_body(&code, "raise:via:");
     assert_has(
         "untyped `error:` receiver must be guarded by class_object_understands",
-        &body,
+        body,
         &["'beamtalk_class_dispatch':'class_object_understands'("],
     );
     assert_has(
         "class-object branch must send `error:`",
-        &body,
+        body,
         &["'beamtalk_message_dispatch':'send'(", "'error:', ["],
     );
     assert_has(
         "instance branch must keep the user_error raise",
-        &body,
+        body,
         &["'user_error'"],
     );
 }
@@ -1624,12 +1624,12 @@ fn test_bt4075_self_error_in_instance_method_stays_unguarded_intrinsic() {
     let body = method_body(&code, "boom");
     assert_has(
         "`self error:` in an instance method must raise user_error",
-        &body,
+        body,
         &["'user_error'"],
     );
     assert_lacks(
         "`self` in an instance method is never a class object",
-        &body,
+        body,
         &["class_object_understands"],
     );
 }
@@ -1642,17 +1642,17 @@ fn test_bt4075_self_error_in_class_method_guards_class_side_send() {
     let body = method_body(&code, "class_boom");
     assert_has(
         "class-method `self error:` must be guarded",
-        &body,
+        body,
         &["'beamtalk_class_dispatch':'class_object_understands'("],
     );
     assert_has(
         "class-method `self error:` must self-send, not go through the class process",
-        &body,
+        body,
         &["'beamtalk_class_dispatch':'class_self_send'("],
     );
     assert_has(
         "class-method `self error:` without a class-side `error:` must still raise",
-        &body,
+        body,
         &["'user_error'"],
     );
 }
@@ -1672,12 +1672,12 @@ fn test_bt4075_actor_error_on_untyped_receiver_replies_with_its_answer() {
         .unwrap_or_else(|| panic!("no guarded error: send:\n{code}"));
     assert_has(
         "`obj error:` as the last statement must reply with its answer",
-        &guarded,
+        guarded,
         &["{'reply', _Result, "],
     );
     assert_has(
         "`obj error:` may run user code, so it must be bracketed",
-        &guarded,
+        guarded,
         &["'beamtalk_actor_state':'store'("],
     );
     let raise = code
@@ -1686,7 +1686,7 @@ fn test_bt4075_actor_error_on_untyped_receiver_replies_with_its_answer() {
         .unwrap_or_else(|| panic!("no bare `self error:` raise:\n{code}"));
     assert_lacks(
         "`self error:` never returns, so it gets no reply tuple",
-        &raise,
+        raise,
         &["'reply'"],
     );
 }
@@ -1702,7 +1702,7 @@ fn test_bt4075_actor_logger_error_last_statement_replies() {
         .unwrap_or_else(|| panic!("no Logger log call:\n{code}"));
     assert_has(
         "`Logger error:` as the last statement must reply",
-        &line,
+        line,
         &["{'reply', _Result, "],
     );
 }
@@ -4206,12 +4206,12 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
     let spawn1_body = &code[spawn1_start..spawn1_end];
     assert_has(
         "spawn/0 ok-branch must register the instance. Got spawn/0 body",
-        &spawn0_body,
+        spawn0_body,
         &["let _InstReg = try call 'beamtalk_object_instances':'register'("],
     );
     assert_has(
         "spawn/1 ok-branch must register the instance. Got spawn/1 body",
-        &spawn1_body,
+        spawn1_body,
         &["let _InstReg = try call 'beamtalk_object_instances':'register'("],
     );
 }
@@ -4492,12 +4492,12 @@ fn test_open_class_static_class_self_send_is_a_plain_direct_call() {
         let baz = &rest[..end];
         assert_has(
             "static open-class call is a plain direct call",
-            &baz,
+            baz,
             &["call 'test':'class_bar'("],
         );
         assert_lacks(
             "static open-class call is a plain direct call",
-            &baz,
+            baz,
             &["ClassVars", "class_var_result"],
         );
     }
@@ -4923,12 +4923,12 @@ fn test_explicit_ffi_class_new_bakes_direct_new() {
     for (what, module) in [("FFI forward", &code), ("native `self delegate`", &native)] {
         assert_has(
             &format!("{what}: bakes a direct `new` verdict"),
-            &module,
+            module,
             &["'direct_constructors' => ['new']"],
         );
         assert_has(
             &format!("{what}: `new/0` must delegate to `class_new('undefined')`"),
-            &module,
+            module,
             &["'new'/0 = fun () ->\n    call 'test':'class_new'('undefined')"],
         );
     }

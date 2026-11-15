@@ -1664,12 +1664,12 @@ const CLASS_OF_OBJECT: &str = "call 'beamtalk_primitive':'class_of_object'(";
 fn assert_plain_class_of(code: &str, why: &str) {
     assert_has(
         &format!("{why}: `class` should stay a class_of_object/1 call"),
-        &code,
+        code,
         &[CLASS_OF_OBJECT],
     );
     assert_lacks(
         &format!("{why}: `class` must not take the inline path"),
-        &code,
+        code,
         &["TClassRecv"],
     );
 }
