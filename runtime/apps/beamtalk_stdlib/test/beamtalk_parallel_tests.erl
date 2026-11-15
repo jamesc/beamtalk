@@ -57,7 +57,7 @@ gather_all_down_path_marks_killed_slot_as_error_test() ->
     Caller = self(),
     _Helper = run_trapping(
         fun() ->
-            beamtalk_parallel:'all:'([
+            beamtalk_parallel:all([
                 fun() ->
                     Caller ! {worker_pid, self()},
                     %% sleep: simulates a long-running worker, killed by the test
@@ -92,7 +92,7 @@ gather_all_down_path_other_slots_unaffected_test() ->
     Caller = self(),
     _Helper = run_trapping(
         fun() ->
-            beamtalk_parallel:'all:'([
+            beamtalk_parallel:all([
                 fun() -> 100 end,
                 fun() ->
                     Caller ! {worker_pid, self()},
@@ -131,7 +131,7 @@ gather_any_down_path_all_killed_returns_error_test() ->
     Caller = self(),
     _Helper = run_trapping(
         fun() ->
-            beamtalk_parallel:'any:'([
+            beamtalk_parallel:any([
                 fun() ->
                     Caller ! {worker_pid, 1, self()},
                     %% sleep: simulates a long-running worker, killed by the test
@@ -174,7 +174,7 @@ gather_any_down_path_one_killed_winner_succeeds_test() ->
     Caller = self(),
     _Helper = run_trapping(
         fun() ->
-            beamtalk_parallel:'any:'([
+            beamtalk_parallel:any([
                 fun() ->
                     Caller ! {worker_pid, self()},
                     %% sleep: simulates a long-running worker, killed by the test
@@ -216,21 +216,21 @@ gather_any_down_path_one_killed_winner_succeeds_test() ->
 %%% ============================================================================
 
 all_empty_blocks_returns_empty_list_test() ->
-    ?assertEqual([], beamtalk_parallel:'all:'([])).
+    ?assertEqual([], beamtalk_parallel:all([])).
 
 all_single_block_success_test() ->
-    Results = beamtalk_parallel:'all:'([fun() -> 7 end]),
+    Results = beamtalk_parallel:all([fun() -> 7 end]),
     ?assertMatch([#{'isOk' := true, 'okValue' := 7}], Results).
 
 all_multiple_blocks_succeed_in_order_test() ->
     %% Results must be in the same order as the input blocks, regardless of
     %% which block finishes first.
-    Results = beamtalk_parallel:'all:'([fun() -> a end, fun() -> b end, fun() -> c end]),
+    Results = beamtalk_parallel:all([fun() -> a end, fun() -> b end, fun() -> c end]),
     Values = [maps:get('okValue', R) || R <- Results],
     ?assertEqual([a, b, c], Values).
 
 all_block_error_becomes_result_error_test() ->
-    Results = beamtalk_parallel:'all:'([
+    Results = beamtalk_parallel:all([
         fun() -> 1 end,
         fun() -> erlang:error(deliberate_error) end
     ]),
@@ -242,17 +242,17 @@ all_block_error_becomes_result_error_test() ->
 %%% ============================================================================
 
 all_non_list_argument_raises_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_parallel:'all:'(not_a_list)).
+    ?assertBtError(type_error, beamtalk_parallel:all(not_a_list)).
 
 all_non_block_element_raises_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_parallel:'all:'([fun() -> ok end, 42])).
+    ?assertBtError(type_error, beamtalk_parallel:all([fun() -> ok end, 42])).
 
 %%% ============================================================================
 %%% 'all:timeout:' — timeout paths
 %%% ============================================================================
 
 all_timeout_completes_within_deadline_test() ->
-    Results = beamtalk_parallel:'all:timeout:'([fun() -> 99 end], 5000),
+    Results = beamtalk_parallel:all([fun() -> 99 end], 5000),
     ?assertMatch([#{'isOk' := true, 'okValue' := 99}], Results).
 
 all_timeout_kills_slow_worker_and_marks_slot_as_error_test() ->
@@ -260,7 +260,7 @@ all_timeout_kills_slow_worker_and_marks_slot_as_error_test() ->
     %% deadline, gather_all/5's `after` fires, kill_pending kills block 1, and
     %% its slot becomes Result error: (timeout kind). Block 2's slot keeps its
     %% real result.
-    Results = beamtalk_parallel:'all:timeout:'(
+    Results = beamtalk_parallel:all(
         [
             fun() ->
                 %% sleep: simulates a slow worker that outlives the deadline
@@ -278,27 +278,27 @@ all_timeout_kills_slow_worker_and_marks_slot_as_error_test() ->
     ?assertMatch(#{'isOk' := true, 'okValue' := fast}, lists:nth(2, Results)).
 
 all_timeout_with_duration_argument_test() ->
-    D = beamtalk_duration:'milliseconds:'(500),
-    Results = beamtalk_parallel:'all:timeout:'([fun() -> 42 end], D),
+    D = beamtalk_duration:milliseconds(500),
+    Results = beamtalk_parallel:all([fun() -> 42 end], D),
     ?assertMatch([#{'isOk' := true, 'okValue' := 42}], Results).
 
 all_timeout_negative_ms_raises_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_parallel:'all:timeout:'([fun() -> 1 end], -1)).
+    ?assertBtError(type_error, beamtalk_parallel:all([fun() -> 1 end], -1)).
 
 all_timeout_non_list_raises_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_parallel:'all:timeout:'(not_a_list, 100)).
+    ?assertBtError(type_error, beamtalk_parallel:all(not_a_list, 100)).
 
 %%% ============================================================================
 %%% 'any:' — normal paths
 %%% ============================================================================
 
 any_single_block_success_test() ->
-    Result = beamtalk_parallel:'any:'([fun() -> 7 end]),
+    Result = beamtalk_parallel:any([fun() -> 7 end]),
     ?assertMatch(#{'isOk' := true, 'okValue' := 7}, Result).
 
 any_first_succeeding_block_wins_test() ->
     %% Block 1 sleeps; block 2 returns immediately — block 2 is the winner.
-    Result = beamtalk_parallel:'any:'([
+    Result = beamtalk_parallel:any([
         fun() ->
             %% sleep: simulates a slow worker that loses the race
             timer:sleep(5000),
@@ -309,7 +309,7 @@ any_first_succeeding_block_wins_test() ->
     ?assertMatch(#{'isOk' := true, 'okValue' := fast}, Result).
 
 any_all_fail_returns_error_with_reason_list_test() ->
-    Result = beamtalk_parallel:'any:'([
+    Result = beamtalk_parallel:any([
         fun() -> erlang:error(fail1) end,
         fun() -> erlang:error(fail2) end
     ]),
@@ -321,13 +321,13 @@ any_all_fail_returns_error_with_reason_list_test() ->
 %%% ============================================================================
 
 any_empty_list_raises_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_parallel:'any:'([])).
+    ?assertBtError(type_error, beamtalk_parallel:any([])).
 
 any_non_list_raises_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_parallel:'any:'(not_a_list)).
+    ?assertBtError(type_error, beamtalk_parallel:any(not_a_list)).
 
 any_non_block_element_raises_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_parallel:'any:'([fun() -> ok end, 99])).
+    ?assertBtError(type_error, beamtalk_parallel:any([fun() -> ok end, 99])).
 
 %%% ============================================================================
 %%% FFI shims — all/1, all/2, any/1 delegate to canonical colon forms

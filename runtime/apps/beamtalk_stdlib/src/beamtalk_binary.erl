@@ -19,7 +19,6 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
 |-----------------|--------------------------------------------------|
 | `serialize:`    | Term → binary (via `term_to_binary/1`)            |
 | `deserialize:`  | Binary → term (via `binary_to_term/2`, safe mode) |
-| `size:`         | Binary → byte size                                |
 | `fromIolist:`   | Iolist → binary                                  |
 | `fromBase64:`   | Standard base64 string → Result(Binary, Error)   |
 | `fromBase64Url:` | URL-safe base64 string → Result(Binary, Error)  |
@@ -46,19 +45,8 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
 """.
 
 %% Class methods
--export([
-    'serialize:'/1,
-    'deserialize:'/1,
-    'size:'/1,
-    'fromIolist:'/1,
-    'fromBytes:'/1,
-    'deserializeWithUsed:'/1,
-    'fromBase64:'/1,
-    'fromBase64Url:'/1,
-    'fromHex:'/1
-]).
--export([serialize/1, deserialize/1, size/1, fromIolist/1, fromBytes/1, deserializeWithUsed/1]).
--export([fromBase64/1, fromBase64Url/1, fromHex/1]).
+-export([serialize/1, deserialize/1, fromIolist/1, fromBase64/1, fromBase64Url/1, fromHex/1]).
+-export([fromBytes/1, deserializeWithUsed/1]).
 
 %% Instance methods (ADR 0086 Phase 1)
 -export([do/2, at/2, byte_at/2, part/3, concat/2]).
@@ -79,11 +67,10 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
 -export_type([binary_or_string/0]).
 
 %% Instance methods — encoding
--export(['asBase64:'/1, 'asBase64Url:'/1, 'asHex:'/1]).
+-export([asBase64/1, asBase64Url/1, asHex/1]).
 
 %% Instance methods — byte-level substring search (BT-4190)
 -export([includes_substring/2, index_of/2]).
--export([asBase64/1, asBase64Url/1, asHex/1]).
 
 %% Instance methods — bit size, shared with Bitstring (ADR 0141, BT-4139)
 -export([bitSize/1]).
@@ -93,8 +80,8 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
 %%% ============================================================================
 
 -doc "Serialize any term to a binary via `erlang:term_to_binary/1`.".
--spec 'serialize:'(term()) -> binary().
-'serialize:'(Term) ->
+-spec serialize(term()) -> binary().
+serialize(Term) ->
     erlang:term_to_binary(Term).
 
 -doc """
@@ -103,10 +90,10 @@ Deserialize a binary back to the original term.
 Uses safe mode (`[safe]`) to prevent atom table exhaustion from untrusted
 input. Atoms not already in the atom table will cause an error.
 """.
--spec 'deserialize:'(binary_or_string()) -> term().
-'deserialize:'({beamtalk_string, Raw}) when is_binary(Raw) ->
-    'deserialize:'(Raw);
-'deserialize:'(Bin) when is_binary(Bin) ->
+-spec deserialize(binary_or_string()) -> term().
+deserialize({beamtalk_string, Raw}) when is_binary(Raw) ->
+    deserialize(Raw);
+deserialize(Bin) when is_binary(Bin) ->
     try
         erlang:binary_to_term(Bin, [safe])
     catch
@@ -115,17 +102,8 @@ input. Atoms not already in the atom table will cause an error.
                 'Binary', 'deserialize:', <<"Binary data is invalid or contains unknown atoms">>
             )
     end;
-'deserialize:'(_) ->
+deserialize(_) ->
     beamtalk_error:raise_type_error('Binary', 'deserialize:', <<"Argument must be a Binary">>).
-
--doc "Return the byte size of a binary.".
--spec 'size:'(binary_or_string()) -> non_neg_integer().
-'size:'({beamtalk_string, Raw}) when is_binary(Raw) ->
-    erlang:byte_size(Raw);
-'size:'(Bin) when is_binary(Bin) ->
-    erlang:byte_size(Bin);
-'size:'(_) ->
-    beamtalk_error:raise_type_error('Binary', 'size:', <<"Argument must be a Binary">>).
 
 -doc """
 Convert an iolist to a flat binary.
@@ -133,8 +111,8 @@ Convert an iolist to a flat binary.
 BT-4170: `String` elements unwrap before assembly, alongside the raw
 binaries, byte integers and nested iolists that were always accepted.
 """.
--spec 'fromIolist:'(iolist()) -> binary().
-'fromIolist:'(Iolist) ->
+-spec fromIolist(iolist()) -> binary().
+fromIolist(Iolist) ->
     try
         erlang:iolist_to_binary(beamtalk_primitive:deep_unwrap_strings(Iolist))
     catch
@@ -151,8 +129,8 @@ Decode a standard (RFC 4648 §4) base64 string. Returns a Result: `Result ok:`
 with the decoded Binary, or `Result error:` on malformed base64 (wrong
 padding, invalid alphabet characters, etc.).
 """.
--spec 'fromBase64:'(beamtalk_string:t()) -> beamtalk_result:t().
-'fromBase64:'({beamtalk_string, Str}) when is_binary(Str) ->
+-spec fromBase64(beamtalk_string:t()) -> beamtalk_result:t().
+fromBase64({beamtalk_string, Str}) when is_binary(Str) ->
     try base64:decode(Str) of
         Decoded ->
             beamtalk_result:from_tagged_tuple({ok, Decoded})
@@ -164,13 +142,13 @@ padding, invalid alphabet characters, etc.).
         error:_ ->
             beamtalk_result:from_tagged_tuple({error, base64_decode_error('fromBase64:')})
     end;
-'fromBase64:'(Bin) when is_binary(Bin) ->
+fromBase64(Bin) when is_binary(Bin) ->
     beamtalk_error:raise_type_error(
         'Binary',
         'fromBase64:',
         <<"Argument must be a String; decode bytes via asString first">>
     );
-'fromBase64:'(_) ->
+fromBase64(_) ->
     beamtalk_error:raise_type_error('Binary', 'fromBase64:', <<"Argument must be a String">>).
 
 -doc """
@@ -180,8 +158,8 @@ Returns a Result, as `fromBase64:/1`.
 Accepts both padded and unpadded input (`padding => false`) — the unpadded
 form is the one commonly used in JWTs (RFC 7515 §2) and PKCE challenges.
 """.
--spec 'fromBase64Url:'(beamtalk_string:t()) -> beamtalk_result:t().
-'fromBase64Url:'({beamtalk_string, Str}) when is_binary(Str) ->
+-spec fromBase64Url(beamtalk_string:t()) -> beamtalk_result:t().
+fromBase64Url({beamtalk_string, Str}) when is_binary(Str) ->
     try base64:decode(Str, #{mode => urlsafe, padding => false}) of
         Decoded ->
             beamtalk_result:from_tagged_tuple({ok, Decoded})
@@ -192,21 +170,21 @@ form is the one commonly used in JWTs (RFC 7515 §2) and PKCE challenges.
         error:_ ->
             beamtalk_result:from_tagged_tuple({error, base64_decode_error('fromBase64Url:')})
     end;
-'fromBase64Url:'(Bin) when is_binary(Bin) ->
+fromBase64Url(Bin) when is_binary(Bin) ->
     beamtalk_error:raise_type_error(
         'Binary',
         'fromBase64Url:',
         <<"Argument must be a String; decode bytes via asString first">>
     );
-'fromBase64Url:'(_) ->
+fromBase64Url(_) ->
     beamtalk_error:raise_type_error('Binary', 'fromBase64Url:', <<"Argument must be a String">>).
 
 -doc """
 Decode a hexadecimal string (upper- or lower-case digits accepted). Returns
 a Result: `Result error:` on odd length or non-hex-digit characters.
 """.
--spec 'fromHex:'(beamtalk_string:t()) -> beamtalk_result:t().
-'fromHex:'({beamtalk_string, Str}) when is_binary(Str) ->
+-spec fromHex(beamtalk_string:t()) -> beamtalk_result:t().
+fromHex({beamtalk_string, Str}) when is_binary(Str) ->
     try binary:decode_hex(Str) of
         Decoded ->
             beamtalk_result:from_tagged_tuple({ok, Decoded})
@@ -220,13 +198,13 @@ a Result: `Result error:` on odd length or non-hex-digit characters.
             ),
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
-'fromHex:'(Bin) when is_binary(Bin) ->
+fromHex(Bin) when is_binary(Bin) ->
     beamtalk_error:raise_type_error(
         'Binary',
         'fromHex:',
         <<"Argument must be a String; decode bytes via asString first">>
     );
-'fromHex:'(_) ->
+fromHex(_) ->
     beamtalk_error:raise_type_error('Binary', 'fromHex:', <<"Argument must be a String">>).
 
 %%% ============================================================================
@@ -461,25 +439,25 @@ as_string_unchecked(_) ->
     beamtalk_error:raise_type_error('Binary', as_string_unchecked, <<"Receiver must be a Binary">>).
 
 -doc "Encode as a standard (RFC 4648 §4) base64 string, with `=` padding.".
--spec 'asBase64:'(binary_or_string()) -> beamtalk_string:t().
-'asBase64:'({beamtalk_string, Raw}) when is_binary(Raw) ->
-    'asBase64:'(Raw);
-'asBase64:'(Bin) when is_binary(Bin) ->
+-spec asBase64(binary_or_string()) -> beamtalk_string:t().
+asBase64({beamtalk_string, Raw}) when is_binary(Raw) ->
+    asBase64(Raw);
+asBase64(Bin) when is_binary(Bin) ->
     %% base64 output is ASCII by construction — the wrap needs no validation.
     beamtalk_primitive:string_from_binary(base64:encode(Bin));
-'asBase64:'(_) ->
+asBase64(_) ->
     beamtalk_error:raise_type_error('Binary', 'asBase64:', <<"Receiver must be a Binary">>).
 
 -doc """
 Encode as a URL-safe (RFC 4648 §5) base64 string, with `=` padding
 (`-`/`_` in place of `+`/`/`).
 """.
--spec 'asBase64Url:'(binary_or_string()) -> beamtalk_string:t().
-'asBase64Url:'({beamtalk_string, Raw}) when is_binary(Raw) ->
-    'asBase64Url:'(Raw);
-'asBase64Url:'(Bin) when is_binary(Bin) ->
+-spec asBase64Url(binary_or_string()) -> beamtalk_string:t().
+asBase64Url({beamtalk_string, Raw}) when is_binary(Raw) ->
+    asBase64Url(Raw);
+asBase64Url(Bin) when is_binary(Bin) ->
     beamtalk_primitive:string_from_binary(base64:encode(Bin, #{mode => urlsafe}));
-'asBase64Url:'(_) ->
+asBase64Url(_) ->
     beamtalk_error:raise_type_error('Binary', 'asBase64Url:', <<"Receiver must be a Binary">>).
 
 -doc "True if Needle occurs as a byte sequence in Bin. Empty needle is found.".
@@ -521,12 +499,12 @@ index_of(_Bin, _Needle) ->
     beamtalk_error:raise_type_error('Binary', 'indexOf:', <<"Argument must be a Binary">>).
 
 -doc "Encode as a lowercase hexadecimal string.".
--spec 'asHex:'(binary_or_string()) -> beamtalk_string:t().
-'asHex:'({beamtalk_string, Raw}) when is_binary(Raw) ->
-    'asHex:'(Raw);
-'asHex:'(Bin) when is_binary(Bin) ->
+-spec asHex(binary_or_string()) -> beamtalk_string:t().
+asHex({beamtalk_string, Raw}) when is_binary(Raw) ->
+    asHex(Raw);
+asHex(Bin) when is_binary(Bin) ->
     beamtalk_primitive:string_from_binary(binary:encode_hex(Bin, lowercase));
-'asHex:'(_) ->
+asHex(_) ->
     beamtalk_error:raise_type_error('Binary', 'asHex:', <<"Receiver must be a Binary">>).
 
 -doc "Printable representation: hex for non-UTF-8, quoted for valid UTF-8.".
@@ -641,61 +619,13 @@ base64_decode_error(Selector) ->
     ).
 
 %%% ============================================================================
-%%% FFI aliases — no-colon names for Erlang FFI dispatch
+%%% Additional class methods
 %%% ============================================================================
 
--doc "FFI alias for serialize:/1.".
--spec serialize(term()) -> binary().
-serialize(X) -> 'serialize:'(X).
-
--doc "FFI alias for deserialize:/1.".
--spec deserialize(binary_or_string()) -> term().
-deserialize(X) -> 'deserialize:'(X).
-
--doc "FFI alias for size:/1.".
--spec size(binary_or_string()) -> non_neg_integer().
-size(X) -> 'size:'(X).
-
--doc "FFI alias for fromIolist:/1.".
--spec fromIolist(iolist()) -> binary().
-fromIolist(X) -> 'fromIolist:'(X).
-
--doc "Class method wrapper for from_bytes/1.".
--spec 'fromBytes:'([non_neg_integer()]) -> binary().
-'fromBytes:'(Bytes) -> from_bytes(Bytes).
-
--doc "FFI alias for fromBytes:/1.".
+-doc "Build a Binary from a list of byte values.".
 -spec fromBytes([non_neg_integer()]) -> binary().
 fromBytes(Bytes) -> from_bytes(Bytes).
 
 -doc "Class method wrapper for deserialize_with_used/1.".
--spec 'deserializeWithUsed:'(binary_or_string()) -> {term(), non_neg_integer()}.
-'deserializeWithUsed:'(Bin) -> deserialize_with_used(Bin).
-
--doc "FFI alias for deserializeWithUsed:/1.".
 -spec deserializeWithUsed(binary_or_string()) -> {term(), non_neg_integer()}.
 deserializeWithUsed(Bin) -> deserialize_with_used(Bin).
-
--doc "FFI alias for fromBase64:/1.".
--spec fromBase64(beamtalk_string:t()) -> beamtalk_result:t().
-fromBase64(Str) -> 'fromBase64:'(Str).
-
--doc "FFI alias for fromBase64Url:/1.".
--spec fromBase64Url(beamtalk_string:t()) -> beamtalk_result:t().
-fromBase64Url(Str) -> 'fromBase64Url:'(Str).
-
--doc "FFI alias for fromHex:/1.".
--spec fromHex(beamtalk_string:t()) -> beamtalk_result:t().
-fromHex(Str) -> 'fromHex:'(Str).
-
--doc "FFI alias for asBase64:/1.".
--spec asBase64(binary_or_string()) -> beamtalk_string:t().
-asBase64(Bin) -> 'asBase64:'(Bin).
-
--doc "FFI alias for asBase64Url:/1.".
--spec asBase64Url(binary_or_string()) -> beamtalk_string:t().
-asBase64Url(Bin) -> 'asBase64Url:'(Bin).
-
--doc "FFI alias for asHex:/1.".
--spec asHex(binary_or_string()) -> beamtalk_string:t().
-asHex(Bin) -> 'asHex:'(Bin).

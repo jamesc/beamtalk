@@ -52,10 +52,9 @@ error:` for that slot. It never crashes the caller.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% Class methods (canonical colon forms)
--export(['all:'/1, 'all:timeout:'/2, 'any:'/1]).
+-export([all/1, all/2, any/1]).
 
 %% FFI shims for (Erlang beamtalk_parallel) / `self delegate` dispatch
--export([all/1, all/2, any/1]).
 
 -type worker_result() :: beamtalk_result:t().
 -type pending() :: #{pos_integer() => {pid(), reference()}}.
@@ -71,11 +70,11 @@ caller until every block has finished (successfully or not). Returns one
 yields `Result error:` for its slot; the other blocks still run to
 completion.
 """.
--spec 'all:'([function()]) -> [worker_result()].
-'all:'(Blocks) when is_list(Blocks) ->
+-spec all([function()]) -> [worker_result()].
+all(Blocks) when is_list(Blocks) ->
     validate_blocks('all:', Blocks),
     all_impl(Blocks, infinity);
-'all:'(Blocks) ->
+all(Blocks) ->
     beamtalk_error:raise_type_error(
         'Parallel', 'all:', <<"Argument must be a List of zero-argument Blocks">>, #{
             got => Blocks
@@ -91,22 +90,22 @@ kill)`, so the kill cannot reach the caller) and its slot becomes `Result
 error:` with a `timeout`-kind error; blocks that already finished keep their
 real `Result`.
 """.
--spec 'all:timeout:'([function()], integer() | beamtalk_duration:t()) -> [worker_result()].
-'all:timeout:'(Blocks, #{'$beamtalk_class' := 'Duration'} = D) when is_list(Blocks) ->
-    'all:timeout:'(Blocks, beamtalk_duration:'asMilliseconds'(D));
-'all:timeout:'(Blocks, TimeoutMs) when
+-spec all([function()], integer() | beamtalk_duration:t()) -> [worker_result()].
+all(Blocks, #{'$beamtalk_class' := 'Duration'} = D) when is_list(Blocks) ->
+    all(Blocks, beamtalk_duration:'asMilliseconds'(D));
+all(Blocks, TimeoutMs) when
     is_list(Blocks), is_integer(TimeoutMs), TimeoutMs >= 0
 ->
     validate_blocks('all:timeout:', Blocks),
     all_impl(Blocks, TimeoutMs);
-'all:timeout:'(Blocks, TimeoutMs) when is_list(Blocks) ->
+all(Blocks, TimeoutMs) when is_list(Blocks) ->
     beamtalk_error:raise_type_error(
         'Parallel',
         'all:timeout:',
         <<"Timeout must be a non-negative Integer or a non-negative Duration">>,
         #{got => TimeoutMs}
     );
-'all:timeout:'(Blocks, _TimeoutMs) ->
+all(Blocks, _TimeoutMs) ->
     beamtalk_error:raise_type_error(
         'Parallel',
         'all:timeout:',
@@ -124,18 +123,18 @@ Every still-running block is killed as soon as a winner is found (`unlink` +
 Raises a `type_error` if `Blocks` is empty — "first of nothing" is not a
 meaningful call.
 """.
--spec 'any:'([function()]) -> worker_result().
-'any:'([]) ->
+-spec any([function()]) -> worker_result().
+any([]) ->
     beamtalk_error:raise_type_error(
         'Parallel',
         'any:',
         <<"Argument must be a non-empty List of zero-argument Blocks">>,
         #{got => []}
     );
-'any:'(Blocks) when is_list(Blocks) ->
+any(Blocks) when is_list(Blocks) ->
     validate_blocks('any:', Blocks),
     any_impl(Blocks);
-'any:'(Blocks) ->
+any(Blocks) ->
     beamtalk_error:raise_type_error(
         'Parallel', 'any:', <<"Argument must be a List of zero-argument Blocks">>, #{
             got => Blocks
@@ -150,18 +149,6 @@ meaningful call.
 %%% (stripping the trailing colon) — these shims bridge to the canonical
 %%% colon-quoted implementations above.
 %%% ============================================================================
-
--doc "FFI shim: `(Erlang beamtalk_parallel) all: blocks`".
--spec all([function()]) -> [worker_result()].
-all(Blocks) -> 'all:'(Blocks).
-
--doc "FFI shim: `(Erlang beamtalk_parallel) all: blocks timeout: ms`".
--spec all([function()], integer() | beamtalk_duration:t()) -> [worker_result()].
-all(Blocks, TimeoutMs) -> 'all:timeout:'(Blocks, TimeoutMs).
-
--doc "FFI shim: `(Erlang beamtalk_parallel) any: blocks`".
--spec any([function()]) -> worker_result().
-any(Blocks) -> 'any:'(Blocks).
 
 %%% ============================================================================
 %%% Internal — shared worker spawn
@@ -419,7 +406,7 @@ gather_any(_CallRef, Pending, _PendingByRef, IndexOrder, Errors) when map_size(P
     %% as-is (unlike `from_tagged_tuple/1`, which would try to re-wrap the
     %% whole List as if it were a single raw exception reason).
     Reasons = [maps:get(Idx, Errors) || Idx <- IndexOrder],
-    beamtalk_result:'makeError:'(Reasons);
+    beamtalk_result:error(Reasons);
 gather_any(CallRef, Pending, PendingByRef, IndexOrder, Errors) ->
     receive
         {CallRef, Idx, #{'isOk' := true} = Result} when is_map_key(Idx, Pending) ->

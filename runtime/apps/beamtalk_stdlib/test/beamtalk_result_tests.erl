@@ -13,7 +13,7 @@ Tests cover:
 - 'fromTuple:'/1 — ok, error, and invalid-input clauses
 - class_tryDo:/3 — success path, exception path, NLR re-raise
 - 'unwrapError:'/2 — wrapped exception re-raise, raw symbol signal, raw map
-- FFI shims: ok/1, makeError/1, fromTuple/1, tryDo/1, unwrapError/1
+- Colon-free implementations: ok/1, error/1, fromTuple/1, tryDo/1, unwrapError/1
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -66,12 +66,12 @@ from_tagged_tuple_error_atom_test() ->
     ?assertMatch(#{'$beamtalk_class' := _, 'error' := #beamtalk_error{}}, ErrReason).
 
 %%% ============================================================================
-%%% makeError:/1 — direct error constructor (reason stored as-is)
+%%% error/1 — direct error constructor (reason stored as-is)
 %%% ============================================================================
 
 error_atom_stores_as_is_test() ->
-    %% makeError: does NOT wrap — reason is stored verbatim
-    Result = beamtalk_result:'makeError:'(file_not_found),
+    %% error/1 does NOT wrap — reason is stored verbatim
+    Result = beamtalk_result:error(file_not_found),
     ?assertMatch(
         #{
             '$beamtalk_class' := 'Result',
@@ -83,7 +83,7 @@ error_atom_stores_as_is_test() ->
     ).
 
 ok_stores_value_test() ->
-    Result = beamtalk_result:'ok:'(42),
+    Result = beamtalk_result:ok(42),
     ?assertMatch(
         #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := 42, 'errReason' := nil},
         Result
@@ -145,7 +145,7 @@ from_tagged_tuple_error_already_wrapped_test() ->
 try_do_non_fun_raises_type_error_test() ->
     %% Passing a non-block (e.g. an integer) raises type_error rather than badfun crash.
     try
-        beamtalk_result:'tryDo:'(42),
+        beamtalk_result:tryDo(42),
         ?assert(false, "tryDo: should have raised a type_error")
     catch
         error:Caught ->
@@ -166,7 +166,7 @@ try_do_discards_class_var_writes_made_inside_the_block_test() ->
     ok = beamtalk_class_vars:install(Key, #{n => 0}),
     try
         erlang:put(Key, #{n => 1}),
-        Result = beamtalk_result:'tryDo:'(fun() ->
+        Result = beamtalk_result:tryDo(fun() ->
             erlang:put(Key, #{n => 2}),
             error(boom)
         end),
@@ -180,14 +180,14 @@ try_do_keeps_class_var_writes_on_success_and_nlr_test() ->
     Key = beamtalk_class_vars:key('BT3708TryDoOk'),
     ok = beamtalk_class_vars:install(Key, #{n => 0}),
     try
-        Ok = beamtalk_result:'tryDo:'(fun() -> erlang:put(Key, #{n => 3}) end),
+        Ok = beamtalk_result:tryDo(fun() -> erlang:put(Key, #{n => 3}) end),
         ?assertMatch(#{'isOk' := true}, Ok),
         ?assertEqual(#{n => 3}, erlang:get(Key)),
         %% A `^` is control flow, not an error: writes before it are kept.
         Nlr = {'$bt_nlr', make_ref(), done},
         ?assertThrow(
             Nlr,
-            beamtalk_result:'tryDo:'(fun() ->
+            beamtalk_result:tryDo(fun() ->
                 erlang:put(Key, #{n => 4}),
                 throw(Nlr)
             end)
@@ -204,7 +204,7 @@ try_do_keeps_class_var_writes_on_success_and_nlr_test() ->
 class_try_do_success_test() ->
     %% A block that returns a value normally
     Block = fun() -> 99 end,
-    Result = beamtalk_result:'tryDo:'(Block),
+    Result = beamtalk_result:tryDo(Block),
     ?assertMatch(
         #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := 99, 'errReason' := nil},
         Result
@@ -225,7 +225,7 @@ class_try_do_exception_test() ->
         details = #{}
     },
     Block = fun() -> beamtalk_error:raise(Error) end,
-    Result = beamtalk_result:'tryDo:'(Block),
+    Result = beamtalk_result:tryDo(Block),
     ?assertMatch(
         #{'$beamtalk_class' := 'Result', 'isOk' := false, 'okValue' := nil},
         Result
@@ -252,11 +252,11 @@ unwrap_error_rewraps_exception_test() ->
         details = #{path => <<"test.txt">>}
     },
     Block = fun() -> beamtalk_error:raise(OrigError) end,
-    Result = beamtalk_result:'tryDo:'(Block),
+    Result = beamtalk_result:tryDo(Block),
     #{'errReason' := ErrReason} = Result,
     %% ErrReason is the wrapped exception map; unwrapError: should re-raise the embedded error
     try
-        beamtalk_result:'unwrapError:'(undefined, ErrReason),
+        beamtalk_result:unwrapError(ErrReason),
         ?assert(false, "unwrapError: should have raised an exception")
     catch
         error:Caught ->
@@ -270,7 +270,7 @@ unwrap_error_rewraps_exception_test() ->
 unwrap_error_raw_symbol_test() ->
     %% unwrapError: with a raw symbol (not a wrapped exception) raises a generic signal error
     try
-        beamtalk_result:'unwrapError:'(undefined, not_found),
+        beamtalk_result:unwrapError(not_found),
         ?assert(false, "unwrapError: should have raised an exception")
     catch
         error:Caught ->
@@ -287,7 +287,7 @@ unwrap_error_raw_symbol_test() ->
 unwrap_error_raw_map_test() ->
     %% unwrapError: with a raw map formats it via print_string, not ~p
     try
-        beamtalk_result:'unwrapError:'(undefined, #{<<"detail">> => <<"oops">>}),
+        beamtalk_result:unwrapError(#{<<"detail">> => <<"oops">>}),
         ?assert(false, "unwrapError: should have raised an exception")
     catch
         error:Caught ->
@@ -309,7 +309,7 @@ try_do_nlr_reraise_test() ->
     FakeToken = make_ref(),
     ?assertThrow(
         {'$bt_nlr', FakeToken, 42, some_state},
-        beamtalk_result:'tryDo:'(fun() -> throw({'$bt_nlr', FakeToken, 42, some_state}) end)
+        beamtalk_result:tryDo(fun() -> throw({'$bt_nlr', FakeToken, 42, some_state}) end)
     ).
 
 try_do_nlr_reraise_3tuple_test() ->
@@ -317,7 +317,7 @@ try_do_nlr_reraise_3tuple_test() ->
     FakeToken = make_ref(),
     ?assertThrow(
         {'$bt_nlr', FakeToken, hello},
-        beamtalk_result:'tryDo:'(fun() -> throw({'$bt_nlr', FakeToken, hello}) end)
+        beamtalk_result:tryDo(fun() -> throw({'$bt_nlr', FakeToken, hello}) end)
     ).
 
 %%% ============================================================================
@@ -326,7 +326,7 @@ try_do_nlr_reraise_3tuple_test() ->
 
 from_tuple_ok_returns_ok_result_test() ->
     %% {ok, Value} clause → delegates to from_tagged_tuple/1
-    Result = beamtalk_result:'fromTuple:'({ok, hello}),
+    Result = beamtalk_result:fromTuple({ok, hello}),
     ?assertMatch(
         #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := hello, 'errReason' := nil},
         Result
@@ -334,7 +334,7 @@ from_tuple_ok_returns_ok_result_test() ->
 
 from_tuple_error_wraps_reason_test() ->
     %% {error, Reason} clause → delegates to from_tagged_tuple/1, reason is wrapped
-    Result = beamtalk_result:'fromTuple:'({error, enoent}),
+    Result = beamtalk_result:fromTuple({error, enoent}),
     ?assertMatch(
         #{'$beamtalk_class' := 'Result', 'isOk' := false, 'okValue' := nil},
         Result
@@ -346,7 +346,7 @@ from_tuple_error_wraps_reason_test() ->
 from_tuple_invalid_raises_type_error_test() ->
     %% Any other value raises type_error with class='Result', selector='fromTuple:'
     try
-        beamtalk_result:'fromTuple:'({foo, bar}),
+        beamtalk_result:fromTuple({foo, bar}),
         ?assert(false, "'fromTuple:' should have raised a type_error")
     catch
         error:Caught ->
@@ -370,19 +370,6 @@ ok_shim_returns_ok_result_test() ->
         Result
     ).
 
-make_error_shim_stores_reason_as_is_test() ->
-    %% makeError/1 is the FFI shim for 'makeError:'(Reason) — does NOT wrap
-    Result = beamtalk_result:makeError(not_found),
-    ?assertMatch(
-        #{
-            '$beamtalk_class' := 'Result',
-            'isOk' := false,
-            'okValue' := nil,
-            'errReason' := not_found
-        },
-        Result
-    ).
-
 from_tuple_shim_delegates_to_from_tuple_test() ->
     %% fromTuple/1 is the FFI shim for 'fromTuple:'(Tuple)
     Result = beamtalk_result:fromTuple({ok, 7}),
@@ -400,8 +387,7 @@ try_do_shim_delegates_to_try_do_test() ->
     ).
 
 unwrap_error_shim_raises_signal_test() ->
-    %% unwrapError/1 shim calls 'unwrapError:'(undefined, ErrReason)
-    %% For a raw symbol, this raises a signal error.
+    %% unwrapError/1 with a raw symbol, this raises a signal error.
     try
         beamtalk_result:unwrapError(bad_value),
         ?assert(false, "unwrapError/1 should have raised an exception")
@@ -419,7 +405,7 @@ unwrap_error_shim_raises_signal_test() ->
 
 try_do_2_success_keeps_local_writes_test() ->
     Block = fun(Acc) -> {7, Acc#{'__local__t' => maps:get('__local__t', Acc) + 1}} end,
-    {Result, Acc1} = beamtalk_result:'tryDo:'(Block, #{'__local__t' => 0}),
+    {Result, Acc1} = beamtalk_result:tryDo(Block, #{'__local__t' => 0}),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := 7}, Result),
     ?assertEqual(#{'__local__t' => 1}, Acc1).
 
@@ -429,7 +415,7 @@ try_do_2_raise_discards_local_writes_and_answers_entry_state_test() ->
         _Discarded = Acc#{'__local__t' => 99},
         error(boom)
     end,
-    {Result, Acc1} = beamtalk_result:'tryDo:'(Block, Entry),
+    {Result, Acc1} = beamtalk_result:tryDo(Block, Entry),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := false, 'okValue' := nil}, Result),
     #{'errReason' := ExObj} = Result,
     ?assertMatch(#{'$beamtalk_class' := _}, ExObj),
@@ -440,7 +426,7 @@ try_do_2_raise_restores_class_var_writes_test() ->
     ok = beamtalk_class_vars:install(Key, #{n => 0}),
     try
         erlang:put(Key, #{n => 1}),
-        {Result, _} = beamtalk_result:'tryDo:'(
+        {Result, _} = beamtalk_result:tryDo(
             fun(Acc) ->
                 erlang:put(Key, #{n => 2}),
                 _ = Acc,
@@ -458,7 +444,7 @@ try_do_2_keeps_class_var_writes_on_success_test() ->
     Key = beamtalk_class_vars:key('BT3750TryDo2Ok'),
     ok = beamtalk_class_vars:install(Key, #{n => 0}),
     try
-        {Result, _} = beamtalk_result:'tryDo:'(
+        {Result, _} = beamtalk_result:tryDo(
             fun(Acc) ->
                 erlang:put(Key, #{n => 3}),
                 {ok, Acc}
@@ -475,12 +461,12 @@ try_do_2_nlr_passes_through_test() ->
     Nlr = {'$bt_nlr', make_ref(), done},
     ?assertThrow(
         Nlr,
-        beamtalk_result:'tryDo:'(fun(_Acc) -> throw(Nlr) end, #{})
+        beamtalk_result:tryDo(fun(_Acc) -> throw(Nlr) end, #{})
     ).
 
 try_do_2_non_fun_raises_type_error_test() ->
     try
-        beamtalk_result:'tryDo:'(fun() -> ok end, #{}),
+        beamtalk_result:tryDo(fun() -> ok end, #{}),
         ?assert(false, "tryDo:/2 should have raised a type_error")
     catch
         error:Caught ->

@@ -31,7 +31,7 @@ would be dead code).
 """.
 
 %% Class methods
--export(['v4'/0, 'v7'/0, 'fromString:'/1, 'isValid:'/1]).
+-export(['v4'/0, 'v7'/0, fromString/1, isValid/1]).
 
 %% Instance methods
 -export(['asString'/1, 'asBinary'/1, version/1, 'printString'/1]).
@@ -40,7 +40,7 @@ would be dead code).
 %% FFI shims for (Erlang beamtalk_uuid) dispatch — also the functions
 %% `self delegate` actually calls for keyword selectors (first keyword,
 %% colon stripped; see docs/beamtalk-native-erlang.md "The naming rule").
--export([fromString/1, isValid/1]).
+
 -export([lt/2, gt/2, lte/2, gte/2]).
 
 -type t() :: #{'$beamtalk_class' := 'Uuid', bytes := <<_:128>>}.
@@ -93,11 +93,11 @@ Parse the canonical `8-4-4-4-12` hyphenated hex string form.
 Accepts upper- or lower-case hex digits. Returns `Result ok: uuid` on
 success, `Result error:` if `Str` isn't a syntactically valid Uuid string.
 """.
--spec 'fromString:'(binary() | beamtalk_string:t()) -> beamtalk_result:t().
+-spec fromString(binary() | beamtalk_string:t()) -> beamtalk_result:t().
 %% BT-4173: strings arrive tagged from Beamtalk — unwrap to bytes.
-'fromString:'({beamtalk_string, Str}) when is_binary(Str) ->
-    'fromString:'(Str);
-'fromString:'(Str) when is_binary(Str) ->
+fromString({beamtalk_string, Str}) when is_binary(Str) ->
+    fromString(Str);
+fromString(Str) when is_binary(Str) ->
     case parse_uuid_string(Str) of
         {ok, Bytes} ->
             beamtalk_result:from_tagged_tuple({ok, make_uuid(Bytes)});
@@ -113,7 +113,7 @@ success, `Result error:` if `Str` isn't a syntactically valid Uuid string.
             ),
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
-'fromString:'(_) ->
+fromString(_) ->
     beamtalk_error:raise_type_error('Uuid', 'fromString:', <<"Argument must be a String">>).
 
 -doc """
@@ -122,15 +122,15 @@ True if `Str` is a syntactically valid canonical Uuid string.
 Checks format only (hex digits and hyphen placement) — does not require the
 version/variant bits to be one this class would generate.
 """.
--spec 'isValid:'(binary() | beamtalk_string:t()) -> boolean().
-'isValid:'({beamtalk_string, Str}) when is_binary(Str) ->
-    'isValid:'(Str);
-'isValid:'(Str) when is_binary(Str) ->
+-spec isValid(binary() | beamtalk_string:t()) -> boolean().
+isValid({beamtalk_string, Str}) when is_binary(Str) ->
+    isValid(Str);
+isValid(Str) when is_binary(Str) ->
     case parse_uuid_string(Str) of
         {ok, _Bytes} -> true;
         error -> false
     end;
-'isValid:'(_) ->
+isValid(_) ->
     beamtalk_error:raise_type_error('Uuid', 'isValid:', <<"Argument must be a String">>).
 
 %%% ============================================================================
@@ -207,14 +207,6 @@ version(#{'$beamtalk_class' := 'Uuid', bytes := <<_:48, Version:4, _:76>>}) ->
 %% selector_to_function/1 extracts the first keyword segment as the function
 %% name. These shims bridge camelCase/short FFI names to the existing
 %% colon-suffix and operator-named implementations.
-
-%% `fromString:` → strips to `fromString`, arity 1
--spec fromString(binary()) -> beamtalk_result:t().
-fromString(Str) -> 'fromString:'(Str).
-
-%% `isValid:` → strips to `isValid`, arity 1
--spec isValid(binary()) -> boolean().
-isValid(Str) -> 'isValid:'(Str).
 
 %% `lt:with:` → strips to `lt`, arity 2
 -spec lt(t(), t()) -> boolean().

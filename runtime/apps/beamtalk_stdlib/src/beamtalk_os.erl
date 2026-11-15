@@ -19,7 +19,7 @@ and capturing their output as a String.
 | `run:timeout:`    | Same, with an explicit wall-clock timeout (ms)   |
 """.
 
--export(['run:'/1, run/1, 'run:timeout:'/2, run/2]).
+-export([run/1, run/2]).
 
 %% Default wall-clock timeout for OS run: (30 seconds).
 -define(DEFAULT_TIMEOUT_MS, 30000).
@@ -45,13 +45,13 @@ Blocks until the command exits or the default 30-second timeout fires.
 Raises `#beamtalk_error{kind = timeout}` on timeout,
 `output_too_large` if stdout exceeds 10 MB.
 """.
--spec 'run:'(beamtalk_string:t() | binary()) -> beamtalk_string:t().
+-spec run(beamtalk_string:t() | binary()) -> beamtalk_string:t().
 %% BT-4173: a bare binary spells the same command (pre-flip calls stay valid).
-'run:'(Cmd) when is_binary(Cmd) ->
-    'run:'({beamtalk_string, Cmd});
-'run:'({beamtalk_string, Cmd}) when is_binary(Cmd) ->
+run(Cmd) when is_binary(Cmd) ->
+    run({beamtalk_string, Cmd});
+run({beamtalk_string, Cmd}) when is_binary(Cmd) ->
     run_cmd(Cmd, ?DEFAULT_TIMEOUT_MS, 'run:');
-'run:'(_) ->
+run(_) ->
     beamtalk_error:raise_type_error('OS', 'run:', <<"Argument must be a String">>).
 
 -doc """
@@ -61,26 +61,18 @@ Behaves like `run:` but the caller controls the wall-clock deadline.
 Raises `#beamtalk_error{kind = timeout}` if the command has not exited
 within `TimeoutMs` milliseconds.
 """.
--spec 'run:timeout:'(beamtalk_string:t() | binary(), Timeout :: pos_integer()) ->
+-spec run(beamtalk_string:t() | binary(), Timeout :: pos_integer()) ->
     beamtalk_string:t().
-'run:timeout:'(Cmd, TimeoutMs) when is_binary(Cmd) ->
-    'run:timeout:'({beamtalk_string, Cmd}, TimeoutMs);
-'run:timeout:'({beamtalk_string, Cmd}, TimeoutMs) when
+run(Cmd, TimeoutMs) when is_binary(Cmd) ->
+    run({beamtalk_string, Cmd}, TimeoutMs);
+run({beamtalk_string, Cmd}, TimeoutMs) when
     is_binary(Cmd), is_integer(TimeoutMs), TimeoutMs > 0
 ->
     run_cmd(Cmd, TimeoutMs, 'run:timeout:');
-'run:timeout:'({beamtalk_string, _}, _TimeoutMs) ->
+run({beamtalk_string, _}, _TimeoutMs) ->
     beamtalk_error:raise_type_error('OS', 'run:timeout:', <<"Timeout must be a positive Integer">>);
-'run:timeout:'(_, _) ->
+run(_, _) ->
     beamtalk_error:raise_type_error('OS', 'run:timeout:', <<"Argument must be a String">>).
-
--doc "FFI shim for (Erlang beamtalk_os) run: cmd dispatch.".
--spec run(beamtalk_string:t() | binary()) -> beamtalk_string:t().
-run(Cmd) -> 'run:'(Cmd).
-
--doc "FFI shim for (Erlang beamtalk_os) run: cmd timeout: ms dispatch.".
--spec run(beamtalk_string:t() | binary(), Timeout :: pos_integer()) -> beamtalk_string:t().
-run(Cmd, TimeoutMs) -> 'run:timeout:'(Cmd, TimeoutMs).
 
 %%% ============================================================================
 %%% Internal helpers

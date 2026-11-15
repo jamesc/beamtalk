@@ -160,7 +160,7 @@ fn a_nested_construct_not_threaded_today_is_in_names_but_not_lowered() {
 #[test]
 fn try_do_is_a_construct_whose_block_is_lowered() {
     // ADR 0131 Phase 4 (BT-3750): `Result tryDo:` packs its block's writes into
-    // the `__local__` keys of the scratch map `'tryDo:'/2` threads, alone and
+    // the `__local__` keys of the scratch map `tryDo/2` threads, alone and
     // nested in a loop.
     for context in [CodeGenContext::Actor, CodeGenContext::ValueType] {
         let generator = make_generator(context, &["t"]);

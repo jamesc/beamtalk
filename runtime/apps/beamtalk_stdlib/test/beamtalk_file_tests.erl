@@ -176,23 +176,23 @@ handle_has_method_readAll_test() ->
 %%% ============================================================================
 
 exists_nonexistent_test() ->
-    ?assertNot(beamtalk_file:'exists:'(<<"_bt_test_no_such_file.txt">>)).
+    ?assertNot(beamtalk_file:exists(<<"_bt_test_no_such_file.txt">>)).
 
 exists_real_file_test() ->
     with_temp_file("_bt_test_exists.txt", <<"test">>, fun() ->
-        ?assert(beamtalk_file:'exists:'(<<"_bt_test_exists.txt">>))
+        ?assert(beamtalk_file:exists(<<"_bt_test_exists.txt">>))
     end).
 
 exists_non_string_returns_false_test() ->
-    ?assertNot(beamtalk_file:'exists:'(42)).
+    ?assertNot(beamtalk_file:exists(42)).
 
 exists_atom_returns_false_test() ->
-    ?assertNot(beamtalk_file:'exists:'(foo)).
+    ?assertNot(beamtalk_file:exists(foo)).
 
 exists_tmp_directory_via_tempDirectory_test() ->
     {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
     %% tempDirectory returns a real directory, but exists: checks regular files
-    ?assertNot(beamtalk_file:'exists:'(TmpDir)).
+    ?assertNot(beamtalk_file:exists(TmpDir)).
 
 %%% ============================================================================
 %%% readAll:/1
@@ -206,25 +206,25 @@ readAll_success_test() ->
                 'isOk' := true,
                 'okValue' := {beamtalk_string, <<"hello">>}
             },
-            beamtalk_file:'readAll:'(<<"_bt_test_read.txt">>)
+            beamtalk_file:readAll(<<"_bt_test_read.txt">>)
         )
     end).
 
 readAll_file_not_found_test() ->
-    R = beamtalk_file:'readAll:'(<<"_bt_test_no_such_file.txt">>),
+    R = beamtalk_file:readAll(<<"_bt_test_no_such_file.txt">>),
     ?assertBtResultObjError(file_not_found, 'File', 'readAll:', R).
 
 readAll_type_error_integer_test() ->
-    ?assertBtError(type_error, 'File', 'readAll:', beamtalk_file:'readAll:'(42)).
+    ?assertBtError(type_error, 'File', 'readAll:', beamtalk_file:readAll(42)).
 
 readAll_type_error_atom_test() ->
-    ?assertBtError(type_error, 'File', 'readAll:', beamtalk_file:'readAll:'(foo)).
+    ?assertBtError(type_error, 'File', 'readAll:', beamtalk_file:readAll(foo)).
 
 readAll_absolute_path_test() ->
     %% Absolute paths now work — read a known file
     case os:type() of
         {unix, _} ->
-            R = beamtalk_file:'readAll:'(<<"/etc/hostname">>),
+            R = beamtalk_file:readAll(<<"/etc/hostname">>),
             %% May succeed or fail (file_not_found) depending on OS, but never invalid_path
             case R of
                 #{'isOk' := true, 'okValue' := V} -> ?assertMatch({beamtalk_string, _}, V);
@@ -246,7 +246,7 @@ readAll_permission_denied_test() ->
             DenyCmd = "icacls \"" ++ FileName ++ "\" /deny " ++ UserName ++ ":R >nul 2>&1",
             _ = os:cmd(DenyCmd),
             try
-                R = beamtalk_file:'readAll:'(list_to_binary(FileName)),
+                R = beamtalk_file:readAll(list_to_binary(FileName)),
                 ?assertBtResultObjError(permission_denied, 'File', 'readAll:', R)
             after
                 %% Reset ACL to allow access before deleting
@@ -260,7 +260,7 @@ readAll_permission_denied_test() ->
             ok = file:write_file(FileName, <<"secret">>),
             ok = file:change_mode(FileName, 8#000),
             try
-                R = beamtalk_file:'readAll:'(list_to_binary(FileName)),
+                R = beamtalk_file:readAll(list_to_binary(FileName)),
                 ?assertBtResultObjError(permission_denied, 'File', 'readAll:', R)
             after
                 file:change_mode(FileName, 8#644),
@@ -280,7 +280,7 @@ writeAll_success_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'writeAll:contents:'(
+            beamtalk_file:writeAll(
                 list_to_binary(FileName), <<"content">>
             )
         ),
@@ -294,7 +294,7 @@ writeAll_type_error_non_string_path_test() ->
         type_error,
         'File',
         'writeAll:contents:',
-        beamtalk_file:'writeAll:contents:'(42, <<"content">>)
+        beamtalk_file:writeAll(42, <<"content">>)
     ).
 
 writeAll_type_error_non_string_contents_test() ->
@@ -302,7 +302,7 @@ writeAll_type_error_non_string_contents_test() ->
         type_error,
         'File',
         'writeAll:contents:',
-        beamtalk_file:'writeAll:contents:'(<<"file.txt">>, 42)
+        beamtalk_file:writeAll(<<"file.txt">>, 42)
     ).
 
 writeAll_absolute_path_via_temp_test() ->
@@ -312,7 +312,7 @@ writeAll_absolute_path_via_temp_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'writeAll:contents:'(TmpFile, <<"abs-path-data">>)
+            beamtalk_file:writeAll(TmpFile, <<"abs-path-data">>)
         ),
         ?assertMatch(
             #{
@@ -320,7 +320,7 @@ writeAll_absolute_path_via_temp_test() ->
                 'isOk' := true,
                 'okValue' := {beamtalk_string, <<"abs-path-data">>}
             },
-            beamtalk_file:'readAll:'(TmpFile)
+            beamtalk_file:readAll(TmpFile)
         )
     after
         file:delete(binary_to_list(TmpFile))
@@ -332,7 +332,7 @@ writeAll_creates_subdirectory_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'writeAll:contents:'(
+            beamtalk_file:writeAll(
                 list_to_binary(FileName), <<"nested content">>
             )
         ),
@@ -354,7 +354,7 @@ writeAll_permission_denied_test() ->
             DenyCmd = "icacls \"" ++ FileName ++ "\" /deny " ++ UserName ++ ":W >nul 2>&1",
             _ = os:cmd(DenyCmd),
             try
-                R = beamtalk_file:'writeAll:contents:'(list_to_binary(FileName), <<"data">>),
+                R = beamtalk_file:writeAll(list_to_binary(FileName), <<"data">>),
                 ?assertBtResultObjError(permission_denied, 'File', 'writeAll:contents:', R)
             after
                 %% Reset ACL to allow access before cleanup
@@ -369,7 +369,7 @@ writeAll_permission_denied_test() ->
             ok = filelib:ensure_dir(FileName),
             ok = file:change_mode(Dir, 8#555),
             try
-                R = beamtalk_file:'writeAll:contents:'(list_to_binary(FileName), <<"data">>),
+                R = beamtalk_file:writeAll(list_to_binary(FileName), <<"data">>),
                 ?assertBtResultObjError(permission_denied, 'File', 'writeAll:contents:', R)
             after
                 file:change_mode(Dir, 8#755),
@@ -389,22 +389,22 @@ readBinary_success_test() ->
     with_temp_file("_bt_test_read_bin.dat", <<1, 2, 3, 0, 255>>, fun() ->
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := <<1, 2, 3, 0, 255>>},
-            beamtalk_file:'readBinary:'(<<"_bt_test_read_bin.dat">>)
+            beamtalk_file:readBinary(<<"_bt_test_read_bin.dat">>)
         )
     end).
 
 readBinary_file_not_found_test() ->
-    R = beamtalk_file:'readBinary:'(<<"_bt_test_no_such_file.bin">>),
+    R = beamtalk_file:readBinary(<<"_bt_test_no_such_file.bin">>),
     ?assertBtResultObjError(file_not_found, 'File', 'readBinary:', R).
 
 readBinary_type_error_test() ->
-    ?assertBtError(type_error, 'File', 'readBinary:', beamtalk_file:'readBinary:'(42)).
+    ?assertBtError(type_error, 'File', 'readBinary:', beamtalk_file:readBinary(42)).
 
 readBinary_empty_file_test() ->
     with_temp_file("_bt_test_read_bin_empty.dat", <<>>, fun() ->
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := <<>>},
-            beamtalk_file:'readBinary:'(<<"_bt_test_read_bin_empty.dat">>)
+            beamtalk_file:readBinary(<<"_bt_test_read_bin_empty.dat">>)
         )
     end).
 
@@ -421,7 +421,7 @@ writeBinary_success_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'writeBinary:contents:'(
+            beamtalk_file:writeBinary(
                 list_to_binary(FileName), <<1, 2, 3, 0, 255>>
             )
         ),
@@ -435,7 +435,7 @@ writeBinary_creates_subdirectory_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'writeBinary:contents:'(
+            beamtalk_file:writeBinary(
                 list_to_binary(FileName), <<42>>
             )
         ),
@@ -450,7 +450,7 @@ writeBinary_type_error_non_string_path_test() ->
         type_error,
         'File',
         'writeBinary:contents:',
-        beamtalk_file:'writeBinary:contents:'(42, <<1, 2, 3>>)
+        beamtalk_file:writeBinary(42, <<1, 2, 3>>)
     ).
 
 writeBinary_type_error_non_binary_contents_test() ->
@@ -458,7 +458,7 @@ writeBinary_type_error_non_binary_contents_test() ->
         type_error,
         'File',
         'writeBinary:contents:',
-        beamtalk_file:'writeBinary:contents:'(<<"file.dat">>, 42)
+        beamtalk_file:writeBinary(<<"file.dat">>, 42)
     ).
 
 ffi_shim_writeBinary_success_test() ->
@@ -482,7 +482,7 @@ appendBinary_creates_file_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'appendBinary:contents:'(
+            beamtalk_file:appendBinary(
                 list_to_binary(FileName), <<1, 2, 3>>
             )
         ),
@@ -497,7 +497,7 @@ appendBinary_appends_to_existing_test() ->
         ok = file:write_file(FileName, <<1, 2, 3>>),
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'appendBinary:contents:'(
+            beamtalk_file:appendBinary(
                 list_to_binary(FileName), <<4, 5, 6>>
             )
         ),
@@ -511,7 +511,7 @@ appendBinary_creates_subdirectory_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'appendBinary:contents:'(
+            beamtalk_file:appendBinary(
                 list_to_binary(FileName), <<10, 20>>
             )
         ),
@@ -526,7 +526,7 @@ appendBinary_type_error_non_string_path_test() ->
         type_error,
         'File',
         'appendBinary:contents:',
-        beamtalk_file:'appendBinary:contents:'(42, <<1, 2, 3>>)
+        beamtalk_file:appendBinary(42, <<1, 2, 3>>)
     ).
 
 appendBinary_type_error_non_binary_contents_test() ->
@@ -534,7 +534,7 @@ appendBinary_type_error_non_binary_contents_test() ->
         type_error,
         'File',
         'appendBinary:contents:',
-        beamtalk_file:'appendBinary:contents:'(<<"file.dat">>, 42)
+        beamtalk_file:appendBinary(<<"file.dat">>, 42)
     ).
 
 ffi_shim_appendBinary_success_test() ->
@@ -556,7 +556,7 @@ ffi_shim_appendBinary_success_test() ->
 
 lines_success_test() ->
     with_temp_file("_bt_test_lines.txt", <<"a\nb\nc\n">>, fun() ->
-        R = beamtalk_file:'lines:'(<<"_bt_test_lines.txt">>),
+        R = beamtalk_file:lines(<<"_bt_test_lines.txt">>),
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Stream} = R,
         Result = beamtalk_stream:as_list(Stream),
@@ -567,15 +567,15 @@ lines_success_test() ->
     end).
 
 lines_file_not_found_test() ->
-    R = beamtalk_file:'lines:'(<<"_bt_test_no_such_file.txt">>),
+    R = beamtalk_file:lines(<<"_bt_test_no_such_file.txt">>),
     ?assertBtResultObjError(file_not_found, 'File', 'lines:', R).
 
 lines_type_error_test() ->
-    ?assertBtError(type_error, 'File', 'lines:', beamtalk_file:'lines:'(42)).
+    ?assertBtError(type_error, 'File', 'lines:', beamtalk_file:lines(42)).
 
 lines_empty_file_test() ->
     with_temp_file("_bt_test_empty_lines.txt", <<>>, fun() ->
-        R = beamtalk_file:'lines:'(<<"_bt_test_empty_lines.txt">>),
+        R = beamtalk_file:lines(<<"_bt_test_empty_lines.txt">>),
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Stream} = R,
         Result = beamtalk_stream:as_list(Stream),
@@ -584,7 +584,7 @@ lines_empty_file_test() ->
 
 lines_no_trailing_newline_test() ->
     with_temp_file("_bt_test_notrail.txt", <<"first\nsecond">>, fun() ->
-        R = beamtalk_file:'lines:'(<<"_bt_test_notrail.txt">>),
+        R = beamtalk_file:lines(<<"_bt_test_notrail.txt">>),
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Stream} = R,
         Result = beamtalk_stream:as_list(Stream),
@@ -593,7 +593,7 @@ lines_no_trailing_newline_test() ->
 
 lines_windows_crlf_test() ->
     with_temp_file("_bt_test_crlf.txt", <<"a\r\nb\r\nc\r\n">>, fun() ->
-        R = beamtalk_file:'lines:'(<<"_bt_test_crlf.txt">>),
+        R = beamtalk_file:lines(<<"_bt_test_crlf.txt">>),
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Stream} = R,
         Result = beamtalk_stream:as_list(Stream),
@@ -605,7 +605,7 @@ lines_windows_crlf_test() ->
 
 lines_single_line_test() ->
     with_temp_file("_bt_test_single.txt", <<"only">>, fun() ->
-        R = beamtalk_file:'lines:'(<<"_bt_test_single.txt">>),
+        R = beamtalk_file:lines(<<"_bt_test_single.txt">>),
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Stream} = R,
         Result = beamtalk_stream:as_list(Stream),
@@ -713,23 +713,23 @@ with_temp_dir(Name, Fun) ->
 
 isDirectory_on_directory_test() ->
     with_temp_dir("_bt_eunit_isdir", fun() ->
-        ?assert(beamtalk_file:'isDirectory:'(<<"_bt_eunit_isdir">>))
+        ?assert(beamtalk_file:isDirectory(<<"_bt_eunit_isdir">>))
     end).
 
 isDirectory_on_file_test() ->
     with_temp_file("_bt_eunit_isdir_file.txt", <<"x">>, fun() ->
-        ?assertNot(beamtalk_file:'isDirectory:'(<<"_bt_eunit_isdir_file.txt">>))
+        ?assertNot(beamtalk_file:isDirectory(<<"_bt_eunit_isdir_file.txt">>))
     end).
 
 isDirectory_on_missing_path_test() ->
-    ?assertNot(beamtalk_file:'isDirectory:'(<<"_bt_eunit_no_such_dir_xyz">>)).
+    ?assertNot(beamtalk_file:isDirectory(<<"_bt_eunit_no_such_dir_xyz">>)).
 
 isDirectory_absolute_path_test() ->
     {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
-    ?assert(beamtalk_file:'isDirectory:'(TmpDir)).
+    ?assert(beamtalk_file:isDirectory(TmpDir)).
 
 isDirectory_type_error_returns_false_test() ->
-    ?assertNot(beamtalk_file:'isDirectory:'(42)).
+    ?assertNot(beamtalk_file:isDirectory(42)).
 
 %%% ============================================================================
 %%% isFile:/1
@@ -737,23 +737,23 @@ isDirectory_type_error_returns_false_test() ->
 
 isFile_on_file_test() ->
     with_temp_file("_bt_eunit_isfile.txt", <<"x">>, fun() ->
-        ?assert(beamtalk_file:'isFile:'(<<"_bt_eunit_isfile.txt">>))
+        ?assert(beamtalk_file:isFile(<<"_bt_eunit_isfile.txt">>))
     end).
 
 isFile_on_directory_test() ->
     with_temp_dir("_bt_eunit_isfile_dir", fun() ->
-        ?assertNot(beamtalk_file:'isFile:'(<<"_bt_eunit_isfile_dir">>))
+        ?assertNot(beamtalk_file:isFile(<<"_bt_eunit_isfile_dir">>))
     end).
 
 isFile_on_missing_path_test() ->
-    ?assertNot(beamtalk_file:'isFile:'(<<"_bt_eunit_no_such_file_xyz.txt">>)).
+    ?assertNot(beamtalk_file:isFile(<<"_bt_eunit_no_such_file_xyz.txt">>)).
 
 isFile_absolute_path_test() ->
     {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
-    ?assertNot(beamtalk_file:'isFile:'(TmpDir)).
+    ?assertNot(beamtalk_file:isFile(TmpDir)).
 
 isFile_type_error_returns_false_test() ->
-    ?assertNot(beamtalk_file:'isFile:'(42)).
+    ?assertNot(beamtalk_file:isFile(42)).
 
 %%% ============================================================================
 %%% mkdir:/1
@@ -764,7 +764,7 @@ mkdir_success_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'mkdir:'(list_to_binary(Dir))
+            beamtalk_file:mkdir(list_to_binary(Dir))
         ),
         ?assert(filelib:is_dir(Dir))
     after
@@ -773,16 +773,16 @@ mkdir_success_test() ->
 
 mkdir_already_exists_test() ->
     with_temp_dir("_bt_eunit_mkdir_exists", fun() ->
-        R = beamtalk_file:'mkdir:'(<<"_bt_eunit_mkdir_exists">>),
+        R = beamtalk_file:mkdir(<<"_bt_eunit_mkdir_exists">>),
         ?assertBtResultObjError(already_exists, 'File', 'mkdir:', R)
     end).
 
 mkdir_missing_parent_test() ->
-    R = beamtalk_file:'mkdir:'(<<"_bt_eunit_no_parent_xyz/child">>),
+    R = beamtalk_file:mkdir(<<"_bt_eunit_no_parent_xyz/child">>),
     ?assertBtResultObjError(directory_not_found, 'File', 'mkdir:', R).
 
 mkdir_type_error_test() ->
-    ?assertBtError(type_error, 'File', 'mkdir:', beamtalk_file:'mkdir:'(42)).
+    ?assertBtError(type_error, 'File', 'mkdir:', beamtalk_file:mkdir(42)).
 
 %%% ============================================================================
 %%% mkdirAll:/1
@@ -792,7 +792,7 @@ mkdirAll_success_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'mkdirAll:'(<<"_bt_eunit_mkdirall/a/b/c">>)
+            beamtalk_file:mkdirAll(<<"_bt_eunit_mkdirall/a/b/c">>)
         ),
         ?assert(filelib:is_dir("_bt_eunit_mkdirall/a/b/c"))
     after
@@ -804,11 +804,11 @@ mkdirAll_idempotent_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'mkdirAll:'(list_to_binary(Dir))
+            beamtalk_file:mkdirAll(list_to_binary(Dir))
         ),
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'mkdirAll:'(list_to_binary(Dir))
+            beamtalk_file:mkdirAll(list_to_binary(Dir))
         ),
         ?assert(filelib:is_dir(Dir))
     after
@@ -816,7 +816,7 @@ mkdirAll_idempotent_test() ->
     end.
 
 mkdirAll_type_error_test() ->
-    ?assertBtError(type_error, 'File', 'mkdirAll:', beamtalk_file:'mkdirAll:'(42)).
+    ?assertBtError(type_error, 'File', 'mkdirAll:', beamtalk_file:mkdirAll(42)).
 
 %%% ============================================================================
 %%% listDirectory:/1
@@ -826,7 +826,7 @@ listDirectory_success_test() ->
     with_temp_dir("_bt_eunit_listdir", fun() ->
         ok = file:write_file("_bt_eunit_listdir/a.txt", <<"a">>),
         ok = file:write_file("_bt_eunit_listdir/b.txt", <<"b">>),
-        R = beamtalk_file:'listDirectory:'(<<"_bt_eunit_listdir">>),
+        R = beamtalk_file:listDirectory(<<"_bt_eunit_listdir">>),
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Entries} = R,
         ?assertEqual(
@@ -836,7 +836,7 @@ listDirectory_success_test() ->
 
 listDirectory_empty_dir_test() ->
     with_temp_dir("_bt_eunit_listdir_empty", fun() ->
-        R = beamtalk_file:'listDirectory:'(<<"_bt_eunit_listdir_empty">>),
+        R = beamtalk_file:listDirectory(<<"_bt_eunit_listdir_empty">>),
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := []},
             R
@@ -846,16 +846,16 @@ listDirectory_empty_dir_test() ->
 listDirectory_not_a_directory_test() ->
     %% filelib:is_regular/1 check ensures consistent error on all OSes
     with_temp_file("_bt_eunit_listdir_file.txt", <<"x">>, fun() ->
-        R = beamtalk_file:'listDirectory:'(<<"_bt_eunit_listdir_file.txt">>),
+        R = beamtalk_file:listDirectory(<<"_bt_eunit_listdir_file.txt">>),
         ?assertBtResultObjError(not_a_directory, 'File', 'listDirectory:', R)
     end).
 
 listDirectory_directory_not_found_test() ->
-    R = beamtalk_file:'listDirectory:'(<<"_bt_eunit_no_such_dir_xyz">>),
+    R = beamtalk_file:listDirectory(<<"_bt_eunit_no_such_dir_xyz">>),
     ?assertBtResultObjError(directory_not_found, 'File', 'listDirectory:', R).
 
 listDirectory_type_error_test() ->
-    ?assertBtError(type_error, 'File', 'listDirectory:', beamtalk_file:'listDirectory:'(42)).
+    ?assertBtError(type_error, 'File', 'listDirectory:', beamtalk_file:listDirectory(42)).
 
 %%% ============================================================================
 %%% delete:/1
@@ -866,7 +866,7 @@ delete_file_test() ->
     ok = file:write_file(FileName, <<"x">>),
     ?assertMatch(
         #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-        beamtalk_file:'delete:'(list_to_binary(FileName))
+        beamtalk_file:delete(list_to_binary(FileName))
     ),
     ?assertNot(filelib:is_regular(FileName)).
 
@@ -875,23 +875,23 @@ delete_empty_dir_test() ->
     ok = file:make_dir(Dir),
     ?assertMatch(
         #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-        beamtalk_file:'delete:'(list_to_binary(Dir))
+        beamtalk_file:delete(list_to_binary(Dir))
     ),
     ?assertNot(filelib:is_dir(Dir)).
 
 delete_not_empty_test() ->
     with_temp_dir("_bt_eunit_delete_nonempty", fun() ->
         ok = file:write_file("_bt_eunit_delete_nonempty/child.txt", <<"x">>),
-        R = beamtalk_file:'delete:'(<<"_bt_eunit_delete_nonempty">>),
+        R = beamtalk_file:delete(<<"_bt_eunit_delete_nonempty">>),
         ?assertBtResultObjError(not_empty, 'File', 'delete:', R)
     end).
 
 delete_file_not_found_test() ->
-    R = beamtalk_file:'delete:'(<<"_bt_eunit_no_such_file_xyz.txt">>),
+    R = beamtalk_file:delete(<<"_bt_eunit_no_such_file_xyz.txt">>),
     ?assertBtResultObjError(file_not_found, 'File', 'delete:', R).
 
 delete_type_error_test() ->
-    ?assertBtError(type_error, 'File', 'delete:', beamtalk_file:'delete:'(42)).
+    ?assertBtError(type_error, 'File', 'delete:', beamtalk_file:delete(42)).
 
 %%% ============================================================================
 %%% deleteAll:/1
@@ -903,7 +903,7 @@ deleteAll_success_test() ->
         ok = file:write_file("_bt_eunit_deleteall/a/b/file.txt", <<"x">>),
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'deleteAll:'(<<"_bt_eunit_deleteall">>)
+            beamtalk_file:deleteAll(<<"_bt_eunit_deleteall">>)
         ),
         ?assertNot(filelib:is_dir("_bt_eunit_deleteall"))
     after
@@ -911,11 +911,11 @@ deleteAll_success_test() ->
     end.
 
 deleteAll_file_not_found_test() ->
-    R = beamtalk_file:'deleteAll:'(<<"_bt_eunit_no_such_dir_xyz">>),
+    R = beamtalk_file:deleteAll(<<"_bt_eunit_no_such_dir_xyz">>),
     ?assertBtResultObjError(file_not_found, 'File', 'deleteAll:', R).
 
 deleteAll_type_error_test() ->
-    ?assertBtError(type_error, 'File', 'deleteAll:', beamtalk_file:'deleteAll:'(42)).
+    ?assertBtError(type_error, 'File', 'deleteAll:', beamtalk_file:deleteAll(42)).
 
 %%% ============================================================================
 %%% rename:to:/2
@@ -928,7 +928,7 @@ rename_to_file_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'rename:to:'(list_to_binary(Src), list_to_binary(Dst))
+            beamtalk_file:rename(list_to_binary(Src), list_to_binary(Dst))
         ),
         ?assertNot(filelib:is_regular(Src)),
         ?assert(filelib:is_regular(Dst)),
@@ -945,7 +945,7 @@ rename_to_directory_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'rename:to:'(list_to_binary(Src), list_to_binary(Dst))
+            beamtalk_file:rename(list_to_binary(Src), list_to_binary(Dst))
         ),
         ?assertNot(filelib:is_dir(Src)),
         ?assert(filelib:is_dir(Dst))
@@ -955,14 +955,14 @@ rename_to_directory_test() ->
     end.
 
 rename_to_file_not_found_test() ->
-    R = beamtalk_file:'rename:to:'(<<"_bt_eunit_no_such_xyz.txt">>, <<"_bt_eunit_dst.txt">>),
+    R = beamtalk_file:rename(<<"_bt_eunit_no_such_xyz.txt">>, <<"_bt_eunit_dst.txt">>),
     ?assertBtResultObjError(file_not_found, 'File', 'rename:to:', R).
 
 rename_to_type_error_from_test() ->
-    ?assertBtError(type_error, 'File', 'rename:to:', beamtalk_file:'rename:to:'(42, <<"dst.txt">>)).
+    ?assertBtError(type_error, 'File', 'rename:to:', beamtalk_file:rename(42, <<"dst.txt">>)).
 
 rename_to_type_error_to_test() ->
-    ?assertBtError(type_error, 'File', 'rename:to:', beamtalk_file:'rename:to:'(<<"src.txt">>, 42)).
+    ?assertBtError(type_error, 'File', 'rename:to:', beamtalk_file:rename(<<"src.txt">>, 42)).
 
 %%% ============================================================================
 %%% absolutePath:/1
@@ -970,7 +970,7 @@ rename_to_type_error_to_test() ->
 
 absolutePath_success_test() ->
     Input = <<"some/relative/path">>,
-    R = beamtalk_file:'absolutePath:'(Input),
+    R = beamtalk_file:absolutePath(Input),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
     #{'okValue' := Result} = R,
     ?assertMatch({beamtalk_string, _}, Result),
@@ -982,13 +982,13 @@ absolutePath_success_test() ->
 absolutePath_absolute_input_test() ->
     %% absolutePath: on an already-absolute path returns it unchanged
     {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
-    R = beamtalk_file:'absolutePath:'(TmpDir),
+    R = beamtalk_file:absolutePath(TmpDir),
     ?assertMatch(
         #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := {beamtalk_string, TmpDir}}, R
     ).
 
 absolutePath_type_error_test() ->
-    ?assertBtError(type_error, 'File', 'absolutePath:', beamtalk_file:'absolutePath:'(42)).
+    ?assertBtError(type_error, 'File', 'absolutePath:', beamtalk_file:absolutePath(42)).
 
 %%% ============================================================================
 %%% lastModified:/1
@@ -996,7 +996,7 @@ absolutePath_type_error_test() ->
 
 lastModified_success_test() ->
     with_temp_file("_bt_eunit_lastmod.txt", <<"data">>, fun() ->
-        R = beamtalk_file:'lastModified:'(<<"_bt_eunit_lastmod.txt">>),
+        R = beamtalk_file:lastModified(<<"_bt_eunit_lastmod.txt">>),
         ?assertMatch(
             #{
                 '$beamtalk_class' := 'Result',
@@ -1011,11 +1011,11 @@ lastModified_success_test() ->
     end).
 
 lastModified_file_not_found_test() ->
-    R = beamtalk_file:'lastModified:'(<<"_bt_eunit_no_such_lastmod.txt">>),
+    R = beamtalk_file:lastModified(<<"_bt_eunit_no_such_lastmod.txt">>),
     ?assertBtResultObjError(file_not_found, 'File', 'lastModified:', R).
 
 lastModified_type_error_test() ->
-    ?assertBtError(type_error, 'File', 'lastModified:', beamtalk_file:'lastModified:'(42)).
+    ?assertBtError(type_error, 'File', 'lastModified:', beamtalk_file:lastModified(42)).
 
 ffi_shim_lastModified_test() ->
     with_temp_file("_bt_shim_lastmod.txt", <<"x">>, fun() ->
@@ -1070,7 +1070,7 @@ tempDirectory_non_empty_test() ->
 
 tempDirectory_is_a_directory_test() ->
     {beamtalk_string, TmpDir} = beamtalk_file:'tempDirectory'(),
-    ?assert(beamtalk_file:'isDirectory:'(TmpDir)).
+    ?assert(beamtalk_file:isDirectory(TmpDir)).
 
 %%% ============================================================================
 %%% readAll: — additional error paths
@@ -1080,7 +1080,7 @@ readAll_empty_file_test() ->
     with_temp_file("_bt_test_read_empty.txt", <<>>, fun() ->
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := {beamtalk_string, <<>>}},
-            beamtalk_file:'readAll:'(<<"_bt_test_read_empty.txt">>)
+            beamtalk_file:readAll(<<"_bt_test_read_empty.txt">>)
         )
     end).
 
@@ -1094,7 +1094,7 @@ writeAll_overwrite_existing_test() ->
         ok = file:write_file(FileName, <<"original">>),
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'writeAll:contents:'(
+            beamtalk_file:writeAll(
                 list_to_binary(FileName), <<"replaced">>
             )
         ),
@@ -1114,7 +1114,7 @@ readBinary_permission_denied_test() ->
             ok = file:write_file(FileName, <<1, 2, 3>>),
             ok = file:change_mode(FileName, 8#000),
             try
-                R = beamtalk_file:'readBinary:'(list_to_binary(FileName)),
+                R = beamtalk_file:readBinary(list_to_binary(FileName)),
                 ?assertBtResultObjError(permission_denied, 'File', 'readBinary:', R)
             after
                 file:change_mode(FileName, 8#644),
@@ -1136,7 +1136,7 @@ writeBinary_permission_denied_test() ->
             ok = filelib:ensure_dir(FileName),
             ok = file:change_mode(Dir, 8#555),
             try
-                R = beamtalk_file:'writeBinary:contents:'(list_to_binary(FileName), <<1, 2, 3>>),
+                R = beamtalk_file:writeBinary(list_to_binary(FileName), <<1, 2, 3>>),
                 ?assertBtResultObjError(permission_denied, 'File', 'writeBinary:contents:', R)
             after
                 file:change_mode(Dir, 8#755),
@@ -1159,7 +1159,7 @@ appendBinary_permission_denied_test() ->
             ok = filelib:ensure_dir(FileName),
             ok = file:change_mode(Dir, 8#555),
             try
-                R = beamtalk_file:'appendBinary:contents:'(
+                R = beamtalk_file:appendBinary(
                     list_to_binary(FileName), <<1, 2, 3>>
                 ),
                 ?assertBtResultObjError(permission_denied, 'File', 'appendBinary:contents:', R)
@@ -1183,7 +1183,7 @@ lines_permission_denied_test() ->
             ok = file:write_file(FileName, <<"line1\nline2\n">>),
             ok = file:change_mode(FileName, 8#000),
             try
-                R = beamtalk_file:'lines:'(list_to_binary(FileName)),
+                R = beamtalk_file:lines(list_to_binary(FileName)),
                 ?assertBtResultObjError(permission_denied, 'File', 'lines:', R)
             after
                 file:change_mode(FileName, 8#644),
@@ -1229,7 +1229,7 @@ listDirectory_permission_denied_test() ->
             ok = file:write_file(Dir ++ "/a.txt", <<"a">>),
             ok = file:change_mode(Dir, 8#000),
             try
-                R = beamtalk_file:'listDirectory:'(list_to_binary(Dir)),
+                R = beamtalk_file:listDirectory(list_to_binary(Dir)),
                 ?assertBtResultObjError(permission_denied, 'File', 'listDirectory:', R)
             after
                 file:change_mode(Dir, 8#755),
@@ -1243,7 +1243,7 @@ listDirectory_includes_subdirectories_test() ->
     with_temp_dir("_bt_eunit_listdir_mixed", fun() ->
         ok = file:write_file("_bt_eunit_listdir_mixed/file.txt", <<"x">>),
         ok = file:make_dir("_bt_eunit_listdir_mixed/subdir"),
-        R = beamtalk_file:'listDirectory:'(<<"_bt_eunit_listdir_mixed">>),
+        R = beamtalk_file:listDirectory(<<"_bt_eunit_listdir_mixed">>),
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Entries} = R,
         Sorted = lists:sort(Entries),
@@ -1261,7 +1261,7 @@ mkdir_permission_denied_test() ->
             ok = file:make_dir(Dir),
             ok = file:change_mode(Dir, 8#555),
             try
-                R = beamtalk_file:'mkdir:'(list_to_binary(Dir ++ "/child")),
+                R = beamtalk_file:mkdir(list_to_binary(Dir ++ "/child")),
                 ?assertBtResultObjError(permission_denied, 'File', 'mkdir:', R)
             after
                 file:change_mode(Dir, 8#755),
@@ -1285,7 +1285,7 @@ rename_to_permission_denied_test() ->
             ok = file:write_file(Src, <<"data">>),
             ok = file:change_mode(Dir, 8#555),
             try
-                R = beamtalk_file:'rename:to:'(list_to_binary(Src), list_to_binary(Dst)),
+                R = beamtalk_file:rename(list_to_binary(Src), list_to_binary(Dst)),
                 ?assertBtResultObjError(permission_denied, 'File', 'rename:to:', R)
             after
                 file:change_mode(Dir, 8#755),
@@ -1303,7 +1303,7 @@ rename_to_overwrites_destination_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'rename:to:'(list_to_binary(Src), list_to_binary(Dst))
+            beamtalk_file:rename(list_to_binary(Src), list_to_binary(Dst))
         ),
         ?assertNot(filelib:is_regular(Src)),
         ?assertEqual({ok, <<"new">>}, file:read_file(Dst))
@@ -1325,7 +1325,7 @@ delete_permission_denied_test() ->
             ok = file:write_file(FileName, <<"x">>),
             ok = file:change_mode(Dir, 8#555),
             try
-                R = beamtalk_file:'delete:'(list_to_binary(FileName)),
+                R = beamtalk_file:delete(list_to_binary(FileName)),
                 ?assertBtResultObjError(permission_denied, 'File', 'delete:', R)
             after
                 file:change_mode(Dir, 8#755),
@@ -1345,7 +1345,7 @@ deleteAll_single_file_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'deleteAll:'(list_to_binary(FileName))
+            beamtalk_file:deleteAll(list_to_binary(FileName))
         ),
         ?assertNot(filelib:is_regular(FileName))
     after
@@ -1361,7 +1361,7 @@ lines_large_file_test() ->
     Lines = [integer_to_binary(N) || N <- lists:seq(1, 1000)],
     Content = iolist_to_binary(lists:join(<<"\n">>, Lines)),
     with_temp_file("_bt_test_large_lines.txt", Content, fun() ->
-        R = beamtalk_file:'lines:'(<<"_bt_test_large_lines.txt">>),
+        R = beamtalk_file:lines(<<"_bt_test_large_lines.txt">>),
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{'okValue' := Stream} = R,
         Result = beamtalk_stream:as_list(Stream),
@@ -1376,7 +1376,7 @@ lines_large_file_test() ->
 
 absolutePath_dot_relative_test() ->
     %% ./foo should resolve to cwd/foo
-    R = beamtalk_file:'absolutePath:'(<<"./foo">>),
+    R = beamtalk_file:absolutePath(<<"./foo">>),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
     #{'okValue' := AbsPath} = R,
     Cwd = beamtalk_file:'cwd'(),
@@ -1384,7 +1384,7 @@ absolutePath_dot_relative_test() ->
 
 absolutePath_empty_string_test() ->
     %% Empty string should resolve to cwd
-    R = beamtalk_file:'absolutePath:'(<<>>),
+    R = beamtalk_file:absolutePath(<<>>),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
     #{'okValue' := AbsPath} = R,
     ?assert(byte_size(element(2, AbsPath)) > 0).
@@ -1450,7 +1450,7 @@ writeAll_large_file_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'writeAll:contents:'(
+            beamtalk_file:writeAll(
                 list_to_binary(FileName), Content
             )
         ),
@@ -1469,7 +1469,7 @@ readAll_writeAll_unicode_roundtrip_test() ->
     try
         ?assertMatch(
             #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil},
-            beamtalk_file:'writeAll:contents:'(list_to_binary(FileName), Content)
+            beamtalk_file:writeAll(list_to_binary(FileName), Content)
         ),
         ?assertMatch(
             #{
@@ -1477,7 +1477,7 @@ readAll_writeAll_unicode_roundtrip_test() ->
                 'isOk' := true,
                 'okValue' := {beamtalk_string, Content}
             },
-            beamtalk_file:'readAll:'(list_to_binary(FileName))
+            beamtalk_file:readAll(list_to_binary(FileName))
         )
     after
         file:delete(FileName)
@@ -1522,7 +1522,7 @@ readAll_eisdir_test() ->
     Dir = "_bt_eunit_readAll_eisdir",
     try
         ok = filelib:ensure_path(Dir),
-        R = beamtalk_file:'readAll:'(list_to_binary(Dir)),
+        R = beamtalk_file:readAll(list_to_binary(Dir)),
         ?assertBtResultObjError(io_error, R)
     after
         file:del_dir_r(Dir)
@@ -1532,7 +1532,7 @@ readBinary_eisdir_test() ->
     Dir = "_bt_eunit_readBinary_eisdir",
     try
         ok = filelib:ensure_path(Dir),
-        R = beamtalk_file:'readBinary:'(list_to_binary(Dir)),
+        R = beamtalk_file:readBinary(list_to_binary(Dir)),
         ?assertBtResultObjError(io_error, R)
     after
         file:del_dir_r(Dir)
@@ -1542,7 +1542,7 @@ writeAll_eisdir_test() ->
     Dir = "_bt_eunit_writeAll_eisdir",
     try
         ok = filelib:ensure_path(Dir),
-        R = beamtalk_file:'writeAll:contents:'(list_to_binary(Dir), <<"x">>),
+        R = beamtalk_file:writeAll(list_to_binary(Dir), <<"x">>),
         ?assertBtResultObjError(io_error, R)
     after
         file:del_dir_r(Dir)
@@ -1552,7 +1552,7 @@ writeBinary_eisdir_test() ->
     Dir = "_bt_eunit_writeBinary_eisdir",
     try
         ok = filelib:ensure_path(Dir),
-        R = beamtalk_file:'writeBinary:contents:'(list_to_binary(Dir), <<"x">>),
+        R = beamtalk_file:writeBinary(list_to_binary(Dir), <<"x">>),
         ?assertBtResultObjError(io_error, R)
     after
         file:del_dir_r(Dir)
@@ -1562,7 +1562,7 @@ appendBinary_eisdir_test() ->
     Dir = "_bt_eunit_appendBinary_eisdir",
     try
         ok = filelib:ensure_path(Dir),
-        R = beamtalk_file:'appendBinary:contents:'(list_to_binary(Dir), <<"x">>),
+        R = beamtalk_file:appendBinary(list_to_binary(Dir), <<"x">>),
         ?assertBtResultObjError(io_error, R)
     after
         file:del_dir_r(Dir)
@@ -1572,7 +1572,7 @@ lines_eisdir_test() ->
     Dir = "_bt_eunit_lines_eisdir",
     try
         ok = filelib:ensure_path(Dir),
-        R = beamtalk_file:'lines:'(list_to_binary(Dir)),
+        R = beamtalk_file:lines(list_to_binary(Dir)),
         ?assertBtResultObjError(io_error, R)
     after
         file:del_dir_r(Dir)
@@ -1600,7 +1600,7 @@ mkdir_already_exists_as_file_test() ->
     FileName = "_bt_eunit_mkdir_eexist.txt",
     try
         ok = file:write_file(FileName, <<"x">>),
-        R = beamtalk_file:'mkdir:'(list_to_binary(FileName)),
+        R = beamtalk_file:mkdir(list_to_binary(FileName)),
         ?assertBtResultObjError(already_exists, R)
     after
         file:delete(FileName)
@@ -1611,14 +1611,14 @@ mkdirAll_parent_is_file_test() ->
     Parent = "_bt_eunit_mkdirAll_parent_file.txt",
     try
         ok = file:write_file(Parent, <<"x">>),
-        R = beamtalk_file:'mkdirAll:'(list_to_binary(Parent ++ "/child")),
+        R = beamtalk_file:mkdirAll(list_to_binary(Parent ++ "/child")),
         ?assertBtResultObjError(_, R)
     after
         file:delete(Parent)
     end.
 
 listDirectory_missing_dir_test() ->
-    R = beamtalk_file:'listDirectory:'(<<"_bt_eunit_listdir_missing">>),
+    R = beamtalk_file:listDirectory(<<"_bt_eunit_listdir_missing">>),
     ?assertBtResultObjError(directory_not_found, R).
 
 listDirectory_upfront_file_check_test() ->
@@ -1626,7 +1626,7 @@ listDirectory_upfront_file_check_test() ->
     FileName = "_bt_eunit_listdir_file.txt",
     try
         ok = file:write_file(FileName, <<"x">>),
-        R = beamtalk_file:'listDirectory:'(list_to_binary(FileName)),
+        R = beamtalk_file:listDirectory(list_to_binary(FileName)),
         ?assertBtResultObjError(not_a_directory, R)
     after
         file:delete(FileName)
@@ -1641,7 +1641,7 @@ rename_to_destination_is_directory_test() ->
         ok = file:write_file(Src, <<"x">>),
         ok = filelib:ensure_path(Dst),
         ok = file:write_file(DstChild, <<"y">>),
-        R = beamtalk_file:'rename:to:'(list_to_binary(Src), list_to_binary(Dst)),
+        R = beamtalk_file:rename(list_to_binary(Src), list_to_binary(Dst)),
         ?assertBtResultObjError(_, R)
     after
         file:delete(Src),
@@ -1654,7 +1654,7 @@ rename_to_destination_is_directory_test() ->
 
 lines_empty_trailing_newline_only_test() ->
     with_temp_file("_bt_eunit_lines_empty_newline.txt", <<"\n">>, fun() ->
-        R = beamtalk_file:'lines:'(<<"_bt_eunit_lines_empty_newline.txt">>),
+        R = beamtalk_file:lines(<<"_bt_eunit_lines_empty_newline.txt">>),
         ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
         #{okValue := Stream} = R,
         Lines = beamtalk_stream:as_list(Stream),
@@ -1665,7 +1665,7 @@ lines_empty_trailing_newline_only_test() ->
 lines_bare_cr_in_middle_test() ->
     %% A bare \r inside a line is preserved (only trailing \r\n is stripped)
     with_temp_file("_bt_eunit_lines_bare_cr.txt", <<"ab\rcd\nef\n">>, fun() ->
-        R = beamtalk_file:'lines:'(<<"_bt_eunit_lines_bare_cr.txt">>),
+        R = beamtalk_file:lines(<<"_bt_eunit_lines_bare_cr.txt">>),
         #{okValue := Stream} = R,
         Lines = beamtalk_stream:as_list(Stream),
         ?assertEqual([{beamtalk_string, <<"ab\rcd">>}, {beamtalk_string, <<"ef">>}], Lines)
@@ -1835,7 +1835,7 @@ open_mode_read_missing_file_test() ->
 %% the `path` detail; tagging it would forge an invalid `String` (BT-4170).
 invalid_utf8_binary_path_detail_stays_binary_test() ->
     #{'errReason' := #{error := #beamtalk_error{details = Details}}} =
-        beamtalk_file:'readAll:'(<<255, 254>>),
+        beamtalk_file:readAll(<<255, 254>>),
     ?assertEqual(<<255, 254>>, maps:get(path, Details)).
 
 text_detail_tags_valid_utf8_test() ->
@@ -1949,7 +1949,7 @@ open_mode_do_closes_handle_on_exception_test() ->
         Self = self(),
         ?assertThrow(
             Ref,
-            beamtalk_file:'open:mode:do:'(
+            beamtalk_file:open(
                 <<"_bt_test_open_mode_do_raise.txt">>,
                 read,
                 fun(Handle) ->
@@ -1968,7 +1968,7 @@ open_mode_do_closes_handle_on_exception_test() ->
 
 open_mode_do_block_closing_handle_is_fine_test() ->
     with_temp_file("_bt_test_open_mode_do_close.txt", <<"data">>, fun() ->
-        R = beamtalk_file:'open:mode:do:'(
+        R = beamtalk_file:open(
             <<"_bt_test_open_mode_do_close.txt">>,
             read,
             fun(Handle) -> beamtalk_file_handle:close(Handle) end
@@ -1977,7 +1977,7 @@ open_mode_do_block_closing_handle_is_fine_test() ->
     end).
 
 open_mode_do_non_block_raises_test() ->
-    ?assertBtError(type_error, beamtalk_file:'open:mode:do:'(<<"x.txt">>, read, not_a_block)).
+    ?assertBtError(type_error, beamtalk_file:open(<<"x.txt">>, read, not_a_block)).
 
 open_shim_rejects_ambiguous_second_argument_test() ->
     %% open/2 backs both open:do: and open:mode:; a non-atom, non-Block second
@@ -2106,12 +2106,12 @@ ffi_boundary_preserves_wrapped_error_test() ->
 open_mode_do_non_atom_mode_raises_test() ->
     %% Binary path + binary mode (not atom) + valid block → raises type_error.
     ?assertBtError(
-        type_error, beamtalk_file:'open:mode:do:'(<<"x.txt">>, <<"read">>, fun(_H) -> ok end)
+        type_error, beamtalk_file:open(<<"x.txt">>, <<"read">>, fun(_H) -> ok end)
     ).
 
 open_mode_do_non_binary_path_raises_test() ->
     %% Non-binary path → raises type_error regardless of mode or block.
-    ?assertBtError(type_error, beamtalk_file:'open:mode:do:'(42, read, fun(_H) -> ok end)).
+    ?assertBtError(type_error, beamtalk_file:open(42, read, fun(_H) -> ok end)).
 
 %%% ============================================================================
 %%% do_open: ensure_parent_dir failure path
@@ -2155,7 +2155,7 @@ writeAll_ensure_dir_failure_test() ->
         %% causes filelib:ensure_dir to return {error, _} (typically eexist
         %% on OTP, enotdir on some OSes) — neither of which is eacces.
         NestedPath = list_to_binary(BlockingFile ++ "/sub/target.txt"),
-        R = beamtalk_file:'writeAll:contents:'(NestedPath, <<"data">>),
+        R = beamtalk_file:writeAll(NestedPath, <<"data">>),
         ?assertBtResultObjError(io_error, 'File', 'writeAll:contents:', R)
     after
         file:delete(BlockingFile)
@@ -2166,7 +2166,7 @@ writeBinary_ensure_dir_failure_test() ->
     try
         ok = file:write_file(BlockingFile, <<"blocker">>),
         NestedPath = list_to_binary(BlockingFile ++ "/sub/target.dat"),
-        R = beamtalk_file:'writeBinary:contents:'(NestedPath, <<1, 2, 3>>),
+        R = beamtalk_file:writeBinary(NestedPath, <<1, 2, 3>>),
         ?assertBtResultObjError(io_error, 'File', 'writeBinary:contents:', R)
     after
         file:delete(BlockingFile)
@@ -2177,7 +2177,7 @@ appendBinary_ensure_dir_failure_test() ->
     try
         ok = file:write_file(BlockingFile, <<"blocker">>),
         NestedPath = list_to_binary(BlockingFile ++ "/sub/target.dat"),
-        R = beamtalk_file:'appendBinary:contents:'(NestedPath, <<1, 2, 3>>),
+        R = beamtalk_file:appendBinary(NestedPath, <<1, 2, 3>>),
         ?assertBtResultObjError(io_error, 'File', 'appendBinary:contents:', R)
     after
         file:delete(BlockingFile)

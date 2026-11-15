@@ -671,6 +671,8 @@ All native Erlang modules in a Beamtalk package have an implicit dependency on `
 
 This dependency does not need to be declared in `beamtalk.toml` — the build tool ensures the runtime is on the code path.
 
+The Erlang modules behind the standard library (`beamtalk_file`, `beamtalk_datetime`, `beamtalk_json`, and the other `beamtalk_*` modules in `runtime/apps/beamtalk_stdlib`) are internal, like the runtime modules. They are not public API and may change without notice. Each exports a single function per entry point, named by the naming rule above (first keyword, colon stripped): `File exists:` calls `beamtalk_file:exists/1`, with no `'exists:'/1` twin. Call the standard-library classes from Beamtalk instead of reaching into these modules.
+
 ## Practical Example: Creating a Native-Backed Class
 
 This walkthrough creates a key-value store backed by an ETS table. ETS tables require Erlang for lifecycle management, and the actor owns the table (ETS tables die with their owner process), so Actor supervision gives table durability for free.

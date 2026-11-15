@@ -21,7 +21,7 @@ shim aliases, and the type_error paths for non-binary inputs and keys.
 %%% ============================================================================
 
 sha256_returns_32_bytes_test() ->
-    Result = beamtalk_digest:'sha256:'(<<"hello">>),
+    Result = beamtalk_digest:sha256(<<"hello">>),
     ?assert(is_binary(Result)),
     ?assertEqual(32, byte_size(Result)).
 
@@ -61,46 +61,46 @@ sha256_known_value_test() ->
         16#b8,
         16#55
     >>,
-    ?assertEqual(Expected, beamtalk_digest:'sha256:'(<<>>)).
+    ?assertEqual(Expected, beamtalk_digest:sha256(<<>>)).
 
 sha256_deterministic_test() ->
     Input = <<"beamtalk">>,
     ?assertEqual(
-        beamtalk_digest:'sha256:'(Input),
-        beamtalk_digest:'sha256:'(Input)
+        beamtalk_digest:sha256(Input),
+        beamtalk_digest:sha256(Input)
     ).
 
 sha256_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_digest:'sha256:'(not_a_binary)).
+    ?assertBtError(type_error, beamtalk_digest:sha256(not_a_binary)).
 
 %%% ============================================================================
 %%% sha512:/1
 %%% ============================================================================
 
 sha512_returns_64_bytes_test() ->
-    Result = beamtalk_digest:'sha512:'(<<"hello">>),
+    Result = beamtalk_digest:sha512(<<"hello">>),
     ?assert(is_binary(Result)),
     ?assertEqual(64, byte_size(Result)).
 
 sha512_known_value_test() ->
     %% SHA-512("") = cf83e1357eefb8bdf1542850d66d8007...
-    Result = beamtalk_digest:'sha512:'(<<>>),
+    Result = beamtalk_digest:sha512(<<>>),
     ?assertEqual(64, byte_size(Result)),
     %% Verify first byte to confirm the right algorithm
     ?assertEqual(16#cf, binary:at(Result, 0)).
 
 sha512_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_digest:'sha512:'(42)).
+    ?assertBtError(type_error, beamtalk_digest:sha512(42)).
 
 sha512_type_error_atom_test() ->
-    ?assertBtError(type_error, beamtalk_digest:'sha512:'(hello)).
+    ?assertBtError(type_error, beamtalk_digest:sha512(hello)).
 
 %%% ============================================================================
 %%% md5:/1
 %%% ============================================================================
 
 md5_returns_16_bytes_test() ->
-    Result = beamtalk_digest:'md5:'(<<"hello">>),
+    Result = beamtalk_digest:md5(<<"hello">>),
     ?assert(is_binary(Result)),
     ?assertEqual(16, byte_size(Result)).
 
@@ -124,17 +124,17 @@ md5_known_value_test() ->
         16#42,
         16#7e
     >>,
-    ?assertEqual(Expected, beamtalk_digest:'md5:'(<<>>)).
+    ?assertEqual(Expected, beamtalk_digest:md5(<<>>)).
 
 md5_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_digest:'md5:'([1, 2, 3])).
+    ?assertBtError(type_error, beamtalk_digest:md5([1, 2, 3])).
 
 %%% ============================================================================
 %%% hmacSha256:key:/2
 %%% ============================================================================
 
 hmac_sha256_returns_32_bytes_test() ->
-    Result = beamtalk_digest:'hmacSha256:key:'(<<"message">>, <<"key">>),
+    Result = beamtalk_digest:hmacSha256(<<"message">>, <<"key">>),
     ?assert(is_binary(Result)),
     ?assertEqual(32, byte_size(Result)).
 
@@ -142,30 +142,30 @@ hmac_sha256_deterministic_test() ->
     Input = <<"data">>,
     Key = <<"secret">>,
     ?assertEqual(
-        beamtalk_digest:'hmacSha256:key:'(Input, Key),
-        beamtalk_digest:'hmacSha256:key:'(Input, Key)
+        beamtalk_digest:hmacSha256(Input, Key),
+        beamtalk_digest:hmacSha256(Input, Key)
     ).
 
 hmac_sha256_type_error_input_test() ->
-    ?assertBtError(type_error, beamtalk_digest:'hmacSha256:key:'(not_a_binary, <<"key">>)).
+    ?assertBtError(type_error, beamtalk_digest:hmacSha256(not_a_binary, <<"key">>)).
 
 hmac_sha256_type_error_key_test() ->
-    ?assertBtError(type_error, beamtalk_digest:'hmacSha256:key:'(<<"input">>, not_a_binary)).
+    ?assertBtError(type_error, beamtalk_digest:hmacSha256(<<"input">>, not_a_binary)).
 
 %%% ============================================================================
 %%% hmacSha512:key:/2
 %%% ============================================================================
 
 hmac_sha512_returns_64_bytes_test() ->
-    Result = beamtalk_digest:'hmacSha512:key:'(<<"message">>, <<"key">>),
+    Result = beamtalk_digest:hmacSha512(<<"message">>, <<"key">>),
     ?assert(is_binary(Result)),
     ?assertEqual(64, byte_size(Result)).
 
 hmac_sha512_type_error_input_test() ->
-    ?assertBtError(type_error, beamtalk_digest:'hmacSha512:key:'(42, <<"key">>)).
+    ?assertBtError(type_error, beamtalk_digest:hmacSha512(42, <<"key">>)).
 
 hmac_sha512_type_error_key_test() ->
-    ?assertBtError(type_error, beamtalk_digest:'hmacSha512:key:'(<<"input">>, 42)).
+    ?assertBtError(type_error, beamtalk_digest:hmacSha512(<<"input">>, 42)).
 
 %%% ============================================================================
 %%% FFI shims — verify delegation
@@ -174,21 +174,21 @@ hmac_sha512_type_error_key_test() ->
 sha256_ffi_shim_delegates_test() ->
     Input = <<"shim-test">>,
     ?assertEqual(
-        beamtalk_digest:'sha256:'(Input),
+        beamtalk_digest:sha256(Input),
         beamtalk_digest:sha256(Input)
     ).
 
 sha512_ffi_shim_delegates_test() ->
     Input = <<"shim-test">>,
     ?assertEqual(
-        beamtalk_digest:'sha512:'(Input),
+        beamtalk_digest:sha512(Input),
         beamtalk_digest:sha512(Input)
     ).
 
 md5_ffi_shim_delegates_test() ->
     Input = <<"shim-test">>,
     ?assertEqual(
-        beamtalk_digest:'md5:'(Input),
+        beamtalk_digest:md5(Input),
         beamtalk_digest:md5(Input)
     ).
 
@@ -196,7 +196,7 @@ hmac_sha256_ffi_shim_delegates_test() ->
     Input = <<"data">>,
     Key = <<"key">>,
     ?assertEqual(
-        beamtalk_digest:'hmacSha256:key:'(Input, Key),
+        beamtalk_digest:hmacSha256(Input, Key),
         beamtalk_digest:hmacSha256(Input, Key)
     ).
 
@@ -204,6 +204,6 @@ hmac_sha512_ffi_shim_delegates_test() ->
     Input = <<"data">>,
     Key = <<"key">>,
     ?assertEqual(
-        beamtalk_digest:'hmacSha512:key:'(Input, Key),
+        beamtalk_digest:hmacSha512(Input, Key),
         beamtalk_digest:hmacSha512(Input, Key)
     ).

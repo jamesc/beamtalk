@@ -6,7 +6,7 @@
 // check for `Result tryDo:`.
 //
 // Codegen picks the arity of the native: a block that writes no outer local is
-// a Tier 1 `fun()` and reaches `beamtalk_result:'tryDo:'/1`; a block that
+// a Tier 1 `fun()` and reaches `beamtalk_result:tryDo/1`; a block that
 // writes one is a Tier 2 `fun(StateAcc)` and reaches `'tryDo:'/2`. Each pair
 // of methods below runs the SAME block body (a class-variable write, then the
 // raise or the value) through both arities, the Tier 2 one with an extra local

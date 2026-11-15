@@ -55,23 +55,21 @@ timeout guards against unexpected stalls.
 
 ## FFI Shims
 
-The `beamtalk_erlang_proxy:direct_call/4` dispatch derives the Erlang function
-name from the first keyword of the Beamtalk selector (stripping the trailing
-colon). The colon-free shims (`after/2`, `every/2`, `sleep/1`, `sendAfter/3`,
-`sendEvery/3`) bridge the
-gap so that `(Erlang beamtalk_timer) after: ms do: block` dispatches correctly
-to the canonical `'after:do:'/2` implementation.
+`beamtalk_erlang_proxy:native_call` names the Erlang function with
+`selector_to_function/1`: the first keyword of the Beamtalk selector, trailing
+colon stripped. The colon-free functions (`'after'/2`, `every/2`, `sleep/1`,
+`sendAfter/3`, `sendEvery/3`) are the implementations, so
+`(Erlang beamtalk_timer) after: ms do: block` calls `'after'/2` directly.
 """.
 
 %% Class methods (canonical colon forms — used by EUnit tests)
--export(['after:do:'/2, 'every:do:'/2, 'sleep:'/1]).
--export(['send:to:after:'/3, 'send:to:every:'/3]).
+-export(['after'/2, every/2, sleep/1]).
+-export(['sendAfter'/3, 'sendEvery'/3]).
 
 %% Instance methods
 -export([cancel/1, 'isActive'/1, 'printString'/1]).
 
 %% FFI shims for (Erlang beamtalk_timer) dispatch
--export(['after'/2, every/2, sleep/1, 'sendAfter'/3, 'sendEvery'/3]).
 
 -ifdef(TEST).
 -export([next_deadline/3]).
@@ -94,10 +92,10 @@ Evaluate `Block` once after the given delay. Returns a Timer.
 
 The delay is Integer milliseconds or a Duration.
 """.
--spec 'after:do:'(integer() | beamtalk_duration:t(), Do :: function()) -> t().
-'after:do:'(#{'$beamtalk_class' := 'Duration'} = D, Block) ->
-    'after:do:'(beamtalk_duration:'asMilliseconds'(D), Block);
-'after:do:'(Ms, Block) when is_integer(Ms), Ms >= 0, is_function(Block, 0) ->
+-spec 'after'(integer() | beamtalk_duration:t(), Do :: function()) -> t().
+'after'(#{'$beamtalk_class' := 'Duration'} = D, Block) ->
+    'after'(beamtalk_duration:'asMilliseconds'(D), Block);
+'after'(Ms, Block) when is_integer(Ms), Ms >= 0, is_function(Block, 0) ->
     Pid = spawn_link(fun() ->
         receive
             {cancel, From, Ref} ->
@@ -114,15 +112,15 @@ The delay is Integer milliseconds or a Duration.
         end
     end),
     make_timer(Pid);
-'after:do:'(Ms, _Block) when is_integer(Ms) ->
+'after'(Ms, _Block) when is_integer(Ms) ->
     beamtalk_error:raise_type_error(
         'Timer', 'after:do:', <<"Delay must be a non-negative Integer or a non-negative Duration">>
     );
-'after:do:'(_Ms, Block) when is_function(Block, 0) ->
+'after'(_Ms, Block) when is_function(Block, 0) ->
     beamtalk_error:raise_type_error(
         'Timer', 'after:do:', <<"Delay must be a non-negative Integer or a non-negative Duration">>
     );
-'after:do:'(_, _) ->
+'after'(_, _) ->
     beamtalk_error:raise_type_error(
         'Timer', 'after:do:', <<"Expected an Integer or Duration delay and a Block">>
     ).
@@ -132,21 +130,21 @@ Evaluate `Block` at the given repeat interval. Returns a Timer.
 
 The interval is Integer milliseconds or a Duration.
 """.
--spec 'every:do:'(integer() | beamtalk_duration:t(), Do :: function()) -> t().
-'every:do:'(#{'$beamtalk_class' := 'Duration'} = D, Block) ->
-    'every:do:'(beamtalk_duration:'asMilliseconds'(D), Block);
-'every:do:'(Ms, Block) when is_integer(Ms), Ms > 0, is_function(Block, 0) ->
+-spec every(integer() | beamtalk_duration:t(), Do :: function()) -> t().
+every(#{'$beamtalk_class' := 'Duration'} = D, Block) ->
+    every(beamtalk_duration:'asMilliseconds'(D), Block);
+every(Ms, Block) when is_integer(Ms), Ms > 0, is_function(Block, 0) ->
     Pid = spawn_link(fun() -> repeat_loop(Ms, Block) end),
     make_timer(Pid);
-'every:do:'(Ms, _Block) when is_integer(Ms) ->
+every(Ms, _Block) when is_integer(Ms) ->
     beamtalk_error:raise_type_error(
         'Timer', 'every:do:', <<"Interval must be a positive Integer or a positive Duration">>
     );
-'every:do:'(_Ms, Block) when is_function(Block, 0) ->
+every(_Ms, Block) when is_function(Block, 0) ->
     beamtalk_error:raise_type_error(
         'Timer', 'every:do:', <<"Interval must be a positive Integer or a positive Duration">>
     );
-'every:do:'(_, _) ->
+every(_, _) ->
     beamtalk_error:raise_type_error(
         'Timer',
         'every:do:',
@@ -159,10 +157,10 @@ Send `Msg` to `Target` once after the given delay. Returns a Timer.
 `Target` is an Actor (including a Server) or a raw pid; the delay is Integer
 milliseconds or a Duration. Backed by `erlang:send_after/3`.
 """.
--spec 'send:to:after:'(term(), term(), integer() | beamtalk_duration:t()) -> t().
-'send:to:after:'(Msg, Target, #{'$beamtalk_class' := 'Duration'} = D) ->
-    'send:to:after:'(Msg, Target, beamtalk_duration:'asMilliseconds'(D));
-'send:to:after:'(Msg, Target, Ms) when is_integer(Ms), Ms >= 0, Ms =< ?MAX_TIMEOUT_MS ->
+-spec 'sendAfter'(term(), term(), integer() | beamtalk_duration:t()) -> t().
+'sendAfter'(Msg, Target, #{'$beamtalk_class' := 'Duration'} = D) ->
+    'sendAfter'(Msg, Target, beamtalk_duration:'asMilliseconds'(D));
+'sendAfter'(Msg, Target, Ms) when is_integer(Ms), Ms >= 0, Ms =< ?MAX_TIMEOUT_MS ->
     case resolve_dest('send:to:after:', Target) of
         unreachable ->
             %% An unregistered global name: an inert timer — cancel answers
@@ -176,7 +174,7 @@ milliseconds or a Duration. Backed by `erlang:send_after/3`.
             %% Remote target: send_after/3 rejects it, so a one-shot process.
             make_timer(spawn(fun() -> send_once(Ms, Dest, Msg) end))
     end;
-'send:to:after:'(_Msg, _Target, _Ms) ->
+'sendAfter'(_Msg, _Target, _Ms) ->
     beamtalk_error:raise_type_error(
         'Timer',
         'send:to:after:',
@@ -190,10 +188,10 @@ Send `Msg` to `Target` at the given repeat interval. Returns a Timer.
 Integer milliseconds or a Duration. Runs in a small unlinked process (the
 `every:do:` machinery) that stops on `cancel` or when a pid target dies.
 """.
--spec 'send:to:every:'(term(), term(), integer() | beamtalk_duration:t()) -> t().
-'send:to:every:'(Msg, Target, #{'$beamtalk_class' := 'Duration'} = D) ->
-    'send:to:every:'(Msg, Target, beamtalk_duration:'asMilliseconds'(D));
-'send:to:every:'(Msg, Target, Ms) when is_integer(Ms), Ms > 0, Ms =< ?MAX_TIMEOUT_MS ->
+-spec 'sendEvery'(term(), term(), integer() | beamtalk_duration:t()) -> t().
+'sendEvery'(Msg, Target, #{'$beamtalk_class' := 'Duration'} = D) ->
+    'sendEvery'(Msg, Target, beamtalk_duration:'asMilliseconds'(D));
+'sendEvery'(Msg, Target, Ms) when is_integer(Ms), Ms > 0, Ms =< ?MAX_TIMEOUT_MS ->
     case resolve_dest('send:to:every:', Target) of
         unreachable ->
             make_tref_timer(make_ref());
@@ -206,7 +204,7 @@ Integer milliseconds or a Duration. Runs in a small unlinked process (the
             end),
             make_timer(Pid)
     end;
-'send:to:every:'(_Msg, _Target, _Ms) ->
+'sendEvery'(_Msg, _Target, _Ms) ->
     beamtalk_error:raise_type_error(
         'Timer',
         'send:to:every:',
@@ -218,13 +216,13 @@ Block the current process for the given delay.
 
 The delay is Integer milliseconds or a Duration.
 """.
--spec 'sleep:'(integer() | beamtalk_duration:t()) -> 'nil'.
-'sleep:'(#{'$beamtalk_class' := 'Duration'} = D) ->
-    'sleep:'(beamtalk_duration:'asMilliseconds'(D));
-'sleep:'(Ms) when is_integer(Ms), Ms >= 0 ->
+-spec sleep(integer() | beamtalk_duration:t()) -> 'nil'.
+sleep(#{'$beamtalk_class' := 'Duration'} = D) ->
+    sleep(beamtalk_duration:'asMilliseconds'(D));
+sleep(Ms) when is_integer(Ms), Ms >= 0 ->
     timer:sleep(Ms),
     nil;
-'sleep:'(_) ->
+sleep(_) ->
     beamtalk_error:raise_type_error(
         'Timer', 'sleep:', <<"Delay must be a non-negative Integer or a non-negative Duration">>
     ).
@@ -279,10 +277,10 @@ cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
 %%% ============================================================================
 %%% FFI Shims
 %%%
-%%% The (Erlang beamtalk_timer) FFI uses beamtalk_erlang_proxy:direct_call/4,
-%%% which derives the Erlang function name from the first keyword of the
-%%% Beamtalk selector (stripping the trailing colon). These shims provide
-%%% the colon-free entry points that the proxy calls:
+%%% The (Erlang beamtalk_timer) FFI and `self delegate` resolve through
+%%% beamtalk_erlang_proxy:native_call, which names the function with
+%%% selector_to_function/1 (first keyword, trailing colon stripped). These
+%%% colon-free functions are the implementations, not forwarders:
 %%%
 %%%   (Erlang beamtalk_timer) after: ms do: block  → 'after'/2
 %%%   (Erlang beamtalk_timer) every: ms do: block  → every/2
@@ -293,26 +291,6 @@ cancel(#{'$beamtalk_class' := 'Timer', pid := Pid}) ->
 %%%   (Erlang beamtalk_timer) isActive: self       → isActive/1 (direct)
 %%%   (Erlang beamtalk_timer) printString: self    → printString/1 (direct)
 %%% ============================================================================
-
--doc "FFI shim: `(Erlang beamtalk_timer) after: ms do: block`".
--spec 'after'(integer() | beamtalk_duration:t(), Do :: function()) -> t().
-'after'(Ms, Block) -> 'after:do:'(Ms, Block).
-
--doc "FFI shim: `(Erlang beamtalk_timer) every: ms do: block`".
--spec every(integer() | beamtalk_duration:t(), Do :: function()) -> t().
-every(Ms, Block) -> 'every:do:'(Ms, Block).
-
--doc "FFI shim: `(Erlang beamtalk_timer) sleep: ms`".
--spec sleep(integer() | beamtalk_duration:t()) -> 'nil'.
-sleep(Ms) -> 'sleep:'(Ms).
-
--doc "FFI shim: `(Erlang beamtalk_timer) sendAfter: msg to: target delay: ms`".
--spec 'sendAfter'(term(), term(), integer() | beamtalk_duration:t()) -> t().
-'sendAfter'(Msg, Target, Ms) -> 'send:to:after:'(Msg, Target, Ms).
-
--doc "FFI shim: `(Erlang beamtalk_timer) sendEvery: msg to: target interval: ms`".
--spec 'sendEvery'(term(), term(), integer() | beamtalk_duration:t()) -> t().
-'sendEvery'(Msg, Target, Ms) -> 'send:to:every:'(Msg, Target, Ms).
 
 %%% ============================================================================
 %%% Internal Functions

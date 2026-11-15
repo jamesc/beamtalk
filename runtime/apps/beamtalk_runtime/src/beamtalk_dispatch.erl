@@ -897,7 +897,7 @@ breadcrumb context, same role `MethodOwner` plays for `invoke_method/6`).
 
 A connected `Program exit: N` (ADR 0099 §3) and a `^` non-local return in
 flight (ADR 0041, thrown as `{'$bt_nlr', ...}` — see
-`beamtalk_result:'tryDo:'/1` for the same two tuple shapes) must pass through
+`beamtalk_result:tryDo/1` for the same two tuple shapes) must pass through
 this frame untouched rather than be wrapped (`raised/4` re-raises them): for a
 value-type extension (arity-2), `apply_extension_by_arity/4` runs the fun
 inline in the caller's own process, so the throw is a control-flow signal

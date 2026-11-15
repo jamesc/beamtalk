@@ -21,10 +21,10 @@ FFI shims, and error paths.
 %%% ============================================================================
 
 make_dt(Y, Mo, D, H, Mi, S) ->
-    beamtalk_datetime:'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S).
+    beamtalk_datetime:year(Y, Mo, D, H, Mi, S).
 
 make_date(Y, Mo, D) ->
-    beamtalk_datetime:'year:month:day:'(Y, Mo, D).
+    beamtalk_datetime:year(Y, Mo, D).
 
 %%% ============================================================================
 %%% Constructor — year:month:day:
@@ -44,7 +44,7 @@ year_month_day_invalid_date_test() ->
     ?assertBtError(type_error, make_date(2024, 2, 30)).
 
 year_month_day_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_datetime:'year:month:day:'(<<"2024">>, 1, 1)).
+    ?assertBtError(type_error, beamtalk_datetime:year(<<"2024">>, 1, 1)).
 
 %%% ============================================================================
 %%% Constructor — year:month:day:hour:minute:second:
@@ -71,7 +71,7 @@ full_constructor_second_out_of_range_test() ->
 full_constructor_type_error_test() ->
     ?assertBtError(
         type_error,
-        beamtalk_datetime:'year:month:day:hour:minute:second:'(<<"2024">>, 1, 1, 0, 0, 0)
+        beamtalk_datetime:year(<<"2024">>, 1, 1, 0, 0, 0)
     ).
 
 %%% ============================================================================
@@ -80,7 +80,7 @@ full_constructor_type_error_test() ->
 
 from_timestamp_epoch_test() ->
     %% Unix epoch = 1970-01-01T00:00:00
-    DT = beamtalk_datetime:'fromTimestamp:'(0),
+    DT = beamtalk_datetime:fromTimestamp(0),
     ?assertEqual(1970, maps:get(year, DT)),
     ?assertEqual(1, maps:get(month, DT)),
     ?assertEqual(1, maps:get(day, DT)),
@@ -90,20 +90,20 @@ from_timestamp_epoch_test() ->
 
 from_timestamp_known_test() ->
     %% 2024-01-01T00:00:00Z = 1704067200
-    DT = beamtalk_datetime:'fromTimestamp:'(1704067200),
+    DT = beamtalk_datetime:fromTimestamp(1704067200),
     ?assertEqual(2024, maps:get(year, DT)),
     ?assertEqual(1, maps:get(month, DT)),
     ?assertEqual(1, maps:get(day, DT)).
 
 from_timestamp_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_datetime:'fromTimestamp:'(<<"1704067200">>)).
+    ?assertBtError(type_error, beamtalk_datetime:fromTimestamp(<<"1704067200">>)).
 
 %%% ============================================================================
 %%% Constructor — fromString:
 %%% ============================================================================
 
 from_string_basic_test() ->
-    DT = beamtalk_datetime:'fromString:'(<<"2024-06-15T10:30:45Z">>),
+    DT = beamtalk_datetime:fromString(<<"2024-06-15T10:30:45Z">>),
     ?assertEqual(2024, maps:get(year, DT)),
     ?assertEqual(6, maps:get(month, DT)),
     ?assertEqual(15, maps:get(day, DT)),
@@ -112,17 +112,17 @@ from_string_basic_test() ->
     ?assertEqual(45, maps:get(second, DT)).
 
 from_string_no_z_test() ->
-    DT = beamtalk_datetime:'fromString:'(<<"2024-06-15T10:30:45">>),
+    DT = beamtalk_datetime:fromString(<<"2024-06-15T10:30:45">>),
     ?assertEqual(2024, maps:get(year, DT)).
 
 from_string_bad_format_test() ->
-    ?assertBtError(type_error, beamtalk_datetime:'fromString:'(<<"not-a-date">>)).
+    ?assertBtError(type_error, beamtalk_datetime:fromString(<<"not-a-date">>)).
 
 from_string_invalid_date_test() ->
-    ?assertBtError(type_error, beamtalk_datetime:'fromString:'(<<"2024-02-30T00:00:00Z">>)).
+    ?assertBtError(type_error, beamtalk_datetime:fromString(<<"2024-02-30T00:00:00Z">>)).
 
 from_string_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_datetime:'fromString:'(20240615)).
+    ?assertBtError(type_error, beamtalk_datetime:fromString(20240615)).
 
 %%% ============================================================================
 %%% Accessors
@@ -147,7 +147,7 @@ as_timestamp_epoch_test() ->
 
 as_timestamp_roundtrip_test() ->
     Ts = 1704067200,
-    DT = beamtalk_datetime:'fromTimestamp:'(Ts),
+    DT = beamtalk_datetime:fromTimestamp(Ts),
     ?assertEqual(Ts, beamtalk_datetime:'asTimestamp'(DT)).
 
 as_string_test() ->
@@ -169,45 +169,45 @@ print_string_test() ->
 
 add_seconds_positive_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
-    DT2 = beamtalk_datetime:'addSeconds:'(DT, 3661),
+    DT2 = beamtalk_datetime:addSeconds(DT, 3661),
     ?assertEqual(1, beamtalk_datetime:hour(DT2)),
     ?assertEqual(1, beamtalk_datetime:minute(DT2)),
     ?assertEqual(1, beamtalk_datetime:second(DT2)).
 
 add_seconds_negative_test() ->
     DT = make_dt(2024, 1, 2, 0, 0, 0),
-    DT2 = beamtalk_datetime:'addSeconds:'(DT, -86400),
+    DT2 = beamtalk_datetime:addSeconds(DT, -86400),
     ?assertEqual(2024, beamtalk_datetime:year(DT2)),
     ?assertEqual(1, beamtalk_datetime:month(DT2)),
     ?assertEqual(1, beamtalk_datetime:day(DT2)).
 
 add_seconds_type_error_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
-    ?assertBtError(type_error, beamtalk_datetime:'addSeconds:'(DT, <<"3600">>)).
+    ?assertBtError(type_error, beamtalk_datetime:addSeconds(DT, <<"3600">>)).
 
 add_days_test() ->
     DT = make_dt(2024, 1, 1, 12, 0, 0),
-    DT2 = beamtalk_datetime:'addDays:'(DT, 30),
+    DT2 = beamtalk_datetime:addDays(DT, 30),
     ?assertEqual(2024, beamtalk_datetime:year(DT2)),
     ?assertEqual(1, beamtalk_datetime:month(DT2)),
     ?assertEqual(31, beamtalk_datetime:day(DT2)).
 
 add_days_type_error_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
-    ?assertBtError(type_error, beamtalk_datetime:'addDays:'(DT, 1.5)).
+    ?assertBtError(type_error, beamtalk_datetime:addDays(DT, 1.5)).
 
 diff_seconds_test() ->
     DT1 = make_dt(2024, 1, 1, 1, 0, 0),
     DT2 = make_dt(2024, 1, 1, 0, 0, 0),
-    ?assertEqual(3600, beamtalk_datetime:'diffSeconds:'(DT1, DT2)).
+    ?assertEqual(3600, beamtalk_datetime:diffSeconds(DT1, DT2)).
 
 diff_seconds_zero_test() ->
     DT = make_dt(2024, 6, 15, 10, 30, 45),
-    ?assertEqual(0, beamtalk_datetime:'diffSeconds:'(DT, DT)).
+    ?assertEqual(0, beamtalk_datetime:diffSeconds(DT, DT)).
 
 diff_seconds_type_error_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
-    ?assertBtError(type_error, beamtalk_datetime:'diffSeconds:'(DT, <<"other">>)).
+    ?assertBtError(type_error, beamtalk_datetime:diffSeconds(DT, <<"other">>)).
 
 %%% ============================================================================
 %%% Comparison
@@ -293,23 +293,23 @@ ffi_shim_fromString_test() ->
     ?assertEqual(2026, beamtalk_datetime:year(Dt)).
 
 ffi_shim_addSeconds_test() ->
-    Dt0 = beamtalk_datetime:'year:month:day:'(2026, 1, 1),
+    Dt0 = beamtalk_datetime:year(2026, 1, 1),
     Dt1 = beamtalk_datetime:addSeconds(Dt0, 3600),
     ?assertEqual(1, beamtalk_datetime:hour(Dt1)).
 
 ffi_shim_addDays_test() ->
-    Dt0 = beamtalk_datetime:'year:month:day:'(2026, 1, 1),
+    Dt0 = beamtalk_datetime:year(2026, 1, 1),
     Dt1 = beamtalk_datetime:addDays(Dt0, 7),
     ?assertEqual(8, beamtalk_datetime:day(Dt1)).
 
 ffi_shim_diffSeconds_test() ->
-    Dt0 = beamtalk_datetime:'year:month:day:'(2026, 1, 1),
-    Dt1 = beamtalk_datetime:'year:month:day:'(2026, 1, 2),
+    Dt0 = beamtalk_datetime:year(2026, 1, 1),
+    Dt1 = beamtalk_datetime:year(2026, 1, 2),
     ?assertEqual(86400, beamtalk_datetime:diffSeconds(Dt1, Dt0)).
 
 ffi_shim_comparisons_test() ->
-    Dt1 = beamtalk_datetime:'year:month:day:'(2025, 1, 1),
-    Dt2 = beamtalk_datetime:'year:month:day:'(2026, 1, 1),
+    Dt1 = beamtalk_datetime:year(2025, 1, 1),
+    Dt2 = beamtalk_datetime:year(2026, 1, 1),
     ?assert(beamtalk_datetime:lt(Dt1, Dt2)),
     ?assert(beamtalk_datetime:gt(Dt2, Dt1)),
     ?assert(beamtalk_datetime:lte(Dt1, Dt1)),
@@ -320,7 +320,7 @@ ffi_shim_comparisons_test() ->
     ?assertNot(beamtalk_datetime:sneq(Dt1, Dt1)).
 
 ffi_shim_sneq_type_error_test() ->
-    Dt = beamtalk_datetime:'year:month:day:'(2026, 1, 1),
+    Dt = beamtalk_datetime:year(2026, 1, 1),
     ?assertBtError(type_error, beamtalk_datetime:sneq(Dt, <<"other">>)).
 
 %%% ============================================================================
@@ -338,7 +338,7 @@ weekday_iso_test() ->
     Dates = [{10, 26}, {10, 27}, {10, 28}, {10, 29}, {10, 30}, {10, 31}, {11, 1}],
     lists:foreach(
         fun({N, {Mo, D}}) ->
-            DT = beamtalk_datetime:'year:month:day:'(2026, Mo, D),
+            DT = beamtalk_datetime:year(2026, Mo, D),
             ?assertEqual(N, beamtalk_datetime:weekday(DT)),
             ?assertEqual(calendar:day_of_the_week(2026, Mo, D), beamtalk_datetime:weekday(DT))
         end,
