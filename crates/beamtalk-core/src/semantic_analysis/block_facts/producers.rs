@@ -817,7 +817,7 @@ pub fn lookup_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
 /// ADR 0131 Phase 4 (BT-3750): and the one block of a `tryDo:` send whose
 /// argument is a block literal, the other exception-like catch boundary. It
 /// is not inlined into a `try`: it compiles to a `fun(StateAcc)` handed to
-/// `beamtalk_result:'tryDo:'/2`, whose body is a `BranchArm` frame like any
+/// `beamtalk_result:tryDo/2`, whose body is a `BranchArm` frame like any
 /// other arm of an exception producer.
 #[must_use]
 pub fn exception_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
@@ -850,7 +850,7 @@ pub fn exception_arm_blocks(expr: &Expression) -> Option<Vec<&Block>> {
                 _ => None,
             }
         }
-        // Only the `Result` class lowers to `beamtalk_result:'tryDo:'/2`: any
+        // Only the `Result` class lowers to `beamtalk_result:tryDo/2`: any
         // other receiver keeps its own `tryDo:` and a dynamic send.
         LocalThreadingFamily::TryDo => match arguments.as_slice() {
             [Expression::Block(body)] if is_result_try_do(receiver, &construct.selector) => {

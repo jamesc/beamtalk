@@ -22,14 +22,15 @@ Used by protocol handlers and op modules.
 %% itself one of these keeps its specific structured kind instead of
 %% collapsing into the generic "Evaluation error: Class:Reason" wrapper.
 %%
-%% Matched as {Tag, Arity} rather than bare Tag: every tag here happens to map
-%% to exactly one arity today, but a same-named tag at a different arity
-%% elsewhere in the codebase (e.g. a hypothetical unrelated 2-arity
-%% `{method_not_found, Reason}`) must NOT be misidentified as "known" just
-%% because the atom matches — that would silently route it through
-%% is_known_error_reason into ensure_structured_error/1's generic catch-all
-%% clause (a degraded `~p` dump), dropping the eval_error `Class:` context,
-%% instead of the intended generic "Evaluation error: Class:Reason" wrapper.
+%% Matched as {Tag, Arity} rather than bare Tag: `class_not_found` is both the
+%% REPL's own 2-tuple and the loader's 4-tuple, and a same-named tag at an
+%% arity no clause handles must NOT be misidentified as "known" — that would
+%% route it through is_known_error_reason into ensure_structured_error/1's
+%% generic catch-all clause (a degraded `~p` dump), dropping the eval_error
+%% `Class:` context, instead of the intended generic
+%% "Evaluation error: Class:Reason" wrapper. (BT-4897: the loader's old 2-tuple
+%% `{method_not_found, Reason}` shared its tag with the 3-tuple DNU shape; it is
+%% now `{method_span_unresolved, Reason, Message}`.)
 -define(KNOWN_ERROR_TUPLE_TAGS, [
     {compile_error, 2},
     {undefined_variable, 2},
@@ -43,7 +44,10 @@ Used by protocol handlers and op modules.
     {invalid_module_name, 2},
     {actors_exist, 3},
     {class_not_found, 2},
+    {class_not_found, 4},
     {method_not_found, 3},
+    {method_span_unresolved, 3},
+    {core_compile_error, 2},
     {unknown_op, 2},
     {inspect_failed, 2},
     {actor_not_alive, 2},
@@ -89,13 +93,10 @@ make(Kind, Source, Message, Hint) ->
 Safely convert a binary to an existing atom, returning error instead of creating new atoms.
 """.
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
-safe_to_existing_atom(<<>>) ->
-    {error, badarg};
 safe_to_existing_atom(Bin) when is_binary(Bin) ->
-    try binary_to_existing_atom(Bin, utf8) of
-        Atom -> {ok, Atom}
-    catch
-        error:badarg -> {error, badarg}
+    case beamtalk_text:to_existing_atom(Bin) of
+        {ok, _} = Ok -> Ok;
+        error -> {error, badarg}
     end;
 safe_to_existing_atom(_) ->
     {error, badarg}.
@@ -271,6 +272,51 @@ ensure_structured_error({method_not_found, ClassName, Selector}) ->
             <<"Use :help ">>, format_name(ClassName), <<" to see available methods.">>
         ])
     );
+ensure_structured_error({class_not_found, Expected, Path, Defined}) when is_list(Defined) ->
+    %% beamtalk_repl_loader:verify_class_present/3: the file compiled but does
+    %% not define the class the caller expected.
+    DefinedText =
+        case Defined of
+            [] ->
+                <<"the file defines no classes">>;
+            _ ->
+                iolist_to_binary([
+                    <<"the file defines: ">>,
+                    lists:join(<<", ">>, [format_name(N) || N <- Defined])
+                ])
+        end,
+    make(
+        class_not_found,
+        'REPL',
+        iolist_to_binary([
+            <<"Class ">>,
+            format_name(Expected),
+            <<" not found in ">>,
+            format_name(Path),
+            <<" (">>,
+            DefinedText,
+            <<")">>
+        ])
+    );
+ensure_structured_error({core_compile_error, #{message := Message}}) ->
+    make(
+        compile_error,
+        'Compiler',
+        iolist_to_binary([<<"Core Erlang compilation failed: ">>, format_name(Message)])
+    );
+ensure_structured_error({core_compile_error, Reason}) ->
+    make(
+        compile_error,
+        'Compiler',
+        iolist_to_binary([<<"Core Erlang compilation failed: ">>, format_name(Reason)])
+    );
+ensure_structured_error({method_span_unresolved, _Reason, Message}) ->
+    %% The compiler port could not resolve the method's span when removing it.
+    make(
+        runtime_error,
+        'REPL',
+        iolist_to_binary([<<"Cannot locate the method to remove: ">>, format_name(Message)])
+    );
 ensure_structured_error({unknown_op, Op}) ->
     make(unknown_op, 'REPL', iolist_to_binary([<<"Unknown operation: ">>, format_name(Op)]));
 ensure_structured_error({inspect_failed, PidStr}) ->
@@ -326,66 +372,32 @@ ensure_structured_error(Reason) ->
 
 -doc """
 Ensure an error reason is structured, with exception class context.
-Delegates known tuple patterns to ensure_structured_error/1 to preserve
-specific error kinds, only falling back to generic wrapper for unknown terms.
+Delegates every shape `is_known_error_reason/1` recognizes (and `eval_error`
+wrappers) to ensure_structured_error/1 to preserve specific error kinds, only
+falling back to the generic `Class: ~p` wrapper for unknown terms.
 """.
 -spec ensure_structured_error(term(), atom()) -> #beamtalk_error{}.
 ensure_structured_error(#beamtalk_error{} = Err, _Class) ->
     Err;
 ensure_structured_error(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}, _Class) ->
     Err;
-ensure_structured_error({compile_error, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
 ensure_structured_error({eval_error, _, _} = Reason, _Class) ->
     ensure_structured_error(Reason);
-ensure_structured_error({undefined_variable, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({file_not_found, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({read_error, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({load_error, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({parse_error, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({invalid_request, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({registration_error, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({module_not_found, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({invalid_module_name, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({actors_exist, _, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({class_not_found, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({method_not_found, _, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({unknown_op, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({inspect_failed, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({actor_not_alive, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({no_source_file, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({module_not_loaded, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({missing_module_name, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
-ensure_structured_error({session_creation_failed, _} = Reason, _Class) ->
-    ensure_structured_error(Reason);
 ensure_structured_error(Reason, Class) ->
-    make(
-        internal_error,
-        'REPL',
-        iolist_to_binary([
-            atom_to_binary(Class, utf8),
-            <<": ">>,
-            io_lib:format("~p", [Reason])
-        ])
-    ).
+    case is_known_error_reason(Reason) of
+        true ->
+            ensure_structured_error(Reason);
+        false ->
+            make(
+                internal_error,
+                'REPL',
+                iolist_to_binary([
+                    atom_to_binary(Class, utf8),
+                    <<": ">>,
+                    io_lib:format("~p", [Reason])
+                ])
+            )
+    end.
 
 -doc """
 Is this term one of the raw-error-tuple shapes ensure_structured_error/1

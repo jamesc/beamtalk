@@ -803,22 +803,10 @@ flatten_ancestor_map_tolerates_a_raising_reader_test() ->
 
 %% Compile and load a module whose `__beamtalk_meta/0` returns `Meta`.
 load_meta_module(Mod, Meta) ->
-    Forms = [
-        {attribute, 1, module, Mod},
-        {attribute, 2, export, [{'__beamtalk_meta', 0}]},
-        {function, 3, '__beamtalk_meta', 0, [
-            {clause, 3, [], [], [erl_parse:abstract(Meta, [{line, 3}])]}
-        ]}
-    ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".erl", Bin),
-    Mod.
+    beamtalk_test_module:meta_module(Mod, Meta).
 
 unload_module(Mod) ->
-    _ = code:purge(Mod),
-    _ = code:delete(Mod),
-    _ = code:purge(Mod),
-    ok.
+    beamtalk_test_module:unload(Mod).
 
 %% Own-only (BT-3801): an ancestor's kinds are not merged into a subclass's;
 %% inherited_class_var_kinds/1 is the diagnostic-only ancestor view, closer
@@ -885,13 +873,11 @@ class_var_kinds_or_unknown_test() ->
 
 %% Compile and load a module whose `__beamtalk_meta/0` body is `BodyExpr`.
 load_meta_body_module(Mod, BodyExpr) ->
-    Forms = [
+    ok = beamtalk_test_module:load(Mod, [
         {attribute, 1, module, Mod},
         {attribute, 2, export, [{'__beamtalk_meta', 0}]},
         {function, 3, '__beamtalk_meta', 0, [{clause, 3, [], [], [BodyExpr]}]}
-    ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".erl", Bin),
+    ]),
     Mod.
 
 read_meta_test_() ->
@@ -961,9 +947,7 @@ read_meta_autoload_loads_unloaded_module_test() ->
     ok = file:write_file(BeamFile, Bin),
     true = code:add_patha(Dir),
     try
-        _ = code:purge(Mod),
-        _ = code:delete(Mod),
-        _ = code:purge(Mod),
+        beamtalk_test_module:unload(Mod),
         ?assertNot(erlang:module_loaded(Mod)),
         %% The guarded reads cannot see a module nobody has loaded yet ...
         ?assertEqual(none, beamtalk_class_metadata:read_meta_detailed(Mod)),
@@ -972,9 +956,7 @@ read_meta_autoload_loads_unloaded_module_test() ->
         ?assertEqual({ok, #{class => 'Auto'}}, beamtalk_class_metadata:read_meta_autoload(Mod))
     after
         code:del_path(Dir),
-        _ = code:purge(Mod),
-        _ = code:delete(Mod),
-        _ = code:purge(Mod),
+        beamtalk_test_module:unload(Mod),
         file:delete(BeamFile),
         file:del_dir(Dir)
     end.

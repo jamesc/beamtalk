@@ -401,7 +401,7 @@ pub(super) fn mark_timer_spawns(class_methods: &mut [MethodMeta]) -> Result<()> 
 /// Mark `Parallel` class methods that spawn their block arguments in separate
 /// BEAM processes.
 ///
-/// Feeds the `spawns_block_selectors()` metadata a future lint uses to warn when
+/// Feeds the `spawns_block` metadata a future lint uses to warn when
 /// a synchronous `self` send appears inside a spawned-block argument (deadlock
 /// risk: an actor blocks in `Parallel all:`, a block does a synchronous send back
 /// to the same actor, and hangs).

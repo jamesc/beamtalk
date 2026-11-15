@@ -145,17 +145,17 @@ read_line_exit_from_io_server_returns_nil_test() ->
 
 read_line_with_prompt_eof_returns_nil_test() ->
     with_mock_gl(eof, fun() ->
-        ?assertEqual(nil, beamtalk_console:'readLine:'(<<"Enter: ">>))
+        ?assertEqual(nil, beamtalk_console:readLine(<<"Enter: ">>))
     end).
 
 read_line_with_prompt_returns_stripped_line_test() ->
     with_mock_gl(<<"answer\n">>, fun() ->
-        ?assertEqual(<<"answer">>, beamtalk_console:'readLine:'(<<"Prompt: ">>))
+        ?assertEqual(<<"answer">>, beamtalk_console:readLine(<<"Prompt: ">>))
     end).
 
 read_line_with_integer_prompt_renders_and_reads_test() ->
     with_mock_gl(<<"42\n">>, fun() ->
-        ?assertEqual(<<"42">>, beamtalk_console:'readLine:'(42))
+        ?assertEqual(<<"42">>, beamtalk_console:readLine(42))
     end).
 
 %%% ============================================================================
@@ -180,7 +180,7 @@ print_to_dying_device_returns_nil_test() ->
     %% When the io server exits without replying, io:put_chars raises exit:_,
     %% caught by write/3's `exit:_Reason -> nil` clause.
     with_dying_gl(fun() ->
-        ?assertEqual(nil, beamtalk_console:'print:'(<<"hello">>))
+        ?assertEqual(nil, beamtalk_console:print(<<"hello">>))
     end).
 
 %%% ============================================================================

@@ -34,6 +34,7 @@ use super::test_stdlib::{
     report_results, run_all_eunit_tests,
 };
 use crate::beam_compiler::escape_erlang_string;
+use crate::commands::fixture::FixtureCompiler;
 use crate::commands::util;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
@@ -541,14 +542,16 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
     for (md_path, btscript_path) in &btscript_files {
         let result = compile_single_test_file(
             btscript_path,
-            &build_dir,
-            opts.no_warnings,
-            opts.warnings_as_errors,
-            &pre_loaded_aliases,
-            // BT-3617 only wired FFI typing into `test-stdlib` proper; markdown
-            // doctests run over `docs/*.md`, not the stdlib tree, so there is
-            // no `extract_stdlib_type_specs()` fallback to apply here.
-            None,
+            &FixtureCompiler::bootstrap(
+                &build_dir,
+                opts.no_warnings,
+                opts.warnings_as_errors,
+                &pre_loaded_aliases,
+                // BT-3617 only wired FFI typing into `test-stdlib` proper;
+                // markdown doctests run over `docs/*.md`, not the stdlib tree,
+                // so there is no `extract_stdlib_type_specs()` fallback here.
+                None,
+            ),
         )
         .wrap_err_with(|| format!("Failed to compile doctests from '{md_path}'"))?;
 

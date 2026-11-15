@@ -23,9 +23,6 @@ use ecow::EcoString;
 /// auto-chained dispatch sequence emitted by `generate_handle_continue`.
 #[derive(Debug, Clone)]
 pub(in crate::core_erlang) struct InitializeChainEntry {
-    /// Beamtalk class name (e.g. `"CachingDatabaseActor"`). Used for diagnostics.
-    #[allow(dead_code)] // reserved for future diagnostic output
-    pub class_name: String,
     /// Compiled Erlang module name for this class (e.g. `"bt@caching_database_actor"`).
     /// The `safe_dispatch` call targets this module so dispatch starts at the
     /// class's own table rather than walking from the leaf.
@@ -917,7 +914,6 @@ impl CoreErlangGenerator {
                 .filter(|c| c.methods.iter().any(|m| m.selector.name() == "initialize"))
                 .map(|c| {
                     vec![InitializeChainEntry {
-                        class_name: c.name.name.to_string(),
                         module_name: self.compiled_module_name(&c.name.name),
                     }]
                 })
@@ -949,10 +945,7 @@ impl CoreErlangGenerator {
                 continue;
             }
             let module_name = self.compiled_module_name(name.as_str());
-            out.push(InitializeChainEntry {
-                class_name: name.to_string(),
-                module_name,
-            });
+            out.push(InitializeChainEntry { module_name });
         }
         out
     }
@@ -2823,7 +2816,10 @@ mod tests {
         let module = module_with_class(class_with_initialize("MyActor"));
         let chain = generator.user_defined_initialize_chain(&module, "MyActor");
         assert_eq!(chain.len(), 1);
-        assert_eq!(chain[0].class_name, "MyActor");
+        assert_eq!(
+            chain[0].module_name,
+            generator.compiled_module_name("MyActor")
+        );
     }
 
     #[test]

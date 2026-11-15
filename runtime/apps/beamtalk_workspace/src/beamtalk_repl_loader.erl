@@ -82,8 +82,7 @@ Extracted from beamtalk_repl_eval.
     load_compiled_module/6,
     extract_trailing_info/1,
     resolve_class_name/1,
-    safe_binary_to_atom/1,
-    safe_list_to_atom/1,
+    existing_atom_or_undefined/1,
     maybe_add_loaded_module/2,
     store_file_class_sources/3,
     store_class_sources/4,
@@ -1028,29 +1027,21 @@ read_installed_shape_version(ModuleName) ->
 resolve_class_name(ClassMap) ->
     case maps:get(name, ClassMap, undefined) of
         N when is_binary(N) ->
-            safe_binary_to_atom(N);
+            existing_atom_or_undefined(N);
         N when is_atom(N) ->
             N;
         N when is_list(N) ->
-            safe_list_to_atom(N);
+            existing_atom_or_undefined(N);
         _ ->
             undefined
     end.
 
--spec safe_binary_to_atom(binary()) -> atom() | undefined.
-safe_binary_to_atom(Bin) ->
-    try
-        binary_to_existing_atom(Bin, utf8)
-    catch
-        error:badarg -> undefined
-    end.
-
--spec safe_list_to_atom(string()) -> atom() | undefined.
-safe_list_to_atom(List) ->
-    try
-        list_to_existing_atom(List)
-    catch
-        error:badarg -> undefined
+%% `atom() | undefined` view of `beamtalk_text:to_existing_atom/1`.
+-spec existing_atom_or_undefined(binary() | string()) -> atom() | undefined.
+existing_atom_or_undefined(Name) ->
+    case beamtalk_text:to_existing_atom(Name) of
+        {ok, Atom} -> Atom;
+        error -> undefined
     end.
 
 %% Reload a class file without REPL session state.
@@ -1854,8 +1845,8 @@ remove_class_method(ClassNameBin, SelectorBin, Side) ->
                             ),
                             Error
                     end;
-                {error, Reason, _Msg} ->
-                    {error, {method_not_found, Reason}}
+                {error, Reason, Msg} ->
+                    {error, {method_span_unresolved, Reason, Msg}}
             end
     end.
 

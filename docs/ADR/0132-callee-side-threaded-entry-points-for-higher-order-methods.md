@@ -138,7 +138,7 @@ registry at each level before the class's own methods; ADR 0084
 runtime-installed funs take part in the same walk.
 
 **One threaded entry already exists.** ADR 0131 §5 gave
-`beamtalk_result:'tryDo:'` an arity-2 clause, `'tryDo:'(Block, StateAcc)
+`beamtalk_result:tryDo` an arity-2 clause, `tryDo(Block, StateAcc)`
 when is_function(Block, 1)`, answering `{Result, StateAcc1}`, sharing
 `protect/1` and the catch sequence with the arity-1 clause, with a Rust ↔
 Erlang conformance fixture. Codegen chooses the arity from the block
@@ -723,7 +723,7 @@ on an overridable one.)
   the same boundary, with the map-as-value making the write survive where
   Pony would forbid the send; I17 is the boundary kept where the frame is
   gone.
-- **Within Beamtalk.** `beamtalk_result:'tryDo:'/2` (ADR 0131 §5) is the
+- **Within Beamtalk.** `beamtalk_result:tryDo/2` (ADR 0131 §5) is the
   first threaded entry. ADR 0129 Phase 0b's `direct_class_methods` is the
   metadata resolution pattern. ADR 0128's opaque-callable fold and its
   per-element tier gate are the in-body lowering for forwarded blocks. ADR
@@ -752,7 +752,7 @@ on an overridable one.)
   threading parameter, `'__t2_<sel>'/n+1`, and two metadata keys. Calling
   a Beamtalk HOM from Erlang with a plain fun is unchanged (the plain
   entry). Hand-writing a native HOM that should thread means adding an
-  arity-`n+1` clause the way `'tryDo:'/2` did, with a conformance fixture
+  arity-`n+1` clause the way `tryDo/2` did, with a conformance fixture
   (`docs/development/erlang-guidelines.md` gains the rule).
 - **Production operator.** No runtime protocol change for existing calls;
   the entry is additive, hot reload of mixed modules degrades to a
@@ -969,7 +969,7 @@ and the per-invocation gate makes one entry accept any mix.
 | 2 | **Resolution.** `send_threaded/4` as the `dispatch/3` walk with the entry lookup at the resolved implementation (extensions, runtime funs and DNU proxies → structured error; DNU → `does_not_understand`); `super_threaded/5`; the non-exact-receiver warning; cross-module forwards and forwards to unknown receivers inside a body; I6 (the ADR 0128 fold seeded from the pack, with `call_threaded` as its gate, in class, value-type, REPL and actor context); the REPL bindings-map rule. | I1 and I4 for unknown and cross-module receivers, I6 pins; `send_threaded` benchmarked against the ~65 ns budget; a module-skew test (new caller, old callee; old caller, new callee; reload mid-cache). | M |
 | 3 | **Callee frames: `Acc` capability per site.** Lift the trailing-family rejections for `Acc` at `Letrec` bodies, the search and keyed folds, arms holding a fold, `on:do:`/`ensure:` arms, bare and stored blocks (Tier 2 by containment with the `'__acc__'` nesting) and the NLR boundary; `Block`'s own intrinsics with a non-literal receiver or argument; `arity`/`respondsTo:` lowering. | I2 and the I9 intrinsic row; a per-site capability corpus (site × fold kind × body × position × tier mix), as BT-3827's; `.core` diff harness lists the expected diffs. | L |
 | 4 | **Late binding, processes, actors.** `safe_dispatch_threaded`, `class_self_send_threaded`, the threaded `dispatch/3` clause; the threaded `class_method_call` variant through `invoke_class_method/7` (I8); actor bodies as paired `dispatch/4` clauses and `'__sealed_'` functions with the `{Result, Acc}` reply; I3; the override lint (§6). | I3, I7 (late-bound), I8 pins; `hom_composability_actor.bt`, `self_send_hom_pool.bt`, `tier2stored_block_matrix_actor.bt` unchanged; `self_send_bench` before and after; the BT-3755 exemption in `local_threading.rs` reduced to the agreement test's non-overlap rule. | M |
-| 5 | **Natives, on demand.** For each Erlang-implemented HOM that should thread: an arity-`n+1` clause sharing the body (the `'tryDo:'/2` shape), a hand-written metadata entry in the native facade, and a `.bt` conformance fixture asserting both arities agree on the raising and non-raising paths. The Erlang guideline. | Per native. | S each |
+| 5 | **Natives, on demand.** For each Erlang-implemented HOM that should thread: an arity-`n+1` clause sharing the body (the `tryDo/2` shape), a hand-written metadata entry in the native facade, and a `.bt` conformance fixture asserting both arities agree on the raising and non-raising paths. The Erlang guideline. | Per native. | S each |
 | 6 | **Close-out.** Docs (`beamtalk-language-features.md` § What Works and What Doesn't, § Passing Blocks Through Class Methods; `docs/agents/expanded.md` § State-Threading Codegen; `debugging.md` verifier table; `erlang-guidelines.md`; `surface-parity.md`); ADR 0131 §6 and ADR 0128 §"Explicitly narrowed" amended to point here; flip every pin; final measurement; Status to Implemented. | CI. | S |
 
 Dependency order: 0 → 1 → 2 → 3 → 4; 5 and 6 after 4. Phase 1 lands with
@@ -1078,7 +1078,7 @@ callees before callers.
   fallback), `crates/beamtalk-codegen/src/core_erlang/class_meta.rs`,
   `runtime/apps/beamtalk_runtime/src/beamtalk_class_dispatch.erl`
   (`class_send/3`), `runtime/apps/beamtalk_runtime/src/beamtalk_dispatch.erl`,
-  `runtime/apps/beamtalk_stdlib/src/beamtalk_result.erl` (`'tryDo:'/2`),
+  `runtime/apps/beamtalk_stdlib/src/beamtalk_result.erl` (`tryDo/2`),
   `stdlib/test/fixtures/adr0132section6_actor.bt.pending`,
   `stdlib/test/fixtures/hom_composability_actor.bt`,
   `stdlib/test/fixtures/self_send_hom_pool.bt`

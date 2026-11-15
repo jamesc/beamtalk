@@ -41,10 +41,11 @@
 //! skipped for that unit rather than fed into the compiler.
 
 use crate::beam_compiler::BeamCompiler;
+use crate::commands::fixture::FixtureCompiler;
 use crate::commands::test_stdlib::{
     self, AssertionCase, CompiledTestFile, EunitBatchResult, TestRunOptions, compile_erl_files,
-    compile_expression_to_core, compile_fixture, extract_assignment_var,
-    generate_eunit_wrapper_for, parse_test_file, run_all_eunit_tests,
+    compile_expression_to_core, extract_assignment_var, generate_eunit_wrapper_for,
+    parse_test_file, run_all_eunit_tests,
 };
 use crate::commands::util;
 use beamtalk_core::ast::{
@@ -824,7 +825,7 @@ fn compile_transform_variant(
 /// Compiles every `@load` fixture referenced by `parsed`, returning the
 /// resulting `bt@...` module names.
 ///
-/// `pre_loaded_aliases`: see `test_stdlib::compile_fixture`'s doc.
+/// `pre_loaded_aliases`: see `FixtureCompiler::bootstrap`'s doc.
 fn compile_load_fixtures(
     parsed: &test_stdlib::ParsedTestFile,
     test_file: &camino::Utf8Path,
@@ -842,17 +843,17 @@ fn compile_load_fixtures(
                 test_file
             );
         }
-        let module_name = compile_fixture(
-            &fixture_path,
+        let module_name = FixtureCompiler::bootstrap(
             build_dir,
             opts.no_warnings,
             opts.warnings_as_errors,
             pre_loaded_aliases,
             // BT-3617 only wired FFI typing into `test-stdlib` proper; the
-            // metamorphic harness is a separate pipeline reusing this same
-            // helper, left out of scope here.
+            // metamorphic harness is a separate pipeline reusing the same
+            // fixture compiler, left out of scope here.
             None,
-        )?;
+        )
+        .compile_fixture(&fixture_path)?;
         fixture_modules.push(module_name);
     }
     Ok(fixture_modules)
@@ -872,7 +873,7 @@ struct FileVariants {
 /// Parses one `.btscript` file, compiles its `@load` fixtures, and builds +
 /// compiles every transform variant of its cases.
 ///
-/// `pre_loaded_aliases`: see `test_stdlib::compile_fixture`'s doc.
+/// `pre_loaded_aliases`: see `FixtureCompiler::bootstrap`'s doc.
 fn process_test_file(
     test_file: &camino::Utf8Path,
     build_dir: &camino::Utf8Path,

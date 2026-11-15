@@ -66,9 +66,7 @@ teardown(PendingTable) ->
     ),
     lists:foreach(
         fun(Mod) ->
-            code:purge(Mod),
-            code:delete(Mod),
-            code:purge(Mod)
+            beamtalk_test_module:unload(Mod)
         end,
         modules()
     ).
@@ -117,9 +115,7 @@ compiled_class_source(Module, ClassName, AbiEntry, OnLoad) ->
     ).
 
 compile_source(Source) ->
-    {ok, Tokens, _} = erl_scan:string(Source),
-    Forms = beamtalk_test_erl_forms:split_forms(Tokens),
-    {ok, _Mod, Binary} = compile:forms(Forms, [binary, return_errors]),
+    {_Mod, Binary} = beamtalk_test_module:compile(Source),
     Binary.
 
 load(Module, Binary) ->

@@ -22,7 +22,7 @@ is_binary/1` before calling it, so it can never hit the list/other case) and
 is pinned by a golden test instead — see `beamtalk_compiler_port_tests.erl`.
 """.
 
--export([to_binary/1, unwrap/1, unwrap_or_raise/4]).
+-export([to_binary/1, to_existing_atom/1, unwrap/1, unwrap_or_raise/4, unwrap_or_raise_message/4]).
 
 -doc "Normalise an atom, binary, String, list, or arbitrary term to a UTF-8 binary.".
 -spec to_binary(term()) -> binary().
@@ -38,6 +38,36 @@ to_binary(Name) when is_list(Name) ->
     list_to_binary(Name);
 to_binary(Name) ->
     list_to_binary(io_lib:format("~p", [Name])).
+
+-doc """
+Resolve a name (bare binary, charlist, or tagged `String`) to an atom that
+already exists — **never creates one**. Client text must not grow the VM atom
+table (atoms are never collected).
+
+Answers `{ok, Atom}`, or `error` for an empty name, a name with no existing
+atom, malformed UTF-8, or any non-text term. This is the single
+existing-atom conversion for the workspace and stdlib; callers decide what
+"unknown" means (a not-found error, an empty result, a skip).
+""".
+-spec to_existing_atom(term()) -> {ok, atom()} | error.
+to_existing_atom({beamtalk_string, Bin}) when is_binary(Bin) ->
+    to_existing_atom(Bin);
+to_existing_atom(<<>>) ->
+    error;
+to_existing_atom(Bin) when is_binary(Bin) ->
+    try binary_to_existing_atom(Bin, utf8) of
+        Atom -> {ok, Atom}
+    catch
+        error:badarg -> error
+    end;
+to_existing_atom([_ | _] = Chars) ->
+    try list_to_existing_atom(Chars) of
+        Atom -> {ok, Atom}
+    catch
+        error:badarg -> error
+    end;
+to_existing_atom(_) ->
+    error.
 
 -doc """
 Unwrap a text value — a tagged `String` or a bare binary — to its bytes.
@@ -62,4 +92,15 @@ unwrap_or_raise(Value, Class, Selector, Hint) ->
     case unwrap(Value) of
         {ok, Bin} -> Bin;
         error -> beamtalk_error:raise_type_error(Class, Selector, Hint)
+    end.
+
+-doc """
+As `unwrap_or_raise/4`, but the `type_error` carries `Message` as its message
+(no hint) — for call sites that author the whole message text.
+""".
+-spec unwrap_or_raise_message(term(), atom(), atom(), term()) -> binary() | no_return().
+unwrap_or_raise_message(Value, Class, Selector, Message) ->
+    case unwrap(Value) of
+        {ok, Bin} -> Bin;
+        error -> beamtalk_error:raise_type_error_message(Class, Selector, Message)
     end.

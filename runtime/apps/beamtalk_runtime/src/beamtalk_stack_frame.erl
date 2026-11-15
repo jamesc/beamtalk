@@ -456,13 +456,13 @@ package_path(Module) ->
 class_segment(Module) ->
     %% The prefix test first: most loaded modules are OTP and runtime ones,
     %% and this runs over all of them.
-    case atom_to_binary(Module, utf8) of
-        <<"bt@", _/binary>> = Name ->
-            case binary:split(Name, <<"@">>, [global]) of
+    case beamtalk_module_name:is_class_module(Module) of
+        true ->
+            case binary:split(atom_to_binary(Module, utf8), <<"@">>, [global]) of
                 [_, _ | _] = Parts -> lists:last(Parts);
                 _ -> undefined
             end;
-        _ ->
+        false ->
             undefined
     end.
 
@@ -496,8 +496,9 @@ a Beamtalk class, a `bt@...` module whose class is not loaded, or a table that
 does not exist yet (early boot). The renderer never guesses a class name from
 the module name (ADR 0139 decision 2).
 
-`class_name_for_module/1` reads a memoised module->class map (no fold per call,
-but each read copies the whole map); `wrap/1` fetches the map once per stack.
+`class_name_for_module/1` is a warm-cache read of one module's own row (cost
+independent of the number of loaded classes); `wrap/1` fetches the whole map
+once per stack.
 """.
 -spec module_to_class(atom()) -> atom() | 'nil'.
 module_to_class(Module) when is_atom(Module) ->
@@ -858,7 +859,7 @@ frame_file(_, _) ->
 
 -spec format_file_path(atom(), string()) -> string().
 format_file_path(Module, File) ->
-    case lists:prefix("bt@stdlib@", atom_to_list(Module)) of
+    case beamtalk_module_name:is_stdlib_module(Module) of
         true -> filename:basename(File);
         false -> make_relative(File)
     end.

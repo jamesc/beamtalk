@@ -374,8 +374,7 @@ with_module(Mod, Fun) ->
     try
         Fun()
     after
-        code:delete(Mod),
-        code:purge(Mod)
+        beamtalk_test_module:unload(Mod)
     end.
 
 %%% ============================================================================

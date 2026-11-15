@@ -22,35 +22,32 @@ the same JSON the WebSocket transport returns via `handle_op/4`.
 %% Helpers
 %%====================================================================
 
-make_msg(Op) ->
-    {protocol_msg, Op, <<"id-1">>, undefined, #{}}.
-
 %%====================================================================
 %% dispatch/4 — term shapes (no JSON in the core path)
 %%====================================================================
 
 dispatch_eval_empty_code_returns_error_term_test() ->
-    Msg = make_msg(<<"eval">>),
+    Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"id-1">>, undefined),
     %% Empty code short-circuits before touching the session pid.
     Result = beamtalk_repl_ops:dispatch(<<"eval">>, #{<<"code">> => <<>>}, Msg, self()),
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
 dispatch_actors_no_registry_returns_actors_term_test() ->
-    Msg = make_msg(<<"actors">>),
+    Msg = beamtalk_test_repl:make_msg(<<"actors">>, <<"id-1">>, undefined),
     %% No beamtalk_actor_registry registered → empty actor list term.
     beamtalk_test_actor_registry:without_registry(fun() ->
         ?assertEqual({actors, []}, beamtalk_repl_ops:dispatch(<<"actors">>, #{}, Msg, self()))
     end).
 
 dispatch_inspect_invalid_pid_returns_error_term_test() ->
-    Msg = make_msg(<<"inspect">>),
+    Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops:dispatch(
         <<"inspect">>, #{<<"actor">> => <<"not-a-pid">>}, Msg, self()
     ),
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
 dispatch_kill_invalid_pid_returns_error_term_test() ->
-    Msg = make_msg(<<"kill">>),
+    Msg = beamtalk_test_repl:make_msg(<<"kill">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops:dispatch(
         <<"kill">>, #{<<"actor">> => <<"bad-pid">>}, Msg, self()
     ),
@@ -63,11 +60,11 @@ dispatch_interrupt_dead_session_returns_status_term_test() ->
     receive
         {'DOWN', MRef, process, Pid, _} -> ok
     end,
-    Msg = make_msg(<<"interrupt">>),
+    Msg = beamtalk_test_repl:make_msg(<<"interrupt">>, <<"id-1">>, undefined),
     ?assertEqual({status, ok}, beamtalk_repl_ops:dispatch(<<"interrupt">>, #{}, Msg, Pid)).
 
 dispatch_unknown_op_returns_error_term_test() ->
-    Msg = make_msg(<<"no-such-op">>),
+    Msg = beamtalk_test_repl:make_msg(<<"no-such-op">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops:dispatch(<<"no-such-op">>, #{}, Msg, self()),
     ?assertMatch({error, #beamtalk_error{}}, Result),
     {error, Err} = Result,
@@ -76,52 +73,52 @@ dispatch_unknown_op_returns_error_term_test() ->
 dispatch_close_returns_status_term_test() ->
     %% `close` is now ported to a native term shape — the {json, Binary}
     %% escape tag was removed once every op returned a native op_result().
-    Msg = make_msg(<<"close">>),
+    Msg = beamtalk_test_repl:make_msg(<<"close">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops:dispatch(<<"close">>, #{}, Msg, self()),
     ?assertEqual({status, ok}, Result).
 
 dispatch_sessions_no_supervisor_returns_sessions_term_test() ->
     %% No beamtalk_session_sup in unit tests → empty sessions list term.
-    Msg = make_msg(<<"sessions">>),
+    Msg = beamtalk_test_repl:make_msg(<<"sessions">>, <<"id-1">>, undefined),
     ?assertEqual({sessions, []}, beamtalk_repl_ops:dispatch(<<"sessions">>, #{}, Msg, self())).
 
 dispatch_describe_returns_describe_term_test() ->
-    Msg = make_msg(<<"describe">>),
+    Msg = beamtalk_test_repl:make_msg(<<"describe">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops:dispatch(<<"describe">>, #{}, Msg, self()),
     ?assertMatch({describe, Ops, Versions} when is_map(Ops) andalso is_map(Versions), Result).
 
 dispatch_load_source_empty_returns_error_term_test() ->
-    Msg = make_msg(<<"load-source">>),
+    Msg = beamtalk_test_repl:make_msg(<<"load-source">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops:dispatch(<<"load-source">>, #{<<"source">> => <<>>}, Msg, self()),
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
 dispatch_nav_query_missing_kind_returns_error_term_test() ->
-    Msg = make_msg(<<"nav-query">>),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops:dispatch(<<"nav-query">>, #{}, Msg, self()),
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
 dispatch_complete_returns_completions_term_test() ->
     %% Empty prefix → empty completions list, no runtime registry needed.
-    Msg = make_msg(<<"complete">>),
+    Msg = beamtalk_test_repl:make_msg(<<"complete">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops:dispatch(<<"complete">>, #{<<"code">> => <<>>}, Msg, self()),
     ?assertEqual({completions, []}, Result).
 
 dispatch_methods_unknown_class_returns_methods_term_test() ->
-    Msg = make_msg(<<"methods">>),
+    Msg = beamtalk_test_repl:make_msg(<<"methods">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops:dispatch(
         <<"methods">>, #{<<"class">> => <<"NoSuchClassXyz">>}, Msg, self()
     ),
     ?assertEqual({methods, [], []}, Result).
 
 dispatch_unload_unknown_class_returns_error_term_test() ->
-    Msg = make_msg(<<"unload">>),
+    Msg = beamtalk_test_repl:make_msg(<<"unload">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops:dispatch(
         <<"unload">>, #{<<"module">> => <<"NoSuchClassXyz">>}, Msg, self()
     ),
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
 dispatch_show_codegen_no_params_returns_error_term_test() ->
-    Msg = make_msg(<<"show-codegen">>),
+    Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops:dispatch(<<"show-codegen">>, #{}, Msg, self()),
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
@@ -130,7 +127,7 @@ dispatch_tracing_invalid_arg_returns_error_term_test() ->
     %% term so dist clients always get an op_result(). An invalid actor PID is
     %% rejected during filter parsing before the trace store is touched, so this
     %% runs without a running store.
-    Msg = make_msg(<<"get-traces">>),
+    Msg = beamtalk_test_repl:make_msg(<<"get-traces">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops:dispatch(
         <<"get-traces">>, #{<<"actor">> => <<"not-a-pid">>}, Msg, self()
     ),
@@ -140,13 +137,13 @@ dispatch_nav_symbols_returns_value_term_test() ->
     %% dispatch(<<"nav-symbols">>) delegates to handle_term/4, which always returns
     %% {value, #{<<"classes">> := List}} — whether the class registry is absent
     %% (empty list) or running (stdlib classes present).
-    Msg = make_msg(<<"nav-symbols">>),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-symbols">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops:dispatch(<<"nav-symbols">>, #{}, Msg, self()),
     ?assertMatch({value, #{<<"classes">> := Classes}} when is_list(Classes), Result).
 
 %% round-trip — encoding a dispatched term reproduces the handle_op JSON.
 encode_completions_term_matches_handle_op_json_test() ->
-    Msg = make_msg(<<"complete">>),
+    Msg = beamtalk_test_repl:make_msg(<<"complete">>, <<"id-1">>, undefined),
     Params = #{<<"code">> => <<>>},
     Term = beamtalk_repl_ops:dispatch(<<"complete">>, Params, Msg, self()),
     Encoded = beamtalk_repl_ops:encode(Term, Msg),
@@ -162,7 +159,7 @@ encode_completions_term_matches_handle_op_json_test() ->
 encode_actors_term_matches_handle_op_json_test() ->
     %% Encoding a dispatched term at the edge must reproduce exactly what the
     %% WebSocket transport returns via handle_op/4 (wire format unchanged).
-    Msg = make_msg(<<"actors">>),
+    Msg = beamtalk_test_repl:make_msg(<<"actors">>, <<"id-1">>, undefined),
     beamtalk_test_actor_registry:without_registry(fun() ->
         Term = beamtalk_repl_ops:dispatch(<<"actors">>, #{}, Msg, self()),
         Encoded = beamtalk_repl_ops:encode(Term, Msg),
@@ -173,7 +170,7 @@ encode_actors_term_matches_handle_op_json_test() ->
     end).
 
 encode_error_term_produces_error_json_test() ->
-    Msg = make_msg(<<"inspect">>),
+    Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"id-1">>, undefined),
     Term = beamtalk_repl_ops:dispatch(
         <<"inspect">>, #{<<"actor">> => <<"not-a-pid">>}, Msg, self()
     ),
@@ -184,7 +181,7 @@ encode_error_term_produces_error_json_test() ->
 encode_value_term_is_identity_encoded_test() ->
     %% the `value` tag carries an already-wire-shaped JSON value, encoded
     %% with identity (no term_to_json). A map of binaries/lists survives intact.
-    Msg = make_msg(<<"nav-query">>),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"id-1">>, undefined),
     Value = #{<<"sites">> => []},
     Encoded = beamtalk_repl_ops:encode({value, Value}, Msg),
     Decoded = json:decode(Encoded),
@@ -194,7 +191,7 @@ encode_value_term_is_identity_encoded_test() ->
 encode_describe_term_matches_handle_op_json_test() ->
     %% Encoding a dispatched term at the edge must reproduce exactly what the
     %% WebSocket transport returns via handle_op/4 (wire format unchanged).
-    Msg = make_msg(<<"describe">>),
+    Msg = beamtalk_test_repl:make_msg(<<"describe">>, <<"id-1">>, undefined),
     Term = beamtalk_repl_ops:dispatch(<<"describe">>, #{}, Msg, self()),
     Encoded = beamtalk_repl_ops:encode(Term, Msg),
     ViaServer = beamtalk_repl_server:handle_op(<<"describe">>, #{}, Msg, self()),
@@ -202,7 +199,7 @@ encode_describe_term_matches_handle_op_json_test() ->
 
 encode_loaded_term_produces_classes_json_test() ->
     %% {loaded, Classes, Warnings} → JSON with "classes" list and "status": ["done"].
-    Msg = make_msg(<<"load-source">>),
+    Msg = beamtalk_test_repl:make_msg(<<"load-source">>, <<"id-1">>, undefined),
     Encoded = beamtalk_repl_ops:encode({loaded, [], []}, Msg),
     Decoded = json:decode(Encoded),
     ?assertEqual([], maps:get(<<"classes">>, Decoded)),
@@ -210,7 +207,7 @@ encode_loaded_term_produces_classes_json_test() ->
 
 encode_codegen_term_produces_core_erlang_json_test() ->
     %% {codegen, CoreErlang, Warnings} → JSON with "core_erlang" field and "status": ["done"].
-    Msg = make_msg(<<"show-codegen">>),
+    Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"id-1">>, undefined),
     CoreErl = <<"module 'Foo' ['new'/0] { }">>,
     Encoded = beamtalk_repl_ops:encode({codegen, CoreErl, []}, Msg),
     Decoded = json:decode(Encoded),
@@ -220,7 +217,7 @@ encode_codegen_term_produces_core_erlang_json_test() ->
 encode_inspect_binary_produces_state_json_test() ->
     %% encode({inspect, Bin}) when is_binary(Bin) → binary inspect clause (line 243).
     %% The binary form carries an already-serialised inspect string from the runtime.
-    Msg = make_msg(<<"inspect">>),
+    Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"id-1">>, undefined),
     StateBin = <<"#Actor<foo> state: #{count => 0}">>,
     Encoded = beamtalk_repl_ops:encode({inspect, StateBin}, Msg),
     Decoded = json:decode(Encoded),

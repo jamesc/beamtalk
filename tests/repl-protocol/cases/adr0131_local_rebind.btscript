@@ -54,7 +54,7 @@ t
 // => 4
 
 // ADR 0131 Phase 4 (BT-3750): the Tier 2 block reaches
-// `beamtalk_result:'tryDo:'/2`, a local-threading producer.
+// `beamtalk_result:tryDo/2`, a local-threading producer.
 (Result tryDo: [t := t + 1. 1 / 0]) isError
 // => true
 

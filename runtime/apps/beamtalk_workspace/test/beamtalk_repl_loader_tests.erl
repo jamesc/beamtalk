@@ -165,26 +165,28 @@ resolve_class_name_undefined_name_test() ->
     ?assertEqual(undefined, Result).
 
 %%====================================================================
-%% safe_binary_to_atom/1
+%% existing_atom_or_undefined/1 (binary)
 %%====================================================================
 
-safe_binary_to_atom_known_test() ->
-    ?assertEqual(lists, beamtalk_repl_loader:safe_binary_to_atom(<<"lists">>)).
+existing_atom_or_undefined_known_test() ->
+    ?assertEqual(lists, beamtalk_repl_loader:existing_atom_or_undefined(<<"lists">>)).
 
-safe_binary_to_atom_unknown_test() ->
+existing_atom_or_undefined_unknown_test() ->
     ?assertEqual(
-        undefined, beamtalk_repl_loader:safe_binary_to_atom(<<"xyzzy_nonexistent_atom_111">>)
+        undefined, beamtalk_repl_loader:existing_atom_or_undefined(<<"xyzzy_nonexistent_atom_111">>)
     ).
 
 %%====================================================================
-%% safe_list_to_atom/1
+%% existing_atom_or_undefined/1 (charlist)
 %%====================================================================
 
-safe_list_to_atom_known_test() ->
-    ?assertEqual(lists, beamtalk_repl_loader:safe_list_to_atom("lists")).
+existing_atom_or_undefined_list_known_test() ->
+    ?assertEqual(lists, beamtalk_repl_loader:existing_atom_or_undefined("lists")).
 
-safe_list_to_atom_unknown_test() ->
-    ?assertEqual(undefined, beamtalk_repl_loader:safe_list_to_atom("xyzzy_nonexistent_atom_222")).
+existing_atom_or_undefined_list_unknown_test() ->
+    ?assertEqual(
+        undefined, beamtalk_repl_loader:existing_atom_or_undefined("xyzzy_nonexistent_atom_222")
+    ).
 
 %%====================================================================
 %% safe_atom_result/1
@@ -721,22 +723,8 @@ loader_teardown(Proj) ->
     %% beamtalk_repl_eval_tests depend on it).
     _ = application:stop(beamtalk_compiler),
     %% Best-effort recursive cleanup of the temp project directory.
-    rm_rf(Proj),
+    beamtalk_test_fs:rm_rf(Proj),
     ok.
-
-rm_rf(Path) ->
-    case filelib:is_dir(Path) of
-        true ->
-            case file:list_dir(Path) of
-                {ok, Entries} ->
-                    lists:foreach(fun(E) -> rm_rf(filename:join(Path, E)) end, Entries),
-                    file:del_dir(Path);
-                {error, _} ->
-                    ok
-            end;
-        false ->
-            file:delete(Path)
-    end.
 
 %% Write a .bt file inside the project src dir and return its absolute path.
 write_bt(Proj, Name, Source) ->

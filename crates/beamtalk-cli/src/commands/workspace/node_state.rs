@@ -4,20 +4,15 @@
 //! Node liveness queries for workspace BEAM nodes.
 //!
 //! Owns all "what state is this node in?" queries: OS liveness checks,
-//! port file nonce reading, and WebSocket health probes. Isolating these
+//! port-file nonce checks and TCP liveness probes. Isolating these
 //! here makes `is_node_running` testable without spawning processes and
 //! puts the OS-specific liveness probing code in one auditable place.
 //!
 //! **DDD Context:** CLI
 
+use super::storage::{NodeInfo, read_port_file};
 use std::net::TcpStream;
 use std::time::Duration;
-
-use miette::{IntoDiagnostic, Result};
-use serde::Deserialize;
-
-use super::storage::{NodeInfo, read_port_file};
-use crate::commands::protocol::ProtocolClient;
 
 /// TCP connect timeout in milliseconds.
 pub(super) const TCP_CONNECT_TIMEOUT_MS: u64 = 2000;
@@ -80,7 +75,7 @@ pub fn is_node_running(info: &NodeInfo, workspace_id: Option<&str>) -> bool {
             super::storage::workspaces_base_dir()
                 .ok()
                 .as_deref()
-                .and_then(|root| read_port_file_nonce(root, info.port))
+                .and_then(|root| beamtalk_workspace::read_port_file_nonce_in(root, info.port))
         };
         match file_nonce {
             Some(file_nonce) => file_nonce == *expected_nonce,
@@ -91,82 +86,11 @@ pub fn is_node_running(info: &NodeInfo, workspace_id: Option<&str>) -> bool {
     }
 }
 
-/// Read the nonce from a port file that matches the given port.
-///
-/// Scans all immediate subdirectories of `workspaces_root` for a `port` file
-/// whose first line matches `port`, returning the second line (the nonce) when
-/// found. Accepts a `workspaces_root` parameter so callers can pass either the
-/// real `~/.beamtalk/workspaces` directory or a temporary directory in tests.
-///
-/// Returns `None` if no matching port file is found or on any I/O error.
-fn read_port_file_nonce(workspaces_root: &std::path::Path, port: u16) -> Option<String> {
-    let entries = std::fs::read_dir(workspaces_root).ok()?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let port_file_path = path.join("port");
-        let Ok(contents) = std::fs::read_to_string(&port_file_path) else {
-            continue;
-        };
-        // Port file format: PORT\nNONCE (two lines of plain text)
-        let mut lines = contents.lines();
-        if let Some(port_line) = lines.next()
-            && let Ok(file_port) = port_line.trim().parse::<u16>()
-            && file_port == port
-        {
-            return lines
-                .next()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
-        }
-    }
-    None
-}
-
-/// Response from a health probe.
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)] // Used in workspace lifecycle and integration tests
-pub struct HealthProbeResponse {
-    /// Workspace identifier reported by the running node.
-    #[allow(dead_code)] // deserialized for protocol completeness; used in Debug output
-    pub workspace_id: String,
-    /// Nonce for stale detection — compared against port file nonce.
-    pub nonce: String,
-    /// Status information from the workspace.
-    #[serde(default)]
-    #[allow(dead_code)] // deserialized for protocol completeness; used in Debug output
-    pub status: Vec<String>,
-}
-
-/// Send a WebSocket health probe to a workspace (ADR 0020).
-///
-/// Connects to the workspace's WebSocket endpoint, authenticates with the
-/// cookie, sends a `{"op":"health"}` message, and returns the parsed response
-/// containing `workspace_id` and `nonce`.
-#[allow(dead_code)] // Available for workspace lifecycle and integration tests
-pub fn tcp_health_probe(host: &str, port: u16, cookie: &str) -> Result<HealthProbeResponse> {
-    let mut client = ProtocolClient::connect(
-        host,
-        port,
-        cookie,
-        Some(Duration::from_millis(TCP_READ_TIMEOUT_MS)),
-    )?;
-
-    // Send health probe request
-    let request = serde_json::json!({"op": "health"});
-    let response = client.send_raw(&request)?;
-    let parsed: HealthProbeResponse = serde_json::from_value(response).into_diagnostic()?;
-    Ok(parsed)
-}
-
 /// Check whether a process is alive by PID.
 ///
-/// Shared with `tests/cli_common`'s stale test-cache-dir sweep,
-/// so this lives in the lib-level `pid_liveness` module rather than here.
-pub(super) use beamtalk_cli::pid_liveness::is_process_alive;
+/// Implemented in `beamtalk_workspace::pid_liveness`, which is shared with
+/// `tests/cli_common` and `beamtalk-desktop-broker`.
+pub(super) use beamtalk_workspace::pid_liveness::is_process_alive;
 
 #[cfg(test)]
 mod tests {
@@ -346,47 +270,5 @@ mod tests {
         assert!(is_node_running(&info, None));
 
         drop(listener);
-    }
-
-    #[test]
-    fn test_read_port_file_nonce_from_plain_text() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        write_port_file(tmp.path(), "ws1", 12345, Some("abc123def456"));
-
-        let nonce = read_port_file_nonce(tmp.path(), 12345);
-        assert_eq!(nonce, Some("abc123def456".to_string()));
-    }
-
-    #[test]
-    fn test_read_port_file_nonce_wrong_port() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        write_port_file(tmp.path(), "ws1", 23456, Some("nonce_value"));
-
-        // Looking for a different port should return None
-        let nonce = read_port_file_nonce(tmp.path(), 54321);
-        assert_eq!(nonce, None);
-    }
-
-    #[test]
-    fn test_read_port_file_nonce_no_nonce_line() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        write_port_file(tmp.path(), "ws1", 11111, None);
-
-        let nonce = read_port_file_nonce(tmp.path(), 11111);
-        assert_eq!(nonce, None, "Missing nonce line should return None");
-    }
-
-    #[test]
-    fn test_read_port_file_nonce_multiple_workspaces_returns_correct() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        write_port_file(tmp.path(), "ws1", 10001, Some("nonce_a"));
-        write_port_file(tmp.path(), "ws2", 10002, Some("nonce_b"));
-        write_port_file(tmp.path(), "ws3", 10003, Some("nonce_c"));
-
-        assert_eq!(
-            read_port_file_nonce(tmp.path(), 10002),
-            Some("nonce_b".to_string())
-        );
-        assert_eq!(read_port_file_nonce(tmp.path(), 10099), None);
     }
 }

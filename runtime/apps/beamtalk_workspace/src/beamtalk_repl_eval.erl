@@ -1328,7 +1328,7 @@ eval_loaded_module(
             throw:{beamtalk_script_exit, Code} ->
                 %% `Program exit: Code` evaluated in a connected session
                 %% (ADR 0099 §3 / Phase 5). This is the job-level exit signal raised
-                %% by `beamtalk_program:'exit:'/1`, not a user error — surface the
+                %% by `beamtalk_program:exit/1`, not a user error — surface the
                 %% status so the shell reports it and terminates the session. Caught
                 %% ahead of the generic clause so it is never wrapped as an error.
                 {script_exit, Code, State};

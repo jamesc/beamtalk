@@ -208,15 +208,16 @@ parse_pid(PidBin) when is_binary(PidBin) ->
 
 -doc """
 Parse a selector binary to an existing atom.
-Uses binary_to_existing_atom to avoid atom table exhaustion from user input.
+Uses `beamtalk_text:to_existing_atom/1` to avoid atom table exhaustion from user
+input; an empty name counts as unknown.
 Raises a structured beamtalk_error if the selector is unknown.
 """.
 -spec parse_selector(binary()) -> atom().
 parse_selector(SelectorBin) ->
-    try
-        binary_to_existing_atom(SelectorBin, utf8)
-    catch
-        error:badarg ->
+    case beamtalk_text:to_existing_atom(SelectorBin) of
+        {ok, Selector} ->
+            Selector;
+        error ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',
@@ -234,15 +235,16 @@ parse_selector(SelectorBin) ->
 
 -doc """
 Parse a class filter binary to an existing atom.
-Uses binary_to_existing_atom to avoid atom table exhaustion from user input.
+Uses `beamtalk_text:to_existing_atom/1` to avoid atom table exhaustion from user
+input; an empty name counts as unknown.
 Raises a structured beamtalk_error if the class name is unknown.
 """.
 -spec parse_class(binary()) -> atom().
 parse_class(ClassBin) ->
-    try
-        binary_to_existing_atom(ClassBin, utf8)
-    catch
-        error:badarg ->
+    case beamtalk_text:to_existing_atom(ClassBin) of
+        {ok, Class} ->
+            Class;
+        error ->
             error(#beamtalk_error{
                 kind = invalid_argument,
                 class = 'Tracing',

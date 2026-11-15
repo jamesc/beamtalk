@@ -14,32 +14,7 @@ fn analyse_with_known_vars_and_classes_injects_user_class_into_hierarchy() {
     use crate::semantic_analysis::class_hierarchy::ClassInfo;
 
     let pre_class = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: EcoString::from("UserClass"),
-        superclass: Some(EcoString::from("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("UserClass", Some("Object"))
     };
 
     let src = "42.";

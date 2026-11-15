@@ -10,7 +10,6 @@
 //! ([`is_stdlib_up_to_date`]), compiles every file, and hands the extracted
 //! class metadata to the generators ([`super::generators`]).
 
-use super::extract_stdlib_type_specs;
 use super::generators::{
     generate_app_file, generate_app_src_file, generate_builtins_rs, generate_class_vars_keys_hrl,
     generate_erlang_builtins_hrl, generate_sentinel_tags_hrl, generate_supervisor_config_hrl,
@@ -25,6 +24,7 @@ use crate::beam_compiler::{
     BeamCompiler, ClassHierarchyContext, CompileContext, compile_source_with_bindings,
 };
 use crate::commands::build::build_alias_metadata;
+use beamtalk_package::native_type_specs::extract_stdlib_type_specs;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::BTreeSet;

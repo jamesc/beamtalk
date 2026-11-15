@@ -35,25 +35,25 @@ next_in_range_test() ->
 %%% ============================================================================
 
 next_integer_returns_integer_test() ->
-    V = beamtalk_random:'nextInteger:'(10),
+    V = beamtalk_random:nextInteger(10),
     ?assert(is_integer(V)).
 
 next_integer_in_range_test() ->
-    V = beamtalk_random:'nextInteger:'(100),
+    V = beamtalk_random:nextInteger(100),
     ?assert(V >= 1),
     ?assert(V =< 100).
 
 next_integer_one_test() ->
-    ?assertEqual(1, beamtalk_random:'nextInteger:'(1)).
+    ?assertEqual(1, beamtalk_random:nextInteger(1)).
 
 next_integer_zero_test() ->
-    ?assertBtError(type_error, beamtalk_random:'nextInteger:'(0)).
+    ?assertBtError(type_error, beamtalk_random:nextInteger(0)).
 
 next_integer_negative_test() ->
-    ?assertBtError(type_error, beamtalk_random:'nextInteger:'(-5)).
+    ?assertBtError(type_error, beamtalk_random:nextInteger(-5)).
 
 next_integer_non_integer_test() ->
-    ?assertBtError(type_error, beamtalk_random:'nextInteger:'(<<"10">>)).
+    ?assertBtError(type_error, beamtalk_random:nextInteger(<<"10">>)).
 
 %%% ============================================================================
 %%% new/0 — constructor
@@ -78,39 +78,39 @@ new_produces_distinct_instances_test() ->
 %%% ============================================================================
 
 seed_returns_random_map_test() ->
-    R = beamtalk_random:'seed:'(42),
+    R = beamtalk_random:seed(42),
     ?assertEqual('Random', maps:get('$beamtalk_class', R)).
 
 seed_same_seed_same_state_test() ->
-    R1 = beamtalk_random:'seed:'(42),
-    R2 = beamtalk_random:'seed:'(42),
+    R1 = beamtalk_random:seed(42),
+    R2 = beamtalk_random:seed(42),
     ?assertEqual(maps:get(state, R1), maps:get(state, R2)).
 
 seed_different_seeds_different_state_test() ->
-    R1 = beamtalk_random:'seed:'(1),
-    R2 = beamtalk_random:'seed:'(2),
+    R1 = beamtalk_random:seed(1),
+    R2 = beamtalk_random:seed(2),
     ?assertNotEqual(maps:get(state, R1), maps:get(state, R2)).
 
 seed_non_integer_test() ->
-    ?assertBtError(type_error, beamtalk_random:'seed:'(<<"42">>)).
+    ?assertBtError(type_error, beamtalk_random:seed(<<"42">>)).
 
 %%% ============================================================================
 %%% next/1 — instance float
 %%% ============================================================================
 
 instance_next_returns_float_test() ->
-    R = beamtalk_random:'seed:'(42),
+    R = beamtalk_random:seed(42),
     V = beamtalk_random:next(R),
     ?assert(is_float(V)).
 
 instance_next_in_range_test() ->
-    R = beamtalk_random:'seed:'(42),
+    R = beamtalk_random:seed(42),
     V = beamtalk_random:next(R),
     ?assert(V >= 0.0),
     ?assert(V < 1.0).
 
 instance_next_deterministic_test() ->
-    R = beamtalk_random:'seed:'(99),
+    R = beamtalk_random:seed(99),
     V1 = beamtalk_random:next(R),
     V2 = beamtalk_random:next(R),
     %% Same instance = same state = same result (value object semantics)
@@ -124,32 +124,32 @@ instance_next_bad_receiver_test() ->
 %%% ============================================================================
 
 instance_next_integer_returns_integer_test() ->
-    R = beamtalk_random:'seed:'(42),
+    R = beamtalk_random:seed(42),
     V = beamtalk_random:nextInteger(R, 100),
     ?assert(is_integer(V)).
 
 instance_next_integer_in_range_test() ->
-    R = beamtalk_random:'seed:'(42),
+    R = beamtalk_random:seed(42),
     V = beamtalk_random:nextInteger(R, 100),
     ?assert(V >= 1),
     ?assert(V =< 100).
 
 instance_next_integer_deterministic_test() ->
-    R = beamtalk_random:'seed:'(7),
+    R = beamtalk_random:seed(7),
     V1 = beamtalk_random:nextInteger(R, 10),
     V2 = beamtalk_random:nextInteger(R, 10),
     ?assertEqual(V1, V2).
 
 instance_next_integer_zero_max_test() ->
-    R = beamtalk_random:'seed:'(1),
+    R = beamtalk_random:seed(1),
     ?assertBtError(type_error, beamtalk_random:nextInteger(R, 0)).
 
 instance_next_integer_negative_max_test() ->
-    R = beamtalk_random:'seed:'(1),
+    R = beamtalk_random:seed(1),
     ?assertBtError(type_error, beamtalk_random:nextInteger(R, -1)).
 
 instance_next_integer_non_integer_max_test() ->
-    R = beamtalk_random:'seed:'(1),
+    R = beamtalk_random:seed(1),
     ?assertBtError(type_error, beamtalk_random:nextInteger(R, 1.5)).
 
 instance_next_integer_bad_receiver_test() ->
@@ -207,12 +207,12 @@ ffi_shim_seed_error_propagates_test() ->
     ?assertBtError(type_error, beamtalk_random:seed(<<"bad">>)).
 
 ffi_shim_instance_next_integer_returns_integer_test() ->
-    R = beamtalk_random:'seed:'(42),
+    R = beamtalk_random:seed(42),
     V = beamtalk_random:nextInteger(R, 100),
     ?assert(is_integer(V)),
     ?assert(V >= 1),
     ?assert(V =< 100).
 
 ffi_shim_instance_next_integer_error_propagates_test() ->
-    R = beamtalk_random:'seed:'(1),
+    R = beamtalk_random:seed(1),
     ?assertBtError(type_error, beamtalk_random:nextInteger(R, 0)).

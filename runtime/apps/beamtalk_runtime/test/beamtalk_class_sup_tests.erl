@@ -10,9 +10,6 @@ eager crash recovery via `beamtalk_class_monitor`.
 """.
 -include_lib("eunit/include/eunit.hrl").
 
-%% Custom logger handler callback (see capture_log/2 tests).
--export([log/2]).
-
 %%====================================================================
 %% Setup/Teardown
 %%====================================================================
@@ -138,58 +135,20 @@ stop_if_alive(_) ->
 minimal_class_info() ->
     #{module => beamtalk_class_bt, superclass => none, methods => #{}, class_methods => #{}}.
 
-kill_and_wait(Pid) ->
-    MRef = erlang:monitor(process, Pid),
-    exit(Pid, kill),
-    receive
-        {'DOWN', MRef, process, Pid, _} -> ok
-    after 5000 -> ?assert(false)
-    end.
-
 %%====================================================================
-%% Logger capture handler (log/2 is the handler callback)
+%% Logger capture (beamtalk_test_log)
 %%====================================================================
 
-log(#{msg := Msg, level := Level}, #{config := #{test_pid := TestPid}}) ->
-    TestPid ! {captured_log, Level, Msg},
-    ok.
-
-add_capture_handler() ->
-    %% The rebar3 eunit node's primary logger level filters warnings out, so
-    %% lower it for the duration of the capture (restored in
-    %% remove_capture_handler/1).
-    #{level := OldLevel} = logger:get_primary_config(),
-    ok = logger:set_primary_config(level, warning),
-    ok = logger:add_handler(
-        bt3236_capture,
-        ?MODULE,
-        #{config => #{test_pid => self()}, level => warning}
-    ),
-    OldLevel.
-
-remove_capture_handler(OldLevel) ->
-    _ = logger:remove_handler(bt3236_capture),
-    _ = logger:set_primary_config(level, OldLevel),
-    %% Drain any queued captures so a later test in this process starts clean.
-    drain_captures().
-
-drain_captures() ->
-    receive
-        {captured_log, _, _} -> drain_captures()
-    after 0 -> ok
-    end.
-
+%% The rebar3 eunit node's primary logger level filters warnings out;
+%% beamtalk_test_log:start_capture/1 lowers it for the capture.
 restart_warning_received() ->
-    receive
-        {captured_log, warning, {Fmt, _Args}} when is_list(Fmt) ->
-            case string:find(Fmt, "auto-restarted") of
-                nomatch -> restart_warning_received();
-                _ -> true
-            end;
-        {captured_log, _, _} ->
-            restart_warning_received()
-    after 0 -> false
-    end.
+    Matches = fun
+        (#{level := warning, msg := {Fmt, _Args}}) when is_list(Fmt) ->
+            string:find(Fmt, "auto-restarted") =/= nomatch;
+        (_) ->
+            false
+    end,
+    beamtalk_test_log:await(Matches, 0) =/= timeout.
 
 %%====================================================================
 %% Tests
@@ -225,12 +184,12 @@ eager_restart_test_() ->
         [
             {"killed class process is eagerly restarted without a message send",
                 {timeout, 30, fun() ->
-                    OldLevel = add_capture_handler(),
+                    Capture = beamtalk_test_log:start_capture(warning),
                     try
                         {ok, OldPid} = beamtalk_object_class:start(
                             'SupTest3236C', minimal_class_info()
                         ),
-                        kill_and_wait(OldPid),
+                        beamtalk_test_proc:kill_and_wait(OldPid),
                         %% No send to the class here — the monitor's 'DOWN' handler
                         %% must bring it back on its own.
                         ?assertEqual(
@@ -270,7 +229,7 @@ eager_restart_test_() ->
                             ok, beamtalk_test_wait:until(fun restart_warning_received/0)
                         )
                     after
-                        remove_capture_handler(OldLevel)
+                        beamtalk_test_log:stop_capture(Capture)
                     end
                 end}}
         ]
@@ -341,7 +300,7 @@ restart_budget_test_() ->
                     {ok, PidA} = beamtalk_object_class:start('SupTest3236E', minimal_class_info()),
                     {ok, PidB} = beamtalk_object_class:start('SupTest3236F', minimal_class_info()),
                     %% First crash: within budget → eagerly restarted.
-                    kill_and_wait(PidA),
+                    beamtalk_test_proc:kill_and_wait(PidA),
                     ?assertEqual(
                         ok,
                         beamtalk_test_wait:until(fun() ->
@@ -353,10 +312,10 @@ restart_budget_test_() ->
                     ),
                     Pid2 = beamtalk_class_registry:whereis_class('SupTest3236E'),
                     %% Second crash inside the window: budget exhausted → stays down.
-                    kill_and_wait(Pid2),
+                    beamtalk_test_proc:kill_and_wait(Pid2),
                     ?assertEqual(undefined, beamtalk_class_registry:whereis_class('SupTest3236E')),
                     %% The budget is per class: an unrelated class still restarts.
-                    kill_and_wait(PidB),
+                    beamtalk_test_proc:kill_and_wait(PidB),
                     ?assertEqual(
                         ok,
                         beamtalk_test_wait:until(fun() ->
@@ -437,7 +396,7 @@ unwatch_test_() ->
                 {ok, Pid} = beamtalk_object_class:start('SupTest3236H', minimal_class_info()),
                 %% Let the watch cast land, then unwatch (synchronous).
                 ok = beamtalk_class_monitor:unwatch('SupTest3236H'),
-                kill_and_wait(Pid),
+                beamtalk_test_proc:kill_and_wait(Pid),
                 ?assertEqual(undefined, beamtalk_class_registry:whereis_class('SupTest3236H'))
             end}
         ]
@@ -458,7 +417,7 @@ monitor_restart_readopts_test_() ->
                     stop_if_alive(MonPid),
                     {ok, NewMon} = beamtalk_class_monitor:start_link(),
                     ?assert(is_process_alive(NewMon)),
-                    kill_and_wait(OldPid),
+                    beamtalk_test_proc:kill_and_wait(OldPid),
                     ?assertEqual(
                         ok,
                         beamtalk_test_wait:until(fun() ->

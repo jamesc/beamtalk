@@ -196,8 +196,7 @@ remote_code_mismatch_undef_compiled(PeerNode) ->
             beamtalk_actor:sync_send(Pid, 'invokeBlockWith:', [Fun])
         )
     after
-        code:delete(ModName),
-        code:purge(ModName),
+        beamtalk_test_module:unload(ModName),
         rpc:call(PeerNode, gen_server, stop, [Pid])
     end.
 
@@ -220,8 +219,7 @@ remote_code_mismatch_badfun_compiled(PeerNode) ->
             beamtalk_actor:sync_send(Pid, 'invokeBlockWith:', [Fun])
         )
     after
-        code:delete(ModName),
-        code:purge(ModName),
+        beamtalk_test_module:unload(ModName),
         rpc:call(PeerNode, code, delete, [ModName]),
         rpc:call(PeerNode, code, purge, [ModName]),
         rpc:call(PeerNode, gen_server, stop, [Pid])

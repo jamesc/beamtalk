@@ -30,9 +30,6 @@ Covers:
 %% Helpers
 %%====================================================================
 
-make_msg(Op) ->
-    {protocol_msg, Op, <<"id-1">>, undefined, #{}}.
-
 setup(SessionId) ->
     {ok, _} = application:ensure_all_started(compiler),
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
@@ -68,7 +65,7 @@ teardown(SessionPid) ->
 %%====================================================================
 
 handle_term_empty_code_returns_empty_expression_error_test() ->
-    Msg = make_msg(<<"eval">>),
+    Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"id-1">>, undefined),
     Result = beamtalk_repl_ops_eval:handle_term(
         <<"eval">>, #{<<"code">> => <<>>}, Msg, self()
     ),
@@ -82,7 +79,7 @@ handle_term_non_empty_eval_success_test_() ->
     {setup, fun() -> setup(<<"test-eval-ops-success">>) end, fun teardown/1, fun(SessionPid) ->
         [
             ?_test(begin
-                Msg = make_msg(<<"eval">>),
+                Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"id-1">>, undefined),
                 Result = beamtalk_repl_ops_eval:handle_term(
                     <<"eval">>, #{<<"code">> => <<"1 + 2">>}, Msg, SessionPid
                 ),
@@ -95,7 +92,7 @@ handle_term_eval_error_wraps_in_beamtalk_error_test_() ->
     {setup, fun() -> setup(<<"test-eval-ops-error">>) end, fun teardown/1, fun(SessionPid) ->
         [
             ?_test(begin
-                Msg = make_msg(<<"eval">>),
+                Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"id-1">>, undefined),
                 %% Unary message not understood by Integer → does_not_understand.
                 Result = beamtalk_repl_ops_eval:handle_term(
                     <<"eval">>, #{<<"code">> => <<"1 unknownMsg">>}, Msg, SessionPid
@@ -134,7 +131,7 @@ handle_term_non_trace_script_exit_test_() ->
         fun teardown_shared_workspace/1, fun(SessionPid) ->
             [
                 ?_test(begin
-                    Msg = make_msg(<<"eval">>),
+                    Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"id-1">>, undefined),
                     Result = beamtalk_repl_ops_eval:handle_term(
                         <<"eval">>, #{<<"code">> => <<"Program exit: 5">>}, Msg, SessionPid
                     ),
@@ -151,7 +148,7 @@ handle_term_trace_mode_returns_trace_shape_test_() ->
     {setup, fun() -> setup(<<"test-eval-ops-trace">>) end, fun teardown/1, fun(SessionPid) ->
         [
             ?_test(begin
-                Msg = make_msg(<<"eval">>),
+                Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"id-1">>, undefined),
                 Result = beamtalk_repl_ops_eval:handle_term(
                     <<"eval">>,
                     #{<<"code">> => <<"1 + 2">>, <<"trace">> => true},
@@ -167,7 +164,7 @@ handle_term_trace_mode_error_wraps_in_beamtalk_error_test_() ->
     {setup, fun() -> setup(<<"test-eval-ops-trace-error">>) end, fun teardown/1, fun(SessionPid) ->
         [
             ?_test(begin
-                Msg = make_msg(<<"eval">>),
+                Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"id-1">>, undefined),
                 %% Unary message not understood by Integer in trace mode →
                 %% does_not_understand, wrapped by ensure_structured_error.
                 %% Covers the error branch at lines 63–64 of
@@ -188,7 +185,7 @@ handle_term_trace_mode_script_exit_test_() ->
         fun teardown_shared_workspace/1, fun(SessionPid) ->
             [
                 ?_test(begin
-                    Msg = make_msg(<<"eval">>),
+                    Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"id-1">>, undefined),
                     %% `Program exit: N` in trace mode also surfaces as
                     %% `{script_exit, N, Output, Warnings}`.
                     %% Covers the uncovered branch at line 61 of
@@ -212,7 +209,7 @@ handle_websocket_encodes_eval_result_to_json_test_() ->
     {setup, fun() -> setup(<<"test-eval-ops-ws">>) end, fun teardown/1, fun(SessionPid) ->
         [
             ?_test(begin
-                Msg = make_msg(<<"eval">>),
+                Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"id-1">>, undefined),
                 Result = beamtalk_repl_ops_eval:handle(
                     <<"eval">>, #{<<"code">> => <<"1 + 2">>}, Msg, SessionPid
                 ),
@@ -233,7 +230,7 @@ handle_term_character_literal_tags_result_test_() ->
     {setup, fun() -> setup(<<"test-eval-ops-char">>) end, fun teardown/1, fun(SessionPid) ->
         [
             ?_test(begin
-                Msg = make_msg(<<"eval">>),
+                Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"id-1">>, undefined),
                 Result = beamtalk_repl_ops_eval:handle_term(
                     <<"eval">>, #{<<"code">> => <<"$A">>}, Msg, SessionPid
                 ),
@@ -241,7 +238,7 @@ handle_term_character_literal_tags_result_test_() ->
                 ?assertMatch({ok, {beamtalk_character, 65}, _, _}, Result)
             end),
             ?_test(begin
-                Msg = make_msg(<<"eval">>),
+                Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"id-1">>, undefined),
                 Result = beamtalk_repl_ops_eval:handle_term(
                     <<"eval">>, #{<<"code">> => <<"65">>}, Msg, SessionPid
                 ),
@@ -259,7 +256,7 @@ handle_websocket_character_displays_distinctly_test_() ->
     {setup, fun() -> setup(<<"test-eval-ops-char-ws">>) end, fun teardown/1, fun(SessionPid) ->
         [
             ?_test(begin
-                Msg = make_msg(<<"eval">>),
+                Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"id-1">>, undefined),
                 Result = beamtalk_repl_ops_eval:handle(
                     <<"eval">>, #{<<"code">> => <<"$A">>}, Msg, SessionPid
                 ),
@@ -267,7 +264,7 @@ handle_websocket_character_displays_distinctly_test_() ->
                 ?assertEqual(<<"$A">>, maps:get(<<"value">>, Decoded))
             end),
             ?_test(begin
-                Msg = make_msg(<<"eval">>),
+                Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"id-1">>, undefined),
                 Result = beamtalk_repl_ops_eval:handle(
                     <<"eval">>, #{<<"code">> => <<"\"hello\"">>}, Msg, SessionPid
                 ),

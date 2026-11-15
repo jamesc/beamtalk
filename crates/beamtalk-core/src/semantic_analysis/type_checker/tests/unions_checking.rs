@@ -5,58 +5,20 @@
 
 use super::super::*;
 use super::common::*;
+use crate::semantic_analysis::class_hierarchy::ClassInfo;
 
 // --- Argument type checking with unions ---
 
 #[test]
 fn union_arg_all_compatible_no_warning() {
     // Union(Integer | Float) passed to param expecting Number → all compatible → no warning
-    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
     let mut hierarchy = ClassHierarchy::with_builtins();
-    hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "Calculator".into(),
-        superclass: Some("Object".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![MethodInfo {
-            selector: "compute:".into(),
-            arity: 1,
-            kind: MethodKind::Primary,
-            defined_in: "Calculator".into(),
-            is_sealed: false,
-            is_internal: false,
-            spawns_block: false,
-            return_type: Some(DeclaredType::parse("Number")),
-            param_types: vec![Some(DeclaredType::parse("Number"))],
-            doc: None,
-
-            origin: None,
-            primitive: None,
-            constant_value: None,
-            answers_receiver: false,
-        }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
-    }]);
+    hierarchy.add_from_beam_meta(vec![class_with_method(
+        "Calculator",
+        "compute:",
+        "Number",
+        "Number",
+    )]);
 
     let mut checker = TypeChecker::new();
     checker.check_argument_types(
@@ -80,52 +42,13 @@ fn union_arg_all_compatible_no_warning() {
 #[test]
 fn union_arg_none_compatible_warns() {
     // Union(String | Symbol) passed to param expecting Integer → none compatible → warning
-    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
     let mut hierarchy = ClassHierarchy::with_builtins();
-    hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "Calculator".into(),
-        superclass: Some("Object".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![MethodInfo {
-            selector: "compute:".into(),
-            arity: 1,
-            kind: MethodKind::Primary,
-            defined_in: "Calculator".into(),
-            is_sealed: false,
-            is_internal: false,
-            spawns_block: false,
-            return_type: Some(DeclaredType::parse("Integer")),
-            param_types: vec![Some(DeclaredType::parse("Integer"))],
-            doc: None,
-
-            origin: None,
-            primitive: None,
-            constant_value: None,
-            answers_receiver: false,
-        }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
-    }]);
+    hierarchy.add_from_beam_meta(vec![class_with_method(
+        "Calculator",
+        "compute:",
+        "Integer",
+        "Integer",
+    )]);
 
     let mut checker = TypeChecker::new();
     checker.check_argument_types(
@@ -155,52 +78,13 @@ fn union_arg_none_compatible_warns() {
 #[test]
 fn union_arg_mixed_compatible_hints() {
     // Union(Integer | String) passed to param expecting Number → Integer matches, String doesn't → hint
-    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
     let mut hierarchy = ClassHierarchy::with_builtins();
-    hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "Calculator".into(),
-        superclass: Some("Object".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![MethodInfo {
-            selector: "compute:".into(),
-            arity: 1,
-            kind: MethodKind::Primary,
-            defined_in: "Calculator".into(),
-            is_sealed: false,
-            is_internal: false,
-            spawns_block: false,
-            return_type: Some(DeclaredType::parse("Number")),
-            param_types: vec![Some(DeclaredType::parse("Number"))],
-            doc: None,
-
-            origin: None,
-            primitive: None,
-            constant_value: None,
-            answers_receiver: false,
-        }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
-    }]);
+    hierarchy.add_from_beam_meta(vec![class_with_method(
+        "Calculator",
+        "compute:",
+        "Number",
+        "Number",
+    )]);
 
     let mut checker = TypeChecker::new();
     checker.check_argument_types(
@@ -230,52 +114,13 @@ fn union_arg_mixed_compatible_hints() {
 #[test]
 fn union_arg_dynamic_still_skips() {
     // Dynamic arg should still skip (no regression)
-    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
     let mut hierarchy = ClassHierarchy::with_builtins();
-    hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "Calculator".into(),
-        superclass: Some("Object".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![MethodInfo {
-            selector: "compute:".into(),
-            arity: 1,
-            kind: MethodKind::Primary,
-            defined_in: "Calculator".into(),
-            is_sealed: false,
-            is_internal: false,
-            spawns_block: false,
-            return_type: Some(DeclaredType::parse("Integer")),
-            param_types: vec![Some(DeclaredType::parse("Integer"))],
-            doc: None,
-
-            origin: None,
-            primitive: None,
-            constant_value: None,
-            answers_receiver: false,
-        }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
-    }]);
+    hierarchy.add_from_beam_meta(vec![class_with_method(
+        "Calculator",
+        "compute:",
+        "Integer",
+        "Integer",
+    )]);
 
     let mut checker = TypeChecker::new();
     checker.check_argument_types(
@@ -309,58 +154,13 @@ fn union_arg_dynamic_still_skips() {
 fn test_hierarchy_with_class_literal_arg(
     param_type: &str,
 ) -> crate::semantic_analysis::class_hierarchy::ClassHierarchy {
-    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![
         ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: "TestCase".into(),
-            superclass: Some("Value".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: None,
             is_value: true,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: std::collections::HashMap::new(),
-            state_has_default: std::collections::HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("TestCase", Some("Value"))
         },
         ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: "ClassChecker".into(),
-            superclass: Some("Object".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: None,
-            is_value: false,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: std::collections::HashMap::new(),
-            state_has_default: std::collections::HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
             methods: vec![MethodInfo {
                 selector: "accept:".into(),
                 arity: 1,
@@ -378,11 +178,7 @@ fn test_hierarchy_with_class_literal_arg(
                 constant_value: None,
                 answers_receiver: false,
             }],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("ClassChecker", Some("Object"))
         },
     ]);
     hierarchy
@@ -800,30 +596,10 @@ fn union_protocol_none_conform_warns() {
 fn union_protocol_mixed_conformance_hints() {
     // Build a protocol "HasSortKey" requiring sortKey.
     // Integer has sortKey (we register it), String does not → hint.
-    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
     let mut hierarchy = ClassHierarchy::with_builtins();
     // Add sortKey to Integer so it conforms
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "SortableInt".into(),
-        superclass: Some("Integer".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
         is_value: true,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: "sortKey".into(),
             arity: 0,
@@ -841,11 +617,7 @@ fn union_protocol_mixed_conformance_hints() {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("SortableInt", Some("Integer"))
     }]);
 
     let mut registry = ProtocolRegistry::new();
@@ -900,35 +672,11 @@ fn union_protocol_mixed_conformance_hints() {
 #[test]
 fn union_type_param_bounds_all_conform_no_warning() {
     // Logger(T :: Printable) where T = Integer | String → both conform → no warning
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "BoundedLogger".into(),
-        superclass: Some("Actor".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
         type_params: vec!["T".into()],
         type_param_bounds: vec![Some("Printable".into())],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("BoundedLogger", Some("Actor"))
     }]);
 
     let mut registry = ProtocolRegistry::new();
@@ -974,35 +722,11 @@ fn union_type_param_bounds_all_conform_no_warning() {
 #[test]
 fn union_type_param_bounds_none_conform_warns() {
     // Logger(T :: HasSortKey) where T = Integer | String → neither conforms → warning
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "BoundedLogger".into(),
-        superclass: Some("Actor".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
         type_params: vec!["T".into()],
         type_param_bounds: vec![Some("HasSortKey".into())],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("BoundedLogger", Some("Actor"))
     }]);
 
     let mut registry = ProtocolRegistry::new();
@@ -1059,58 +783,15 @@ fn union_type_param_bounds_none_conform_warns() {
 #[allow(clippy::too_many_lines)] // large ClassInfo fixture literal
 fn union_type_param_bounds_mixed_conformance_hints() {
     // Logger(T :: HasSortKey) where T = SortableInt | String → SortableInt conforms, String doesn't → hint
-    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![
         ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: "BoundedLogger".into(),
-            superclass: Some("Actor".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: None,
-            is_value: false,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
             type_params: vec!["T".into()],
             type_param_bounds: vec![Some("HasSortKey".into())],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("BoundedLogger", Some("Actor"))
         },
         ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: "SortableInt".into(),
-            superclass: Some("Integer".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: None,
             is_value: true,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
             methods: vec![MethodInfo {
                 selector: "sortKey".into(),
                 arity: 0,
@@ -1128,11 +809,7 @@ fn union_type_param_bounds_mixed_conformance_hints() {
                 constant_value: None,
                 answers_receiver: false,
             }],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("SortableInt", Some("Integer"))
         },
     ]);
 
@@ -1881,29 +1558,8 @@ fn is_type_compatible_mismatched_type_args_rejected() {
 /// must name the offending parameterized member, not bare `Array`).
 #[test]
 fn union_arg_parameterized_member_mismatch_warns() {
-    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "Sink".into(),
-        superclass: Some("Object".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: "take:".into(),
             arity: 1,
@@ -1921,11 +1577,7 @@ fn union_arg_parameterized_member_mismatch_warns() {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Sink", Some("Object"))
     }]);
 
     let arg = InferredType::union_of(&[
@@ -1968,29 +1620,8 @@ fn union_arg_parameterized_member_mismatch_warns() {
 /// is compatible.
 #[test]
 fn union_arg_parameterized_members_all_match_no_warning() {
-    use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "Sink".into(),
-        superclass: Some("Object".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: "take:".into(),
             arity: 1,
@@ -2008,11 +1639,7 @@ fn union_arg_parameterized_members_all_match_no_warning() {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Sink", Some("Object"))
     }]);
 
     let arg = InferredType::union_of(&[

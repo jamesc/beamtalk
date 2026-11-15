@@ -35,8 +35,8 @@ instance method returning a JSON-representable value.
 | `prettyPrint:`  | Beamtalk value → formatted JSON string   |
 """.
 
--export(['parse:'/1, 'generate:'/1, 'prettyPrint:'/1]).
 -export([parse/1, generate/1, prettyPrint/1]).
+
 -export([prettify_term/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -55,11 +55,11 @@ Float, true/false stay as atoms, null becomes nil.
 Returns `Result ok: value` on success, `Result error:` on invalid JSON.
 Type error (non-String argument) still raises.
 """.
--spec 'parse:'(beamtalk_string:t() | binary()) -> beamtalk_result:t().
-%% BT-4173: a bare binary spells the same text (pre-flip calls stay valid).
-'parse:'(JsonStr) when is_binary(JsonStr) ->
-    'parse:'({beamtalk_string, JsonStr});
-'parse:'({beamtalk_string, JsonStr}) when is_binary(JsonStr) ->
+-spec parse(beamtalk_string:t() | binary()) -> beamtalk_result:t().
+parse(Arg) ->
+    JsonStr = beamtalk_text:unwrap_or_raise(
+        Arg, 'Json', 'parse:', <<"Argument must be a String">>
+    ),
     try
         Value = json:decode(JsonStr),
         normalize_ok(Value)
@@ -76,9 +76,7 @@ Type error (non-String argument) still raises.
                 #{reason => Reason}
             ),
             beamtalk_result:from_tagged_tuple({error, Error})
-    end;
-'parse:'(_) ->
-    beamtalk_error:raise_type_error('Json', 'parse:', <<"Argument must be a String">>).
+    end.
 
 -doc """
 Generate a JSON string from a Beamtalk value.
@@ -88,8 +86,8 @@ JSON strings, Integer/Float become numbers, true/false become JSON
 booleans, nil becomes null. Custom objects that implement `asJson`
 are converted via that hook.
 """.
--spec 'generate:'(term()) -> beamtalk_string:t().
-'generate:'(Value) ->
+-spec generate(term()) -> beamtalk_string:t().
+generate(Value) ->
     beamtalk_primitive:string_from_binary(
         encode_with_errors('generate:', fun() ->
             iolist_to_binary(json:encode(prepare_for_encode(Value)))
@@ -97,8 +95,8 @@ are converted via that hook.
     ).
 
 -doc "Generate a pretty-printed JSON string with indentation.".
--spec 'prettyPrint:'(term()) -> beamtalk_string:t().
-'prettyPrint:'(Value) ->
+-spec prettyPrint(term()) -> beamtalk_string:t().
+prettyPrint(Value) ->
     beamtalk_primitive:string_from_binary(
         encode_with_errors('prettyPrint:', fun() ->
             Prepared = prepare_for_encode(Value),
@@ -138,22 +136,8 @@ encode_with_errors(Selector, Encode) ->
     end.
 
 %%% ============================================================================
-%%% FFI aliases — no-colon names for Erlang FFI dispatch
+%%% Pretty printing
 %%% ============================================================================
-
--doc "FFI alias for parse:/1 — called via (Erlang beamtalk_json) parse: str.".
--spec parse(beamtalk_string:t()) -> term().
-parse(X) -> 'parse:'(X).
-
--doc "FFI alias for generate:/1 — called via (Erlang beamtalk_json) generate: val.".
--spec generate(term()) -> beamtalk_string:t().
-generate(X) -> 'generate:'(X).
-
--doc """
-FFI alias for prettyPrint:/1 — called via (Erlang beamtalk_json) prettyPrint: val.
-""".
--spec prettyPrint(term()) -> beamtalk_string:t().
-prettyPrint(X) -> 'prettyPrint:'(X).
 
 -doc """
 Encode a term to pretty-printed JSON binary.

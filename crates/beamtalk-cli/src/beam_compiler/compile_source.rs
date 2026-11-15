@@ -125,7 +125,7 @@ pub struct CompileContext<'a> {
     /// re-filter already-unchanged files until they're next recompiled
     /// (content change or `--force`) — a known, narrow limitation of the
     /// replay path, not a bug in this field itself.
-    pub diagnostics_overrides: crate::commands::manifest::DiagnosticsTable,
+    pub diagnostics_overrides: beamtalk_package::manifest::DiagnosticsTable,
     /// Where diagnostics that lie in a flattened trait provision's protocol
     /// file are reported (ADR 0127 §3). Disabled by default (each file
     /// prints its own immediately); a whole-package build enables it so a
@@ -335,7 +335,7 @@ pub fn compile_source(
 pub(crate) fn diagnostics_are_errors(
     diagnostics: &[beamtalk_core::source_analysis::Diagnostic],
     options: &beamtalk_core::CompilerOptions,
-    diagnostics_overrides: &crate::commands::manifest::DiagnosticsTable,
+    diagnostics_overrides: &beamtalk_package::manifest::DiagnosticsTable,
 ) -> bool {
     diagnostics.iter().any(|d| {
         d.severity == beamtalk_core::source_analysis::Severity::Error
@@ -424,7 +424,7 @@ pub(crate) fn analyse_source_with_bindings(
             // extensions are in `extension_index` (ADR 0070 WS3, BT-4608).
             options: beamtalk_core::CompilerOptions {
                 dependency_extensions_unknown:
-                    beamtalk_cli::dependency_extensions::dependency_extensions_unknown(
+                    beamtalk_project::dependency_extensions::dependency_extensions_unknown(
                         options.dependency_extensions_unknown,
                         true,
                         ctx.hierarchy.dependency_extensions_complete,
@@ -852,7 +852,7 @@ mod tests {
     const UNRESOLVED_CLASS_SOURCE: &str = "NonExistentClassBt2793";
 
     fn diagnostics_table_ctx(
-        table: crate::commands::manifest::DiagnosticsTable,
+        table: beamtalk_package::manifest::DiagnosticsTable,
     ) -> CompileContext<'static> {
         CompileContext {
             diagnostics_overrides: table,
@@ -867,37 +867,12 @@ mod tests {
     /// build. A single standalone file otherwise can't tell an unresolved
     /// class name apart from one defined in a sibling file it hasn't seen.
     fn diagnostics_table_ctx_with_cross_file_classes(
-        table: crate::commands::manifest::DiagnosticsTable,
+        table: beamtalk_package::manifest::DiagnosticsTable,
     ) -> CompileContext<'static> {
         use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 
         let sibling = ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: "SiblingBt2793".into(),
-            superclass: Some("Object".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: None,
-            is_value: false,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: std::collections::HashMap::new(),
-            state_has_default: std::collections::HashMap::new(),
-            state_kinds: std::collections::HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("SiblingBt2793", Some("Object"))
         };
 
         CompileContext {
@@ -927,7 +902,7 @@ mod tests {
             &core_file,
             &options,
             &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
-            &diagnostics_table_ctx(crate::commands::manifest::DiagnosticsTable::new()),
+            &diagnostics_table_ctx(beamtalk_package::manifest::DiagnosticsTable::new()),
             None,
         )
         .expect("Dnu hint alone must not fail the build");
@@ -948,10 +923,10 @@ mod tests {
         let core_file = temp_path.join("dnu.core");
         fs::write(&source_file, DNU_HINT_SOURCE).unwrap();
 
-        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        let mut table = beamtalk_package::manifest::DiagnosticsTable::new();
         table.insert(
             beamtalk_core::source_analysis::DiagnosticCategory::Dnu,
-            crate::commands::manifest::DiagnosticSeverityOverride::Off,
+            beamtalk_package::manifest::DiagnosticSeverityOverride::Off,
         );
 
         let options = beamtalk_core::CompilerOptions::default();
@@ -987,10 +962,10 @@ mod tests {
         let core_file = temp_path.join("dnu.core");
         fs::write(&source_file, "@expect dnu\n\"hello\" frobnicate").unwrap();
 
-        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        let mut table = beamtalk_package::manifest::DiagnosticsTable::new();
         table.insert(
             beamtalk_core::source_analysis::DiagnosticCategory::Dnu,
-            crate::commands::manifest::DiagnosticSeverityOverride::Error,
+            beamtalk_package::manifest::DiagnosticSeverityOverride::Error,
         );
 
         let options = beamtalk_core::CompilerOptions::default();
@@ -1024,10 +999,10 @@ mod tests {
         let core_file = temp_path.join("dnu.core");
         fs::write(&source_file, DNU_HINT_SOURCE).unwrap();
 
-        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        let mut table = beamtalk_package::manifest::DiagnosticsTable::new();
         table.insert(
             beamtalk_core::source_analysis::DiagnosticCategory::Dnu,
-            crate::commands::manifest::DiagnosticSeverityOverride::Error,
+            beamtalk_package::manifest::DiagnosticSeverityOverride::Error,
         );
 
         let options = beamtalk_core::CompilerOptions::default();
@@ -1061,10 +1036,10 @@ mod tests {
         let core_file = temp_path.join("actor_new.core");
         fs::write(&source_file, ACTOR_NEW_SOURCE).unwrap();
 
-        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        let mut table = beamtalk_package::manifest::DiagnosticsTable::new();
         table.insert(
             beamtalk_core::source_analysis::DiagnosticCategory::ActorNew,
-            crate::commands::manifest::DiagnosticSeverityOverride::Warn,
+            beamtalk_package::manifest::DiagnosticSeverityOverride::Warn,
         );
 
         let options = beamtalk_core::CompilerOptions::default();
@@ -1094,10 +1069,10 @@ mod tests {
         let core_file = temp_path.join("actor_new.core");
         fs::write(&source_file, ACTOR_NEW_SOURCE).unwrap();
 
-        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        let mut table = beamtalk_package::manifest::DiagnosticsTable::new();
         table.insert(
             beamtalk_core::source_analysis::DiagnosticCategory::ActorNew,
-            crate::commands::manifest::DiagnosticSeverityOverride::Off,
+            beamtalk_package::manifest::DiagnosticSeverityOverride::Off,
         );
 
         let options = beamtalk_core::CompilerOptions::default();
@@ -1138,7 +1113,7 @@ mod tests {
             &options,
             &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
             &diagnostics_table_ctx_with_cross_file_classes(
-                crate::commands::manifest::DiagnosticsTable::new(),
+                beamtalk_package::manifest::DiagnosticsTable::new(),
             ),
             None,
         );
@@ -1162,10 +1137,10 @@ mod tests {
         let core_file = temp_path.join("unresolved.core");
         fs::write(&source_file, UNRESOLVED_CLASS_SOURCE).unwrap();
 
-        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        let mut table = beamtalk_package::manifest::DiagnosticsTable::new();
         table.insert(
             beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass,
-            crate::commands::manifest::DiagnosticSeverityOverride::Warn,
+            beamtalk_package::manifest::DiagnosticSeverityOverride::Warn,
         );
 
         let options = beamtalk_core::CompilerOptions {
@@ -1204,10 +1179,10 @@ mod tests {
         let core_file = temp_path.join("unresolved.core");
         fs::write(&source_file, UNRESOLVED_CLASS_SOURCE).unwrap();
 
-        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        let mut table = beamtalk_package::manifest::DiagnosticsTable::new();
         table.insert(
             beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass,
-            crate::commands::manifest::DiagnosticSeverityOverride::Hint,
+            beamtalk_package::manifest::DiagnosticSeverityOverride::Hint,
         );
 
         let options = beamtalk_core::CompilerOptions {
@@ -1245,10 +1220,10 @@ mod tests {
         let core_file = temp_path.join("unresolved.core");
         fs::write(&source_file, UNRESOLVED_CLASS_SOURCE).unwrap();
 
-        let mut table = crate::commands::manifest::DiagnosticsTable::new();
+        let mut table = beamtalk_package::manifest::DiagnosticsTable::new();
         table.insert(
             beamtalk_core::source_analysis::DiagnosticCategory::UnresolvedClass,
-            crate::commands::manifest::DiagnosticSeverityOverride::Lint,
+            beamtalk_package::manifest::DiagnosticSeverityOverride::Lint,
         );
 
         let options = beamtalk_core::CompilerOptions {

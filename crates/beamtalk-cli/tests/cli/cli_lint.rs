@@ -457,7 +457,7 @@ fn expect_dead_assignment_not_stale_across_lint_build_and_test_bt_3384() {
 /// `is_under_stdlib_src_dir` is purely path-shape based (any ancestor
 /// `stdlib/src` pair), so a hermetic temp dir shaped that way exercises the
 /// same code path as the real `stdlib/src` without depending on it.
-/// `beamtalk_uuid:'isValid:'/1` is a real exported function in this repo's
+/// `beamtalk_uuid:isValid/1` is a real exported function in this repo's
 /// own built runtime (pinned via `BEAMTALK_RUNTIME_DIR`, see
 /// `cli_common::beamtalk`), so a correctly-populated registry infers its
 /// return type instead of reporting the expression Dynamic.

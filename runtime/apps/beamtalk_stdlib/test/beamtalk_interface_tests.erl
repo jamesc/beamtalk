@@ -14,67 +14,21 @@ in findSendersIn/2 and findReferencesToIn/2, while [] is still returned
 (per-method fault-tolerance contract unchanged).
 """.
 
-%% Logger handler callback for log capture
--export([log/2]).
-
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
-%%% Logger handler callback
-%%% ============================================================================
-
-%% Capture log events and forward to the test process.
-log(LogEvent, #{config := #{parent := Parent}}) ->
-    Parent ! {captured_log, LogEvent},
-    ok.
-
-%%% ============================================================================
 %%% Helpers
 %%% ============================================================================
 
-install_capture_handler() ->
-    HandlerId = beamtalk_interface_test_capture,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{
-        config => #{parent => self()},
-        level => all
-    }),
-    %% Lower the primary logger level to 'all' so our capture handler receives
-    %% warning/error events. The sys.config for tests sets primary level to 'error'
-    %% to suppress noise; we restore it after the test.
-    #{level := OrigLevel} = logger:get_primary_config(),
-    ok = logger:set_primary_config(level, all),
-    {HandlerId, OrigLevel}.
-
-remove_capture_handler({HandlerId, OrigLevel}) ->
-    logger:remove_handler(HandlerId),
-    logger:set_primary_config(level, OrigLevel).
-
-%% Drain one log event from the mailbox that matches a given level.
+%% Wait for one captured log event of the given level.
 %% Returns {ok, LogEvent} | not_found.
-%% Uses a fixed deadline so non-matching events consume the timeout budget
-%% rather than resetting it on each recursion (avoids waiting far longer than
-%% Timeout under log noise).
 collect_log(Level, Timeout) ->
-    Deadline = erlang:monotonic_time(millisecond) + Timeout,
-    collect_log_until(Level, Deadline).
-
-collect_log_until(Level, Deadline) ->
-    Remaining = Deadline - erlang:monotonic_time(millisecond),
-    case Remaining =< 0 of
-        true ->
-            not_found;
-        false ->
-            receive
-                {captured_log, #{level := Level} = E} ->
-                    {ok, E};
-                {captured_log, _Other} ->
-                    collect_log_until(Level, Deadline)
-            after Remaining ->
-                not_found
-            end
+    case beamtalk_test_log:await(fun(#{level := L}) -> L =:= Level end, Timeout) of
+        {ok, E} -> {ok, E};
+        timeout -> not_found
     end.
 
 %%% ============================================================================
@@ -84,7 +38,7 @@ collect_log_until(Level, Deadline) ->
 log_compiler_diagnostics_warning_test() ->
     %% Diagnostics that do NOT indicate port unavailability should trigger
     %% a LOG_WARNING.
-    Handle = install_capture_handler(),
+    Handle = beamtalk_test_log:start_capture(all),
     try
         Diagnostics = [#{message => <<"Parse error: unexpected token">>}],
         beamtalk_interface:log_compiler_diagnostics(Diagnostics, 'findSendersIn:selector:'),
@@ -97,7 +51,7 @@ log_compiler_diagnostics_warning_test() ->
         ?assertEqual('findSendersIn:selector:', maps:get(selector, Meta)),
         ?assertEqual(Diagnostics, maps:get(diagnostics, Meta))
     after
-        remove_capture_handler(Handle)
+        beamtalk_test_log:stop_capture(Handle)
     end.
 
 %%% ============================================================================
@@ -107,7 +61,7 @@ log_compiler_diagnostics_warning_test() ->
 log_compiler_diagnostics_error_on_port_unavailable_test() ->
     %% Diagnostics that indicate the compiler server is not available should
     %% trigger a LOG_ERROR (not just a warning).
-    Handle = install_capture_handler(),
+    Handle = beamtalk_test_log:start_capture(all),
     try
         Diagnostics = [#{message => <<"Compiler server is not available">>}],
         beamtalk_interface:log_compiler_diagnostics(Diagnostics, 'findReferencesToIn:class:'),
@@ -119,7 +73,7 @@ log_compiler_diagnostics_error_on_port_unavailable_test() ->
         ?assertEqual('findReferencesToIn:class:', maps:get(selector, Meta)),
         ?assertEqual(Diagnostics, maps:get(diagnostics, Meta))
     after
-        remove_capture_handler(Handle)
+        beamtalk_test_log:stop_capture(Handle)
     end.
 
 %%% ============================================================================
@@ -128,7 +82,7 @@ log_compiler_diagnostics_error_on_port_unavailable_test() ->
 
 log_compiler_diagnostics_error_on_timeout_test() ->
     %% "timed out" diagnostics also escalate to LOG_ERROR.
-    Handle = install_capture_handler(),
+    Handle = beamtalk_test_log:start_capture(all),
     try
         Diagnostics = [#{message => <<"Compiler server timed out">>}],
         beamtalk_interface:log_compiler_diagnostics(Diagnostics, 'findSendersIn:selector:'),
@@ -140,7 +94,7 @@ log_compiler_diagnostics_error_on_timeout_test() ->
         ?assertEqual('findSendersIn:selector:', maps:get(selector, Meta)),
         ?assertEqual(Diagnostics, maps:get(diagnostics, Meta))
     after
-        remove_capture_handler(Handle)
+        beamtalk_test_log:stop_capture(Handle)
     end.
 
 %%% ============================================================================
@@ -239,20 +193,27 @@ version_matches_app_vsn_when_loaded_test() ->
 
 dispatch_version_matches_app_vsn_when_loaded_test() ->
     _ = application:load(beamtalk_runtime),
-    Result = beamtalk_interface:dispatch(version, [], fake_self()),
+    Result = beamtalk_interface:dispatch(
+        version, [], beamtalk_test_repl:fake_self(beamtalk, self())
+    ),
     case application:get_key(beamtalk_runtime, vsn) of
         {ok, Vsn} -> ?assertEqual({beamtalk_string, list_to_binary(Vsn)}, Result);
         _ -> ?assertEqual({beamtalk_string, <<"unknown">>}, Result)
     end.
 
 dispatch_version_returns_string_test() ->
-    ?assertMatch({beamtalk_string, _}, beamtalk_interface:dispatch(version, [], fake_self())).
+    ?assertMatch(
+        {beamtalk_string, _},
+        beamtalk_interface:dispatch(version, [], beamtalk_test_repl:fake_self(beamtalk, self()))
+    ).
 
 dispatch_unknown_selector_raises_dnu_test() ->
     ?assertBtError(
         does_not_understand,
         'Beamtalk',
-        beamtalk_interface:dispatch(noSuchSelectorXyz, [], fake_self())
+        beamtalk_interface:dispatch(
+            noSuchSelectorXyz, [], beamtalk_test_repl:fake_self(beamtalk, self())
+        )
     ).
 
 %%% ============================================================================
@@ -264,10 +225,6 @@ dispatch_unknown_selector_raises_dnu_test() ->
 %%% format_class_help / format_method_help / collect_flattened_methods /
 %%% find_defining_class hierarchy-walking helpers and the not-found error paths.
 %%% ============================================================================
-
-%% A fake Self value — Beamtalk primitives ignore Self entirely.
-fake_self() ->
-    {beamtalk_object, 'Beamtalk class', 'bt@stdlib@beamtalk', self()}.
 
 live_setup() ->
     %% Boot through the shared beamtalk_test_boot helper rather than
@@ -413,17 +370,19 @@ live_registry_test_() ->
             end},
             {"dispatch help: routes to handle_help", fun() ->
                 {beamtalk_string, H} = beamtalk_interface:dispatch(
-                    'help:', ['Integer'], fake_self()
+                    'help:', ['Integer'], beamtalk_test_repl:fake_self(beamtalk, self())
                 )
             end},
             {"dispatch help:selector: routes to handle_help_selector", fun() ->
                 {beamtalk_string, H} = beamtalk_interface:dispatch(
-                    'help:selector:', ['Integer', '+'], fake_self()
+                    'help:selector:',
+                    ['Integer', '+'],
+                    beamtalk_test_repl:fake_self(beamtalk, self())
                 )
             end},
             {"dispatch erlangHelp: routes through", fun() ->
                 {beamtalk_string, H} = beamtalk_interface:dispatch(
-                    'erlangHelp:', [<<"lists">>], fake_self()
+                    'erlangHelp:', [<<"lists">>], beamtalk_test_repl:fake_self(beamtalk, self())
                 )
             end},
             {"erlangHelp: on a known module returns docs", fun() ->
@@ -469,19 +428,25 @@ live_registry_test_() ->
                 ?assert(is_list(R))
             end},
             {"dispatch allClasses routes to allClasses/0", fun() ->
-                R = beamtalk_interface:dispatch(allClasses, [], fake_self()),
+                R = beamtalk_interface:dispatch(
+                    allClasses, [], beamtalk_test_repl:fake_self(beamtalk, self())
+                ),
                 ?assert(is_list(R)),
                 ?assert(length(R) > 0)
             end},
             {"dispatch classNamed: routes to handle_class_named", fun() ->
                 ?assertMatch(
                     {beamtalk_object, 'Integer class', _, _},
-                    beamtalk_interface:dispatch('classNamed:', ['Integer'], fake_self())
+                    beamtalk_interface:dispatch(
+                        'classNamed:', ['Integer'], beamtalk_test_repl:fake_self(beamtalk, self())
+                    )
                 )
             end},
             {"dispatch erlangHelp:selector: routes through", fun() ->
                 {beamtalk_string, R} = beamtalk_interface:dispatch(
-                    'erlangHelp:selector:', [<<"lists">>, <<"reverse">>], fake_self()
+                    'erlangHelp:selector:',
+                    [<<"lists">>, <<"reverse">>],
+                    beamtalk_test_repl:fake_self(beamtalk, self())
                 )
             end},
             {"help: on the root class renders a header without '<'", fun() ->
@@ -532,7 +497,9 @@ live_registry_test_() ->
                 ?assertBtError(
                     class_not_found,
                     beamtalk_interface:dispatch(
-                        'help:selector:', ['ZzzNoSuchClass', foo], fake_self()
+                        'help:selector:',
+                        ['ZzzNoSuchClass', foo],
+                        beamtalk_test_repl:fake_self(beamtalk, self())
                     )
                 )
             end},

@@ -151,7 +151,7 @@ class_testDnu(_ClassSelf) ->
 -doc """
 Zero-argument class method that raises the connected `Program exit:` signal
 (ADR 0099 §3) — `throw({beamtalk_script_exit, 7})` — exactly as
-`beamtalk_program:'exit:'/1` does inside a method body. Exercises the
+`beamtalk_program:exit/1` does inside a method body. Exercises the
 script-exit pass-through in the class-method apply catch + the re-raise in
 class_send_dispatch/3.
 """.

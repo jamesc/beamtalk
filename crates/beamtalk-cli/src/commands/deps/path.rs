@@ -18,8 +18,8 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::collections::HashMap;
 use tracing::{debug, info};
 
-use crate::commands::build_layout::BuildLayout;
-use crate::commands::manifest;
+use beamtalk_core::build_layout::BuildLayout;
+use beamtalk_package::manifest;
 
 /// A resolved dependency with its compiled ebin path and class index.
 #[derive(Debug)]
@@ -88,7 +88,7 @@ pub struct ResolvedDependency {
     /// the pre-WS3 dependency guard lifts only when every dependency's is
     /// complete. The default is *unknown* (incomplete), which keeps the guard
     /// on.
-    pub extensions: beamtalk_cli::dependency_extensions::DependencyExtensions,
+    pub extensions: beamtalk_project::dependency_extensions::DependencyExtensions,
 }
 
 /// Runs `f` over the dependencies in `resolved` that `dep_name` depends on,
@@ -412,7 +412,7 @@ fn compile_dependency_with_context(
         // package is compiled as someone else's dependency. Low practical
         // impact — dependency diagnostics are never surfaced to or promoted
         // for the consuming build — but worth revisiting if that changes.
-        diagnostics_overrides: crate::commands::manifest::DiagnosticsTable::new(),
+        diagnostics_overrides: beamtalk_package::manifest::DiagnosticsTable::new(),
         provision_sink: crate::beam_compiler::ProvisionSink::default(),
     };
 
@@ -738,7 +738,7 @@ fn extract_dep_protocol_alias_metadata(
         }
         // Shared with the offline scan MCP lint uses (BT-4585).
         let (module_protocols, module_aliases) =
-            beamtalk_cli::dependency_classes::dependency_protocol_alias_infos(module, dep_name);
+            beamtalk_package::dependency_classes::dependency_protocol_alias_infos(module, dep_name);
         protocol_infos.extend(module_protocols);
         alias_infos.extend(module_aliases);
         // Full ASTs of carried protocols only (ADR 0127 §10a;
@@ -767,7 +767,7 @@ struct DepIndexScan {
     class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     trait_users: beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
     metadata: DepProtocolAliasMetadata,
-    extensions: beamtalk_cli::dependency_extensions::DependencyExtensions,
+    extensions: beamtalk_project::dependency_extensions::DependencyExtensions,
     dep_name: String,
 }
 
@@ -779,7 +779,7 @@ pub(crate) type DepIndexExports = (
     Vec<beamtalk_core::ast::ProtocolDefinition>,
     Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     beamtalk_core::semantic_analysis::ProtocolSourceMap,
-    beamtalk_cli::dependency_extensions::DependencyExtensions,
+    beamtalk_project::dependency_extensions::DependencyExtensions,
 );
 
 impl DepIndexScan {
@@ -802,18 +802,18 @@ impl DepIndexScan {
         trait_users.flatten(&mut class_infos, extra_protocol_defs, Some(&dep_name));
         // BT-4615: after flattening, which replaces trait-users' infos.
         let mut metadata = metadata;
-        beamtalk_cli::dependency_extensions::expand_dependency_class_aliases(
+        beamtalk_project::dependency_extensions::expand_dependency_class_aliases(
             &metadata.alias_infos,
             &mut class_infos,
             &mut metadata.protocol_infos,
         );
-        beamtalk_cli::dependency_extensions::expand_dependency_extension_aliases(
+        beamtalk_project::dependency_extensions::expand_dependency_extension_aliases(
             &metadata.alias_infos,
             &mut extensions,
         );
         // BT-4707: the exported protocol ASTs too — flattened (above) against
         // the unexpanded ones in this dependency's own alias scope.
-        beamtalk_cli::dependency_extensions::expand_dependency_protocol_defs(
+        beamtalk_project::dependency_extensions::expand_dependency_protocol_defs(
             &metadata.alias_infos,
             &mut metadata.protocol_defs,
         );
@@ -845,7 +845,7 @@ fn exports_or_empty(
                 Vec::new(),
                 Vec::new(),
                 beamtalk_core::semantic_analysis::ProtocolSourceMap::new(),
-                beamtalk_cli::dependency_extensions::DependencyExtensions::scanning(),
+                beamtalk_project::dependency_extensions::DependencyExtensions::scanning(),
             )
         },
         |scan| scan.into_exports(extra_protocol_defs),
@@ -879,7 +879,7 @@ fn scan_dep_index(dep_root: &Utf8Path, dep_name: &str) -> Result<Option<DepIndex
     // ADR 0070 WS3 (BT-4608): the dependency's extensions, from the same
     // parsed ASTs. A file the index pass could not read is missing from
     // `cached_asts`, and leaves the result incomplete.
-    let mut extensions = beamtalk_cli::dependency_extensions::DependencyExtensions::scanning();
+    let mut extensions = beamtalk_project::dependency_extensions::DependencyExtensions::scanning();
     for file in &source_files {
         match cached_asts.get(file) {
             Some(ast) => extensions.add_file(&ast.module, file.as_std_path(), &ast.diagnostics),
@@ -1332,7 +1332,7 @@ mod tests {
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
-            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
+            extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(),
         }
     }
 
@@ -1544,7 +1544,7 @@ mod tests {
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
-            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
+            extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(),
         };
 
         let Some(registry) = dependency_type_registry(

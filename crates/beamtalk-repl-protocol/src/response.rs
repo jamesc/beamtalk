@@ -612,6 +612,65 @@ mod tests {
         }
     }
 
+    /// The serialised top-level key set of `ReplResponse` is the `rust_keys`
+    /// list in `tests/repl-protocol/response_keys.json`, which the Erlang
+    /// encoders are checked against in `beamtalk_repl_protocol_tests`. The
+    /// struct literal names every field, so adding one fails to compile here
+    /// until the fixture is updated too.
+    #[test]
+    fn repl_response_keys_match_shared_fixture() {
+        let json = serde_json::json!({});
+        let response = ReplResponse {
+            response_type: Some(String::new()),
+            id: Some(String::new()),
+            session: Some(String::new()),
+            status: Some(vec![]),
+            exit_code: Some(0),
+            value: Some(json.clone()),
+            value_type: Some(String::new()),
+            output: Some(String::new()),
+            message: Some(String::new()),
+            error: Some(String::new()),
+            frames: Some(vec![]),
+            bindings: Some(json.clone()),
+            classes: Some(vec![]),
+            class_list: Some(vec![]),
+            actors: Some(vec![]),
+            sessions: Some(vec![]),
+            completions: Some(vec![]),
+            info: Some(json.clone()),
+            state: Some(json.clone()),
+            warnings: Some(vec![]),
+            warning_details: Some(vec![]),
+            line: Some(0),
+            hint: Some(String::new()),
+            docs: Some(String::new()),
+            core_erlang: Some(String::new()),
+            errors: vec![json.clone()],
+            summary: Some(String::new()),
+            results: Some(json.clone()),
+            steps: Some(vec![]),
+            ops: Some(json.clone()),
+            versions: Some(json),
+        };
+        let serialised = serde_json::to_value(&response).unwrap();
+        let mut actual: Vec<String> = serialised.as_object().unwrap().keys().cloned().collect();
+        actual.sort();
+
+        let path = beamtalk_workspace::cargo_workspace_root!()
+            .join("tests/repl-protocol/response_keys.json");
+        let raw = std::fs::read_to_string(&path).expect("read response_keys.json");
+        let fixture: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let mut expected: Vec<String> = fixture["rust_keys"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_owned())
+            .collect();
+        expected.sort();
+        assert_eq!(actual, expected);
+    }
+
     /// The Rust frame type and `beamtalk_stack_frame:structured_frame/1` agree
     /// on the key set through `tests/repl-protocol/frame_fields.json`.
     #[test]

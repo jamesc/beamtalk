@@ -200,28 +200,6 @@ impl Module {
         }
     }
 
-    /// Creates a new module with file-level leading comments.
-    #[must_use]
-    pub fn with_comments(
-        expressions: Vec<ExpressionStatement>,
-        span: Span,
-        file_leading_comments: Vec<Comment>,
-    ) -> Self {
-        Self {
-            classes: Vec::new(),
-            method_definitions: Vec::new(),
-            protocols: Vec::new(),
-            type_aliases: Vec::new(),
-            native_declarations: Vec::new(),
-            expressions,
-            span,
-            file_leading_comments,
-            file_trailing_comments: Vec::new(),
-            pipeline_sends: PipelineSends::default(),
-            literal_comments: LiteralComments::default(),
-        }
-    }
-
     /// Iterate every method defined in this module — both inline class methods
     /// (instance-side and class-side) and standalone Tonel-style definitions.
     ///

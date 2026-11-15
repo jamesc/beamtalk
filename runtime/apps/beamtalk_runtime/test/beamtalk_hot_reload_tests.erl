@@ -17,13 +17,6 @@ Tests hot code reloading, actor migration, and module replacement.
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_cast/2, code_change/3]).
 
-%% Logger handler callback for the unexpected-init-return warning test below.
--export([log/2]).
-
-log(LogEvent, #{config := #{parent := Parent}}) ->
-    Parent ! {log_event, LogEvent},
-    ok.
-
 %%====================================================================
 %% Tests for beamtalk_hot_reload domain service
 %%====================================================================
@@ -456,14 +449,8 @@ test_field_migration_unexpected_init_return_logs_warning() ->
     %% output clean, which would otherwise drop this ?LOG_WARNING before it
     %% reaches any handler (BT-1822 uses the same trick for an error-level
     %% log, where it's a no-op).
-    logger:set_primary_config(level, all),
-    HandlerId = bt_3532_hot_reload_warning_test_handler,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{
-        config => #{parent => self()},
-        level => all
-    }),
-    StubMod = beamtalk_hot_reload_bad_init_test_helper,
-    try
+    beamtalk_test_log:with_capture(all, fun() ->
+        StubMod = beamtalk_hot_reload_bad_init_test_helper,
         OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 3},
         {ok, NewState} = beamtalk_hot_reload:code_change(
             v1, OldState, #{module => StubMod}
@@ -474,30 +461,24 @@ test_field_migration_unexpected_init_return_logs_warning() ->
         ?assertEqual(1, maps:get('__shape_version__', NewState)),
         ?assertEqual(OldState, maps:remove('__shape_version__', NewState)),
         ?assert(
-            receive_bad_init_warning(StubMod, {error, not_a_state_map}, 5)
+            receive_bad_init_warning(StubMod, {error, not_a_state_map})
         )
-    after
-        logger:remove_handler(HandlerId),
-        logger:set_primary_config(level, error)
-    end.
+    end).
 
-%% Drains up to N pending {log_event, ...} messages looking for a `warning`
-%% naming Module and Returned — either seed_internal_keys/4's or
-%% beamtalk_shape_migration:safe_init_defaults/2's warning matches.
-receive_bad_init_warning(_Module, _Returned, 0) ->
-    false;
-receive_bad_init_warning(Module, Returned, N) ->
-    receive
-        {log_event, #{level := warning, meta := Meta}} ->
-            case
-                maps:get(module, Meta, undefined) =:= Module andalso
-                    maps:get(returned, Meta, undefined) =:= Returned
-            of
-                true -> true;
-                false -> receive_bad_init_warning(Module, Returned, N - 1)
-            end
-    after 1000 ->
-        false
+%% Waits for a captured `warning` naming Module and Returned — either
+%% seed_internal_keys/4's or beamtalk_shape_migration:safe_init_defaults/2's
+%% warning matches.
+receive_bad_init_warning(Module, Returned) ->
+    Matches = fun
+        (#{level := warning, meta := Meta}) ->
+            maps:get(module, Meta, undefined) =:= Module andalso
+                maps:get(returned, Meta, undefined) =:= Returned;
+        (_) ->
+            false
+    end,
+    case beamtalk_test_log:await(Matches, 1000) of
+        {ok, _} -> true;
+        timeout -> false
     end.
 
 %% BT-3531: LoggingCounter (Counter subclass, adds `logCount`) — before the
@@ -547,13 +528,7 @@ test_field_migration_subclass_gains_ancestor_field() ->
 %% misclassified as "removed" — no "Hot reload dropped fields" warning for
 %% `value` when migrating a LoggingCounter instance.
 test_field_migration_subclass_no_dropped_fields_warning() ->
-    logger:set_primary_config(level, all),
-    HandlerId = bt_3531_hot_reload_dropped_fields_test_handler,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{
-        config => #{parent => self()},
-        level => all
-    }),
-    try
+    beamtalk_test_log:with_capture(all, fun() ->
         OldState = #{
             '$beamtalk_class' => 'LoggingCounter',
             '__class_mod__' => 'bt@logging_counter',
@@ -563,16 +538,17 @@ test_field_migration_subclass_no_dropped_fields_warning() ->
         {ok, _NewState} = beamtalk_hot_reload:code_change(
             v1, OldState, #{module => 'bt@logging_counter'}
         ),
-        receive
-            {log_event, #{msg := {string, "Hot reload dropped fields"}}} ->
-                ?assert(false)
-        after 200 ->
-            ok
-        end
-    after
-        logger:remove_handler(HandlerId),
-        logger:set_primary_config(level, error)
-    end.
+        ?assertEqual(
+            timeout,
+            beamtalk_test_log:await(
+                fun
+                    (#{msg := {string, "Hot reload dropped fields"}}) -> true;
+                    (_) -> false
+                end,
+                200
+            )
+        )
+    end).
 
 %%====================================================================
 %% Tests for '__shape_version__' tracking (ADR 0123 Phase 0, BT-3534)

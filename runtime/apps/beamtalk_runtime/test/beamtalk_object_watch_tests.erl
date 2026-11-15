@@ -37,15 +37,6 @@ setup() ->
 teardown(_) ->
     ok.
 
-%% A harmless long-lived process to stand in for a watched actor pid (we publish
-%% changes directly, so it never needs to dispatch).
-spawn_dummy() ->
-    spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end).
-
 stop_dummy(Pid) ->
     Pid ! stop,
     beamtalk_test_wait:dead(Pid).
@@ -88,7 +79,7 @@ wait_unwatched(Actor) ->
 subscribe_publish_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         ?_test(begin
-            Actor = spawn_dummy(),
+            Actor = beamtalk_test_proc:spawn_idle(),
             ok = beamtalk_object_watch:subscribe(Actor, self()),
             ok = sync(ok),
             ?assert(beamtalk_object_watch:is_watched(Actor)),
@@ -101,7 +92,7 @@ subscribe_publish_test_() ->
 unwatched_pid_is_not_watched_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         ?_test(begin
-            Actor = spawn_dummy(),
+            Actor = beamtalk_test_proc:spawn_idle(),
             ?assertNot(beamtalk_object_watch:is_watched(Actor)),
             %% Publishing to an unwatched pid delivers nothing.
             ok = beamtalk_object_watch:publish_change(Actor, 'Counter', [count]),
@@ -113,7 +104,7 @@ unwatched_pid_is_not_watched_test_() ->
 idempotent_subscribe_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         ?_test(begin
-            Actor = spawn_dummy(),
+            Actor = beamtalk_test_proc:spawn_idle(),
             ok = beamtalk_object_watch:subscribe(Actor, self()),
             ok = beamtalk_object_watch:subscribe(Actor, self()),
             ok = sync(ok),
@@ -128,7 +119,7 @@ idempotent_subscribe_test_() ->
 unsubscribe_stops_delivery_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         ?_test(begin
-            Actor = spawn_dummy(),
+            Actor = beamtalk_test_proc:spawn_idle(),
             ok = beamtalk_object_watch:subscribe(Actor, self()),
             ok = sync(ok),
             ok = beamtalk_object_watch:unsubscribe(Actor, self()),
@@ -143,7 +134,7 @@ unsubscribe_stops_delivery_test_() ->
 subscriber_death_cleans_up_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         ?_test(begin
-            Actor = spawn_dummy(),
+            Actor = beamtalk_test_proc:spawn_idle(),
             Test = self(),
             Sub = spawn(fun() ->
                 beamtalk_object_watch:subscribe(Actor, self()),
@@ -169,7 +160,7 @@ subscriber_death_cleans_up_test_() ->
 watched_actor_death_cleans_up_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         ?_test(begin
-            Actor = spawn_dummy(),
+            Actor = beamtalk_test_proc:spawn_idle(),
             ok = beamtalk_object_watch:subscribe(Actor, self()),
             ok = sync(ok),
             ?assert(beamtalk_object_watch:is_watched(Actor)),
@@ -182,7 +173,7 @@ watched_actor_death_cleans_up_test_() ->
 multiple_subscribers_each_notified_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         ?_test(begin
-            Actor = spawn_dummy(),
+            Actor = beamtalk_test_proc:spawn_idle(),
             Test = self(),
             _Sub2 = spawn(fun() ->
                 beamtalk_object_watch:subscribe(Actor, self()),
@@ -211,7 +202,7 @@ multiple_subscribers_each_notified_test_() ->
 publish_no_server_is_safe_test() ->
     %% No setup: directly assert the absent-server path never crashes.
     beamtalk_test_proc:stop_registered(beamtalk_object_watch),
-    Actor = spawn_dummy(),
+    Actor = beamtalk_test_proc:spawn_idle(),
     ?assertEqual(ok, beamtalk_object_watch:publish_change(Actor, 'Counter', [a])),
     ?assertNot(beamtalk_object_watch:is_watched(Actor)),
     ?assertEqual([], beamtalk_object_watch:watched_pids()),

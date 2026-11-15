@@ -420,7 +420,7 @@ dispatch_missing_function_details_test() ->
             ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
             Details = Inner#beamtalk_error.details,
             ?assertEqual(math, maps:get(module, Details)),
-            ?assertEqual(init, maps:get(function, Details)),
+            ?assertEqual({beamtalk_string, <<"init">>}, maps:get(function, Details)),
             ?assertEqual(0, maps:get(arity, Details))
     end.
 
@@ -1312,7 +1312,7 @@ direct_call_wrong_arity_error_unchanged_test() ->
             ?assertEqual(
                 #{
                     module => lists,
-                    function => reverse,
+                    function => {beamtalk_string, <<"reverse">>},
                     expected_arities => [1, 2],
                     actual_arity => 3
                 },
@@ -1335,7 +1335,11 @@ direct_call_missing_function_error_unchanged_test() ->
                 Inner#beamtalk_error.hint
             ),
             ?assertEqual(
-                #{module => lists, function => nonexistent_xyz, arity => 1},
+                #{
+                    module => lists,
+                    function => {beamtalk_string, <<"nonexistent_xyz">>},
+                    arity => 1
+                },
                 Inner#beamtalk_error.details
             )
     end.
@@ -1416,7 +1420,11 @@ backtrace_depth_zero_keeps_ffi_errors_test() ->
             error:#{error := Inline} ->
                 ?assertEqual(does_not_understand, Inline#beamtalk_error.kind),
                 ?assertEqual(
-                    #{module => lists, function => nonexistent_xyz, arity => 1},
+                    #{
+                        module => lists,
+                        function => {beamtalk_string, <<"nonexistent_xyz">>},
+                        arity => 1
+                    },
                     Inline#beamtalk_error.details
                 )
         end,
@@ -1472,7 +1480,11 @@ dispatch_call_args_errors_unchanged_test() ->
             ?assertEqual(does_not_understand, Missing#beamtalk_error.kind),
             ?assertEqual('call:args:', Missing#beamtalk_error.selector),
             ?assertEqual(
-                #{module => lists, function => nonexistent_xyz, arity => 1},
+                #{
+                    module => lists,
+                    function => {beamtalk_string, <<"nonexistent_xyz">>},
+                    arity => 1
+                },
                 Missing#beamtalk_error.details
             )
     end.
@@ -1510,14 +1522,12 @@ direct_call_handle_undefined_function_test() ->
             error:#{error := Inner} ->
                 ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
                 ?assertEqual(
-                    #{module => Mod, function => other, arity => 1},
+                    #{module => Mod, function => {beamtalk_string, <<"other">>}, arity => 1},
                     Inner#beamtalk_error.details
                 )
         end
     after
-        _ = code:purge(Mod),
-        _ = code:delete(Mod),
-        _ = code:purge(Mod)
+        beamtalk_test_module:unload(Mod)
     end.
 
 %% Load an in-memory module `Mod` exporting each `{Name, Return}` as a
@@ -1555,13 +1565,12 @@ direct_call_tracks_hot_reload_and_purge_test() ->
             error:#{error := Missing} ->
                 ?assertEqual(does_not_understand, Missing#beamtalk_error.kind),
                 ?assertEqual(
-                    #{module => Mod, function => gone, arity => 0},
+                    #{module => Mod, function => {beamtalk_string, <<"gone">>}, arity => 0},
                     Missing#beamtalk_error.details
                 )
         end,
         %% Delete + purge: the module (in-memory only) can no longer be loaded.
-        _ = code:purge(Mod),
-        true = code:delete(Mod),
+        beamtalk_test_module:unload(Mod),
         _ = code:purge(Mod),
         try
             beamtalk_erlang_proxy:direct_call(Mod, answer, []),
@@ -1575,9 +1584,7 @@ direct_call_tracks_hot_reload_and_purge_test() ->
                 )
         end
     after
-        _ = code:purge(Mod),
-        _ = code:delete(Mod),
-        _ = code:purge(Mod)
+        beamtalk_test_module:unload(Mod)
     end.
 
 %%% ============================================================================
@@ -1622,9 +1629,7 @@ load_bt_raiser(Mod) ->
     Mod.
 
 unload_bt_raiser(Mod) ->
-    _ = code:purge(Mod),
-    _ = code:delete(Mod),
-    _ = code:purge(Mod),
+    beamtalk_test_module:unload(Mod),
     ok.
 
 native_call_block_error_from_beamtalk_code_is_unchanged_test() ->

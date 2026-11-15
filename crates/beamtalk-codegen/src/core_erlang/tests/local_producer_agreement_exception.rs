@@ -43,7 +43,7 @@ const EXCEPTIONS: &[&str] = &[
     "[(s < 3) ifTrue: [t := t + 1]. 1] ensure: [(s < 3) ifTrue: [u := u + 1]]",
     // ADR 0131 Phase 4 (BT-3750): `Result tryDo:` is the other exception-like
     // producer. Its block is a `BranchArm` frame run by `beamtalk_result:
-    // 'tryDo:'/2`, so the same sites, frames and nesting apply; a block that
+    // `tryDo/2`, so the same sites, frames and nesting apply; a block that
     // writes no local is Tier 1 and no producer.
     "Result tryDo: [t := t + 1. 2]",
     "Result tryDo: [t := t + 1. u := u + 1. 2]",

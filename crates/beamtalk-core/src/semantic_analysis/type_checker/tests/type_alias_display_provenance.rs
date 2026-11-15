@@ -529,54 +529,10 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![
         ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: "TestCase".into(),
-            superclass: Some("Value".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: None,
             is_value: true,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: std::collections::HashMap::new(),
-            state_has_default: std::collections::HashMap::new(),
-            state_kinds: std::collections::HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("TestCase", Some("Value"))
         },
         ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: "ClassChecker".into(),
-            superclass: Some("Object".into()),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: None,
-            is_value: false,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: std::collections::HashMap::new(),
-            state_has_default: std::collections::HashMap::new(),
-            state_kinds: std::collections::HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
             methods: vec![MethodInfo {
                 selector: "accept:".into(),
                 arity: 1,
@@ -594,11 +550,7 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
                 constant_value: None,
                 answers_receiver: false,
             }],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("ClassChecker", Some("Object"))
         },
     ]);
 
@@ -664,26 +616,6 @@ fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
 
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "Widget".into(),
-        superclass: Some("Object".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: std::collections::HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: "restart:".into(),
             arity: 1,
@@ -703,11 +635,7 @@ fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Widget", Some("Object"))
     }]);
 
     let mut alias_registry = AliasRegistry::new();

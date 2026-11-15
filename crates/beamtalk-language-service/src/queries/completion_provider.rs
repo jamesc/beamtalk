@@ -2888,7 +2888,6 @@ mod tests {
     // --- ADR 0071: Cross-package visibility filtering ---
     #[test]
     fn internal_class_excluded_from_cross_package_completions() {
-        use std::collections::HashMap;
         let source = "x := 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
@@ -2896,32 +2895,9 @@ mod tests {
         // Inject an internal class from package "other_pkg"
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
-                surface_incomplete: false,
-                in_caller_new1: false,
-                is_module_less: false,
-                name: EcoString::from("SecretHelper"),
-                superclass: Some(EcoString::from("Object")),
-                is_sealed: false,
-                is_abstract: false,
-                is_typed: false,
                 is_internal: true,
                 package: Some(EcoString::from("other_pkg")),
-                is_value: false,
-                is_native: false,
-                auto_ctors: None,
-                handle_scope: None,
-                state: vec![],
-                state_types: HashMap::new(),
-                state_has_default: HashMap::new(),
-                state_kinds: HashMap::new(),
-                initialize_assigns: std::collections::BTreeSet::new(),
-                has_dynamic_field_writer: false,
-                methods: vec![],
-                class_methods: vec![],
-                class_variables: vec![],
-                type_params: vec![],
-                type_param_bounds: vec![],
-                superclass_type_args: vec![],
+                ..ClassInfo::test("SecretHelper", Some("Object"))
             },
         ]);
         // From a different package: internal class should be filtered out
@@ -2940,39 +2916,15 @@ mod tests {
     }
     #[test]
     fn internal_class_visible_in_same_package_completions() {
-        use std::collections::HashMap;
         let source = "x := 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
-                surface_incomplete: false,
-                in_caller_new1: false,
-                is_module_less: false,
-                name: EcoString::from("InternalHelper"),
-                superclass: Some(EcoString::from("Object")),
-                is_sealed: false,
-                is_abstract: false,
-                is_typed: false,
                 is_internal: true,
                 package: Some(EcoString::from("my_pkg")),
-                is_value: false,
-                is_native: false,
-                auto_ctors: None,
-                handle_scope: None,
-                state: vec![],
-                state_types: HashMap::new(),
-                state_has_default: HashMap::new(),
-                state_kinds: HashMap::new(),
-                initialize_assigns: std::collections::BTreeSet::new(),
-                has_dynamic_field_writer: false,
-                methods: vec![],
-                class_methods: vec![],
-                class_variables: vec![],
-                type_params: vec![],
-                type_param_bounds: vec![],
-                superclass_type_args: vec![],
+                ..ClassInfo::test("InternalHelper", Some("Object"))
             },
         ]);
         // From the same package: internal class should be visible
@@ -2991,39 +2943,15 @@ mod tests {
     }
     #[test]
     fn internal_class_visible_when_no_package_context() {
-        use std::collections::HashMap;
         let source = "x := 1";
         let tokens = lex_with_eof(source);
         let (module, _) = parse(tokens);
         let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
-                surface_incomplete: false,
-                in_caller_new1: false,
-                is_module_less: false,
-                name: EcoString::from("InternalHelper"),
-                superclass: Some(EcoString::from("Object")),
-                is_sealed: false,
-                is_abstract: false,
-                is_typed: false,
                 is_internal: true,
                 package: Some(EcoString::from("some_pkg")),
-                is_value: false,
-                is_native: false,
-                auto_ctors: None,
-                handle_scope: None,
-                state: vec![],
-                state_types: HashMap::new(),
-                state_has_default: HashMap::new(),
-                state_kinds: HashMap::new(),
-                initialize_assigns: std::collections::BTreeSet::new(),
-                has_dynamic_field_writer: false,
-                methods: vec![],
-                class_methods: vec![],
-                class_variables: vec![],
-                type_params: vec![],
-                type_param_bounds: vec![],
-                superclass_type_args: vec![],
+                ..ClassInfo::test("InternalHelper", Some("Object"))
             },
         ]);
         // No package context (REPL/script): internal classes still visible
@@ -3037,31 +2965,11 @@ mod tests {
     #[test]
     fn cross_package_internal_method_helper() {
         use beamtalk_core::ast::MethodKind;
-        use std::collections::HashMap;
         let mut hierarchy = ClassHierarchy::with_builtins();
         // Inject a class with both public and internal methods from "other_pkg"
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
-                surface_incomplete: false,
-                in_caller_new1: false,
-                is_module_less: false,
-                name: EcoString::from("RemoteService"),
-                superclass: Some(EcoString::from("Object")),
-                is_sealed: false,
-                is_abstract: false,
-                is_typed: false,
-                is_internal: false,
                 package: Some(EcoString::from("other_pkg")),
-                is_value: false,
-                is_native: false,
-                auto_ctors: None,
-                handle_scope: None,
-                state: vec![],
-                state_types: HashMap::new(),
-                state_has_default: HashMap::new(),
-                state_kinds: HashMap::new(),
-                initialize_assigns: std::collections::BTreeSet::new(),
-                has_dynamic_field_writer: false,
                 methods: vec![
                     MethodInfo {
                         selector: EcoString::from("publicMethod"),
@@ -3098,11 +3006,7 @@ mod tests {
                         answers_receiver: false,
                     },
                 ],
-                class_methods: vec![],
-                class_variables: vec![],
-                type_params: vec![],
-                type_param_bounds: vec![],
-                superclass_type_args: vec![],
+                ..ClassInfo::test("RemoteService", Some("Object"))
             },
         ]);
         let public_method = hierarchy
@@ -3134,34 +3038,10 @@ mod tests {
     }
     #[test]
     fn cross_package_internal_class_helper() {
-        use std::collections::HashMap;
         let internal_class = beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: EcoString::from("InternalClass"),
-            superclass: Some(EcoString::from("Object")),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
             is_internal: true,
             package: Some(EcoString::from("other_pkg")),
-            is_value: false,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test("InternalClass", Some("Object"))
         };
         // Cross-package: should be filtered
         assert!(
@@ -3179,9 +3059,6 @@ mod tests {
             "Internal class should not be filtered when no package context"
         );
         let public_class = beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
             name: EcoString::from("PublicClass"),
             is_internal: false,
             package: Some(EcoString::from("other_pkg")),
@@ -3196,7 +3073,6 @@ mod tests {
     #[test]
     fn internal_method_excluded_from_typed_receiver_completions() {
         use beamtalk_core::ast::MethodKind;
-        use std::collections::HashMap;
         // Use source that references RemoteService with a typed variable
         let source = "Object subclass: Client\n  doWork: svc :: RemoteService =>\n    svc pub";
         let tokens = lex_with_eof(source);
@@ -3205,26 +3081,7 @@ mod tests {
         // Inject RemoteService with both public and internal methods
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
-                surface_incomplete: false,
-                in_caller_new1: false,
-                is_module_less: false,
-                name: EcoString::from("RemoteService"),
-                superclass: Some(EcoString::from("Object")),
-                is_sealed: false,
-                is_abstract: false,
-                is_typed: false,
-                is_internal: false,
                 package: Some(EcoString::from("other_pkg")),
-                is_value: false,
-                is_native: false,
-                auto_ctors: None,
-                handle_scope: None,
-                state: vec![],
-                state_types: HashMap::new(),
-                state_has_default: HashMap::new(),
-                state_kinds: HashMap::new(),
-                initialize_assigns: std::collections::BTreeSet::new(),
-                has_dynamic_field_writer: false,
                 methods: vec![
                     MethodInfo {
                         selector: EcoString::from("publicMethod"),
@@ -3261,11 +3118,7 @@ mod tests {
                         answers_receiver: false,
                     },
                 ],
-                class_methods: vec![],
-                class_variables: vec![],
-                type_params: vec![],
-                type_param_bounds: vec![],
-                superclass_type_args: vec![],
+                ..ClassInfo::test("RemoteService", Some("Object"))
             },
         ]);
         // Completions from "my_pkg" — internal method should be excluded

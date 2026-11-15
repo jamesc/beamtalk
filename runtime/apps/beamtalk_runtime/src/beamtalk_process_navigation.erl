@@ -989,8 +989,8 @@ supervisor_callback_module(Pid) ->
 %% live-class-entries read skipped it). Reliable: it matches
 %% the registry's recorded module, never reconstructs the name from text.
 %%
-%% `beamtalk_class_registry:class_name_for_module/1` reads a memoised
-%% module->class map (one ETS read that copies the map, no fold): no
+%% `beamtalk_class_registry:class_name_for_module/1` reads one module's own
+%% cached row (one small ETS read, independent of the class count): no
 %% `gen_server:call` to a class process (this
 %% can run inside one, where such calls deadlock two classes against each
 %% other, BT-3820) and no per-call scan of every loaded class, however many

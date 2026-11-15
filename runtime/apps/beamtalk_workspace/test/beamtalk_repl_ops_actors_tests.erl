@@ -34,13 +34,13 @@ inside the `try`).
 validate_invalid_string_returns_invalid_pid_test() ->
     ?assertEqual(
         {error, invalid_pid},
-        beamtalk_repl_ops_actors:validate_actor_pid("not-a-pid")
+        beamtalk_repl_params:validate_actor_pid("not-a-pid")
     ).
 
 validate_empty_string_returns_invalid_pid_test() ->
     ?assertEqual(
         {error, invalid_pid},
-        beamtalk_repl_ops_actors:validate_actor_pid("")
+        beamtalk_repl_params:validate_actor_pid("")
     ).
 
 validate_valid_pid_no_registry_returns_unknown_actor_test() ->
@@ -50,7 +50,7 @@ validate_valid_pid_no_registry_returns_unknown_actor_test() ->
     beamtalk_test_actor_registry:without_registry(fun() ->
         ?assertEqual(
             {error, unknown_actor},
-            beamtalk_repl_ops_actors:validate_actor_pid(PidStr)
+            beamtalk_repl_params:validate_actor_pid(PidStr)
         )
     end).
 
@@ -61,7 +61,7 @@ validate_valid_pid_no_registry_returns_unknown_actor_test() ->
 is_known_actor_no_registry_returns_false_test() ->
     %% whereis(beamtalk_actor_registry) returns undefined in unit tests → false.
     beamtalk_test_actor_registry:without_registry(fun() ->
-        ?assertEqual(false, beamtalk_repl_ops_actors:is_known_actor(self()))
+        ?assertEqual(false, beamtalk_repl_params:is_known_actor(self()))
     end).
 
 %%====================================================================

@@ -46,9 +46,9 @@ with_caps(Caps, Tests) ->
 %% evaluator catches.
 shared_exit_with_code_throws_script_exit_test_() ->
     with_caps(?SHARED, [
-        ?_assertThrow({beamtalk_script_exit, 5}, beamtalk_program:'exit:'(5)),
-        ?_assertThrow({beamtalk_script_exit, 0}, beamtalk_program:'exit:'(0)),
-        ?_assertThrow({beamtalk_script_exit, 255}, beamtalk_program:'exit:'(255)),
+        ?_assertThrow({beamtalk_script_exit, 5}, beamtalk_program:exit(5)),
+        ?_assertThrow({beamtalk_script_exit, 0}, beamtalk_program:exit(0)),
+        ?_assertThrow({beamtalk_script_exit, 255}, beamtalk_program:exit(255)),
         %% Zero-arg `exit`/`exit:` shim both route through `exit:(0)`.
         ?_assertThrow({beamtalk_script_exit, 0}, beamtalk_program:exit()),
         ?_assertThrow({beamtalk_script_exit, 7}, beamtalk_program:exit(7))
@@ -58,7 +58,7 @@ shared_exit_with_code_throws_script_exit_test_() ->
 %% of the chain (script harness, `eval`, `rpc`) decides what to do with it.
 owned_exit_on_entry_chain_throws_script_exit_test_() ->
     with_caps(?OWNED, [
-        ?_assertThrow({beamtalk_script_exit, 3}, beamtalk_program:'exit:'(3))
+        ?_assertThrow({beamtalk_script_exit, 3}, beamtalk_program:exit(3))
     ]).
 
 %% From an actor (off any harness's call chain) in a shared workspace there is no
@@ -69,7 +69,7 @@ shared_exit_from_actor_raises_program_exit_outside_entry_test_() ->
             Old = beamtalk_actor_state:install(#{}),
             try
                 ?assertBtErrorDetails(
-                    program_exit_outside_entry, _, _, #{status := 4}, beamtalk_program:'exit:'(4)
+                    program_exit_outside_entry, _, _, #{status := 4}, beamtalk_program:exit(4)
                 )
             after
                 beamtalk_actor_state:uninstall(Old)
@@ -82,7 +82,7 @@ shared_exit_from_actor_raises_program_exit_outside_entry_test_() ->
 no_workspace_exit_raises_program_exit_test_() ->
     with_caps(none, [
         ?_test(
-            ?assertBtErrorDetails(program_exit, _, _, #{status := 3}, beamtalk_program:'exit:'(3))
+            ?assertBtErrorDetails(program_exit, _, _, #{status := 3}, beamtalk_program:exit(3))
         ),
         ?_test(?assertBtErrorDetails(program_exit, _, _, #{status := 0}, beamtalk_program:exit()))
     ]).
@@ -91,14 +91,14 @@ no_workspace_exit_raises_program_exit_test_() ->
 %% raises a structured error in any context (consistent with `System halt:`).
 exit_out_of_range_raises_invalid_argument_test_() ->
     with_caps(?SHARED, [
-        ?_test(?assertBtError(invalid_argument, beamtalk_program:'exit:'(999))),
-        ?_test(?assertBtError(invalid_argument, beamtalk_program:'exit:'(-1)))
+        ?_test(?assertBtError(invalid_argument, beamtalk_program:exit(999))),
+        ?_test(?assertBtError(invalid_argument, beamtalk_program:exit(-1)))
     ]).
 
 %% Non-integer is a wrong *type*, also validated before the node-owning gate.
 exit_non_integer_raises_type_error_test_() ->
     with_caps(?SHARED, [
-        ?_test(?assertBtError(type_error, beamtalk_program:'exit:'(<<"two">>)))
+        ?_test(?assertBtError(type_error, beamtalk_program:exit(<<"two">>)))
     ]).
 
 %%====================================================================

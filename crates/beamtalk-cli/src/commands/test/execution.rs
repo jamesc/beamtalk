@@ -32,12 +32,6 @@ pub(super) struct BunitResult {
     pub(super) passed: usize,
     /// Number of failing tests.
     pub(super) failed: usize,
-    /// Number of skipped tests.
-    #[allow(dead_code)] // populated for future skip-reason display
-    pub(super) skipped: usize,
-    /// Total duration in seconds.
-    #[allow(dead_code)] // populated for future per-class duration display
-    pub(super) duration: f64,
     /// Per-test result details (name, status, optional error).
     pub(super) tests: Vec<TestResultDetail>,
 }
@@ -73,9 +67,6 @@ pub(super) struct NativeEunitResult {
     pub(super) passed: usize,
     /// Number of failing tests.
     pub(super) failed: usize,
-    /// Number of skipped tests.
-    #[allow(dead_code)] // populated for future skip-reason display
-    pub(super) skipped: usize,
     /// Per-module results: `(module_name, passed, failed, skipped)`.
     pub(super) modules: Vec<(String, usize, usize, usize)>,
     /// Captured `EUnit` output (failures, errors).
@@ -97,7 +88,7 @@ pub(super) struct TestResults {
 pub(super) fn execute_tests(pipeline: &TestPipeline) -> Result<TestResults> {
     println!("Running tests...\n");
 
-    let bunit = if pipeline.compiled_tests.is_empty() && pipeline.compiled_doc_tests.is_empty() {
+    let bunit = if pipeline.compiled_tests.is_empty() && pipeline.compiled_doc_test_classes == 0 {
         None
     } else {
         Some(run_bunit_tests(pipeline)?)
@@ -263,8 +254,10 @@ fn parse_bunit_result_json(stdout: &str, stderr: &str) -> Result<BunitResult> {
     let total = parse_usize("total")?;
     let passed = parse_usize("passed")?;
     let failed = parse_usize("failed")?;
-    let skipped = parse_usize("skipped")?;
-    let duration = result_json["duration"]
+    // The runner's summary always carries these; they are validated but not
+    // reported (only `total`/`passed`/`failed` and the per-test details are).
+    parse_usize("skipped")?;
+    result_json["duration"]
         .as_f64()
         .ok_or_else(|| miette::miette!("Missing 'duration' in BUnit result"))?;
 
@@ -292,8 +285,6 @@ fn parse_bunit_result_json(stdout: &str, stderr: &str) -> Result<BunitResult> {
         total,
         passed,
         failed,
-        skipped,
-        duration,
         tests,
     })
 }
@@ -633,7 +624,6 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
         total: sections.total_passed + sections.total_failed + sections.total_skipped,
         passed: sections.total_passed,
         failed: sections.total_failed,
-        skipped: sections.total_skipped,
         modules: sections.modules,
         output: sections.eunit_output,
     })

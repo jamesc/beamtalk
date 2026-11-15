@@ -27,10 +27,10 @@ use std::collections::HashSet;
 
 use crate::commands::build::collect_formattable_files_from_dir;
 use crate::commands::erlfmt;
-use crate::commands::lint::find_package_root;
 use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use beamtalk_core::unparse::format_source;
+use beamtalk_package::lint_pipeline::find_package_root;
 use camino::Utf8PathBuf;
 use miette::{IntoDiagnostic, Result};
 use similar::TextDiff;

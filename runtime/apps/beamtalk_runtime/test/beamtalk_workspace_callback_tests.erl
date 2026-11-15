@@ -193,8 +193,7 @@ load_crashing_workspace() ->
 
 unload_crashing_workspace(Mod) ->
     ok = beamtalk_workspace_callback:unregister(),
-    _ = code:purge(Mod),
-    _ = code:delete(Mod),
+    beamtalk_test_module:unload(Mod),
     ok.
 
 classify_class_reports_an_unexpected_failure_test() ->
