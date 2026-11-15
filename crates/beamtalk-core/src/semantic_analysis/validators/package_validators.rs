@@ -20,7 +20,8 @@ use std::collections::HashSet;
 /// [`known_qualifier_packages`](crate::semantic_analysis::known_qualifier_packages):
 /// the `[dependencies]` of `beamtalk.toml`, the package itself and the stdlib.
 ///
-/// If `known_packages` is empty, validation is skipped. Callers with no
+/// An empty `known_packages` skips validation. That is only a guard: the set
+/// from `known_qualifier_packages` always holds `stdlib`, and callers with no
 /// package at all (single-file scripts, a manifest-less directory) pass no
 /// set, so the check never runs for them.
 pub fn check_package_qualifiers(
