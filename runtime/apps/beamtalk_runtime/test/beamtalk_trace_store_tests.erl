@@ -54,477 +54,454 @@ cleanup(_State) ->
 %%====================================================================
 
 direct_insert_and_query_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
+    {foreach, fun setup/0, fun cleanup/1, [
+        ?_test(begin
+            %% Record a dispatch directly (bypassing telemetry)
+            TestPid = self(),
+            beamtalk_trace_store:record_dispatch(
+                TestPid, increment, 5000, ok, sync, 'Counter'
+            ),
+
+            %% Always-on class entry, and no per-actor entry while disabled
+            ?assertEqual(#{}, beamtalk_trace_store:get_stats(TestPid)),
+            #{
+                {beamtalk_string, <<"methods">>} := #{
+                    {beamtalk_string, <<"increment">>} := IncStats
+                }
+            } =
+                class_entry(<<"Counter">>),
+            ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, IncStats)),
+            ?assertEqual(1, maps:get({beamtalk_string, <<"ok">>}, IncStats)),
+            ?assertEqual(0, maps:get({beamtalk_string, <<"errors">>}, IncStats)),
+            ?assertEqual(5000, maps:get({beamtalk_string, <<"total_duration_ns">>}, IncStats)),
+
+            %% Enabled, the per-actor entry appears too
+            beamtalk_trace_store:enable(),
+            beamtalk_trace_store:record_dispatch(
+                TestPid, increment, 7000, ok, sync, 'Counter'
+            ),
+            PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
+            #{
+                PidKey := #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"increment">>} := PidInc
+                    }
+                }
+            } =
+                beamtalk_trace_store:get_stats(TestPid),
+            ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, PidInc)),
+            ?assertEqual(7000, maps:get({beamtalk_string, <<"total_duration_ns">>}, PidInc))
+        end),
+        %%====================================================================
+        %% Test: Class name wired into actor stats
+        %%====================================================================
+        {"class from telemetry metadata keys the always-on entry",
             ?_test(begin
-                %% Record a dispatch directly (bypassing telemetry)
                 TestPid = self(),
                 beamtalk_trace_store:record_dispatch(
-                    TestPid, increment, 5000, ok, sync, 'Counter'
+                    TestPid, increment, 5000, ok, sync, 'EventStore'
                 ),
-
-                %% Always-on class entry, and no per-actor entry while disabled
-                ?assertEqual(#{}, beamtalk_trace_store:get_stats(TestPid)),
-                #{
-                    {beamtalk_string, <<"methods">>} := #{
-                        {beamtalk_string, <<"increment">>} := IncStats
-                    }
-                } =
-                    class_entry(<<"Counter">>),
-                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, IncStats)),
-                ?assertEqual(1, maps:get({beamtalk_string, <<"ok">>}, IncStats)),
-                ?assertEqual(0, maps:get({beamtalk_string, <<"errors">>}, IncStats)),
-                ?assertEqual(5000, maps:get({beamtalk_string, <<"total_duration_ns">>}, IncStats)),
-
-                %% Enabled, the per-actor entry appears too
-                beamtalk_trace_store:enable(),
-                beamtalk_trace_store:record_dispatch(
-                    TestPid, increment, 7000, ok, sync, 'Counter'
+                Entry = class_entry(<<"EventStore">>),
+                ?assertEqual(
+                    {beamtalk_string, <<"EventStore">>},
+                    maps:get({beamtalk_string, <<"class">>}, Entry)
                 ),
-                PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
-                #{
-                    PidKey := #{
-                        {beamtalk_string, <<"methods">>} := #{
-                            {beamtalk_string, <<"increment">>} := PidInc
+                ?assertMatch(
+                    #{
+                        {beamtalk_string, <<"increment">>} := #{
+                            {beamtalk_string, <<"calls">>} := 1
                         }
-                    }
-                } =
-                    beamtalk_trace_store:get_stats(TestPid),
-                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, PidInc)),
-                ?assertEqual(7000, maps:get({beamtalk_string, <<"total_duration_ns">>}, PidInc))
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Class name wired into actor stats
-%%====================================================================
-
-class_in_actor_stats_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            {"class from telemetry metadata keys the always-on entry",
-                ?_test(begin
-                    TestPid = self(),
-                    beamtalk_trace_store:record_dispatch(
-                        TestPid, increment, 5000, ok, sync, 'EventStore'
-                    ),
-                    Entry = class_entry(<<"EventStore">>),
-                    ?assertEqual(
-                        {beamtalk_string, <<"EventStore">>},
-                        maps:get({beamtalk_string, <<"class">>}, Entry)
-                    ),
-                    ?assertMatch(
-                        #{
-                            {beamtalk_string, <<"increment">>} := #{
-                                {beamtalk_string, <<"calls">>} := 1
-                            }
-                        },
-                        maps:get({beamtalk_string, <<"methods">>}, Entry)
-                    )
-                end)},
-            {"unknown class aggregates under class:unknown",
-                ?_test(begin
-                    TestPid = self(),
-                    beamtalk_trace_store:record_dispatch(
-                        TestPid, increment, 5000, ok, sync, unknown
-                    ),
-                    Entry = class_entry(<<"unknown">>),
-                    ?assertEqual(
-                        {beamtalk_string, <<"unknown">>},
-                        maps:get({beamtalk_string, <<"class">>}, Entry)
-                    )
-                end)},
-            {"per-actor entry carries the telemetry class while enabled",
-                ?_test(begin
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_dispatch(
-                        TestPid, increment, 5000, ok, sync, 'EventStore'
-                    ),
-                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
-                    #{PidKey := PidStats} = beamtalk_trace_store:get_stats(TestPid),
-                    ?assertEqual(
-                        {beamtalk_string, <<"EventStore">>},
-                        maps:get({beamtalk_string, <<"class">>}, PidStats)
-                    )
-                end)},
-            {"class appears in collect_method_stats via slow_methods",
-                ?_test(begin
-                    TestPid = self(),
-                    beamtalk_trace_store:record_dispatch(
-                        TestPid, slow_op, 50000, ok, sync, 'WorkflowEngine'
-                    ),
-                    Result = beamtalk_trace_store:slow_methods(1),
-                    [Top | _] = Result,
-                    ?assertEqual(
-                        {beamtalk_string, <<"WorkflowEngine">>},
-                        maps:get({beamtalk_string, <<"class">>}, Top)
-                    )
-                end)}
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Trace event recording when enabled
-%%====================================================================
-
-trace_event_recording_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                TestPid = self(),
-                %% No events when disabled
-                beamtalk_trace_store:record_trace_event(
-                    TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
-                ),
-                ?assertEqual([], beamtalk_trace_store:get_traces()),
-
-                %% Enable and record
-                beamtalk_trace_store:enable(),
-                ?assert(beamtalk_trace_store:is_enabled()),
-
-                beamtalk_trace_store:record_trace_event(
-                    TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
-                ),
-                beamtalk_trace_store:record_trace_event(
-                    TestPid, 'Counter', decrement, sync, 3000, ok, #{}, stop
-                ),
-
-                Traces = beamtalk_trace_store:get_traces(),
-                ?assertEqual(2, length(Traces)),
-
-                %% Newest first
-                [First | _] = Traces,
-                ?assertEqual(
-                    {beamtalk_string, <<"decrement">>},
-                    maps:get({beamtalk_string, <<"selector">>}, First)
-                ),
-
-                %% Filter by pid
-                TracesForPid = beamtalk_trace_store:get_traces(TestPid),
-                ?assertEqual(2, length(TracesForPid)),
-
-                %% Filter by pid + selector
-                TracesForSel = beamtalk_trace_store:get_traces(TestPid, increment),
-                ?assertEqual(1, length(TracesForSel)),
-                ?assertEqual(
-                    {beamtalk_string, <<"increment">>},
-                    maps:get({beamtalk_string, <<"selector">>}, hd(TracesForSel))
+                    },
+                    maps:get({beamtalk_string, <<"methods">>}, Entry)
                 )
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Ring buffer eviction
-%%====================================================================
-
-ring_buffer_eviction_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
+            end)},
+        {"unknown class aggregates under class:unknown",
             ?_test(begin
-                MaxEvents = 50,
-                %% Insert exactly 55 events: one sweep removes 10%
-                %% (55 * 10 div 100 = 5), leaving exactly 50 = MaxEvents.
-                %% This makes further sweeps no-ops (50 > 50 is false),
-                %% so the result is stable regardless of whether the
-                %% periodic 1s sweep timer also fires.
-                InsertCount = 55,
-                ExpectedAfterSweep = InsertCount - (InsertCount * 10 div 100),
-
-                %% Clear any events from other tests to start clean
-                beamtalk_trace_store:clear(),
-
-                %% Capture original max_events so we restore the real
-                %% value, not a hard-coded constant.
-                OrigMax = beamtalk_trace_store:max_events(),
-
-                %% Set a small max for testing; restore in `after`
-                %% so a failing assertion doesn't leave max_events=50
-                %% for subsequent tests.
-                beamtalk_trace_store:max_events(MaxEvents),
-                try
-                    ?assertEqual(MaxEvents, beamtalk_trace_store:max_events()),
-
-                    %% Enable tracing and insert more than max
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    lists:foreach(
-                        fun(I) ->
-                            beamtalk_trace_store:record_trace_event(
-                                TestPid, 'Counter', increment, sync, I * 100, ok, #{}, stop
-                            )
-                        end,
-                        lists:seq(1, InsertCount)
-                    ),
-
-                    %% Trigger sweep and wait for it to complete.
-                    %% sys:get_state/1 forces a round-trip through the
-                    %% gen_server mailbox, ensuring the sweep_eviction
-                    %% message has been processed.
-                    beamtalk_trace_store ! sweep_eviction,
-                    sys:get_state(beamtalk_trace_store),
-
-                    %% After sweep, exactly ExpectedAfterSweep events
-                    %% should remain for our pid. Filter by TestPid to
-                    %% avoid interference from concurrent test suites.
-                    PostSweep = beamtalk_trace_store:get_traces(TestPid),
-                    ?assertEqual(ExpectedAfterSweep, length(PostSweep))
-                after
-                    beamtalk_trace_store:max_events(OrigMax)
-                end
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Counters aggregates
-%%====================================================================
-
-counters_aggregates_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                beamtalk_trace_store:enable(),
                 TestPid = self(),
-
-                %% Record multiple dispatches
-                beamtalk_trace_store:record_dispatch(TestPid, increment, 1000, ok, sync, 'Counter'),
-                beamtalk_trace_store:record_dispatch(TestPid, increment, 2000, ok, sync, 'Counter'),
                 beamtalk_trace_store:record_dispatch(
-                    TestPid, increment, 3000, error, sync, 'Counter'
+                    TestPid, increment, 5000, ok, sync, unknown
                 ),
-
-                %% Check aggregated per-actor stats
-                Stats = beamtalk_trace_store:get_stats(TestPid),
-                PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
-                PidStats = maps:get(PidKey, Stats),
-                IncStats = maps:get(
-                    {beamtalk_string, <<"increment">>},
-                    maps:get({beamtalk_string, <<"methods">>}, PidStats)
-                ),
-
-                ?assertEqual(3, maps:get({beamtalk_string, <<"calls">>}, IncStats)),
-                ?assertEqual(2, maps:get({beamtalk_string, <<"ok">>}, IncStats)),
-                ?assertEqual(1, maps:get({beamtalk_string, <<"errors">>}, IncStats)),
-                ?assertEqual(6000, maps:get({beamtalk_string, <<"total_duration_ns">>}, IncStats)),
-                ?assertEqual(2000, maps:get({beamtalk_string, <<"avg_duration_ns">>}, IncStats)),
-                ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, IncStats)),
-                ?assertEqual(3000, maps:get({beamtalk_string, <<"max_duration_ns">>}, IncStats)),
-
-                %% The always-on class entry carries the same totals
-                #{
-                    {beamtalk_string, <<"methods">>} := #{
-                        {beamtalk_string, <<"increment">>} := ClassInc
-                    }
-                } =
-                    class_entry(<<"Counter">>),
-                ?assertEqual(3, maps:get({beamtalk_string, <<"calls">>}, ClassInc)),
-                ?assertEqual(6000, maps:get({beamtalk_string, <<"total_duration_ns">>}, ClassInc))
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Clear resets all data
-%%====================================================================
-
-clear_resets_all_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                TestPid = self(),
-
-                %% Insert some data
-                beamtalk_trace_store:record_dispatch(TestPid, increment, 1000, ok, sync, 'Counter'),
-                beamtalk_trace_store:enable(),
-                beamtalk_trace_store:record_trace_event(
-                    TestPid, 'Counter', increment, sync, 1000, ok, #{}, stop
-                ),
-
-                %% Verify data exists
-                ?assertNotEqual(#{}, beamtalk_trace_store:get_stats()),
-                ?assertNotEqual([], beamtalk_trace_store:get_traces()),
-
-                %% Clear
-                beamtalk_trace_store:clear(),
-
-                %% Verify all data is gone
-                ?assertEqual(#{}, beamtalk_trace_store:get_stats()),
-                ?assertEqual([], beamtalk_trace_store:get_traces())
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Composite key uniqueness
-%%====================================================================
-
-composite_key_uniqueness_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                beamtalk_trace_store:enable(),
-                TestPid = self(),
-
-                %% Insert events rapidly — composite key should ensure uniqueness
-                lists:foreach(
-                    fun(_) ->
-                        beamtalk_trace_store:record_trace_event(
-                            TestPid, 'Counter', increment, sync, 100, ok, #{}, stop
-                        )
-                    end,
-                    lists:seq(1, 100)
-                ),
-
-                Traces = beamtalk_trace_store:get_traces(),
-                ?assertEqual(100, length(Traces))
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Slow methods query
-%%====================================================================
-
-slow_methods_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                TestPid = self(),
-
-                %% Record methods with different durations
-                beamtalk_trace_store:record_dispatch(TestPid, fast, 100, ok, sync, 'Counter'),
-                beamtalk_trace_store:record_dispatch(TestPid, slow, 10000, ok, sync, 'Counter'),
-                beamtalk_trace_store:record_dispatch(TestPid, medium, 5000, ok, sync, 'Counter'),
-
-                Result = beamtalk_trace_store:slow_methods(2),
-                ?assertEqual(2, length(Result)),
-                [Slowest | _] = Result,
-                ?assertEqual(slow, maps:get({beamtalk_string, <<"selector">>}, Slowest))
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Hot methods query
-%%====================================================================
-
-hot_methods_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                TestPid = self(),
-
-                %% Record methods with different call counts
-                beamtalk_trace_store:record_dispatch(TestPid, rare, 100, ok, sync, 'Counter'),
-                lists:foreach(
-                    fun(_) ->
-                        beamtalk_trace_store:record_dispatch(
-                            TestPid, popular, 100, ok, sync, 'Counter'
-                        )
-                    end,
-                    lists:seq(1, 10)
-                ),
-
-                Result = beamtalk_trace_store:hot_methods(1),
-                ?assertEqual(1, length(Result)),
-                ?assertEqual(popular, maps:get({beamtalk_string, <<"selector">>}, hd(Result)))
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Error methods query
-%%====================================================================
-
-error_methods_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                TestPid = self(),
-
-                %% Record methods with different error rates
-                beamtalk_trace_store:record_dispatch(TestPid, reliable, 100, ok, sync, 'Counter'),
-                beamtalk_trace_store:record_dispatch(TestPid, reliable, 100, ok, sync, 'Counter'),
-                beamtalk_trace_store:record_dispatch(TestPid, flaky, 100, error, sync, 'Counter'),
-                beamtalk_trace_store:record_dispatch(TestPid, flaky, 100, timeout, sync, 'Counter'),
-
-                Result = beamtalk_trace_store:error_methods(1),
-                ?assertEqual(1, length(Result)),
-                ?assertEqual(flaky, maps:get({beamtalk_string, <<"selector">>}, hd(Result)))
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Actor health
-%%====================================================================
-
-actor_health_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                %% Health of a live process
-                TestPid = self(),
-                Health = beamtalk_trace_store:actor_health(TestPid),
+                Entry = class_entry(<<"unknown">>),
                 ?assertEqual(
-                    {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
-                    maps:get({beamtalk_string, <<"pid">>}, Health)
-                ),
-                ?assertNotEqual(dead, maps:get({beamtalk_string, <<"status">>}, Health)),
-                ?assert(is_integer(maps:get({beamtalk_string, <<"queue_depth">>}, Health))),
-                ?assert(is_integer(maps:get({beamtalk_string, <<"memory_kb">>}, Health))),
-                ?assert(is_integer(maps:get({beamtalk_string, <<"reductions">>}, Health)))
-            end),
-            ?_test(begin
-                %% Health of a dead process
-                DeadPid = spawn(fun() -> ok end),
-                beamtalk_test_wait:dead(DeadPid),
-                Health = beamtalk_trace_store:actor_health(DeadPid),
-                ?assertEqual(dead, maps:get({beamtalk_string, <<"status">>}, Health)),
-                ?assertEqual(
-                    {beamtalk_string, <<"process not alive">>},
-                    maps:get({beamtalk_string, <<"error">>}, Health)
+                    {beamtalk_string, <<"unknown">>},
+                    maps:get({beamtalk_string, <<"class">>}, Entry)
                 )
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: System health
-%%====================================================================
-
-system_health_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
+            end)},
+        {"per-actor entry carries the telemetry class while enabled",
             ?_test(begin
-                Health = beamtalk_trace_store:system_health(),
-                ?assert(is_integer(maps:get({beamtalk_string, <<"scheduler_count">>}, Health))),
-                ?assert(maps:get({beamtalk_string, <<"scheduler_count">>}, Health) > 0),
-                ?assert(is_integer(maps:get({beamtalk_string, <<"process_count">>}, Health))),
-                ?assert(is_map(maps:get({beamtalk_string, <<"memory">>}, Health))),
-                Memory = maps:get({beamtalk_string, <<"memory">>}, Health),
-                ?assert(is_integer(maps:get({beamtalk_string, <<"total_mb">>}, Memory))),
-                ?assert(is_integer(maps:get({beamtalk_string, <<"run_queue">>}, Health)))
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Bottlenecks query
-%%====================================================================
-
-bottlenecks_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, increment, 5000, ok, sync, 'EventStore'
+                ),
+                PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
+                #{PidKey := PidStats} = beamtalk_trace_store:get_stats(TestPid),
+                ?assertEqual(
+                    {beamtalk_string, <<"EventStore">>},
+                    maps:get({beamtalk_string, <<"class">>}, PidStats)
+                )
+            end)},
+        {"class appears in collect_method_stats via slow_methods",
             ?_test(begin
-                %% bottlenecks/1 scans the instance registry, so it needs no
-                %% dispatches and works whether or not tracing is enabled.
+                TestPid = self(),
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, slow_op, 50000, ok, sync, 'WorkflowEngine'
+                ),
+                Result = beamtalk_trace_store:slow_methods(1),
+                [Top | _] = Result,
+                ?assertEqual(
+                    {beamtalk_string, <<"WorkflowEngine">>},
+                    maps:get({beamtalk_string, <<"class">>}, Top)
+                )
+            end)},
+        %%====================================================================
+        %% Test: Trace event recording when enabled
+        %%====================================================================
+        ?_test(begin
+            TestPid = self(),
+            %% No events when disabled
+            beamtalk_trace_store:record_trace_event(
+                TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+            ),
+            ?assertEqual([], beamtalk_trace_store:get_traces()),
+
+            %% Enable and record
+            beamtalk_trace_store:enable(),
+            ?assert(beamtalk_trace_store:is_enabled()),
+
+            beamtalk_trace_store:record_trace_event(
+                TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+            ),
+            beamtalk_trace_store:record_trace_event(
+                TestPid, 'Counter', decrement, sync, 3000, ok, #{}, stop
+            ),
+
+            Traces = beamtalk_trace_store:get_traces(),
+            ?assertEqual(2, length(Traces)),
+
+            %% Newest first
+            [First | _] = Traces,
+            ?assertEqual(
+                {beamtalk_string, <<"decrement">>},
+                maps:get({beamtalk_string, <<"selector">>}, First)
+            ),
+
+            %% Filter by pid
+            TracesForPid = beamtalk_trace_store:get_traces(TestPid),
+            ?assertEqual(2, length(TracesForPid)),
+
+            %% Filter by pid + selector
+            TracesForSel = beamtalk_trace_store:get_traces(TestPid, increment),
+            ?assertEqual(1, length(TracesForSel)),
+            ?assertEqual(
+                {beamtalk_string, <<"increment">>},
+                maps:get({beamtalk_string, <<"selector">>}, hd(TracesForSel))
+            )
+        end),
+        %%====================================================================
+        %% Test: Ring buffer eviction
+        %%====================================================================
+        ?_test(begin
+            MaxEvents = 50,
+            %% Insert exactly 55 events: one sweep removes 10%
+            %% (55 * 10 div 100 = 5), leaving exactly 50 = MaxEvents.
+            %% This makes further sweeps no-ops (50 > 50 is false),
+            %% so the result is stable regardless of whether the
+            %% periodic 1s sweep timer also fires.
+            InsertCount = 55,
+            ExpectedAfterSweep = InsertCount - (InsertCount * 10 div 100),
+
+            %% Clear any events from other tests to start clean
+            beamtalk_trace_store:clear(),
+
+            %% Capture original max_events so we restore the real
+            %% value, not a hard-coded constant.
+            OrigMax = beamtalk_trace_store:max_events(),
+
+            %% Set a small max for testing; restore in `after`
+            %% so a failing assertion doesn't leave max_events=50
+            %% for subsequent tests.
+            beamtalk_trace_store:max_events(MaxEvents),
+            try
+                ?assertEqual(MaxEvents, beamtalk_trace_store:max_events()),
+
+                %% Enable tracing and insert more than max
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                lists:foreach(
+                    fun(I) ->
+                        beamtalk_trace_store:record_trace_event(
+                            TestPid, 'Counter', increment, sync, I * 100, ok, #{}, stop
+                        )
+                    end,
+                    lists:seq(1, InsertCount)
+                ),
+
+                %% Trigger sweep and wait for it to complete.
+                %% sys:get_state/1 forces a round-trip through the
+                %% gen_server mailbox, ensuring the sweep_eviction
+                %% message has been processed.
+                beamtalk_trace_store ! sweep_eviction,
+                sys:get_state(beamtalk_trace_store),
+
+                %% After sweep, exactly ExpectedAfterSweep events
+                %% should remain for our pid. Filter by TestPid to
+                %% avoid interference from concurrent test suites.
+                PostSweep = beamtalk_trace_store:get_traces(TestPid),
+                ?assertEqual(ExpectedAfterSweep, length(PostSweep))
+            after
+                beamtalk_trace_store:max_events(OrigMax)
+            end
+        end),
+        %%====================================================================
+        %% Test: Counters aggregates
+        %%====================================================================
+        ?_test(begin
+            beamtalk_trace_store:enable(),
+            TestPid = self(),
+
+            %% Record multiple dispatches
+            beamtalk_trace_store:record_dispatch(TestPid, increment, 1000, ok, sync, 'Counter'),
+            beamtalk_trace_store:record_dispatch(TestPid, increment, 2000, ok, sync, 'Counter'),
+            beamtalk_trace_store:record_dispatch(
+                TestPid, increment, 3000, error, sync, 'Counter'
+            ),
+
+            %% Check aggregated per-actor stats
+            Stats = beamtalk_trace_store:get_stats(TestPid),
+            PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
+            PidStats = maps:get(PidKey, Stats),
+            IncStats = maps:get(
+                {beamtalk_string, <<"increment">>},
+                maps:get({beamtalk_string, <<"methods">>}, PidStats)
+            ),
+
+            ?assertEqual(3, maps:get({beamtalk_string, <<"calls">>}, IncStats)),
+            ?assertEqual(2, maps:get({beamtalk_string, <<"ok">>}, IncStats)),
+            ?assertEqual(1, maps:get({beamtalk_string, <<"errors">>}, IncStats)),
+            ?assertEqual(6000, maps:get({beamtalk_string, <<"total_duration_ns">>}, IncStats)),
+            ?assertEqual(2000, maps:get({beamtalk_string, <<"avg_duration_ns">>}, IncStats)),
+            ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, IncStats)),
+            ?assertEqual(3000, maps:get({beamtalk_string, <<"max_duration_ns">>}, IncStats)),
+
+            %% The always-on class entry carries the same totals
+            #{
+                {beamtalk_string, <<"methods">>} := #{
+                    {beamtalk_string, <<"increment">>} := ClassInc
+                }
+            } =
+                class_entry(<<"Counter">>),
+            ?assertEqual(3, maps:get({beamtalk_string, <<"calls">>}, ClassInc)),
+            ?assertEqual(6000, maps:get({beamtalk_string, <<"total_duration_ns">>}, ClassInc))
+        end),
+        %%====================================================================
+        %% Test: Clear resets all data
+        %%====================================================================
+        ?_test(begin
+            TestPid = self(),
+
+            %% Insert some data
+            beamtalk_trace_store:record_dispatch(TestPid, increment, 1000, ok, sync, 'Counter'),
+            beamtalk_trace_store:enable(),
+            beamtalk_trace_store:record_trace_event(
+                TestPid, 'Counter', increment, sync, 1000, ok, #{}, stop
+            ),
+
+            %% Verify data exists
+            ?assertNotEqual(#{}, beamtalk_trace_store:get_stats()),
+            ?assertNotEqual([], beamtalk_trace_store:get_traces()),
+
+            %% Clear
+            beamtalk_trace_store:clear(),
+
+            %% Verify all data is gone
+            ?assertEqual(#{}, beamtalk_trace_store:get_stats()),
+            ?assertEqual([], beamtalk_trace_store:get_traces())
+        end),
+        %%====================================================================
+        %% Test: Composite key uniqueness
+        %%====================================================================
+        ?_test(begin
+            beamtalk_trace_store:enable(),
+            TestPid = self(),
+
+            %% Insert events rapidly — composite key should ensure uniqueness
+            lists:foreach(
+                fun(_) ->
+                    beamtalk_trace_store:record_trace_event(
+                        TestPid, 'Counter', increment, sync, 100, ok, #{}, stop
+                    )
+                end,
+                lists:seq(1, 100)
+            ),
+
+            Traces = beamtalk_trace_store:get_traces(),
+            ?assertEqual(100, length(Traces))
+        end),
+        %%====================================================================
+        %% Test: Slow methods query
+        %%====================================================================
+        ?_test(begin
+            TestPid = self(),
+
+            %% Record methods with different durations
+            beamtalk_trace_store:record_dispatch(TestPid, fast, 100, ok, sync, 'Counter'),
+            beamtalk_trace_store:record_dispatch(TestPid, slow, 10000, ok, sync, 'Counter'),
+            beamtalk_trace_store:record_dispatch(TestPid, medium, 5000, ok, sync, 'Counter'),
+
+            Result = beamtalk_trace_store:slow_methods(2),
+            ?assertEqual(2, length(Result)),
+            [Slowest | _] = Result,
+            ?assertEqual(slow, maps:get({beamtalk_string, <<"selector">>}, Slowest))
+        end),
+        %%====================================================================
+        %% Test: Hot methods query
+        %%====================================================================
+        ?_test(begin
+            TestPid = self(),
+
+            %% Record methods with different call counts
+            beamtalk_trace_store:record_dispatch(TestPid, rare, 100, ok, sync, 'Counter'),
+            lists:foreach(
+                fun(_) ->
+                    beamtalk_trace_store:record_dispatch(
+                        TestPid, popular, 100, ok, sync, 'Counter'
+                    )
+                end,
+                lists:seq(1, 10)
+            ),
+
+            Result = beamtalk_trace_store:hot_methods(1),
+            ?assertEqual(1, length(Result)),
+            ?assertEqual(popular, maps:get({beamtalk_string, <<"selector">>}, hd(Result)))
+        end),
+        %%====================================================================
+        %% Test: Error methods query
+        %%====================================================================
+        ?_test(begin
+            TestPid = self(),
+
+            %% Record methods with different error rates
+            beamtalk_trace_store:record_dispatch(TestPid, reliable, 100, ok, sync, 'Counter'),
+            beamtalk_trace_store:record_dispatch(TestPid, reliable, 100, ok, sync, 'Counter'),
+            beamtalk_trace_store:record_dispatch(TestPid, flaky, 100, error, sync, 'Counter'),
+            beamtalk_trace_store:record_dispatch(TestPid, flaky, 100, timeout, sync, 'Counter'),
+
+            Result = beamtalk_trace_store:error_methods(1),
+            ?assertEqual(1, length(Result)),
+            ?assertEqual(flaky, maps:get({beamtalk_string, <<"selector">>}, hd(Result)))
+        end),
+        %%====================================================================
+        %% Test: Actor health
+        %%====================================================================
+        ?_test(begin
+            %% Health of a live process
+            TestPid = self(),
+            Health = beamtalk_trace_store:actor_health(TestPid),
+            ?assertEqual(
+                {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
+                maps:get({beamtalk_string, <<"pid">>}, Health)
+            ),
+            ?assertNotEqual(dead, maps:get({beamtalk_string, <<"status">>}, Health)),
+            ?assert(is_integer(maps:get({beamtalk_string, <<"queue_depth">>}, Health))),
+            ?assert(is_integer(maps:get({beamtalk_string, <<"memory_kb">>}, Health))),
+            ?assert(is_integer(maps:get({beamtalk_string, <<"reductions">>}, Health)))
+        end),
+        ?_test(begin
+            %% Health of a dead process
+            DeadPid = spawn(fun() -> ok end),
+            beamtalk_test_wait:dead(DeadPid),
+            Health = beamtalk_trace_store:actor_health(DeadPid),
+            ?assertEqual(dead, maps:get({beamtalk_string, <<"status">>}, Health)),
+            ?assertEqual(
+                {beamtalk_string, <<"process not alive">>},
+                maps:get({beamtalk_string, <<"error">>}, Health)
+            )
+        end),
+        %%====================================================================
+        %% Test: System health
+        %%====================================================================
+        ?_test(begin
+            Health = beamtalk_trace_store:system_health(),
+            ?assert(is_integer(maps:get({beamtalk_string, <<"scheduler_count">>}, Health))),
+            ?assert(maps:get({beamtalk_string, <<"scheduler_count">>}, Health) > 0),
+            ?assert(is_integer(maps:get({beamtalk_string, <<"process_count">>}, Health))),
+            ?assert(is_map(maps:get({beamtalk_string, <<"memory">>}, Health))),
+            Memory = maps:get({beamtalk_string, <<"memory">>}, Health),
+            ?assert(is_integer(maps:get({beamtalk_string, <<"total_mb">>}, Memory))),
+            ?assert(is_integer(maps:get({beamtalk_string, <<"run_queue">>}, Health)))
+        end),
+        %%====================================================================
+        %% Test: Bottlenecks query
+        %%====================================================================
+        ?_test(begin
+            %% bottlenecks/1 scans the instance registry, so it needs no
+            %% dispatches and works whether or not tracing is enabled.
+            case whereis(beamtalk_object_instances) of
+                undefined -> {ok, _} = beamtalk_object_instances:start_link();
+                _ -> ok
+            end,
+            Self = self(),
+            Pid = spawn(fun() ->
+                Self ! ready,
+                receive
+                    stop -> ok
+                end
+            end),
+            receive
+                ready -> ok
+            end,
+            ok = beamtalk_object_instances:register('Counter', Pid),
+            try
+                Result = beamtalk_trace_store:bottlenecks(10),
+                ?assert(is_list(Result)),
+                %% Our registered process should be in the list
+                PidBin = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
+                Pids = [maps:get({beamtalk_string, <<"actor">>}, R) || R <- Result],
+                ?assert(lists:member(PidBin, Pids)),
+                [Entry] = [
+                    R
+                 || R <- Result, maps:get({beamtalk_string, <<"actor">>}, R) =:= PidBin
+                ],
+                ?assertEqual(
+                    {beamtalk_string, <<"Counter">>},
+                    maps:get({beamtalk_string, <<"class">>}, Entry)
+                ),
+
+                %% An unregistered process with dispatches never appears
+                Ghost = spawn(fun() ->
+                    Self ! ghost_ready,
+                    receive
+                        stop -> ok
+                    end
+                end),
+                receive
+                    ghost_ready -> ok
+                end,
+                beamtalk_trace_store:record_dispatch(
+                    Ghost, test_method, 100, ok, sync, 'Counter'
+                ),
+                Result2 = beamtalk_trace_store:bottlenecks(1000),
+                GhostBin = {beamtalk_string, list_to_binary(pid_to_list(Ghost))},
+                ?assertNot(
+                    lists:member(GhostBin, [
+                        maps:get({beamtalk_string, <<"actor">>}, R)
+                     || R <- Result2
+                    ])
+                ),
+                Ghost ! stop
+            after
+                beamtalk_object_instances:unregister('Counter', Pid),
+                Pid ! stop
+            end
+        end),
+        {"a pid registered under two classes reports once",
+            ?_test(begin
                 case whereis(beamtalk_object_instances) of
-                    undefined -> {ok, _} = beamtalk_object_instances:start_link();
-                    _ -> ok
+                    undefined ->
+                        {ok, _} = beamtalk_object_instances:start_link();
+                    _ ->
+                        ok
                 end,
                 Self = self(),
                 Pid = spawn(fun() ->
@@ -537,174 +514,90 @@ bottlenecks_test_() ->
                     ready -> ok
                 end,
                 ok = beamtalk_object_instances:register('Counter', Pid),
+                ok = beamtalk_object_instances:register('Other', Pid),
                 try
-                    Result = beamtalk_trace_store:bottlenecks(10),
-                    ?assert(is_list(Result)),
-                    %% Our registered process should be in the list
+                    Result = beamtalk_trace_store:bottlenecks(1000),
                     PidBin = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
-                    Pids = [maps:get({beamtalk_string, <<"actor">>}, R) || R <- Result],
-                    ?assert(lists:member(PidBin, Pids)),
-                    [Entry] = [
+                    Matches = [
                         R
                      || R <- Result, maps:get({beamtalk_string, <<"actor">>}, R) =:= PidBin
                     ],
-                    ?assertEqual(
-                        {beamtalk_string, <<"Counter">>},
-                        maps:get({beamtalk_string, <<"class">>}, Entry)
-                    ),
-
-                    %% An unregistered process with dispatches never appears
-                    Ghost = spawn(fun() ->
-                        Self ! ghost_ready,
-                        receive
-                            stop -> ok
-                        end
-                    end),
-                    receive
-                        ghost_ready -> ok
-                    end,
-                    beamtalk_trace_store:record_dispatch(
-                        Ghost, test_method, 100, ok, sync, 'Counter'
-                    ),
-                    Result2 = beamtalk_trace_store:bottlenecks(1000),
-                    GhostBin = {beamtalk_string, list_to_binary(pid_to_list(Ghost))},
-                    ?assertNot(
-                        lists:member(GhostBin, [
-                            maps:get({beamtalk_string, <<"actor">>}, R)
-                         || R <- Result2
-                        ])
-                    ),
-                    Ghost ! stop
+                    ?assertEqual(1, length(Matches))
                 after
                     beamtalk_object_instances:unregister('Counter', Pid),
+                    beamtalk_object_instances:unregister('Other', Pid),
                     Pid ! stop
                 end
-            end),
-            {"a pid registered under two classes reports once",
-                ?_test(begin
-                    case whereis(beamtalk_object_instances) of
-                        undefined ->
-                            {ok, _} = beamtalk_object_instances:start_link();
-                        _ ->
-                            ok
-                    end,
-                    Self = self(),
-                    Pid = spawn(fun() ->
-                        Self ! ready,
-                        receive
-                            stop -> ok
-                        end
-                    end),
-                    receive
-                        ready -> ok
-                    end,
-                    ok = beamtalk_object_instances:register('Counter', Pid),
-                    ok = beamtalk_object_instances:register('Other', Pid),
-                    try
-                        Result = beamtalk_trace_store:bottlenecks(1000),
-                        PidBin = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
-                        Matches = [
-                            R
-                         || R <- Result, maps:get({beamtalk_string, <<"actor">>}, R) =:= PidBin
-                        ],
-                        ?assertEqual(1, length(Matches))
-                    after
-                        beamtalk_object_instances:unregister('Counter', Pid),
-                        beamtalk_object_instances:unregister('Other', Pid),
-                        Pid ! stop
-                    end
-                end)}
-        ]
-    end}.
+            end)},
+        %%====================================================================
+        %% Test: Direct dispatch recording - stop (BT-4113: no longer a telemetry handler)
+        %%====================================================================
+        ?_test(begin
+            TestPid = self(),
+            Duration = 5000,
+            Metadata = #{
+                pid => TestPid,
+                class => 'Counter',
+                selector => increment,
+                mode => sync,
+                outcome => ok
+            },
 
-%%====================================================================
-%% Test: Direct dispatch recording - stop (BT-4113: no longer a telemetry handler)
-%%====================================================================
+            %% Record directly, as dispatch_span/5 does
+            beamtalk_trace_store:record_dispatch_stop(Metadata, Duration),
 
-record_dispatch_stop_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                TestPid = self(),
-                Duration = 5000,
-                Metadata = #{
-                    pid => TestPid,
-                    class => 'Counter',
-                    selector => increment,
-                    mode => sync,
-                    outcome => ok
-                },
+            %% Verify the always-on class aggregate was recorded
+            #{
+                {beamtalk_string, <<"methods">>} := #{
+                    {beamtalk_string, <<"increment">>} := IncStats
+                }
+            } =
+                class_entry(<<"Counter">>),
+            ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, IncStats))
+        end),
+        %%====================================================================
+        %% Test: Direct dispatch recording - exception
+        %%====================================================================
+        ?_test(begin
+            TestPid = self(),
+            Duration = 3000,
+            Metadata = #{
+                pid => TestPid,
+                class => 'Counter',
+                selector => badmethod,
+                mode => sync,
+                kind => error,
+                reason => badarg
+            },
 
-                %% Record directly, as dispatch_span/5 does
-                beamtalk_trace_store:record_dispatch_stop(Metadata, Duration),
+            %% Record directly, as dispatch_span/5 does
+            beamtalk_trace_store:record_dispatch_exception(Metadata, Duration),
 
-                %% Verify the always-on class aggregate was recorded
-                #{
-                    {beamtalk_string, <<"methods">>} := #{
-                        {beamtalk_string, <<"increment">>} := IncStats
-                    }
-                } =
-                    class_entry(<<"Counter">>),
-                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, IncStats))
-            end)
-        ]
-    end}.
+            %% Verify error was recorded in the always-on class entry
+            #{
+                {beamtalk_string, <<"methods">>} := #{
+                    {beamtalk_string, <<"badmethod">>} := MethodStats
+                }
+            } =
+                class_entry(<<"Counter">>),
+            ?assertEqual(1, maps:get({beamtalk_string, <<"errors">>}, MethodStats))
+        end),
+        %%====================================================================
+        %% Test: Enable/disable toggle
+        %%====================================================================
+        ?_test(begin
+            %% Initially disabled
+            ?assertNot(beamtalk_trace_store:is_enabled()),
 
-%%====================================================================
-%% Test: Direct dispatch recording - exception
-%%====================================================================
+            %% Enable
+            beamtalk_trace_store:enable(),
+            ?assert(beamtalk_trace_store:is_enabled()),
 
-record_dispatch_exception_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                TestPid = self(),
-                Duration = 3000,
-                Metadata = #{
-                    pid => TestPid,
-                    class => 'Counter',
-                    selector => badmethod,
-                    mode => sync,
-                    kind => error,
-                    reason => badarg
-                },
-
-                %% Record directly, as dispatch_span/5 does
-                beamtalk_trace_store:record_dispatch_exception(Metadata, Duration),
-
-                %% Verify error was recorded in the always-on class entry
-                #{
-                    {beamtalk_string, <<"methods">>} := #{
-                        {beamtalk_string, <<"badmethod">>} := MethodStats
-                    }
-                } =
-                    class_entry(<<"Counter">>),
-                ?assertEqual(1, maps:get({beamtalk_string, <<"errors">>}, MethodStats))
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Enable/disable toggle
-%%====================================================================
-
-enable_disable_toggle_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                %% Initially disabled
-                ?assertNot(beamtalk_trace_store:is_enabled()),
-
-                %% Enable
-                beamtalk_trace_store:enable(),
-                ?assert(beamtalk_trace_store:is_enabled()),
-
-                %% Disable
-                beamtalk_trace_store:disable(),
-                ?assertNot(beamtalk_trace_store:is_enabled())
-            end)
-        ]
-    end}.
+            %% Disable
+            beamtalk_trace_store:disable(),
+            ?assertNot(beamtalk_trace_store:is_enabled())
+        end)
+    ]}.
 
 %%====================================================================
 %% Test: Crash recovery preserves exact aggregates (heir)
@@ -717,40 +610,38 @@ enable_disable_toggle_test_() ->
 %% is terminated, so no restart races the assertions) and handed back
 %% afterwards, whatever the ambient suite state.
 crash_recovery_preserves_exact_counts_test_() ->
-    {setup, fun setup/0, fun crash_cleanup/1, fun(_State) ->
-        [
-            {"graceful restart preserves aggregates exactly",
-                ?_timed(begin
-                    take_store_direct(),
-                    TestPid = seed_crash_test_data(),
-                    gen_server:stop(beamtalk_trace_store),
-                    %% The heir has taken over the handed-back tables
-                    ok = beamtalk_test_wait:sync(beamtalk_ets_heir),
+    {foreach, fun setup/0, fun crash_cleanup/1, [
+        {"graceful restart preserves aggregates exactly",
+            ?_timed(begin
+                take_store_direct(),
+                TestPid = seed_crash_test_data(),
+                gen_server:stop(beamtalk_trace_store),
+                %% The heir has taken over the handed-back tables
+                ok = beamtalk_test_wait:sync(beamtalk_ets_heir),
+                {ok, _} = beamtalk_trace_store:start_link(),
+                assert_seeded_data_intact(TestPid)
+            end)},
+        {"kill preserves aggregates exactly",
+            ?_timed(begin
+                take_store_direct(),
+                TestPid = seed_crash_test_data(),
+                StorePid = whereis(beamtalk_trace_store),
+                %% The store is linked here (direct start above): trap
+                %% the kill's EXIT instead of dying with it.
+                process_flag(trap_exit, true),
+                try
+                    exit(StorePid, kill),
+                    receive
+                        {'EXIT', StorePid, killed} -> ok
+                    after 5000 -> ?assert(false)
+                    end,
                     {ok, _} = beamtalk_trace_store:start_link(),
                     assert_seeded_data_intact(TestPid)
-                end)},
-            {"kill preserves aggregates exactly",
-                ?_timed(begin
-                    take_store_direct(),
-                    TestPid = seed_crash_test_data(),
-                    StorePid = whereis(beamtalk_trace_store),
-                    %% The store is linked here (direct start above): trap
-                    %% the kill's EXIT instead of dying with it.
-                    process_flag(trap_exit, true),
-                    try
-                        exit(StorePid, kill),
-                        receive
-                            {'EXIT', StorePid, killed} -> ok
-                        after 5000 -> ?assert(false)
-                        end,
-                        {ok, _} = beamtalk_trace_store:start_link(),
-                        assert_seeded_data_intact(TestPid)
-                    after
-                        process_flag(trap_exit, false)
-                    end
-                end)}
-        ]
-    end}.
+                after
+                    process_flag(trap_exit, false)
+                end
+            end)}
+    ]}.
 
 -doc """
 Take direct ownership of the trace store however it currently runs: a
@@ -855,89 +746,73 @@ assert_seeded_data_intact(TestPid) ->
 %%====================================================================
 
 vm_measurements_handler_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                %% Simulate a VM measurement event
-                Measurements = #{total => 100000, processes => 50000, ets => 20000},
-                beamtalk_trace_store:handle_vm_measurements(
-                    [vm, memory],
-                    Measurements,
-                    #{},
-                    #{}
-                ),
-                %% The measurements are a cast; sync waits until it is handled
-                ok = beamtalk_test_wait:sync(beamtalk_trace_store),
+    {foreach, fun setup/0, fun cleanup/1, [
+        ?_test(begin
+            %% Simulate a VM measurement event
+            Measurements = #{total => 100000, processes => 50000, ets => 20000},
+            beamtalk_trace_store:handle_vm_measurements(
+                [vm, memory],
+                Measurements,
+                #{},
+                #{}
+            ),
+            %% The measurements are a cast; sync waits until it is handled
+            ok = beamtalk_test_wait:sync(beamtalk_trace_store),
 
-                %% System health should include the VM stats
-                Health = beamtalk_trace_store:system_health(),
-                VmStats = maps:get({beamtalk_string, <<"vm_stats">>}, Health),
-                ?assert(is_map(VmStats))
-            end)
-        ]
-    end}.
+            %% System health should include the VM stats
+            Health = beamtalk_trace_store:system_health(),
+            VmStats = maps:get({beamtalk_string, <<"vm_stats">>}, Health),
+            ?assert(is_map(VmStats))
+        end),
+        %%====================================================================
+        %% Test: Wall-clock timestamp in trace events
+        %%====================================================================
+        ?_test(begin
+            TestPid = self(),
+            beamtalk_trace_store:enable(),
 
-%%====================================================================
-%% Test: Wall-clock timestamp in trace events
-%%====================================================================
+            Before = erlang:system_time(microsecond),
+            beamtalk_trace_store:record_trace_event(
+                TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+            ),
+            After = erlang:system_time(microsecond),
 
-wall_clock_timestamp_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                TestPid = self(),
-                beamtalk_trace_store:enable(),
-
-                Before = erlang:system_time(microsecond),
-                beamtalk_trace_store:record_trace_event(
-                    TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
-                ),
-                After = erlang:system_time(microsecond),
-
-                [Trace] = beamtalk_trace_store:get_traces(),
-                Ts = maps:get({beamtalk_string, <<"timestamp_us">>}, Trace),
-                %% Wall-clock timestamp should be between Before and After
-                ?assert(Ts >= Before),
-                ?assert(Ts =< After),
-                %% Should be a reasonable epoch timestamp (after 2025-01-01)
-                ?assert(Ts > 1735689600000000)
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Serialized counter grow
-%%====================================================================
-
-serialized_counter_grow_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                %% Fill up counter slots to trigger a grow.
-                %% Initial size is 8000 slots, 8 per key = 1000 keys before grow.
-                %% Record enough unique {Class, Selector} keys to force a grow.
-                TestPid = self(),
-                lists:foreach(
-                    fun(I) ->
-                        % elp:fixme W0023 intentional atom creation
-                        Sel = list_to_atom("method_" ++ integer_to_list(I)),
-                        beamtalk_trace_store:record_dispatch(TestPid, Sel, 100, ok, sync, 'Counter')
-                    end,
-                    lists:seq(1, 1010)
-                ),
-                %% Verify the atomics grew — stats should have all 1010 methods
-                #{{beamtalk_string, <<"methods">>} := Methods} = class_entry(<<"Counter">>),
-                ?assert(maps:size(Methods) >= 1010)
-            end)
-        ]
-    end}.
+            [Trace] = beamtalk_trace_store:get_traces(),
+            Ts = maps:get({beamtalk_string, <<"timestamp_us">>}, Trace),
+            %% Wall-clock timestamp should be between Before and After
+            ?assert(Ts >= Before),
+            ?assert(Ts =< After),
+            %% Should be a reasonable epoch timestamp (after 2025-01-01)
+            ?assert(Ts > 1735689600000000)
+        end),
+        %%====================================================================
+        %% Test: Serialized counter grow
+        %%====================================================================
+        ?_test(begin
+            %% Fill up counter slots to trigger a grow.
+            %% Initial size is 8000 slots, 8 per key = 1000 keys before grow.
+            %% Record enough unique {Class, Selector} keys to force a grow.
+            TestPid = self(),
+            lists:foreach(
+                fun(I) ->
+                    % elp:fixme W0023 intentional atom creation
+                    Sel = list_to_atom("method_" ++ integer_to_list(I)),
+                    beamtalk_trace_store:record_dispatch(TestPid, Sel, 100, ok, sync, 'Counter')
+                end,
+                lists:seq(1, 1010)
+            ),
+            %% Verify the atomics grew — stats should have all 1010 methods
+            #{{beamtalk_string, <<"methods">>} := Methods} = class_entry(<<"Counter">>),
+            ?assert(maps:size(Methods) >= 1010)
+        end)
+    ]}.
 
 %%====================================================================
 %% Test: Concurrent hits during grow lose nothing (BT-4103)
 %%====================================================================
 
 concurrent_hits_during_grow_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+    {foreach, fun setup/0, fun cleanup/1, [
         {timeout, 60,
             ?_test(begin
                 %% Hammer one class key from many writers while fresh keys
@@ -1004,1043 +879,906 @@ concurrent_hits_during_grow_test_() ->
                     class_entry(<<"Racy">>),
                 ?assertEqual(32 * 500, maps:get({beamtalk_string, <<"calls">>}, Hammered))
             end)}
-    end}.
+    ]}.
 
 %%====================================================================
 %% Test: Min/max duration tracking
 %%====================================================================
 
 min_max_duration_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                beamtalk_trace_store:enable(),
-                TestPid = self(),
-                PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
-                PidPing = fun() ->
-                    #{
-                        PidKey := #{
-                            {beamtalk_string, <<"methods">>} := #{
-                                {beamtalk_string, <<"ping">>} := S
-                            }
-                        }
-                    } =
-                        beamtalk_trace_store:get_stats(TestPid),
-                    S
-                end,
-                ClassPing = fun() ->
-                    #{{beamtalk_string, <<"methods">>} := #{{beamtalk_string, <<"ping">>} := S}} = class_entry(
-                        <<"Counter">>
-                    ),
-                    S
-                end,
-
-                %% Single call — min and max should be the same
-                beamtalk_trace_store:record_dispatch(TestPid, ping, 5000, ok, sync, 'Counter'),
-                ?assertEqual(5000, maps:get({beamtalk_string, <<"min_duration_ns">>}, PidPing())),
-                ?assertEqual(5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, PidPing())),
-                ?assertEqual(5000, maps:get({beamtalk_string, <<"min_duration_ns">>}, ClassPing())),
-                ?assertEqual(5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, ClassPing())),
-
-                %% Add a faster call — min should decrease, max stays
-                beamtalk_trace_store:record_dispatch(TestPid, ping, 1000, ok, sync, 'Counter'),
-                ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, PidPing())),
-                ?assertEqual(5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, PidPing())),
-                ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, ClassPing())),
-                ?assertEqual(5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, ClassPing())),
-
-                %% Add a slower call — max should increase, min stays
-                beamtalk_trace_store:record_dispatch(TestPid, ping, 11000, ok, sync, 'Counter'),
-                ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, PidPing())),
-                ?assertEqual(11000, maps:get({beamtalk_string, <<"max_duration_ns">>}, PidPing())),
-                ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, ClassPing())),
-                ?assertEqual(11000, maps:get({beamtalk_string, <<"max_duration_ns">>}, ClassPing()))
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Min/max CAS correctness under concurrent updates
-%%====================================================================
-
-min_max_concurrent_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            {timeout, 30,
-                ?_test(begin
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-
-                    %% Pre-allocate the slot with an initial dispatch to avoid the
-                    %% first-observation allocation race between concurrent writers.
-                    beamtalk_trace_store:record_dispatch(
-                        TestPid, concurrent_method, 5000, ok, sync, 'Counter'
-                    ),
-
-                    %% Spawn multiple processes that all record dispatches concurrently
-                    %% with varying durations. The known min is 199, max is 10000.
-                    NumProcesses = 10,
-                    CallsPerProcess = 100,
-                    Parent = self(),
-                    Pids = [
-                        spawn(fun() ->
-                            lists:foreach(
-                                fun(J) ->
-                                    Duration = 100 + (J * 99),
-                                    beamtalk_trace_store:record_dispatch(
-                                        TestPid, concurrent_method, Duration, ok, sync, 'Counter'
-                                    )
-                                end,
-                                lists:seq(1, CallsPerProcess)
-                            ),
-                            Parent ! {done, self()}
-                        end)
-                     || _ <- lists:seq(1, NumProcesses)
-                    ],
-
-                    %% Wait for all processes to finish
-                    lists:foreach(
-                        fun(Pid) ->
-                            receive
-                                {done, Pid} -> ok
-                            end
-                        end,
-                        Pids
-                    ),
-
-                    %% Verify min and max
-                    Stats = beamtalk_trace_store:get_stats(TestPid),
-                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
-                    PidStats = maps:get(PidKey, Stats),
-                    MethodStats = maps:get(
-                        {beamtalk_string, <<"concurrent_method">>},
-                        maps:get({beamtalk_string, <<"methods">>}, PidStats)
-                    ),
-
-                    %% Slot pre-allocated, so all concurrent increments hit the same slot.
-                    %% 1 pre-allocation + NumProcesses * CallsPerProcess
-                    ExpectedCalls = 1 + NumProcesses * CallsPerProcess,
-                    ?assertEqual(
-                        ExpectedCalls, maps:get({beamtalk_string, <<"calls">>}, MethodStats)
-                    ),
-                    %% Min should be 100 + (1 * 99) = 199 (lower than pre-alloc 5000)
-                    ?assertEqual(
-                        199, maps:get({beamtalk_string, <<"min_duration_ns">>}, MethodStats)
-                    ),
-                    %% Max should be 100 + (100 * 99) = 10000 (higher than pre-alloc 5000)
-                    ?assertEqual(
-                        10000, maps:get({beamtalk_string, <<"max_duration_ns">>}, MethodStats)
-                    )
-                end)}
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Clear resets min sentinel
-%%====================================================================
-
-clear_resets_min_sentinel_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                beamtalk_trace_store:enable(),
-                TestPid = self(),
-
-                %% Record a dispatch to establish min/max
-                beamtalk_trace_store:record_dispatch(
-                    TestPid, sentinel_check, 5000, ok, sync, 'Counter'
-                ),
-                Stats1 = beamtalk_trace_store:get_stats(TestPid),
-                PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
-                PidStats1 = maps:get(PidKey, Stats1),
-                MethodStats1 = maps:get(
-                    {beamtalk_string, <<"sentinel_check">>},
-                    maps:get({beamtalk_string, <<"methods">>}, PidStats1)
-                ),
-                ?assertEqual(
-                    5000, maps:get({beamtalk_string, <<"min_duration_ns">>}, MethodStats1)
-                ),
-                ?assertEqual(
-                    5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, MethodStats1)
-                ),
-
-                %% Clear stats
-                beamtalk_trace_store:clear(),
-
-                %% Stats should be empty
-                ?assertEqual(#{}, beamtalk_trace_store:get_stats()),
-
-                %% Record a new dispatch — min should be set fresh, not stuck.
-                %% The class row is kept (zeroed in place) while the pid row
-                %% is dropped and re-created: both must reset the sentinel.
-                beamtalk_trace_store:record_dispatch(
-                    TestPid, sentinel_check, 8000, ok, sync, 'Counter'
-                ),
-                Stats2 = beamtalk_trace_store:get_stats(TestPid),
-                PidStats2 = maps:get(PidKey, Stats2),
-                MethodStats2 = maps:get(
-                    {beamtalk_string, <<"sentinel_check">>},
-                    maps:get({beamtalk_string, <<"methods">>}, PidStats2)
-                ),
-                ?assertEqual(
-                    8000, maps:get({beamtalk_string, <<"min_duration_ns">>}, MethodStats2)
-                ),
-                ?assertEqual(
-                    8000, maps:get({beamtalk_string, <<"max_duration_ns">>}, MethodStats2)
-                ),
+    {foreach, fun setup/0, fun cleanup/1, [
+        ?_test(begin
+            beamtalk_trace_store:enable(),
+            TestPid = self(),
+            PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
+            PidPing = fun() ->
                 #{
-                    {beamtalk_string, <<"methods">>} := #{
-                        {beamtalk_string, <<"sentinel_check">>} := ClassStats
+                    PidKey := #{
+                        {beamtalk_string, <<"methods">>} := #{
+                            {beamtalk_string, <<"ping">>} := S
+                        }
                     }
                 } =
-                    class_entry(<<"Counter">>),
-                ?assertEqual(8000, maps:get({beamtalk_string, <<"min_duration_ns">>}, ClassStats)),
-                ?assertEqual(8000, maps:get({beamtalk_string, <<"max_duration_ns">>}, ClassStats))
-            end)
-        ]
-    end}.
+                    beamtalk_trace_store:get_stats(TestPid),
+                S
+            end,
+            ClassPing = fun() ->
+                #{{beamtalk_string, <<"methods">>} := #{{beamtalk_string, <<"ping">>} := S}} = class_entry(
+                    <<"Counter">>
+                ),
+                S
+            end,
 
-%%====================================================================
-%% Test: Slow methods sort by max duration
-%%====================================================================
+            %% Single call — min and max should be the same
+            beamtalk_trace_store:record_dispatch(TestPid, ping, 5000, ok, sync, 'Counter'),
+            ?assertEqual(5000, maps:get({beamtalk_string, <<"min_duration_ns">>}, PidPing())),
+            ?assertEqual(5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, PidPing())),
+            ?assertEqual(5000, maps:get({beamtalk_string, <<"min_duration_ns">>}, ClassPing())),
+            ?assertEqual(5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, ClassPing())),
 
-slow_methods_sort_by_max_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
+            %% Add a faster call — min should decrease, max stays
+            beamtalk_trace_store:record_dispatch(TestPid, ping, 1000, ok, sync, 'Counter'),
+            ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, PidPing())),
+            ?assertEqual(5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, PidPing())),
+            ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, ClassPing())),
+            ?assertEqual(5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, ClassPing())),
+
+            %% Add a slower call — max should increase, min stays
+            beamtalk_trace_store:record_dispatch(TestPid, ping, 11000, ok, sync, 'Counter'),
+            ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, PidPing())),
+            ?assertEqual(11000, maps:get({beamtalk_string, <<"max_duration_ns">>}, PidPing())),
+            ?assertEqual(1000, maps:get({beamtalk_string, <<"min_duration_ns">>}, ClassPing())),
+            ?assertEqual(11000, maps:get({beamtalk_string, <<"max_duration_ns">>}, ClassPing()))
+        end),
+        %%====================================================================
+        %% Test: Min/max CAS correctness under concurrent updates
+        %%====================================================================
+        {timeout, 30,
             ?_test(begin
+                beamtalk_trace_store:enable(),
                 TestPid = self(),
 
-                %% Method 'steady' has high avg but low max (consistent)
-                beamtalk_trace_store:record_dispatch(TestPid, steady, 9000, ok, sync, 'Counter'),
-                beamtalk_trace_store:record_dispatch(TestPid, steady, 9000, ok, sync, 'Counter'),
+                %% Pre-allocate the slot with an initial dispatch to avoid the
+                %% first-observation allocation race between concurrent writers.
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, concurrent_method, 5000, ok, sync, 'Counter'
+                ),
 
-                %% Method 'spiky' has low avg but high max (outlier)
-                beamtalk_trace_store:record_dispatch(TestPid, spiky, 1000, ok, sync, 'Counter'),
-                beamtalk_trace_store:record_dispatch(TestPid, spiky, 20000, ok, sync, 'Counter'),
+                %% Spawn multiple processes that all record dispatches concurrently
+                %% with varying durations. The known min is 199, max is 10000.
+                NumProcesses = 10,
+                CallsPerProcess = 100,
+                Parent = self(),
+                Pids = [
+                    spawn(fun() ->
+                        lists:foreach(
+                            fun(J) ->
+                                Duration = 100 + (J * 99),
+                                beamtalk_trace_store:record_dispatch(
+                                    TestPid, concurrent_method, Duration, ok, sync, 'Counter'
+                                )
+                            end,
+                            lists:seq(1, CallsPerProcess)
+                        ),
+                        Parent ! {done, self()}
+                    end)
+                 || _ <- lists:seq(1, NumProcesses)
+                ],
 
-                %% By avg, 'steady' should be first (avg=9000 vs avg=10500)
-                %% Actually spiky avg = (1000+20000)/2 = 10500, steady avg = 9000
-                %% So by avg, spiky is first
-                ByAvg = beamtalk_trace_store:slow_methods(2),
-                ?assertEqual(spiky, maps:get({beamtalk_string, <<"selector">>}, hd(ByAvg))),
+                %% Wait for all processes to finish
+                lists:foreach(
+                    fun(Pid) ->
+                        receive
+                            {done, Pid} -> ok
+                        end
+                    end,
+                    Pids
+                ),
 
-                %% By max, 'spiky' should still be first (max=20000 vs max=9000)
-                ByMax = beamtalk_trace_store:slow_methods(2, max_duration_ns),
-                ?assertEqual(spiky, maps:get({beamtalk_string, <<"selector">>}, hd(ByMax))),
+                %% Verify min and max
+                Stats = beamtalk_trace_store:get_stats(TestPid),
+                PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
+                PidStats = maps:get(PidKey, Stats),
+                MethodStats = maps:get(
+                    {beamtalk_string, <<"concurrent_method">>},
+                    maps:get({beamtalk_string, <<"methods">>}, PidStats)
+                ),
 
-                %% Verify the second entry is 'steady' when sorted by max
-                [_, Second] = ByMax,
-                ?assertEqual(steady, maps:get({beamtalk_string, <<"selector">>}, Second))
-            end)
-        ]
-    end}.
+                %% Slot pre-allocated, so all concurrent increments hit the same slot.
+                %% 1 pre-allocation + NumProcesses * CallsPerProcess
+                ExpectedCalls = 1 + NumProcesses * CallsPerProcess,
+                ?assertEqual(
+                    ExpectedCalls, maps:get({beamtalk_string, <<"calls">>}, MethodStats)
+                ),
+                %% Min should be 100 + (1 * 99) = 199 (lower than pre-alloc 5000)
+                ?assertEqual(
+                    199, maps:get({beamtalk_string, <<"min_duration_ns">>}, MethodStats)
+                ),
+                %% Max should be 100 + (100 * 99) = 10000 (higher than pre-alloc 5000)
+                ?assertEqual(
+                    10000, maps:get({beamtalk_string, <<"max_duration_ns">>}, MethodStats)
+                )
+            end)},
+        %%====================================================================
+        %% Test: Clear resets min sentinel
+        %%====================================================================
+        ?_test(begin
+            beamtalk_trace_store:enable(),
+            TestPid = self(),
 
-%%====================================================================
-%% Test: export_traces
-%%====================================================================
+            %% Record a dispatch to establish min/max
+            beamtalk_trace_store:record_dispatch(
+                TestPid, sentinel_check, 5000, ok, sync, 'Counter'
+            ),
+            Stats1 = beamtalk_trace_store:get_stats(TestPid),
+            PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
+            PidStats1 = maps:get(PidKey, Stats1),
+            MethodStats1 = maps:get(
+                {beamtalk_string, <<"sentinel_check">>},
+                maps:get({beamtalk_string, <<"methods">>}, PidStats1)
+            ),
+            ?assertEqual(
+                5000, maps:get({beamtalk_string, <<"min_duration_ns">>}, MethodStats1)
+            ),
+            ?assertEqual(
+                5000, maps:get({beamtalk_string, <<"max_duration_ns">>}, MethodStats1)
+            ),
 
-export_traces_no_filters_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            {"export with no traces produces empty file",
-                ?_test(begin
-                    TmpFile = tmp_export_path("no_traces"),
-                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
-                    ?assertMatch({ok, #{path := TmpFile, count := 0}}, Result),
-                    %% Verify file exists and contains valid JSON
-                    {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = json:decode(Bin),
-                    ?assertEqual(
-                        0, maps:get(<<"total_events">>, maps:get(<<"metadata">>, Decoded))
-                    ),
-                    ?assertEqual([], maps:get(<<"traces">>, Decoded)),
-                    file:delete(TmpFile)
-                end)},
-            {"export captures recorded trace events",
-                ?_test(begin
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', decrement, sync, 3000, ok, #{}, stop
-                    ),
-                    TmpFile = tmp_export_path("with_traces"),
-                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
-                    ?assertMatch({ok, #{count := 2}}, Result),
-                    {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = json:decode(Bin),
-                    Meta = maps:get(<<"metadata">>, Decoded),
-                    ?assertEqual(2, maps:get(<<"total_events">>, Meta)),
-                    Traces = maps:get(<<"traces">>, Decoded),
-                    ?assertEqual(2, length(Traces)),
-                    file:delete(TmpFile)
-                end)}
-        ]
-    end}.
+            %% Clear stats
+            beamtalk_trace_store:clear(),
 
-export_traces_with_filters_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            {"export with selector filter",
-                ?_test(begin
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', decrement, sync, 3000, ok, #{}, stop
-                    ),
-                    TmpFile = tmp_export_path("filtered"),
-                    Result = beamtalk_trace_store:export_traces(#{
-                        path => TmpFile,
-                        actor => TestPid,
-                        selector => increment
-                    }),
-                    ?assertMatch({ok, #{count := 1}}, Result),
-                    {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = json:decode(Bin),
-                    Traces = maps:get(<<"traces">>, Decoded),
-                    ?assertEqual(1, length(Traces)),
-                    [Trace] = Traces,
-                    ?assertEqual(<<"increment">>, maps:get(<<"selector">>, Trace)),
-                    file:delete(TmpFile)
-                end)},
-            {"export with limit",
-                ?_test(begin
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    lists:foreach(
-                        fun(I) ->
-                            % elp:fixme W0023 intentional atom creation
-                            Sel = list_to_atom("m_" ++ integer_to_list(I)),
-                            beamtalk_trace_store:record_trace_event(
-                                TestPid, 'Counter', Sel, sync, 1000, ok, #{}, stop
-                            )
-                        end,
-                        lists:seq(1, 10)
-                    ),
-                    TmpFile = tmp_export_path("limited"),
-                    Result = beamtalk_trace_store:export_traces(#{
-                        path => TmpFile,
-                        limit => 3
-                    }),
-                    ?assertMatch({ok, #{count := 3}}, Result),
-                    {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = json:decode(Bin),
-                    ?assertEqual(3, length(maps:get(<<"traces">>, Decoded))),
-                    file:delete(TmpFile)
-                end)}
-        ]
-    end}.
+            %% Stats should be empty
+            ?assertEqual(#{}, beamtalk_trace_store:get_stats()),
 
-export_traces_default_path_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            {"export with default path generates timestamped file",
-                ?_test(begin
-                    Result = beamtalk_trace_store:export_traces(#{}),
-                    ?assertMatch({ok, #{path := _, count := 0}}, Result),
-                    {ok, #{path := Path}} = Result,
-                    %% Verify the default path matches the expected pattern
-                    ?assertMatch(<<"traces-", _/binary>>, Path),
-                    ?assert(binary:match(Path, <<".json">>) =/= nomatch),
-                    file:delete(Path)
-                end)}
-        ]
-    end}.
+            %% Record a new dispatch — min should be set fresh, not stuck.
+            %% The class row is kept (zeroed in place) while the pid row
+            %% is dropped and re-created: both must reset the sentinel.
+            beamtalk_trace_store:record_dispatch(
+                TestPid, sentinel_check, 8000, ok, sync, 'Counter'
+            ),
+            Stats2 = beamtalk_trace_store:get_stats(TestPid),
+            PidStats2 = maps:get(PidKey, Stats2),
+            MethodStats2 = maps:get(
+                {beamtalk_string, <<"sentinel_check">>},
+                maps:get({beamtalk_string, <<"methods">>}, PidStats2)
+            ),
+            ?assertEqual(
+                8000, maps:get({beamtalk_string, <<"min_duration_ns">>}, MethodStats2)
+            ),
+            ?assertEqual(
+                8000, maps:get({beamtalk_string, <<"max_duration_ns">>}, MethodStats2)
+            ),
+            #{
+                {beamtalk_string, <<"methods">>} := #{
+                    {beamtalk_string, <<"sentinel_check">>} := ClassStats
+                }
+            } =
+                class_entry(<<"Counter">>),
+            ?assertEqual(8000, maps:get({beamtalk_string, <<"min_duration_ns">>}, ClassStats)),
+            ?assertEqual(8000, maps:get({beamtalk_string, <<"max_duration_ns">>}, ClassStats))
+        end),
+        %%====================================================================
+        %% Test: Slow methods sort by max duration
+        %%====================================================================
+        ?_test(begin
+            TestPid = self(),
 
-%%====================================================================
-%% Test: Opts map filters (class, outcome, min_duration_ns)
-%%====================================================================
+            %% Method 'steady' has high avg but low max (consistent)
+            beamtalk_trace_store:record_dispatch(TestPid, steady, 9000, ok, sync, 'Counter'),
+            beamtalk_trace_store:record_dispatch(TestPid, steady, 9000, ok, sync, 'Counter'),
 
-opts_map_class_filter_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"filter by class returns only matching class",
-                ?_test(begin
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'EventStore', put, sync, 3000, ok, #{}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', decrement, sync, 2000, ok, #{}, stop
-                    ),
-                    All = beamtalk_trace_store:get_traces(),
-                    ?assertEqual(3, length(All)),
+            %% Method 'spiky' has low avg but high max (outlier)
+            beamtalk_trace_store:record_dispatch(TestPid, spiky, 1000, ok, sync, 'Counter'),
+            beamtalk_trace_store:record_dispatch(TestPid, spiky, 20000, ok, sync, 'Counter'),
 
-                    CounterOnly = beamtalk_trace_store:get_traces(#{class => 'Counter'}),
-                    ?assertEqual(2, length(CounterOnly)),
-                    lists:foreach(
-                        fun(T) ->
-                            ?assertEqual(
-                                {beamtalk_string, <<"Counter">>},
-                                maps:get({beamtalk_string, <<"class">>}, T)
-                            )
-                        end,
-                        CounterOnly
-                    ),
+            %% By avg, 'steady' should be first (avg=9000 vs avg=10500)
+            %% Actually spiky avg = (1000+20000)/2 = 10500, steady avg = 9000
+            %% So by avg, spiky is first
+            ByAvg = beamtalk_trace_store:slow_methods(2),
+            ?assertEqual(spiky, maps:get({beamtalk_string, <<"selector">>}, hd(ByAvg))),
 
-                    EventStoreOnly = beamtalk_trace_store:get_traces(#{class => 'EventStore'}),
-                    ?assertEqual(1, length(EventStoreOnly)),
-                    ?assertEqual(
-                        {beamtalk_string, <<"EventStore">>},
-                        maps:get({beamtalk_string, <<"class">>}, hd(EventStoreOnly))
-                    )
-                end)}
-        ]
-    end}.
+            %% By max, 'spiky' should still be first (max=20000 vs max=9000)
+            ByMax = beamtalk_trace_store:slow_methods(2, max_duration_ns),
+            ?assertEqual(spiky, maps:get({beamtalk_string, <<"selector">>}, hd(ByMax))),
 
-opts_map_outcome_filter_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"filter by outcome returns only matching outcome",
-                ?_test(begin
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', decrement, sync, 3000, error, #{error => badarg}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', reset, sync, 2000, ok, #{}, stop
-                    ),
-                    All = beamtalk_trace_store:get_traces(),
-                    ?assertEqual(3, length(All)),
+            %% Verify the second entry is 'steady' when sorted by max
+            [_, Second] = ByMax,
+            ?assertEqual(steady, maps:get({beamtalk_string, <<"selector">>}, Second))
+        end),
+        %%====================================================================
+        %% Test: export_traces
+        %%====================================================================
+        {"export with no traces produces empty file",
+            ?_test(begin
+                TmpFile = tmp_export_path("no_traces"),
+                Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                ?assertMatch({ok, #{path := TmpFile, count := 0}}, Result),
+                %% Verify file exists and contains valid JSON
+                {ok, Bin} = file:read_file(TmpFile),
+                Decoded = json:decode(Bin),
+                ?assertEqual(
+                    0, maps:get(<<"total_events">>, maps:get(<<"metadata">>, Decoded))
+                ),
+                ?assertEqual([], maps:get(<<"traces">>, Decoded)),
+                file:delete(TmpFile)
+            end)},
+        {"export captures recorded trace events",
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', decrement, sync, 3000, ok, #{}, stop
+                ),
+                TmpFile = tmp_export_path("with_traces"),
+                Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                ?assertMatch({ok, #{count := 2}}, Result),
+                {ok, Bin} = file:read_file(TmpFile),
+                Decoded = json:decode(Bin),
+                Meta = maps:get(<<"metadata">>, Decoded),
+                ?assertEqual(2, maps:get(<<"total_events">>, Meta)),
+                Traces = maps:get(<<"traces">>, Decoded),
+                ?assertEqual(2, length(Traces)),
+                file:delete(TmpFile)
+            end)},
+        {"export with selector filter",
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', decrement, sync, 3000, ok, #{}, stop
+                ),
+                TmpFile = tmp_export_path("filtered"),
+                Result = beamtalk_trace_store:export_traces(#{
+                    path => TmpFile,
+                    actor => TestPid,
+                    selector => increment
+                }),
+                ?assertMatch({ok, #{count := 1}}, Result),
+                {ok, Bin} = file:read_file(TmpFile),
+                Decoded = json:decode(Bin),
+                Traces = maps:get(<<"traces">>, Decoded),
+                ?assertEqual(1, length(Traces)),
+                [Trace] = Traces,
+                ?assertEqual(<<"increment">>, maps:get(<<"selector">>, Trace)),
+                file:delete(TmpFile)
+            end)},
+        {"export with limit",
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                lists:foreach(
+                    fun(I) ->
+                        % elp:fixme W0023 intentional atom creation
+                        Sel = list_to_atom("m_" ++ integer_to_list(I)),
+                        beamtalk_trace_store:record_trace_event(
+                            TestPid, 'Counter', Sel, sync, 1000, ok, #{}, stop
+                        )
+                    end,
+                    lists:seq(1, 10)
+                ),
+                TmpFile = tmp_export_path("limited"),
+                Result = beamtalk_trace_store:export_traces(#{
+                    path => TmpFile,
+                    limit => 3
+                }),
+                ?assertMatch({ok, #{count := 3}}, Result),
+                {ok, Bin} = file:read_file(TmpFile),
+                Decoded = json:decode(Bin),
+                ?assertEqual(3, length(maps:get(<<"traces">>, Decoded))),
+                file:delete(TmpFile)
+            end)},
+        {"export with default path generates timestamped file",
+            ?_test(begin
+                Result = beamtalk_trace_store:export_traces(#{}),
+                ?assertMatch({ok, #{path := _, count := 0}}, Result),
+                {ok, #{path := Path}} = Result,
+                %% Verify the default path matches the expected pattern
+                ?assertMatch(<<"traces-", _/binary>>, Path),
+                ?assert(binary:match(Path, <<".json">>) =/= nomatch),
+                file:delete(Path)
+            end)},
+        %%====================================================================
+        %% Test: Opts map filters (class, outcome, min_duration_ns)
+        %%====================================================================
+        {"filter by class returns only matching class",
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'EventStore', put, sync, 3000, ok, #{}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', decrement, sync, 2000, ok, #{}, stop
+                ),
+                All = beamtalk_trace_store:get_traces(),
+                ?assertEqual(3, length(All)),
 
-                    Errors = beamtalk_trace_store:get_traces(#{outcome => error}),
-                    ?assertEqual(1, length(Errors)),
-                    ?assertEqual(
-                        {beamtalk_string, <<"decrement">>},
-                        maps:get({beamtalk_string, <<"selector">>}, hd(Errors))
-                    ),
+                CounterOnly = beamtalk_trace_store:get_traces(#{class => 'Counter'}),
+                ?assertEqual(2, length(CounterOnly)),
+                lists:foreach(
+                    fun(T) ->
+                        ?assertEqual(
+                            {beamtalk_string, <<"Counter">>},
+                            maps:get({beamtalk_string, <<"class">>}, T)
+                        )
+                    end,
+                    CounterOnly
+                ),
 
-                    Oks = beamtalk_trace_store:get_traces(#{outcome => ok}),
-                    ?assertEqual(2, length(Oks))
-                end)}
-        ]
-    end}.
+                EventStoreOnly = beamtalk_trace_store:get_traces(#{class => 'EventStore'}),
+                ?assertEqual(1, length(EventStoreOnly)),
+                ?assertEqual(
+                    {beamtalk_string, <<"EventStore">>},
+                    maps:get({beamtalk_string, <<"class">>}, hd(EventStoreOnly))
+                )
+            end)},
+        {"filter by outcome returns only matching outcome",
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', decrement, sync, 3000, error, #{error => badarg}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', reset, sync, 2000, ok, #{}, stop
+                ),
+                All = beamtalk_trace_store:get_traces(),
+                ?assertEqual(3, length(All)),
 
-opts_map_min_duration_filter_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"filter by min_duration_ns returns only slow traces",
-                ?_test(begin
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', fast_op, sync, 1000, ok, #{}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', medium_op, sync, 5000000, ok, #{}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', slow_op, sync, 10000000, ok, #{}, stop
-                    ),
-                    All = beamtalk_trace_store:get_traces(),
-                    ?assertEqual(3, length(All)),
+                Errors = beamtalk_trace_store:get_traces(#{outcome => error}),
+                ?assertEqual(1, length(Errors)),
+                ?assertEqual(
+                    {beamtalk_string, <<"decrement">>},
+                    maps:get({beamtalk_string, <<"selector">>}, hd(Errors))
+                ),
 
-                    %% Only events >= 5ms (5_000_000 ns)
-                    Slow = beamtalk_trace_store:get_traces(#{min_duration_ns => 5000000}),
-                    ?assertEqual(2, length(Slow)),
+                Oks = beamtalk_trace_store:get_traces(#{outcome => ok}),
+                ?assertEqual(2, length(Oks))
+            end)},
+        {"filter by min_duration_ns returns only slow traces",
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', fast_op, sync, 1000, ok, #{}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', medium_op, sync, 5000000, ok, #{}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', slow_op, sync, 10000000, ok, #{}, stop
+                ),
+                All = beamtalk_trace_store:get_traces(),
+                ?assertEqual(3, length(All)),
 
-                    %% Only events >= 10ms
-                    VerySlow = beamtalk_trace_store:get_traces(#{min_duration_ns => 10000000}),
-                    ?assertEqual(1, length(VerySlow)),
-                    ?assertEqual(
-                        {beamtalk_string, <<"slow_op">>},
-                        maps:get({beamtalk_string, <<"selector">>}, hd(VerySlow))
-                    )
-                end)}
-        ]
-    end}.
+                %% Only events >= 5ms (5_000_000 ns)
+                Slow = beamtalk_trace_store:get_traces(#{min_duration_ns => 5000000}),
+                ?assertEqual(2, length(Slow)),
 
-opts_map_combined_filters_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"combined class + outcome filter",
-                ?_test(begin
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', decrement, sync, 3000, error, #{}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'EventStore', put, sync, 4000, error, #{}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'EventStore', get, sync, 2000, ok, #{}, stop
-                    ),
+                %% Only events >= 10ms
+                VerySlow = beamtalk_trace_store:get_traces(#{min_duration_ns => 10000000}),
+                ?assertEqual(1, length(VerySlow)),
+                ?assertEqual(
+                    {beamtalk_string, <<"slow_op">>},
+                    maps:get({beamtalk_string, <<"selector">>}, hd(VerySlow))
+                )
+            end)},
+        {"combined class + outcome filter",
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', decrement, sync, 3000, error, #{}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'EventStore', put, sync, 4000, error, #{}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'EventStore', get, sync, 2000, ok, #{}, stop
+                ),
 
-                    %% Counter errors only
-                    CounterErrors = beamtalk_trace_store:get_traces(#{
-                        class => 'Counter', outcome => error
-                    }),
-                    ?assertEqual(1, length(CounterErrors)),
-                    ?assertEqual(
-                        {beamtalk_string, <<"decrement">>},
-                        maps:get({beamtalk_string, <<"selector">>}, hd(CounterErrors))
-                    ),
+                %% Counter errors only
+                CounterErrors = beamtalk_trace_store:get_traces(#{
+                    class => 'Counter', outcome => error
+                }),
+                ?assertEqual(1, length(CounterErrors)),
+                ?assertEqual(
+                    {beamtalk_string, <<"decrement">>},
+                    maps:get({beamtalk_string, <<"selector">>}, hd(CounterErrors))
+                ),
 
-                    %% EventStore errors only
-                    ESErrors = beamtalk_trace_store:get_traces(#{
-                        class => 'EventStore', outcome => error
-                    }),
-                    ?assertEqual(1, length(ESErrors)),
-                    ?assertEqual(
-                        {beamtalk_string, <<"put">>},
-                        maps:get({beamtalk_string, <<"selector">>}, hd(ESErrors))
-                    )
-                end)},
-            {"selector without actor filter works independently",
-                ?_test(begin
-                    beamtalk_trace_store:clear(),
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', decrement, sync, 3000, ok, #{}, stop
-                    ),
+                %% EventStore errors only
+                ESErrors = beamtalk_trace_store:get_traces(#{
+                    class => 'EventStore', outcome => error
+                }),
+                ?assertEqual(1, length(ESErrors)),
+                ?assertEqual(
+                    {beamtalk_string, <<"put">>},
+                    maps:get({beamtalk_string, <<"selector">>}, hd(ESErrors))
+                )
+            end)},
+        {"selector without actor filter works independently",
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', decrement, sync, 3000, ok, #{}, stop
+                ),
 
-                    %% Selector without actor should work
-                    Result = beamtalk_trace_store:get_traces(#{selector => increment}),
-                    ?assertEqual(1, length(Result)),
-                    ?assertEqual(
-                        {beamtalk_string, <<"increment">>},
-                        maps:get({beamtalk_string, <<"selector">>}, hd(Result))
-                    )
-                end)},
-            {"all filters combined: class + outcome + min_duration_ns + selector",
-                ?_test(begin
-                    beamtalk_trace_store:clear(),
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', increment, sync, 1000, ok, #{}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', increment, sync, 10000000, error, #{}, stop
-                    ),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'EventStore', put, sync, 20000000, error, #{}, stop
-                    ),
+                %% Selector without actor should work
+                Result = beamtalk_trace_store:get_traces(#{selector => increment}),
+                ?assertEqual(1, length(Result)),
+                ?assertEqual(
+                    {beamtalk_string, <<"increment">>},
+                    maps:get({beamtalk_string, <<"selector">>}, hd(Result))
+                )
+            end)},
+        {"all filters combined: class + outcome + min_duration_ns + selector",
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', increment, sync, 1000, ok, #{}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', increment, sync, 10000000, error, #{}, stop
+                ),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'EventStore', put, sync, 20000000, error, #{}, stop
+                ),
 
-                    %% Counter + error + slow + increment
-                    Result = beamtalk_trace_store:get_traces(#{
-                        class => 'Counter',
-                        outcome => error,
-                        min_duration_ns => 5000000,
-                        selector => increment
-                    }),
-                    ?assertEqual(1, length(Result)),
-                    ?assertEqual(
-                        {beamtalk_string, <<"Counter">>},
-                        maps:get({beamtalk_string, <<"class">>}, hd(Result))
-                    ),
-                    ?assertEqual(
-                        {beamtalk_string, <<"increment">>},
-                        maps:get({beamtalk_string, <<"selector">>}, hd(Result))
-                    )
-                end)},
-            {"empty opts map returns all traces",
-                ?_test(begin
-                    beamtalk_trace_store:clear(),
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
-                    ),
-                    All = beamtalk_trace_store:get_traces(#{}),
-                    ?assertEqual(1, length(All))
-                end)}
-        ]
-    end}.
-
-%%====================================================================
-%% Test: export_traces with atom/non-JSON metadata
-%%====================================================================
-
-export_traces_atom_metadata_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            {"export succeeds with atom values in metadata",
-                ?_test(begin
-                    beamtalk_trace_store:clear(),
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    %% Simulate lifecycle stop event metadata: reason => normal (atom)
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid,
-                        'EventStore',
-                        stop,
-                        lifecycle,
-                        0,
-                        ok,
-                        #{reason => normal},
-                        stop
-                    ),
-                    TmpFile = tmp_export_path("atom_meta"),
-                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
-                    ?assertMatch({ok, #{count := 1}}, Result),
-                    {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = json:decode(Bin),
-                    [Trace] = maps:get(<<"traces">>, Decoded),
-                    %% Atom reason should be converted to binary string
-                    ?assertEqual(<<"normal">>, maps:get(<<"reason">>, Trace)),
-                    file:delete(TmpFile)
-                end)},
-            {"export succeeds with pid values in metadata",
-                ?_test(begin
-                    beamtalk_trace_store:clear(),
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid,
-                        'EventStore',
-                        stop,
-                        lifecycle,
-                        0,
-                        ok,
-                        #{caller => TestPid},
-                        stop
-                    ),
-                    TmpFile = tmp_export_path("pid_meta"),
-                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
-                    ?assertMatch({ok, #{count := 1}}, Result),
-                    {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = json:decode(Bin),
-                    [Trace] = maps:get(<<"traces">>, Decoded),
-                    %% Pid should be converted to string
-                    CallerBin = maps:get(<<"caller">>, Trace),
-                    ?assert(is_binary(CallerBin)),
-                    file:delete(TmpFile)
-                end)},
-            {"export succeeds with tuple values in metadata",
-                ?_test(begin
-                    beamtalk_trace_store:clear(),
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid,
-                        'EventStore',
-                        stop,
-                        lifecycle,
-                        0,
-                        error,
-                        #{reason => {shutdown, timeout}},
-                        stop
-                    ),
-                    TmpFile = tmp_export_path("tuple_meta"),
-                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
-                    ?assertMatch({ok, #{count := 1}}, Result),
-                    {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = json:decode(Bin),
-                    [Trace] = maps:get(<<"traces">>, Decoded),
-                    %% Tuple should be converted to string representation
-                    ReasonBin = maps:get(<<"reason">>, Trace),
-                    ?assert(is_binary(ReasonBin)),
-                    file:delete(TmpFile)
-                end)},
-            {"export succeeds with mixed metadata types",
-                ?_test(begin
-                    beamtalk_trace_store:clear(),
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid,
-                        'EventStore',
-                        stop,
-                        lifecycle,
-                        0,
-                        ok,
-                        #{
-                            reason => normal,
-                            count => 42,
-                            name => <<"test">>,
-                            flag => true
-                        },
-                        stop
-                    ),
-                    TmpFile = tmp_export_path("mixed_meta"),
-                    Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
-                    ?assertMatch({ok, #{count := 1}}, Result),
-                    {ok, Bin} = file:read_file(TmpFile),
-                    Decoded = json:decode(Bin),
-                    [Trace] = maps:get(<<"traces">>, Decoded),
-                    ?assertEqual(<<"normal">>, maps:get(<<"reason">>, Trace)),
-                    ?assertEqual(42, maps:get(<<"count">>, Trace)),
-                    ?assertEqual(<<"test">>, maps:get(<<"name">>, Trace)),
-                    ?assertEqual(true, maps:get(<<"flag">>, Trace)),
-                    file:delete(TmpFile)
-                end)},
-            {"String metadata values stay Strings; export unwraps them (BT-4223)",
-                ?_test(begin
-                    beamtalk_trace_store:clear(),
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    Alice = {beamtalk_string, <<"alice">>},
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid,
-                        'Counter',
-                        increment,
-                        sync,
-                        0,
-                        ok,
-                        #{user => Alice, raw => <<1, 2>>, tags => [Alice]},
-                        stop
-                    ),
-                    [Ev] = beamtalk_trace_store:get_traces(),
-                    %% A recorded String reads back as that String, not a Binary.
-                    ?assertEqual(Alice, maps:get({beamtalk_string, <<"user">>}, Ev)),
-                    ?assertEqual([Alice], maps:get({beamtalk_string, <<"tags">>}, Ev)),
-                    %% A user Binary stays a Binary.
-                    ?assertEqual(<<1, 2>>, maps:get({beamtalk_string, <<"raw">>}, Ev)),
-                    TmpFile = tmp_export_path("string_meta"),
-                    ?assertMatch(
-                        {ok, #{count := 1}},
-                        beamtalk_trace_store:export_traces(#{path => TmpFile})
-                    ),
-                    {ok, Bin} = file:read_file(TmpFile),
-                    [Trace] = maps:get(<<"traces">>, json:decode(Bin)),
-                    ?assertEqual(<<"alice">>, maps:get(<<"user">>, Trace)),
-                    ?assertEqual([<<"alice">>], maps:get(<<"tags">>, Trace)),
-                    file:delete(TmpFile)
-                end)}
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Empty store edge cases
-%%====================================================================
-
-empty_store_get_traces_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"get_traces on empty store returns empty list",
-                ?_test(begin
-                    ?assertEqual([], beamtalk_trace_store:get_traces())
-                end)},
-            {"get_traces with filters on empty store returns empty list",
-                ?_test(begin
-                    ?assertEqual([], beamtalk_trace_store:get_traces(#{class => 'Counter'})),
-                    ?assertEqual([], beamtalk_trace_store:get_traces(#{outcome => error})),
-                    ?assertEqual([], beamtalk_trace_store:get_traces(#{min_duration_ns => 1000}))
-                end)},
-            {"get_stats on empty store returns empty map",
-                ?_test(begin
-                    ?assertEqual(#{}, beamtalk_trace_store:get_stats())
-                end)},
-            {"slow_methods on empty store returns empty list",
-                ?_test(begin
-                    ?assertEqual([], beamtalk_trace_store:slow_methods(10))
-                end)},
-            {"hot_methods on empty store returns empty list",
-                ?_test(begin
-                    ?assertEqual([], beamtalk_trace_store:hot_methods(10))
-                end)},
-            {"error_methods on empty store returns empty list",
-                ?_test(begin
-                    ?assertEqual([], beamtalk_trace_store:error_methods(10))
-                end)},
-            {"bottlenecks on empty store returns empty list",
-                ?_test(begin
-                    ?assertEqual([], beamtalk_trace_store:bottlenecks(10))
-                end)}
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Lifecycle event handler
-%%====================================================================
-
-lifecycle_event_handler_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"lifecycle start event records aggregate and trace",
-                ?_test(begin
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    Metadata = #{pid => TestPid, class => 'Counter'},
-                    beamtalk_trace_store:handle_lifecycle_event(
-                        [beamtalk, actor, lifecycle, start],
-                        #{},
-                        Metadata,
-                        #{}
-                    ),
-                    %% Aggregate should record the lifecycle action as selector
-                    Stats = beamtalk_trace_store:get_stats(TestPid),
-                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
-                    PidStats = maps:get(PidKey, Stats),
-                    Methods = maps:get({beamtalk_string, <<"methods">>}, PidStats),
-                    ?assertMatch(#{{beamtalk_string, <<"start">>} := _}, Methods),
-                    StartStats = maps:get({beamtalk_string, <<"start">>}, Methods),
-                    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, StartStats)),
-                    %% Trace event should be recorded with lifecycle mode
-                    Traces = beamtalk_trace_store:get_traces(),
-                    ?assertEqual(1, length(Traces)),
-                    [Trace] = Traces,
-                    ?assertEqual(
-                        {beamtalk_string, <<"lifecycle">>},
-                        maps:get({beamtalk_string, <<"mode">>}, Trace)
-                    ),
-                    ?assertEqual(
-                        {beamtalk_string, <<"start">>},
-                        maps:get({beamtalk_string, <<"selector">>}, Trace)
-                    ),
-                    ?assertEqual(
-                        {beamtalk_string, <<"ok">>},
-                        maps:get({beamtalk_string, <<"outcome">>}, Trace)
-                    )
-                end)},
-            {"lifecycle stop with normal reason records ok outcome",
-                ?_test(begin
-                    beamtalk_trace_store:clear(),
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    Metadata = #{pid => TestPid, class => 'Counter', reason => normal},
-                    beamtalk_trace_store:handle_lifecycle_event(
-                        [beamtalk, actor, lifecycle, stop],
-                        #{},
-                        Metadata,
-                        #{}
-                    ),
-                    Traces = beamtalk_trace_store:get_traces(),
-                    ?assertEqual(1, length(Traces)),
-                    ?assertEqual(
-                        {beamtalk_string, <<"ok">>},
-                        maps:get({beamtalk_string, <<"outcome">>}, hd(Traces))
-                    )
-                end)},
-            {"lifecycle stop with crash reason records error outcome",
-                ?_test(begin
-                    beamtalk_trace_store:clear(),
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    Metadata = #{pid => TestPid, class => 'Counter', reason => badarg},
-                    beamtalk_trace_store:handle_lifecycle_event(
-                        [beamtalk, actor, lifecycle, stop],
-                        #{},
-                        Metadata,
-                        #{}
-                    ),
-                    Traces = beamtalk_trace_store:get_traces(),
-                    ?assertEqual(1, length(Traces)),
-                    ?assertEqual(
-                        {beamtalk_string, <<"error">>},
-                        maps:get({beamtalk_string, <<"outcome">>}, hd(Traces))
-                    )
-                end)},
-            {"lifecycle stop with shutdown tuple records ok outcome",
-                ?_test(begin
-                    beamtalk_trace_store:clear(),
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    Metadata = #{pid => TestPid, class => 'Counter', reason => {shutdown, timeout}},
-                    beamtalk_trace_store:handle_lifecycle_event(
-                        [beamtalk, actor, lifecycle, stop],
-                        #{},
-                        Metadata,
-                        #{}
-                    ),
-                    Traces = beamtalk_trace_store:get_traces(),
-                    ?assertEqual(1, length(Traces)),
-                    ?assertEqual(
-                        {beamtalk_string, <<"ok">>},
-                        maps:get({beamtalk_string, <<"outcome">>}, hd(Traces))
-                    )
-                end)}
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Span ID generation
-%%====================================================================
-
-next_span_id_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"next_span_id returns monotonically increasing integers",
-                ?_test(begin
-                    Id1 = beamtalk_trace_store:next_span_id(),
-                    Id2 = beamtalk_trace_store:next_span_id(),
-                    Id3 = beamtalk_trace_store:next_span_id(),
-                    ?assert(Id1 > 0),
-                    ?assert(Id2 > Id1),
-                    ?assert(Id3 > Id2)
-                end)}
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Timeout and cast outcome tracking in aggregates
-%%====================================================================
-
-timeout_and_cast_outcome_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"timeout outcome increments timeout counter",
-                ?_test(begin
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_dispatch(
-                        TestPid, slow_method, 50000, timeout, sync, 'Counter'
-                    ),
-                    Stats = beamtalk_trace_store:get_stats(TestPid),
-                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
-                    PidStats = maps:get(PidKey, Stats),
-                    MethodStats = maps:get(
-                        {beamtalk_string, <<"slow_method">>},
-                        maps:get({beamtalk_string, <<"methods">>}, PidStats)
-                    ),
-                    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, MethodStats)),
-                    ?assertEqual(1, maps:get({beamtalk_string, <<"timeouts">>}, MethodStats)),
-                    ?assertEqual(0, maps:get({beamtalk_string, <<"ok">>}, MethodStats)),
-                    ?assertEqual(0, maps:get({beamtalk_string, <<"errors">>}, MethodStats))
-                end)},
-            {"cast outcome increments ok counter",
-                ?_test(begin
-                    beamtalk_trace_store:enable(),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_dispatch(
-                        TestPid, async_method, 1000, cast, async, 'Counter'
-                    ),
-                    Stats = beamtalk_trace_store:get_stats(TestPid),
-                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
-                    PidStats = maps:get(PidKey, Stats),
-                    MethodStats = maps:get(
-                        {beamtalk_string, <<"async_method">>},
-                        maps:get({beamtalk_string, <<"methods">>}, PidStats)
-                    ),
-                    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, MethodStats)),
-                    ?assertEqual(1, maps:get({beamtalk_string, <<"ok">>}, MethodStats)),
-                    ?assertEqual(0, maps:get({beamtalk_string, <<"errors">>}, MethodStats)),
-                    ?assertEqual(0, maps:get({beamtalk_string, <<"timeouts">>}, MethodStats))
-                end)}
-        ]
-    end}.
-
-%%====================================================================
-%% Test: export_traces badarg
-%%====================================================================
-
-export_traces_badarg_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"export_traces with non-map arg returns badarg error",
-                ?_test(begin
-                    ?assertEqual({error, badarg}, beamtalk_trace_store:export_traces(not_a_map))
-                end)}
-        ]
-    end}.
-
-%%====================================================================
-%% Test: max_events configuration
-%%====================================================================
-
-max_events_config_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"max_events returns default initially",
-                ?_test(begin
-                    Max = beamtalk_trace_store:max_events(),
-                    ?assert(is_integer(Max)),
-                    ?assert(Max > 0)
-                end)},
-            {"max_events/1 updates the ring buffer capacity",
-                ?_test(begin
-                    OrigMax = beamtalk_trace_store:max_events(),
-                    beamtalk_trace_store:max_events(500),
-                    try
-                        ?assertEqual(500, beamtalk_trace_store:max_events())
-                    after
-                        beamtalk_trace_store:max_events(OrigMax)
-                    end
-                end)}
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Telemetry handler attachment check
-%%====================================================================
-
-telemetry_attached_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"telemetry_attached returns true when handlers are active",
-                ?_test(begin
-                    ?assert(beamtalk_trace_store:telemetry_attached())
-                end)}
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Tracing disabled skips trace event recording
-%%====================================================================
-
-tracing_disabled_skips_events_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"record_trace_event is a no-op when tracing is disabled",
-                ?_test(begin
-                    %% Ensure disabled
-                    beamtalk_trace_store:disable(),
-                    ?assertNot(beamtalk_trace_store:is_enabled()),
-                    TestPid = self(),
-                    beamtalk_trace_store:record_trace_event(
-                        TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
-                    ),
-                    %% No traces should have been recorded
-                    ?assertEqual([], beamtalk_trace_store:get_traces())
-                end)},
-            {"dispatch recording does not record trace events when disabled",
-                ?_test(begin
-                    beamtalk_trace_store:disable(),
-                    TestPid = self(),
-                    Duration = 5000,
-                    Metadata = #{
-                        pid => TestPid,
-                        class => 'Counter',
-                        selector => increment,
-                        mode => sync,
-                        outcome => ok
+                %% Counter + error + slow + increment
+                Result = beamtalk_trace_store:get_traces(#{
+                    class => 'Counter',
+                    outcome => error,
+                    min_duration_ns => 5000000,
+                    selector => increment
+                }),
+                ?assertEqual(1, length(Result)),
+                ?assertEqual(
+                    {beamtalk_string, <<"Counter">>},
+                    maps:get({beamtalk_string, <<"class">>}, hd(Result))
+                ),
+                ?assertEqual(
+                    {beamtalk_string, <<"increment">>},
+                    maps:get({beamtalk_string, <<"selector">>}, hd(Result))
+                )
+            end)},
+        {"empty opts map returns all traces",
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                ),
+                All = beamtalk_trace_store:get_traces(#{}),
+                ?assertEqual(1, length(All))
+            end)},
+        %%====================================================================
+        %% Test: export_traces with atom/non-JSON metadata
+        %%====================================================================
+        {"export succeeds with atom values in metadata",
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                %% Simulate lifecycle stop event metadata: reason => normal (atom)
+                beamtalk_trace_store:record_trace_event(
+                    TestPid,
+                    'EventStore',
+                    stop,
+                    lifecycle,
+                    0,
+                    ok,
+                    #{reason => normal},
+                    stop
+                ),
+                TmpFile = tmp_export_path("atom_meta"),
+                Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                ?assertMatch({ok, #{count := 1}}, Result),
+                {ok, Bin} = file:read_file(TmpFile),
+                Decoded = json:decode(Bin),
+                [Trace] = maps:get(<<"traces">>, Decoded),
+                %% Atom reason should be converted to binary string
+                ?assertEqual(<<"normal">>, maps:get(<<"reason">>, Trace)),
+                file:delete(TmpFile)
+            end)},
+        {"export succeeds with pid values in metadata",
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid,
+                    'EventStore',
+                    stop,
+                    lifecycle,
+                    0,
+                    ok,
+                    #{caller => TestPid},
+                    stop
+                ),
+                TmpFile = tmp_export_path("pid_meta"),
+                Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                ?assertMatch({ok, #{count := 1}}, Result),
+                {ok, Bin} = file:read_file(TmpFile),
+                Decoded = json:decode(Bin),
+                [Trace] = maps:get(<<"traces">>, Decoded),
+                %% Pid should be converted to string
+                CallerBin = maps:get(<<"caller">>, Trace),
+                ?assert(is_binary(CallerBin)),
+                file:delete(TmpFile)
+            end)},
+        {"export succeeds with tuple values in metadata",
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid,
+                    'EventStore',
+                    stop,
+                    lifecycle,
+                    0,
+                    error,
+                    #{reason => {shutdown, timeout}},
+                    stop
+                ),
+                TmpFile = tmp_export_path("tuple_meta"),
+                Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                ?assertMatch({ok, #{count := 1}}, Result),
+                {ok, Bin} = file:read_file(TmpFile),
+                Decoded = json:decode(Bin),
+                [Trace] = maps:get(<<"traces">>, Decoded),
+                %% Tuple should be converted to string representation
+                ReasonBin = maps:get(<<"reason">>, Trace),
+                ?assert(is_binary(ReasonBin)),
+                file:delete(TmpFile)
+            end)},
+        {"export succeeds with mixed metadata types",
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid,
+                    'EventStore',
+                    stop,
+                    lifecycle,
+                    0,
+                    ok,
+                    #{
+                        reason => normal,
+                        count => 42,
+                        name => <<"test">>,
+                        flag => true
                     },
-                    beamtalk_trace_store:record_dispatch_stop(Metadata, Duration),
-                    %% Class aggregates should still be recorded, but no
-                    %% per-actor entry and no trace events
-                    ?assertEqual(#{}, beamtalk_trace_store:get_stats(TestPid)),
-                    ?assertNotEqual(#{}, beamtalk_trace_store:get_stats()),
-                    ?assertEqual([], beamtalk_trace_store:get_traces())
-                end)}
-        ]
-    end}.
-
-%%====================================================================
-%% Test: Unknown request handling
-%%====================================================================
-
-unknown_request_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"unknown gen_server call returns error",
-                ?_test(begin
-                    Result = gen_server:call(beamtalk_trace_store, {completely_unknown, 42}),
-                    ?assertEqual({error, unknown_request}, Result)
-                end)}
-        ]
-    end}.
+                    stop
+                ),
+                TmpFile = tmp_export_path("mixed_meta"),
+                Result = beamtalk_trace_store:export_traces(#{path => TmpFile}),
+                ?assertMatch({ok, #{count := 1}}, Result),
+                {ok, Bin} = file:read_file(TmpFile),
+                Decoded = json:decode(Bin),
+                [Trace] = maps:get(<<"traces">>, Decoded),
+                ?assertEqual(<<"normal">>, maps:get(<<"reason">>, Trace)),
+                ?assertEqual(42, maps:get(<<"count">>, Trace)),
+                ?assertEqual(<<"test">>, maps:get(<<"name">>, Trace)),
+                ?assertEqual(true, maps:get(<<"flag">>, Trace)),
+                file:delete(TmpFile)
+            end)},
+        {"String metadata values stay Strings; export unwraps them (BT-4223)",
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                Alice = {beamtalk_string, <<"alice">>},
+                beamtalk_trace_store:record_trace_event(
+                    TestPid,
+                    'Counter',
+                    increment,
+                    sync,
+                    0,
+                    ok,
+                    #{user => Alice, raw => <<1, 2>>, tags => [Alice]},
+                    stop
+                ),
+                [Ev] = beamtalk_trace_store:get_traces(),
+                %% A recorded String reads back as that String, not a Binary.
+                ?assertEqual(Alice, maps:get({beamtalk_string, <<"user">>}, Ev)),
+                ?assertEqual([Alice], maps:get({beamtalk_string, <<"tags">>}, Ev)),
+                %% A user Binary stays a Binary.
+                ?assertEqual(<<1, 2>>, maps:get({beamtalk_string, <<"raw">>}, Ev)),
+                TmpFile = tmp_export_path("string_meta"),
+                ?assertMatch(
+                    {ok, #{count := 1}},
+                    beamtalk_trace_store:export_traces(#{path => TmpFile})
+                ),
+                {ok, Bin} = file:read_file(TmpFile),
+                [Trace] = maps:get(<<"traces">>, json:decode(Bin)),
+                ?assertEqual(<<"alice">>, maps:get(<<"user">>, Trace)),
+                ?assertEqual([<<"alice">>], maps:get(<<"tags">>, Trace)),
+                file:delete(TmpFile)
+            end)},
+        %%====================================================================
+        %% Test: Empty store edge cases
+        %%====================================================================
+        {"get_traces on empty store returns empty list",
+            ?_test(begin
+                ?assertEqual([], beamtalk_trace_store:get_traces())
+            end)},
+        {"get_traces with filters on empty store returns empty list",
+            ?_test(begin
+                ?assertEqual([], beamtalk_trace_store:get_traces(#{class => 'Counter'})),
+                ?assertEqual([], beamtalk_trace_store:get_traces(#{outcome => error})),
+                ?assertEqual([], beamtalk_trace_store:get_traces(#{min_duration_ns => 1000}))
+            end)},
+        {"get_stats on empty store returns empty map",
+            ?_test(begin
+                ?assertEqual(#{}, beamtalk_trace_store:get_stats())
+            end)},
+        {"slow_methods on empty store returns empty list",
+            ?_test(begin
+                ?assertEqual([], beamtalk_trace_store:slow_methods(10))
+            end)},
+        {"hot_methods on empty store returns empty list",
+            ?_test(begin
+                ?assertEqual([], beamtalk_trace_store:hot_methods(10))
+            end)},
+        {"error_methods on empty store returns empty list",
+            ?_test(begin
+                ?assertEqual([], beamtalk_trace_store:error_methods(10))
+            end)},
+        {"bottlenecks on empty store returns empty list",
+            ?_test(begin
+                ?assertEqual([], beamtalk_trace_store:bottlenecks(10))
+            end)},
+        %%====================================================================
+        %% Test: Lifecycle event handler
+        %%====================================================================
+        {"lifecycle start event records aggregate and trace",
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                Metadata = #{pid => TestPid, class => 'Counter'},
+                beamtalk_trace_store:handle_lifecycle_event(
+                    [beamtalk, actor, lifecycle, start],
+                    #{},
+                    Metadata,
+                    #{}
+                ),
+                %% Aggregate should record the lifecycle action as selector
+                Stats = beamtalk_trace_store:get_stats(TestPid),
+                PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
+                PidStats = maps:get(PidKey, Stats),
+                Methods = maps:get({beamtalk_string, <<"methods">>}, PidStats),
+                ?assertMatch(#{{beamtalk_string, <<"start">>} := _}, Methods),
+                StartStats = maps:get({beamtalk_string, <<"start">>}, Methods),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, StartStats)),
+                %% Trace event should be recorded with lifecycle mode
+                Traces = beamtalk_trace_store:get_traces(),
+                ?assertEqual(1, length(Traces)),
+                [Trace] = Traces,
+                ?assertEqual(
+                    {beamtalk_string, <<"lifecycle">>},
+                    maps:get({beamtalk_string, <<"mode">>}, Trace)
+                ),
+                ?assertEqual(
+                    {beamtalk_string, <<"start">>},
+                    maps:get({beamtalk_string, <<"selector">>}, Trace)
+                ),
+                ?assertEqual(
+                    {beamtalk_string, <<"ok">>},
+                    maps:get({beamtalk_string, <<"outcome">>}, Trace)
+                )
+            end)},
+        {"lifecycle stop with normal reason records ok outcome",
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                Metadata = #{pid => TestPid, class => 'Counter', reason => normal},
+                beamtalk_trace_store:handle_lifecycle_event(
+                    [beamtalk, actor, lifecycle, stop],
+                    #{},
+                    Metadata,
+                    #{}
+                ),
+                Traces = beamtalk_trace_store:get_traces(),
+                ?assertEqual(1, length(Traces)),
+                ?assertEqual(
+                    {beamtalk_string, <<"ok">>},
+                    maps:get({beamtalk_string, <<"outcome">>}, hd(Traces))
+                )
+            end)},
+        {"lifecycle stop with crash reason records error outcome",
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                Metadata = #{pid => TestPid, class => 'Counter', reason => badarg},
+                beamtalk_trace_store:handle_lifecycle_event(
+                    [beamtalk, actor, lifecycle, stop],
+                    #{},
+                    Metadata,
+                    #{}
+                ),
+                Traces = beamtalk_trace_store:get_traces(),
+                ?assertEqual(1, length(Traces)),
+                ?assertEqual(
+                    {beamtalk_string, <<"error">>},
+                    maps:get({beamtalk_string, <<"outcome">>}, hd(Traces))
+                )
+            end)},
+        {"lifecycle stop with shutdown tuple records ok outcome",
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                Metadata = #{pid => TestPid, class => 'Counter', reason => {shutdown, timeout}},
+                beamtalk_trace_store:handle_lifecycle_event(
+                    [beamtalk, actor, lifecycle, stop],
+                    #{},
+                    Metadata,
+                    #{}
+                ),
+                Traces = beamtalk_trace_store:get_traces(),
+                ?assertEqual(1, length(Traces)),
+                ?assertEqual(
+                    {beamtalk_string, <<"ok">>},
+                    maps:get({beamtalk_string, <<"outcome">>}, hd(Traces))
+                )
+            end)},
+        %%====================================================================
+        %% Test: Span ID generation
+        %%====================================================================
+        {"next_span_id returns monotonically increasing integers",
+            ?_test(begin
+                Id1 = beamtalk_trace_store:next_span_id(),
+                Id2 = beamtalk_trace_store:next_span_id(),
+                Id3 = beamtalk_trace_store:next_span_id(),
+                ?assert(Id1 > 0),
+                ?assert(Id2 > Id1),
+                ?assert(Id3 > Id2)
+            end)},
+        %%====================================================================
+        %% Test: Timeout and cast outcome tracking in aggregates
+        %%====================================================================
+        {"timeout outcome increments timeout counter",
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, slow_method, 50000, timeout, sync, 'Counter'
+                ),
+                Stats = beamtalk_trace_store:get_stats(TestPid),
+                PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
+                PidStats = maps:get(PidKey, Stats),
+                MethodStats = maps:get(
+                    {beamtalk_string, <<"slow_method">>},
+                    maps:get({beamtalk_string, <<"methods">>}, PidStats)
+                ),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, MethodStats)),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"timeouts">>}, MethodStats)),
+                ?assertEqual(0, maps:get({beamtalk_string, <<"ok">>}, MethodStats)),
+                ?assertEqual(0, maps:get({beamtalk_string, <<"errors">>}, MethodStats))
+            end)},
+        {"cast outcome increments ok counter",
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                TestPid = self(),
+                beamtalk_trace_store:record_dispatch(
+                    TestPid, async_method, 1000, cast, async, 'Counter'
+                ),
+                Stats = beamtalk_trace_store:get_stats(TestPid),
+                PidKey = {beamtalk_string, list_to_binary(pid_to_list(TestPid))},
+                PidStats = maps:get(PidKey, Stats),
+                MethodStats = maps:get(
+                    {beamtalk_string, <<"async_method">>},
+                    maps:get({beamtalk_string, <<"methods">>}, PidStats)
+                ),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, MethodStats)),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"ok">>}, MethodStats)),
+                ?assertEqual(0, maps:get({beamtalk_string, <<"errors">>}, MethodStats)),
+                ?assertEqual(0, maps:get({beamtalk_string, <<"timeouts">>}, MethodStats))
+            end)},
+        %%====================================================================
+        %% Test: export_traces badarg
+        %%====================================================================
+        {"export_traces with non-map arg returns badarg error",
+            ?_test(begin
+                ?assertEqual({error, badarg}, beamtalk_trace_store:export_traces(not_a_map))
+            end)},
+        %%====================================================================
+        %% Test: max_events configuration
+        %%====================================================================
+        {"max_events returns default initially",
+            ?_test(begin
+                Max = beamtalk_trace_store:max_events(),
+                ?assert(is_integer(Max)),
+                ?assert(Max > 0)
+            end)},
+        {"max_events/1 updates the ring buffer capacity",
+            ?_test(begin
+                OrigMax = beamtalk_trace_store:max_events(),
+                beamtalk_trace_store:max_events(500),
+                try
+                    ?assertEqual(500, beamtalk_trace_store:max_events())
+                after
+                    beamtalk_trace_store:max_events(OrigMax)
+                end
+            end)},
+        %%====================================================================
+        %% Test: Telemetry handler attachment check
+        %%====================================================================
+        {"telemetry_attached returns true when handlers are active",
+            ?_test(begin
+                ?assert(beamtalk_trace_store:telemetry_attached())
+            end)},
+        %%====================================================================
+        %% Test: Tracing disabled skips trace event recording
+        %%====================================================================
+        {"record_trace_event is a no-op when tracing is disabled",
+            ?_test(begin
+                %% Ensure disabled
+                beamtalk_trace_store:disable(),
+                ?assertNot(beamtalk_trace_store:is_enabled()),
+                TestPid = self(),
+                beamtalk_trace_store:record_trace_event(
+                    TestPid, 'Counter', increment, sync, 5000, ok, #{}, stop
+                ),
+                %% No traces should have been recorded
+                ?assertEqual([], beamtalk_trace_store:get_traces())
+            end)},
+        {"dispatch recording does not record trace events when disabled",
+            ?_test(begin
+                beamtalk_trace_store:disable(),
+                TestPid = self(),
+                Duration = 5000,
+                Metadata = #{
+                    pid => TestPid,
+                    class => 'Counter',
+                    selector => increment,
+                    mode => sync,
+                    outcome => ok
+                },
+                beamtalk_trace_store:record_dispatch_stop(Metadata, Duration),
+                %% Class aggregates should still be recorded, but no
+                %% per-actor entry and no trace events
+                ?assertEqual(#{}, beamtalk_trace_store:get_stats(TestPid)),
+                ?assertNotEqual(#{}, beamtalk_trace_store:get_stats()),
+                ?assertEqual([], beamtalk_trace_store:get_traces())
+            end)},
+        %%====================================================================
+        %% Test: Unknown request handling
+        %%====================================================================
+        {"unknown gen_server call returns error",
+            ?_test(begin
+                Result = gen_server:call(beamtalk_trace_store, {completely_unknown, 42}),
+                ?assertEqual({error, unknown_request}, Result)
+            end)}
+    ]}.
 
 -doc "Fetch the `class:Class` entry of `get_stats/0` (the always-on aggregates).".
 class_entry(ClassBin) ->
@@ -2104,7 +1842,7 @@ churn_one_actor(Kill) ->
     end.
 
 actor_churn_stays_flat_test_() ->
-    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+    {foreach, fun churn_setup/0, fun cleanup/1, [
         {timeout, 120,
             ?_test(begin
                 %% Tracing stays disabled: the always-on path only.
@@ -2150,11 +1888,7 @@ actor_churn_stays_flat_test_() ->
                 {monitored_by, MonitoredBy} = erlang:process_info(Live, monitored_by),
                 ?assertNot(lists:member(StorePid, MonitoredBy)),
                 gen_server:stop(Live)
-            end)}
-    end}.
-
-million_actor_churn_stays_flat_test_() ->
-    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+            end)},
         {timeout, 600,
             ?_test(begin
                 %% 1M short-lived actors through the always-on path (disabled).
@@ -2187,198 +1921,196 @@ million_actor_churn_stays_flat_test_() ->
                     class_entry(<<"Counter">>),
                 ?assertEqual(N, maps:get({beamtalk_string, <<"calls">>}, Churned))
             end)}
-    end}.
+    ]}.
 
 per_actor_stats_need_tracing_test_() ->
-    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
-        [
-            {"class totals survive actor death; per-pid rows are swept",
-                ?_timed(begin
-                    beamtalk_trace_store:enable(),
-                    Spawn = fun() ->
-                        spawn(fun() ->
-                            receive
-                                stop -> ok
-                            end
-                        end)
-                    end,
-                    Live = Spawn(),
-                    Dead1 = Spawn(),
-                    Dead2 = Spawn(),
-                    Record = fun(Pid, Duration, Outcome) ->
-                        beamtalk_trace_store:record_dispatch(
-                            Pid, increment, Duration, Outcome, sync, 'Counter'
-                        )
-                    end,
-                    Record(Live, 1000, ok),
-                    Record(Dead1, 2000, ok),
-                    Record(Dead1, 4000, error),
-                    Record(Dead2, 500, timeout),
-
-                    %% While all three live, stats holds the class entry plus
-                    %% one entry per pid.
-                    Stats0 = beamtalk_trace_store:get_stats(),
-                    LiveKey = {beamtalk_string, list_to_binary(pid_to_list(Live))},
-                    ?assertEqual(
-                        4, maps:size(Stats0)
-                    ),
-                    #{
-                        {beamtalk_string, <<"methods">>} := #{
-                            {beamtalk_string, <<"increment">>} := LiveInc
-                        }
-                    } =
-                        maps:get(LiveKey, Stats0),
-                    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, LiveInc)),
-                    ?assertEqual(
-                        1000, maps:get({beamtalk_string, <<"total_duration_ns">>}, LiveInc)
-                    ),
-
-                    Dead1 ! stop,
-                    Dead2 ! stop,
-                    %% No monitors: the sweep (1s timer) reclaims the dead
-                    %% pids' rows once they are gone.
-                    beamtalk_test_wait:until(fun() ->
-                        beamtalk_trace_store:get_stats(Dead1) =:= #{} andalso
-                            beamtalk_trace_store:get_stats(Dead2) =:= #{}
-                    end),
-                    ?assertEqual(1, ets:info(beamtalk_agg_pid_keys, size)),
-
-                    %% The class entry kept every dispatch across the deaths.
-                    #{
-                        {beamtalk_string, <<"methods">>} := #{
-                            {beamtalk_string, <<"increment">>} := Inc
-                        }
-                    } =
-                        class_entry(<<"Counter">>),
-                    ?assertEqual(4, maps:get({beamtalk_string, <<"calls">>}, Inc)),
-                    ?assertEqual(2, maps:get({beamtalk_string, <<"ok">>}, Inc)),
-                    ?assertEqual(1, maps:get({beamtalk_string, <<"errors">>}, Inc)),
-                    ?assertEqual(1, maps:get({beamtalk_string, <<"timeouts">>}, Inc)),
-                    ?assertEqual(7500, maps:get({beamtalk_string, <<"total_duration_ns">>}, Inc)),
-                    ?assertEqual(
-                        7500 div 4, maps:get({beamtalk_string, <<"avg_duration_ns">>}, Inc)
-                    ),
-                    ?assertEqual(500, maps:get({beamtalk_string, <<"min_duration_ns">>}, Inc)),
-                    ?assertEqual(4000, maps:get({beamtalk_string, <<"max_duration_ns">>}, Inc)),
-
-                    %% The method queries see one class entry with no pid.
-                    Hot = beamtalk_trace_store:hot_methods(10),
-                    [CounterHot] = [
-                        H
-                     || H <- Hot,
-                        maps:get({beamtalk_string, <<"class">>}, H) =:=
-                            {beamtalk_string, <<"Counter">>}
-                    ],
-                    ?assertEqual(4, maps:get({beamtalk_string, <<"calls">>}, CounterHot)),
-                    ?assertNot(maps:is_key({beamtalk_string, <<"pid">>}, CounterHot)),
-                    [TopError | _] = beamtalk_trace_store:error_methods(10),
-                    ?assertNot(maps:is_key({beamtalk_string, <<"pid">>}, TopError)),
-                    [Slowest | _] = beamtalk_trace_store:slow_methods(10, max_duration_ns),
-                    ?assertEqual(4000, maps:get({beamtalk_string, <<"max_duration_ns">>}, Slowest)),
-
-                    %% A later death changes nothing in the class entry but
-                    %% removes the last pid row.
-                    Record(Live, 100, ok),
-                    Live ! stop,
-                    beamtalk_test_wait:until(fun() ->
-                        beamtalk_trace_store:get_stats(Live) =:= #{}
-                    end),
-                    #{
-                        {beamtalk_string, <<"methods">>} := #{
-                            {beamtalk_string, <<"increment">>} := Inc2
-                        }
-                    } =
-                        class_entry(<<"Counter">>),
-                    ?assertEqual(5, maps:get({beamtalk_string, <<"calls">>}, Inc2)),
-                    ?assertEqual(7600, maps:get({beamtalk_string, <<"total_duration_ns">>}, Inc2)),
-                    ?assertEqual(100, maps:get({beamtalk_string, <<"min_duration_ns">>}, Inc2)),
-                    ?assertEqual(0, ets:info(beamtalk_agg_pid, size)),
-                    ?assertEqual(0, ets:info(beamtalk_agg_pid_keys, size))
-                end)},
-            {"disable drops the per-actor rows; the class entry stays",
-                ?_test(begin
-                    %% Cases share one setup: start clean.
-                    beamtalk_trace_store:clear(),
-                    beamtalk_trace_store:enable(),
-                    Pid = idle_process(),
-                    beamtalk_trace_store:record_dispatch(Pid, increment, 10, ok, sync, 'Counter'),
-                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
-                    ?assertMatch(
-                        #{PidKey := _}, beamtalk_trace_store:get_stats(Pid)
-                    ),
-                    beamtalk_trace_store:disable(),
-                    ?assertEqual(#{}, beamtalk_trace_store:get_stats(Pid)),
-                    ?assertEqual(0, ets:info(beamtalk_agg_pid, size)),
-                    ?assertEqual(0, ets:info(beamtalk_agg_pid_keys, size)),
-                    #{
-                        {beamtalk_string, <<"methods">>} := #{
-                            {beamtalk_string, <<"increment">>} := Inc
-                        }
-                    } =
-                        class_entry(<<"Counter">>),
-                    ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, Inc)),
-                    Pid ! stop
-                end)},
-            {"a stop event does not sweep a live actor; its exit does",
-                ?_timed(begin
-                    %% Cases share one setup: start clean.
-                    beamtalk_trace_store:clear(),
-                    beamtalk_trace_store:enable(),
-                    Self = self(),
-                    Pid = spawn(fun() ->
-                        beamtalk_trace_store:record_dispatch(
-                            self(), increment, 10, ok, sync, 'Counter'
-                        ),
-                        beamtalk_trace_store:handle_lifecycle_event(
-                            [beamtalk, actor, lifecycle, stop],
-                            #{},
-                            #{pid => self(), class => 'Counter', reason => badarg},
-                            #{}
-                        ),
-                        Self ! stop_emitted,
+    {foreach, fun churn_setup/0, fun cleanup/1, [
+        {"class totals survive actor death; per-pid rows are swept",
+            ?_timed(begin
+                beamtalk_trace_store:enable(),
+                Spawn = fun() ->
+                    spawn(fun() ->
                         receive
                             stop -> ok
                         end
-                    end),
-                    receive
-                        stop_emitted -> ok
-                    after 5000 -> ?assert(false)
-                    end,
-                    %% Still alive: its per-pid stats stay until it exits.
-                    PidKey = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
-                    #{PidKey := #{{beamtalk_string, <<"methods">>} := LiveMethods}} =
-                        beamtalk_trace_store:get_stats(Pid),
-                    ?assertMatch(
-                        #{
-                            {beamtalk_string, <<"increment">>} := #{
-                                {beamtalk_string, <<"calls">>} := 1
-                            }
-                        },
-                        LiveMethods
-                    ),
-                    Pid ! stop,
-                    beamtalk_test_wait:until(fun() ->
-                        beamtalk_trace_store:get_stats(Pid) =:= #{}
-                    end),
-                    #{{beamtalk_string, <<"methods">>} := Methods} = class_entry(<<"Counter">>),
-                    ?assertMatch(
-                        #{{beamtalk_string, <<"calls">>} := 1},
-                        maps:get({beamtalk_string, <<"increment">>}, Methods)
-                    ),
-                    %% The crash shows up as an error on the class `stop`.
-                    ?assertMatch(
-                        #{
-                            {beamtalk_string, <<"calls">>} := 1,
-                            {beamtalk_string, <<"errors">>} := 1
-                        },
-                        maps:get({beamtalk_string, <<"stop">>}, Methods)
+                    end)
+                end,
+                Live = Spawn(),
+                Dead1 = Spawn(),
+                Dead2 = Spawn(),
+                Record = fun(Pid, Duration, Outcome) ->
+                    beamtalk_trace_store:record_dispatch(
+                        Pid, increment, Duration, Outcome, sync, 'Counter'
                     )
-                end)}
-        ]
-    end}.
+                end,
+                Record(Live, 1000, ok),
+                Record(Dead1, 2000, ok),
+                Record(Dead1, 4000, error),
+                Record(Dead2, 500, timeout),
+
+                %% While all three live, stats holds the class entry plus
+                %% one entry per pid.
+                Stats0 = beamtalk_trace_store:get_stats(),
+                LiveKey = {beamtalk_string, list_to_binary(pid_to_list(Live))},
+                ?assertEqual(
+                    4, maps:size(Stats0)
+                ),
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"increment">>} := LiveInc
+                    }
+                } =
+                    maps:get(LiveKey, Stats0),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, LiveInc)),
+                ?assertEqual(
+                    1000, maps:get({beamtalk_string, <<"total_duration_ns">>}, LiveInc)
+                ),
+
+                Dead1 ! stop,
+                Dead2 ! stop,
+                %% No monitors: the sweep (1s timer) reclaims the dead
+                %% pids' rows once they are gone.
+                beamtalk_test_wait:until(fun() ->
+                    beamtalk_trace_store:get_stats(Dead1) =:= #{} andalso
+                        beamtalk_trace_store:get_stats(Dead2) =:= #{}
+                end),
+                ?assertEqual(1, ets:info(beamtalk_agg_pid_keys, size)),
+
+                %% The class entry kept every dispatch across the deaths.
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"increment">>} := Inc
+                    }
+                } =
+                    class_entry(<<"Counter">>),
+                ?assertEqual(4, maps:get({beamtalk_string, <<"calls">>}, Inc)),
+                ?assertEqual(2, maps:get({beamtalk_string, <<"ok">>}, Inc)),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"errors">>}, Inc)),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"timeouts">>}, Inc)),
+                ?assertEqual(7500, maps:get({beamtalk_string, <<"total_duration_ns">>}, Inc)),
+                ?assertEqual(
+                    7500 div 4, maps:get({beamtalk_string, <<"avg_duration_ns">>}, Inc)
+                ),
+                ?assertEqual(500, maps:get({beamtalk_string, <<"min_duration_ns">>}, Inc)),
+                ?assertEqual(4000, maps:get({beamtalk_string, <<"max_duration_ns">>}, Inc)),
+
+                %% The method queries see one class entry with no pid.
+                Hot = beamtalk_trace_store:hot_methods(10),
+                [CounterHot] = [
+                    H
+                 || H <- Hot,
+                    maps:get({beamtalk_string, <<"class">>}, H) =:=
+                        {beamtalk_string, <<"Counter">>}
+                ],
+                ?assertEqual(4, maps:get({beamtalk_string, <<"calls">>}, CounterHot)),
+                ?assertNot(maps:is_key({beamtalk_string, <<"pid">>}, CounterHot)),
+                [TopError | _] = beamtalk_trace_store:error_methods(10),
+                ?assertNot(maps:is_key({beamtalk_string, <<"pid">>}, TopError)),
+                [Slowest | _] = beamtalk_trace_store:slow_methods(10, max_duration_ns),
+                ?assertEqual(4000, maps:get({beamtalk_string, <<"max_duration_ns">>}, Slowest)),
+
+                %% A later death changes nothing in the class entry but
+                %% removes the last pid row.
+                Record(Live, 100, ok),
+                Live ! stop,
+                beamtalk_test_wait:until(fun() ->
+                    beamtalk_trace_store:get_stats(Live) =:= #{}
+                end),
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"increment">>} := Inc2
+                    }
+                } =
+                    class_entry(<<"Counter">>),
+                ?assertEqual(5, maps:get({beamtalk_string, <<"calls">>}, Inc2)),
+                ?assertEqual(7600, maps:get({beamtalk_string, <<"total_duration_ns">>}, Inc2)),
+                ?assertEqual(100, maps:get({beamtalk_string, <<"min_duration_ns">>}, Inc2)),
+                ?assertEqual(0, ets:info(beamtalk_agg_pid, size)),
+                ?assertEqual(0, ets:info(beamtalk_agg_pid_keys, size))
+            end)},
+        {"disable drops the per-actor rows; the class entry stays",
+            ?_test(begin
+                %% Cases share one setup: start clean.
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                Pid = idle_process(),
+                beamtalk_trace_store:record_dispatch(Pid, increment, 10, ok, sync, 'Counter'),
+                PidKey = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
+                ?assertMatch(
+                    #{PidKey := _}, beamtalk_trace_store:get_stats(Pid)
+                ),
+                beamtalk_trace_store:disable(),
+                ?assertEqual(#{}, beamtalk_trace_store:get_stats(Pid)),
+                ?assertEqual(0, ets:info(beamtalk_agg_pid, size)),
+                ?assertEqual(0, ets:info(beamtalk_agg_pid_keys, size)),
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"increment">>} := Inc
+                    }
+                } =
+                    class_entry(<<"Counter">>),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, Inc)),
+                Pid ! stop
+            end)},
+        {"a stop event does not sweep a live actor; its exit does",
+            ?_timed(begin
+                %% Cases share one setup: start clean.
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:enable(),
+                Self = self(),
+                Pid = spawn(fun() ->
+                    beamtalk_trace_store:record_dispatch(
+                        self(), increment, 10, ok, sync, 'Counter'
+                    ),
+                    beamtalk_trace_store:handle_lifecycle_event(
+                        [beamtalk, actor, lifecycle, stop],
+                        #{},
+                        #{pid => self(), class => 'Counter', reason => badarg},
+                        #{}
+                    ),
+                    Self ! stop_emitted,
+                    receive
+                        stop -> ok
+                    end
+                end),
+                receive
+                    stop_emitted -> ok
+                after 5000 -> ?assert(false)
+                end,
+                %% Still alive: its per-pid stats stay until it exits.
+                PidKey = {beamtalk_string, list_to_binary(pid_to_list(Pid))},
+                #{PidKey := #{{beamtalk_string, <<"methods">>} := LiveMethods}} =
+                    beamtalk_trace_store:get_stats(Pid),
+                ?assertMatch(
+                    #{
+                        {beamtalk_string, <<"increment">>} := #{
+                            {beamtalk_string, <<"calls">>} := 1
+                        }
+                    },
+                    LiveMethods
+                ),
+                Pid ! stop,
+                beamtalk_test_wait:until(fun() ->
+                    beamtalk_trace_store:get_stats(Pid) =:= #{}
+                end),
+                #{{beamtalk_string, <<"methods">>} := Methods} = class_entry(<<"Counter">>),
+                ?assertMatch(
+                    #{{beamtalk_string, <<"calls">>} := 1},
+                    maps:get({beamtalk_string, <<"increment">>}, Methods)
+                ),
+                %% The crash shows up as an error on the class `stop`.
+                ?assertMatch(
+                    #{
+                        {beamtalk_string, <<"calls">>} := 1,
+                        {beamtalk_string, <<"errors">>} := 1
+                    },
+                    maps:get({beamtalk_string, <<"stop">>}, Methods)
+                )
+            end)}
+    ]}.
 
 non_pid_metadata_is_dropped_test_() ->
-    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+    {foreach, fun churn_setup/0, fun cleanup/1, [
         {"a non-pid `pid` is dropped and cannot crash the trace store",
             ?_test(begin
                 StorePid = whereis(beamtalk_trace_store),
@@ -2402,7 +2134,7 @@ non_pid_metadata_is_dropped_test_() ->
                 ?assertEqual(#{}, beamtalk_trace_store:get_stats()),
                 ?assertEqual(StorePid, whereis(beamtalk_trace_store))
             end)}
-    end}.
+    ]}.
 
 -doc "Spawn a process that waits for `stop`.".
 idle_process() ->
@@ -2413,7 +2145,7 @@ idle_process() ->
     end).
 
 sweep_reclaims_dead_pid_rows_test_() ->
-    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+    {foreach, fun churn_setup/0, fun cleanup/1, [
         {"rows a caller re-creates for a dead pid are swept again",
             ?_timed(begin
                 beamtalk_trace_store:enable(),
@@ -2454,11 +2186,7 @@ sweep_reclaims_dead_pid_rows_test_() ->
                     #{{beamtalk_string, <<"calls">>} := 1},
                     maps:get({beamtalk_string, <<"bar">>}, Methods)
                 )
-            end)}
-    end}.
-
-pid_cap_drops_and_recovers_test_() ->
-    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+            end)},
         {timeout, 120,
             ?_test(begin
                 beamtalk_trace_store:enable(),
@@ -2507,11 +2235,7 @@ pid_cap_drops_and_recovers_test_() ->
                 beamtalk_trace_store:record_dispatch(Live, capped_method, 10, ok, sync, 'Cap'),
                 ?assertMatch([_], ets:lookup(beamtalk_agg_pid, {Live, capped_method})),
                 Live ! stop
-            end)}
-    end}.
-
-concurrent_alloc_during_grow_and_clear_test_() ->
-    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+            end)},
         {timeout, 60,
             ?_test(begin
                 beamtalk_trace_store:enable(),
@@ -2613,12 +2337,13 @@ concurrent_alloc_during_grow_and_clear_test_() ->
                 ],
                 Live ! stop
             end)}
-    end}.
+    ]}.
 
 free_list_slots_sharing_a_base_stay_distinct_test_() ->
     %% BT-4746: slots released from different counter arrays (after a grow)
     %% can carry the same base. They are distinct slots, so two new keys that
     %% claim them get distinct {Ref, Base} pairs, zeroed, with no sharing.
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
         ?_test(begin
             beamtalk_trace_store:enable(),
@@ -2648,7 +2373,7 @@ free_list_slots_sharing_a_base_stay_distinct_test_() ->
     end}.
 
 upgrade_resets_aggregates_test_() ->
-    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+    {foreach, fun churn_setup/0, fun cleanup/1, [
         {"pre-BT-4103 tables are reset by code_change; trace events survive",
             ?_test(begin
                 %% Seed current-version data plus one trace event.
@@ -2693,11 +2418,7 @@ upgrade_resets_aggregates_test_() ->
                     <<"Counter">>
                 ),
                 ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, Pong))
-            end)}
-    end}.
-
-upgrade_refreshes_dispatch_flag_test_() ->
-    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+            end)},
         {"code_change derives the dispatch-events flag and drops retired handlers (BT-4113)",
             ?_test(begin
                 beamtalk_trace_store:enable(),
@@ -2728,7 +2449,7 @@ upgrade_refreshes_dispatch_flag_test_() ->
                     ]
                 )
             end)}
-    end}.
+    ]}.
 
 %%====================================================================
 %% Test: Free-list contention under concurrent churn
@@ -2849,7 +2570,7 @@ take_counter_loop(N) ->
     end.
 
 free_list_churn_stays_flat_test_() ->
-    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+    {foreach, fun churn_setup/0, fun cleanup/1, [
         {timeout, 300,
             ?_test(begin
                 beamtalk_trace_store:enable(),
@@ -2932,11 +2653,7 @@ free_list_churn_stays_flat_test_() ->
                 ?assert(Takes =< Allocs * 3 div 2),
                 [exit(P, kill) || P <- Win3],
                 beamtalk_test_wait:until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end)
-            end)}
-    end}.
-
-free_list_release_reuse_roundtrip_test_() ->
-    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+            end)},
         {"released slots are reused with identical slot identity, zeroed",
             ?_test(begin
                 beamtalk_trace_store:enable(),
@@ -2989,11 +2706,7 @@ free_list_release_reuse_roundtrip_test_() ->
                  || P <- Pids2
                 ],
                 [P ! stop || P <- Pids2]
-            end)}
-    end}.
-
-free_slots_upgrade_recreates_unsharded_table_test_() ->
-    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+            end)},
         {"a pre-BT-4120 `set` free list is dropped and recreated sharded",
             ?_test(begin
                 StorePid = whereis(beamtalk_trace_store),
@@ -3018,7 +2731,7 @@ free_slots_upgrade_recreates_unsharded_table_test_() ->
                 ?assertMatch([_], ets:lookup(beamtalk_agg_pid, {P, ping})),
                 P ! stop
             end)}
-    end}.
+    ]}.
 
 %%====================================================================
 %% Test: dead-pid sweep with remote pids and orphaned rows (BT-4197)
@@ -3043,81 +2756,67 @@ wait_sweep_done() ->
     end).
 
 sweep_remote_pid_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                beamtalk_trace_store:clear(),
-                beamtalk_trace_store:enable(),
-                Remote = remote_pid(),
-                ?assertNotEqual(node(), node(Remote)),
-                %% Remote pids get no per-actor row (class aggregate only).
-                beamtalk_trace_store:record_dispatch(Remote, ping, 10, ok, sync, 'Counter'),
-                ?assertEqual(0, pid_row_count()),
-                %% A remote row older code left (moved onto a real slot of a
-                %% local row) does not crash the sweep, and is reclaimed
-                %% (BT-4206): it can never be live data, and would otherwise
-                %% count toward ?MAX_PID_KEYS forever.
-                Local = idle_process(),
-                beamtalk_trace_store:record_dispatch(Local, ping, 10, ok, sync, 'Counter'),
-                [{_, Ref, Base, _}] = ets:take(beamtalk_agg_pid, {Local, ping}),
-                true = ets:delete(beamtalk_agg_pid_keys, Local),
-                true = ets:insert(beamtalk_agg_pid, {{Remote, ping}, Ref, Base, 'Counter'}),
-                true = ets:insert(beamtalk_agg_pid_keys, {Remote, ping}),
-                Store = whereis(beamtalk_trace_store),
-                sweep_and_sync(),
-                ?assertEqual(Store, whereis(beamtalk_trace_store)),
-                ?assert(is_process_alive(Store)),
-                ?assertEqual(0, pid_row_count()),
-                ?assertEqual([], ets:lookup(beamtalk_agg_pid_keys, Remote)),
-                Local ! stop
-            end)
-        ]
-    end}.
-
-sweep_restores_live_pid_keys_entry_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                beamtalk_trace_store:clear(),
-                beamtalk_trace_store:enable(),
-                Live = idle_process(),
-                beamtalk_trace_store:record_dispatch(Live, ping, 10, ok, sync, 'Counter'),
-                PidKey = {beamtalk_string, list_to_binary(pid_to_list(Live))},
-                ?assertMatch(#{PidKey := _}, beamtalk_trace_store:get_stats(Live)),
-                %% Simulate the clear/0 race for a live actor: row present,
-                %% keys entry gone, so its stats are invisible to get_stats/1.
-                true = ets:delete(beamtalk_agg_pid_keys, Live),
-                ?assertEqual(#{}, beamtalk_trace_store:get_stats(Live)),
-                %% The sweep keeps the row and re-indexes it (BT-4206).
-                sweep_and_sync(),
-                ?assertEqual(1, pid_row_count()),
-                ?assertEqual([{Live, ping}], ets:lookup(beamtalk_agg_pid_keys, Live)),
-                ?assertMatch(#{PidKey := _}, beamtalk_trace_store:get_stats(Live)),
-                Live ! stop
-            end)
-        ]
-    end}.
-
-sweep_reclaims_row_without_keys_entry_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                beamtalk_trace_store:clear(),
-                beamtalk_trace_store:enable(),
-                Dead = spawn(fun() -> ok end),
-                Mon = erlang:monitor(process, Dead),
-                receive
-                    {'DOWN', Mon, process, Dead, _} -> ok
-                end,
-                beamtalk_trace_store:record_dispatch(Dead, ping, 10, ok, sync, 'Counter'),
-                ?assertEqual(1, pid_row_count()),
-                %% Simulate the clear/0 race: row present, keys entry gone.
-                true = ets:delete_all_objects(beamtalk_agg_pid_keys),
-                sweep_and_sync(),
-                ?assertEqual(0, pid_row_count())
-            end)
-        ]
-    end}.
+    {foreach, fun setup/0, fun cleanup/1, [
+        ?_test(begin
+            beamtalk_trace_store:clear(),
+            beamtalk_trace_store:enable(),
+            Remote = remote_pid(),
+            ?assertNotEqual(node(), node(Remote)),
+            %% Remote pids get no per-actor row (class aggregate only).
+            beamtalk_trace_store:record_dispatch(Remote, ping, 10, ok, sync, 'Counter'),
+            ?assertEqual(0, pid_row_count()),
+            %% A remote row older code left (moved onto a real slot of a
+            %% local row) does not crash the sweep, and is reclaimed
+            %% (BT-4206): it can never be live data, and would otherwise
+            %% count toward ?MAX_PID_KEYS forever.
+            Local = idle_process(),
+            beamtalk_trace_store:record_dispatch(Local, ping, 10, ok, sync, 'Counter'),
+            [{_, Ref, Base, _}] = ets:take(beamtalk_agg_pid, {Local, ping}),
+            true = ets:delete(beamtalk_agg_pid_keys, Local),
+            true = ets:insert(beamtalk_agg_pid, {{Remote, ping}, Ref, Base, 'Counter'}),
+            true = ets:insert(beamtalk_agg_pid_keys, {Remote, ping}),
+            Store = whereis(beamtalk_trace_store),
+            sweep_and_sync(),
+            ?assertEqual(Store, whereis(beamtalk_trace_store)),
+            ?assert(is_process_alive(Store)),
+            ?assertEqual(0, pid_row_count()),
+            ?assertEqual([], ets:lookup(beamtalk_agg_pid_keys, Remote)),
+            Local ! stop
+        end),
+        ?_test(begin
+            beamtalk_trace_store:clear(),
+            beamtalk_trace_store:enable(),
+            Live = idle_process(),
+            beamtalk_trace_store:record_dispatch(Live, ping, 10, ok, sync, 'Counter'),
+            PidKey = {beamtalk_string, list_to_binary(pid_to_list(Live))},
+            ?assertMatch(#{PidKey := _}, beamtalk_trace_store:get_stats(Live)),
+            %% Simulate the clear/0 race for a live actor: row present,
+            %% keys entry gone, so its stats are invisible to get_stats/1.
+            true = ets:delete(beamtalk_agg_pid_keys, Live),
+            ?assertEqual(#{}, beamtalk_trace_store:get_stats(Live)),
+            %% The sweep keeps the row and re-indexes it (BT-4206).
+            sweep_and_sync(),
+            ?assertEqual(1, pid_row_count()),
+            ?assertEqual([{Live, ping}], ets:lookup(beamtalk_agg_pid_keys, Live)),
+            ?assertMatch(#{PidKey := _}, beamtalk_trace_store:get_stats(Live)),
+            Live ! stop
+        end),
+        ?_test(begin
+            beamtalk_trace_store:clear(),
+            beamtalk_trace_store:enable(),
+            Dead = spawn(fun() -> ok end),
+            Mon = erlang:monitor(process, Dead),
+            receive
+                {'DOWN', Mon, process, Dead, _} -> ok
+            end,
+            beamtalk_trace_store:record_dispatch(Dead, ping, 10, ok, sync, 'Counter'),
+            ?assertEqual(1, pid_row_count()),
+            %% Simulate the clear/0 race: row present, keys entry gone.
+            true = ets:delete_all_objects(beamtalk_agg_pid_keys),
+            sweep_and_sync(),
+            ?assertEqual(0, pid_row_count())
+        end)
+    ]}.
 
 %%====================================================================
 %% Test: chunked sweep and in-caller bottlenecks (BT-4124)
@@ -3149,7 +2848,7 @@ kill_then_sweep(Pids) ->
     end.
 
 chunked_sweep_yields_between_chunks_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+    {foreach, fun setup/0, fun cleanup/1, [
         {timeout, 60,
             ?_test(begin
                 beamtalk_trace_store:enable(),
@@ -3166,43 +2865,41 @@ chunked_sweep_yields_between_chunks_test_() ->
                 ?assertEqual(0, pid_row_count()),
                 ?assertEqual(0, ets:info(beamtalk_agg_pid_keys, size))
             end)}
-    end}.
+    ]}.
 
 chunked_sweep_drop_continuation_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
-        [
-            {timeout, 60,
-                ?_test(begin
-                    %% clear/0 mid-sweep drops the continuation.
-                    beamtalk_trace_store:enable(),
-                    kill_then_sweep(fill_live_pid_rows(3 * 2000 + 10)),
-                    ?assertEqual(true, gen_server:call(beamtalk_trace_store, sweep_pending)),
-                    beamtalk_trace_store:clear(),
-                    ?assertEqual(false, gen_server:call(beamtalk_trace_store, sweep_pending)),
-                    ?assertEqual(0, pid_row_count())
-                end)},
-            {timeout, 60,
-                ?_test(begin
-                    %% disable/0 mid-sweep drops it too.
-                    beamtalk_trace_store:enable(),
-                    kill_then_sweep(fill_live_pid_rows(3 * 2000 + 10)),
-                    ?assertEqual(true, gen_server:call(beamtalk_trace_store, sweep_pending)),
-                    beamtalk_trace_store:disable(),
-                    ?assertEqual(false, gen_server:call(beamtalk_trace_store, sweep_pending)),
-                    ?assertEqual(0, pid_row_count())
-                end)},
+    {foreach, fun setup/0, fun cleanup/1, [
+        {timeout, 60,
             ?_test(begin
-                %% A resume message for a dropped sweep is ignored.
-                Store = whereis(beamtalk_trace_store),
-                Store ! {sweep_continue, make_ref()},
+                %% clear/0 mid-sweep drops the continuation.
+                beamtalk_trace_store:enable(),
+                kill_then_sweep(fill_live_pid_rows(3 * 2000 + 10)),
+                ?assertEqual(true, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                beamtalk_trace_store:clear(),
                 ?assertEqual(false, gen_server:call(beamtalk_trace_store, sweep_pending)),
-                ?assertEqual(Store, whereis(beamtalk_trace_store))
-            end)
-        ]
-    end}.
+                ?assertEqual(0, pid_row_count())
+            end)},
+        {timeout, 60,
+            ?_test(begin
+                %% disable/0 mid-sweep drops it too.
+                beamtalk_trace_store:enable(),
+                kill_then_sweep(fill_live_pid_rows(3 * 2000 + 10)),
+                ?assertEqual(true, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                beamtalk_trace_store:disable(),
+                ?assertEqual(false, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                ?assertEqual(0, pid_row_count())
+            end)},
+        ?_test(begin
+            %% A resume message for a dropped sweep is ignored.
+            Store = whereis(beamtalk_trace_store),
+            Store ! {sweep_continue, make_ref()},
+            ?assertEqual(false, gen_server:call(beamtalk_trace_store, sweep_pending)),
+            ?assertEqual(Store, whereis(beamtalk_trace_store))
+        end)
+    ]}.
 
 chunked_sweep_stale_continuation_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+    {foreach, fun setup/0, fun cleanup/1, [
         ?_test(begin
             %% A continuation whose table is gone must not crash the server.
             beamtalk_trace_store:enable(),
@@ -3220,11 +2917,7 @@ chunked_sweep_stale_continuation_test_() ->
             Store ! {sweep_continue, Token},
             ?assertEqual(false, gen_server:call(Store, sweep_pending)),
             ?assertEqual(Store, whereis(beamtalk_trace_store))
-        end)
-    end}.
-
-bottlenecks_does_not_call_gen_server_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end),
         ?_test(begin
             case whereis(beamtalk_object_instances) of
                 undefined -> {ok, _} = beamtalk_object_instances:start_link();
@@ -3250,4 +2943,4 @@ bottlenecks_does_not_call_gen_server_test_() ->
                 lists:foreach(fun(P) -> P ! stop end, Pids)
             end
         end)
-    end}.
+    ]}.
