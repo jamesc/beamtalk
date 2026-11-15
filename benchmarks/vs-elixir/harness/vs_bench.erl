@@ -33,7 +33,7 @@
 
 -module(vs_bench).
 
--export([main/1, profile/1, invalidate/1, rows/0]).
+-export([main/1, profile/1, invalidate/1, rows/0, boot/0]).
 
 %% Row 13d's callee is `vs_ffi:ffi_ok/0` (beamtalk/native/vs_ffi.erl), not a
 %% harness function: only a package `native/` module has its spec read.
