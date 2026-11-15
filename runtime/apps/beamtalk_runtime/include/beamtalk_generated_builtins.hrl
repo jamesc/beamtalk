@@ -139,4 +139,7 @@
     'ZlibStream'
 ]).
 
+%% Runtime-only built-ins (no .bt source); from ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES.
+-define(BEAMTALK_RUNTIME_ONLY_BUILTIN_CLASSES, ['Future']).
+
 -endif.

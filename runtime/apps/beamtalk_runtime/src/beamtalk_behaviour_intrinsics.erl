@@ -1557,9 +1557,10 @@ Recompile from sourceFile and hot-swap the BEAM module.
 
 ADR 0040 Phase 2.
 Raises an error if sourceFile is nil (stdlib / dynamic class).
-Delegates compilation to beamtalk_repl_eval:reload_class_file/1 via
-erlang:apply/3 to avoid a compile-time dep from beamtalk_runtime to
-beamtalk_workspace (follows the beamtalk_actor_registry registered-name pattern).
+Delegates compilation to the registered workspace callback
+(`beamtalk_workspace_callback:reload_class_file/2`, implemented by
+`beamtalk_workspace_callback_impl`), so beamtalk_runtime keeps no compile-time
+dep on beamtalk_workspace.
 """.
 %% ADR 0127 §11 / BT-3593: a protocol's class object is dispatched by the
 %% single shared `beamtalk_protocol_object` module for EVERY protocol

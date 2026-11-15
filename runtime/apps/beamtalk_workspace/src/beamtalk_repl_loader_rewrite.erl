@@ -748,7 +748,9 @@ resolution, or rewrite failure — the FFI boundary raises it.
 -spec move_class(atom(), binary()) -> ok | {error, #beamtalk_error{}}.
 move_class(ClassName, NewPathBin) when is_atom(ClassName), is_binary(NewPathBin) ->
     ClassNameBin = atom_to_binary(ClassName, utf8),
-    Classification = beamtalk_repl_loader:capture_class_removal_snapshot(ClassNameBin),
+    Classification = beamtalk_repl_loader_changelog_entries:capture_class_removal_snapshot(
+        ClassNameBin
+    ),
     case move_class_ensure_movable(ClassName, Classification) of
         {error, _} = Err ->
             Err;
@@ -805,7 +807,7 @@ move_class_validate_target(ClassName, OldPathBin, NewPathBin) ->
                     <<"moveClass:to: target is the class's current path; nothing to move">>
                 )};
         false ->
-            case beamtalk_repl_loader:classify_source_file(NewPathBin) of
+            case beamtalk_repl_loader_changelog_entries:classify_source_file(NewPathBin) of
                 {flushable, _AbsPath} ->
                     ok;
                 {not_flushable, _Reason} ->
@@ -1137,12 +1139,12 @@ finish_rename_class_revert(Entry) ->
         false ->
             case
                 {
-                    beamtalk_repl_server:safe_to_existing_atom(CurrentNameBin),
-                    beamtalk_repl_server:safe_to_existing_atom(OldNameBin)
+                    beamtalk_repl_errors:safe_to_existing_atom(CurrentNameBin),
+                    beamtalk_repl_errors:safe_to_existing_atom(OldNameBin)
                 }
             of
                 {{ok, CurrentName}, {ok, OldName}} ->
-                    Classification = beamtalk_repl_loader:capture_class_removal_snapshot(
+                    Classification = beamtalk_repl_loader_changelog_entries:capture_class_removal_snapshot(
                         CurrentNameBin
                     ),
                     try
