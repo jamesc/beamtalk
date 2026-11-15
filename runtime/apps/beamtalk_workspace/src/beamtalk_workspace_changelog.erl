@@ -870,7 +870,7 @@ survivor_seqs(Entries) ->
 %% visible.
 -type shadow_key() ::
     {binary(), binary() | undefined, side() | undefined} | {binary(), undefined, kind()}.
--spec shadow_key(#entry{}) -> shadow_key().
+-spec shadow_key(entry()) -> shadow_key().
 shadow_key(#entry{selector = undefined} = E) ->
     {E#entry.class, undefined, E#entry.kind};
 shadow_key(E) ->
