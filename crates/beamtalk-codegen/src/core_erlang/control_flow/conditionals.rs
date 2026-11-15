@@ -3029,7 +3029,13 @@ impl CoreErlangGenerator {
                 // `generate_self_clear_field_open`'s own convention) rather
                 // than a written value.
                 BodyExprKind::SelfClearField => {
-                    self.lower_arm_self_clear_field(cx, &mut last_result, &mut stmts)?;
+                    self.lower_stmt_self_clear_field(
+                        cx,
+                        &mut StmtTail::Arm {
+                            last_result: &mut last_result,
+                        },
+                        &mut stmts,
+                    )?;
                 }
                 // C8 — self fieldAt: name put: <control-flow-with-mutations>.
                 BodyExprKind::SelfFieldAtPutControlFlow => {
@@ -3715,59 +3721,6 @@ impl CoreErlangGenerator {
             stmts.extend(self.construct_locals_in_place(&arguments[1], span));
             if is_last {
                 *last_result = Some(ValueRef::Var(val_var));
-            }
-        }
-        Ok(())
-    }
-
-    fn lower_arm_self_clear_field(
-        &mut self,
-        cx: StmtCx<'_>,
-        last_result: &mut Option<ValueRef>,
-        stmts: &mut Vec<ThreadedStmt>,
-    ) -> Result<()> {
-        let StmtCx {
-            expr,
-            span,
-            is_last,
-            frame,
-            ..
-        } = cx;
-        if let Expression::MessageSend { arguments, .. } = expr {
-            // BT-4369: a dynamic-key field write records itself for the loop checkout.
-            self.note_field_write("<dynamic>", span);
-            let scope = self.thread_send_arguments(expr, frame, stmts)?;
-            let name_var = self.fresh_var("Name");
-            let name_code = self.expression_doc(&arguments[0])?;
-            self.finish_precompiled_scope(scope)?;
-            let source_version = self.state_version();
-            let current_state_name = self.current_state_var();
-            stmts.push(ThreadedStmt::Statement(
-                docvec![
-                    "let ",
-                    leaf::var(name_var.clone()),
-                    " = ",
-                    name_code,
-                    " in ",
-                ],
-                span,
-            ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'maps':'remove'(",
-                    leaf::var(name_var),
-                    ", ",
-                    leaf::var(current_state_name),
-                    ")",
-                ])),
-                span,
-            });
-            if is_last {
-                *last_result = Some(ValueRef::Var("Self".to_string()));
             }
         }
         Ok(())

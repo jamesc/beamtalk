@@ -807,7 +807,9 @@ impl CoreErlangGenerator {
                 BodyExprKind::SelfFieldAtPut => {
                     self.lower_stmt_self_field_at_put(cx, &mut StmtTail::Reply, &mut stmts)
                 }
-                BodyExprKind::SelfClearField => self.lower_reply_self_clear_field(cx, &mut stmts),
+                BodyExprKind::SelfClearField => {
+                    self.lower_stmt_self_clear_field(cx, &mut StmtTail::Reply, &mut stmts)
+                }
                 BodyExprKind::FieldAssignment => {
                     self.lower_stmt_field_assignment(cx, &mut StmtTail::Reply, &mut stmts)
                 }
@@ -1038,41 +1040,6 @@ impl CoreErlangGenerator {
             let expr_str = self.threaded_value_doc(&tv.value);
             stmts.push(ThreadedStmt::Statement(
                 docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in "],
-                span,
-            ));
-        }
-        Ok(())
-    }
-
-    // Mirrors SelfFieldAtPut immediately above — same opaque
-    // Statement + is_last reply shape, mirroring
-    // `generate_self_clear_field_open` (ADR 0124 §1/B4).
-    fn lower_reply_self_clear_field(
-        &mut self,
-        cx: StmtCx<'_>,
-        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
-    ) -> Result<()> {
-        use threaded_ir::ThreadedStmt;
-        let StmtCx {
-            expr,
-            span,
-            is_last,
-            ..
-        } = cx;
-        let scope = self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, stmts)?;
-        let (doc, val_var) = self.generate_self_clear_field_open(expr)?;
-        self.finish_precompiled_scope(scope)?;
-        stmts.push(ThreadedStmt::Statement(doc, span));
-        if is_last {
-            let final_state = self.current_state_var();
-            stmts.push(ThreadedStmt::Statement(
-                docvec![
-                    "{'reply', ",
-                    leaf::var(val_var),
-                    ", ",
-                    leaf::var(final_state),
-                    "}",
-                ],
                 span,
             ));
         }
