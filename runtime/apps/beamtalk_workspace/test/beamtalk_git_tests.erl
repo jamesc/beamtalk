@@ -429,7 +429,7 @@ run_git_in_nonzero_non_repo_error_returns_ok_tuple_test() ->
         ?assert(Code =/= 0),
         ?assertNotEqual(<<>>, Msg)
     after
-        rm_rf(Top)
+        beamtalk_test_fs:rm_rf(Top)
     end.
 
 %% `git diff --exit-code` exits with code 1 when files differ and writes the
@@ -467,7 +467,7 @@ git_log_on_empty_repo_returns_structured_error_test() ->
             ?assertMatch({error, _}, beamtalk_git:git_log(1))
         end)
     after
-        rm_rf(Top)
+        beamtalk_test_fs:rm_rf(Top)
     end.
 
 %%% ============================================================================
@@ -584,7 +584,7 @@ repo_toplevel_outside_repo_errors_test() ->
             beamtalk_git:repo_toplevel(git_status, list_to_binary(Dir))
         )
     after
-        rm_rf(Dir)
+        beamtalk_test_fs:rm_rf(Dir)
     end.
 
 %%% ============================================================================
@@ -806,7 +806,7 @@ with_subdir_repo(Fun) ->
             list_to_binary(FileRel)
         )
     after
-        rm_rf(Top)
+        beamtalk_test_fs:rm_rf(Top)
     end.
 
 %% Start beamtalk_workspace_meta with ProjectPath as the project path, run Fun(),
@@ -844,7 +844,7 @@ with_repo_root_project(Fun) ->
         ok = file:write_file(filename:join(Top, FileRel), <<"modified\n">>),
         Fun(list_to_binary(Top), list_to_binary(FileRel))
     after
-        rm_rf(Top)
+        beamtalk_test_fs:rm_rf(Top)
     end.
 
 %% Create a unique empty temp dir (not a git repo).
@@ -889,17 +889,6 @@ shell_quote(S) ->
         _ ->
             "'" ++ lists:flatten(string:replace(S, "'", "'\\''", all)) ++ "'"
     end.
-
-%% `rm`/`pwd`/etc. from Git for Windows' usr/bin are not on PATH under
-%% `cmd /c` on Windows runners (only reachable via Git Bash), so `rm -rf`
-%% silently no-ops there; use the cmd.exe builtin instead.
-rm_rf(Dir) ->
-    _ =
-        case os:type() of
-            {win32, _} -> os:cmd("rmdir /s /q " ++ shell_quote(Dir) ++ " 2>nul");
-            _ -> os:cmd("rm -rf " ++ shell_quote(Dir))
-        end,
-    ok.
 
 %% Join records with a trailing NUL after each, matching `-z` output.
 nul_join(Records) ->

@@ -848,30 +848,11 @@ extenders_of_extensions_by_round_trip_test_() ->
 %% extension register/unregister hooks have somewhere to write.
 xref_setup() ->
     setup(),
-    case whereis(beamtalk_xref) of
-        undefined -> {ok, _} = beamtalk_xref:start_link();
-        _ -> ok
-    end,
-    clear_xref_tables(),
-    ok.
+    ok = beamtalk_test_repl:ensure_xref().
 
 xref_cleanup(_) ->
-    clear_xref_tables(),
+    beamtalk_test_repl:clear_xref(),
     cleanup(undefined),
-    ok.
-
-clear_xref_tables() ->
-    try
-        sys:replace_state(beamtalk_xref, fun(S) ->
-            ets:delete_all_objects(beamtalk_xref_methods),
-            ets:delete_all_objects(beamtalk_xref_senders),
-            ets:delete_all_objects(beamtalk_xref_references),
-            ets:delete_all_objects(xref_class_gen),
-            S
-        end)
-    catch
-        _:_ -> ok
-    end,
     ok.
 
 %% True when the compiler AST FFI walker that backs runtime xref send-parsing

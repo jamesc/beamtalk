@@ -229,7 +229,7 @@
 %%
 %% Codegen throws the state-carrying 4-tuple `{'$bt_nlr', Token, Value,
 %% State}` (ADR 0041); the 3-tuple is the legacy shape still recognised
-%% by `beamtalk_result:'tryDo:'/1`. Both are control-flow signals aimed at a
+%% by `beamtalk_result:tryDo/1`. Both are control-flow signals aimed at a
 %% method frame that may live in another process, so any dispatch layer that
 %% might intercept a `throw` (class-side self-sends, instance-side extension
 %% invocation, `tryDo:`, class-variable `protect/1`, JSON encoding) must

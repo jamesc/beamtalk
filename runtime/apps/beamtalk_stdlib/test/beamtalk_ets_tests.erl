@@ -40,7 +40,7 @@ with_table(Name, Fun) ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(Name, set),
+    Table = beamtalk_ets:new(Name, set),
     try
         Fun(Table)
     after
@@ -61,7 +61,7 @@ new_set_test() ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_new_set, set),
+    Table = beamtalk_ets:new(bt_ets_test_new_set, set),
     ?assertMatch(#{'$beamtalk_class' := 'Ets', table := bt_ets_test_new_set}, Table),
     ets:delete(bt_ets_test_new_set).
 
@@ -71,7 +71,7 @@ new_ordered_set_test() ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_new_ordered, orderedSet),
+    Table = beamtalk_ets:new(bt_ets_test_new_ordered, orderedSet),
     ?assertMatch(#{'$beamtalk_class' := 'Ets', table := bt_ets_test_new_ordered}, Table),
     ets:delete(bt_ets_test_new_ordered).
 
@@ -81,7 +81,7 @@ new_bag_test() ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_new_bag, bag),
+    Table = beamtalk_ets:new(bt_ets_test_new_bag, bag),
     ?assertMatch(#{'$beamtalk_class' := 'Ets', table := bt_ets_test_new_bag}, Table),
     ets:delete(bt_ets_test_new_bag).
 
@@ -91,7 +91,7 @@ new_duplicate_bag_test() ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_new_dupbag, duplicateBag),
+    Table = beamtalk_ets:new(bt_ets_test_new_dupbag, duplicateBag),
     ?assertMatch(#{'$beamtalk_class' := 'Ets', table := bt_ets_test_new_dupbag}, Table),
     ets:delete(bt_ets_test_new_dupbag).
 
@@ -103,19 +103,19 @@ new_already_exists_test() ->
     end),
     ets:new(bt_ets_test_dup, [set, named_table, public]),
     try
-        ?assertBtError(already_exists, beamtalk_ets:'new:type:'(bt_ets_test_dup, set))
+        ?assertBtError(already_exists, beamtalk_ets:new(bt_ets_test_dup, set))
     after
         ets:delete(bt_ets_test_dup)
     end.
 
 new_type_error_name_not_atom_test() ->
-    ?assertBtError(type_error, 'Ets', beamtalk_ets:'new:type:'(<<"not_an_atom">>, set)).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:new(<<"not_an_atom">>, set)).
 
 new_type_error_type_not_atom_test() ->
-    ?assertBtError(type_error, 'Ets', beamtalk_ets:'new:type:'(some_table, <<"set">>)).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:new(some_table, <<"set">>)).
 
 new_type_error_invalid_type_test() ->
-    ?assertBtError(type_error, 'Ets', beamtalk_ets:'new:type:'(some_table, invalid_type)).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:new(some_table, invalid_type)).
 
 %%% ============================================================================
 %%% named:/1
@@ -129,17 +129,17 @@ named_success_test() ->
     end),
     ets:new(bt_ets_test_named, [set, named_table, public]),
     try
-        Table = beamtalk_ets:'named:'(bt_ets_test_named),
+        Table = beamtalk_ets:named(bt_ets_test_named),
         ?assertMatch(#{'$beamtalk_class' := 'Ets', table := bt_ets_test_named}, Table)
     after
         ets:delete(bt_ets_test_named)
     end.
 
 named_not_found_test() ->
-    ?assertBtError(not_found, 'Ets', beamtalk_ets:'named:'(bt_ets_test_no_such_table_xyz)).
+    ?assertBtError(not_found, 'Ets', beamtalk_ets:named(bt_ets_test_no_such_table_xyz)).
 
 named_type_error_test() ->
-    ?assertBtError(type_error, 'Ets', beamtalk_ets:'named:'(<<"not_an_atom">>)).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:named(<<"not_an_atom">>)).
 
 %%% ============================================================================
 %%% exists:/1
@@ -153,16 +153,16 @@ exists_true_test() ->
     end),
     ets:new(bt_ets_test_exists_true, [set, named_table, public]),
     try
-        ?assert(beamtalk_ets:'exists:'(bt_ets_test_exists_true))
+        ?assert(beamtalk_ets:exists(bt_ets_test_exists_true))
     after
         ets:delete(bt_ets_test_exists_true)
     end.
 
 exists_false_test() ->
-    ?assertNot(beamtalk_ets:'exists:'(bt_ets_test_no_such_exists_xyz)).
+    ?assertNot(beamtalk_ets:exists(bt_ets_test_no_such_exists_xyz)).
 
 exists_type_error_test() ->
-    ?assertBtError(type_error, 'Ets', beamtalk_ets:'exists:'(<<"not_an_atom">>)).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:exists(<<"not_an_atom">>)).
 
 ffi_exists_shim_test() ->
     ?assertNot(beamtalk_ets:exists(bt_ets_test_ffi_exists_xyz)).
@@ -178,7 +178,7 @@ newOrExisting_creates_new_test() ->
         _:_ -> ok
     end),
     try
-        Table = beamtalk_ets:'newOrExisting:type:'(bt_ets_test_new_or_existing_create, set),
+        Table = beamtalk_ets:newOrExisting(bt_ets_test_new_or_existing_create, set),
         ?assertMatch(
             #{'$beamtalk_class' := 'Ets', table := bt_ets_test_new_or_existing_create}, Table
         ),
@@ -203,7 +203,7 @@ newOrExisting_returns_existing_test() ->
         %% Insert data in the original table
         ets:insert(bt_ets_test_new_or_existing_reuse, {<<"key">>, <<"value">>}),
         %% newOrExisting should return the existing table, not create a new empty one
-        Table = beamtalk_ets:'newOrExisting:type:'(bt_ets_test_new_or_existing_reuse, set),
+        Table = beamtalk_ets:newOrExisting(bt_ets_test_new_or_existing_reuse, set),
         ?assertMatch(
             #{'$beamtalk_class' := 'Ets', table := bt_ets_test_new_or_existing_reuse}, Table
         ),
@@ -214,17 +214,17 @@ newOrExisting_returns_existing_test() ->
     end.
 
 newOrExisting_type_error_name_test() ->
-    ?assertBtError(type_error, 'Ets', beamtalk_ets:'newOrExisting:type:'(<<"not_atom">>, set)).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:newOrExisting(<<"not_atom">>, set)).
 
 newOrExisting_type_error_type_test() ->
-    ?assertBtError(type_error, 'Ets', beamtalk_ets:'newOrExisting:type:'(some_table, <<"set">>)).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:newOrExisting(some_table, <<"set">>)).
 
 newOrExisting_invalid_type_test() ->
     ?assertBtError(
         type_error,
         'Ets',
         'newOrExisting:type:',
-        beamtalk_ets:'newOrExisting:type:'(some_table, invalid_type)
+        beamtalk_ets:newOrExisting(some_table, invalid_type)
     ).
 
 ffi_newOrExisting_shim_test() ->
@@ -262,7 +262,7 @@ newOrExisting_concurrent_creators_test() ->
             spawn_link(fun() ->
                 Result =
                     try
-                        beamtalk_ets:'newOrExisting:type:'(Name, set)
+                        beamtalk_ets:newOrExisting(Name, set)
                     catch
                         throw:BtThrown -> BtThrown;
                         error:BtReason:BtStack -> {'EXIT', {BtReason, BtStack}};
@@ -317,10 +317,10 @@ newOrExisting_reuse_with_different_type_test() ->
     end),
     try
         %% Create as set
-        Table1 = beamtalk_ets:'newOrExisting:type:'(Name, set),
+        Table1 = beamtalk_ets:newOrExisting(Name, set),
         beamtalk_ets:insert(Table1, <<"key">>, <<"value">>),
         %% Request as orderedSet — should return existing set table
-        Table2 = beamtalk_ets:'newOrExisting:type:'(Name, orderedSet),
+        Table2 = beamtalk_ets:newOrExisting(Name, orderedSet),
         ?assertMatch(#{'$beamtalk_class' := 'Ets', table := bt_ets_test_reuse_diff_type}, Table2),
         %% Original data should still be there (it's the same table)
         ?assertEqual(<<"value">>, beamtalk_ets:lookup(Table2, <<"key">>)),
@@ -406,7 +406,7 @@ lookupIfAbsent_block_badarg_is_not_reported_as_stale_table_test() ->
 
 lookupIfAbsent_stale_table_still_reported_test() ->
     %% BT-3739: a table that no longer exists is still a stale-table error.
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_lookup_default_stale, set),
+    Table = beamtalk_ets:new(bt_ets_test_lookup_default_stale, set),
     ets:delete(bt_ets_test_lookup_default_stale),
     ?assertBtError(
         stale_table, 'Ets', beamtalk_ets:lookupIfAbsent(Table, <<"key">>, fun() -> 0 end)
@@ -520,7 +520,7 @@ deleteTable_success_test() ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_delete, set),
+    Table = beamtalk_ets:new(bt_ets_test_delete, set),
     ?assertEqual(nil, beamtalk_ets:deleteTable(Table)),
     ?assertEqual(undefined, ets:whereis(bt_ets_test_delete)).
 
@@ -569,7 +569,7 @@ bag_insert_upsert_test() ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_bag_upsert, bag),
+    Table = beamtalk_ets:new(bt_ets_test_bag_upsert, bag),
     try
         beamtalk_ets:insert(Table, <<"key">>, <<"first">>),
         beamtalk_ets:insert(Table, <<"key">>, <<"second">>),
@@ -591,7 +591,7 @@ bag_lookup_returns_value_test() ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_bag_lookup, bag),
+    Table = beamtalk_ets:new(bt_ets_test_bag_lookup, bag),
     try
         beamtalk_ets:insert(Table, <<"key">>, <<"value">>),
         ?assertEqual(<<"value">>, beamtalk_ets:lookup(Table, <<"key">>))
@@ -610,7 +610,7 @@ bag_keys_unique_test() ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_bag_keys, bag),
+    Table = beamtalk_ets:new(bt_ets_test_bag_keys, bag),
     try
         beamtalk_ets:insert(Table, <<"k1">>, <<"a">>),
         beamtalk_ets:insert(Table, <<"k2">>, <<"b">>),
@@ -634,7 +634,7 @@ stale_table_lookup_test() ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_lookup, set),
+    Table = beamtalk_ets:new(bt_ets_test_stale_lookup, set),
     beamtalk_ets:deleteTable(Table),
     ?assertBtError(stale_table, 'Ets', beamtalk_ets:lookup(Table, <<"key">>)).
 
@@ -644,7 +644,7 @@ stale_table_insert_test() ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_insert, set),
+    Table = beamtalk_ets:new(bt_ets_test_stale_insert, set),
     beamtalk_ets:deleteTable(Table),
     ?assertBtError(stale_table, 'Ets', beamtalk_ets:insert(Table, <<"key">>, <<"val">>)).
 
@@ -654,7 +654,7 @@ stale_table_size_test() ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_size, set),
+    Table = beamtalk_ets:new(bt_ets_test_stale_size, set),
     beamtalk_ets:deleteTable(Table),
     ?assertBtError(stale_table, 'Ets', beamtalk_ets:tableSize(Table)).
 
@@ -664,7 +664,7 @@ stale_table_delete_test() ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_delete, set),
+    Table = beamtalk_ets:new(bt_ets_test_stale_delete, set),
     %% Delete the underlying table directly, then verify deleteTable raises stale_table
     %% (the same kind as an unnamed table and every other operation; BT-4604).
     ets:delete(bt_ets_test_stale_delete),
@@ -677,7 +677,7 @@ duplicate_bag_insert_upsert_test() ->
     catch
         _:_ -> ok
     end),
-    Table = beamtalk_ets:'new:type:'(bt_ets_test_dupbag_upsert, duplicateBag),
+    Table = beamtalk_ets:new(bt_ets_test_dupbag_upsert, duplicateBag),
     try
         beamtalk_ets:insert(Table, <<"key">>, <<"first">>),
         beamtalk_ets:insert(Table, <<"key">>, <<"second">>),
@@ -756,7 +756,7 @@ bt3831_bag_rejected_test() ->
         catch
             _:_ -> ok
         end,
-    T = beamtalk_ets:'new:type:'(bt3831_bag, bag),
+    T = beamtalk_ets:new(bt3831_bag, bag),
     try
         ?assertBtError(unsupported_table_type, beamtalk_ets:incrementAt(T, k, 1)),
         ?assertBtError(unsupported_table_type, beamtalk_ets:updateAt(T, k, fun(_) -> 1 end))
@@ -783,7 +783,7 @@ bt3831_update_ordered_set_float_key_test() ->
         catch
             _:_ -> ok
         end,
-    T = beamtalk_ets:'new:type:'(bt3831_ord, orderedSet),
+    T = beamtalk_ets:new(bt3831_ord, orderedSet),
     try
         beamtalk_ets:insert(T, 1, 10),
         ?assertEqual(11, beamtalk_ets:updateAt(T, 1.0, fun(O) -> O + 1 end))
@@ -944,7 +944,7 @@ in_other_process(Fun) ->
 ).
 
 bt4576_private_table_is_unnamed_and_owner_usable_test() ->
-    T = beamtalk_ets:'private:'(set),
+    T = beamtalk_ets:private(set),
     #{'$beamtalk_class' := 'Ets', table := Tid} = T,
     ?assertNot(is_atom(Tid)),
     ?assertEqual(private, ets:info(Tid, protection)),
@@ -958,7 +958,7 @@ bt4576_private_table_is_unnamed_and_owner_usable_test() ->
     beamtalk_ets:deleteTable(T2).
 
 bt4576_private_table_denies_other_processes_test() ->
-    T = beamtalk_ets:'private:'(set),
+    T = beamtalk_ets:private(set),
     beamtalk_ets:insert(T, k, secret),
     ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:lookup(T, k) end)),
     ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:insert(T, k, x) end)),
@@ -979,7 +979,7 @@ bt4576_private_table_denies_other_processes_test() ->
     beamtalk_ets:deleteTable(T).
 
 bt4576_protected_table_allows_other_readers_only_test() ->
-    T = beamtalk_ets:'protected:'(set),
+    T = beamtalk_ets:protected(set),
     beamtalk_ets:insert(T, k, 1),
     ?assertEqual({ok, 1}, in_other_process(fun() -> beamtalk_ets:lookup(T, k) end)),
     ?assertEqual({ok, 1}, in_other_process(fun() -> beamtalk_ets:tableSize(T) end)),
@@ -989,7 +989,7 @@ bt4576_protected_table_allows_other_readers_only_test() ->
     beamtalk_ets:deleteTable(T).
 
 bt4576_delete_unnamed_table_errors_test() ->
-    T = beamtalk_ets:'protected:'(set),
+    T = beamtalk_ets:protected(set),
     %% Only the owner may delete, even a table others may read.
     ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:deleteTable(T) end)),
     ?assertEqual(nil, beamtalk_ets:deleteTable(T)),
@@ -1010,7 +1010,7 @@ with_named_table_cleanup(Name, Body) ->
 bt4604_delete_named_public_table_by_non_owner_succeeds_test() ->
     %% Named tables are public, and ETS lets any process delete a public table.
     with_named_table_cleanup(bt4604_named_public_delete, fun() ->
-        T = beamtalk_ets:'new:type:'(bt4604_named_public_delete, set),
+        T = beamtalk_ets:new(bt4604_named_public_delete, set),
         ?assertEqual({ok, nil}, in_other_process(fun() -> beamtalk_ets:deleteTable(T) end)),
         ?assertBtError(stale_table, 'Ets', beamtalk_ets:deleteTable(T))
     end).
@@ -1057,14 +1057,14 @@ bt4604_delete_badarg_name_reuse_test() ->
     end).
 
 bt4576_deleted_private_table_is_stale_test() ->
-    T = beamtalk_ets:'private:'(set),
+    T = beamtalk_ets:private(set),
     beamtalk_ets:deleteTable(T),
     ?assertBtError(stale_table, beamtalk_ets:lookup(T, k)),
     ?assertBtError(stale_table, beamtalk_ets:tableSize(T)).
 
 bt4576_private_rejects_bad_type_test() ->
-    ?assertBtError(type_error, _, 'private:', beamtalk_ets:'private:'(nope)),
-    ?assertBtError(type_error, _, 'protected:', beamtalk_ets:'protected:'(<<"set">>)).
+    ?assertBtError(type_error, _, 'private:', beamtalk_ets:private(nope)),
+    ?assertBtError(type_error, _, 'protected:', beamtalk_ets:protected(<<"set">>)).
 
 bt4576_remove_key_if_absent_takes_value_test() ->
     with_table(bt_ets_test_take, fun(T) ->
@@ -1078,12 +1078,12 @@ bt4576_remove_key_if_absent_takes_value_test() ->
 bt4576_atomic_ops_on_private_bag_deny_before_type_check_test() ->
     %% A non-owner must get access_denied, not unsupported_table_type (which
     %% would reveal the table type).
-    T = beamtalk_ets:'private:'(bag),
+    T = beamtalk_ets:private(bag),
     ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:incrementAt(T, k, 1) end)),
     beamtalk_ets:deleteTable(T).
 
 bt4576_protected_table_bulk_reads_from_other_process_test() ->
-    T = beamtalk_ets:'protected:'(set),
+    T = beamtalk_ets:protected(set),
     beamtalk_ets:insert(T, k, 1),
     ?assertEqual({ok, [k]}, in_other_process(fun() -> beamtalk_ets:keys(T) end)),
     ?assertEqual({ok, [1]}, in_other_process(fun() -> beamtalk_ets:values(T) end)),
@@ -1094,7 +1094,7 @@ bt4576_protected_table_bulk_reads_from_other_process_test() ->
     beamtalk_ets:deleteTable(T).
 
 bt4576_remove_key_if_absent_on_bag_removes_all_entries_test() ->
-    T = beamtalk_ets:'private:'(duplicateBag),
+    T = beamtalk_ets:private(duplicateBag),
     #{table := Tid} = T,
     ets:insert(Tid, [{k, a}, {k, b}]),
     ?assertEqual(a, beamtalk_ets:removeKey(T, k, fun() -> nil end)),

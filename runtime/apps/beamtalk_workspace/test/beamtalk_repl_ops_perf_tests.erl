@@ -19,9 +19,6 @@ Uses a running trace store for integration-style tests.
 %% Helpers
 %%====================================================================
 
-make_msg(Op) ->
-    {protocol_msg, Op, <<"test-1">>, <<"session-1">>, #{}}.
-
 decode_response(Bin) ->
     json:decode(Bin).
 
@@ -68,7 +65,12 @@ enable_tracing_test_() ->
         [
             {"enable-tracing returns success", fun() ->
                 Result = beamtalk_repl_ops_perf:handle(
-                    <<"enable-tracing">>, #{}, make_msg(<<"enable-tracing">>), self()
+                    <<"enable-tracing">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(
+                        <<"enable-tracing">>, <<"test-1">>, <<"session-1">>
+                    ),
+                    self()
                 ),
                 Decoded = decode_response(Result),
                 ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
@@ -79,7 +81,12 @@ enable_tracing_test_() ->
                 beamtalk_trace_store:disable(),
                 ?assertNot(beamtalk_trace_store:is_enabled()),
                 _ = beamtalk_repl_ops_perf:handle(
-                    <<"enable-tracing">>, #{}, make_msg(<<"enable-tracing">>), self()
+                    <<"enable-tracing">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(
+                        <<"enable-tracing">>, <<"test-1">>, <<"session-1">>
+                    ),
+                    self()
                 ),
                 ?assert(beamtalk_trace_store:is_enabled())
             end}
@@ -95,7 +102,10 @@ get_traces_test_() ->
         [
             {"get-traces returns empty list when no traces", fun() ->
                 Result = beamtalk_repl_ops_perf:handle(
-                    <<"get-traces">>, #{}, make_msg(<<"get-traces">>), self()
+                    <<"get-traces">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(<<"get-traces">>, <<"test-1">>, <<"session-1">>),
+                    self()
                 ),
                 Decoded = decode_response(Result),
                 ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
@@ -105,7 +115,7 @@ get_traces_test_() ->
                 Result = beamtalk_repl_ops_perf:handle(
                     <<"get-traces">>,
                     #{<<"limit">> => 5},
-                    make_msg(<<"get-traces">>),
+                    beamtalk_test_repl:make_msg(<<"get-traces">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 Decoded = decode_response(Result),
@@ -117,7 +127,7 @@ get_traces_test_() ->
                 Result = beamtalk_repl_ops_perf:handle(
                     <<"get-traces">>,
                     #{<<"actor">> => PidStr},
-                    make_msg(<<"get-traces">>),
+                    beamtalk_test_repl:make_msg(<<"get-traces">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 Decoded = decode_response(Result),
@@ -136,7 +146,10 @@ actor_stats_test_() ->
         [
             {"actor-stats returns success with value when no stats", fun() ->
                 Result = beamtalk_repl_ops_perf:handle(
-                    <<"actor-stats">>, #{}, make_msg(<<"actor-stats">>), self()
+                    <<"actor-stats">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(<<"actor-stats">>, <<"test-1">>, <<"session-1">>),
+                    self()
                 ),
                 Decoded = decode_response(Result),
                 ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
@@ -148,7 +161,7 @@ actor_stats_test_() ->
                 Result = beamtalk_repl_ops_perf:handle(
                     <<"actor-stats">>,
                     #{<<"actor">> => PidStr},
-                    make_msg(<<"actor-stats">>),
+                    beamtalk_test_repl:make_msg(<<"actor-stats">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 Decoded = decode_response(Result),
@@ -169,7 +182,7 @@ export_traces_test_() ->
                 Result = beamtalk_repl_ops_perf:handle(
                     <<"export-traces">>,
                     #{<<"path">> => TmpFile},
-                    make_msg(<<"export-traces">>),
+                    beamtalk_test_repl:make_msg(<<"export-traces">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 Decoded = decode_response(Result),
@@ -194,7 +207,7 @@ export_traces_test_() ->
                         <<"selector">> => <<"increment">>,
                         <<"limit">> => 10
                     },
-                    make_msg(<<"export-traces">>),
+                    beamtalk_test_repl:make_msg(<<"export-traces">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 Decoded = decode_response(Result),
@@ -207,7 +220,7 @@ export_traces_test_() ->
                 Result = beamtalk_repl_ops_perf:handle(
                     <<"export-traces">>,
                     #{},
-                    make_msg(<<"export-traces">>),
+                    beamtalk_test_repl:make_msg(<<"export-traces">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 Decoded = decode_response(Result),
@@ -239,7 +252,12 @@ disable_tracing_test_() ->
         [
             {"disable-tracing returns success response", fun() ->
                 Result = beamtalk_repl_ops_perf:handle(
-                    <<"disable-tracing">>, #{}, make_msg(<<"disable-tracing">>), self()
+                    <<"disable-tracing">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(
+                        <<"disable-tracing">>, <<"test-1">>, <<"session-1">>
+                    ),
+                    self()
                 ),
                 Decoded = decode_response(Result),
                 ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
@@ -250,7 +268,12 @@ disable_tracing_test_() ->
                 beamtalk_tracing:enable(),
                 ?assert(beamtalk_trace_store:is_enabled()),
                 _ = beamtalk_repl_ops_perf:handle(
-                    <<"disable-tracing">>, #{}, make_msg(<<"disable-tracing">>), self()
+                    <<"disable-tracing">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(
+                        <<"disable-tracing">>, <<"test-1">>, <<"session-1">>
+                    ),
+                    self()
                 ),
                 ?assertNot(beamtalk_trace_store:is_enabled())
             end}
@@ -269,7 +292,7 @@ get_traces_outcome_filter_test_() ->
                 Result = beamtalk_repl_ops_perf:handle(
                     <<"get-traces">>,
                     #{<<"outcome">> => <<"ok">>},
-                    make_msg(<<"get-traces">>),
+                    beamtalk_test_repl:make_msg(<<"get-traces">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 ?assertMatch(#{<<"status">> := [<<"done">>]}, decode_response(Result))
@@ -279,7 +302,7 @@ get_traces_outcome_filter_test_() ->
                 Result = beamtalk_repl_ops_perf:handle(
                     <<"get-traces">>,
                     #{<<"outcome">> => <<"error">>},
-                    make_msg(<<"get-traces">>),
+                    beamtalk_test_repl:make_msg(<<"get-traces">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 ?assertMatch(#{<<"status">> := [<<"done">>]}, decode_response(Result))
@@ -289,7 +312,7 @@ get_traces_outcome_filter_test_() ->
                 Result = beamtalk_repl_ops_perf:handle(
                     <<"get-traces">>,
                     #{<<"outcome">> => <<"timeout">>},
-                    make_msg(<<"get-traces">>),
+                    beamtalk_test_repl:make_msg(<<"get-traces">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 ?assertMatch(#{<<"status">> := [<<"done">>]}, decode_response(Result))
@@ -301,7 +324,9 @@ get_traces_outcome_filter_test_() ->
                     beamtalk_repl_ops_perf:handle_term(
                         <<"get-traces">>,
                         #{<<"outcome">> => <<"flying">>},
-                        make_msg(<<"get-traces">>),
+                        beamtalk_test_repl:make_msg(
+                            <<"get-traces">>, <<"test-1">>, <<"session-1">>
+                        ),
                         self()
                     )
                 )
@@ -318,7 +343,7 @@ get_traces_class_filter_test_() ->
                 Result = beamtalk_repl_ops_perf:handle(
                     <<"get-traces">>,
                     #{<<"class">> => <<"ok">>},
-                    make_msg(<<"get-traces">>),
+                    beamtalk_test_repl:make_msg(<<"get-traces">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 ?assertMatch(#{<<"status">> := [<<"done">>]}, decode_response(Result))
@@ -330,7 +355,9 @@ get_traces_class_filter_test_() ->
                     beamtalk_repl_ops_perf:handle_term(
                         <<"get-traces">>,
                         #{<<"class">> => <<"NonExistentClassXYZ99999NightlyTest">>},
-                        make_msg(<<"get-traces">>),
+                        beamtalk_test_repl:make_msg(
+                            <<"get-traces">>, <<"test-1">>, <<"session-1">>
+                        ),
                         self()
                     )
                 )
@@ -346,7 +373,7 @@ get_traces_min_duration_ns_filter_test_() ->
                 Result = beamtalk_repl_ops_perf:handle(
                     <<"get-traces">>,
                     #{<<"min_duration_ns">> => 1000},
-                    make_msg(<<"get-traces">>),
+                    beamtalk_test_repl:make_msg(<<"get-traces">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 ?assertMatch(#{<<"status">> := [<<"done">>]}, decode_response(Result))
@@ -358,7 +385,9 @@ get_traces_min_duration_ns_filter_test_() ->
                     beamtalk_repl_ops_perf:handle_term(
                         <<"get-traces">>,
                         #{<<"min_duration_ns">> => <<"not-a-number">>},
-                        make_msg(<<"get-traces">>),
+                        beamtalk_test_repl:make_msg(
+                            <<"get-traces">>, <<"test-1">>, <<"session-1">>
+                        ),
                         self()
                     )
                 )
@@ -374,7 +403,7 @@ get_traces_limit_fallthrough_test_() ->
                 Result = beamtalk_repl_ops_perf:handle(
                     <<"get-traces">>,
                     #{<<"limit">> => 0},
-                    make_msg(<<"get-traces">>),
+                    beamtalk_test_repl:make_msg(<<"get-traces">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 ?assertMatch(#{<<"status">> := [<<"done">>]}, decode_response(Result))
@@ -391,7 +420,7 @@ export_traces_noninteger_limit_test_() ->
                 Result = beamtalk_repl_ops_perf:handle(
                     <<"export-traces">>,
                     #{<<"path">> => TmpFile, <<"limit">> => <<"not-a-number">>},
-                    make_msg(<<"export-traces">>),
+                    beamtalk_test_repl:make_msg(<<"export-traces">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 Decoded = decode_response(Result),
@@ -418,7 +447,9 @@ error_handling_test_() ->
                     beamtalk_repl_ops_perf:handle_term(
                         <<"get-traces">>,
                         #{<<"actor">> => <<"not-a-pid">>},
-                        make_msg(<<"get-traces">>),
+                        beamtalk_test_repl:make_msg(
+                            <<"get-traces">>, <<"test-1">>, <<"session-1">>
+                        ),
                         self()
                     )
                 )
@@ -433,7 +464,9 @@ error_handling_test_() ->
                             <<"actor">> => PidStr,
                             <<"selector">> => <<"nonexistent_selector_xyz_12345">>
                         },
-                        make_msg(<<"get-traces">>),
+                        beamtalk_test_repl:make_msg(
+                            <<"get-traces">>, <<"test-1">>, <<"session-1">>
+                        ),
                         self()
                     )
                 )
@@ -444,7 +477,9 @@ error_handling_test_() ->
                     beamtalk_repl_ops_perf:handle_term(
                         <<"actor-stats">>,
                         #{<<"actor">> => <<"garbage">>},
-                        make_msg(<<"actor-stats">>),
+                        beamtalk_test_repl:make_msg(
+                            <<"actor-stats">>, <<"test-1">>, <<"session-1">>
+                        ),
                         self()
                     )
                 )
@@ -453,7 +488,7 @@ error_handling_test_() ->
                 Result = beamtalk_repl_ops_perf:handle(
                     <<"get-traces">>,
                     #{<<"actor">> => <<"not-a-pid">>},
-                    make_msg(<<"get-traces">>),
+                    beamtalk_test_repl:make_msg(<<"get-traces">>, <<"test-1">>, <<"session-1">>),
                     self()
                 ),
                 Decoded = decode_response(Result),

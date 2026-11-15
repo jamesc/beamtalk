@@ -591,8 +591,7 @@ compile_native_erl_files_valid_module_test() ->
         %% Module should be loadable and callable.
         ?assertEqual(world, bt_native_test_valid_mod:hello()),
         %% Cleanup: purge test module.
-        code:purge(bt_native_test_valid_mod),
-        code:delete(bt_native_test_valid_mod)
+        beamtalk_test_module:unload(bt_native_test_valid_mod)
     after
         rm_temp_dir(Dir)
     end.
@@ -644,8 +643,7 @@ compile_native_erl_files_with_include_test() ->
         ?assertEqual(1, Count),
         ?assertEqual(42, bt_native_test_inc_mod:val()),
         %% Cleanup.
-        code:purge(bt_native_test_inc_mod),
-        code:delete(bt_native_test_inc_mod)
+        beamtalk_test_module:unload(bt_native_test_inc_mod)
     after
         rm_temp_dir(Dir)
     end.
@@ -675,10 +673,8 @@ compile_native_erl_files_multiple_test() ->
         ?assertEqual(one, bt_native_test_multi1:a()),
         ?assertEqual(two, bt_native_test_multi2:b()),
         %% Cleanup.
-        code:purge(bt_native_test_multi1),
-        code:delete(bt_native_test_multi1),
-        code:purge(bt_native_test_multi2),
-        code:delete(bt_native_test_multi2)
+        beamtalk_test_module:unload(bt_native_test_multi1),
+        beamtalk_test_module:unload(bt_native_test_multi2)
     after
         rm_temp_dir(Dir)
     end.
@@ -874,8 +870,7 @@ maybe_recompile_native_deps_compiles_stale_test() ->
             >>
         ),
         %% Module is not loaded — should trigger compilation.
-        code:purge(bt_native_test_demand_mod),
-        code:delete(bt_native_test_demand_mod),
+        beamtalk_test_module:unload(bt_native_test_demand_mod),
         ?assertEqual(
             {ok, 1},
             beamtalk_workspace_project_sync:maybe_recompile_native_deps(BtPath, Dir)
@@ -883,8 +878,7 @@ maybe_recompile_native_deps_compiles_stale_test() ->
         %% Module should now be callable.
         ?assertEqual(hello, bt_native_test_demand_mod:greet()),
         %% Cleanup.
-        code:purge(bt_native_test_demand_mod),
-        code:delete(bt_native_test_demand_mod)
+        beamtalk_test_module:unload(bt_native_test_demand_mod)
     after
         rm_temp_dir(Dir)
     end.
@@ -922,8 +916,7 @@ maybe_recompile_native_deps_skips_unchanged_test() ->
         Result = beamtalk_workspace_project_sync:maybe_recompile_native_deps(BtPath, Dir),
         ?assertEqual({ok, 0}, Result),
         %% Cleanup.
-        code:purge(bt_native_test_nochange_mod),
-        code:delete(bt_native_test_nochange_mod)
+        beamtalk_test_module:unload(bt_native_test_nochange_mod)
     after
         rm_temp_dir(Dir)
     end.
@@ -976,16 +969,14 @@ maybe_recompile_native_deps_ffi_ref_compiles_test() ->
             >>
         ),
         %% Module is not loaded — should trigger compilation.
-        code:purge(bt_native_test_ffi_demand),
-        code:delete(bt_native_test_ffi_demand),
+        beamtalk_test_module:unload(bt_native_test_ffi_demand),
         ?assertEqual(
             {ok, 1},
             beamtalk_workspace_project_sync:maybe_recompile_native_deps(BtPath, Dir)
         ),
         ?assertEqual(done, bt_native_test_ffi_demand:work()),
         %% Cleanup.
-        code:purge(bt_native_test_ffi_demand),
-        code:delete(bt_native_test_ffi_demand)
+        beamtalk_test_module:unload(bt_native_test_ffi_demand)
     after
         rm_temp_dir(Dir)
     end.
@@ -1193,8 +1184,7 @@ compile_native_uses_generated_class_header_test() ->
         ?assertEqual(included, bt_native_test_uses_header:ok())
     after
         %% Cleanup in `after` so a failed assertion can't leave the module loaded.
-        code:purge(bt_native_test_uses_header),
-        code:delete(bt_native_test_uses_header),
+        beamtalk_test_module:unload(bt_native_test_uses_header),
         rm_temp_dir(Dir)
     end.
 
@@ -1227,8 +1217,7 @@ test_load_compiles_native_test_helper_test() ->
         >>,
         write_temp_file(NativeTestDir, "bt_native_test_helper_e2e.erl", HelperSrc),
         %% Ensure the helper is not loaded before the test-load path runs.
-        code:purge(bt_native_test_helper_e2e),
-        code:delete(bt_native_test_helper_e2e),
+        beamtalk_test_module:unload(bt_native_test_helper_e2e),
         ?assertEqual(false, code:is_loaded(bt_native_test_helper_e2e)),
         %% Run the shared test-load path (include_tests=true).
         {ok, Result} = beamtalk_workspace_project_sync:sync_project(
@@ -1240,8 +1229,7 @@ test_load_compiles_native_test_helper_test() ->
         ?assertEqual(started, bt_native_test_helper_e2e:start())
     after
         %% Cleanup in `after` so a failed assertion can't leave the module loaded.
-        code:purge(bt_native_test_helper_e2e),
-        code:delete(bt_native_test_helper_e2e),
+        beamtalk_test_module:unload(bt_native_test_helper_e2e),
         rm_temp_dir(Dir)
     end.
 
@@ -1267,8 +1255,7 @@ test_load_excludes_native_test_helper_without_flag_test() ->
         write_temp_file(
             NativeTestDir, "bt_native_test_helper_excluded.erl", HelperSrc
         ),
-        code:purge(bt_native_test_helper_excluded),
-        code:delete(bt_native_test_helper_excluded),
+        beamtalk_test_module:unload(bt_native_test_helper_excluded),
         {ok, _Result} = beamtalk_workspace_project_sync:sync_project(
             Dir, #{include_tests => false}
         ),
@@ -1505,8 +1492,7 @@ cold_load_native_macro_compiles_test() ->
         ?assertEqual('bt@e2ecold@gadget', bt_native_cold_macro:gadget_module())
     after
         %% Cleanup in `after` so a failed assertion can't leave the module loaded.
-        code:purge(bt_native_cold_macro),
-        code:delete(bt_native_cold_macro),
+        beamtalk_test_module:unload(bt_native_cold_macro),
         rm_temp_dir(Dir)
     end.
 
@@ -1768,8 +1754,7 @@ setup_project_native(ModName, Src) ->
     {Dir, ErlPath, ModName}.
 
 teardown_project_native(Dir, ModName) ->
-    code:purge(ModName),
-    code:delete(ModName),
+    beamtalk_test_module:unload(ModName),
     rm_temp_dir(Dir).
 
 native_module_editable_target_project_test() ->

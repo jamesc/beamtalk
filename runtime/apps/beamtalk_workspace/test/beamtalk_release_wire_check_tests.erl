@@ -268,26 +268,8 @@ write_fixture_class_beam(Ebin) ->
 
 -doc "Compile a hand-written module source (test-only: no epp, so no macros/records).".
 write_compiled_module(Ebin, ExpectedModule, Src) ->
-    {ok, Tokens, _} = erl_scan:string(Src),
-    Forms = lists:map(
-        fun(FormTokens) ->
-            {ok, Form} = erl_parse:parse_form(FormTokens),
-            Form
-        end,
-        split_on_dot(Tokens)
-    ),
-    {ok, ExpectedModule, BeamBin} = compile:forms(Forms, []),
+    {ExpectedModule, BeamBin} = beamtalk_test_module:compile(Src),
     file:write_file(filename:join(Ebin, atom_to_list(ExpectedModule) ++ ".beam"), BeamBin).
-
-split_on_dot(Tokens) ->
-    split_on_dot(Tokens, [], []).
-
-split_on_dot([], [], Acc) ->
-    lists:reverse(Acc);
-split_on_dot([{dot, _} = Dot | Rest], Cur, Acc) ->
-    split_on_dot(Rest, [], [lists:reverse([Dot | Cur]) | Acc]);
-split_on_dot([Tok | Rest], Cur, Acc) ->
-    split_on_dot(Rest, [Tok | Cur], Acc).
 
 %%====================================================================
 %% .rel / boot script / sys.config

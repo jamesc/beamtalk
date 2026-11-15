@@ -495,7 +495,7 @@ fn a_fold_that_writes_no_binding_is_not_unpacked() {
 }
 
 /// ADR 0131 Phase 4 (BT-3750): `Result tryDo:` compiles to its
-/// `{Value, Bindings}` tuple (`beamtalk_result:'tryDo:'/2`) only where the
+/// `{Value, Bindings}` tuple (`beamtalk_result:tryDo/2`) only where the
 /// REPL unpacks one: a statement, an assignment's value, a producer operand
 /// site, or (BT-3823) a producer site of a REPL arm or fold body, whose
 /// producer unpacks it the same way. Codegen must not depend on the validator
@@ -504,7 +504,7 @@ fn a_fold_that_writes_no_binding_is_not_unpacked() {
 /// `adr0131_local_rebind.btscript` pins the answer.)
 #[test]
 fn a_repl_try_do_is_a_construct_tuple_only_where_the_root_unpacks_it() {
-    let tuple_call = "call 'beamtalk_result':'tryDo:'(fun (StateAcc)";
+    let tuple_call = "call 'beamtalk_result':'tryDo'(fun (StateAcc)";
     for src in [
         "Result tryDo: [t := t + 1. 1]",
         "r := Result tryDo: [t := t + 1. 1]",

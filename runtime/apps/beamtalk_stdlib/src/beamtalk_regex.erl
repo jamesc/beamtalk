@@ -23,8 +23,8 @@ Regex objects are represented as tagged maps:
 ```
 """.
 
--export(['from:'/1, 'from:options:'/2]).
 -export([from/1, from/2]).
+
 -export([source/1, 'printString'/1]).
 -export([valid_options/0]).
 -export([
@@ -55,11 +55,11 @@ Compile a regex pattern string into a Regex object.
 
 Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid.
 """.
--spec 'from:'(beamtalk_string:t() | binary()) -> beamtalk_result:t().
+-spec from(beamtalk_string:t() | binary()) -> beamtalk_result:t().
 %% BT-4173: a bare binary spells the same pattern (pre-flip calls stay valid).
-'from:'(Pattern) when is_binary(Pattern) ->
-    'from:'({beamtalk_string, Pattern});
-'from:'({beamtalk_string, Pattern} = Tagged) when is_binary(Pattern) ->
+from(Pattern) when is_binary(Pattern) ->
+    from({beamtalk_string, Pattern});
+from({beamtalk_string, Pattern} = Tagged) when is_binary(Pattern) ->
     case re:compile(Pattern) of
         {ok, MP} ->
             beamtalk_result:from_tagged_tuple(
@@ -77,7 +77,7 @@ Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid
                 {error, compile_error('Regex', 'from:', Msg, {ErrStr, Pos})}
             )
     end;
-'from:'(_) ->
+from(_) ->
     beamtalk_error:raise_type_error('Regex', 'from:', <<"Pattern must be a String">>).
 
 -doc """
@@ -86,11 +86,11 @@ Compile a regex pattern string with PCRE options.
 Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid.
 Unknown options still raise (programming error).
 """.
--spec 'from:options:'(beamtalk_string:t() | binary(), Options :: [regex_option()]) ->
+-spec from(beamtalk_string:t() | binary(), Options :: [regex_option()]) ->
     beamtalk_result:t().
-'from:options:'(Pattern, Options) when is_binary(Pattern) ->
-    'from:options:'({beamtalk_string, Pattern}, Options);
-'from:options:'({beamtalk_string, Pattern} = Tagged, Options) when
+from(Pattern, Options) when is_binary(Pattern) ->
+    from({beamtalk_string, Pattern}, Options);
+from({beamtalk_string, Pattern} = Tagged, Options) when
     is_binary(Pattern), is_list(Options)
 ->
     ErlOpts = translate_options(Options),
@@ -111,24 +111,10 @@ Unknown options still raise (programming error).
                 {error, compile_error('Regex', 'from:options:', Msg, {ErrStr, Pos})}
             )
     end;
-'from:options:'(_, _) ->
+from(_, _) ->
     beamtalk_error:raise_type_error(
         'Regex', 'from:options:', <<"Pattern must be a String and options a List">>
     ).
-
-%%% ============================================================================
-%%% FFI aliases — no-colon names for Erlang FFI dispatch
-%%% ============================================================================
-
--doc "FFI alias for from:/1 — called via (Erlang beamtalk_regex) from: pattern.".
--spec from(beamtalk_string:t()) -> beamtalk_result:t().
-from(Pattern) -> 'from:'(Pattern).
-
--doc """
-FFI alias for from:options:/2 — called via (Erlang beamtalk_regex) from: p options: opts.
-""".
--spec from(beamtalk_string:t(), Options :: [regex_option()]) -> beamtalk_result:t().
-from(Pattern, Opts) -> 'from:options:'(Pattern, Opts).
 
 %%% ============================================================================
 %%% Instance Methods — Inspection

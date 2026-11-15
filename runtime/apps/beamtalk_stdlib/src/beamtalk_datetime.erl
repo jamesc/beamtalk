@@ -45,25 +45,22 @@ adopted.
 
 %% Class methods
 -export([now/0, 'monotonicNow'/0]).
--export(['year:month:day:'/3, 'year:month:day:hour:minute:second:'/6]).
--export(['year:month:day:hour:minute:second:offsetMinutes:'/7]).
--export(['fromTimestamp:'/1, 'fromString:'/1]).
--export(['parse:format:'/2]).
+-export([year/3, year/6, year/7]).
+-export([fromTimestamp/1, fromString/1]).
+-export([parse/2]).
 
 %% Instance methods
 -export([year/1, month/1, day/1, weekday/1, hour/1, minute/1, second/1, 'offsetMinutes'/1]).
 -export(['asTimestamp'/1, 'asString'/1, 'printString'/1]).
--export(['addSeconds:'/2, 'addDays:'/2, 'addDuration:'/2, 'diffSeconds:'/2]).
+-export([addSeconds/2, addDays/2, addDuration/2, diffSeconds/2]).
 -export(['<'/2, '>'/2, '=<'/2, '>='/2, '=:='/2, '/='/2, '-'/2, '<='/2, 'sameInstant'/2]).
--export(['toUtc'/1, 'toOffset:'/2, 'format:'/2]).
+-export(['toUtc'/1, toOffset/2, format/2]).
 
-%% FFI shims for (Erlang beamtalk_datetime) dispatch — also the functions
+%% Entry points for (Erlang beamtalk_datetime) dispatch — also the functions
 %% `self delegate` actually calls for keyword selectors (first keyword,
 %% colon stripped; see docs/beamtalk-native-erlang.md "The naming rule").
--export([year/3, year/6, year/7, fromTimestamp/1, fromString/1]).
--export([addSeconds/2, addDays/2, addDuration/2, diffSeconds/2, subtract/2]).
+-export([subtract/2]).
 -export([lt/2, gt/2, lte/2, gte/2, eql/2, neq/2, sneq/2]).
--export([toOffset/2, format/2, parse/2]).
 
 -type field() :: year | month | day | hour | minute | second.
 -type t() :: #{'$beamtalk_class' := 'DateTime', atom() => term()}.
@@ -88,17 +85,17 @@ now() ->
     erlang:monotonic_time(nanosecond).
 
 -doc "Construct a DateTime from year, month, day (time defaults to 00:00:00).".
--spec 'year:month:day:'(integer(), Month :: integer(), Day :: integer()) -> t().
-'year:month:day:'(Y, Mo, D) when is_integer(Y), is_integer(Mo), is_integer(D) ->
+-spec year(integer(), Month :: integer(), Day :: integer()) -> t().
+year(Y, Mo, D) when is_integer(Y), is_integer(Mo), is_integer(D) ->
     validate_date(Y, Mo, D, 'year:month:day:'),
     make_datetime(Y, Mo, D, 0, 0, 0);
-'year:month:day:'(_, _, _) ->
+year(_, _, _) ->
     beamtalk_error:raise_type_error(
         'DateTime', 'year:month:day:', <<"Arguments must be Integers">>
     ).
 
 -doc "Construct a DateTime from year, month, day, hour, minute, second.".
--spec 'year:month:day:hour:minute:second:'(
+-spec year(
     integer(),
     Month :: integer(),
     Day :: integer(),
@@ -106,7 +103,7 @@ now() ->
     Minute :: integer(),
     Second :: integer()
 ) -> t().
-'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S) when
+year(Y, Mo, D, H, Mi, S) when
     is_integer(Y),
     is_integer(Mo),
     is_integer(D),
@@ -117,7 +114,7 @@ now() ->
     validate_date(Y, Mo, D, 'year:month:day:hour:minute:second:'),
     validate_time(H, Mi, S, 'year:month:day:hour:minute:second:'),
     make_datetime(Y, Mo, D, H, Mi, S);
-'year:month:day:hour:minute:second:'(_, _, _, _, _, _) ->
+year(_, _, _, _, _, _) ->
     beamtalk_error:raise_type_error(
         'DateTime', 'year:month:day:hour:minute:second:', <<"Arguments must be Integers">>
     ).
@@ -135,7 +132,7 @@ DateTime year: 2026 month: 7 day: 25 hour: 14 minute: 30 second: 0 offsetMinutes
 // => DateTime(2026-07-25T14:30:00+02:00)
 ```
 """.
--spec 'year:month:day:hour:minute:second:offsetMinutes:'(
+-spec year(
     integer(),
     Month :: integer(),
     Day :: integer(),
@@ -144,7 +141,7 @@ DateTime year: 2026 month: 7 day: 25 hour: 14 minute: 30 second: 0 offsetMinutes
     Second :: integer(),
     OffsetMinutes :: integer()
 ) -> t().
-'year:month:day:hour:minute:second:offsetMinutes:'(Y, Mo, D, H, Mi, S, Off) when
+year(Y, Mo, D, H, Mi, S, Off) when
     is_integer(Y),
     is_integer(Mo),
     is_integer(D),
@@ -157,7 +154,7 @@ DateTime year: 2026 month: 7 day: 25 hour: 14 minute: 30 second: 0 offsetMinutes
     validate_time(H, Mi, S, 'year:month:day:hour:minute:second:offsetMinutes:'),
     validate_offset(Off, 'year:month:day:hour:minute:second:offsetMinutes:'),
     make_datetime(Y, Mo, D, H, Mi, S, Off);
-'year:month:day:hour:minute:second:offsetMinutes:'(_, _, _, _, _, _, _) ->
+year(_, _, _, _, _, _, _) ->
     beamtalk_error:raise_type_error(
         'DateTime',
         'year:month:day:hour:minute:second:offsetMinutes:',
@@ -165,10 +162,10 @@ DateTime year: 2026 month: 7 day: 25 hour: 14 minute: 30 second: 0 offsetMinutes
     ).
 
 -doc "Construct a DateTime from a Unix epoch timestamp (seconds); UTC (offsetMinutes 0).".
--spec 'fromTimestamp:'(integer()) -> t().
-'fromTimestamp:'(Ts) when is_integer(Ts) ->
+-spec fromTimestamp(integer()) -> t().
+fromTimestamp(Ts) when is_integer(Ts) ->
     from_timestamp_with_offset(Ts, 0);
-'fromTimestamp:'(_) ->
+fromTimestamp(_) ->
     beamtalk_error:raise_type_error(
         'DateTime', 'fromTimestamp:', <<"Argument must be an Integer (Unix epoch seconds)">>
     ).
@@ -185,11 +182,11 @@ DateTime fromString: "2026-07-25T14:30:00+02:00"
 // => DateTime(2026-07-25T14:30:00+02:00)
 ```
 """.
--spec 'fromString:'(binary() | beamtalk_string:t()) -> t().
+-spec fromString(binary() | beamtalk_string:t()) -> t().
 %% BT-4173: strings arrive tagged from Beamtalk — unwrap to bytes.
-'fromString:'({beamtalk_string, Str}) when is_binary(Str) ->
-    'fromString:'(Str);
-'fromString:'(Str) when is_binary(Str) ->
+fromString({beamtalk_string, Str}) when is_binary(Str) ->
+    fromString(Str);
+fromString(Str) when is_binary(Str) ->
     case parse_iso8601(Str) of
         {ok, Y, Mo, D, H, Mi, S, Off} ->
             validate_offset(Off, 'fromString:'),
@@ -201,7 +198,7 @@ DateTime fromString: "2026-07-25T14:30:00+02:00"
                 <<"Expected ISO 8601 format: YYYY-MM-DDThh:mm:ss(Z|+hh:mm|-hh:mm)">>
             )
     end;
-'fromString:'(_) ->
+fromString(_) ->
     beamtalk_error:raise_type_error('DateTime', 'fromString:', <<"Argument must be a String">>).
 
 -doc """
@@ -223,13 +220,13 @@ DateTime parse: "2026-07-25 14:30:00" format: "yyyy-MM-dd HH:mm:ss"
 // => false
 ```
 """.
--spec 'parse:format:'(binary() | beamtalk_string:t(), binary() | beamtalk_string:t()) ->
+-spec parse(binary() | beamtalk_string:t(), binary() | beamtalk_string:t()) ->
     beamtalk_result:t().
-'parse:format:'({beamtalk_string, Str}, Pattern) when is_binary(Str) ->
-    'parse:format:'(Str, Pattern);
-'parse:format:'(Str, {beamtalk_string, Pattern}) when is_binary(Pattern) ->
-    'parse:format:'(Str, Pattern);
-'parse:format:'(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
+parse({beamtalk_string, Str}, Pattern) when is_binary(Str) ->
+    parse(Str, Pattern);
+parse(Str, {beamtalk_string, Pattern}) when is_binary(Pattern) ->
+    parse(Str, Pattern);
+parse(Str, Pattern) when is_binary(Str), is_binary(Pattern) ->
     case parse_with_pattern(Str, Pattern) of
         {ok, Y, Mo, D, H, Mi, S} ->
             beamtalk_result:from_tagged_tuple({ok, make_datetime(Y, Mo, D, H, Mi, S, 0)});
@@ -239,7 +236,7 @@ DateTime parse: "2026-07-25 14:30:00" format: "yyyy-MM-dd HH:mm:ss"
             Error2 = beamtalk_error:with_hint(Error1, Hint),
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
-'parse:format:'(_, _) ->
+parse(_, _) ->
     beamtalk_error:raise_type_error(
         'DateTime', 'parse:format:', <<"Both arguments must be Strings">>
     ).
@@ -329,11 +326,11 @@ offsetMinutes change.
 // => DateTime(2026-07-25T14:30:00+02:00)
 ```
 """.
--spec 'toOffset:'(t(), OffsetMinutes :: integer()) -> t().
-'toOffset:'(Self, Off) when is_integer(Off) ->
+-spec toOffset(t(), OffsetMinutes :: integer()) -> t().
+toOffset(Self, Off) when is_integer(Off) ->
     validate_offset(Off, 'toOffset:'),
     from_timestamp_with_offset('asTimestamp'(Self), Off);
-'toOffset:'(_, _) ->
+toOffset(_, _) ->
     beamtalk_error:raise_type_error(
         'DateTime', 'toOffset:', <<"Argument must be an Integer (offset minutes)">>
     ).
@@ -369,15 +366,15 @@ numeric tokens (e.g. `M/d`, not `Md`) — without one, an unpadded field's
 // => "2026-07-25 14:30:00"
 ```
 """.
--spec 'format:'(t(), Pattern :: binary() | beamtalk_string:t()) -> beamtalk_string:t().
-'format:'(Self, {beamtalk_string, Pattern}) when is_binary(Pattern) ->
-    'format:'(Self, Pattern);
-'format:'(Self, Pattern) when is_binary(Pattern) ->
+-spec format(t(), Pattern :: binary() | beamtalk_string:t()) -> beamtalk_string:t().
+format(Self, {beamtalk_string, Pattern}) when is_binary(Pattern) ->
+    format(Self, Pattern);
+format(Self, Pattern) when is_binary(Pattern) ->
     Tokens = tokenize_pattern(Pattern),
     beamtalk_primitive:string_from_binary(
         iolist_to_binary([render_pattern_token(Token, Self) || Token <- Tokens])
     );
-'format:'(_, _) ->
+format(_, _) ->
     beamtalk_error:raise_type_error('DateTime', 'format:', <<"Argument must be a String pattern">>).
 
 %%% ============================================================================
@@ -385,19 +382,19 @@ numeric tokens (e.g. `M/d`, not `Md`) — without one, an unpadded field's
 %%% ============================================================================
 
 -doc "Add seconds, return new DateTime. Preserves self's offsetMinutes.".
--spec 'addSeconds:'(t(), Secs :: integer()) -> t().
-'addSeconds:'(Self, Secs) when is_integer(Secs) ->
+-spec addSeconds(t(), Secs :: integer()) -> t().
+addSeconds(Self, Secs) when is_integer(Secs) ->
     Ts = 'asTimestamp'(Self) + Secs,
     Off = maps:get(offsetMinutes, Self, 0),
     from_timestamp_with_offset(Ts, Off);
-'addSeconds:'(_, _) ->
+addSeconds(_, _) ->
     beamtalk_error:raise_type_error('DateTime', 'addSeconds:', <<"Argument must be an Integer">>).
 
 -doc "Add days, return new DateTime.".
--spec 'addDays:'(t(), Days :: integer()) -> t().
-'addDays:'(Self, Days) when is_integer(Days) ->
-    'addSeconds:'(Self, Days * 86400);
-'addDays:'(_, _) ->
+-spec addDays(t(), Days :: integer()) -> t().
+addDays(Self, Days) when is_integer(Days) ->
+    addSeconds(Self, Days * 86400);
+addDays(_, _) ->
     beamtalk_error:raise_type_error('DateTime', 'addDays:', <<"Argument must be an Integer">>).
 
 -doc """
@@ -406,10 +403,10 @@ Add a Duration, return a new DateTime.
 DateTime has second resolution; any sub-second milliseconds in the
 Duration are truncated toward zero.
 """.
--spec 'addDuration:'(t(), beamtalk_duration:t()) -> t().
-'addDuration:'(Self, #{'$beamtalk_class' := 'Duration'} = D) ->
-    'addSeconds:'(Self, beamtalk_duration:'asSeconds'(D));
-'addDuration:'(_, _) ->
+-spec addDuration(t(), beamtalk_duration:t()) -> t().
+addDuration(Self, #{'$beamtalk_class' := 'Duration'} = D) ->
+    addSeconds(Self, beamtalk_duration:'asSeconds'(D));
+addDuration(_, _) ->
     beamtalk_error:raise_type_error('DateTime', 'addDuration:', <<"Argument must be a Duration">>).
 
 -doc """
@@ -419,15 +416,15 @@ Difference between two DateTimes as a Duration.
 """.
 -spec '-'(t(), t()) -> beamtalk_duration:t().
 '-'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
-    beamtalk_duration:'seconds:'('diffSeconds:'(Self, Other));
+    beamtalk_duration:seconds(diffSeconds(Self, Other));
 '-'(_, _) ->
     beamtalk_error:raise_type_error('DateTime', '-', <<"Argument must be a DateTime">>).
 
 -doc "Difference in seconds between this and another DateTime.".
--spec 'diffSeconds:'(t(), t()) -> integer().
-'diffSeconds:'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
+-spec diffSeconds(t(), t()) -> integer().
+diffSeconds(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) - 'asTimestamp'(Other);
-'diffSeconds:'(_, _) ->
+diffSeconds(_, _) ->
     beamtalk_error:raise_type_error('DateTime', 'diffSeconds:', <<"Argument must be a DateTime">>).
 
 %%% ============================================================================
@@ -481,57 +478,8 @@ Difference between two DateTimes as a Duration.
 %%% ============================================================================
 %%
 %% selector_to_function/1 extracts the first keyword segment as the function name.
-%% These shims bridge camelCase/short FFI names to the existing colon-suffix
-%% and operator-named implementations.
-
-%% `year:month:day:` → strips to `year`, arity 3
--spec year(integer(), Month :: integer(), Day :: integer()) -> t().
-year(Y, Mo, D) -> 'year:month:day:'(Y, Mo, D).
-
-%% `year:month:day:hour:minute:second:` → strips to `year`, arity 6
--spec year(
-    integer(),
-    Month :: integer(),
-    Day :: integer(),
-    Hour :: integer(),
-    Minute :: integer(),
-    Second :: integer()
-) -> t().
-year(Y, Mo, D, H, Mi, S) -> 'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S).
-
-%% `year:month:day:hour:minute:second:offsetMinutes:` → strips to `year`, arity 7
--spec year(
-    integer(),
-    Month :: integer(),
-    Day :: integer(),
-    Hour :: integer(),
-    Minute :: integer(),
-    Second :: integer(),
-    OffsetMinutes :: integer()
-) -> t().
-year(Y, Mo, D, H, Mi, S, Off) ->
-    'year:month:day:hour:minute:second:offsetMinutes:'(Y, Mo, D, H, Mi, S, Off).
-
-%% `fromTimestamp:` → strips to `fromTimestamp`, arity 1
-fromTimestamp(Ts) -> 'fromTimestamp:'(Ts).
-
-%% `fromString:` → strips to `fromString`, arity 1
-fromString(Str) -> 'fromString:'(Str).
-
-%% `addSeconds:secs:` → strips to `addSeconds`, arity 2
--spec addSeconds(t(), Secs :: integer()) -> t().
-addSeconds(Self, Secs) -> 'addSeconds:'(Self, Secs).
-
-%% `addDays:days:` → strips to `addDays`, arity 2
--spec addDays(t(), Days :: integer()) -> t().
-addDays(Self, Days) -> 'addDays:'(Self, Days).
-
-%% `addDuration:with:` → strips to `addDuration`, arity 2
--spec addDuration(t(), beamtalk_duration:t()) -> t().
-addDuration(Self, D) -> 'addDuration:'(Self, D).
-
-%% `diffSeconds:with:` → strips to `diffSeconds`, arity 2
-diffSeconds(Self, Other) -> 'diffSeconds:'(Self, Other).
+%% The operator selectors have no valid Erlang function name, so these shims
+%% bridge the FFI names to the operator-named implementations.
 
 %% `subtract:with:` → strips to `subtract`, arity 2 (DateTime difference)
 -spec subtract(t(), t()) -> beamtalk_duration:t().
@@ -571,20 +519,6 @@ sneq(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) =/= 'asTimestamp'(Other);
 sneq(_, _) ->
     beamtalk_error:raise_type_error('DateTime', sneq, <<"Argument must be a DateTime">>).
-
-%% `toOffset:` → strips to `toOffset`, arity 2 — this is what `self delegate`
-%% for `toOffset: minutes` actually calls (first keyword, colon stripped).
--spec toOffset(t(), OffsetMinutes :: integer()) -> t().
-toOffset(Self, Off) -> 'toOffset:'(Self, Off).
-
-%% `format:` → strips to `format`, arity 2 — what `self delegate` calls.
--spec format(t(), Pattern :: binary() | beamtalk_string:t()) -> beamtalk_string:t().
-format(Self, Pattern) -> 'format:'(Self, Pattern).
-
-%% `parse:format:` → strips to `parse`, arity 2 (class method, no self) —
-%% what `self delegate` calls.
--spec parse(binary(), binary()) -> beamtalk_result:t().
-parse(Str, Pattern) -> 'parse:format:'(Str, Pattern).
 
 %%% ============================================================================
 %%% Internal Functions

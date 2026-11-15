@@ -29,17 +29,6 @@ Covers:
 %% Helpers
 %%====================================================================
 
-%% Construct a minimal protocol_msg record (mirrors nav tests).
-make_msg() ->
-    {protocol_msg, <<"browse">>, <<"t1">>, <<"s1">>, #{}}.
-
-%% Decode a JSON binary and assert it represents an error response.
-assert_error_response(Response) ->
-    Decoded = json:decode(Response),
-    ?assertMatch(#{<<"status">> := [<<"done">>, <<"error">>]}, Decoded),
-    ?assert(is_binary(maps:get(<<"error">>, Decoded))),
-    Decoded.
-
 %% Decode a JSON binary and assert it is a successful `value`-tagged response,
 %% returning the inner value.
 decode_value(Response) ->
@@ -436,7 +425,7 @@ native_source_by_module_test() ->
         beamtalk_repl_ops_browse:handle(
             <<"browse-native-source">>,
             #{<<"module">> => <<"beamtalk_array">>},
-            make_msg(),
+            beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
             self()
         )
     ),
@@ -453,10 +442,10 @@ native_source_unknown_module_errors_test() ->
     Response = beamtalk_repl_ops_browse:handle(
         <<"browse-native-source">>,
         #{<<"module">> => <<"definitely_not_a_loaded_module_xyz">>},
-        make_msg(),
+        beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
         self()
     ),
-    Decoded = assert_error_response(Response),
+    Decoded = beamtalk_test_repl:assert_error_response(Response),
     ?assertNotEqual(
         nomatch,
         binary:match(maps:get(<<"error">>, Decoded), <<"not found">>)
@@ -465,7 +454,10 @@ native_source_unknown_module_errors_test() ->
 %% Helper: enumerate via the term handler.
 native_modules() ->
     {value, Rows} = beamtalk_repl_ops_browse:handle_term(
-        <<"browse-native-modules">>, #{}, make_msg(), self()
+        <<"browse-native-modules">>,
+        #{},
+        beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+        self()
     ),
     Rows.
 
@@ -718,9 +710,12 @@ describe_ops_has_alias_source_key_test() ->
 alias_source_unknown_name_is_error_test() ->
     ensure_stdlib(),
     Response = beamtalk_repl_ops_browse:handle(
-        <<"browse-alias-source">>, #{<<"name">> => <<"__NoSuchAlias__">>}, make_msg(), self()
+        <<"browse-alias-source">>,
+        #{<<"name">> => <<"__NoSuchAlias__">>},
+        beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+        self()
     ),
-    Decoded = assert_error_response(Response),
+    Decoded = beamtalk_test_repl:assert_error_response(Response),
     ?assertNotEqual(nomatch, binary:match(maps:get(<<"error">>, Decoded), <<"not found">>)).
 
 %% With a single alias of that name loaded, `package` can be omitted.
@@ -737,7 +732,10 @@ alias_source_omitted_package_finds_unique_alias_test() ->
         ],
         fun() ->
             {value, Source} = beamtalk_repl_ops_browse:handle_term(
-                <<"browse-alias-source">>, #{<<"name">> => <<"SoloAlias">>}, make_msg(), self()
+                <<"browse-alias-source">>,
+                #{<<"name">> => <<"SoloAlias">>},
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                self()
             ),
             ?assertEqual(<<"stdlib">>, maps:get(<<"source_origin">>, Source)),
             ?assertEqual(false, maps:get(<<"editable">>, Source))
@@ -774,7 +772,7 @@ alias_source_disambiguates_same_name_by_package_test() ->
                     {value, StdlibSource} = beamtalk_repl_ops_browse:handle_term(
                         <<"browse-alias-source">>,
                         #{<<"name">> => <<"Shared">>, <<"package">> => <<"stdlib">>},
-                        make_msg(),
+                        beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                         self()
                     ),
                     ?assertEqual(<<"stdlib">>, maps:get(<<"source_origin">>, StdlibSource)),
@@ -785,7 +783,7 @@ alias_source_disambiguates_same_name_by_package_test() ->
                             <<"name">> => <<"Shared">>,
                             <<"package">> => <<"bt_fake_alias_dup_pkg">>
                         },
-                        make_msg(),
+                        beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                         self()
                     ),
                     ?assertEqual(<<"dependency">>, maps:get(<<"source_origin">>, DepSource)),
@@ -793,10 +791,10 @@ alias_source_disambiguates_same_name_by_package_test() ->
                     Response = beamtalk_repl_ops_browse:handle(
                         <<"browse-alias-source">>,
                         #{<<"name">> => <<"Shared">>, <<"package">> => <<"__no_such_pkg__">>},
-                        make_msg(),
+                        beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                         self()
                     ),
-                    assert_error_response(Response)
+                    beamtalk_test_repl:assert_error_response(Response)
                 end
             )
         end
@@ -820,7 +818,7 @@ alias_source_stdlib_degrades_to_null_content_test() ->
             {value, Source} = beamtalk_repl_ops_browse:handle_term(
                 <<"browse-alias-source">>,
                 #{<<"name">> => <<"RestartStrategy">>, <<"package">> => <<"stdlib">>},
-                make_msg(),
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                 self()
             ),
             ?assertEqual(null, maps:get(<<"content">>, Source)),
@@ -853,7 +851,7 @@ alias_source_project_reads_file_content_test() ->
                 {value, Source} = beamtalk_repl_ops_browse:handle_term(
                     <<"browse-alias-source">>,
                     #{<<"name">> => <<"Greeting">>, <<"package">> => <<"myapp">>},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 ),
                 ?assertEqual(<<"project">>, maps:get(<<"source_origin">>, Source)),
@@ -885,7 +883,7 @@ alias_source_project_rejects_absolute_source_file_test() ->
                 {value, Source} = beamtalk_repl_ops_browse:handle_term(
                     <<"browse-alias-source">>,
                     #{<<"name">> => <<"Escaped">>, <<"package">> => <<"myapp">>},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 ),
                 ?assertEqual(null, maps:get(<<"content">>, Source))
@@ -915,7 +913,7 @@ alias_source_project_rejects_dotdot_traversal_test() ->
                 {value, Source} = beamtalk_repl_ops_browse:handle_term(
                     <<"browse-alias-source">>,
                     #{<<"name">> => <<"Escaped">>, <<"package">> => <<"myapp">>},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 ),
                 ?assertEqual(null, maps:get(<<"content">>, Source))
@@ -1060,7 +1058,10 @@ class_definition_text_all_modifiers_test() ->
 %% Helper: enumerate via the term handler.
 type_aliases() ->
     {value, Rows} = beamtalk_repl_ops_browse:handle_term(
-        <<"browse-type-aliases">>, #{}, make_msg(), self()
+        <<"browse-type-aliases">>,
+        #{},
+        beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+        self()
     ),
     Rows.
 
@@ -1122,8 +1123,13 @@ with_types_only_fixture_app(App, Aliases, Fun) ->
 %%====================================================================
 
 protocols_missing_class_is_error_test() ->
-    Response = beamtalk_repl_ops_browse:handle(<<"browse-protocols">>, #{}, make_msg(), self()),
-    Decoded = assert_error_response(Response),
+    Response = beamtalk_repl_ops_browse:handle(
+        <<"browse-protocols">>,
+        #{},
+        beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+        self()
+    ),
+    Decoded = beamtalk_test_repl:assert_error_response(Response),
     ?assertNotEqual(nomatch, binary:match(maps:get(<<"error">>, Decoded), <<"class">>)).
 
 protocols_unknown_class_is_error_test() ->
@@ -1131,10 +1137,10 @@ protocols_unknown_class_is_error_test() ->
     Response = beamtalk_repl_ops_browse:handle(
         <<"browse-protocols">>,
         #{<<"class">> => <<"__NoSuchBrowseClass__">>, <<"side">> => <<"instance">>},
-        make_msg(),
+        beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
         self()
     ),
-    Decoded = assert_error_response(Response),
+    Decoded = beamtalk_test_repl:assert_error_response(Response),
     ?assertNotEqual(nomatch, binary:match(maps:get(<<"error">>, Decoded), <<"not found">>)).
 
 method_source_missing_selector_is_error_test() ->
@@ -1142,15 +1148,21 @@ method_source_missing_selector_is_error_test() ->
     %% the unknown-class path is avoided by asserting the message mentions a
     %% required field). Without a `class` the class check fires first.
     Response = beamtalk_repl_ops_browse:handle(
-        <<"browse-method-source">>, #{}, make_msg(), self()
+        <<"browse-method-source">>,
+        #{},
+        beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+        self()
     ),
-    assert_error_response(Response).
+    beamtalk_test_repl:assert_error_response(Response).
 
 definition_empty_class_is_error_test() ->
     Response = beamtalk_repl_ops_browse:handle(
-        <<"browse-class-definition">>, #{<<"class">> => <<>>}, make_msg(), self()
+        <<"browse-class-definition">>,
+        #{<<"class">> => <<>>},
+        beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+        self()
     ),
-    assert_error_response(Response).
+    beamtalk_test_repl:assert_error_response(Response).
 
 %%====================================================================
 %% Success paths — live class object + seeded xref
@@ -1368,7 +1380,12 @@ browse_tests(#{class_name := Class}) ->
     [
         {"browse-classes includes the registered class with required fields", fun() ->
             Value = decode_value(
-                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-classes">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                    self()
+                )
             ),
             ?assert(is_list(Value)),
             Row = find_class_row(Value, Class),
@@ -1395,7 +1412,12 @@ browse_tests(#{class_name := Class}) ->
             %% Only protocol class objects (ADR 0068) carry is_protocol
             %% true — the browser groups those under a "Protocols" category.
             Value = decode_value(
-                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-classes">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                    self()
+                )
             ),
             Row = find_class_row(Value, Class),
             ?assertEqual(false, maps:get(<<"is_protocol">>, Row))
@@ -1405,14 +1427,24 @@ browse_tests(#{class_name := Class}) ->
             %% can group them under a "Tests" category. The fixture class does not
             %% descend from TestCase, so the flag is a plain boolean false.
             Value = decode_value(
-                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-classes">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                    self()
+                )
             ),
             Row = find_class_row(Value, Class),
             ?assertEqual(false, maps:get(<<"is_test">>, Row))
         end},
         {"browse-classes comment is the first line of the class doc", fun() ->
             Value = decode_value(
-                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-classes">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                    self()
+                )
             ),
             Row = find_class_row(Value, Class),
             ?assertEqual(<<"The canonical live object.">>, maps:get(<<"comment">>, Row))
@@ -1421,7 +1453,12 @@ browse_tests(#{class_name := Class}) ->
             %% The fixture module has no backing .bt source attribute, so
             %% source_file is null → origin runtime (ADR 0096).
             Value = decode_value(
-                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-classes">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                    self()
+                )
             ),
             Row = find_class_row(Value, Class),
             ?assertEqual(null, maps:get(<<"source_file">>, Row)),
@@ -1431,7 +1468,12 @@ browse_tests(#{class_name := Class}) ->
             %% source_origin is the bare classification
             %% (project|dependency|stdlib) — the package name is NOT packed in.
             Value = decode_value(
-                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-classes">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                    self()
+                )
             ),
             Row = find_class_row(Value, Class),
             SourceOrigin = maps:get(<<"source_origin">>, Row),
@@ -1443,7 +1485,12 @@ browse_tests(#{class_name := Class}) ->
             %% package is orthogonal to source_origin and present
             %% (binary or null) on every class row.
             Value = decode_value(
-                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-classes">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                    self()
+                )
             ),
             Row = find_class_row(Value, Class),
             ?assert(maps:is_key(<<"package">>, Row)),
@@ -1457,7 +1504,7 @@ browse_tests(#{class_name := Class}) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-class-definition">>,
                     #{<<"class">> => Class},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1473,7 +1520,7 @@ browse_tests(#{class_name := Class}) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-class-definition">>,
                     #{<<"class">> => Class},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1501,7 +1548,7 @@ browse_tests(#{class_name := Class}) ->
                     beamtalk_repl_ops_browse:handle(
                         <<"browse-class-definition">>,
                         #{<<"class">> => atom_to_binary(TypedName, utf8)},
-                        make_msg(),
+                        beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                         self()
                     )
                 ),
@@ -1532,7 +1579,7 @@ browse_tests(#{class_name := Class}) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-class-definition">>,
                     #{<<"class">> => Class},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1543,10 +1590,10 @@ browse_tests(#{class_name := Class}) ->
             Response = beamtalk_repl_ops_browse:handle(
                 <<"browse-native-source">>,
                 #{<<"class">> => Class},
-                make_msg(),
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                 self()
             ),
-            Decoded = assert_error_response(Response),
+            Decoded = beamtalk_test_repl:assert_error_response(Response),
             ?assertNotEqual(
                 nomatch,
                 binary:match(maps:get(<<"error">>, Decoded), <<"not native-backed">>)
@@ -1557,7 +1604,7 @@ browse_tests(#{class_name := Class}) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-protocols">>,
                     #{<<"class">> => Class, <<"side">> => <<"instance">>},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1581,7 +1628,7 @@ browse_tests(#{class_name := Class}) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-protocols">>,
                     #{<<"class">> => Class, <<"side">> => <<"instance">>},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1610,7 +1657,7 @@ browse_tests(#{class_name := Class}) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-protocols">>,
                     #{<<"class">> => Class, <<"side">> => <<"instance">>},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1647,7 +1694,7 @@ browse_tests(#{class_name := Class}) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-protocols">>,
                     #{<<"class">> => Class, <<"side">> => <<"instance">>},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1680,7 +1727,7 @@ browse_tests(#{class_name := Class}) ->
                     beamtalk_repl_ops_browse:handle(
                         <<"browse-protocols">>,
                         #{<<"class">> => Class, <<"side">> => <<"class">>},
-                        make_msg(),
+                        beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                         self()
                     )
                 ),
@@ -1719,7 +1766,7 @@ browse_tests(#{class_name := Class}) ->
                         <<"side">> => <<"class">>,
                         <<"selector">> => <<"spawn">>
                     },
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1733,20 +1780,20 @@ browse_tests(#{class_name := Class}) ->
             Response = beamtalk_repl_ops_browse:handle(
                 <<"browse-protocols">>,
                 #{<<"class">> => Class, <<"side">> => <<"klass">>},
-                make_msg(),
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                 self()
             ),
-            Decoded = assert_error_response(Response),
+            Decoded = beamtalk_test_repl:assert_error_response(Response),
             ?assertNotEqual(nomatch, binary:match(maps:get(<<"error">>, Decoded), <<"side">>))
         end},
         {"browse-protocols missing side is an error", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
                 <<"browse-protocols">>,
                 #{<<"class">> => Class},
-                make_msg(),
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                 self()
             ),
-            assert_error_response(Response)
+            beamtalk_test_repl:assert_error_response(Response)
         end},
         {"browse-method-source returns image source and source_status", fun() ->
             Value = decode_value(
@@ -1757,7 +1804,7 @@ browse_tests(#{class_name := Class}) ->
                         <<"side">> => <<"instance">>,
                         <<"selector">> => <<"increment">>
                     },
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1777,7 +1824,7 @@ browse_tests(#{class_name := Class}) ->
                         <<"side">> => <<"instance">>,
                         <<"selector">> => <<"increment">>
                     },
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1798,7 +1845,7 @@ browse_tests(#{class_name := Class}) ->
                         <<"side">> => <<"instance">>,
                         <<"selector">> => <<"value">>
                     },
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1816,7 +1863,7 @@ browse_tests(#{class_name := Class}) ->
                         <<"side">> => <<"instance">>,
                         <<"selector">> => <<"increment">>
                     },
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1836,7 +1883,7 @@ browse_tests(#{class_name := Class}) ->
                         <<"side">> => <<"instance">>,
                         <<"selector">> => <<"unknownBrowseSelector">>
                     },
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1851,7 +1898,7 @@ browse_tests(#{class_name := Class}) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-class-definition">>,
                     #{<<"class">> => Class},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1882,13 +1929,18 @@ browse_tests(#{class_name := Class}) ->
             %% method to a value, these calls would surface that error. They all
             %% succeed (status [done]) → reflection only (ADR 0091 Decision 4).
             _ = decode_value(
-                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-classes">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                    self()
+                )
             ),
             _ = decode_value(
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-protocols">>,
                     #{<<"class">> => Class, <<"side">> => <<"instance">>},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1900,7 +1952,7 @@ browse_tests(#{class_name := Class}) ->
                         <<"side">> => <<"instance">>,
                         <<"selector">> => <<"increment">>
                     },
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1908,7 +1960,7 @@ browse_tests(#{class_name := Class}) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-class-definition">>,
                     #{<<"class">> => Class},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -1924,16 +1976,19 @@ browse_tests(#{class_name := Class}) ->
             Response = beamtalk_repl_ops_browse:handle(
                 <<"browse-categories">>,
                 #{<<"class">> => <<"__bt3337_never_a_class__">>},
-                make_msg(),
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                 self()
             ),
-            _ = assert_error_response(Response)
+            _ = beamtalk_test_repl:assert_error_response(Response)
         end},
         {"browse-categories: missing class is an argument error", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
-                <<"browse-categories">>, #{}, make_msg(), self()
+                <<"browse-categories">>,
+                #{},
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                self()
             ),
-            _ = assert_error_response(Response)
+            _ = beamtalk_test_repl:assert_error_response(Response)
         end},
         {"browse-categories: a class with no on-disk source degrades to no dividers", fun() ->
             %% The fixture class has no beamtalk_source module attribute, so
@@ -1941,7 +1996,10 @@ browse_tests(#{class_name := Class}) ->
             %% has nothing to read — the honest "nothing to group" empty state.
             Value = decode_value(
                 beamtalk_repl_ops_browse:handle(
-                    <<"browse-categories">>, #{<<"class">> => Class}, make_msg(), self()
+                    <<"browse-categories">>,
+                    #{<<"class">> => Class},
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                    self()
                 )
             ),
             ?assertEqual(false, maps:get(<<"has_dividers">>, Value)),
@@ -1955,40 +2013,46 @@ browse_tests(#{class_name := Class}) ->
                     <<"side">> => <<"instance">>,
                     <<"selector">> => <<"foo">>
                 },
-                make_msg(),
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                 self()
             ),
-            _ = assert_error_response(Response)
+            _ = beamtalk_test_repl:assert_error_response(Response)
         end},
         {"browse-method-source: missing selector is an argument error", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
                 <<"browse-method-source">>,
                 #{<<"class">> => Class, <<"side">> => <<"instance">>},
-                make_msg(),
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                 self()
             ),
-            _ = assert_error_response(Response)
+            _ = beamtalk_test_repl:assert_error_response(Response)
         end},
         {"browse-class-definition: unknown class is a not-found error", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
                 <<"browse-class-definition">>,
                 #{<<"class">> => <<"__bt3337_never_a_class__">>},
-                make_msg(),
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                 self()
             ),
-            _ = assert_error_response(Response)
+            _ = beamtalk_test_repl:assert_error_response(Response)
         end},
         {"browse-class-definition: missing class is an argument error", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
-                <<"browse-class-definition">>, #{}, make_msg(), self()
+                <<"browse-class-definition">>,
+                #{},
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                self()
             ),
-            _ = assert_error_response(Response)
+            _ = beamtalk_test_repl:assert_error_response(Response)
         end},
         {"browse-protocols: missing side is an argument error", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
-                <<"browse-protocols">>, #{<<"class">> => Class}, make_msg(), self()
+                <<"browse-protocols">>,
+                #{<<"class">> => Class},
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                self()
             ),
-            Decoded = assert_error_response(Response),
+            Decoded = beamtalk_test_repl:assert_error_response(Response),
             ?assertNotEqual(
                 nomatch, binary:match(maps:get(<<"error">>, Decoded), <<"`side` is required">>)
             )
@@ -1999,34 +2063,43 @@ browse_tests(#{class_name := Class}) ->
             Response = beamtalk_repl_ops_browse:handle_term(
                 <<"browse-protocols">>,
                 #{<<"class">> => Class, <<"side">> => 42},
-                make_msg(),
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                 self()
             ),
             ?assertMatch({error, _}, Response)
         end},
         {"browse-native-source: neither class nor module is an argument error", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
-                <<"browse-native-source">>, #{}, make_msg(), self()
+                <<"browse-native-source">>,
+                #{},
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                self()
             ),
-            _ = assert_error_response(Response)
+            _ = beamtalk_test_repl:assert_error_response(Response)
         end},
         {"browse-native-source: an unloaded module name is a not-found error", fun() ->
             %% resolve_module/1's `code:is_loaded/1 =:= false` branch: `ok`
             %% already exists as an atom (used throughout this suite) but
             %% names no loaded module.
             Response = beamtalk_repl_ops_browse:handle(
-                <<"browse-native-source">>, #{<<"module">> => <<"ok">>}, make_msg(), self()
+                <<"browse-native-source">>,
+                #{<<"module">> => <<"ok">>},
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                self()
             ),
-            Decoded = assert_error_response(Response),
+            Decoded = beamtalk_test_repl:assert_error_response(Response),
             ?assertNotEqual(
                 nomatch, binary:match(maps:get(<<"error">>, Decoded), <<"not found">>)
             )
         end},
         {"browse-alias-source: missing name is an argument error", fun() ->
             Response = beamtalk_repl_ops_browse:handle(
-                <<"browse-alias-source">>, #{}, make_msg(), self()
+                <<"browse-alias-source">>,
+                #{},
+                beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                self()
             ),
-            _ = assert_error_response(Response)
+            _ = beamtalk_test_repl:assert_error_response(Response)
         end},
 
         %%============================================================
@@ -2044,7 +2117,7 @@ browse_tests(#{class_name := Class}) ->
                         <<"side">> => <<"class">>,
                         <<"selector">> => <<"startingAt:">>
                     },
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -2141,7 +2214,12 @@ protocol_tests(#{proto_bin := Proto}) ->
     [
         {"browse-classes flags a protocol class object is_protocol=true", fun() ->
             Value = decode_value(
-                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-classes">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                    self()
+                )
             ),
             Row = find_class_row(Value, Proto),
             ?assertNotEqual(undefined, Row),
@@ -2152,7 +2230,12 @@ protocol_tests(#{proto_bin := Proto}) ->
             %% shared beamtalk_protocol_object dispatch module (which would read
             %% "project").
             Value = decode_value(
-                beamtalk_repl_ops_browse:handle(<<"browse-classes">>, #{}, make_msg(), self())
+                beamtalk_repl_ops_browse:handle(
+                    <<"browse-classes">>,
+                    #{},
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
+                    self()
+                )
             ),
             Row = find_class_row(Value, Proto),
             ?assertEqual(<<"stdlib">>, maps:get(<<"source_origin">>, Row))
@@ -2162,7 +2245,7 @@ protocol_tests(#{proto_bin := Proto}) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-protocols">>,
                     #{<<"class">> => Proto, <<"side">> => <<"instance">>},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -2175,7 +2258,7 @@ protocol_tests(#{proto_bin := Proto}) ->
                 beamtalk_repl_ops_browse:handle(
                     <<"browse-protocols">>,
                     #{<<"class">> => Proto, <<"side">> => <<"class">>},
-                    make_msg(),
+                    beamtalk_test_repl:make_msg(<<"browse">>, <<"t1">>, <<"s1">>),
                     self()
                 )
             ),
@@ -2437,20 +2520,16 @@ protocol_of(Protocols, Selector) ->
 %% between `all_classes/0` and the per-class reflection calls).
 %%====================================================================
 
-dead_pid() ->
-    Pid = spawn(fun() -> ok end),
-    beamtalk_test_wait:dead(Pid),
-    ?assertNot(is_process_alive(Pid)),
-    Pid.
-
 class_row_dead_pid_is_filtered_out_test() ->
-    ?assertEqual(false, beamtalk_repl_ops_browse:class_row(dead_pid(), sets:new())).
+    ?assertEqual(
+        false, beamtalk_repl_ops_browse:class_row(beamtalk_test_proc:dead_pid(), sets:new())
+    ).
 
 state_slots_dead_pid_degrades_to_empty_list_test() ->
     %% Both `instance_variables` and `field_defaults` safe_class_call/2 reads
     %% degrade to `undefined` against a dead pid, so FieldList/DefaultsMap
     %% both fall back to their empty defaults.
-    ?assertEqual([], beamtalk_repl_ops_browse:state_slots(dead_pid(), #{})).
+    ?assertEqual([], beamtalk_repl_ops_browse:state_slots(beamtalk_test_proc:dead_pid(), #{})).
 
 %%====================================================================
 %% alias_field_binary/1's Erlang-string clause: `.app`-file

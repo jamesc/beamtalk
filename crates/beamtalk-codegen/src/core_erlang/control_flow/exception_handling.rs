@@ -797,7 +797,7 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// let SeededState = <scratch map with the block's locals> in
-    /// call 'beamtalk_result':'tryDo:'(fun (StateAcc) -> {Value, StateAcc1}, SeededState)
+    /// call 'beamtalk_result':'tryDo'(fun (StateAcc) -> {Value, StateAcc1}, SeededState)
     /// ```
     ///
     /// The scratch map is seeded like an `on:do:`'s ([`Self::exception_body_outer_state`],
@@ -837,29 +837,27 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// `call 'beamtalk_result':'tryDo:'(fun (StateAcc) -> <body>, <entry>)`:
+    /// `call 'beamtalk_result':'tryDo'(fun (StateAcc) -> <body>, <entry>)`:
     /// the one spelling of the Tier 2 call, shared by the method-body and REPL
     /// producers. `body` is the fun's `{Value, StateAcc1}` arm; `entry` the
     /// `StateAcc` variable it starts from.
     fn try_do_tier2_call(body: Document<'static>, entry: String) -> Document<'static> {
-        docvec![
-            "call 'beamtalk_result':'tryDo:'(fun (StateAcc) -> ",
-            body,
-            ", ",
-            leaf::var(entry),
-            ")",
-        ]
+        beamtalk_cerl_doc::form::call(
+            "beamtalk_result",
+            "tryDo",
+            [docvec!["fun (StateAcc) -> ", body], leaf::var(entry)],
+        )
     }
 
     /// [`Self::try_do_tier2_tuple_doc`] at the REPL root, whose locals live in
     /// the bindings map under their plain names (the REPL's inlined arm
     /// statements read and write plain keys, as an `on:do:` arm does). The
     /// block body is the inlined arm over a `StateAcc` that is the bindings
-    /// map itself, so `tryDo:/2` answers the `{Value, Bindings}` tuple the REPL
+    /// map itself, so `tryDo/2` answers the `{Value, Bindings}` tuple the REPL
     /// assembler unpacks, with the entry bindings on a raise:
     ///
     /// ```erlang
-    /// call 'beamtalk_result':'tryDo:'(fun (StateAcc) -> {Value, StateAcc1}, Bindings)
+    /// call 'beamtalk_result':'tryDo'(fun (StateAcc) -> {Value, StateAcc1}, Bindings)
     /// ```
     ///
     /// Sets `repl_loop_mutated`.

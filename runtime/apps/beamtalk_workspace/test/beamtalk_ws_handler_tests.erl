@@ -224,15 +224,6 @@ op_json(Op, Params) ->
 %% Decode the text frame out of a {[{text, Bin}], State} reply.
 first_text([{text, Bin} | _]) -> json:decode(Bin).
 
-%% Spawn a process and wait for it to be dead, returning its (now dead) pid.
-dead_pid() ->
-    {Pid, Ref} = spawn_monitor(fun() -> ok end),
-    receive
-        {'DOWN', Ref, process, Pid, _} -> Pid
-    after 1000 ->
-        error(timeout_waiting_for_dead_pid)
-    end.
-
 %%% ===========================================================================
 %%% init/2 + websocket_init/1
 %%% ===========================================================================
@@ -483,7 +474,7 @@ eval_non_binary_code_returns_error_test() ->
 
 eval_with_dead_session_returns_session_down_test() ->
     Json = op_json(<<"eval">>, #{<<"code">> => <<"1 + 1">>}),
-    State = (authed_state())#ws_state{session_pid = dead_pid()},
+    State = (authed_state())#ws_state{session_pid = beamtalk_test_proc:dead_pid()},
     {Frames, _State} = beamtalk_ws_handler:websocket_handle({text, Json}, State),
     ?assertMatch([{text, _} | _], Frames).
 
@@ -1337,7 +1328,7 @@ resume_alive_session() ->
 
 resume_dead_session_creates_new() ->
     DeadId = <<"dead-sess">>,
-    beamtalk_session_table:insert(DeadId, dead_pid()),
+    beamtalk_session_table:insert(DeadId, beamtalk_test_proc:dead_pid()),
     Json = auth_json(#{<<"resume">> => DeadId}),
     {_Frames, State} = beamtalk_ws_handler:websocket_handle({text, Json}, unauth_state()),
     ?assert(State#ws_state.authenticated),

@@ -64,11 +64,11 @@ A use the table's protection forbids raises `access_denied`, never a raw
 - ADR 0055: Erlang-Backed Class Protocol
 """.
 
-%% Class methods — canonical colon forms (for EUnit tests and Beamtalk dispatch)
+%% Class methods
 -define(RECEIVER_HINT, <<"Receiver must be an Ets instance">>).
 
--export(['new:type:'/2, 'named:'/1, 'exists:'/1, 'newOrExisting:type:'/2]).
--export(['private:'/1, 'protected:'/1]).
+-export([new/2, named/1, exists/1, newOrExisting/2]).
+-export([private/1, protected/1]).
 
 %% Instance methods — no-colon forms used by the FFI proxy
 %% The (Erlang beamtalk_ets) dispatch strips the first keyword from the selector
@@ -92,9 +92,6 @@ A use the table's protection forbids raises `access_denied`, never a raw
 %% Opt-out of the FFI proxy's ok/error -> Result coercion: Ets returns user data.
 -export([beamtalk_ffi_raw_results/0]).
 
-%% FFI shims for class methods: `(Erlang beamtalk_ets) new: name type: t` → `new/2`
--export([new/2, named/1, exists/1, newOrExisting/2, private/1, protected/1]).
-
 -type t() :: #{'$beamtalk_class' := 'Ets', atom() => term()}.
 -export_type([t/0]).
 
@@ -115,8 +112,8 @@ read and written by any process.
 Raises `already_exists` if a table with the same name already exists.
 Raises `type_error` if arguments are not atoms.
 """.
--spec 'new:type:'(atom(), Type :: atom()) -> t().
-'new:type:'(Name, TableType) when is_atom(Name), is_atom(TableType) ->
+-spec new(atom(), Type :: atom()) -> t().
+new(Name, TableType) when is_atom(Name), is_atom(TableType) ->
     EtsType = map_table_type(TableType),
     try
         ets:new(Name, [EtsType, named_table, public, {keypos, 1}]),
@@ -129,9 +126,9 @@ Raises `type_error` if arguments are not atoms.
                 )
             )
     end;
-'new:type:'(Name, _TableType) when not is_atom(Name) ->
+new(Name, _TableType) when not is_atom(Name) ->
     beamtalk_error:raise_type_error('Ets', 'new:type:', <<"Table name must be a Symbol">>);
-'new:type:'(_Name, _TableType) ->
+new(_Name, _TableType) ->
     beamtalk_error:raise_type_error(
         'Ets',
         'new:type:',
@@ -145,8 +142,8 @@ Returns an Ets instance if a table with the given name exists.
 Raises `not_found` if no table with that name has been created.
 Raises `type_error` if the argument is not an atom.
 """.
--spec 'named:'(atom()) -> t().
-'named:'(Name) when is_atom(Name) ->
+-spec named(atom()) -> t().
+named(Name) when is_atom(Name) ->
     case ets:whereis(Name) of
         undefined ->
             beamtalk_error:raise(
@@ -157,7 +154,7 @@ Raises `type_error` if the argument is not an atom.
         _Tid ->
             make_ets(Name)
     end;
-'named:'(_) ->
+named(_) ->
     beamtalk_error:raise_type_error('Ets', 'named:', <<"Table name must be a Symbol">>).
 
 -doc """
@@ -166,10 +163,10 @@ Check whether a named ETS table exists.
 Returns `true` if a table with the given name exists, `false` otherwise.
 Raises `type_error` if the argument is not an atom.
 """.
--spec 'exists:'(atom()) -> boolean().
-'exists:'(Name) when is_atom(Name) ->
+-spec exists(atom()) -> boolean().
+exists(Name) when is_atom(Name) ->
     ets:whereis(Name) =/= undefined;
-'exists:'(_) ->
+exists(_) ->
     beamtalk_error:raise_type_error('Ets', 'exists:', <<"Table name must be a Symbol">>).
 
 -doc """
@@ -179,8 +176,8 @@ If a table with the given name already exists, returns an Ets instance
 wrapping it. Otherwise creates a new table with the specified type.
 Raises `type_error` if arguments are not atoms.
 """.
--spec 'newOrExisting:type:'(atom(), Type :: atom()) -> t().
-'newOrExisting:type:'(Name, TableType) when is_atom(Name), is_atom(TableType) ->
+-spec newOrExisting(atom(), Type :: atom()) -> t().
+newOrExisting(Name, TableType) when is_atom(Name), is_atom(TableType) ->
     EtsType = map_table_type_for('newOrExisting:type:', TableType),
     try
         ets:new(Name, [EtsType, named_table, public, {keypos, 1}]),
@@ -203,11 +200,11 @@ Raises `type_error` if arguments are not atoms.
                     make_ets(Name)
             end
     end;
-'newOrExisting:type:'(Name, _TableType) when not is_atom(Name) ->
+newOrExisting(Name, _TableType) when not is_atom(Name) ->
     beamtalk_error:raise_type_error(
         'Ets', 'newOrExisting:type:', <<"Table name must be a Symbol">>
     );
-'newOrExisting:type:'(_Name, _TableType) ->
+newOrExisting(_Name, _TableType) ->
     beamtalk_error:raise_type_error(
         'Ets',
         'newOrExisting:type:',
@@ -222,8 +219,8 @@ Only the owner process may read or write it; any other process gets
 atom is created. The table dies with its owner.
 Raises `type_error` if `TableType` is not a table-type atom.
 """.
--spec 'private:'(Type :: atom()) -> t().
-'private:'(TableType) -> new_unnamed(private, 'private:', TableType).
+-spec private(Type :: atom()) -> t().
+private(TableType) -> new_unnamed(private, 'private:', TableType).
 
 -doc """
 Create an unnamed `protected` ETS table owned by the caller (BT-4576).
@@ -232,8 +229,8 @@ Any process may read it, but only the owner may write; a write from another
 process raises `access_denied`. The table dies with its owner.
 Raises `type_error` if `TableType` is not a table-type atom.
 """.
--spec 'protected:'(Type :: atom()) -> t().
-'protected:'(TableType) -> new_unnamed(protected, 'protected:', TableType).
+-spec protected(Type :: atom()) -> t().
+protected(TableType) -> new_unnamed(protected, 'protected:', TableType).
 
 -spec new_unnamed(private | protected, atom(), term()) -> t().
 new_unnamed(Access, Selector, TableType) when is_atom(TableType) ->
@@ -737,38 +734,13 @@ entries(TableName, Selector) ->
 %%% ============================================================================
 %%% FFI Shims
 %%%
-%%% The (Erlang beamtalk_ets) FFI uses beamtalk_erlang_proxy:direct_call/4,
-%%% which derives the Erlang function name from the first keyword of the
-%%% Beamtalk selector. These shims provide the colon-free entry points:
-%%%   `(Erlang beamtalk_ets) new: name type: t` → `new(name, t)` → `'new:type:'`
-%%%   `(Erlang beamtalk_ets) named: name`       → `named(name)` → `'named:'`
+%%% The (Erlang beamtalk_ets) FFI and `self delegate` resolve through
+%%% beamtalk_erlang_proxy:native_call, which names the function with
+%%% selector_to_function/1 (first keyword, trailing colon stripped). These
+%%% colon-free functions are the implementations, not forwarders:
+%%%   `(Erlang beamtalk_ets) new: name type: t` → `new(name, t)`
+%%%   `(Erlang beamtalk_ets) named: name`       → `named(name)`
 %%% ============================================================================
-
--doc "FFI shim for new:type: — called via (Erlang beamtalk_ets) new: name type: type.".
--spec new(atom(), Type :: atom()) -> t().
-new(Name, TableType) -> 'new:type:'(Name, TableType).
-
--doc "FFI shim for named: — called via (Erlang beamtalk_ets) named: name.".
--spec named(atom()) -> t().
-named(Name) -> 'named:'(Name).
-
--doc "FFI shim for exists: — called via (Erlang beamtalk_ets) exists: name.".
--spec exists(atom()) -> boolean().
-exists(Name) -> 'exists:'(Name).
-
--doc """
-FFI shim for newOrExisting:type: — called via (Erlang beamtalk_ets) newOrExisting: name type: t.
-""".
--spec newOrExisting(atom(), Type :: atom()) -> t().
-newOrExisting(Name, TableType) -> 'newOrExisting:type:'(Name, TableType).
-
--doc "FFI shim for private: — called via `Ets private: type` (`self delegate`).".
--spec private(Type :: atom()) -> t().
-private(TableType) -> 'private:'(TableType).
-
--doc "FFI shim for protected: — called via `Ets protected: type` (`self delegate`).".
--spec protected(Type :: atom()) -> t().
-protected(TableType) -> 'protected:'(TableType).
 
 %%% ============================================================================
 %%% Internal Helpers

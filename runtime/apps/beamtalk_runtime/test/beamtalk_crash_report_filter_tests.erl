@@ -64,10 +64,7 @@ cleanup(Installed) ->
         end,
     _ = logger:remove_handler(?HANDLER),
     beamtalk_test_class:stop_graceful('Bt4820Crasher'),
-    code:purge(?MOD),
-    code:delete(?MOD),
-    code:purge(?MOD),
-    ok.
+    beamtalk_test_module:unload(?MOD).
 
 %% EUnit runs `setup` in another process than the tests: each test claims
 %% the capture by registering itself (see drain/0).
@@ -92,18 +89,7 @@ load_crasher() ->
         "start_link() -> gen_server:start_link('bt@bt4820pkg@bt4820_crasher', #{}, []).\n"
         "crash() -> erlang:error(boom).\n"
         "'at:put:'() -> erlang:error(boom).\n",
-    {ok, Toks, _} = erl_scan:string(Src),
-    Forms = parse_forms(Toks, []),
-    {ok, ?MOD, Bin} = compile:forms(Forms, [binary]),
-    {module, ?MOD} = code:load_binary(?MOD, "bt4820.beam", Bin),
-    ok.
-
-parse_forms([], Acc) ->
-    lists:reverse(Acc);
-parse_forms(Toks, Acc) ->
-    {Form, Rest} = lists:splitwith(fun(T) -> element(1, T) =/= dot end, Toks),
-    {ok, F} = erl_parse:parse_form(Form ++ [hd(Rest)]),
-    parse_forms(tl(Rest), [F | Acc]).
+    beamtalk_test_module:load(?MOD, Src).
 
 %%% Cases
 

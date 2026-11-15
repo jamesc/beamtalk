@@ -37,7 +37,7 @@ mechanism settled for the `program_name` Open Question (ADR 0099 §2). Absent
 %% unqualified.
 -compile({no_auto_import, [exit/1]}).
 
--export([commandName/0, package/0, rootSupervisor/0, exit/0, 'exit:'/1, exit/1]).
+-export([commandName/0, package/0, rootSupervisor/0, exit/0, exit/1]).
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -109,7 +109,7 @@ package() ->
 -doc "End this program with status 0 (the job-level, safe exit). Does not return.".
 -spec exit() -> no_return().
 exit() ->
-    'exit:'(0).
+    exit(0).
 
 -doc """
 End this program with status `Code` — the job-level, safe exit (ADR 0099 §3,
@@ -143,8 +143,8 @@ wraps `Program exit:` in an `on:do:` whose handler matches (`on: Error do:`, a
 catch-all) intercepts it as an `erlang_throw`. `ensure:` re-raises after its
 cleanup, so the exit still propagates.
 """.
--spec 'exit:'(integer()) -> no_return().
-'exit:'(Code) when is_integer(Code), Code >= 0, Code =< 255 ->
+-spec exit(integer()) -> no_return().
+exit(Code) when is_integer(Code), Code >= 0, Code =< 255 ->
     Policy = beamtalk_capability:exit_policy(),
     case {Policy, in_actor()} of
         {none, _} ->
@@ -187,7 +187,7 @@ cleanup, so the exit still propagates.
             %% `on:do:` handler does not swallow it.
             throw({beamtalk_script_exit, Code})
     end;
-'exit:'(Code) when is_integer(Code) ->
+exit(Code) when is_integer(Code) ->
     %% Out of the POSIX range — a wrong *value*, not a wrong *type*. Validated
     %% here (not deferred to erlang:halt/1, which would silently truncate to the
     %% low byte) for consistency with System halt:.
@@ -198,13 +198,8 @@ cleanup, so the exit still propagates.
         Error2, <<"Exit status must be in the POSIX range 0..255">>
     ),
     beamtalk_error:raise(Error3);
-'exit:'(_Code) ->
+exit(_Code) ->
     beamtalk_error:raise_type_error('Program', 'exit:', <<"Exit status must be an Integer">>).
-
--doc "FFI shim for `(Erlang beamtalk_program) exit:` (proxy strips the colon).".
--spec exit(integer()) -> no_return().
-exit(Code) ->
-    'exit:'(Code).
 
 %%% ============================================================================
 %%% Internal helpers

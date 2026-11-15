@@ -32,13 +32,11 @@ detecting the operating system and architecture, and querying process info.
 %% BIF qualified (`erlang:halt/1`).
 -compile({no_auto_import, [halt/0, halt/1]}).
 
--export(['getEnv:'/1, 'getEnv:default:'/2]).
--export(['setEnv:value:'/2, 'unsetEnv:'/1]).
--export([osPlatform/0, osFamily/0, architecture/0, hostname/0]).
--export([erlangVersion/0, pid/0, uniqueId/0]).
--export([halt/0, 'halt:'/1, halt/1]).
 -export([getEnv/1, getEnv/2]).
 -export([setEnv/2, unsetEnv/1]).
+-export([osPlatform/0, osFamily/0, architecture/0, hostname/0]).
+-export([erlangVersion/0, pid/0, uniqueId/0]).
+-export([halt/0, halt/1]).
 
 -ifdef(TEST).
 -export([platform_name/1]).
@@ -51,67 +49,67 @@ detecting the operating system and architecture, and querying process info.
 %%% ============================================================================
 
 -doc "Read an environment variable. Returns nil if not set.".
--spec 'getEnv:'(beamtalk_string:t() | binary()) -> beamtalk_string:t() | 'nil'.
+-spec getEnv(beamtalk_string:t() | binary()) -> beamtalk_string:t() | 'nil'.
 %% BT-4173: a tagged String unwraps to the same name bytes.
-'getEnv:'({beamtalk_string, Name}) when is_binary(Name) ->
-    'getEnv:'(Name);
-'getEnv:'(Name) when is_binary(Name) ->
+getEnv({beamtalk_string, Name}) when is_binary(Name) ->
+    getEnv(Name);
+getEnv(Name) when is_binary(Name) ->
     case os:getenv(binary_to_list(Name)) of
         false -> nil;
         Value -> beamtalk_primitive:string_from_binary(list_to_binary(Value))
     end;
-'getEnv:'(_) ->
+getEnv(_) ->
     beamtalk_error:raise_type_error('System', 'getEnv:', <<"Argument must be a String">>).
 
 -doc "Read an environment variable with a default fallback.".
--spec 'getEnv:default:'(beamtalk_string:t() | binary(), Default :: beamtalk_string:t() | binary()) ->
+-spec getEnv(beamtalk_string:t() | binary(), Default :: beamtalk_string:t() | binary()) ->
     beamtalk_string:t() | binary().
-'getEnv:default:'({beamtalk_string, Name}, Default) when is_binary(Name) ->
-    'getEnv:default:'(Name, Default);
-'getEnv:default:'(Name, {beamtalk_string, Default}) when is_binary(Name) ->
-    'getEnv:default:'(Name, Default);
-'getEnv:default:'(Name, Default) when is_binary(Name), is_binary(Default) ->
+getEnv({beamtalk_string, Name}, Default) when is_binary(Name) ->
+    getEnv(Name, Default);
+getEnv(Name, {beamtalk_string, Default}) when is_binary(Name) ->
+    getEnv(Name, Default);
+getEnv(Name, Default) when is_binary(Name), is_binary(Default) ->
     case os:getenv(binary_to_list(Name)) of
         %% BT-4173: the default was a String at the boundary — re-tag it.
         false -> beamtalk_primitive:string_from_binary(Default);
         Value -> beamtalk_primitive:string_from_binary(list_to_binary(Value))
     end;
-'getEnv:default:'(Name, _Default) when not is_binary(Name) ->
+getEnv(Name, _Default) when not is_binary(Name) ->
     beamtalk_error:raise_type_error(
         'System', 'getEnv:default:', <<"Name argument must be a String">>
     );
-'getEnv:default:'(_Name, _Default) ->
+getEnv(_Name, _Default) ->
     beamtalk_error:raise_type_error(
         'System', 'getEnv:default:', <<"Default argument must be a String">>
     ).
 
 -doc "Set an environment variable. Returns true.".
--spec 'setEnv:value:'(beamtalk_string:t() | binary(), Value :: beamtalk_string:t() | binary()) ->
+-spec setEnv(beamtalk_string:t() | binary(), Value :: beamtalk_string:t() | binary()) ->
     'true'.
-'setEnv:value:'({beamtalk_string, Name}, Value) when is_binary(Name) ->
-    'setEnv:value:'(Name, Value);
-'setEnv:value:'(Name, {beamtalk_string, Value}) when is_binary(Name) ->
-    'setEnv:value:'(Name, Value);
-'setEnv:value:'(Name, Value) when is_binary(Name), is_binary(Value) ->
+setEnv({beamtalk_string, Name}, Value) when is_binary(Name) ->
+    setEnv(Name, Value);
+setEnv(Name, {beamtalk_string, Value}) when is_binary(Name) ->
+    setEnv(Name, Value);
+setEnv(Name, Value) when is_binary(Name), is_binary(Value) ->
     os:putenv(binary_to_list(Name), binary_to_list(Value)),
     true;
-'setEnv:value:'(Name, _Value) when not is_binary(Name) ->
+setEnv(Name, _Value) when not is_binary(Name) ->
     beamtalk_error:raise_type_error(
         'System', 'setEnv:value:', <<"Name argument must be a String">>
     );
-'setEnv:value:'(_Name, _Value) ->
+setEnv(_Name, _Value) ->
     beamtalk_error:raise_type_error(
         'System', 'setEnv:value:', <<"Value argument must be a String">>
     ).
 
 -doc "Remove an environment variable. Returns true.".
--spec 'unsetEnv:'(beamtalk_string:t() | binary()) -> 'true'.
-'unsetEnv:'({beamtalk_string, Name}) when is_binary(Name) ->
-    'unsetEnv:'(Name);
-'unsetEnv:'(Name) when is_binary(Name) ->
+-spec unsetEnv(beamtalk_string:t() | binary()) -> 'true'.
+unsetEnv({beamtalk_string, Name}) when is_binary(Name) ->
+    unsetEnv(Name);
+unsetEnv(Name) when is_binary(Name) ->
     os:unsetenv(binary_to_list(Name)),
     true;
-'unsetEnv:'(_) ->
+unsetEnv(_) ->
     beamtalk_error:raise_type_error('System', 'unsetEnv:', <<"Argument must be a String">>).
 
 -doc """
@@ -203,10 +201,10 @@ shared workspace would kill the service and every other connected session, so
 the node is program-owned (`beamtalk_capability:exit_policy/0` is `node`) —
 run-mode, escript, and release `eval`/`foreground`.
 """.
--spec 'halt:'(integer()) -> no_return().
-'halt:'(Code) when is_integer(Code), Code >= 0, Code =< 255 ->
+-spec halt(integer()) -> no_return().
+halt(Code) when is_integer(Code), Code >= 0, Code =< 255 ->
     do_halt(Code, 'halt:');
-'halt:'(Code) when is_integer(Code) ->
+halt(Code) when is_integer(Code) ->
     Error0 = beamtalk_error:new(invalid_argument, 'System'),
     Error1 = beamtalk_error:with_selector(Error0, 'halt:'),
     Error2 = beamtalk_error:with_details(Error1, #{got => Code}),
@@ -214,35 +212,8 @@ run-mode, escript, and release `eval`/`foreground`.
         Error2, <<"Exit status must be in the POSIX range 0..255">>
     ),
     beamtalk_error:raise(Error3);
-'halt:'(_Code) ->
+halt(_Code) ->
     beamtalk_error:raise_type_error('System', 'halt:', <<"Exit status must be an Integer">>).
-
--doc "FFI shim for `(Erlang beamtalk_system) halt:` (proxy strips the colon).".
--spec halt(integer()) -> no_return().
-halt(Code) ->
-    'halt:'(Code).
-
--doc """
-Shims for (Erlang beamtalk_system) FFI dispatch.
-The Erlang FFI proxy (beamtalk_erlang_proxy) maps any keyword selector to
-its first keyword before calling direct_call/3, so `getEnv:` → `getEnv`
-and `getEnv:default:` → `getEnv`. These shims exist so the Beamtalk
-selectors `(Erlang beamtalk_system) getEnv: name` and
-`(Erlang beamtalk_system) getEnv: name default: fallback` dispatch to
-getEnv/1 and getEnv/2 respectively, delegating to the canonical forms.
-""".
--spec getEnv(beamtalk_string:t() | binary()) -> beamtalk_string:t() | 'nil'.
-getEnv(Name) -> 'getEnv:'(Name).
-
--spec getEnv(beamtalk_string:t() | binary(), Default :: beamtalk_string:t() | binary()) ->
-    beamtalk_string:t() | binary().
-getEnv(Name, Default) -> 'getEnv:default:'(Name, Default).
-
--spec setEnv(beamtalk_string:t() | binary(), Value :: beamtalk_string:t() | binary()) -> 'true'.
-setEnv(Name, Value) -> 'setEnv:value:'(Name, Value).
-
--spec unsetEnv(beamtalk_string:t() | binary()) -> 'true'.
-unsetEnv(Name) -> 'unsetEnv:'(Name).
 
 %%% ============================================================================
 %%% Internal Functions

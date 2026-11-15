@@ -33,7 +33,7 @@ Tests cover:
 
 %% Unwrap a successful fromString: result.
 parse(Str) ->
-    #{'isOk' := true, 'okValue' := Uuid} = beamtalk_uuid:'fromString:'(Str),
+    #{'isOk' := true, 'okValue' := Uuid} = beamtalk_uuid:fromString(Str),
     Uuid.
 
 %%% ============================================================================
@@ -84,13 +84,13 @@ v7_monotonic_ordering_test() ->
 %%% ============================================================================
 
 from_string_parses_canonical_lowercase_test() ->
-    Result = beamtalk_uuid:'fromString:'(?KNOWN_STR),
+    Result = beamtalk_uuid:fromString(?KNOWN_STR),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, Result),
     #{'okValue' := Uuid} = Result,
     ?assertMatch(#{'$beamtalk_class' := 'Uuid', bytes := <<_:128>>}, Uuid).
 
 from_string_case_insensitive_test() ->
-    Result = beamtalk_uuid:'fromString:'(?KNOWN_STR_UPPER),
+    Result = beamtalk_uuid:fromString(?KNOWN_STR_UPPER),
     ?assertMatch(#{'isOk' := true}, Result).
 
 from_string_canonicalizes_to_lowercase_test() ->
@@ -106,28 +106,28 @@ from_string_version_4_roundtrip_test() ->
 %%% ============================================================================
 
 from_string_rejects_trailing_newline_test() ->
-    Result = beamtalk_uuid:'fromString:'(<<(?KNOWN_STR)/binary, "\n">>),
+    Result = beamtalk_uuid:fromString(<<(?KNOWN_STR)/binary, "\n">>),
     ?assertMatch(#{'isOk' := false}, Result).
 
 from_string_rejects_no_hyphens_test() ->
-    Result = beamtalk_uuid:'fromString:'(<<"550e8400e29b41d4a716446655440000">>),
+    Result = beamtalk_uuid:fromString(<<"550e8400e29b41d4a716446655440000">>),
     ?assertMatch(#{'isOk' := false}, Result).
 
 from_string_rejects_short_string_test() ->
-    Result = beamtalk_uuid:'fromString:'(<<"550e8400-e29b-41d4-a716-44665544000">>),
+    Result = beamtalk_uuid:fromString(<<"550e8400-e29b-41d4-a716-44665544000">>),
     ?assertMatch(#{'isOk' := false}, Result).
 
 from_string_rejects_invalid_hex_chars_test() ->
-    Result = beamtalk_uuid:'fromString:'(<<"gggggggg-gggg-gggg-gggg-gggggggggggg">>),
+    Result = beamtalk_uuid:fromString(<<"gggggggg-gggg-gggg-gggg-gggggggggggg">>),
     ?assertMatch(#{'isOk' := false}, Result).
 
 from_string_rejects_empty_string_test() ->
-    Result = beamtalk_uuid:'fromString:'(<<>>),
+    Result = beamtalk_uuid:fromString(<<>>),
     ?assertMatch(#{'isOk' := false}, Result).
 
 from_string_type_error_for_non_binary_test() ->
     try
-        beamtalk_uuid:'fromString:'(12345),
+        beamtalk_uuid:fromString(12345),
         ?assert(false, "'fromString:' with non-binary should raise type_error")
     catch
         error:Caught ->
@@ -142,19 +142,19 @@ from_string_type_error_for_non_binary_test() ->
 %%% ============================================================================
 
 is_valid_true_for_canonical_lowercase_test() ->
-    ?assert(beamtalk_uuid:'isValid:'(?KNOWN_STR)).
+    ?assert(beamtalk_uuid:isValid(?KNOWN_STR)).
 
 is_valid_true_for_canonical_uppercase_test() ->
-    ?assert(beamtalk_uuid:'isValid:'(?KNOWN_STR_UPPER)).
+    ?assert(beamtalk_uuid:isValid(?KNOWN_STR_UPPER)).
 
 is_valid_false_for_malformed_test() ->
-    ?assertNot(beamtalk_uuid:'isValid:'(<<"not-a-uuid">>)),
-    ?assertNot(beamtalk_uuid:'isValid:'(<<(?KNOWN_STR)/binary, "\n">>)),
-    ?assertNot(beamtalk_uuid:'isValid:'(<<>>)).
+    ?assertNot(beamtalk_uuid:isValid(<<"not-a-uuid">>)),
+    ?assertNot(beamtalk_uuid:isValid(<<(?KNOWN_STR)/binary, "\n">>)),
+    ?assertNot(beamtalk_uuid:isValid(<<>>)).
 
 is_valid_type_error_for_non_binary_test() ->
     try
-        beamtalk_uuid:'isValid:'(42),
+        beamtalk_uuid:isValid(42),
         ?assert(false, "'isValid:' with non-binary should raise type_error")
     catch
         error:Caught ->
@@ -272,7 +272,7 @@ comparison_type_error_for_non_uuid_test() ->
     ).
 
 %%% ============================================================================
-%%% FFI shims — delegate to canonical colon-suffixed functions
+%%% FFI entry points — fromString/1, isValid/1
 %%% ============================================================================
 
 from_string_shim_returns_ok_result_test() ->

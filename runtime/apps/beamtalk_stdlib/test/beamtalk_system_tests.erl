@@ -23,15 +23,15 @@ pid/0, uniqueId/0, and type error paths.
 
 get_env_set_variable_test() ->
     os:putenv("BT_TEST_ENV_VAR", "hello"),
-    ?assertEqual({beamtalk_string, <<"hello">>}, beamtalk_system:'getEnv:'(<<"BT_TEST_ENV_VAR">>)),
+    ?assertEqual({beamtalk_string, <<"hello">>}, beamtalk_system:getEnv(<<"BT_TEST_ENV_VAR">>)),
     os:unsetenv("BT_TEST_ENV_VAR").
 
 get_env_unset_variable_returns_nil_test() ->
     os:unsetenv("BT_TEST_UNSET_VAR"),
-    ?assertEqual(nil, beamtalk_system:'getEnv:'(<<"BT_TEST_UNSET_VAR">>)).
+    ?assertEqual(nil, beamtalk_system:getEnv(<<"BT_TEST_UNSET_VAR">>)).
 
 get_env_non_binary_name_test() ->
-    ?assertBtError(type_error, beamtalk_system:'getEnv:'(not_a_string)).
+    ?assertBtError(type_error, beamtalk_system:getEnv(not_a_string)).
 
 %%% ============================================================================
 %%% getEnv:default:/2
@@ -41,7 +41,7 @@ get_env_default_set_variable_test() ->
     os:putenv("BT_TEST_ENV_VAR2", "world"),
     ?assertEqual(
         {beamtalk_string, <<"world">>},
-        beamtalk_system:'getEnv:default:'(<<"BT_TEST_ENV_VAR2">>, <<"fallback">>)
+        beamtalk_system:getEnv(<<"BT_TEST_ENV_VAR2">>, <<"fallback">>)
     ),
     os:unsetenv("BT_TEST_ENV_VAR2").
 
@@ -49,35 +49,35 @@ get_env_default_unset_returns_default_test() ->
     os:unsetenv("BT_TEST_UNSET_VAR2"),
     ?assertEqual(
         {beamtalk_string, <<"fallback">>},
-        beamtalk_system:'getEnv:default:'(<<"BT_TEST_UNSET_VAR2">>, <<"fallback">>)
+        beamtalk_system:getEnv(<<"BT_TEST_UNSET_VAR2">>, <<"fallback">>)
     ).
 
 get_env_default_non_binary_name_test() ->
-    ?assertBtError(type_error, beamtalk_system:'getEnv:default:'(42, <<"fallback">>)).
+    ?assertBtError(type_error, beamtalk_system:getEnv(42, <<"fallback">>)).
 
 get_env_default_non_binary_default_test() ->
-    ?assertBtError(type_error, beamtalk_system:'getEnv:default:'(<<"NAME">>, 42)).
+    ?assertBtError(type_error, beamtalk_system:getEnv(<<"NAME">>, 42)).
 
 %%% ============================================================================
 %%% setEnv:value:/2
 %%% ============================================================================
 
 set_env_value_sets_variable_test() ->
-    ?assertEqual(true, beamtalk_system:'setEnv:value:'(<<"BT_TEST_SET">>, <<"val1">>)),
-    ?assertEqual({beamtalk_string, <<"val1">>}, beamtalk_system:'getEnv:'(<<"BT_TEST_SET">>)),
+    ?assertEqual(true, beamtalk_system:setEnv(<<"BT_TEST_SET">>, <<"val1">>)),
+    ?assertEqual({beamtalk_string, <<"val1">>}, beamtalk_system:getEnv(<<"BT_TEST_SET">>)),
     os:unsetenv("BT_TEST_SET").
 
 set_env_value_overwrites_existing_test() ->
     os:putenv("BT_TEST_OVERWRITE", "old"),
-    ?assertEqual(true, beamtalk_system:'setEnv:value:'(<<"BT_TEST_OVERWRITE">>, <<"new">>)),
-    ?assertEqual({beamtalk_string, <<"new">>}, beamtalk_system:'getEnv:'(<<"BT_TEST_OVERWRITE">>)),
+    ?assertEqual(true, beamtalk_system:setEnv(<<"BT_TEST_OVERWRITE">>, <<"new">>)),
+    ?assertEqual({beamtalk_string, <<"new">>}, beamtalk_system:getEnv(<<"BT_TEST_OVERWRITE">>)),
     os:unsetenv("BT_TEST_OVERWRITE").
 
 set_env_value_non_binary_name_test() ->
-    ?assertBtError(type_error, beamtalk_system:'setEnv:value:'(42, <<"value">>)).
+    ?assertBtError(type_error, beamtalk_system:setEnv(42, <<"value">>)).
 
 set_env_value_non_binary_value_test() ->
-    ?assertBtError(type_error, beamtalk_system:'setEnv:value:'(<<"name">>, 42)).
+    ?assertBtError(type_error, beamtalk_system:setEnv(<<"name">>, 42)).
 
 %%% ============================================================================
 %%% unsetEnv:/1
@@ -85,15 +85,15 @@ set_env_value_non_binary_value_test() ->
 
 unset_env_removes_variable_test() ->
     os:putenv("BT_TEST_UNSET", "to_remove"),
-    ?assertEqual(true, beamtalk_system:'unsetEnv:'(<<"BT_TEST_UNSET">>)),
-    ?assertEqual(nil, beamtalk_system:'getEnv:'(<<"BT_TEST_UNSET">>)).
+    ?assertEqual(true, beamtalk_system:unsetEnv(<<"BT_TEST_UNSET">>)),
+    ?assertEqual(nil, beamtalk_system:getEnv(<<"BT_TEST_UNSET">>)).
 
 unset_env_nonexistent_returns_true_test() ->
     os:unsetenv("BT_TEST_NEVER_SET"),
-    ?assertEqual(true, beamtalk_system:'unsetEnv:'(<<"BT_TEST_NEVER_SET">>)).
+    ?assertEqual(true, beamtalk_system:unsetEnv(<<"BT_TEST_NEVER_SET">>)).
 
 unset_env_non_binary_name_test() ->
-    ?assertBtError(type_error, beamtalk_system:'unsetEnv:'(42)).
+    ?assertBtError(type_error, beamtalk_system:unsetEnv(42)).
 
 %%% ============================================================================
 %%% setEnv/2 and unsetEnv/1 shims
@@ -247,7 +247,7 @@ halt_in_shared_workspace_raises_unsupported_test() ->
     Prev = beamtalk_capability:recorded(),
     beamtalk_capability:set(#{mode => workspace, include_compiler => true, node_owning => false}),
     try
-        ?assertBtError(unsupported, beamtalk_system:'halt:'(0))
+        ?assertBtError(unsupported, beamtalk_system:halt(0))
     after
         case Prev of
             none -> beamtalk_capability:clear();
@@ -259,16 +259,16 @@ halt_zero_raises_unsupported_test() ->
     ?assertBtError(unsupported, beamtalk_system:halt()).
 
 halt_colon_valid_code_raises_unsupported_test() ->
-    ?assertBtError(unsupported, beamtalk_system:'halt:'(0)).
+    ?assertBtError(unsupported, beamtalk_system:halt(0)).
 
 halt_colon_out_of_range_negative_raises_invalid_argument_test() ->
-    ?assertBtError(invalid_argument, beamtalk_system:'halt:'(-1)).
+    ?assertBtError(invalid_argument, beamtalk_system:halt(-1)).
 
 halt_colon_out_of_range_too_large_raises_invalid_argument_test() ->
-    ?assertBtError(invalid_argument, beamtalk_system:'halt:'(256)).
+    ?assertBtError(invalid_argument, beamtalk_system:halt(256)).
 
 halt_colon_non_integer_raises_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_system:'halt:'(not_an_integer)).
+    ?assertBtError(type_error, beamtalk_system:halt(not_an_integer)).
 
 halt_shim_delegates_to_halt_colon_test() ->
     ?assertBtError(unsupported, beamtalk_system:halt(0)).

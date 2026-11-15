@@ -195,23 +195,14 @@ different Md5) for the same module name, standing in for "a different
 version of the class deployed on this node."
 """.
 compile_block_module_variant(ModName, Suffix) ->
-    Forms = [
-        parse_form(io_lib:format("-module(~p).", [ModName])),
-        parse_form("-export([make_block/0])."),
-        parse_form(
-            io_lib:format(
-                "make_block() -> fun(X) -> {block_result, X, <<\"~s\">>} end.", [Suffix]
-            )
-        )
-    ],
-    {ok, ModName, Binary} = compile:forms(Forms, [binary, return_errors]),
+    Src = io_lib:format(
+        "-module(~p).\n"
+        "-export([make_block/0]).\n"
+        "make_block() -> fun(X) -> {block_result, X, <<\"~s\">>} end.\n",
+        [ModName, Suffix]
+    ),
+    {ModName, Binary} = beamtalk_test_module:compile(Src),
     Binary.
-
-parse_form(IoData) ->
-    Str = lists:flatten(IoData),
-    {ok, Tokens, _EndLine} = erl_scan:string(Str),
-    {ok, Form} = erl_parse:parse_form(Tokens),
-    Form.
 
 block_missing_module_raises(PeerNode) ->
     ModName = beamtalk_test_unique:atom("bt3579b_missing"),
@@ -234,8 +225,7 @@ block_missing_module_raises(PeerNode) ->
         %% from the `undef` term itself.
         ?assertEqual({module, ModName}, erlang:fun_info(Fun, module))
     after
-        code:delete(ModName),
-        code:purge(ModName)
+        beamtalk_test_module:unload(ModName)
     end.
 
 block_different_version_raises(PeerNode) ->
@@ -258,8 +248,7 @@ block_different_version_raises(PeerNode) ->
         {caught, error, {badfun, CaughtFun}, _} = Capture,
         ?assertEqual({module, ModName}, erlang:fun_info(CaughtFun, module))
     after
-        code:delete(ModName),
-        code:purge(ModName),
+        beamtalk_test_module:unload(ModName),
         rpc:call(PeerNode, code, delete, [ModName]),
         rpc:call(PeerNode, code, purge, [ModName])
     end.

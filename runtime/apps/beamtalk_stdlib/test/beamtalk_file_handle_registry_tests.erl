@@ -54,18 +54,8 @@ delete_temp(TmpPath) ->
     file:delete(TmpPath),
     ok.
 
-spawn_dummy() ->
-    spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end).
-
 stop_dummy(Pid) ->
     Pid ! stop,
-    wait_dead(Pid).
-
-wait_dead(Pid) ->
     beamtalk_test_wait:dead(Pid).
 
 %% A descriptor stand-in that never answers a close request. `file:close/1` on
@@ -81,7 +71,7 @@ spawn_wedged_fd() ->
 
 release_wedged_fd(Fd) ->
     Fd ! release,
-    wait_dead(Fd).
+    beamtalk_test_wait:dead(Fd).
 
 %% Block until the registry has processed all calls up to this point (calls
 %% are handled in order, so a further sync call flushes prior ones — and
@@ -106,7 +96,7 @@ has_entry(Path, Handles) ->
 owned_handle_closed_and_removed_on_owner_death_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         ?_test(begin
-            Owner = spawn_dummy(),
+            Owner = beamtalk_test_proc:spawn_idle(),
             {Handle, TmpPath} = open_handle(),
             PathBin = list_to_binary(TmpPath),
             ok = beamtalk_file_handle_registry:register(Handle, Owner),
@@ -135,7 +125,7 @@ registry_stays_responsive_while_owner_close_is_in_flight_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         ?_test(begin
             Registry = whereis(beamtalk_file_handle_registry),
-            Owner = spawn_dummy(),
+            Owner = beamtalk_test_proc:spawn_idle(),
             WedgedFd = spawn_wedged_fd(),
             WedgedPath = list_to_binary(temp_path("beamtalk_file_handle_registry_wedged")),
             Wedged = beamtalk_file_handle:new(WedgedFd, write, WedgedPath),
@@ -182,7 +172,7 @@ unowned_handle_listed_but_never_reclaimed_test_() ->
             %% The process that happened to make the call (the "caller") is
             %% never itself the owner for an unowned registration — it is not
             %% monitored at all, so its death changes nothing.
-            Caller = spawn_dummy(),
+            Caller = beamtalk_test_proc:spawn_idle(),
             stop_dummy(Caller),
             ok = sync(ok),
             ?assert(beamtalk_file_handle:is_open(Handle)),
@@ -197,7 +187,7 @@ unowned_handle_listed_but_never_reclaimed_test_() ->
 unregister_removes_immediately_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         ?_test(begin
-            Owner = spawn_dummy(),
+            Owner = beamtalk_test_proc:spawn_idle(),
             {Handle, TmpPath} = open_handle(),
             PathBin = list_to_binary(TmpPath),
             ok = beamtalk_file_handle_registry:register(Handle, Owner),
@@ -218,7 +208,7 @@ unregister_removes_immediately_test_() ->
 shared_owner_monitor_survives_until_last_handle_gone_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         ?_test(begin
-            Owner = spawn_dummy(),
+            Owner = beamtalk_test_proc:spawn_idle(),
             {H1, P1} = open_handle(),
             {H2, P2} = open_handle(),
             ok = beamtalk_file_handle_registry:register(H1, Owner),
@@ -322,8 +312,8 @@ multiple_owners_monitor_demonitored_independently_test_() ->
     %% monitors map contains entries for more than one distinct owner pid.
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         ?_test(begin
-            Owner1 = spawn_dummy(),
-            Owner2 = spawn_dummy(),
+            Owner1 = beamtalk_test_proc:spawn_idle(),
+            Owner2 = beamtalk_test_proc:spawn_idle(),
             {H1, P1} = open_handle(),
             {H2, P2} = open_handle(),
             ok = beamtalk_file_handle_registry:register(H1, Owner1),

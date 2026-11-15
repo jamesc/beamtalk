@@ -3142,23 +3142,11 @@ kill_then_sweep(Pids) ->
     Store = whereis(beamtalk_trace_store),
     sys:suspend(Store),
     try
-        kill_and_wait(Pids),
+        lists:foreach(fun beamtalk_test_proc:kill_and_wait/1, Pids),
         Store ! sweep_eviction
     after
         sys:resume(Store)
     end.
-
-kill_and_wait(Pids) ->
-    Mons = [{erlang:monitor(process, P), P} || P <- Pids],
-    lists:foreach(fun(P) -> exit(P, kill) end, Pids),
-    lists:foreach(
-        fun({Mon, P}) ->
-            receive
-                {'DOWN', Mon, process, P, _} -> ok
-            end
-        end,
-        Mons
-    ).
 
 chunked_sweep_yields_between_chunks_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_) ->

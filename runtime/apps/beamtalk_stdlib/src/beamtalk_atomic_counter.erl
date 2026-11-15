@@ -49,8 +49,8 @@ AtomicCounter objects are represented as tagged maps:
 - Existing FFI pattern: `beamtalk_ets.erl`
 """.
 
-%% Class methods — canonical colon forms (for EUnit tests and Beamtalk dispatch)
--export(['new:'/1, 'named:'/1]).
+%% Class methods
+-export([new/1, named/1]).
 
 %% Instance methods — no-colon forms used by the FFI proxy
 -export([increment/1, incrementBy/2, decrement/1, decrementBy/2, value/1, reset/1, delete/1]).
@@ -58,9 +58,6 @@ AtomicCounter objects are represented as tagged maps:
 %% The Beamtalk method `value` dispatches via `(Erlang beamtalk_atomic_counter) readValue: self`
 %% because the unary `value` selector is intercepted by block-evaluation codegen (see ADR-0101).
 -export([readValue/1]).
-
-%% FFI shims for class methods
--export([new/1, named/1]).
 
 -type t() :: #{'$beamtalk_class' := 'AtomicCounter', atom() => term()}.
 -export_type([t/0]).
@@ -76,8 +73,8 @@ Creates a named ETS table with a single entry `{value, 0}`.
 Raises `already_exists` if a counter with this name already exists.
 Raises `type_error` if the argument is not an atom.
 """.
--spec 'new:'(atom()) -> t().
-'new:'(Name) when is_atom(Name) ->
+-spec new(atom()) -> t().
+new(Name) when is_atom(Name) ->
     try
         ets:new(Name, [set, named_table, public, {keypos, 1}]),
         ets:insert(Name, {value, 0}),
@@ -93,7 +90,7 @@ Raises `type_error` if the argument is not an atom.
                 )
             )
     end;
-'new:'(_Name) ->
+new(_Name) ->
     beamtalk_error:raise_type_error('AtomicCounter', 'new:', <<"Counter name must be a Symbol">>).
 
 -doc """
@@ -103,8 +100,8 @@ Returns an AtomicCounter instance if a counter with the given name exists.
 Raises `not_found` if no counter with that name has been created.
 Raises `type_error` if the argument is not an atom.
 """.
--spec 'named:'(atom()) -> t().
-'named:'(Name) when is_atom(Name) ->
+-spec named(atom()) -> t().
+named(Name) when is_atom(Name) ->
     case ets:whereis(Name) of
         undefined ->
             beamtalk_error:raise(
@@ -115,7 +112,7 @@ Raises `type_error` if the argument is not an atom.
         _Tid ->
             make_counter(Name)
     end;
-'named:'(_) ->
+named(_) ->
     beamtalk_error:raise_type_error('AtomicCounter', 'named:', <<"Counter name must be a Symbol">>).
 
 %%% ============================================================================
@@ -250,19 +247,12 @@ delete(_Self) ->
 %%% ============================================================================
 %%% FFI Shims
 %%%
-%%% The (Erlang beamtalk_atomic_counter) FFI uses beamtalk_erlang_proxy:direct_call/4,
-%%% which derives the Erlang function name from the first keyword of the selector.
-%%%   `(Erlang beamtalk_atomic_counter) new: name` → `new(name)` → `'new:'`
-%%%   `(Erlang beamtalk_atomic_counter) named: name` → `named(name)` → `'named:'`
+%%% The (Erlang beamtalk_atomic_counter) FFI and `self delegate` resolve through
+%%% beamtalk_erlang_proxy:native_call, which names the function with
+%%% selector_to_function/1 (first keyword, trailing colon stripped).
+%%%   `(Erlang beamtalk_atomic_counter) new: name` → `new(name)`
+%%%   `(Erlang beamtalk_atomic_counter) named: name` → `named(name)`
 %%% ============================================================================
-
--doc "FFI shim for new: — called via (Erlang beamtalk_atomic_counter) new: name.".
--spec new(atom()) -> t().
-new(Name) -> 'new:'(Name).
-
--doc "FFI shim for named: — called via (Erlang beamtalk_atomic_counter) named: name.".
--spec named(atom()) -> t().
-named(Name) -> 'named:'(Name).
 
 %%% ============================================================================
 %%% Internal Helpers
