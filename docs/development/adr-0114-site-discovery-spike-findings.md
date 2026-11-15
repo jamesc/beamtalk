@@ -148,7 +148,7 @@ Tracing why: both `>>` (parsed as a standalone `MethodDefinition`,
 `beamtalk_repl_eval:handle_method_definition/4` →
 `beamtalk_repl_loader:reload_method_definition/4`) and `compile:source:`
 (`beamtalk_repl_eval:compile_method/6,7` → `do_compile_method/7` →
-`beamtalk_repl_loader:install_method/9`) converge on the *same* function,
+`beamtalk_repl_loader_methods:install_method/9`) converge on the *same* function,
 `install_method_with_source/10`/`recompile_with_method`, which:
 
 1. Merges the patched method's source into the class's full, on-disk source

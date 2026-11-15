@@ -270,7 +270,7 @@ file's real, current content sits at `new_path` the entire time — an
 entirely ordinary "rename, flush, rename again" sequence, not a race. Once
 a `move`/`move_noop` commits successfully, `maybe_reload_renamed_class_
 source/1` best-effort reloads the class from `new_path`
-(`beamtalk_repl_loader:reload_class_file/2` — the same tested machinery
+(`beamtalk_repl_loader_reload:reload_class_file/2` — the same tested machinery
 `Counter reload`/`:reload` already uses) purely to refresh this bookkeeping
 attribute for a possible future rename; the class's in-memory identity and
 behaviour are already correct at this point (`classRenameTo/2`'s own job).
@@ -1402,7 +1402,7 @@ reload_renamed_class_source(NewPath, NewClassBin) ->
             {ok, Atom} -> Atom;
             {error, _} -> undefined
         end,
-    try beamtalk_repl_loader:reload_class_file(binary_to_list(NewPath), ExpectedClassName) of
+    try beamtalk_repl_loader_reload:reload_class_file(binary_to_list(NewPath), ExpectedClassName) of
         {ok, _ClassNames} ->
             ok;
         {error, Reason} ->

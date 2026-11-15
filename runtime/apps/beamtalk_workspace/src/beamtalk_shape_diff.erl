@@ -83,7 +83,7 @@ caller.
 %% just-installed generation) with `diff/2`'s field-level result to produce
 %% the ADR 0123 §4 findings table. `own_shape` is the *un-flattened* subset —
 %% just this class's own `field_types`, no ancestors — kept alongside `shape`
-%% so a pre-save precheck (`beamtalk_repl_loader:precheck_class_shape/2`,
+%% so a pre-save precheck (`beamtalk_repl_loader_methods:precheck_class_shape/2`,
 %% ADR 0105 Phase 3) can recompute a *pending* edit's flattened shape without
 %% re-walking the ancestor chain. `ancestor_shape` is the ancestor-only
 %% counterpart, captured directly by `beamtalk_workspace_shape_store`'s own

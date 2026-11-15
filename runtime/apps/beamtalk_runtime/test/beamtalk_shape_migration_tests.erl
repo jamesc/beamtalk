@@ -406,7 +406,7 @@ test_migrate_warns_when_class_method_outside_shape_migrations_table() ->
 %% test_migrate_warns_when_class_method_outside_shape_migrations_table/0, but
 %% via migrate/4 with skip_stray_warning => true — the per-instance hot-reload
 %% call path (beamtalk_hot_reload:migrate_state/3) — which must not warn,
-%% since beamtalk_repl_loader:hot_reload_class/2 already ran the check once
+%% since beamtalk_repl_loader_activate:hot_reload_class/2 already ran the check once
 %% for the class before fanning out to instances.
 test_migrate_skip_stray_warning_suppresses_warning() ->
     beamtalk_test_log:with_capture(all, fun() ->
@@ -421,7 +421,7 @@ test_migrate_skip_stray_warning_suppresses_warning() ->
     end).
 
 %% BT-3543: check_stray_migrations/1 is the once-per-reload call site
-%% (beamtalk_repl_loader:hot_reload_class/2) — it must still warn on its own,
+%% (beamtalk_repl_loader_activate:hot_reload_class/2) — it must still warn on its own,
 %% with no migrate/3-4 call at all.
 test_check_stray_migrations_warns_directly() ->
     beamtalk_test_log:with_capture(all, fun() ->

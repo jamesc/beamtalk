@@ -603,7 +603,7 @@ normalize_diagnostic_wire_encoding_test() ->
 %%% ============================================================================
 
 ensure_structured_error_loader_class_not_found_test() ->
-    %% beamtalk_repl_loader:verify_class_present/3's shape.
+    %% beamtalk_repl_loader_reload:verify_class_present/3's shape.
     Result = beamtalk_repl_errors:ensure_structured_error(
         {class_not_found, 'Counter', "/some/path.bt", ["Other", "Another"]}
     ),

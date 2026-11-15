@@ -465,7 +465,7 @@ define_project_class(Tmp, ClassNameBin) ->
     Path = filename:join(Tmp, binary_to_list(ClassNameBin) ++ ".bt"),
     Source = iolist_to_binary([<<"Object subclass: ">>, ClassNameBin, <<"\n  value => 1\n">>]),
     ok = file:write_file(Path, Source),
-    {ok, _ClassNames} = beamtalk_repl_loader:reload_class_file(Path),
+    {ok, _ClassNames} = beamtalk_repl_loader_reload:reload_class_file(Path),
     ok = beamtalk_workspace_meta:set_class_source(ClassNameBin, binary_to_list(Source)),
     ClassAtom = binary_to_atom(ClassNameBin, utf8),
     Pid = wait_for_class(ClassAtom, 50),
@@ -485,7 +485,7 @@ define_supervisor_class(Tmp, Unique) ->
             <<"\n  state: value = 0\n\n  getValue => self.value\n">>
         ])
     ),
-    {ok, _} = beamtalk_repl_loader:reload_class_file(CounterPath),
+    {ok, _} = beamtalk_repl_loader_reload:reload_class_file(CounterPath),
     _ = wait_for_class(list_to_atom(CounterName), 50),
 
     SupName = "WiSup" ++ Unique,
@@ -500,7 +500,7 @@ define_supervisor_class(Tmp, Unique) ->
             <<")\n">>
         ])
     ),
-    {ok, _} = beamtalk_repl_loader:reload_class_file(SupPath),
+    {ok, _} = beamtalk_repl_loader_reload:reload_class_file(SupPath),
     SupAtom = list_to_atom(SupName),
     SupPid = wait_for_class(SupAtom, 50),
     {class_object_for(SupAtom, SupPid), SupAtom}.

@@ -698,7 +698,7 @@ reload_file(Path) ->
 
 -spec do_reload_file(string()) -> {ok, [binary()]} | {error, term()}.
 do_reload_file(Path) ->
-    case beamtalk_repl_loader:reload_class_file(Path) of
+    case beamtalk_repl_loader_reload:reload_class_file(Path) of
         {ok, ClassNames} ->
             repopulate_class_sources(Path, ClassNames),
             {ok, class_name_binaries(ClassNames)};
@@ -940,7 +940,7 @@ the human REPL path passes `human'. They are stamped onto the MethodInfo so the
 install chokepoint records them verbatim instead of defaulting to `human'.
 
 The patch compiles and installs in memory, and the install chokepoint
-(`beamtalk_repl_loader:load_recompiled_method/7') attempts (best-effort) to emit
+(`beamtalk_repl_loader_methods:load_recompiled_method/7') attempts (best-effort) to emit
 a ChangeLog entry tagged with `Intent' and the author metadata. Returns
 `{ok, ClassName}' on success or `{error, Reason}' on compile/install failure
 (memory unchanged — the all-or-nothing contract for the install).
@@ -1007,7 +1007,7 @@ precheck_method(ClassNameBin, Selector, Source, Side) ->
             {error, stdlib_method_read_only_error(ClassNameBin, SelectorBin)};
         none ->
             IsClassMethod = (Side =:= class),
-            beamtalk_repl_loader:precheck_method(
+            beamtalk_repl_loader_methods:precheck_method(
                 ClassNameBin, SelectorBin, Source, IsClassMethod
             )
     end.
@@ -1061,9 +1061,9 @@ remove_method(ClassNameBin, Selector, Side, StdlibPolicy) ->
         {refuse_stdlib, {ok, _Module}} ->
             {error, stdlib_method_read_only_error(ClassNameBin, SelectorBin)};
         {allow_stdlib, _} ->
-            beamtalk_repl_loader:remove_method(ClassNameBin, SelectorBin, Side);
+            beamtalk_repl_loader_methods:remove_method(ClassNameBin, SelectorBin, Side);
         {refuse_stdlib, none} ->
-            beamtalk_repl_loader:remove_method(ClassNameBin, SelectorBin, Side)
+            beamtalk_repl_loader_methods:remove_method(ClassNameBin, SelectorBin, Side)
     end.
 
 -doc """
@@ -1105,7 +1105,7 @@ do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind,
     State = beamtalk_repl_state:new(undefined, 0),
     IsClassMethod = (Side =:= class),
     case
-        beamtalk_repl_loader:install_method(
+        beamtalk_repl_loader_methods:install_method(
             ClassNameBin,
             SelectorBin,
             Source,

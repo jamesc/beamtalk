@@ -859,7 +859,7 @@ defmodule BtAttachWeb.Live.ClassModals do
   end
 
   # Snake-case a PascalCase class name, mirroring the runtime's
-  # `beamtalk_repl_loader:to_snake_case/1` EXACTLY so the IDE-derived filename and
+  # `beamtalk_repl_loader_support:to_snake_case/1` EXACTLY so the IDE-derived filename and
   # the loader's basename normalisation agree (BT-2646). The rule: the first
   # character is lowercased unconditionally; thereafter an uppercase letter gets a
   # leading `_` ONLY when the previous character was a lowercase letter. This

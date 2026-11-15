@@ -153,7 +153,7 @@ a flat, exhaustively-checkable list.
   selector-keyed (xref) or `state:`/`field:` shape-keyed dependency graph,
   with no concept of "sites that tested this class for leafness." This gap
   is now closed by new, dedicated plumbing rather than an extension of the
-  existing selector/shape trackers: `beamtalk_repl_loader:activate_module/4`
+  existing selector/shape trackers: `beamtalk_repl_loader_activate:activate_module/4`
   detects, immediately before each class-defining `code:load_binary/3` call,
   whether any of the newly-installed classes' declared superclasses are
   about to lose leaf status (`superclasses_losing_leaf_status/1`); when one
