@@ -309,15 +309,21 @@ The captured output is included in the protocol response as the `output` field (
 
 #### 7. Binding Update
 
-If the expression was an assignment (`x := value`), update bindings:
+If the expression was a single assignment (`x := value`), update bindings. The
+compiler port reports the assigned variable alongside the compiled module
+(`assigned_var` in the `compile_expression` response, `step_assignments` — one
+entry per step — for `compile_expression_trace`); the workspace never re-parses
+the source to find it. It is `none` for any other source, including several
+top-level statements, where each assignment has already been threaded through
+the eval module's own bindings:
 
 ```erlang
-case extract_assignment(Expression) of
-    {ok, VarName} ->
-        NewBindings = maps:put(VarName, Result, Bindings);
+case AssignedVar of            %% from the compiler, not the source text
     none ->
-        %% Not an assignment, bindings unchanged
-        Bindings
+        %% Not a single assignment, bindings unchanged
+        Bindings;
+    VarName ->
+        NewBindings = maps:put(VarName, Result, Bindings)
 end
 ```
 

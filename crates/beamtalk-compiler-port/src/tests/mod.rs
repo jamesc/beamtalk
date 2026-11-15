@@ -183,6 +183,7 @@ mod compile_roundtrip_proptest;
 mod completion_and_native_types;
 mod diagnostics_class_hierarchy;
 mod dispatch_and_hierarchy_meta;
+mod expression_assignment;
 mod load_project_parity;
 mod module_naming_and_misc;
 mod protocol_sources_wire;
