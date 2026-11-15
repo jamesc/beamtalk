@@ -167,10 +167,6 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-core/src/semantic_analysis/block_facts/escape.rs",
         4,
     ),
-    (
-        "beamtalk-core/src/semantic_analysis/block_facts/outer_writes.rs",
-        1,
-    ),
     // The `hasField:` guard check runs on the un-normalized AST: its
     // receiver can still be parenthesized (BT-4681 swapped its private
     // `strip_parens` for this call).
