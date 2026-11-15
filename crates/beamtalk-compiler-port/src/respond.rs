@@ -83,16 +83,59 @@ pub(crate) fn build_referenced_alias_terms(referenced_aliases: &[ecow::EcoString
     referenced_aliases.iter().map(|n| binary(n)).collect()
 }
 
-/// Build a response map for a successful `compile_expression`.
-pub(crate) fn ok_response(core_erlang: &str, warnings: &[Warning]) -> Term {
-    Term::from(Map::from([
+/// `compile_expression` success response, plus the variable the source
+/// assigns (BT-4911): `assigned_var` is the binary name when the source is a
+/// single top-level `name := …` statement, else the atom `none`. The workspace
+/// uses it to rebind the session variable to the evaluated result without
+/// re-parsing the source itself.
+pub(crate) fn expression_ok_response(
+    core_erlang: &str,
+    warnings: &[Warning],
+    assigned_var: Option<&str>,
+) -> Term {
+    let mut map = ok_response_map(core_erlang, warnings);
+    map.insert(atom("assigned_var"), assigned_name_term(assigned_var));
+    Term::from(Map::from(map))
+}
+
+/// `compile_expression_trace` success response: `step_assignments` holds one
+/// entry per top-level statement (the same order as the trace steps) — the
+/// assigned variable's name, or the atom `none`.
+pub(crate) fn trace_expression_ok_response(
+    core_erlang: &str,
+    warnings: &[Warning],
+    step_assignments: &[Option<&str>],
+) -> Term {
+    let mut map = ok_response_map(core_erlang, warnings);
+    map.insert(
+        atom("step_assignments"),
+        Term::from(List::from(
+            step_assignments
+                .iter()
+                .copied()
+                .map(assigned_name_term)
+                .collect::<Vec<_>>(),
+        )),
+    );
+    Term::from(Map::from(map))
+}
+
+fn assigned_name_term(name: Option<&str>) -> Term {
+    name.map_or_else(|| atom("none"), binary)
+}
+
+fn ok_response_map(
+    core_erlang: &str,
+    warnings: &[Warning],
+) -> std::collections::HashMap<Term, Term> {
+    std::collections::HashMap::from([
         (atom("status"), atom("ok")),
         (atom("core_erlang"), binary(core_erlang)),
         (
             atom("warnings"),
             Term::from(List::from(build_warning_terms(warnings))),
         ),
-    ]))
+    ])
 }
 
 /// Build a response map for a successful inline class definition in REPL.
