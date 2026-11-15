@@ -608,7 +608,31 @@ source (defined inline at the REPL rather than loaded from a file).
 ) ->
     {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
-patch_protocol_provision(ProtocolBin, SelectorBin, MethodSource, Opts, Warnings, State) ->
+patch_protocol_provision(ProtocolBin, SelectorBin, MethodSource0, Opts, Warnings, State) ->
+    %% `compile:source:' / MCP `save_method' pass a bare body; the edit below
+    %% splices the text into the protocol file and the ChangeLog records it, so
+    %% both need the complete `selector => ...' definition. The compiler owns
+    %% that rule (BT-4911) — a full definition comes back unchanged.
+    case beamtalk_compiler:complete_method_source(MethodSource0, SelectorBin) of
+        {ok, MethodSource} ->
+            patch_protocol_provision_headed(
+                ProtocolBin, SelectorBin, MethodSource, Opts, Warnings, State
+            );
+        {error, _Reason, Msg} ->
+            {error, {compile_error, Msg}, <<>>, Warnings, State}
+    end.
+
+-spec patch_protocol_provision_headed(
+    binary(),
+    binary(),
+    binary(),
+    map(),
+    [beamtalk_repl_protocol:warning()],
+    beamtalk_repl_state:state()
+) ->
+    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
+    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
+patch_protocol_provision_headed(ProtocolBin, SelectorBin, MethodSource, Opts, Warnings, State) ->
     case patch_protocol_provision_edit(ProtocolBin, SelectorBin, MethodSource, Opts) of
         ok ->
             Intent = maps:get(intent, Opts, durable),

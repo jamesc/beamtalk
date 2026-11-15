@@ -29,8 +29,8 @@ use eetf::Term;
 use handlers::{
     handle_build_class_module_index_in_source, handle_categorize_methods,
     handle_class_state_field_defaults, handle_compile, handle_compile_expression,
-    handle_compile_expression_trace, handle_compile_method, handle_diagnostics,
-    handle_find_all_sends_in_source, handle_find_announce_sites_in_source,
+    handle_compile_expression_trace, handle_compile_method, handle_complete_method_source,
+    handle_diagnostics, handle_find_all_sends_in_source, handle_find_announce_sites_in_source,
     handle_find_definition_selector_spans, handle_find_ffi_sites_in_source,
     handle_find_field_readers_in_source, handle_find_field_writers_in_source,
     handle_find_references_to_in_source, handle_find_selector_send_spans,
@@ -75,6 +75,7 @@ fn handle_request(request_term: &Term) -> Term {
         "compile_expression_trace" => handle_compile_expression_trace(map),
         "compile" => handle_compile(map),
         "compile_method" => handle_compile_method(map),
+        "complete_method_source" => handle_complete_method_source(map),
         "diagnostics" => handle_diagnostics(map),
         "version" => handle_version(),
         "resolve_completion_type" => handle_resolve_completion_type(map),
