@@ -377,7 +377,6 @@ pub struct PackageManifest {
     pub description: Option<String>,
     /// Optional SPDX license identifiers (e.g. `["Apache-2.0"]`).
     #[serde(default)]
-    #[allow(dead_code)] // Read by future phases (Hex publishing)
     pub licenses: Option<Vec<String>>,
     /// When `true`, using a class from a transitive dependency is a compile
     /// error instead of a warning (ADR 0070 Phase 3).
@@ -421,7 +420,6 @@ pub struct ParsedManifest {
     /// The package metadata.
     pub package: PackageManifest,
     /// The optional application configuration.
-    #[allow(dead_code)] // Used by tests; will be used for dep application support
     pub application: Option<ApplicationConfig>,
     /// The parsed and validated dependencies (empty if `[dependencies]` is absent).
     pub dependencies: DependencyMap,
