@@ -1824,7 +1824,8 @@ fn test_file_module_name(
 
 /// Discover, compile, and generate wrappers for a single test file.
 ///
-/// Handles `@load` directive resolution, multi-package module name prefixing,
+/// Handles `@load` directive resolution, path-based module naming
+/// (`test_file_module_name`),
 /// `TestCase` compilation, `EUnit` wrapper generation, and doc test discovery.
 fn compile_single_test_file(
     pipeline: &mut TestPipeline,
@@ -1854,14 +1855,6 @@ fn compile_single_test_file(
     // and the REPL.
     let test_file_package = pipeline.current_package_for(test_file);
     let module_name = test_file_module_name(test_file, &pipeline.pkg_root_to_name)?;
-    // A loose test file (`bt@{stem}`) can share a name with a fixture module;
-    // the later `.core`/`.beam` would silently overwrite the earlier one.
-    if pipeline.all_fixture_modules.contains(&module_name) {
-        miette::bail!(
-            "Test file '{test_file}' compiles to module '{module_name}', which a fixture \
-             already uses. Rename or move one of the files."
-        );
-    }
     for tc in &mut test_classes {
         tc.module_name.clone_from(&module_name);
     }
@@ -1892,6 +1885,17 @@ fn compile_single_test_file(
         fixture_modules_by_name,
         &file_hierarchy,
     )?;
+
+    // A loose test file (`bt@{stem}`) can share a name with a fixture module,
+    // including one this file's own `@load` just compiled; the later
+    // `.core`/`.beam` would silently overwrite the earlier one. This runs
+    // before any test core is written.
+    if pipeline.all_fixture_modules.contains(&module_name) {
+        miette::bail!(
+            "Test file '{test_file}' compiles to module '{module_name}', which a fixture \
+             already uses. Rename or move one of the files."
+        );
+    }
 
     // Compile TestCase subclasses
     for test_class in test_classes {
@@ -2005,6 +2009,20 @@ fn resolve_load_directives(
             continue;
         }
         fixture_modules_by_name.insert(fixture_module.clone(), fixture_path.clone());
+
+        // The fixture's `.core` would overwrite an earlier loose test file that
+        // is already named `bt@{stem}` with the same stem.
+        if let Some(test) = pipeline
+            .compiled_tests
+            .iter()
+            .find(|c| c.test_class.module_name == fixture_module)
+        {
+            miette::bail!(
+                "Fixture module name collision for '{fixture_module}': '@load {load_path}' in \
+                 '{test_file}' vs test file '{}'. Rename or move one of the files.",
+                test.source_file
+            );
+        }
 
         if !fixture_path.exists() {
             miette::bail!(
