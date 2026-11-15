@@ -30,81 +30,23 @@ newly non-exhaustive.
 
 -include_lib("eunit/include/eunit.hrl").
 
+alias_recheck_setup() ->
+    beamtalk_test_recheck_fixtures:setup(fixture_opts()).
+
+alias_recheck_teardown(_) ->
+    beamtalk_test_recheck_fixtures:teardown(fixture_opts()).
+
+fixture_opts() ->
+    #{
+        workspace_id => <<"alias_change_recheck_test_ws">>,
+        restart => [beamtalk_alias_xref, beamtalk_workspace_shape_recheck_worker, beamtalk_workspace_findings_store],
+        clear_xref => false
+    }.
+
 %%====================================================================
 %% Integration fixture: real compiler port + alias_xref + workspace_meta +
 %% stores
 %%====================================================================
-
-alias_recheck_setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
-    application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
-    {ok, _} = beamtalk_workspace_meta:start_link(#{
-        workspace_id => <<"alias_change_recheck_test_ws">>,
-        project_path => undefined,
-        created_at => erlang:system_time(second),
-        mode => run
-    }),
-    %% Clears the compiler_server's ambient class *and* alias caches (ADR
-    %% 0108 — clear_classes/0 now clears both, see its doc).
-    beamtalk_compiler_server:clear_classes(),
-    case whereis(beamtalk_alias_xref) of
-        undefined -> ok;
-        AliasXrefPid -> gen_server:stop(AliasXrefPid)
-    end,
-    {ok, _} = beamtalk_alias_xref:start_link(),
-    case whereis(beamtalk_workspace_shape_recheck_worker) of
-        undefined -> ok;
-        WorkerPid -> gen_server:stop(WorkerPid)
-    end,
-    {ok, _} = beamtalk_workspace_shape_recheck_worker:start_link(),
-    case whereis(beamtalk_workspace_findings_store) of
-        undefined -> ok;
-        FindingsPid -> gen_server:stop(FindingsPid)
-    end,
-    {ok, _} = beamtalk_workspace_findings_store:start_link(),
-    ok = beamtalk_announcements:ensure_started(),
-    ok.
-
-alias_recheck_teardown(_) ->
-    beamtalk_repl_subscriptions:unsubscribe(reload_check, self()),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
-    case whereis(beamtalk_alias_xref) of
-        undefined -> ok;
-        AliasXrefPid -> gen_server:stop(AliasXrefPid)
-    end,
-    case whereis(beamtalk_workspace_shape_recheck_worker) of
-        undefined -> ok;
-        WorkerPid -> gen_server:stop(WorkerPid)
-    end,
-    case whereis(beamtalk_workspace_findings_store) of
-        undefined -> ok;
-        FindingsPid -> gen_server:stop(FindingsPid)
-    end,
-    beamtalk_compiler_server:clear_classes(),
-    _ = application:stop(beamtalk_compiler),
-    ok.
-
-subscribe_self_to_reload_check() ->
-    ok = beamtalk_repl_subscriptions:subscribe(reload_check, self()).
-
-receive_reload_check_announcement() ->
-    receive
-        {beamtalk_announcement, _SubRef, 'ReloadCheckCompleted', _Handler, Event} ->
-            Event
-    after 2000 ->
-        error(timeout_waiting_for_reload_check_announcement)
-    end.
 
 %% Forces the (asynchronous, `beamtalk_workspace_shape_recheck_worker`-queued)
 %% alias-change re-check to have run to completion before a test asserts on
@@ -187,7 +129,7 @@ live_alias_redefinition_invalidates_a_matchexhaustive_proof_test_() ->
                         beamtalk_alias_xref:dependents_of(<<"AliasChangeDirection">>)
                     ),
 
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
 
                     %% Turn 2: redefine the alias, adding `#west` — the
                     %% dependent's matchExhaustive: (still only covering
@@ -202,7 +144,7 @@ live_alias_redefinition_invalidates_a_matchexhaustive_proof_test_() ->
                     ),
                     wait_for_alias_change_worker(),
 
-                    Event = receive_reload_check_announcement(),
+                    Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
                     ?assertEqual(
                         <<"AliasChangeDirection">>, maps:get(changedClass, Event)
                     ),
@@ -266,7 +208,7 @@ live_alias_redefinition_to_same_expansion_does_not_produce_findings_test_() ->
                     ok = file:write_file(UserPath, user_source()),
                     {ok, _, _State2} = beamtalk_repl_loader:handle_load(UserPath, State1),
 
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
                     %% Same expansion, verbatim — no new staleness.
                     _State3 = declare_alias(
                         <<"AliasChangeDirection">>,
@@ -281,7 +223,7 @@ live_alias_redefinition_to_same_expansion_does_not_produce_findings_test_() ->
                     %% where a real stored finding IS cleared).
                     ?assertError(
                         timeout_waiting_for_reload_check_announcement,
-                        receive_reload_check_announcement()
+                        beamtalk_test_recheck_fixtures:receive_reload_check_announcement()
                     ),
                     ?assertEqual(
                         [],
@@ -323,7 +265,7 @@ live_alias_redefinition_back_to_sound_expansion_announces_clearing_test_() ->
                     ok = file:write_file(UserPath, user_source()),
                     {ok, _, State2} = beamtalk_repl_loader:handle_load(UserPath, State1),
 
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
 
                     %% Turn 2: add `#west` — the dependent's matchExhaustive:
                     %% is newly non-exhaustive; findings are stored and
@@ -334,7 +276,7 @@ live_alias_redefinition_back_to_sound_expansion_announces_clearing_test_() ->
                         State2
                     ),
                     wait_for_alias_change_worker(),
-                    BreakEvent = receive_reload_check_announcement(),
+                    BreakEvent = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
                     ?assertNotEqual([], maps:get(findings, BreakEvent)),
                     ?assertNotEqual(
                         [],
@@ -352,7 +294,7 @@ live_alias_redefinition_back_to_sound_expansion_announces_clearing_test_() ->
                         State3
                     ),
                     wait_for_alias_change_worker(),
-                    ClearEvent = receive_reload_check_announcement(),
+                    ClearEvent = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
                     ?assertEqual(<<"AliasChangeDirection">>, maps:get(changedClass, ClearEvent)),
                     ?assertEqual(alias_change, maps:get(classification, ClearEvent)),
                     ?assertEqual([], maps:get(findings, ClearEvent)),
@@ -587,7 +529,7 @@ live_redefinition_of_a_deeply_transitive_alias_triggers_recheck_test_() ->
                         beamtalk_alias_xref:dependents_of(<<"AliasChangeDeepC">>)
                     ),
 
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
 
                     %% Turn 4: redefine only the innermost alias, adding
                     %% `#west` — never touching `AliasChangeDeepB` or
@@ -601,7 +543,7 @@ live_redefinition_of_a_deeply_transitive_alias_triggers_recheck_test_() ->
                     ),
                     wait_for_alias_change_worker(),
 
-                    Event = receive_reload_check_announcement(),
+                    Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
                     ?assertEqual(
                         <<"AliasChangeDeepA">>, maps:get(changedClass, Event)
                     ),

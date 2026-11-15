@@ -24,81 +24,23 @@ counterpart.
 
 -include_lib("eunit/include/eunit.hrl").
 
+-define(PREFIX, <<"LoaderShape">>).
+
+shape_loader_setup() ->
+    beamtalk_test_recheck_fixtures:setup(fixture_opts()).
+
+shape_loader_teardown(_) ->
+    beamtalk_test_recheck_fixtures:teardown(fixture_opts()).
+
+fixture_opts() ->
+    #{
+        workspace_id => <<"shape_loader_test_ws">>,
+        restart => [beamtalk_workspace_shape_store, beamtalk_workspace_shape_recheck_worker, beamtalk_workspace_findings_store]
+    }.
+
 %%====================================================================
 %% Integration fixture: real compiler port + xref + workspace_meta + stores
 %%====================================================================
-
-shape_loader_setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
-    application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
-    {ok, _} = beamtalk_workspace_meta:start_link(#{
-        workspace_id => <<"shape_loader_test_ws">>,
-        project_path => undefined,
-        created_at => erlang:system_time(second),
-        mode => run
-    }),
-    beamtalk_test_repl:clear_xref(),
-    beamtalk_compiler_server:clear_classes(),
-    case whereis(beamtalk_workspace_shape_store) of
-        undefined -> ok;
-        ShapePid -> gen_server:stop(ShapePid)
-    end,
-    {ok, _} = beamtalk_workspace_shape_store:start_link(),
-    case whereis(beamtalk_workspace_shape_recheck_worker) of
-        undefined -> ok;
-        WorkerPid -> gen_server:stop(WorkerPid)
-    end,
-    {ok, _} = beamtalk_workspace_shape_recheck_worker:start_link(),
-    case whereis(beamtalk_workspace_findings_store) of
-        undefined -> ok;
-        FindingsPid -> gen_server:stop(FindingsPid)
-    end,
-    {ok, _} = beamtalk_workspace_findings_store:start_link(),
-    %% See beamtalk_repl_loader_recheck_tests:loader_recheck_setup/0's
-    %% identical comment for why this must be up before any test subscribes.
-    ok = beamtalk_announcements:ensure_started(),
-    ok.
-
-shape_loader_teardown(_) ->
-    beamtalk_repl_subscriptions:unsubscribe(reload_check, self()),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
-    case whereis(beamtalk_workspace_shape_store) of
-        undefined -> ok;
-        ShapePid -> gen_server:stop(ShapePid)
-    end,
-    case whereis(beamtalk_workspace_shape_recheck_worker) of
-        undefined -> ok;
-        WorkerPid -> gen_server:stop(WorkerPid)
-    end,
-    case whereis(beamtalk_workspace_findings_store) of
-        undefined -> ok;
-        FindingsPid -> gen_server:stop(FindingsPid)
-    end,
-    beamtalk_test_repl:clear_xref(),
-    _ = application:stop(beamtalk_compiler),
-    ok.
-
-subscribe_self_to_reload_check() ->
-    ok = beamtalk_repl_subscriptions:subscribe(reload_check, self()).
-
-receive_reload_check_announcement() ->
-    receive
-        {beamtalk_announcement, _SubRef, 'ReloadCheckCompleted', _Handler, Event} ->
-            Event
-    after 2000 ->
-        error(timeout_waiting_for_reload_check_announcement)
-    end.
 
 %% ADR 0123 §4 (BT-3538): the shape-reload findings push — a distinct
 %% announcement class from 'ReloadCheckCompleted', riding the same
@@ -159,25 +101,6 @@ counter_source_gen2() ->
         "  state: count :: Integer = 0\n"
     >>.
 
-dashboard_name_accessor_xref() ->
-    [
-        #{
-            class_side => false,
-            selector => 'cleanup:',
-            line => 2,
-            sends => [#{selector => name, line => 2, recv_kind => other}],
-            references => [#{class => 'LoaderShapeCounter', line => 2}],
-            source_status => indexed,
-            provenance => class_body
-        }
-    ].
-
-dashboard_name_accessor_source() ->
-    <<
-        "Object subclass: LoaderShapeDashboard\n"
-        "  cleanup: c :: LoaderShapeCounter => c name\n"
-    >>.
-
 %%====================================================================
 %% End-to-end: reload removes a state: slot, dependent gets flagged
 %%====================================================================
@@ -187,7 +110,7 @@ removing_a_state_slot_flags_the_real_dependent_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
                     UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
@@ -207,10 +130,10 @@ removing_a_state_slot_flags_the_real_dependent_test_() ->
                     %% generation 2, since that is the reload trigger_shape/2
                     %% must find it for.
                     ok = beamtalk_xref:register_class(
-                        'LoaderShapeDashboard', dashboard_name_accessor_xref()
+                        'LoaderShapeDashboard', beamtalk_test_recheck_fixtures:dashboard_name_accessor_xref(?PREFIX)
                     ),
                     ok = beamtalk_workspace_meta:set_class_source(
-                        <<"LoaderShapeDashboard">>, dashboard_name_accessor_source()
+                        <<"LoaderShapeDashboard">>, beamtalk_test_recheck_fixtures:dashboard_name_accessor_source(?PREFIX)
                     ),
 
                     %% Generation 2: `name` removed. The shape store already
@@ -221,7 +144,7 @@ removing_a_state_slot_flags_the_real_dependent_test_() ->
                     ok = file:write_file(Path, counter_source_gen2()),
                     {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
 
-                    Event = receive_reload_check_announcement(),
+                    Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
                     ?assertEqual(<<"LoaderShapeCounter">>, maps:get(changedClass, Event)),
                     ?assertEqual(shape_change, maps:get(classification, Event)),
                     ?assert(
@@ -298,7 +221,7 @@ adding_an_unrelated_field_with_no_stale_dependents_still_announces_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
                     UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
@@ -326,7 +249,7 @@ adding_an_unrelated_field_with_no_stale_dependents_still_announces_test_() ->
                     ok = file:write_file(Path, clean_counter_source_gen2()),
                     {ok, _, _State2} = beamtalk_repl_loader:handle_load(Path, State1),
 
-                    Event = receive_reload_check_announcement(),
+                    Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
                     ?assertEqual(<<"LoaderShapeCleanCounter">>, maps:get(changedClass, Event)),
                     ?assertEqual(shape_change, maps:get(classification, Event)),
                     ?assert(
@@ -509,7 +432,7 @@ row1_dropped_without_bump_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
                     UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
@@ -548,7 +471,7 @@ row2_added_only_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
                     UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
@@ -586,7 +509,7 @@ row3_bumped_without_migration_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
                     UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
@@ -623,7 +546,7 @@ row4_version_decreased_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
                     UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),
@@ -668,7 +591,7 @@ row5_instances_suspended_test_() ->
         {setup, fun shape_loader_setup/0, fun shape_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
                     UniqueId = beamtalk_test_unique:id(),
                     Path = filename:join(
                         beamtalk_test_fs:base_dir(),

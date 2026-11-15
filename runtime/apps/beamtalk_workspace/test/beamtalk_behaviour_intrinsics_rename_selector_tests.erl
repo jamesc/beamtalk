@@ -49,16 +49,9 @@ start_fixture(Prefix, Files) ->
     ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
     %% BT-4792: the runtime reaches the workspace pipeline through this callback.
     ok = beamtalk_workspace_callback:register(beamtalk_workspace_callback_impl),
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(beamtalk_test_fs:base_dir(), Prefix ++ "-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
@@ -100,10 +93,7 @@ stop_classes(ClassNames) ->
 stop_meta() ->
     ok = beamtalk_workspace_callback:unregister(),
     ok = beamtalk_capability:clear(),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end.
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta).
 
 class_object(ClassName) ->
     beamtalk_class_registry:class_object_from_pid(
@@ -144,7 +134,7 @@ setup_super_in_self() ->
         {"bt3279_superinself_grandbase.bt", super_in_self_grandbase_source()},
         {"bt3279_superinself_base.bt", super_in_self_base_source()}
     ]),
-    start_changelog(Fixture, "bt3279-superinself-cl").
+    start_changelog(Fixture).
 
 teardown_super_in_self(Fixture) ->
     stop_changelog(Fixture),
@@ -266,31 +256,10 @@ rename_selector_success(_Fixture) ->
 
 setup_happy_with_changelog() ->
     Fixture = setup_happy(),
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
-    Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary("bt-rename-selector-changelog-" ++ Unique),
-    ChangelogHome = filename:join(
-        beamtalk_test_fs:base_dir(), "bt-rename-selector-changelog-home-" ++ Unique
-    ),
-    ok = filelib:ensure_path(ChangelogHome),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", ChangelogHome),
-    {ok, _} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
-    Fixture#{old_home => OldHome}.
+    Fixture#{changelog_ws => beamtalk_test_fs:start_changelog_workspace()}.
 
-teardown_happy_with_changelog(#{old_home := OldHome} = Fixture) ->
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    case OldHome of
-        false -> os:unsetenv("HOME");
-        _ -> os:putenv("HOME", OldHome)
-    end,
+teardown_happy_with_changelog(#{changelog_ws := Ws} = Fixture) ->
+    beamtalk_test_fs:stop_changelog_workspace(Ws),
     teardown_happy(Fixture).
 
 rename_selector_revert_test_() ->
@@ -414,7 +383,7 @@ setup_xclass() ->
         {"bt3279_xclass_base.bt", xclass_base_source()},
         {"bt3279_xclass_unrelated.bt", xclass_unrelated_source()}
     ]),
-    start_changelog(Fixture, "bt3279-xclass-cl").
+    start_changelog(Fixture).
 
 teardown_xclass(Fixture) ->
     stop_changelog(Fixture),
@@ -495,7 +464,7 @@ setup_override() ->
         {"bt3279_override_sub.bt", override_sub_source()},
         {"bt3279_override_deep.bt", override_deep_source()}
     ]),
-    start_changelog(Fixture, "bt3279-override-cl").
+    start_changelog(Fixture).
 
 teardown_override(Fixture) ->
     stop_changelog(Fixture),
@@ -783,28 +752,8 @@ rename_selector_if_absent(_Fixture) ->
 %% beamtalk_behaviour_intrinsics_rename_to_tests.erl's setup_with_changelog/0)
 %%====================================================================
 
-start_changelog(Fixture, Prefix) ->
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
-    Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary(Prefix ++ "-" ++ Unique),
-    ChangelogHome = filename:join(beamtalk_test_fs:base_dir(), Prefix ++ "-home-" ++ Unique),
-    ok = filelib:ensure_path(ChangelogHome),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", ChangelogHome),
-    {ok, _} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
-    Fixture#{old_home => OldHome}.
+start_changelog(Fixture) ->
+    Fixture#{changelog_ws => beamtalk_test_fs:start_changelog_workspace()}.
 
-stop_changelog(#{old_home := OldHome}) ->
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    case OldHome of
-        false -> os:unsetenv("HOME");
-        _ -> os:putenv("HOME", OldHome)
-    end,
-    ok.
+stop_changelog(#{changelog_ws := Ws}) ->
+    beamtalk_test_fs:stop_changelog_workspace(Ws).

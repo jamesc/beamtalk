@@ -1957,12 +1957,8 @@ maybe_help_for_alias_ignores_selector_and_class_forms_test() ->
 %%====================================================================
 
 eval_setup() ->
-    application:ensure_all_started(compiler),
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
     %% Allow the runtime to register its bootstrap classes before compiling.
     ok = beamtalk_test_wait:class('Object'),
     %% A live beamtalk_workspace_meta is needed by reload_file/1,
@@ -1972,10 +1968,7 @@ eval_setup() ->
     %% handle_method_definition_with_source_compile_fail_test/0 above.
     %% `mode => run` avoids the disk-persistence side effect
     %% beamtalk_repl_loader_precheck_tests.erl's fixture also steers clear of.
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        OldPid -> gen_server:stop(OldPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     {ok, _} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"eval_success_ws">>,
         project_path => undefined,
@@ -1995,14 +1988,8 @@ eval_teardown(_) ->
     %% tests (and later test modules in the shared EUnit node) see the baseline
     %% "compiler not running" state this fixture started from.
     _ = application:stop(beamtalk_compiler),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end,
-    case whereis(beamtalk_workspace_signature_store) of
-        undefined -> ok;
-        SigStorePid -> gen_server:stop(SigStorePid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_signature_store),
     ok.
 
 %% Seed workspace_meta with `ClassSource` under `ClassNameBin` so a
@@ -2833,10 +2820,7 @@ repopulate_class_sources_success_test() ->
     %% A standalone workspace_meta instance, mirroring
     %% handle_method_definition_with_source_compile_fail_test/0 above — this
     %% test does not run inside the eval_success_test_/0 fixture.
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        OldPid -> gen_server:stop(OldPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     {ok, WsPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"repopulate_test_ws">>,
         project_path => undefined,

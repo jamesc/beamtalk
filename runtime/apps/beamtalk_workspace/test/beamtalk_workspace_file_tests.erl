@@ -288,7 +288,7 @@ changelog_log_rewrite_does_not_touch_a_foreign_fixed_tmp_test() ->
 %% swept when the ChangeLog starts; a fresh one is left alone.
 changelog_start_sweeps_stale_temps_test() ->
     WorkspaceId = list_to_binary("test-ws-file-sweep-" ++ beamtalk_test_unique:id()),
-    with_home(fun(_Home) ->
+    beamtalk_test_fs:with_tmp_home(fun(_Home) ->
         ChangesDir = beamtalk_workspace_changelog:changes_dir(WorkspaceId),
         SourcesDir = filename:join(ChangesDir, "sources"),
         ok = filelib:ensure_path(SourcesDir),
@@ -324,7 +324,7 @@ with_dir(Fun) ->
 %% throwaway `HOME`, as `beamtalk_workspace_flush_tests` sets one up.
 with_changelog(Fun) ->
     WorkspaceId = list_to_binary("test-ws-file-" ++ beamtalk_test_unique:id()),
-    with_home(fun(Home) ->
+    beamtalk_test_fs:with_tmp_home(fun(Home) ->
         {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
         try
             Fun(WorkspaceId, Home)
@@ -332,25 +332,6 @@ with_changelog(Fun) ->
             stop(Pid)
         end
     end).
-
-%% Run `Fun(Home)` with `HOME` pointing at a fresh throwaway directory, then
-%% restore `HOME` and delete the directory.
-with_home(Fun) ->
-    Home = filename:join(
-        beamtalk_test_fs:base_dir(), "bt-wsfile-home-" ++ beamtalk_test_unique:id()
-    ),
-    ok = filelib:ensure_path(Home),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", Home),
-    try
-        Fun(Home)
-    after
-        case OldHome of
-            false -> os:unsetenv("HOME");
-            _ -> os:putenv("HOME", OldHome)
-        end,
-        _ = file:del_dir_r(Home)
-    end.
 
 stop(Pid) ->
     Ref = monitor(process, Pid),

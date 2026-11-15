@@ -26,6 +26,19 @@ Two tiers:
 
 -include_lib("eunit/include/eunit.hrl").
 
+-define(PREFIX, <<"ReCheck">>).
+
+recheck_setup() ->
+    beamtalk_test_recheck_fixtures:setup(fixture_opts()).
+
+recheck_teardown(_) ->
+    beamtalk_test_recheck_fixtures:teardown(fixture_opts()).
+
+fixture_opts() ->
+    #{
+        workspace_id => <<"recheck_test_ws">>
+    }.
+
 %%====================================================================
 %% Pure helpers — group_by_owner/1, apply_cap/2, cap_note/1
 %%====================================================================
@@ -442,74 +455,6 @@ class_name_mentioned_false_when_absent_test() ->
 %% Integration fixture: real compiler port + xref + workspace_meta
 %%====================================================================
 
-recheck_setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
-    application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
-    %% `mode => run` (run mode) is load-bearing for test isolation, not
-    %% just tidiness: in REPL mode (the default) `beamtalk_workspace_meta`
-    %% persists `class_sources` to
-    %% `~/.beamtalk/workspaces/<workspace_id>/metadata.json` and *reloads* it
-    %% on the next `init/1` — so a "fresh" restart under the same
-    %% `workspace_id` would resurrect a previous test's `set_class_source/2`
-    %% calls instead of starting empty (discovered via a genuinely-flaky
-    %% no-live-source test here). Run mode skips disk entirely.
-    {ok, _} = beamtalk_workspace_meta:start_link(#{
-        workspace_id => <<"recheck_test_ws">>,
-        project_path => undefined,
-        created_at => erlang:system_time(second),
-        mode => run
-    }),
-    beamtalk_test_repl:clear_xref(),
-    beamtalk_compiler_server:clear_classes(),
-    ok.
-
-recheck_teardown(_) ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
-    beamtalk_test_repl:clear_xref(),
-    _ = application:stop(beamtalk_compiler),
-    ok.
-
-%% xref payload: `ReCheckDashboard>>refresh:` sends `size` to a
-%% `ReCheckCounter`-typed parameter — the real dependent.
-dashboard_xref() ->
-    [
-        #{
-            class_side => false,
-            selector => 'refresh:',
-            line => 2,
-            sends => [#{selector => size, line => 2, recv_kind => other}],
-            references => [#{class => 'ReCheckCounter', line => 2}],
-            source_status => indexed,
-            provenance => class_body
-        }
-    ].
-
-%% xref payload: `ReCheckListView>>render:` also sends `size`, but to a
-%% `List`-typed parameter — an unrelated same-selector site.
-listview_xref() ->
-    [
-        #{
-            class_side => false,
-            selector => 'render:',
-            line => 2,
-            sends => [#{selector => size, line => 2, recv_kind => other}],
-            references => [],
-            source_status => indexed,
-            provenance => class_body
-        }
-    ].
-
 %% xref payload: `ReCheckDashboard>>cleanup:` sends the removed selector
 %% `reset` to a `ReCheckCounter`-typed parameter.
 dashboard_reset_xref() ->
@@ -524,18 +469,6 @@ dashboard_reset_xref() ->
             provenance => class_body
         }
     ].
-
-dashboard_source() ->
-    <<
-        "Object subclass: ReCheckDashboard\n"
-        "  refresh: c :: ReCheckCounter -> Integer => (c size) + 1\n"
-    >>.
-
-listview_source() ->
-    <<
-        "Object subclass: ReCheckListView\n"
-        "  render: xs :: List -> Integer => (xs size) + 1\n"
-    >>.
 
 dashboard_reset_source() ->
     <<
@@ -564,13 +497,13 @@ signature_change_finding_and_receiver_filter_test_() ->
                             size => #{arity => 0, param_types => [], return_type => 'String'}
                         })
                     ),
-                    ok = beamtalk_xref:register_class('ReCheckDashboard', dashboard_xref()),
-                    ok = beamtalk_xref:register_class('ReCheckListView', listview_xref()),
+                    ok = beamtalk_xref:register_class('ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)),
+                    ok = beamtalk_xref:register_class('ReCheckListView', beamtalk_test_recheck_fixtures:listview_xref([])),
                     ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckDashboard">>, dashboard_source()
+                        <<"ReCheckDashboard">>, beamtalk_test_recheck_fixtures:dashboard_source(?PREFIX)
                     ),
                     ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckListView">>, listview_source()
+                        <<"ReCheckListView">>, beamtalk_test_recheck_fixtures:listview_list_source(?PREFIX)
                     ),
 
                     Result = beamtalk_recheck:trigger(
@@ -650,13 +583,13 @@ caller_cap_note_test_() ->
                                 size => #{arity => 0, param_types => [], return_type => 'String'}
                             })
                         ),
-                        ok = beamtalk_xref:register_class('ReCheckDashboard', dashboard_xref()),
-                        ok = beamtalk_xref:register_class('ReCheckListView', listview_xref()),
+                        ok = beamtalk_xref:register_class('ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)),
+                        ok = beamtalk_xref:register_class('ReCheckListView', beamtalk_test_recheck_fixtures:listview_xref([])),
                         ok = beamtalk_workspace_meta:set_class_source(
-                            <<"ReCheckDashboard">>, dashboard_source()
+                            <<"ReCheckDashboard">>, beamtalk_test_recheck_fixtures:dashboard_source(?PREFIX)
                         ),
                         ok = beamtalk_workspace_meta:set_class_source(
-                            <<"ReCheckListView">>, listview_source()
+                            <<"ReCheckListView">>, beamtalk_test_recheck_fixtures:listview_list_source(?PREFIX)
                         ),
 
                         Result = beamtalk_recheck:trigger(
@@ -776,7 +709,7 @@ no_live_source_is_skipped_not_checked_test_() ->
                     %% xref knows about a sender, but no `set_class_source/2`
                     %% was ever recorded for it (e.g. a stdlib/dependency
                     %% class, never installed through beamtalk_repl_loader).
-                    ok = beamtalk_xref:register_class('ReCheckDashboard', dashboard_xref()),
+                    ok = beamtalk_xref:register_class('ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)),
 
                     Result = beamtalk_recheck:trigger(
                         <<"ReCheckCounter">>, <<"size">>, instance, signature_change
@@ -1292,27 +1225,6 @@ counter_actor_hierarchy(FieldTypes) ->
         field_types => FieldTypes
     }.
 
-%% xref payload: `ReCheckDashboard>>cleanup:` sends the removed accessor
-%% selector `name` to a `ReCheckCounter`-typed parameter.
-dashboard_name_accessor_xref() ->
-    [
-        #{
-            class_side => false,
-            selector => 'cleanup:',
-            line => 2,
-            sends => [#{selector => name, line => 2, recv_kind => other}],
-            references => [#{class => 'ReCheckCounter', line => 2}],
-            source_status => indexed,
-            provenance => class_body
-        }
-    ].
-
-dashboard_name_accessor_source() ->
-    <<
-        "Object subclass: ReCheckDashboard\n"
-        "  cleanup: c :: ReCheckCounter => c name\n"
-    >>.
-
 removed_field_accessor_is_flagged_test_() ->
     {timeout, 30,
         {setup, fun recheck_setup/0, fun recheck_teardown/1, fun(_) ->
@@ -1324,10 +1236,10 @@ removed_field_accessor_is_flagged_test_() ->
                         'ReCheckCounter', counter_actor_hierarchy(#{count => 'Integer'})
                     ),
                     ok = beamtalk_xref:register_class(
-                        'ReCheckDashboard', dashboard_name_accessor_xref()
+                        'ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_name_accessor_xref(?PREFIX)
                     ),
                     ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckDashboard">>, dashboard_name_accessor_source()
+                        <<"ReCheckDashboard">>, beamtalk_test_recheck_fixtures:dashboard_name_accessor_source(?PREFIX)
                     ),
 
                     Result = beamtalk_recheck:trigger_shape(
@@ -1454,9 +1366,9 @@ trigger_pending_finds_stale_dependent_without_installing_test_() ->
                             size => #{arity => 0, param_types => [], return_type => 'Integer'}
                         })
                     ),
-                    ok = beamtalk_xref:register_class('ReCheckDashboard', dashboard_xref()),
+                    ok = beamtalk_xref:register_class('ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)),
                     ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckDashboard">>, dashboard_source()
+                        <<"ReCheckDashboard">>, beamtalk_test_recheck_fixtures:dashboard_source(?PREFIX)
                     ),
 
                     %% Pending, NOT YET installed edit: size -> String.
@@ -1537,9 +1449,9 @@ trigger_pending_does_not_clobber_concurrent_register_class_test_() ->
                             size => #{arity => 0, param_types => [], return_type => 'Integer'}
                         })
                     ),
-                    ok = beamtalk_xref:register_class('ReCheckDashboard', dashboard_xref()),
+                    ok = beamtalk_xref:register_class('ReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)),
                     ok = beamtalk_workspace_meta:set_class_source(
-                        <<"ReCheckDashboard">>, dashboard_source()
+                        <<"ReCheckDashboard">>, beamtalk_test_recheck_fixtures:dashboard_source(?PREFIX)
                     ),
 
                     %% A distinct, independently-installed generation — models

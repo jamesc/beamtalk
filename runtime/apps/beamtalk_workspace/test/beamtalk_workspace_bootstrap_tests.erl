@@ -651,10 +651,7 @@ store_bootstrap_class_source_success_test_() ->
             cleanup_test_source_class('BT_SrcPresent'),
             code:purge('bt@BT_SrcPresent'),
             code:delete('bt@BT_SrcPresent'),
-            case whereis(beamtalk_workspace_meta) of
-                undefined -> ok;
-                MetaPid -> gen_server:stop(MetaPid)
-            end
+            beamtalk_test_proc:stop_registered(beamtalk_workspace_meta)
         end,
         fun(_) ->
             [

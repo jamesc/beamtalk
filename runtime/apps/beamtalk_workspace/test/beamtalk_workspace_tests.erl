@@ -24,10 +24,7 @@ test_metadata() ->
     }.
 
 ensure_meta_stopped() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        OldPid -> gen_server:stop(OldPid)
-    end.
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta).
 
 %%====================================================================
 %% Tests
