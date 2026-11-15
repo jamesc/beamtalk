@@ -18,6 +18,7 @@ The classification table itself is unit-tested in
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -define(RELEASE, #{mode => release, include_compiler => false}).
@@ -52,6 +53,7 @@ raised_kind(Fun) ->
     try Fun() of
         _ -> none
     catch
+        %% BT-4900: kept hand-written - value-returning helper / message prefix (offset 0) match
         error:#{error := #beamtalk_error{kind = Kind}} -> Kind;
         error:#beamtalk_error{kind = Kind} -> Kind;
         _:_ -> other
@@ -305,21 +307,24 @@ compile_source_refused_without_compiler_test() ->
 compile_source_refusal_names_the_method_test() ->
     with_dynamic_class('BT3568CompileMsg', fun(ClassObj) ->
         with_capabilities(?RELEASE, fun() ->
-            try
-                beamtalk_class_refactor:classCompileSource(
-                    ClassObj, increment, <<"increment => 1">>
-                ),
-                ?assert(false)
-            catch
-                error:#{error := #beamtalk_error{message = Message}} ->
+            %% The message must START with the method name (offset 0), so this is
+            %% a prefix match rather than a `...MessageContains` check.
+            ?assertBtErrorWith(
+                _,
+                _,
+                _,
+                fun(#beamtalk_error{message = {beamtalk_string, Message}}) ->
                     ?assertMatch(
                         {0, _},
                         binary:match(
-                            element(2, Message),
-                            <<"BT3568CompileMsg >> increment cannot be compiled.">>
+                            Message, <<"BT3568CompileMsg >> increment cannot be compiled.">>
                         )
                     )
-            end
+                end,
+                beamtalk_class_refactor:classCompileSource(
+                    ClassObj, increment, <<"increment => 1">>
+                )
+            )
         end)
     end).
 

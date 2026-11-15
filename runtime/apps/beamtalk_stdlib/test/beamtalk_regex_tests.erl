@@ -99,17 +99,20 @@ every_valid_option_compiles_test() ->
     ).
 
 unknown_option_hint_lists_valid_options_test() ->
-    try beamtalk_regex:from(<<"a">>, [bogus]) of
-        _ -> ?assert(false)
-    catch
-        error:#{error := #beamtalk_error{kind = regex_error, hint = {beamtalk_string, Hint}}} ->
+    ?assertBtErrorWith(
+        regex_error,
+        _,
+        _,
+        fun(#beamtalk_error{hint = {beamtalk_string, Hint}}) ->
             lists:foreach(
                 fun(Opt) ->
                     ?assertNotEqual(nomatch, binary:match(Hint, atom_to_binary(Opt)))
                 end,
                 beamtalk_regex:valid_options()
             )
-    end.
+        end,
+        beamtalk_regex:from(<<"a">>, [bogus])
+    ).
 
 %% Members of `type RegexOption = #a | #b | ...` as recorded in the stdlib
 %% app's `type_aliases` env (generated from stdlib/src/regex.bt).

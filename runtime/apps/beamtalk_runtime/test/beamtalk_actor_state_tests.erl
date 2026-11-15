@@ -7,6 +7,7 @@
 -moduledoc "EUnit tests for beamtalk_actor_state (ADR 0137 Phase 1).".
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 self_obj() ->
@@ -24,11 +25,9 @@ with_cell(State, Fun) ->
     end.
 
 kind_of(Fun) ->
-    try
-        Fun(),
-        no_error
-    catch
-        error:#{error := #beamtalk_error{kind = Kind}} -> Kind
+    case beamtalk_test_assert:raised_error(Fun) of
+        no_error -> no_error;
+        #beamtalk_error{kind = Kind} -> Kind
     end.
 
 %%% install / take / uninstall
@@ -163,16 +162,16 @@ away_read_without_capture_raises_test() ->
     ).
 
 unreachable_error_shape_test() ->
-    try
-        beamtalk_actor_state:put(self_obj(), x, 1),
-        ?assert(false)
-    catch
-        error:#{error := #beamtalk_error{kind = K, class = C, hint = H, details = D}} ->
-            ?assertEqual(actor_state_unreachable, K),
-            ?assertEqual('ActorStateTestClass', C),
-            ?assertMatch({beamtalk_string, _}, H),
-            ?assertEqual(#{field => x}, D)
-    end.
+    ?assertBtErrorWith(
+        actor_state_unreachable,
+        'ActorStateTestClass',
+        _,
+        fun(Err) ->
+            ?assertMatch({beamtalk_string, _}, Err#beamtalk_error.hint),
+            ?assertEqual(#{field => x}, Err#beamtalk_error.details)
+        end,
+        beamtalk_actor_state:put(self_obj(), x, 1)
+    ).
 
 %%% snapshot / restore (BT-4122: restore only rolls back at home)
 

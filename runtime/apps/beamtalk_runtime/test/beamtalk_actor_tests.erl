@@ -430,12 +430,7 @@ compat_sync_send_preserves_class_test_() ->
 compat_sync_send_case(Selector, Class, Kind) ->
     {ok, Actor} = test_compat_error_actor:start_link(),
     try
-        beamtalk_actor:sync_send(Actor, Selector, []),
-        ?assert(false, "Expected error to be raised")
-    catch
-        error:#{error := Inner, '$beamtalk_class' := RaisedClass} ->
-            ?assertEqual(Class, RaisedClass),
-            ?assertEqual(Kind, Inner#beamtalk_error.kind)
+        ?assertBtErrorTagged(Class, Kind, _, _, beamtalk_actor:sync_send(Actor, Selector, []))
     after
         gen_server:stop(Actor)
     end.
@@ -2582,9 +2577,16 @@ restore_propagated_ctx_erases_call_stack_when_absent_test() ->
     ?assertEqual(undefined, get('$bt_call_stack')).
 
 restore_propagated_ctx_non_map_is_noop_test() ->
-    %% Non-map argument is silently ignored
-    beamtalk_actor:restore_propagated_ctx(not_a_map),
-    ok.
+    %% Non-map argument is silently ignored: returns ok and leaves the
+    %% process's existing trace context untouched.
+    Marker = [{'Marker', bt4900}],
+    put('$bt_call_stack', Marker),
+    try
+        ?assertEqual(ok, beamtalk_actor:restore_propagated_ctx(not_a_map)),
+        ?assertEqual(Marker, get('$bt_call_stack'))
+    after
+        erase('$bt_call_stack')
+    end.
 
 %%% ============================================================================
 %%% sync_send/4 invalid timeout test
@@ -4788,6 +4790,7 @@ continuation_error_kind(Fun) ->
     try Fun() of
         Other -> {no_error, Other}
     catch
+        %% BT-4900: kept hand-written - value-returning kind helper ({no_error, V} on success)
         error:#{error := #beamtalk_error{kind = Kind}} -> Kind
     end.
 

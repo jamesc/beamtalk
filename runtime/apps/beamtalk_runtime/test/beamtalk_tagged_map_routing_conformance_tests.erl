@@ -677,6 +677,7 @@ outcome(Fun) ->
     try
         {returned, Fun()}
     catch
+        %% BT-4900: kept hand-written - value-returning outcome helper (also catches non-Beamtalk raises)
         error:#{error := #beamtalk_error{} = E} -> {raised, error_shape(E)};
         error:#beamtalk_error{} = E -> {raised, error_shape(E)};
         Class:Reason -> {raised, Class, Reason}
