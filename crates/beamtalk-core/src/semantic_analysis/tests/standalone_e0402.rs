@@ -27,7 +27,7 @@ fn analyse_ext(preloaded: &[(&str, &str)], ext_src: &str) -> Vec<Diagnostic> {
     let ctx = AnalysisContext::default()
         .with_current_package("app")
         .with_pre_loaded_classes(classes);
-    analyse_full(&parse_module(ext_src), ctx).diagnostics
+    analyse_full(&parse_bt(ext_src), ctx).diagnostics
 }
 
 fn leaks(d: &[Diagnostic]) -> Vec<&Diagnostic> {
@@ -41,7 +41,7 @@ fn inline_leak_message(class_src: &str) -> String {
     let ctx = AnalysisContext::default()
         .with_current_package("app")
         .with_pre_loaded_classes(declared_by("app", TOKEN_BUFFER));
-    let d = analyse_full(&parse_module(class_src), ctx).diagnostics;
+    let d = analyse_full(&parse_bt(class_src), ctx).diagnostics;
     let hits = leaks(&d);
     assert_eq!(hits.len(), 1, "{d:?}");
     hits[0].message.to_string()
@@ -148,7 +148,7 @@ fn same_file_extension_leak_is_reported_once() {
         .with_pre_loaded_classes(declared_by("app", TOKEN_BUFFER));
     let src = "Object subclass: Parser\n  go => 1\n\
                Parser >> tokenize: s :: String -> TokenBuffer => nil\n";
-    let d = analyse_full(&parse_module(src), ctx).diagnostics;
+    let d = analyse_full(&parse_bt(src), ctx).diagnostics;
     assert_eq!(leaks(&d).len(), 1, "{d:?}");
 }
 
@@ -161,7 +161,7 @@ fn standalone_internal_method_satisfying_a_public_protocol_is_an_error() {
         .with_pre_loaded_classes(declared_by("app", PARSER));
     let src = "Protocol define: Tokenizing\n  tokenize -> Integer\n\
                Parser >> internal tokenize -> Integer => 1\n";
-    let d = analyse_full(&parse_module(src), ctx).diagnostics;
+    let d = analyse_full(&parse_bt(src), ctx).diagnostics;
     let hits: Vec<_> = d
         .iter()
         .filter(|d| d.message.contains("satisfies public protocol"))
@@ -181,7 +181,7 @@ fn standalone_internal_class_method_satisfying_a_public_protocol_is_an_error() {
         .with_pre_loaded_classes(declared_by("app", PARSER));
     let src = "Protocol define: Making\n  class make -> Integer\n\
                Parser class >> internal make -> Integer => 1\n";
-    let d = analyse_full(&parse_module(src), ctx).diagnostics;
+    let d = analyse_full(&parse_bt(src), ctx).diagnostics;
     let hits: Vec<_> = d
         .iter()
         .filter(|d| d.message.contains("satisfies public protocol"))

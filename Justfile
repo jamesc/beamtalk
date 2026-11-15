@@ -938,7 +938,7 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names test-lint-stamp test-refresh-edge test-vs-elixir-nightly
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names test-lint-stamp test-refresh-edge test-check-stdlib-class-beams test-vs-elixir-nightly
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -962,6 +962,17 @@ test-refresh-edge:
 [windows]
 test-refresh-edge:
     @echo "test-refresh-edge: skipped on Windows (covered by Linux CI)"
+
+# Test (BT-4925): the `test-install` class-beam guard passes on a populated
+# ebin dir every time (no `find | grep -q` SIGPIPE under pipefail) and fails
+# with a diagnostic on an empty one.
+[unix]
+test-check-stdlib-class-beams:
+    @bash scripts/ci/test-check-stdlib-class-beams.sh
+
+[windows]
+test-check-stdlib-class-beams:
+    @echo "test-check-stdlib-class-beams: skipped on Windows (covered by Linux CI)"
 
 # Test (BT-4844): the parser and the 25% time gate of the nightly vs-elixir
 # subset (scripts/ci/vs_elixir_nightly.py).
@@ -1568,10 +1579,9 @@ test-install: build-release build-stdlib
     # entry with no beam fails activation at startup, and the `modules` list
     # must match the installed beams. A count of 0 means the stdlib build no
     # longer writes where install-otp-apps.sh reads.
-    if ! find runtime/apps/beamtalk_stdlib/ebin -maxdepth 1 -name 'bt@*.beam' 2>/dev/null | grep -q .; then
-        echo "❌ No bt@*.beam in runtime/apps/beamtalk_stdlib/ebin after build-stdlib — has its output dir moved?"
-        exit 1
-    fi
+    # (BT-4925: the guard is a script, not `find | grep -q`, which SIGPIPEs
+    # find under pipefail and read a populated dir as empty.)
+    scripts/ci/check-stdlib-class-beams.sh runtime/apps/beamtalk_stdlib/ebin
     erl -noshell -eval '
         [Ebin] = init:get_plain_arguments(),
         {ok, [{application, beamtalk_stdlib, Props}]} =
