@@ -2263,7 +2263,7 @@ with_registry(Fun) ->
 open_mode_path(Tag) ->
     list_to_binary(
         "_bt_test_bt3635_" ++ Tag ++ "_" ++
-            integer_to_list(erlang:unique_integer([positive])) ++ ".txt"
+            beamtalk_test_unique:id() ++ ".txt"
     ).
 
 open_in(Dict, Path) ->

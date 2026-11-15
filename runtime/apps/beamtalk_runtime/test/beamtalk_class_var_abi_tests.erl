@@ -541,7 +541,7 @@ preflight_test_() ->
 scratch_dir(Name) ->
     Dir = filename:join(
         binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
-        Name ++ "_" ++ integer_to_list(erlang:unique_integer([positive]))
+        Name ++ "_" ++ beamtalk_test_unique:id()
     ),
     ok = filelib:ensure_path(Dir),
     Dir.

@@ -101,8 +101,8 @@ to_qualified_module_atom_binary_and_string_package_agree_test() ->
 to_qualified_module_atom_never_creates_atom_test() ->
     %% A snake/package combo that has never been turned into an atom in this
     %% VM must resolve to undefined, not silently mint a new atom.
-    Unique = erlang:unique_integer([positive]),
-    Snake = "bt3108_never_created_" ++ integer_to_list(Unique),
+    Unique = beamtalk_test_unique:id(),
+    Snake = "bt3108_never_created_" ++ Unique,
     ?assertEqual(
         undefined,
         beamtalk_module_name:to_qualified_module_atom(Snake, <<"nopkg">>)

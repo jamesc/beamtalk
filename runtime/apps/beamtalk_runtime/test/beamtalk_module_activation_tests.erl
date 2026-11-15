@@ -331,7 +331,7 @@ activate_ebin_nonexistent_dir_test() ->
     NonExistent = filename:join(
         get_tmp_base(),
         "nonexistent_ebin_" ++
-            integer_to_list(erlang:unique_integer([positive]))
+            beamtalk_test_unique:id()
     ),
     ?assertEqual({ok, []}, beamtalk_module_activation:activate_ebin(NonExistent)).
 
@@ -731,7 +731,7 @@ index_of(Elem, [_ | Rest], N) ->
 create_temp_dir() ->
     Base = filename:join([
         get_tmp_base(),
-        "bt_activation_test_" ++ integer_to_list(erlang:unique_integer([positive]))
+        "bt_activation_test_" ++ beamtalk_test_unique:id()
     ]),
     ok = filelib:ensure_dir(filename:join(Base, "dummy")),
     Base.

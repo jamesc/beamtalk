@@ -853,7 +853,7 @@ make_temp_dir() ->
     %% (embedding literal `"` characters), which is a legal POSIX filename
     %% byte but a forbidden Windows filename character -- use ~s instead.
     Unique = lists:flatten(
-        io_lib:format("repo_~p_~s", [erlang:unique_integer([positive]), os:getpid()])
+        io_lib:format("repo_~s", [beamtalk_test_unique:id()])
     ),
     Dir = filename:join(binary_to_list(element(2, beamtalk_file:'tempDirectory'())), Unique),
     ok = filelib:ensure_dir(filename:join(Dir, "x")),

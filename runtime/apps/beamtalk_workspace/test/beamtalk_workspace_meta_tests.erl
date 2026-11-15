@@ -321,7 +321,7 @@ register_module_test() ->
 
     %% Register a fresh module name unlikely to already exist
     % elp:fixme W0023 intentional atom creation
-    ModuleName = list_to_atom("test_module_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    ModuleName = list_to_atom("test_module_" ++ beamtalk_test_unique:id()),
     ok = beamtalk_workspace_meta:register_module(ModuleName),
     ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
 
@@ -364,7 +364,7 @@ unregister_module_test() ->
 
     % elp:fixme W0023 intentional atom creation
     ModuleName = list_to_atom(
-        "test_unrg_" ++ integer_to_list(erlang:unique_integer([positive]))
+        "test_unrg_" ++ beamtalk_test_unique:id()
     ),
     ok = beamtalk_workspace_meta:register_module(ModuleName),
     ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
@@ -396,7 +396,7 @@ unregister_module_when_not_started_test() ->
 
 persist_and_restore_modules_test() ->
     %% Use a unique workspace ID so we control the metadata file
-    WsId = <<"persist_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"persist_test_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     MetaDir = filename:dirname(MetaFile),
 
@@ -446,7 +446,7 @@ persist_and_restore_modules_test() ->
 stale_metadata_project_path_does_not_override_launcher_test() ->
     %% BT-3664: a stale metadata.json (workspace ids are per-VM counters) with a
     %% different project_path must not change how sync names project modules.
-    WsId = <<"stale_pp_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"stale_pp_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     MetaDir = filename:dirname(MetaFile),
     StaleDir = "bt_test_3664_stale_project",
@@ -505,7 +505,7 @@ stale_metadata_under_colliding_id_does_not_leak_into_foreground_workspace_test()
 stale_metadata_no_leak_case() ->
     %% BT-3670: a stale metadata.json left under an old-style colliding id
     %% (`foreground_1') must not affect a workspace started with a fresh id.
-    OldId = <<"foreground_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    OldId = <<"foreground_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     OldFile = metadata_path_for(OldId),
     OldDir = filename:dirname(OldFile),
     filelib:ensure_dir(OldFile),
@@ -542,7 +542,7 @@ stale_metadata_no_leak_case() ->
 named_workspace_still_restores_metadata_test() ->
     %% BT-3670: explicitly named/persistent workspaces intentionally reuse
     %% their id and must keep restoring timestamps and settings.
-    WsId = <<"named_ws_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"named_ws_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     MetaDir = filename:dirname(MetaFile),
     filelib:ensure_dir(MetaFile),
@@ -609,7 +609,7 @@ anonymous_foreground_no_persist_case() ->
 
 named_workspace_still_persists_metadata_test() ->
     %% BT-3672 regression: explicitly named ids keep writing metadata.json.
-    WsId = <<"named_ws_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"named_ws_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     MetaDir = filename:dirname(MetaFile),
     stop_if_running(),
@@ -640,7 +640,7 @@ prune_stale_foreground_workspaces_test_() ->
     end.
 
 prune_cases() ->
-    Base = filename:join("bt_test_3672_prune", integer_to_list(erlang:unique_integer([positive]))),
+    Base = filename:join("bt_test_3672_prune", beamtalk_test_unique:id()),
     Now = erlang:system_time(second),
     Week = 7 * 24 * 3600,
     %% pid 2147483000 exceeds any kernel pid_max, so `kill -0` => No such process.
@@ -719,7 +719,7 @@ prune_stale_foreground_workspaces_async_test_() ->
     end.
 
 prune_async_case() ->
-    Base = filename:join("bt_test_3672_async", integer_to_list(erlang:unique_integer([positive]))),
+    Base = filename:join("bt_test_3672_async", beamtalk_test_unique:id()),
     Now = erlang:system_time(second),
     Week = 7 * 24 * 3600,
     Dir = filename:join(Base, "foreground_2147483000_1_1"),
@@ -742,7 +742,7 @@ prune_async_case() ->
 
 load_corrupt_json_falls_back_test() ->
     %% Use a unique workspace ID
-    WsId = <<"corrupt_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"corrupt_test_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     MetaDir = filename:dirname(MetaFile),
 
@@ -853,7 +853,7 @@ remove_class_source_when_not_started_test() ->
 
 debounce_coalesces_rapid_changes_test() ->
     %% Use a unique workspace ID to control the metadata file
-    WsId = <<"debounce_test_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"debounce_test_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     MetaDir = filename:dirname(MetaFile),
 
@@ -870,11 +870,11 @@ debounce_coalesces_rapid_changes_test() ->
 
     %% Register 3 modules in rapid succession (< 2s debounce window)
     % elp:fixme W0023 intentional atom creation
-    Mod1 = list_to_atom("debounce_mod1_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    Mod1 = list_to_atom("debounce_mod1_" ++ beamtalk_test_unique:id()),
     % elp:fixme W0023 intentional atom creation
-    Mod2 = list_to_atom("debounce_mod2_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    Mod2 = list_to_atom("debounce_mod2_" ++ beamtalk_test_unique:id()),
     % elp:fixme W0023 intentional atom creation
-    Mod3 = list_to_atom("debounce_mod3_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    Mod3 = list_to_atom("debounce_mod3_" ++ beamtalk_test_unique:id()),
     ok = beamtalk_workspace_meta:register_module(Mod1),
     ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     ok = beamtalk_workspace_meta:register_module(Mod2),
@@ -913,7 +913,7 @@ debounce_coalesces_rapid_changes_test() ->
 
 run_mode_no_disk_write_test() ->
     %% In run mode (mode => run), no entry should be written to ~/.beamtalk/workspaces/
-    WsId = <<"run_mode_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"run_mode_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     %% Mirror beamtalk_workspace_meta's metadata path computation exactly.
     MetaFile = metadata_path_for(WsId),
 
@@ -942,7 +942,7 @@ run_mode_no_disk_write_test() ->
 release_mode_no_disk_write_test() ->
     %% ADR 0125 §1.4: release mode, like run mode, writes no workspace
     %% artifacts to disk.
-    WsId = <<"release_mode_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"release_mode_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     _ = file:delete(MetaFile),
     stop_if_running(),
@@ -978,7 +978,7 @@ removed_repl_key_fails_loudly_test() ->
 
 run_mode_metadata_accessible_test() ->
     %% Even in run mode, get_metadata/0 must work normally
-    WsId = <<"run_meta_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"run_meta_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
 
     stop_if_running(),
 
@@ -1017,7 +1017,7 @@ settings_set_then_get_roundtrips_test() ->
 settings_survive_restart_test() ->
     %% A boolean setting persisted on shutdown must be re-readable after restart.
     stop_if_running(),
-    WsId = <<"settings_persist_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"settings_persist_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     %% Clean up any leftover metadata from a prior run with a colliding id.
     _ = file:delete(MetaFile),
@@ -1065,7 +1065,7 @@ class_removed_cast_unregisters_module_test() ->
 
     % elp:fixme W0023 intentional atom creation
     ModuleName = list_to_atom(
-        "bt1242_meta_" ++ integer_to_list(erlang:unique_integer([positive]))
+        "bt1242_meta_" ++ beamtalk_test_unique:id()
     ),
     ok = beamtalk_workspace_meta:register_module(ModuleName),
     ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
@@ -1246,7 +1246,7 @@ settings_int_and_binary_survive_restart_test() ->
     %% persistable_setting_value/1 whitelists boolean, integer, binary. Exercise
     %% the integer and binary branches via a persist/restore round-trip.
     stop_if_running(),
-    WsId = <<"settings_int_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"settings_int_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     _ = file:delete(MetaFile),
     try
@@ -1311,7 +1311,7 @@ git_toplevel_cache_not_persisted_test() ->
     %% written to metadata.json, so it cannot be restored stale across restarts
     %% (or across machines, where the cached path would not exist).
     stop_if_running(),
-    WsId = <<"gittop_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"gittop_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     _ = file:delete(MetaFile),
     try
@@ -1353,7 +1353,7 @@ set_git_toplevel_when_not_started_test() ->
 %% class would after a supervisor-restart rather than a full VM restart).
 class_source_survives_restart_when_module_loaded_test() ->
     stop_if_running(),
-    WsId = <<"clssrc_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"clssrc_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     _ = file:delete(MetaFile),
     ModuleAtom = load_fake_class_module('Bt3108Foo'),
@@ -1387,7 +1387,7 @@ class_source_survives_restart_for_packaged_project_test() ->
     stop_if_running(),
     ProjectDir = filename:join(
         temp_dir_meta(),
-        "bt-meta-pkg-" ++ integer_to_list(erlang:unique_integer([positive]))
+        "bt-meta-pkg-" ++ beamtalk_test_unique:id()
     ),
     ok = filelib:ensure_path(ProjectDir),
     ok = file:write_file(
@@ -1396,7 +1396,7 @@ class_source_survives_restart_for_packaged_project_test() ->
     ),
     ProjectPath = list_to_binary(ProjectDir),
     application:set_env(beamtalk_runtime, root_package, <<"bt3108pkg">>),
-    WsId = <<"clssrc_pkg_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"clssrc_pkg_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     _ = file:delete(MetaFile),
     ModuleAtom = load_fake_class_module_qualified('Bt3108Pkg', <<"bt3108pkg">>),
@@ -1428,7 +1428,7 @@ class_source_survives_restart_for_packaged_project_test() ->
 %% session) is dropped on restore rather than served as if still current.
 class_source_dropped_when_module_not_loaded_test() ->
     stop_if_running(),
-    WsId = <<"clssrc_gone_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"clssrc_gone_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     _ = file:delete(MetaFile),
     %% Ensure the class-name atom itself exists (so restore gets past
@@ -1436,7 +1436,7 @@ class_source_dropped_when_module_not_loaded_test() ->
     %% "atom exists but module isn't loaded" from "atom never existed".
     % elp:fixme W0023 intentional atom creation
     ClassAtom = list_to_atom(
-        "Bt3108Gone" ++ integer_to_list(erlang:unique_integer([positive]))
+        "Bt3108Gone" ++ beamtalk_test_unique:id()
     ),
     ClassBin = atom_to_binary(ClassAtom, utf8),
     try
@@ -1463,11 +1463,11 @@ class_source_dropped_when_module_not_loaded_test() ->
 %% no longer be trusted to match what's on disk.
 class_source_dropped_when_source_file_newer_than_snapshot_test() ->
     stop_if_running(),
-    WsId = <<"clssrc_stale_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"clssrc_stale_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     _ = file:delete(MetaFile),
     Tmp = filename:join(
-        temp_dir_meta(), "bt-meta-clssrc-" ++ integer_to_list(erlang:unique_integer([positive]))
+        temp_dir_meta(), "bt-meta-clssrc-" ++ beamtalk_test_unique:id()
     ),
     ok = filelib:ensure_path(Tmp),
     SourceFile = filename:join(Tmp, "bt3108stale.bt"),
@@ -1508,12 +1508,12 @@ class_source_dropped_when_source_file_newer_than_snapshot_test() ->
 
 loaded_modules_dropped_when_module_not_loaded_test() ->
     stop_if_running(),
-    WsId = <<"ldmod_gone_", (integer_to_binary(erlang:unique_integer([positive])))/binary>>,
+    WsId = <<"ldmod_gone_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
     MetaFile = metadata_path_for(WsId),
     _ = file:delete(MetaFile),
     % elp:fixme W0023 intentional atom creation
     ModuleAtom = list_to_atom(
-        "bt3108_unloaded_" ++ integer_to_list(erlang:unique_integer([positive]))
+        "bt3108_unloaded_" ++ beamtalk_test_unique:id()
     ),
     try
         Init = #{

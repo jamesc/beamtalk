@@ -269,7 +269,7 @@ purge_activation_fixture_module() ->
 make_temp_project_dir() ->
     Base = filename:join(
         beamtalk_test_fs:base_dir(),
-        "beamtalk_proj_" ++ integer_to_list(erlang:unique_integer([positive]))
+        "beamtalk_proj_" ++ beamtalk_test_unique:id()
     ),
     ok = file:make_dir(Base),
     ok = file:make_dir(filename:join(Base, "_build")),
@@ -495,7 +495,7 @@ find_bt_modules_skips_invalid_names_test() ->
 make_temp_beam_dir(FileNames) ->
     Dir = filename:join(
         beamtalk_test_fs:base_dir(),
-        "beamtalk_bootstrap_test_" ++ integer_to_list(erlang:unique_integer([positive]))
+        "beamtalk_bootstrap_test_" ++ beamtalk_test_unique:id()
     ),
     ok = file:make_dir(Dir),
     lists:foreach(

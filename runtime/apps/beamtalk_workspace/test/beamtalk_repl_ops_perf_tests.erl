@@ -226,7 +226,7 @@ tmp_export_path(Tag) ->
         "beamtalk_test_ops_export_",
         Tag,
         "_",
-        integer_to_list(erlang:unique_integer([positive])),
+        beamtalk_test_unique:id(),
         ".json"
     ]).
 
