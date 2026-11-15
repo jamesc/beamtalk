@@ -54,11 +54,7 @@ teardown(ClassNames) ->
                 undefined ->
                     ok;
                 Pid when is_pid(Pid) ->
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
+                    beamtalk_test_proc:stop(Pid)
             end
         end,
         ClassNames
@@ -119,782 +115,472 @@ metaclass_new_raises_test() ->
 %%% ============================================================================
 
 class_class_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1088BiClassClass', #{}, #{}),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    ?assertEqual('Metaclass', MetaObj#beamtalk_object.class),
-                    ?assertEqual(Pid, MetaObj#beamtalk_object.pid)
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% className/1
-%%% ============================================================================
-
-class_name_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1088BiClassName', #{}, #{}),
-                try
-                    ?assertEqual(
-                        'BT1088BiClassName',
-                        beamtalk_behaviour_intrinsics:className(ClassObj)
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1088BiClassClass', #{}, #{}),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                ?assertEqual('Metaclass', MetaObj#beamtalk_object.class),
+                ?assertEqual(Pid, MetaObj#beamtalk_object.pid)
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% className/1
+        %%% ============================================================================
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1088BiClassName', #{}, #{}),
+            try
+                ?assertEqual(
+                    'BT1088BiClassName',
+                    beamtalk_behaviour_intrinsics:className(ClassObj)
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classLocalMethods/1
+        %%% ============================================================================
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1088BiNoMethods', #{}, #{}),
+            try
+                Methods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
+                ?assert(is_list(Methods)),
+                ?assertEqual([], Methods)
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {ClassObj, Pid} = register_class(
+                'BT1088BiWithMethods',
+                #{},
+                #{'getValue' => MethodFun, 'setValue:' => MethodFun}
+            ),
+            try
+                Methods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
+                ?assert(lists:member('getValue', Methods)),
+                ?assert(lists:member('setValue:', Methods))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% classLocalMethods on metaclass object returns class methods
+        ?_test(begin
+            ClassMethodFun = fun(_Self) -> ok end,
+            {_ClassObj, Pid} = register_class_with_class_methods(
+                'BT1635MetaHasMethods',
+                #{},
+                #{},
+                #{'myClassMethod' => ClassMethodFun, 'otherClassMethod' => ClassMethodFun}
+            ),
+            try
+                %% Build metaclass object: class = 'Metaclass', same pid
+                MetaObj = #beamtalk_object{
+                    class = 'Metaclass',
+                    class_mod = beamtalk_metaclass_bt,
+                    pid = Pid
+                },
+                Methods = beamtalk_behaviour_intrinsics:classLocalMethods(MetaObj),
+                ?assert(is_list(Methods)),
+                ?assert(lists:member('myClassMethod', Methods)),
+                ?assert(lists:member('otherClassMethod', Methods))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% classLocalMethods on metaclass with no class methods returns []
+        ?_test(begin
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {_ClassObj, Pid} = register_class(
+                'BT1635MetaNoMethods',
+                #{},
+                #{'instanceMethod' => MethodFun}
+            ),
+            try
+                MetaObj = #beamtalk_object{
+                    class = 'Metaclass',
+                    class_mod = beamtalk_metaclass_bt,
+                    pid = Pid
+                },
+                Methods = beamtalk_behaviour_intrinsics:classLocalMethods(MetaObj),
+                ?assert(is_list(Methods)),
+                ?assertEqual([], Methods),
+                %% Verify instance methods are NOT returned
+                ?assertNot(lists:member('instanceMethod', Methods))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% classIncludesSelector on metaclass checks class methods
+        ?_test(begin
+            ClassMethodFun = fun(_Self) -> ok end,
+            {_ClassObj, Pid} = register_class_with_class_methods(
+                'BT1635MetaIncludes',
+                #{},
+                #{},
+                #{'myClassMethod' => ClassMethodFun}
+            ),
+            try
+                MetaObj = #beamtalk_object{
+                    class = 'Metaclass',
+                    class_mod = beamtalk_metaclass_bt,
+                    pid = Pid
+                },
+                ?assert(
+                    beamtalk_behaviour_intrinsics:classIncludesSelector(
+                        MetaObj, 'myClassMethod'
                     )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classLocalMethods/1
-%%% ============================================================================
-
-class_local_methods_empty_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1088BiNoMethods', #{}, #{}),
-                try
-                    Methods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
-                    ?assert(is_list(Methods)),
-                    ?assertEqual([], Methods)
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_local_methods_with_methods_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {ClassObj, Pid} = register_class(
-                    'BT1088BiWithMethods',
-                    #{},
-                    #{'getValue' => MethodFun, 'setValue:' => MethodFun}
                 ),
-                try
-                    Methods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
-                    ?assert(lists:member('getValue', Methods)),
-                    ?assert(lists:member('setValue:', Methods))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% classLocalMethods on metaclass object returns class methods
-class_local_methods_metaclass_with_class_methods_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassMethodFun = fun(_Self) -> ok end,
-                {_ClassObj, Pid} = register_class_with_class_methods(
-                    'BT1635MetaHasMethods',
-                    #{},
-                    #{},
-                    #{'myClassMethod' => ClassMethodFun, 'otherClassMethod' => ClassMethodFun}
+                ?assertNot(
+                    beamtalk_behaviour_intrinsics:classIncludesSelector(
+                        MetaObj, 'bogusMethod'
+                    )
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classFieldNames/1
+        %%% ============================================================================
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1088BiNoFields', #{}, #{}),
+            try
+                Fields = beamtalk_behaviour_intrinsics:classFieldNames(ClassObj),
+                ?assert(is_list(Fields)),
+                ?assertEqual([], Fields)
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {ClassObj, Pid} = register_class(
+                'BT1088BiWithFields',
+                #{x => 0, y => 0},
+                #{}
+            ),
+            try
+                Fields = beamtalk_behaviour_intrinsics:classFieldNames(ClassObj),
+                ?assert(is_list(Fields)),
+                ?assert(lists:member(x, Fields)),
+                ?assert(lists:member(y, Fields))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classClassVarNames/1 and classAllClassVarNames/1
+        %%% ============================================================================
+        %% Dynamic (ClassBuilder) classes carry no static __beamtalk_meta/0, so the
+        %% class-side field intrinsics return [] rather than crashing. The meta-reading
+        %% path (real class_fields) is covered by the BUnit suite against compiled
+        %% fixtures (stdlib/test/class_state_test.bt).
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT2238ClassVarsNoMeta', #{x => 0}, #{}),
+            try
+                Local = beamtalk_behaviour_intrinsics:classClassVarNames(ClassObj),
+                All = beamtalk_behaviour_intrinsics:classAllClassVarNames(ClassObj),
+                ?assertEqual([], Local),
+                ?assertEqual([], All)
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classIncludesSelector/2
+        %%% ============================================================================
+        ?_test(begin
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {ClassObj, Pid} = register_class(
+                'BT1088BiSelectorTrue',
+                #{},
+                #{'increment' => MethodFun}
+            ),
+            try
+                ?assert(
+                    beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'increment')
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1088BiSelectorFalse', #{}, #{}),
+            try
+                ?assertNot(
+                    beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'nonExistent')
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classDoc/1 and classSetDoc/2
+        %%% ============================================================================
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1088BiDocNil', #{}, #{}),
+            try
+                ?assertEqual(nil, beamtalk_behaviour_intrinsics:classDoc(ClassObj))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1088BiDocSet', #{}, #{}),
+            try
+                Doc = <<"This is a test class">>,
+                RetObj = beamtalk_behaviour_intrinsics:classSetDoc(ClassObj, Doc),
+                ?assertEqual(ClassObj, RetObj),
+                ?assertEqual(
+                    {beamtalk_string, Doc}, beamtalk_behaviour_intrinsics:classDoc(ClassObj)
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classSetMethodDoc/3 and classDocForMethod/2
+        %%% ============================================================================
+        ?_test(begin
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {ClassObj, Pid} = register_class(
+                'BT1088BiMethodDoc',
+                #{},
+                #{'myMethod' => MethodFun}
+            ),
+            try
+                Doc = <<"Does something useful">>,
+                RetObj = beamtalk_behaviour_intrinsics:classSetMethodDoc(
+                    ClassObj, 'myMethod', Doc
                 ),
-                try
-                    %% Build metaclass object: class = 'Metaclass', same pid
-                    MetaObj = #beamtalk_object{
-                        class = 'Metaclass',
-                        class_mod = beamtalk_metaclass_bt,
-                        pid = Pid
-                    },
-                    Methods = beamtalk_behaviour_intrinsics:classLocalMethods(MetaObj),
-                    ?assert(is_list(Methods)),
-                    ?assert(lists:member('myClassMethod', Methods)),
-                    ?assert(lists:member('otherClassMethod', Methods))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
+                ?assertEqual(ClassObj, RetObj),
+                ?assertEqual(
+                    {beamtalk_string, Doc},
+                    beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'myMethod')
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1088BiDocForMethod', #{}, #{}),
+            try
+                ?assertEqual(
+                    nil,
+                    beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'nosuchMethod')
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% metaclassSuperclass/1 — via gen_server:call(Pid, superclass)
+        %%% ============================================================================
+        %% metaclassSuperclass/1 now calls gen_server:call(Pid, superclass)
+        %% directly (apply_class_info/2 ensures the gen_server always holds the correct superclass).
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1169BiSuperclassNoMeta', #{}, #{}),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                Result = beamtalk_behaviour_intrinsics:metaclassSuperclass(MetaObj),
+                %% If Object is registered (full test suite), returns its metaclass;
+                %% otherwise nil.
+                case beamtalk_class_registry:whereis_class('Object') of
+                    undefined ->
+                        ?assertEqual(nil, Result);
+                    _ ->
+                        ?assertMatch(#beamtalk_object{class = 'Metaclass'}, Result)
                 end
-            end)
-        ]
-    end}.
-
-%% classLocalMethods on metaclass with no class methods returns []
-class_local_methods_metaclass_no_class_methods_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {_ClassObj, Pid} = register_class(
-                    'BT1635MetaNoMethods',
-                    #{},
-                    #{'instanceMethod' => MethodFun}
-                ),
-                try
-                    MetaObj = #beamtalk_object{
-                        class = 'Metaclass',
-                        class_mod = beamtalk_metaclass_bt,
-                        pid = Pid
-                    },
-                    Methods = beamtalk_behaviour_intrinsics:classLocalMethods(MetaObj),
-                    ?assert(is_list(Methods)),
-                    ?assertEqual([], Methods),
-                    %% Verify instance methods are NOT returned
-                    ?assertNot(lists:member('instanceMethod', Methods))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% classIncludesSelector on metaclass checks class methods
-class_includes_selector_metaclass_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassMethodFun = fun(_Self) -> ok end,
-                {_ClassObj, Pid} = register_class_with_class_methods(
-                    'BT1635MetaIncludes',
-                    #{},
-                    #{},
-                    #{'myClassMethod' => ClassMethodFun}
-                ),
-                try
-                    MetaObj = #beamtalk_object{
-                        class = 'Metaclass',
-                        class_mod = beamtalk_metaclass_bt,
-                        pid = Pid
-                    },
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classIncludesSelector(
-                            MetaObj, 'myClassMethod'
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {_ParentObj, ParentPid} = register_class('BT1792BiMetaSuperParent', #{}, #{}),
+            {ClassObj, ChildPid} = register_class_with_super(
+                'BT1792BiMetaSuperChild', 'BT1792BiMetaSuperParent', #{}, #{}
+            ),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                Result = beamtalk_behaviour_intrinsics:metaclassSuperclass(MetaObj),
+                %% Should return the metaclass of the parent
+                ?assertMatch(#beamtalk_object{class = 'Metaclass'}, Result)
+            after
+                beamtalk_test_proc:stop(ChildPid),
+                beamtalk_test_proc:stop(ParentPid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classSubclasses/1
+        %%% ============================================================================
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1088BiLeafClass', #{}, #{}),
+            try
+                Subclasses = beamtalk_behaviour_intrinsics:classSubclasses(ClassObj),
+                ?assert(is_list(Subclasses)),
+                ?assertEqual([], Subclasses)
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classSuperclass/1
+        %%% ============================================================================
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1792BiSuperclass', #{}, #{}),
+            try
+                Super = beamtalk_behaviour_intrinsics:classSuperclass(ClassObj),
+                %% Superclass is 'Object'. If Object is registered (full test suite),
+                %% we get a class object; if not (isolated eunit), we get nil.
+                case beamtalk_class_registry:whereis_class('Object') of
+                    undefined ->
+                        ?assertEqual(nil, Super);
+                    _ ->
+                        ?assertMatch(#beamtalk_object{}, Super),
+                        ?assertEqual(
+                            'Object',
+                            beamtalk_behaviour_intrinsics:className(Super)
                         )
-                    ),
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:classIncludesSelector(
-                            MetaObj, 'bogusMethod'
-                        )
+                end
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {_ParentObj, ParentPid} = register_class('BT1792BiSuperParent', #{}, #{}),
+            {ChildObj, ChildPid} = register_class_with_super(
+                'BT1792BiSuperChild', 'BT1792BiSuperParent', #{}, #{}
+            ),
+            try
+                Super = beamtalk_behaviour_intrinsics:classSuperclass(ChildObj),
+                ?assertMatch(#beamtalk_object{}, Super),
+                ?assertEqual(
+                    'BT1792BiSuperParent',
+                    beamtalk_behaviour_intrinsics:className(Super)
+                )
+            after
+                beamtalk_test_proc:stop(ChildPid),
+                beamtalk_test_proc:stop(ParentPid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classAllSuperclasses/1
+        %%% ============================================================================
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1792BiAllSupers', #{}, #{}),
+            try
+                Supers = beamtalk_behaviour_intrinsics:classAllSuperclasses(ClassObj),
+                ?assert(is_list(Supers))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {_GrandObj, GrandPid} = register_class('BT1792BiGrand', #{}, #{}),
+            {_ParentObj, ParentPid} = register_class_with_super(
+                'BT1792BiMiddle', 'BT1792BiGrand', #{}, #{}
+            ),
+            {ChildObj, ChildPid} = register_class_with_super(
+                'BT1792BiBottom', 'BT1792BiMiddle', #{}, #{}
+            ),
+            try
+                Supers = beamtalk_behaviour_intrinsics:classAllSuperclasses(ChildObj),
+                SuperNames = [beamtalk_behaviour_intrinsics:className(S) || S <- Supers],
+                ?assert(lists:member('BT1792BiMiddle', SuperNames)),
+                ?assert(lists:member('BT1792BiGrand', SuperNames))
+            after
+                beamtalk_test_proc:stop(ChildPid),
+                beamtalk_test_proc:stop(ParentPid),
+                beamtalk_test_proc:stop(GrandPid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classAllSubclasses/1
+        %%% ============================================================================
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1792BiAllSubEmpty', #{}, #{}),
+            try
+                AllSub = beamtalk_behaviour_intrinsics:classAllSubclasses(ClassObj),
+                ?assert(is_list(AllSub)),
+                ?assertEqual([], AllSub)
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {ParentObj, ParentPid} = register_class('BT1792BiParent', #{}, #{}),
+            {_ChildObj, ChildPid} = register_class_with_super(
+                'BT1792BiChild', 'BT1792BiParent', #{}, #{}
+            ),
+            try
+                Subclasses = beamtalk_behaviour_intrinsics:classSubclasses(ParentObj),
+                SubNames = [beamtalk_behaviour_intrinsics:className(S) || S <- Subclasses],
+                ?assert(lists:member('BT1792BiChild', SubNames)),
+                %% Also test allSubclasses
+                AllSub = beamtalk_behaviour_intrinsics:classAllSubclasses(ParentObj),
+                AllSubNames = [beamtalk_behaviour_intrinsics:className(S) || S <- AllSub],
+                ?assert(lists:member('BT1792BiChild', AllSubNames))
+            after
+                beamtalk_test_proc:stop(ChildPid),
+                beamtalk_test_proc:stop(ParentPid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classMethods/1 — full inheritance chain
+        %%% ============================================================================
+        ?_test(begin
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {ClassObj, Pid} = register_class(
+                'BT1792BiMethodsFull',
+                #{},
+                #{'foo' => MethodFun, 'bar' => MethodFun}
+            ),
+            try
+                Methods = beamtalk_behaviour_intrinsics:classMethods(ClassObj),
+                ?assert(is_list(Methods)),
+                ?assert(lists:member('foo', Methods)),
+                ?assert(lists:member('bar', Methods))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classCanUnderstandFromName/2
+        %%% ============================================================================
+        ?_test(begin
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {_ClassObj, Pid} = register_class(
+                'BT1792BiCanUnderstandName',
+                #{},
+                #{'ping' => MethodFun}
+            ),
+            try
+                ?assert(
+                    beamtalk_behaviour_intrinsics:classCanUnderstandFromName(
+                        'BT1792BiCanUnderstandName', 'ping'
                     )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classFieldNames/1
-%%% ============================================================================
-
-class_field_names_empty_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1088BiNoFields', #{}, #{}),
-                try
-                    Fields = beamtalk_behaviour_intrinsics:classFieldNames(ClassObj),
-                    ?assert(is_list(Fields)),
-                    ?assertEqual([], Fields)
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_field_names_with_fields_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class(
-                    'BT1088BiWithFields',
-                    #{x => 0, y => 0},
-                    #{}
-                ),
-                try
-                    Fields = beamtalk_behaviour_intrinsics:classFieldNames(ClassObj),
-                    ?assert(is_list(Fields)),
-                    ?assert(lists:member(x, Fields)),
-                    ?assert(lists:member(y, Fields))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classClassVarNames/1 and classAllClassVarNames/1
-%%% ============================================================================
-
-%% Dynamic (ClassBuilder) classes carry no static __beamtalk_meta/0, so the
-%% class-side field intrinsics return [] rather than crashing. The meta-reading
-%% path (real class_fields) is covered by the BUnit suite against compiled
-%% fixtures (stdlib/test/class_state_test.bt).
-class_var_names_no_meta_returns_empty_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT2238ClassVarsNoMeta', #{x => 0}, #{}),
-                try
-                    Local = beamtalk_behaviour_intrinsics:classClassVarNames(ClassObj),
-                    All = beamtalk_behaviour_intrinsics:classAllClassVarNames(ClassObj),
-                    ?assertEqual([], Local),
-                    ?assertEqual([], All)
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classIncludesSelector/2
-%%% ============================================================================
-
-class_includes_selector_true_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {ClassObj, Pid} = register_class(
-                    'BT1088BiSelectorTrue',
-                    #{},
-                    #{'increment' => MethodFun}
-                ),
-                try
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'increment')
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {_ClassObj, Pid} = register_class('BT1792BiCanUnderstandNameNo', #{}, #{}),
+            try
+                ?assertNot(
+                    beamtalk_behaviour_intrinsics:classCanUnderstandFromName(
+                        'BT1792BiCanUnderstandNameNo', 'missing'
                     )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_includes_selector_false_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1088BiSelectorFalse', #{}, #{}),
-                try
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'nonExistent')
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classDoc/1 and classSetDoc/2
-%%% ============================================================================
-
-class_doc_nil_initially_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1088BiDocNil', #{}, #{}),
-                try
-                    ?assertEqual(nil, beamtalk_behaviour_intrinsics:classDoc(ClassObj))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_set_doc_and_get_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1088BiDocSet', #{}, #{}),
-                try
-                    Doc = <<"This is a test class">>,
-                    RetObj = beamtalk_behaviour_intrinsics:classSetDoc(ClassObj, Doc),
-                    ?assertEqual(ClassObj, RetObj),
-                    ?assertEqual(
-                        {beamtalk_string, Doc}, beamtalk_behaviour_intrinsics:classDoc(ClassObj)
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classSetMethodDoc/3 and classDocForMethod/2
-%%% ============================================================================
-
-class_set_method_doc_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {ClassObj, Pid} = register_class(
-                    'BT1088BiMethodDoc',
-                    #{},
-                    #{'myMethod' => MethodFun}
-                ),
-                try
-                    Doc = <<"Does something useful">>,
-                    RetObj = beamtalk_behaviour_intrinsics:classSetMethodDoc(
-                        ClassObj, 'myMethod', Doc
-                    ),
-                    ?assertEqual(ClassObj, RetObj),
-                    ?assertEqual(
-                        {beamtalk_string, Doc},
-                        beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'myMethod')
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_doc_for_nonexistent_method_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1088BiDocForMethod', #{}, #{}),
-                try
-                    ?assertEqual(
-                        nil,
-                        beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'nosuchMethod')
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% metaclassSuperclass/1 — via gen_server:call(Pid, superclass)
-%%% ============================================================================
-
-%% metaclassSuperclass/1 now calls gen_server:call(Pid, superclass)
-%% directly (apply_class_info/2 ensures the gen_server always holds the correct superclass).
-metaclass_superclass_returns_metaclass_or_nil_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1169BiSuperclassNoMeta', #{}, #{}),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    Result = beamtalk_behaviour_intrinsics:metaclassSuperclass(MetaObj),
-                    %% If Object is registered (full test suite), returns its metaclass;
-                    %% otherwise nil.
-                    case beamtalk_class_registry:whereis_class('Object') of
-                        undefined ->
-                            ?assertEqual(nil, Result);
-                        _ ->
-                            ?assertMatch(#beamtalk_object{class = 'Metaclass'}, Result)
-                    end
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-metaclass_superclass_with_registered_parent_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {_ParentObj, ParentPid} = register_class('BT1792BiMetaSuperParent', #{}, #{}),
-                {ClassObj, ChildPid} = register_class_with_super(
-                    'BT1792BiMetaSuperChild', 'BT1792BiMetaSuperParent', #{}, #{}
-                ),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    Result = beamtalk_behaviour_intrinsics:metaclassSuperclass(MetaObj),
-                    %% Should return the metaclass of the parent
-                    ?assertMatch(#beamtalk_object{class = 'Metaclass'}, Result)
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classSubclasses/1
-%%% ============================================================================
-
-class_subclasses_empty_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1088BiLeafClass', #{}, #{}),
-                try
-                    Subclasses = beamtalk_behaviour_intrinsics:classSubclasses(ClassObj),
-                    ?assert(is_list(Subclasses)),
-                    ?assertEqual([], Subclasses)
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classSuperclass/1
-%%% ============================================================================
-
-class_superclass_returns_object_or_nil_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiSuperclass', #{}, #{}),
-                try
-                    Super = beamtalk_behaviour_intrinsics:classSuperclass(ClassObj),
-                    %% Superclass is 'Object'. If Object is registered (full test suite),
-                    %% we get a class object; if not (isolated eunit), we get nil.
-                    case beamtalk_class_registry:whereis_class('Object') of
-                        undefined ->
-                            ?assertEqual(nil, Super);
-                        _ ->
-                            ?assertMatch(#beamtalk_object{}, Super),
-                            ?assertEqual(
-                                'Object',
-                                beamtalk_behaviour_intrinsics:className(Super)
-                            )
-                    end
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_superclass_with_registered_parent_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {_ParentObj, ParentPid} = register_class('BT1792BiSuperParent', #{}, #{}),
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1792BiSuperChild', 'BT1792BiSuperParent', #{}, #{}
-                ),
-                try
-                    Super = beamtalk_behaviour_intrinsics:classSuperclass(ChildObj),
-                    ?assertMatch(#beamtalk_object{}, Super),
-                    ?assertEqual(
-                        'BT1792BiSuperParent',
-                        beamtalk_behaviour_intrinsics:className(Super)
-                    )
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classAllSuperclasses/1
-%%% ============================================================================
-
-class_all_superclasses_returns_list_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiAllSupers', #{}, #{}),
-                try
-                    Supers = beamtalk_behaviour_intrinsics:classAllSuperclasses(ClassObj),
-                    ?assert(is_list(Supers))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_all_superclasses_with_hierarchy_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {_GrandObj, GrandPid} = register_class('BT1792BiGrand', #{}, #{}),
-                {_ParentObj, ParentPid} = register_class_with_super(
-                    'BT1792BiMiddle', 'BT1792BiGrand', #{}, #{}
-                ),
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1792BiBottom', 'BT1792BiMiddle', #{}, #{}
-                ),
-                try
-                    Supers = beamtalk_behaviour_intrinsics:classAllSuperclasses(ChildObj),
-                    SuperNames = [beamtalk_behaviour_intrinsics:className(S) || S <- Supers],
-                    ?assert(lists:member('BT1792BiMiddle', SuperNames)),
-                    ?assert(lists:member('BT1792BiGrand', SuperNames))
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(GrandPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classAllSubclasses/1
-%%% ============================================================================
-
-class_all_subclasses_empty_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiAllSubEmpty', #{}, #{}),
-                try
-                    AllSub = beamtalk_behaviour_intrinsics:classAllSubclasses(ClassObj),
-                    ?assert(is_list(AllSub)),
-                    ?assertEqual([], AllSub)
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_subclasses_with_child_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ParentObj, ParentPid} = register_class('BT1792BiParent', #{}, #{}),
-                {_ChildObj, ChildPid} = register_class_with_super(
-                    'BT1792BiChild', 'BT1792BiParent', #{}, #{}
-                ),
-                try
-                    Subclasses = beamtalk_behaviour_intrinsics:classSubclasses(ParentObj),
-                    SubNames = [beamtalk_behaviour_intrinsics:className(S) || S <- Subclasses],
-                    ?assert(lists:member('BT1792BiChild', SubNames)),
-                    %% Also test allSubclasses
-                    AllSub = beamtalk_behaviour_intrinsics:classAllSubclasses(ParentObj),
-                    AllSubNames = [beamtalk_behaviour_intrinsics:className(S) || S <- AllSub],
-                    ?assert(lists:member('BT1792BiChild', AllSubNames))
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classMethods/1 — full inheritance chain
-%%% ============================================================================
-
-class_methods_includes_local_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {ClassObj, Pid} = register_class(
-                    'BT1792BiMethodsFull',
-                    #{},
-                    #{'foo' => MethodFun, 'bar' => MethodFun}
-                ),
-                try
-                    Methods = beamtalk_behaviour_intrinsics:classMethods(ClassObj),
-                    ?assert(is_list(Methods)),
-                    ?assert(lists:member('foo', Methods)),
-                    ?assert(lists:member('bar', Methods))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classCanUnderstandFromName/2
-%%% ============================================================================
-
-class_can_understand_from_name_true_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {_ClassObj, Pid} = register_class(
-                    'BT1792BiCanUnderstandName',
-                    #{},
-                    #{'ping' => MethodFun}
-                ),
-                try
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classCanUnderstandFromName(
-                            'BT1792BiCanUnderstandName', 'ping'
-                        )
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_can_understand_from_name_false_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {_ClassObj, Pid} = register_class('BT1792BiCanUnderstandNameNo', #{}, #{}),
-                try
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:classCanUnderstandFromName(
-                            'BT1792BiCanUnderstandNameNo', 'missing'
-                        )
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end)
+    ]}.
 
 class_can_understand_from_name_unregistered_test() ->
     %% An unregistered class name should return false
@@ -909,631 +595,389 @@ class_can_understand_from_name_unregistered_test() ->
 %%% ============================================================================
 
 class_all_field_names_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class(
-                    'BT1792BiAllFields',
-                    #{x => 0, y => 0},
-                    #{}
-                ),
-                try
-                    AllFields = beamtalk_behaviour_intrinsics:classAllFieldNames(ClassObj),
-                    ?assert(is_list(AllFields)),
-                    ?assert(lists:member(x, AllFields)),
-                    ?assert(lists:member(y, AllFields))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_all_field_names_empty_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiAllFieldsEmpty', #{}, #{}),
-                try
-                    AllFields = beamtalk_behaviour_intrinsics:classAllFieldNames(ClassObj),
-                    ?assert(is_list(AllFields))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% metaclassThisClass/1
-%%% ============================================================================
-
-metaclass_this_class_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiMetaThisClass', #{}, #{}),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    ThisClass = beamtalk_behaviour_intrinsics:metaclassThisClass(MetaObj),
-                    ?assertMatch(#beamtalk_object{}, ThisClass),
-                    ?assertEqual(
-                        'BT1792BiMetaThisClass',
-                        beamtalk_behaviour_intrinsics:className(ThisClass)
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            {ClassObj, Pid} = register_class(
+                'BT1792BiAllFields',
+                #{x => 0, y => 0},
+                #{}
+            ),
+            try
+                AllFields = beamtalk_behaviour_intrinsics:classAllFieldNames(ClassObj),
+                ?assert(is_list(AllFields)),
+                ?assert(lists:member(x, AllFields)),
+                ?assert(lists:member(y, AllFields))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1792BiAllFieldsEmpty', #{}, #{}),
+            try
+                AllFields = beamtalk_behaviour_intrinsics:classAllFieldNames(ClassObj),
+                ?assert(is_list(AllFields))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% metaclassThisClass/1
+        %%% ============================================================================
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1792BiMetaThisClass', #{}, #{}),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                ThisClass = beamtalk_behaviour_intrinsics:metaclassThisClass(MetaObj),
+                ?assertMatch(#beamtalk_object{}, ThisClass),
+                ?assertEqual(
+                    'BT1792BiMetaThisClass',
+                    beamtalk_behaviour_intrinsics:className(ThisClass)
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% metaclassAllMethods/1
+        %%% ============================================================================
+        ?_test(begin
+            ClassMethodFun = fun(_Self) -> ok end,
+            {ClassObj, Pid} = register_class_with_class_methods(
+                'BT1792BiMetaAllMethods',
+                #{},
+                #{},
+                #{'myClassFn' => ClassMethodFun}
+            ),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                AllMethods = beamtalk_behaviour_intrinsics:metaclassAllMethods(MetaObj),
+                ?assert(is_list(AllMethods)),
+                %% Should include the class method we defined
+                ?assert(lists:member('myClassFn', AllMethods))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% metaclassClassMethods/1
+        %%% ============================================================================
+        ?_test(begin
+            ClassMethodFun = fun(_Self) -> ok end,
+            {ClassObj, Pid} = register_class_with_class_methods(
+                'BT1792BiMetaClassMethods',
+                #{},
+                #{},
+                #{'classM1' => ClassMethodFun, 'classM2' => ClassMethodFun}
+            ),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                ClassMethods = beamtalk_behaviour_intrinsics:metaclassClassMethods(MetaObj),
+                ?assert(is_list(ClassMethods)),
+                ?assert(lists:member('classM1', ClassMethods)),
+                ?assert(lists:member('classM2', ClassMethods))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% metaclassLocalClassMethods/1
+        %%% ============================================================================
+        ?_test(begin
+            ClassMethodFun = fun(_Self) -> ok end,
+            {ClassObj, Pid} = register_class_with_class_methods(
+                'BT1792BiMetaLocalClassM',
+                #{},
+                #{},
+                #{'localCM' => ClassMethodFun}
+            ),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                LocalCM = beamtalk_behaviour_intrinsics:metaclassLocalClassMethods(MetaObj),
+                ?assert(is_list(LocalCM)),
+                ?assert(lists:member('localCM', LocalCM))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1792BiMetaLocalEmpty', #{}, #{}),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                LocalCM = beamtalk_behaviour_intrinsics:metaclassLocalClassMethods(MetaObj),
+                ?assert(is_list(LocalCM)),
+                ?assertEqual([], LocalCM)
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% metaclassIncludesSelector/2
+        %%% ============================================================================
+        ?_test(begin
+            ClassMethodFun = fun(_Self) -> ok end,
+            {ClassObj, Pid} = register_class_with_class_methods(
+                'BT1792BiMetaInclSel',
+                #{},
+                #{},
+                #{'checkMe' => ClassMethodFun}
+            ),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                ?assert(
+                    beamtalk_behaviour_intrinsics:metaclassIncludesSelector(
+                        MetaObj, 'checkMe'
                     )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% metaclassAllMethods/1
-%%% ============================================================================
-
-metaclass_all_methods_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassMethodFun = fun(_Self) -> ok end,
-                {ClassObj, Pid} = register_class_with_class_methods(
-                    'BT1792BiMetaAllMethods',
-                    #{},
-                    #{},
-                    #{'myClassFn' => ClassMethodFun}
-                ),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    AllMethods = beamtalk_behaviour_intrinsics:metaclassAllMethods(MetaObj),
-                    ?assert(is_list(AllMethods)),
-                    %% Should include the class method we defined
-                    ?assert(lists:member('myClassFn', AllMethods))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% metaclassClassMethods/1
-%%% ============================================================================
-
-metaclass_class_methods_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassMethodFun = fun(_Self) -> ok end,
-                {ClassObj, Pid} = register_class_with_class_methods(
-                    'BT1792BiMetaClassMethods',
-                    #{},
-                    #{},
-                    #{'classM1' => ClassMethodFun, 'classM2' => ClassMethodFun}
-                ),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    ClassMethods = beamtalk_behaviour_intrinsics:metaclassClassMethods(MetaObj),
-                    ?assert(is_list(ClassMethods)),
-                    ?assert(lists:member('classM1', ClassMethods)),
-                    ?assert(lists:member('classM2', ClassMethods))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% metaclassLocalClassMethods/1
-%%% ============================================================================
-
-metaclass_local_class_methods_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassMethodFun = fun(_Self) -> ok end,
-                {ClassObj, Pid} = register_class_with_class_methods(
-                    'BT1792BiMetaLocalClassM',
-                    #{},
-                    #{},
-                    #{'localCM' => ClassMethodFun}
-                ),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    LocalCM = beamtalk_behaviour_intrinsics:metaclassLocalClassMethods(MetaObj),
-                    ?assert(is_list(LocalCM)),
-                    ?assert(lists:member('localCM', LocalCM))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-metaclass_local_class_methods_empty_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiMetaLocalEmpty', #{}, #{}),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    LocalCM = beamtalk_behaviour_intrinsics:metaclassLocalClassMethods(MetaObj),
-                    ?assert(is_list(LocalCM)),
-                    ?assertEqual([], LocalCM)
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% metaclassIncludesSelector/2
-%%% ============================================================================
-
-metaclass_includes_selector_true_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassMethodFun = fun(_Self) -> ok end,
-                {ClassObj, Pid} = register_class_with_class_methods(
-                    'BT1792BiMetaInclSel',
-                    #{},
-                    #{},
-                    #{'checkMe' => ClassMethodFun}
-                ),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:metaclassIncludesSelector(
-                            MetaObj, 'checkMe'
-                        )
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1792BiMetaInclSelNo', #{}, #{}),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                ?assertNot(
+                    beamtalk_behaviour_intrinsics:metaclassIncludesSelector(
+                        MetaObj, 'nope'
                     )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-metaclass_includes_selector_false_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiMetaInclSelNo', #{}, #{}),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:metaclassIncludesSelector(
-                            MetaObj, 'nope'
-                        )
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classConformsTo/2 and classProtocols/1
+        %%% ============================================================================
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1792BiConformsTo', #{}, #{}),
+            try
+                %% Unknown protocol returns false
+                ?assertNot(
+                    beamtalk_behaviour_intrinsics:classConformsTo(
+                        ClassObj, 'NoSuchProtocol'
                     )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classConformsTo/2 and classProtocols/1
-%%% ============================================================================
-
-class_conforms_to_unknown_protocol_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiConformsTo', #{}, #{}),
-                try
-                    %% Unknown protocol returns false
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:classConformsTo(
-                            ClassObj, 'NoSuchProtocol'
-                        )
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1792BiProtocols', #{}, #{}),
+            try
+                Protocols = beamtalk_behaviour_intrinsics:classProtocols(ClassObj),
+                ?assert(is_list(Protocols))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classSourceFile/1
+        %%% ============================================================================
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1792BiSourceFile', #{}, #{}),
+            try
+                %% Dynamic classes have no source file
+                ?assertEqual(
+                    nil,
+                    beamtalk_behaviour_intrinsics:classSourceFile(ClassObj)
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% classClass/1 — idempotent on metaclass objects
+        %%% ============================================================================
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1792BiClassClassIdem', #{}, #{}),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                MetaMetaObj = beamtalk_behaviour_intrinsics:classClass(MetaObj),
+                %% classClass is idempotent — MetaObj == MetaMetaObj
+                ?assertEqual('Metaclass', MetaMetaObj#beamtalk_object.class),
+                ?assertEqual(
+                    MetaObj#beamtalk_object.pid,
+                    MetaMetaObj#beamtalk_object.pid
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% ============================================================================
+        %%% Additional coverage tests
+        %%% ============================================================================
+        %%% --- classAllSubclasses/1 — multi-level hierarchy ---
+        ?_test(begin
+            {GrandObj, GrandPid} = register_class('BT1959AllSubGrand', #{}, #{}),
+            {_ParentObj, ParentPid} = register_class_with_super(
+                'BT1959AllSubParent', 'BT1959AllSubGrand', #{}, #{}
+            ),
+            {_ChildObj, ChildPid} = register_class_with_super(
+                'BT1959AllSubChild', 'BT1959AllSubParent', #{}, #{}
+            ),
+            try
+                AllSub = beamtalk_behaviour_intrinsics:classAllSubclasses(GrandObj),
+                AllSubNames = [beamtalk_behaviour_intrinsics:className(S) || S <- AllSub],
+                ?assert(lists:member('BT1959AllSubParent', AllSubNames)),
+                ?assert(lists:member('BT1959AllSubChild', AllSubNames)),
+                ?assertEqual(2, length(AllSub))
+            after
+                beamtalk_test_proc:stop(ChildPid),
+                beamtalk_test_proc:stop(ParentPid),
+                beamtalk_test_proc:stop(GrandPid)
+            end
+        end),
+        %%% --- classMethods/1 — inherited methods from parent ---
+        ?_test(begin
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {_ParentObj, ParentPid} = register_class(
+                'BT1959MethodsParent',
+                #{},
+                #{'parentMethod' => MethodFun}
+            ),
+            {ChildObj, ChildPid} = register_class_with_super(
+                'BT1959MethodsChild',
+                'BT1959MethodsParent',
+                #{},
+                #{'childMethod' => MethodFun}
+            ),
+            try
+                Methods = beamtalk_behaviour_intrinsics:classMethods(ChildObj),
+                ?assert(lists:member('childMethod', Methods)),
+                ?assert(lists:member('parentMethod', Methods))
+            after
+                beamtalk_test_proc:stop(ChildPid),
+                beamtalk_test_proc:stop(ParentPid)
+            end
+        end),
+        %% classMethods on metaclass receiver collects class methods
+        ?_test(begin
+            ClassMethodFun = fun(_Self) -> ok end,
+            {_ClassObj, Pid} = register_class_with_class_methods(
+                'BT1959MethodsMeta',
+                #{},
+                #{},
+                #{'metaFoo' => ClassMethodFun}
+            ),
+            try
+                MetaObj = #beamtalk_object{
+                    class = 'Metaclass',
+                    class_mod = beamtalk_metaclass_bt,
+                    pid = Pid
+                },
+                Methods = beamtalk_behaviour_intrinsics:classMethods(MetaObj),
+                ?assert(is_list(Methods)),
+                ?assert(lists:member('metaFoo', Methods))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% --- classCanUnderstandFromName/2 — inherited selectors ---
+        ?_test(begin
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {_ParentObj, ParentPid} = register_class(
+                'BT1959CanUndNameParent',
+                #{},
+                #{'fromParent' => MethodFun}
+            ),
+            {_ChildObj, ChildPid} = register_class_with_super(
+                'BT1959CanUndNameChild', 'BT1959CanUndNameParent', #{}, #{}
+            ),
+            try
+                ?assert(
+                    beamtalk_behaviour_intrinsics:classCanUnderstandFromName(
+                        'BT1959CanUndNameChild', 'fromParent'
                     )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_protocols_returns_list_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiProtocols', #{}, #{}),
-                try
-                    Protocols = beamtalk_behaviour_intrinsics:classProtocols(ClassObj),
-                    ?assert(is_list(Protocols))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classSourceFile/1
-%%% ============================================================================
-
-class_source_file_nil_for_dynamic_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiSourceFile', #{}, #{}),
-                try
-                    %% Dynamic classes have no source file
-                    ?assertEqual(
-                        nil,
-                        beamtalk_behaviour_intrinsics:classSourceFile(ClassObj)
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classClass/1 — idempotent on metaclass objects
-%%% ============================================================================
-
-class_class_idempotent_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1792BiClassClassIdem', #{}, #{}),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    MetaMetaObj = beamtalk_behaviour_intrinsics:classClass(MetaObj),
-                    %% classClass is idempotent — MetaObj == MetaMetaObj
-                    ?assertEqual('Metaclass', MetaMetaObj#beamtalk_object.class),
-                    ?assertEqual(
-                        MetaObj#beamtalk_object.pid,
-                        MetaMetaObj#beamtalk_object.pid
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% Additional coverage tests
-%%% ============================================================================
-
-%%% --- classAllSubclasses/1 — multi-level hierarchy ---
-
-class_all_subclasses_multi_level_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {GrandObj, GrandPid} = register_class('BT1959AllSubGrand', #{}, #{}),
-                {_ParentObj, ParentPid} = register_class_with_super(
-                    'BT1959AllSubParent', 'BT1959AllSubGrand', #{}, #{}
+                )
+            after
+                beamtalk_test_proc:stop(ChildPid),
+                beamtalk_test_proc:stop(ParentPid)
+            end
+        end),
+        %%% --- classAllFieldNames/1 — inherited fields from parent ---
+        ?_test(begin
+            {_ParentObj, ParentPid} = register_class(
+                'BT1959FieldsParent',
+                #{x => 0},
+                #{}
+            ),
+            {ChildObj, ChildPid} = register_class_with_super(
+                'BT1959FieldsChild',
+                'BT1959FieldsParent',
+                #{y => 0},
+                #{}
+            ),
+            try
+                AllFields = beamtalk_behaviour_intrinsics:classAllFieldNames(ChildObj),
+                ?assert(lists:member(x, AllFields)),
+                ?assert(lists:member(y, AllFields))
+            after
+                beamtalk_test_proc:stop(ChildPid),
+                beamtalk_test_proc:stop(ParentPid)
+            end
+        end),
+        %%% --- classSetDoc/2 — overwrite existing doc ---
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1959DocOverwrite', #{}, #{}),
+            try
+                Doc1 = <<"First doc">>,
+                Doc2 = <<"Updated doc">>,
+                beamtalk_behaviour_intrinsics:classSetDoc(ClassObj, Doc1),
+                ?assertEqual(
+                    {beamtalk_string, Doc1}, beamtalk_behaviour_intrinsics:classDoc(ClassObj)
                 ),
-                {_ChildObj, ChildPid} = register_class_with_super(
-                    'BT1959AllSubChild', 'BT1959AllSubParent', #{}, #{}
+                beamtalk_behaviour_intrinsics:classSetDoc(ClassObj, Doc2),
+                ?assertEqual(
+                    {beamtalk_string, Doc2}, beamtalk_behaviour_intrinsics:classDoc(ClassObj)
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% --- classDocForMethod/2 — method exists but no doc ---
+        ?_test(begin
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {ClassObj, Pid} = register_class(
+                'BT1959DocNoDoc',
+                #{},
+                #{'undocumented' => MethodFun}
+            ),
+            try
+                %% Method exists but has no doc set — should return nil
+                ?assertEqual(
+                    nil,
+                    beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'undocumented')
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% --- classSetMethodDoc/3 — overwrite existing method doc ---
+        ?_test(begin
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {ClassObj, Pid} = register_class(
+                'BT1959MethodDocOvr',
+                #{},
+                #{'documented' => MethodFun}
+            ),
+            try
+                Doc1 = <<"First method doc">>,
+                Doc2 = <<"Updated method doc">>,
+                beamtalk_behaviour_intrinsics:classSetMethodDoc(ClassObj, 'documented', Doc1),
+                ?assertEqual(
+                    {beamtalk_string, Doc1},
+                    beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'documented')
                 ),
-                try
-                    AllSub = beamtalk_behaviour_intrinsics:classAllSubclasses(GrandObj),
-                    AllSubNames = [beamtalk_behaviour_intrinsics:className(S) || S <- AllSub],
-                    ?assert(lists:member('BT1959AllSubParent', AllSubNames)),
-                    ?assert(lists:member('BT1959AllSubChild', AllSubNames)),
-                    ?assertEqual(2, length(AllSub))
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(GrandPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classMethods/1 — inherited methods from parent ---
-
-class_methods_inherits_from_parent_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {_ParentObj, ParentPid} = register_class(
-                    'BT1959MethodsParent',
-                    #{},
-                    #{'parentMethod' => MethodFun}
-                ),
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1959MethodsChild',
-                    'BT1959MethodsParent',
-                    #{},
-                    #{'childMethod' => MethodFun}
-                ),
-                try
-                    Methods = beamtalk_behaviour_intrinsics:classMethods(ChildObj),
-                    ?assert(lists:member('childMethod', Methods)),
-                    ?assert(lists:member('parentMethod', Methods))
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%% classMethods on metaclass receiver collects class methods
-class_methods_metaclass_receiver_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassMethodFun = fun(_Self) -> ok end,
-                {_ClassObj, Pid} = register_class_with_class_methods(
-                    'BT1959MethodsMeta',
-                    #{},
-                    #{},
-                    #{'metaFoo' => ClassMethodFun}
-                ),
-                try
-                    MetaObj = #beamtalk_object{
-                        class = 'Metaclass',
-                        class_mod = beamtalk_metaclass_bt,
-                        pid = Pid
-                    },
-                    Methods = beamtalk_behaviour_intrinsics:classMethods(MetaObj),
-                    ?assert(is_list(Methods)),
-                    ?assert(lists:member('metaFoo', Methods))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classCanUnderstandFromName/2 — inherited selectors ---
-
-class_can_understand_from_name_inherited_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {_ParentObj, ParentPid} = register_class(
-                    'BT1959CanUndNameParent',
-                    #{},
-                    #{'fromParent' => MethodFun}
-                ),
-                {_ChildObj, ChildPid} = register_class_with_super(
-                    'BT1959CanUndNameChild', 'BT1959CanUndNameParent', #{}, #{}
-                ),
-                try
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classCanUnderstandFromName(
-                            'BT1959CanUndNameChild', 'fromParent'
-                        )
-                    )
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classAllFieldNames/1 — inherited fields from parent ---
-
-class_all_field_names_inherited_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {_ParentObj, ParentPid} = register_class(
-                    'BT1959FieldsParent',
-                    #{x => 0},
-                    #{}
-                ),
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1959FieldsChild',
-                    'BT1959FieldsParent',
-                    #{y => 0},
-                    #{}
-                ),
-                try
-                    AllFields = beamtalk_behaviour_intrinsics:classAllFieldNames(ChildObj),
-                    ?assert(lists:member(x, AllFields)),
-                    ?assert(lists:member(y, AllFields))
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classSetDoc/2 — overwrite existing doc ---
-
-class_set_doc_overwrite_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1959DocOverwrite', #{}, #{}),
-                try
-                    Doc1 = <<"First doc">>,
-                    Doc2 = <<"Updated doc">>,
-                    beamtalk_behaviour_intrinsics:classSetDoc(ClassObj, Doc1),
-                    ?assertEqual(
-                        {beamtalk_string, Doc1}, beamtalk_behaviour_intrinsics:classDoc(ClassObj)
-                    ),
-                    beamtalk_behaviour_intrinsics:classSetDoc(ClassObj, Doc2),
-                    ?assertEqual(
-                        {beamtalk_string, Doc2}, beamtalk_behaviour_intrinsics:classDoc(ClassObj)
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classDocForMethod/2 — method exists but no doc ---
-
-class_doc_for_method_no_doc_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {ClassObj, Pid} = register_class(
-                    'BT1959DocNoDoc',
-                    #{},
-                    #{'undocumented' => MethodFun}
-                ),
-                try
-                    %% Method exists but has no doc set — should return nil
-                    ?assertEqual(
-                        nil,
-                        beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'undocumented')
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classSetMethodDoc/3 — overwrite existing method doc ---
-
-class_set_method_doc_overwrite_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {ClassObj, Pid} = register_class(
-                    'BT1959MethodDocOvr',
-                    #{},
-                    #{'documented' => MethodFun}
-                ),
-                try
-                    Doc1 = <<"First method doc">>,
-                    Doc2 = <<"Updated method doc">>,
-                    beamtalk_behaviour_intrinsics:classSetMethodDoc(ClassObj, 'documented', Doc1),
-                    ?assertEqual(
-                        {beamtalk_string, Doc1},
-                        beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'documented')
-                    ),
-                    beamtalk_behaviour_intrinsics:classSetMethodDoc(ClassObj, 'documented', Doc2),
-                    ?assertEqual(
-                        {beamtalk_string, Doc2},
-                        beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'documented')
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
+                beamtalk_behaviour_intrinsics:classSetMethodDoc(ClassObj, 'documented', Doc2),
+                ?assertEqual(
+                    {beamtalk_string, Doc2},
+                    beamtalk_behaviour_intrinsics:classDocForMethod(ClassObj, 'documented')
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end)
+    ]}.
 
 %%% --- classRemoveFromSystemByName/1 — class not found ---
 
@@ -1546,36 +990,26 @@ class_remove_from_system_by_name_not_found_test() ->
 %%% --- classRemoveFromSystemByName/1 — has subclasses ---
 
 class_remove_from_system_has_subclasses_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {_ParentObj, ParentPid} = register_class('BT1959RemoveParent', #{}, #{}),
-                {_ChildObj, ChildPid} = register_class_with_super(
-                    'BT1959RemoveChild', 'BT1959RemoveParent', #{}, #{}
-                ),
-                try
-                    %% Should raise because parent has subclasses
-                    ?assertBtError(
-                        runtime_error,
-                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
-                            'BT1959RemoveParent'
-                        )
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            {_ParentObj, ParentPid} = register_class('BT1959RemoveParent', #{}, #{}),
+            {_ChildObj, ChildPid} = register_class_with_super(
+                'BT1959RemoveChild', 'BT1959RemoveParent', #{}, #{}
+            ),
+            try
+                %% Should raise because parent has subclasses
+                ?assertBtError(
+                    runtime_error,
+                    beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
+                        'BT1959RemoveParent'
                     )
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
+                )
+            after
+                beamtalk_test_proc:stop(ChildPid),
+                beamtalk_test_proc:stop(ParentPid)
+            end
+        end)
+    ]}.
 
 %%% --- classRemoveFromSystemByName/1 — busy class is waited for (BT-4290) ---
 %%% The BT-4290 probe only runs when the class process is waiting on the
@@ -1583,7 +1017,7 @@ class_remove_from_system_has_subclasses_test_() ->
 %%% (here: suspended for 6s) is waited for and removed, as before.
 
 class_remove_from_system_waits_for_busy_class_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    {foreach, fun setup/0, fun teardown/1, [
         {timeout, 30,
             ?_test(begin
                 {_ClassObj, Pid} = register_class('BT4290RemoveBusy', #{}, #{}),
@@ -1612,14 +1046,10 @@ class_remove_from_system_waits_for_busy_class_test_() ->
                         beamtalk_class_registry:whereis_class('BT4290RemoveBusy')
                     )
                 after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
+                    beamtalk_test_proc:stop(Pid)
                 end
             end)}
-    end}.
+    ]}.
 
 %%% --- classRemoveFromSystem/1 — dynamic (ClassBuilder) class, no BEAM module ---
 %%% BT-3895: a dynamic class has no loaded module behind it, so code:delete
@@ -1627,642 +1057,431 @@ class_remove_from_system_waits_for_busy_class_test_() ->
 %%% leave the registry empty.
 
 class_remove_from_system_dynamic_class_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1959RemoveCodeDel', #{}, #{}),
-                try
-                    ?assertNotEqual(
-                        undefined,
-                        beamtalk_class_registry:whereis_class('BT1959RemoveCodeDel')
-                    ),
-                    ?assertEqual(
-                        nil, beamtalk_behaviour_intrinsics:classRemoveFromSystem(ClassObj)
-                    ),
-                    ?assertEqual(
-                        undefined,
-                        beamtalk_class_registry:whereis_class('BT1959RemoveCodeDel')
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-class_remove_from_system_by_name_dynamic_class_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {_ClassObj, Pid} = register_class('BT1959RemoveByNameFail', #{}, #{}),
-                try
-                    ?assertNotEqual(
-                        undefined,
-                        beamtalk_class_registry:whereis_class('BT1959RemoveByNameFail')
-                    ),
-                    ?assertEqual(
-                        nil,
-                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
-                            'BT1959RemoveByNameFail'
-                        )
-                    ),
-                    ?assertEqual(
-                        undefined,
-                        beamtalk_class_registry:whereis_class('BT1959RemoveByNameFail')
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classMethods/1 — empty class returns list ---
-
-class_methods_empty_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1959MethodsEmpty', #{}, #{}),
-                try
-                    Methods = beamtalk_behaviour_intrinsics:classMethods(ClassObj),
-                    ?assert(is_list(Methods))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classAllSuperclasses/1 — order is immediate parent to root ---
-
-class_all_superclasses_order_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {_GrandObj, GrandPid} = register_class('BT1959OrderGrand', #{}, #{}),
-                {_ParentObj, ParentPid} = register_class_with_super(
-                    'BT1959OrderMiddle', 'BT1959OrderGrand', #{}, #{}
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1959RemoveCodeDel', #{}, #{}),
+            try
+                ?assertNotEqual(
+                    undefined,
+                    beamtalk_class_registry:whereis_class('BT1959RemoveCodeDel')
                 ),
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1959OrderBottom', 'BT1959OrderMiddle', #{}, #{}
+                ?assertEqual(
+                    nil, beamtalk_behaviour_intrinsics:classRemoveFromSystem(ClassObj)
                 ),
-                try
-                    Supers = beamtalk_behaviour_intrinsics:classAllSuperclasses(ChildObj),
-                    SuperNames = [beamtalk_behaviour_intrinsics:className(S) || S <- Supers],
-                    %% First element should be immediate parent
-                    [First | _] = SuperNames,
-                    ?assertEqual('BT1959OrderMiddle', First)
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(GrandPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classSubclasses/1 — multiple children ---
-
-class_subclasses_multiple_children_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ParentObj, ParentPid} = register_class('BT1959MultiParent', #{}, #{}),
-                {_Child1Obj, Child1Pid} = register_class_with_super(
-                    'BT1959MultiChild1', 'BT1959MultiParent', #{}, #{}
+                ?assertEqual(
+                    undefined,
+                    beamtalk_class_registry:whereis_class('BT1959RemoveCodeDel')
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        ?_test(begin
+            {_ClassObj, Pid} = register_class('BT1959RemoveByNameFail', #{}, #{}),
+            try
+                ?assertNotEqual(
+                    undefined,
+                    beamtalk_class_registry:whereis_class('BT1959RemoveByNameFail')
                 ),
-                {_Child2Obj, Child2Pid} = register_class_with_super(
-                    'BT1959MultiChild2', 'BT1959MultiParent', #{}, #{}
-                ),
-                try
-                    Subclasses = beamtalk_behaviour_intrinsics:classSubclasses(ParentObj),
-                    SubNames = [beamtalk_behaviour_intrinsics:className(S) || S <- Subclasses],
-                    ?assert(lists:member('BT1959MultiChild1', SubNames)),
-                    ?assert(lists:member('BT1959MultiChild2', SubNames)),
-                    ?assertEqual(2, length(Subclasses))
-                after
-                    (try
-                        gen_server:stop(Child1Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(Child2Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% --- metaclassClassMethods/1 — inherited class methods ---
-
-metaclass_class_methods_inherited_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassMethodFun = fun(_Self) -> ok end,
-                {_ParentObj, ParentPid} = register_class_with_class_methods(
-                    'BT1959MetaCMParent',
-                    #{},
-                    #{},
-                    #{'parentCM' => ClassMethodFun}
-                ),
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1959MetaCMChild', 'BT1959MetaCMParent', #{}, #{}
-                ),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ChildObj),
-                    ClassMethods = beamtalk_behaviour_intrinsics:metaclassClassMethods(MetaObj),
-                    ?assert(is_list(ClassMethods)),
-                    ?assert(lists:member('parentCM', ClassMethods))
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% --- metaclassThisClass/1 — round-trip identity ---
-
-metaclass_this_class_round_trip_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1959MetaRoundTrip', #{}, #{}),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    ThisClass = beamtalk_behaviour_intrinsics:metaclassThisClass(MetaObj),
-                    %% Round-trip: classClass -> metaclassThisClass returns same name
-                    ?assertEqual(
-                        beamtalk_behaviour_intrinsics:className(ClassObj),
-                        beamtalk_behaviour_intrinsics:className(ThisClass)
-                    ),
-                    %% Same pid
-                    ?assertEqual(
-                        ClassObj#beamtalk_object.pid,
-                        ThisClass#beamtalk_object.pid
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classClass/1 — class_mod is beamtalk_metaclass_bt ---
-
-class_class_module_is_metaclass_bt_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1959ClassMod', #{}, #{}),
-                try
-                    MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
-                    ?assertEqual(beamtalk_metaclass_bt, MetaObj#beamtalk_object.class_mod)
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classMethods/1 — deduplication across hierarchy ---
-
-class_methods_deduplicates_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {_ParentObj, ParentPid} = register_class(
-                    'BT1959DedupParent',
-                    #{},
-                    #{'shared' => MethodFun, 'parentOnly' => MethodFun}
-                ),
-                %% Child overrides 'shared'
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1959DedupChild',
-                    'BT1959DedupParent',
-                    #{},
-                    #{'shared' => MethodFun, 'childOnly' => MethodFun}
-                ),
-                try
-                    Methods = beamtalk_behaviour_intrinsics:classMethods(ChildObj),
-                    %% 'shared' should appear only once (ordset dedup)
-                    SharedCount = length([M || M <- Methods, M =:= 'shared']),
-                    ?assertEqual(1, SharedCount),
-                    ?assert(lists:member('parentOnly', Methods)),
-                    ?assert(lists:member('childOnly', Methods))
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(ParentPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classFieldNames/1 — multiple fields ---
-
-class_field_names_multiple_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class(
-                    'BT1959FieldsMulti',
-                    #{a => 1, b => 2, c => 3},
-                    #{}
-                ),
-                try
-                    Fields = beamtalk_behaviour_intrinsics:classFieldNames(ClassObj),
-                    ?assertEqual(3, length(Fields)),
-                    ?assert(lists:member(a, Fields)),
-                    ?assert(lists:member(b, Fields)),
-                    ?assert(lists:member(c, Fields))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%%% --- classSuperclass/1 — chain parent to grandparent ---
-
-class_superclass_chain_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {_GrandObj, GrandPid} = register_class('BT1959SuperChainGrand', #{}, #{}),
-                {ChildObj, ChildPid} = register_class_with_super(
-                    'BT1959SuperChainChild', 'BT1959SuperChainGrand', #{}, #{}
-                ),
-                try
-                    Super = beamtalk_behaviour_intrinsics:classSuperclass(ChildObj),
-                    ?assertMatch(#beamtalk_object{}, Super),
-                    ?assertEqual(
-                        'BT1959SuperChainGrand',
-                        beamtalk_behaviour_intrinsics:className(Super)
-                    ),
-                    %% Grandparent's superclass is Object (if registered) or nil
-                    GrandSuper = beamtalk_behaviour_intrinsics:classSuperclass(Super),
-                    case beamtalk_class_registry:whereis_class('Object') of
-                        undefined ->
-                            ?assertEqual(nil, GrandSuper);
-                        _ ->
-                            ?assertMatch(#beamtalk_object{}, GrandSuper)
-                    end
-                after
-                    (try
-                        gen_server:stop(ChildPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    (try
-                        gen_server:stop(GrandPid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end)
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% Additional coverage for behaviour intrinsics
-%%% ============================================================================
-
-%% classReload/1 on a class with no source file (dynamic class) raises
-%% no_source_file — covers the nil branch of classReload/1.
-bt1982_class_reload_no_source_file_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BT1982ReloadNoSrc', #{}, #{}),
-                try
-                    ?assertBtError(
-                        no_source_file, beamtalk_behaviour_intrinsics:classReload(ClassObj)
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% classRemoveFromSystemByName rejects stdlib-module classes with runtime_error +
-%% a "stdlib" hint. Creates a class whose module atom starts with bt@stdlib@
-%% to exercise the stdlib protection branch.
-bt1982_class_remove_rejects_stdlib_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Construct a class whose module name looks like a stdlib module.
-                %% start/2 allows any atom as module; the stdlib check is by name prefix.
-                ClassInfo = #{
-                    name => 'BT1982StdlibProtectedX',
-                    module => 'bt@stdlib@BT1982StdlibProtectedX',
-                    superclass => none,
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start(
-                    'BT1982StdlibProtectedX', ClassInfo
-                ),
-                try
-                    ?assertBtError(
-                        runtime_error,
-                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
-                            'BT1982StdlibProtectedX'
-                        )
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% metaclassSuperclass on a root class (superclass=none) grounds the parallel
-%% chain into the instance-side `Class` (ADR 0036). Covers the none
-%% branch of metaclassSuperclass/1.
-bt1982_metaclass_superclass_root_grounds_at_class_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'BT1982RootMeta',
-                    module => test_class,
-                    superclass => none,
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start('BT1982RootMeta', ClassInfo),
-                %% Metaclass receiver — what real metaclass objects look like.
-                MetaObj = #beamtalk_object{
-                    class = 'Metaclass',
-                    class_mod = beamtalk_metaclass_bt,
-                    pid = Pid
-                },
-                try
-                    Result = beamtalk_behaviour_intrinsics:metaclassSuperclass(MetaObj),
-                    %% parallel chain grounds at `Class` — expect the
-                    %% instance-side Class class object, not nil.
-                    ?assertMatch(
-                        #beamtalk_object{class = 'Class class'},
-                        Result
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% classSuperclass on a class whose module has no __beamtalk_meta/0 (dynamic /
-%% class_builder class) exercises the gen_server-fallback branch — and the
-%% 'none' result should normalize to nil.
-bt1982_class_superclass_root_falls_through_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'BT1982SuperRootFB',
-                    %% test_class doesn't export __beamtalk_meta/0.
-                    module => test_class,
-                    superclass => none,
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start('BT1982SuperRootFB', ClassInfo),
-                ClassObj = #beamtalk_object{
-                    class = 'BT1982SuperRootFB class',
-                    class_mod = test_class,
-                    pid = Pid
-                },
-                try
-                    ?assertEqual(
-                        nil,
-                        beamtalk_behaviour_intrinsics:classSuperclass(ClassObj)
-                    )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% stop_class_actors is a no-op when the actor registry is not running.
-%% It's exported as a plain function, but only called internally from
-%% classRemoveFromSystemByName — exercise that path by attempting a successful
-%% removal, which calls stop_class_actors in its success branch.
-bt1982_class_remove_success_when_registry_absent_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Register a class using a module name that permits code:delete.
-                %% We install a freshly-compiled module so code:soft_purge/1 +
-                %% code:delete/1 succeed (exercising the happy-path through
-                %% ensure_code_step/publish_class_removed/stop_class_actors).
-                ModAtom = bt1982_removable_mod,
-                Forms = [
-                    {attribute, 1, module, ModAtom},
-                    {attribute, 2, export, []}
-                ],
-                {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
-                {module, ModAtom} = code:load_binary(
-                    ModAtom, "bt1982_removable_mod.erl", Bin
-                ),
-                ClassName = 'BT1982Removable',
-                ClassInfo = #{
-                    name => ClassName,
-                    module => ModAtom,
-                    superclass => none,
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, _Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
-
-                %% Remove: this calls stop_class_actors, gen_server:stop,
-                %% soft_purge, delete, soft_purge (again), publish_class_removed.
                 ?assertEqual(
                     nil,
-                    beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+                    beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
+                        'BT1959RemoveByNameFail'
+                    )
                 ),
-                %% Verify the class is gone from the registry.
                 ?assertEqual(
-                    undefined, beamtalk_class_registry:whereis_class(ClassName)
+                    undefined,
+                    beamtalk_class_registry:whereis_class('BT1959RemoveByNameFail')
                 )
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classRemoveFromSystemByName purges derived registries
-%%% ============================================================================
-
-%% The observable bug this issue fixes: an extension registered on a class
-%% must stop being dispatchable once the class is removed, and must not
-%% resurrect if a class of the same name is later re-created (extensions are
-%% keyed by class *name* atom, not by the class's pid/module, so a stale row
-%% would otherwise silently reattach to the new class).
-bt3105_removed_class_extension_not_dispatchable_and_does_not_resurrect_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_extensions:init(),
-                ModAtom = bt3105_ext_removable_mod,
-                Forms = [
-                    {attribute, 1, module, ModAtom},
-                    {attribute, 2, export, []}
-                ],
-                {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
-                {module, ModAtom} = code:load_binary(
-                    ModAtom, "bt3105_ext_removable_mod.erl", Bin
-                ),
-                ClassName = 'BT3105ExtRemovable',
-                ClassInfo = #{
-                    name => ClassName,
-                    module => ModAtom,
-                    superclass => none,
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, _Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
-
-                %% Register an extension on the class and confirm it is live.
-                ExtFun = fun(_Args, _Self) -> greeted end,
-                ok = beamtalk_extensions:register(ClassName, 'greet', ExtFun, bt3105_test),
-                ?assert(beamtalk_extensions:has(ClassName, 'greet')),
-
-                %% Remove the class: exercises the full teardown path.
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% --- classMethods/1 — empty class returns list ---
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1959MethodsEmpty', #{}, #{}),
+            try
+                Methods = beamtalk_behaviour_intrinsics:classMethods(ClassObj),
+                ?assert(is_list(Methods))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% --- classAllSuperclasses/1 — order is immediate parent to root ---
+        ?_test(begin
+            {_GrandObj, GrandPid} = register_class('BT1959OrderGrand', #{}, #{}),
+            {_ParentObj, ParentPid} = register_class_with_super(
+                'BT1959OrderMiddle', 'BT1959OrderGrand', #{}, #{}
+            ),
+            {ChildObj, ChildPid} = register_class_with_super(
+                'BT1959OrderBottom', 'BT1959OrderMiddle', #{}, #{}
+            ),
+            try
+                Supers = beamtalk_behaviour_intrinsics:classAllSuperclasses(ChildObj),
+                SuperNames = [beamtalk_behaviour_intrinsics:className(S) || S <- Supers],
+                %% First element should be immediate parent
+                [First | _] = SuperNames,
+                ?assertEqual('BT1959OrderMiddle', First)
+            after
+                beamtalk_test_proc:stop(ChildPid),
+                beamtalk_test_proc:stop(ParentPid),
+                beamtalk_test_proc:stop(GrandPid)
+            end
+        end),
+        %%% --- classSubclasses/1 — multiple children ---
+        ?_test(begin
+            {ParentObj, ParentPid} = register_class('BT1959MultiParent', #{}, #{}),
+            {_Child1Obj, Child1Pid} = register_class_with_super(
+                'BT1959MultiChild1', 'BT1959MultiParent', #{}, #{}
+            ),
+            {_Child2Obj, Child2Pid} = register_class_with_super(
+                'BT1959MultiChild2', 'BT1959MultiParent', #{}, #{}
+            ),
+            try
+                Subclasses = beamtalk_behaviour_intrinsics:classSubclasses(ParentObj),
+                SubNames = [beamtalk_behaviour_intrinsics:className(S) || S <- Subclasses],
+                ?assert(lists:member('BT1959MultiChild1', SubNames)),
+                ?assert(lists:member('BT1959MultiChild2', SubNames)),
+                ?assertEqual(2, length(Subclasses))
+            after
+                beamtalk_test_proc:stop(Child1Pid),
+                beamtalk_test_proc:stop(Child2Pid),
+                beamtalk_test_proc:stop(ParentPid)
+            end
+        end),
+        %%% --- metaclassClassMethods/1 — inherited class methods ---
+        ?_test(begin
+            ClassMethodFun = fun(_Self) -> ok end,
+            {_ParentObj, ParentPid} = register_class_with_class_methods(
+                'BT1959MetaCMParent',
+                #{},
+                #{},
+                #{'parentCM' => ClassMethodFun}
+            ),
+            {ChildObj, ChildPid} = register_class_with_super(
+                'BT1959MetaCMChild', 'BT1959MetaCMParent', #{}, #{}
+            ),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ChildObj),
+                ClassMethods = beamtalk_behaviour_intrinsics:metaclassClassMethods(MetaObj),
+                ?assert(is_list(ClassMethods)),
+                ?assert(lists:member('parentCM', ClassMethods))
+            after
+                beamtalk_test_proc:stop(ChildPid),
+                beamtalk_test_proc:stop(ParentPid)
+            end
+        end),
+        %%% --- metaclassThisClass/1 — round-trip identity ---
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1959MetaRoundTrip', #{}, #{}),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                ThisClass = beamtalk_behaviour_intrinsics:metaclassThisClass(MetaObj),
+                %% Round-trip: classClass -> metaclassThisClass returns same name
                 ?assertEqual(
-                    nil, beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+                    beamtalk_behaviour_intrinsics:className(ClassObj),
+                    beamtalk_behaviour_intrinsics:className(ThisClass)
                 ),
+                %% Same pid
+                ?assertEqual(
+                    ClassObj#beamtalk_object.pid,
+                    ThisClass#beamtalk_object.pid
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% --- classClass/1 — class_mod is beamtalk_metaclass_bt ---
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1959ClassMod', #{}, #{}),
+            try
+                MetaObj = beamtalk_behaviour_intrinsics:classClass(ClassObj),
+                ?assertEqual(beamtalk_metaclass_bt, MetaObj#beamtalk_object.class_mod)
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% --- classMethods/1 — deduplication across hierarchy ---
+        ?_test(begin
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {_ParentObj, ParentPid} = register_class(
+                'BT1959DedupParent',
+                #{},
+                #{'shared' => MethodFun, 'parentOnly' => MethodFun}
+            ),
+            %% Child overrides 'shared'
+            {ChildObj, ChildPid} = register_class_with_super(
+                'BT1959DedupChild',
+                'BT1959DedupParent',
+                #{},
+                #{'shared' => MethodFun, 'childOnly' => MethodFun}
+            ),
+            try
+                Methods = beamtalk_behaviour_intrinsics:classMethods(ChildObj),
+                %% 'shared' should appear only once (ordset dedup)
+                SharedCount = length([M || M <- Methods, M =:= 'shared']),
+                ?assertEqual(1, SharedCount),
+                ?assert(lists:member('parentOnly', Methods)),
+                ?assert(lists:member('childOnly', Methods))
+            after
+                beamtalk_test_proc:stop(ChildPid),
+                beamtalk_test_proc:stop(ParentPid)
+            end
+        end),
+        %%% --- classFieldNames/1 — multiple fields ---
+        ?_test(begin
+            {ClassObj, Pid} = register_class(
+                'BT1959FieldsMulti',
+                #{a => 1, b => 2, c => 3},
+                #{}
+            ),
+            try
+                Fields = beamtalk_behaviour_intrinsics:classFieldNames(ClassObj),
+                ?assertEqual(3, length(Fields)),
+                ?assert(lists:member(a, Fields)),
+                ?assert(lists:member(b, Fields)),
+                ?assert(lists:member(c, Fields))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %%% --- classSuperclass/1 — chain parent to grandparent ---
+        ?_test(begin
+            {_GrandObj, GrandPid} = register_class('BT1959SuperChainGrand', #{}, #{}),
+            {ChildObj, ChildPid} = register_class_with_super(
+                'BT1959SuperChainChild', 'BT1959SuperChainGrand', #{}, #{}
+            ),
+            try
+                Super = beamtalk_behaviour_intrinsics:classSuperclass(ChildObj),
+                ?assertMatch(#beamtalk_object{}, Super),
+                ?assertEqual(
+                    'BT1959SuperChainGrand',
+                    beamtalk_behaviour_intrinsics:className(Super)
+                ),
+                %% Grandparent's superclass is Object (if registered) or nil
+                GrandSuper = beamtalk_behaviour_intrinsics:classSuperclass(Super),
+                case beamtalk_class_registry:whereis_class('Object') of
+                    undefined ->
+                        ?assertEqual(nil, GrandSuper);
+                    _ ->
+                        ?assertMatch(#beamtalk_object{}, GrandSuper)
+                end
+            after
+                beamtalk_test_proc:stop(ChildPid),
+                beamtalk_test_proc:stop(GrandPid)
+            end
+        end),
+        %%% ============================================================================
+        %%% Additional coverage for behaviour intrinsics
+        %%% ============================================================================
+        %% classReload/1 on a class with no source file (dynamic class) raises
+        %% no_source_file — covers the nil branch of classReload/1.
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BT1982ReloadNoSrc', #{}, #{}),
+            try
+                ?assertBtError(
+                    no_source_file, beamtalk_behaviour_intrinsics:classReload(ClassObj)
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% classRemoveFromSystemByName rejects stdlib-module classes with runtime_error +
+        %% a "stdlib" hint. Creates a class whose module atom starts with bt@stdlib@
+        %% to exercise the stdlib protection branch.
+        ?_test(begin
+            %% Construct a class whose module name looks like a stdlib module.
+            %% start/2 allows any atom as module; the stdlib check is by name prefix.
+            ClassInfo = #{
+                name => 'BT1982StdlibProtectedX',
+                module => 'bt@stdlib@BT1982StdlibProtectedX',
+                superclass => none,
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start(
+                'BT1982StdlibProtectedX', ClassInfo
+            ),
+            try
+                ?assertBtError(
+                    runtime_error,
+                    beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
+                        'BT1982StdlibProtectedX'
+                    )
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% metaclassSuperclass on a root class (superclass=none) grounds the parallel
+        %% chain into the instance-side `Class` (ADR 0036). Covers the none
+        %% branch of metaclassSuperclass/1.
+        ?_test(begin
+            ClassInfo = #{
+                name => 'BT1982RootMeta',
+                module => test_class,
+                superclass => none,
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start('BT1982RootMeta', ClassInfo),
+            %% Metaclass receiver — what real metaclass objects look like.
+            MetaObj = #beamtalk_object{
+                class = 'Metaclass',
+                class_mod = beamtalk_metaclass_bt,
+                pid = Pid
+            },
+            try
+                Result = beamtalk_behaviour_intrinsics:metaclassSuperclass(MetaObj),
+                %% parallel chain grounds at `Class` — expect the
+                %% instance-side Class class object, not nil.
+                ?assertMatch(
+                    #beamtalk_object{class = 'Class class'},
+                    Result
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% classSuperclass on a class whose module has no __beamtalk_meta/0 (dynamic /
+        %% class_builder class) exercises the gen_server-fallback branch — and the
+        %% 'none' result should normalize to nil.
+        ?_test(begin
+            ClassInfo = #{
+                name => 'BT1982SuperRootFB',
+                %% test_class doesn't export __beamtalk_meta/0.
+                module => test_class,
+                superclass => none,
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start('BT1982SuperRootFB', ClassInfo),
+            ClassObj = #beamtalk_object{
+                class = 'BT1982SuperRootFB class',
+                class_mod = test_class,
+                pid = Pid
+            },
+            try
+                ?assertEqual(
+                    nil,
+                    beamtalk_behaviour_intrinsics:classSuperclass(ClassObj)
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% stop_class_actors is a no-op when the actor registry is not running.
+        %% It's exported as a plain function, but only called internally from
+        %% classRemoveFromSystemByName — exercise that path by attempting a successful
+        %% removal, which calls stop_class_actors in its success branch.
+        ?_test(begin
+            %% Register a class using a module name that permits code:delete.
+            %% We install a freshly-compiled module so code:soft_purge/1 +
+            %% code:delete/1 succeed (exercising the happy-path through
+            %% ensure_code_step/publish_class_removed/stop_class_actors).
+            ModAtom = bt1982_removable_mod,
+            Forms = [
+                {attribute, 1, module, ModAtom},
+                {attribute, 2, export, []}
+            ],
+            {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
+            {module, ModAtom} = code:load_binary(
+                ModAtom, "bt1982_removable_mod.erl", Bin
+            ),
+            ClassName = 'BT1982Removable',
+            ClassInfo = #{
+                name => ClassName,
+                module => ModAtom,
+                superclass => none,
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, _Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
 
-                %% The extension is gone — no longer dispatchable.
+            %% Remove: this calls stop_class_actors, gen_server:stop,
+            %% soft_purge, delete, soft_purge (again), publish_class_removed.
+            ?assertEqual(
+                nil,
+                beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+            ),
+            %% Verify the class is gone from the registry.
+            ?assertEqual(
+                undefined, beamtalk_class_registry:whereis_class(ClassName)
+            )
+        end),
+        %%% ============================================================================
+        %%% classRemoveFromSystemByName purges derived registries
+        %%% ============================================================================
+        %% The observable bug this issue fixes: an extension registered on a class
+        %% must stop being dispatchable once the class is removed, and must not
+        %% resurrect if a class of the same name is later re-created (extensions are
+        %% keyed by class *name* atom, not by the class's pid/module, so a stale row
+        %% would otherwise silently reattach to the new class).
+        ?_test(begin
+            beamtalk_extensions:init(),
+            ModAtom = bt3105_ext_removable_mod,
+            Forms = [
+                {attribute, 1, module, ModAtom},
+                {attribute, 2, export, []}
+            ],
+            {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
+            {module, ModAtom} = code:load_binary(
+                ModAtom, "bt3105_ext_removable_mod.erl", Bin
+            ),
+            ClassName = 'BT3105ExtRemovable',
+            ClassInfo = #{
+                name => ClassName,
+                module => ModAtom,
+                superclass => none,
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, _Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+
+            %% Register an extension on the class and confirm it is live.
+            ExtFun = fun(_Args, _Self) -> greeted end,
+            ok = beamtalk_extensions:register(ClassName, 'greet', ExtFun, bt3105_test),
+            ?assert(beamtalk_extensions:has(ClassName, 'greet')),
+
+            %% Remove the class: exercises the full teardown path.
+            ?assertEqual(
+                nil, beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+            ),
+
+            %% The extension is gone — no longer dispatchable.
+            ?assertNot(beamtalk_extensions:has(ClassName, 'greet')),
+            ?assertEqual(not_found, beamtalk_extensions:lookup(ClassName, 'greet')),
+
+            %% Redefine a class under the same name: the old extension
+            %% must not resurrect.
+            {ok, Pid2} = beamtalk_object_class:start(ClassName, ClassInfo),
+            try
                 ?assertNot(beamtalk_extensions:has(ClassName, 'greet')),
-                ?assertEqual(not_found, beamtalk_extensions:lookup(ClassName, 'greet')),
-
-                %% Redefine a class under the same name: the old extension
-                %% must not resurrect.
-                {ok, Pid2} = beamtalk_object_class:start(ClassName, ClassInfo),
-                try
-                    ?assertNot(beamtalk_extensions:has(ClassName, 'greet')),
-                    ?assertEqual(not_found, beamtalk_extensions:lookup(ClassName, 'greet'))
-                after
-                    try
-                        gen_server:stop(Pid2, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% metaclassAllMethods returns the combined method set (class-side + Behaviour
-%% protocol). Even for a dynamic class without the stdlib Class hierarchy
-%% loaded, the function should at least return a list.
-bt1982_metaclass_all_methods_returns_list_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class_with_class_methods(
-                    'BT1982MetaAll', #{}, #{}, #{
-                        'customFactory' => #{
-                            arity => 0, block => fun(_, _, _) -> ok end
-                        }
+                ?assertEqual(not_found, beamtalk_extensions:lookup(ClassName, 'greet'))
+            after
+                beamtalk_test_proc:stop(Pid2)
+            end
+        end),
+        %% metaclassAllMethods returns the combined method set (class-side + Behaviour
+        %% protocol). Even for a dynamic class without the stdlib Class hierarchy
+        %% loaded, the function should at least return a list.
+        ?_test(begin
+            {ClassObj, Pid} = register_class_with_class_methods(
+                'BT1982MetaAll', #{}, #{}, #{
+                    'customFactory' => #{
+                        arity => 0, block => fun(_, _, _) -> ok end
                     }
-                ),
-                try
-                    Methods = beamtalk_behaviour_intrinsics:metaclassAllMethods(ClassObj),
-                    ?assert(is_list(Methods)),
-                    ?assert(lists:member('customFactory', Methods))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
+                }
+            ),
+            try
+                Methods = beamtalk_behaviour_intrinsics:metaclassAllMethods(ClassObj),
+                ?assert(is_list(Methods)),
+                ?assert(lists:member('customFactory', Methods))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end)
+    ]}.
 
 %%% ============================================================================
 %%% Live method patch primitives — compile:source: / tryCompile:source:
@@ -2272,112 +1491,76 @@ bt1982_metaclass_all_methods_returns_list_test_() ->
 %% (binary). compile:source: form (durable) names compile:source: in the
 %% message — covers the durable intent_selector/1 clause.
 compile_source_non_binary_raises_type_error_test_() ->
-    {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BTCompileSrcBadType', #{}, #{}),
-                try
-                    %% Pass an atom (not a binary) as the source body.
-                    ?assertBtError(
-                        type_error,
-                        beamtalk_class_refactor:classCompileSource(
-                            ClassObj, 'foo', not_a_binary
-                        )
+    {foreach, fun setup_workspace/0, fun teardown_workspace/1, [
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BTCompileSrcBadType', #{}, #{}),
+            try
+                %% Pass an atom (not a binary) as the source body.
+                ?assertBtError(
+                    type_error,
+                    beamtalk_class_refactor:classCompileSource(
+                        ClassObj, 'foo', not_a_binary
                     )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% tryCompile:source: (ephemeral) with a non-binary body also raises a
-%% type_error — covers the ephemeral intent_selector/1 clause and the
-%% classTryCompileSource/3 entry point.
-try_compile_source_non_binary_raises_type_error_test_() ->
-    {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BTTryCompileSrcBadType', #{}, #{}),
-                try
-                    ?assertBtError(
-                        type_error,
-                        beamtalk_class_refactor:classTryCompileSource(
-                            ClassObj, 'foo', 12345
-                        )
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% tryCompile:source: (ephemeral) with a non-binary body also raises a
+        %% type_error — covers the ephemeral intent_selector/1 clause and the
+        %% classTryCompileSource/3 entry point.
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BTTryCompileSrcBadType', #{}, #{}),
+            try
+                ?assertBtError(
+                    type_error,
+                    beamtalk_class_refactor:classTryCompileSource(
+                        ClassObj, 'foo', 12345
                     )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% A binary body that cannot be compiled (syntactic garbage) drives the full
-%% do_compile_source/4 path: current_author_context/0 (default repl/human),
-%% the erlang:apply into beamtalk_repl_eval:compile_method/6, and the
-%% {error, Reason} -> compile_failed branch.
-compile_source_invalid_body_raises_compile_failed_test_() ->
-    {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BTCompileSrcInvalid', #{}, #{}),
-                try
-                    ?assertBtError(
-                        compile_failed,
-                        beamtalk_class_refactor:classCompileSource(
-                            ClassObj, 'foo', <<"@@@ not valid beamtalk @@@">>
-                        )
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% A binary body that cannot be compiled (syntactic garbage) drives the full
+        %% do_compile_source/4 path: current_author_context/0 (default repl/human),
+        %% the erlang:apply into beamtalk_repl_eval:compile_method/6, and the
+        %% {error, Reason} -> compile_failed branch.
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BTCompileSrcInvalid', #{}, #{}),
+            try
+                ?assertBtError(
+                    compile_failed,
+                    beamtalk_class_refactor:classCompileSource(
+                        ClassObj, 'foo', <<"@@@ not valid beamtalk @@@">>
                     )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% The agent author branch of current_author_context/0: stamp the process
-%% dictionary with $beamtalk_author_kind = agent and a custom author binary,
-%% then drive a (failing) compile. The compile still fails (invalid body) but
-%% the agent author-context branch is exercised on the way.
-compile_source_agent_author_context_test_() ->
-    {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
-        [
-            ?_test(begin
-                {ClassObj, Pid} = register_class('BTCompileSrcAgent', #{}, #{}),
-                erlang:put('$beamtalk_author_kind', agent),
-                erlang:put('$beamtalk_author', <<"copilot">>),
-                try
-                    ?assertBtError(
-                        compile_failed,
-                        beamtalk_class_refactor:classCompileSource(
-                            ClassObj, 'foo', <<"@@@ still invalid @@@">>
-                        )
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% The agent author branch of current_author_context/0: stamp the process
+        %% dictionary with $beamtalk_author_kind = agent and a custom author binary,
+        %% then drive a (failing) compile. The compile still fails (invalid body) but
+        %% the agent author-context branch is exercised on the way.
+        ?_test(begin
+            {ClassObj, Pid} = register_class('BTCompileSrcAgent', #{}, #{}),
+            erlang:put('$beamtalk_author_kind', agent),
+            erlang:put('$beamtalk_author', <<"copilot">>),
+            try
+                ?assertBtError(
+                    compile_failed,
+                    beamtalk_class_refactor:classCompileSource(
+                        ClassObj, 'foo', <<"@@@ still invalid @@@">>
                     )
-                after
-                    erlang:erase('$beamtalk_author_kind'),
-                    erlang:erase('$beamtalk_author'),
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
+                )
+            after
+                erlang:erase('$beamtalk_author_kind'),
+                erlang:erase('$beamtalk_author'),
+                beamtalk_test_proc:stop(Pid)
+            end
+        end)
+    ]}.
 
 %%% ============================================================================
 %%% meta_for_module/1 — modules exporting __beamtalk_meta/0
@@ -2387,306 +1570,265 @@ compile_source_agent_author_context_test_() ->
 %% path in classFieldNames/1, classLocalMethods/1, classClassVarNames/1 and
 %% classIncludesSelector/2 instead of the gen_server fallback.
 meta_fast_path_reflection_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MetaMod = load_meta_module(bt_meta_fixture_a, #{
-                    superclass => nil,
-                    fields => [alpha, beta],
-                    method_info => #{'doThing' => #{}, 'doOther' => #{}},
-                    class_method_info => #{'factory' => #{}},
-                    class_fields => [counter]
-                }),
-                ClassName = 'BTMetaFixtureA',
-                ClassInfo = #{
-                    name => ClassName,
-                    module => MetaMod,
-                    superclass => none,
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
-                ClassObj = #beamtalk_object{
-                    class = 'BTMetaFixtureA class', class_mod = MetaMod, pid = Pid
-                },
-                try
-                    %% classFieldNames -> maps:get(fields, Meta)
-                    ?assertEqual(
-                        [alpha, beta],
-                        beamtalk_behaviour_intrinsics:classFieldNames(ClassObj)
-                    ),
-                    %% classLocalMethods -> maps:keys(method_info)
-                    LocalMethods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
-                    ?assert(lists:member('doThing', LocalMethods)),
-                    ?assert(lists:member('doOther', LocalMethods)),
-                    %% classClassVarNames -> maps:get(class_fields, Meta)
-                    ?assertEqual(
-                        [counter],
-                        beamtalk_behaviour_intrinsics:classClassVarNames(ClassObj)
-                    ),
-                    %% classIncludesSelector -> maps:is_key(_, method_info)
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'doThing')
-                    ),
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'nope')
-                    )
-                after
-                    (try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    purge_meta_module(MetaMod)
-                end
-            end)
-        ]
-    end}.
-
-%% classIncludesSelector/2 on a metaclass-tagged object backed by a meta module
-%% uses the class_method_info fast path (maps:is_key over class_method_info).
-meta_fast_path_metaclass_includes_selector_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                MetaMod = load_meta_module(bt_meta_fixture_b, #{
-                    superclass => nil,
-                    fields => [],
-                    method_info => #{},
-                    class_method_info => #{'build' => #{}},
-                    class_fields => []
-                }),
-                ClassName = 'BTMetaFixtureB',
-                ClassInfo = #{
-                    name => ClassName,
-                    module => MetaMod,
-                    superclass => none,
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
-                MetaObj = #beamtalk_object{
-                    class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = Pid
-                },
-                try
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classIncludesSelector(MetaObj, 'build')
-                    ),
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:classIncludesSelector(MetaObj, 'missing')
-                    )
-                after
-                    (try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end),
-                    purge_meta_module(MetaMod)
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% stop_class_actors/1 — via removeFromSystem with a live actor registry
-%%% ============================================================================
-
-%% classRemoveFromSystemByName/1 calls stop_class_actors/1 in its success
-%% branch. With a stub registry process registered under beamtalk_actor_registry
-%% that answers list_actors, the actor-collection + kill loop is exercised.
-stop_class_actors_with_registry_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% A removable module so code:delete succeeds on the happy path.
-                ModAtom = bt_stopactors_removable_mod,
-                Forms = [
-                    {attribute, 1, module, ModAtom},
-                    {attribute, 2, export, []}
-                ],
-                {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
-                {module, ModAtom} = code:load_binary(
-                    ModAtom, "bt_stopactors_removable_mod.erl", Bin
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            MetaMod = load_meta_module(bt_meta_fixture_a, #{
+                superclass => nil,
+                fields => [alpha, beta],
+                method_info => #{'doThing' => #{}, 'doOther' => #{}},
+                class_method_info => #{'factory' => #{}},
+                class_fields => [counter]
+            }),
+            ClassName = 'BTMetaFixtureA',
+            ClassInfo = #{
+                name => ClassName,
+                module => MetaMod,
+                superclass => none,
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+            ClassObj = #beamtalk_object{
+                class = 'BTMetaFixtureA class', class_mod = MetaMod, pid = Pid
+            },
+            try
+                %% classFieldNames -> maps:get(fields, Meta)
+                ?assertEqual(
+                    [alpha, beta],
+                    beamtalk_behaviour_intrinsics:classFieldNames(ClassObj)
                 ),
-                ClassName = 'BTStopActorsClass',
-                ClassInfo = #{
-                    name => ClassName,
-                    module => ModAtom,
-                    superclass => none,
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, _ClassPid} = beamtalk_object_class:start(ClassName, ClassInfo),
-
-                %% A fake actor belonging to this class.
-                ActorPid = spawn(fun() ->
-                    receive
-                        stop -> ok
-                    after 10000 -> ok
-                    end
-                end),
-                %% Stub registry: answers list_actors with one matching actor and
-                %% {kill, Pid} by stopping it.
-                Registry = spawn(fun() -> stub_registry_loop(ClassName, ActorPid) end),
-                beamtalk_test_actor_registry:with_registered(Registry, fun() ->
-                    try
-                        ?assertEqual(
-                            nil,
-                            beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
-                        ),
-                        %% The class is gone from the registry.
-                        ?assertEqual(
-                            undefined, beamtalk_class_registry:whereis_class(ClassName)
-                        )
-                    after
-                        try
-                            exit(Registry, kill)
-                        catch
-                            _:_ -> ok
-                        end,
-                        try
-                            exit(ActorPid, kill)
-                        catch
-                            _:_ -> ok
-                        end
-                    end
-                end)
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% classRemoveFromSystemByName with a real class-spawned live actor
-%%% ============================================================================
-
-%% Unlike stop_class_actors_with_registry_test_ above (a bare `spawn/1` fun,
-%% never linked to anything), this spawns the actor *through* the class
-%% gen_server's real `{spawn, _}` handler — `erlang:apply(Module, spawn, [])`
-%% inside `handle_call({spawn, _}, ...)` — which is exactly how the now-removed
-%% link used to form (`beamtalk_actor:safe_spawn/2` ran with the class
-%% gen_server as `self()`, and `gen_server:start_link` linked it to the new
-%% actor). Before the fix, `stop_class_actors/1`'s kill below would take the
-%% class process down too, and the unconditional `gen_server:stop(ClassPid)`
-%% a few lines later in `classRemoveFromSystemByName/1` would then crash
-%% this test with `noproc` instead of returning cleanly.
-classremovefromsystembyname_with_class_spawned_actor_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% A disposable class module whose own `spawn/0` delegates to
-                %% the stable `test_class_actor` fixture as the actor's
-                %% backing gen_server — so `code:delete/1` below only ever
-                %% unloads this throwaway module, never a shared test fixture.
-                ModAtom = bt_3243_removable_class_mod,
-                Forms = beamtalk_test_erl_forms:parse_forms([
-                    "-module(" ++ atom_to_list(ModAtom) ++ ").",
-                    "-export([spawn/0]).",
-                    "spawn() -> beamtalk_actor:safe_spawn(test_class_actor, #{})."
-                ]),
-                {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
-                {module, ModAtom} = code:load_binary(
-                    ModAtom, "bt_3243_removable_class_mod.erl", Bin
+                %% classLocalMethods -> maps:keys(method_info)
+                LocalMethods = beamtalk_behaviour_intrinsics:classLocalMethods(ClassObj),
+                ?assert(lists:member('doThing', LocalMethods)),
+                ?assert(lists:member('doOther', LocalMethods)),
+                %% classClassVarNames -> maps:get(class_fields, Meta)
+                ?assertEqual(
+                    [counter],
+                    beamtalk_behaviour_intrinsics:classClassVarNames(ClassObj)
                 ),
-                ClassName = 'BT3243LiveActorClass',
-                ClassInfo = #{
-                    name => ClassName,
-                    module => ModAtom,
-                    superclass => 'Actor',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, ClassPid} = beamtalk_object_class:start(ClassName, ClassInfo),
+                %% classIncludesSelector -> maps:is_key(_, method_info)
+                ?assert(
+                    beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'doThing')
+                ),
+                ?assertNot(
+                    beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'nope')
+                )
+            after
+                beamtalk_test_proc:stop(Pid),
+                purge_meta_module(MetaMod)
+            end
+        end),
+        %% classIncludesSelector/2 on a metaclass-tagged object backed by a meta module
+        %% uses the class_method_info fast path (maps:is_key over class_method_info).
+        ?_test(begin
+            MetaMod = load_meta_module(bt_meta_fixture_b, #{
+                superclass => nil,
+                fields => [],
+                method_info => #{},
+                class_method_info => #{'build' => #{}},
+                class_fields => []
+            }),
+            ClassName = 'BTMetaFixtureB',
+            ClassInfo = #{
+                name => ClassName,
+                module => MetaMod,
+                superclass => none,
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+            MetaObj = #beamtalk_object{
+                class = 'Metaclass', class_mod = beamtalk_metaclass_bt, pid = Pid
+            },
+            try
+                ?assert(
+                    beamtalk_behaviour_intrinsics:classIncludesSelector(MetaObj, 'build')
+                ),
+                ?assertNot(
+                    beamtalk_behaviour_intrinsics:classIncludesSelector(MetaObj, 'missing')
+                )
+            after
+                beamtalk_test_proc:stop(Pid),
+                purge_meta_module(MetaMod)
+            end
+        end),
+        %%% ============================================================================
+        %%% stop_class_actors/1 — via removeFromSystem with a live actor registry
+        %%% ============================================================================
+        %% classRemoveFromSystemByName/1 calls stop_class_actors/1 in its success
+        %% branch. With a stub registry process registered under beamtalk_actor_registry
+        %% that answers list_actors, the actor-collection + kill loop is exercised.
+        ?_test(begin
+            %% A removable module so code:delete succeeds on the happy path.
+            ModAtom = bt_stopactors_removable_mod,
+            Forms = [
+                {attribute, 1, module, ModAtom},
+                {attribute, 2, export, []}
+            ],
+            {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
+            {module, ModAtom} = code:load_binary(
+                ModAtom, "bt_stopactors_removable_mod.erl", Bin
+            ),
+            ClassName = 'BTStopActorsClass',
+            ClassInfo = #{
+                name => ClassName,
+                module => ModAtom,
+                superclass => none,
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, _ClassPid} = beamtalk_object_class:start(ClassName, ClassInfo),
 
-                %% Real spawn through the class gen_server's own process.
-                {ok, #beamtalk_object{pid = ActorPid}} =
-                    gen_server:call(ClassPid, {spawn, []}),
-                ?assert(is_process_alive(ActorPid)),
-
-                Registry = spawn(fun() -> stub_registry_loop(ClassName, ActorPid) end),
-                beamtalk_test_actor_registry:with_registered(Registry, fun() ->
-                    try
-                        ?assertEqual(
-                            nil,
-                            beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
-                        ),
-                        ?assertEqual(undefined, beamtalk_class_registry:whereis_class(ClassName)),
-                        ?assertNot(is_process_alive(ActorPid))
-                    after
-                        try
-                            exit(Registry, kill)
-                        catch
-                            _:_ -> ok
-                        end,
-                        try
-                            exit(ActorPid, kill)
-                        catch
-                            _:_ -> ok
-                        end
-                    end
-                end)
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% walk_hierarchy/3 — max depth cycle guard
-%%% ============================================================================
-
-%% A self-referential class (its own superclass) makes walk_hierarchy/3 loop;
-%% the ?MAX_HIERARCHY_DEPTH guard halts it and returns the accumulator. We drive
-%% it via classAllSuperclasses/1, which folds class objects up the chain.
-%%
-%% walk_ancestors/3's max_depth_exceeded now carries the last node
-%% visited (with its accumulator riding along inside it — see
-%% beamtalk_behaviour_intrinsics:walk_hierarchy/3's moduledoc), so
-%% walk_hierarchy/3 returns the PARTIAL fold built up before the guard
-%% tripped instead of discarding it in favour of the original (empty) `[]`
-%% accumulator. Assert the list is non-empty and bounded, not merely a list.
-walk_hierarchy_cycle_guard_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassName = 'BTCycleSelf',
-                ClassInfo = #{
-                    name => ClassName,
-                    module => test_class,
-                    %% Superclass points back at itself — an artificial cycle.
-                    superclass => ClassName,
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
-                ClassObj = #beamtalk_object{
-                    class = 'BTCycleSelf class', class_mod = test_class, pid = Pid
-                },
+            %% A fake actor belonging to this class.
+            ActorPid = spawn(fun() ->
+                receive
+                    stop -> ok
+                after 10000 -> ok
+                end
+            end),
+            %% Stub registry: answers list_actors with one matching actor and
+            %% {kill, Pid} by stopping it.
+            Registry = spawn(fun() -> stub_registry_loop(ClassName, ActorPid) end),
+            beamtalk_test_actor_registry:with_registered(Registry, fun() ->
                 try
-                    %% Must terminate (depth guard) and return a bounded,
-                    %% non-empty list: the partial fold collected from the
-                    %% (repeated, self-referencing) ancestor visited before
-                    %% the depth guard tripped, not the empty `[]` the walk
-                    %% started with.
-                    Supers = beamtalk_behaviour_intrinsics:classAllSuperclasses(ClassObj),
-                    ?assert(is_list(Supers)),
-                    ?assert(length(Supers) > 0),
-                    ?assert(length(Supers) =< ?MAX_HIERARCHY_DEPTH + 1),
-                    %% Every entry is the same self-referencing class, since
-                    %% the cycle never reaches a different ancestor.
-                    ?assert(
-                        lists:all(
-                            fun(#beamtalk_object{pid = SuperPid}) -> SuperPid =:= Pid end,
-                            Supers
-                        )
+                    ?assertEqual(
+                        nil,
+                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+                    ),
+                    %% The class is gone from the registry.
+                    ?assertEqual(
+                        undefined, beamtalk_class_registry:whereis_class(ClassName)
                     )
                 after
                     try
-                        gen_server:stop(Pid, normal, 5000)
+                        exit(Registry, kill)
+                    catch
+                        _:_ -> ok
+                    end,
+                    try
+                        exit(ActorPid, kill)
                     catch
                         _:_ -> ok
                     end
                 end
             end)
-        ]
-    end}.
+        end),
+        %%% ============================================================================
+        %%% classRemoveFromSystemByName with a real class-spawned live actor
+        %%% ============================================================================
+        %% Unlike stop_class_actors_with_registry_test_ above (a bare `spawn/1` fun,
+        %% never linked to anything), this spawns the actor *through* the class
+        %% gen_server's real `{spawn, _}` handler — `erlang:apply(Module, spawn, [])`
+        %% inside `handle_call({spawn, _}, ...)` — which is exactly how the now-removed
+        %% link used to form (`beamtalk_actor:safe_spawn/2` ran with the class
+        %% gen_server as `self()`, and `gen_server:start_link` linked it to the new
+        %% actor). Before the fix, `stop_class_actors/1`'s kill below would take the
+        %% class process down too, and the unconditional `gen_server:stop(ClassPid)`
+        %% a few lines later in `classRemoveFromSystemByName/1` would then crash
+        %% this test with `noproc` instead of returning cleanly.
+        ?_test(begin
+            %% A disposable class module whose own `spawn/0` delegates to
+            %% the stable `test_class_actor` fixture as the actor's
+            %% backing gen_server — so `code:delete/1` below only ever
+            %% unloads this throwaway module, never a shared test fixture.
+            ModAtom = bt_3243_removable_class_mod,
+            Forms = beamtalk_test_erl_forms:parse_forms([
+                "-module(" ++ atom_to_list(ModAtom) ++ ").",
+                "-export([spawn/0]).",
+                "spawn() -> beamtalk_actor:safe_spawn(test_class_actor, #{})."
+            ]),
+            {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
+            {module, ModAtom} = code:load_binary(
+                ModAtom, "bt_3243_removable_class_mod.erl", Bin
+            ),
+            ClassName = 'BT3243LiveActorClass',
+            ClassInfo = #{
+                name => ClassName,
+                module => ModAtom,
+                superclass => 'Actor',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, ClassPid} = beamtalk_object_class:start(ClassName, ClassInfo),
+
+            %% Real spawn through the class gen_server's own process.
+            {ok, #beamtalk_object{pid = ActorPid}} =
+                gen_server:call(ClassPid, {spawn, []}),
+            ?assert(is_process_alive(ActorPid)),
+
+            Registry = spawn(fun() -> stub_registry_loop(ClassName, ActorPid) end),
+            beamtalk_test_actor_registry:with_registered(Registry, fun() ->
+                try
+                    ?assertEqual(
+                        nil,
+                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+                    ),
+                    ?assertEqual(undefined, beamtalk_class_registry:whereis_class(ClassName)),
+                    ?assertNot(is_process_alive(ActorPid))
+                after
+                    try
+                        exit(Registry, kill)
+                    catch
+                        _:_ -> ok
+                    end,
+                    try
+                        exit(ActorPid, kill)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        end),
+        %%% ============================================================================
+        %%% walk_hierarchy/3 — max depth cycle guard
+        %%% ============================================================================
+        %% A self-referential class (its own superclass) makes walk_hierarchy/3 loop;
+        %% the ?MAX_HIERARCHY_DEPTH guard halts it and returns the accumulator. We drive
+        %% it via classAllSuperclasses/1, which folds class objects up the chain.
+        %%
+        %% walk_ancestors/3's max_depth_exceeded now carries the last node
+        %% visited (with its accumulator riding along inside it — see
+        %% beamtalk_behaviour_intrinsics:walk_hierarchy/3's moduledoc), so
+        %% walk_hierarchy/3 returns the PARTIAL fold built up before the guard
+        %% tripped instead of discarding it in favour of the original (empty) `[]`
+        %% accumulator. Assert the list is non-empty and bounded, not merely a list.
+        ?_test(begin
+            ClassName = 'BTCycleSelf',
+            ClassInfo = #{
+                name => ClassName,
+                module => test_class,
+                %% Superclass points back at itself — an artificial cycle.
+                superclass => ClassName,
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start(ClassName, ClassInfo),
+            ClassObj = #beamtalk_object{
+                class = 'BTCycleSelf class', class_mod = test_class, pid = Pid
+            },
+            try
+                %% Must terminate (depth guard) and return a bounded,
+                %% non-empty list: the partial fold collected from the
+                %% (repeated, self-referencing) ancestor visited before
+                %% the depth guard tripped, not the empty `[]` the walk
+                %% started with.
+                Supers = beamtalk_behaviour_intrinsics:classAllSuperclasses(ClassObj),
+                ?assert(is_list(Supers)),
+                ?assert(length(Supers) > 0),
+                ?assert(length(Supers) =< ?MAX_HIERARCHY_DEPTH + 1),
+                %% Every entry is the same self-referencing class, since
+                %% the cycle never reaches a different ancestor.
+                ?assert(
+                    lists:all(
+                        fun(#beamtalk_object{pid = SuperPid}) -> SuperPid =:= Pid end,
+                        Supers
+                    )
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end)
+    ]}.
 
 %%% ============================================================================
 %%% Helpers for coverage additions
@@ -2750,6 +1892,7 @@ rewrite_after_identity_move_no_workspace_is_error_tuple_test() ->
 
 classRenameTo_dynamic_class_reregisters_test_() ->
     %% renameTo: classifies the class through the workspace callback.
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
         {ClassObj, Pid} = register_class('BT3278RenameEUnitTarget', #{}, #{}),
         Result = beamtalk_class_refactor:classRenameTo(
@@ -2769,6 +1912,7 @@ classRenameTo_dynamic_class_reregisters_test_() ->
 %% A classification that crashes must refuse the rename BEFORE any mutation,
 %% not be read as a "dynamic" class (which would let a stdlib class be renamed).
 classRenameTo_refuses_without_mutation_when_classification_fails_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
         [
             ?_test(begin
@@ -2791,11 +1935,7 @@ classRenameTo_refuses_without_mutation_when_classification_fails_test_() ->
                     )
                 after
                     beamtalk_workspace_callback_tests:unload_crashing_workspace(Mod),
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
+                    beamtalk_test_proc:stop(Pid)
                 end
             end)
         ]
@@ -2807,6 +1947,7 @@ classRenameTo_refuses_without_mutation_when_classification_fails_test_() ->
 %% em-dash, not an escape, to avoid the encoding mismatch a `\u{...}` escape
 %% would introduce in a plain Erlang string).
 classRenameTo_collision_refused_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         {ClassObj, _Pid} = register_class('BT3278RenameEUnitSource', #{}, #{}),
         {_ExistingObj, _ExistingPid} = register_class('BT3278RenameEUnitExisting', #{}, #{}),
@@ -2851,6 +1992,7 @@ classRenameTo_collision_refused_test_() ->
 %% the process stays alive, and its identity rolls back to the OLD name
 %% rather than being left unreachable under either name.
 object_class_rename_class_rejects_toctou_collision_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         {_ClassObj, Pid} = register_class('BT3278RenameToctouSource', #{}, #{}),
         {_ExistingObj, _ExistingPid} = register_class('BT3278RenameToctouExisting', #{}, #{}),
@@ -2881,6 +2023,7 @@ object_class_rename_class_rejects_toctou_collision_test_() ->
 %% only then is `Pid` resumed, so the handler's own `erlang:register/2`
 %% genuinely loses the race `rename/2`'s pre-check could not have caught.
 object_class_rename_toctou_through_public_api_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         {_ClassObj, Pid} = register_class('BT3278RenamePublicApiSource', #{}, #{}),
         ok = sys:suspend(Pid),
@@ -2933,177 +2076,121 @@ object_class_rename_toctou_through_public_api_test_() ->
 %% Absent selector raises selector_not_found — deliberately not
 %% does_not_understand (ADR 0112 § Error behaviour on absent selector).
 class_remove_selector_absent_raises_selector_not_found_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_extensions:init(),
-                {ClassObj, Pid} = register_class('BTRmSelAbsent3186', #{}, #{}),
-                try
-                    ?assertBtError(
-                        selector_not_found,
-                        beamtalk_class_refactor:classRemoveSelector(
-                            ClassObj, 'noSuchMethod3186'
-                        )
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            beamtalk_extensions:init(),
+            {ClassObj, Pid} = register_class('BTRmSelAbsent3186', #{}, #{}),
+            try
+                ?assertBtError(
+                    selector_not_found,
+                    beamtalk_class_refactor:classRemoveSelector(
+                        ClassObj, 'noSuchMethod3186'
                     )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% Instance-side extension removal: classRemoveSelector returns Self and the
-%% extension is gone.  Uses register/4 (no source) so extension_prev_source/2
-%% exercises its not_found branch (lines 833-835).
-class_remove_selector_extension_instance_side_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_extensions:init(),
-                ClassName = 'BTRmSelExtInst3186',
-                {ClassObj, Pid} = register_class(ClassName, #{}, #{}),
-                ok = beamtalk_extensions:register(
-                    ClassName, 'extensionMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% Instance-side extension removal: classRemoveSelector returns Self and the
+        %% extension is gone.  Uses register/4 (no source) so extension_prev_source/2
+        %% exercises its not_found branch (lines 833-835).
+        ?_test(begin
+            beamtalk_extensions:init(),
+            ClassName = 'BTRmSelExtInst3186',
+            {ClassObj, Pid} = register_class(ClassName, #{}, #{}),
+            ok = beamtalk_extensions:register(
+                ClassName, 'extensionMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
+            ),
+            try
+                Result = beamtalk_class_refactor:classRemoveSelector(
+                    ClassObj, 'extensionMethod3186'
                 ),
-                try
-                    Result = beamtalk_class_refactor:classRemoveSelector(
-                        ClassObj, 'extensionMethod3186'
-                    ),
-                    ?assertEqual(ClassObj, Result),
-                    ?assertNot(beamtalk_extensions:has(ClassName, 'extensionMethod3186'))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% classRemoveSelectorIfAbsent/3: absent selector evaluates the block and
-%% returns its value rather than raising.
-class_remove_selector_if_absent_block_called_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_extensions:init(),
-                {ClassObj, Pid} = register_class('BTRmSelIfAbsent3186', #{}, #{}),
-                try
-                    Result = beamtalk_class_refactor:classRemoveSelectorIfAbsent(
-                        ClassObj, 'noSuchMethod3186', fun() -> block_was_called end
-                    ),
-                    ?assertEqual(block_was_called, Result)
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% classRemoveSelectorIfAbsent/3: extension present — returns Self (block not
-%% called).
-class_remove_selector_if_absent_extension_hit_returns_self_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_extensions:init(),
-                ClassName = 'BTRmSelIfAbsentExt3186',
-                {ClassObj, Pid} = register_class(ClassName, #{}, #{}),
-                ok = beamtalk_extensions:register(
-                    ClassName, 'extMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
+                ?assertEqual(ClassObj, Result),
+                ?assertNot(beamtalk_extensions:has(ClassName, 'extensionMethod3186'))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% classRemoveSelectorIfAbsent/3: absent selector evaluates the block and
+        %% returns its value rather than raising.
+        ?_test(begin
+            beamtalk_extensions:init(),
+            {ClassObj, Pid} = register_class('BTRmSelIfAbsent3186', #{}, #{}),
+            try
+                Result = beamtalk_class_refactor:classRemoveSelectorIfAbsent(
+                    ClassObj, 'noSuchMethod3186', fun() -> block_was_called end
                 ),
-                try
-                    Result = beamtalk_class_refactor:classRemoveSelectorIfAbsent(
-                        ClassObj, 'extMethod3186', fun() -> block_was_called end
-                    ),
-                    ?assertEqual(ClassObj, Result),
-                    ?assertNot(beamtalk_extensions:has(ClassName, 'extMethod3186'))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% Class-side extension removal via a Metaclass-tagged object — exercises the
-%% removal_target/1 Metaclass clause (line 864) and the class-side branch of
-%% extension_ets_class/2 (line 875).
-class_remove_selector_class_side_extension_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_extensions:init(),
-                ClassName = 'BTRmSelClassSide3186',
-                {_ClassObj, Pid} = register_class_with_class_methods(
-                    ClassName, #{}, #{}, #{}
+                ?assertEqual(block_was_called, Result)
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% classRemoveSelectorIfAbsent/3: extension present — returns Self (block not
+        %% called).
+        ?_test(begin
+            beamtalk_extensions:init(),
+            ClassName = 'BTRmSelIfAbsentExt3186',
+            {ClassObj, Pid} = register_class(ClassName, #{}, #{}),
+            ok = beamtalk_extensions:register(
+                ClassName, 'extMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
+            ),
+            try
+                Result = beamtalk_class_refactor:classRemoveSelectorIfAbsent(
+                    ClassObj, 'extMethod3186', fun() -> block_was_called end
                 ),
-                %% Metaclass-tagged object is the class-side receiver.
-                Module = beamtalk_object_class:module_name(Pid),
-                MetaObj = #beamtalk_object{class = 'Metaclass', class_mod = Module, pid = Pid},
-                %% Class-side ETS key is class_object_tag(ClassName).
-                ClassEtsKey = beamtalk_class_registry:class_object_tag(ClassName),
-                ok = beamtalk_extensions:register(
-                    ClassEtsKey, 'classExtMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
+                ?assertEqual(ClassObj, Result),
+                ?assertNot(beamtalk_extensions:has(ClassName, 'extMethod3186'))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% Class-side extension removal via a Metaclass-tagged object — exercises the
+        %% removal_target/1 Metaclass clause (line 864) and the class-side branch of
+        %% extension_ets_class/2 (line 875).
+        ?_test(begin
+            beamtalk_extensions:init(),
+            ClassName = 'BTRmSelClassSide3186',
+            {_ClassObj, Pid} = register_class_with_class_methods(
+                ClassName, #{}, #{}, #{}
+            ),
+            %% Metaclass-tagged object is the class-side receiver.
+            Module = beamtalk_object_class:module_name(Pid),
+            MetaObj = #beamtalk_object{class = 'Metaclass', class_mod = Module, pid = Pid},
+            %% Class-side ETS key is class_object_tag(ClassName).
+            ClassEtsKey = beamtalk_class_registry:class_object_tag(ClassName),
+            ok = beamtalk_extensions:register(
+                ClassEtsKey, 'classExtMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
+            ),
+            try
+                Result = beamtalk_class_refactor:classRemoveSelector(
+                    MetaObj, 'classExtMethod3186'
                 ),
-                try
-                    Result = beamtalk_class_refactor:classRemoveSelector(
-                        MetaObj, 'classExtMethod3186'
-                    ),
-                    ?assertEqual(MetaObj, Result),
-                    ?assertNot(beamtalk_extensions:has(ClassEtsKey, 'classExtMethod3186'))
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% Local-method removal on a node with no recorded workspace capabilities is
-%% refused by beamtalk_capability:require_workspace/1 with a no_workspace error.
-class_remove_selector_local_method_no_workspace_raises_no_workspace_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_extensions:init(),
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {ClassObj, Pid} = register_class(
-                    'BTRmSelLocalNoWs3186', #{}, #{'localTestMethod3186' => MethodFun}
-                ),
-                try
-                    ?assertBtError(
-                        no_workspace,
-                        beamtalk_class_refactor:classRemoveSelector(
-                            ClassObj, 'localTestMethod3186'
-                        )
+                ?assertEqual(MetaObj, Result),
+                ?assertNot(beamtalk_extensions:has(ClassEtsKey, 'classExtMethod3186'))
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% Local-method removal on a node with no recorded workspace capabilities is
+        %% refused by beamtalk_capability:require_workspace/1 with a no_workspace error.
+        ?_test(begin
+            beamtalk_extensions:init(),
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {ClassObj, Pid} = register_class(
+                'BTRmSelLocalNoWs3186', #{}, #{'localTestMethod3186' => MethodFun}
+            ),
+            try
+                ?assertBtError(
+                    no_workspace,
+                    beamtalk_class_refactor:classRemoveSelector(
+                        ClassObj, 'localTestMethod3186'
                     )
-                after
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
+                )
+            after
+                beamtalk_test_proc:stop(Pid)
+            end
+        end)
+    ]}.
 
 %%% ============================================================================
 %%% ADR 0127 §11: refuse removeSelector:/renameSelector:to: on a
@@ -3129,127 +2216,105 @@ ensure_xref_started() ->
     end.
 
 class_remove_selector_protocol_provided_refused_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_extensions:init(),
-                ensure_xref_started(),
-                ClassName = 'BT3592RmSelProtoProvided',
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {ClassObj, Pid} = register_class(
-                    ClassName, #{}, #{'maxOf:' => MethodFun}
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            beamtalk_extensions:init(),
+            ensure_xref_started(),
+            ClassName = 'BT3592RmSelProtoProvided',
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {ClassObj, Pid} = register_class(
+                ClassName, #{}, #{'maxOf:' => MethodFun}
+            ),
+            ok = beamtalk_xref:register_class(ClassName, [
+                #{
+                    class_side => false,
+                    selector => 'maxOf:',
+                    line => 1,
+                    sends => [],
+                    references => [],
+                    source_status => indexed,
+                    provenance => protocol,
+                    origin => 'BT3592ComparableFixture'
+                }
+            ]),
+            try
+                ?assertBtError(
+                    protocol_provided_selector,
+                    beamtalk_class_refactor:classRemoveSelector(ClassObj, 'maxOf:')
                 ),
-                ok = beamtalk_xref:register_class(ClassName, [
-                    #{
-                        class_side => false,
-                        selector => 'maxOf:',
-                        line => 1,
-                        sends => [],
-                        references => [],
-                        source_status => indexed,
-                        provenance => protocol,
-                        origin => 'BT3592ComparableFixture'
-                    }
-                ]),
-                try
-                    ?assertBtError(
-                        protocol_provided_selector,
-                        beamtalk_class_refactor:classRemoveSelector(ClassObj, 'maxOf:')
-                    ),
-                    %% Refused before any mutation — the method is still there.
-                    ?assert(beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'maxOf:'))
-                after
-                    beamtalk_xref:purge_class(ClassName),
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
-
-%% A locally-defined selector (no `protocol` provenance row) removes as usual
-%% — the refusal must not fire for an ordinary class-body method.
-class_remove_selector_non_protocol_provided_still_removable_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_extensions:init(),
-                ensure_xref_started(),
-                ClassName = 'BT3592RmSelOrdinary',
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {ClassObj, _Pid} = register_class(
-                    ClassName, #{}, #{'ordinaryMethod3592' => MethodFun}
-                ),
-                %% No xref row at all for this class — method_origin/3 must
-                %% answer `nil`, not crash, and the refusal must not fire.
-                try
-                    ?assertBtError(
-                        no_workspace,
-                        beamtalk_class_refactor:classRemoveSelector(
-                            ClassObj, 'ordinaryMethod3592'
-                        )
+                %% Refused before any mutation — the method is still there.
+                ?assert(beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'maxOf:'))
+            after
+                beamtalk_xref:purge_class(ClassName),
+                beamtalk_test_proc:stop(Pid)
+            end
+        end),
+        %% A locally-defined selector (no `protocol` provenance row) removes as usual
+        %% — the refusal must not fire for an ordinary class-body method.
+        ?_test(begin
+            beamtalk_extensions:init(),
+            ensure_xref_started(),
+            ClassName = 'BT3592RmSelOrdinary',
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {ClassObj, _Pid} = register_class(
+                ClassName, #{}, #{'ordinaryMethod3592' => MethodFun}
+            ),
+            %% No xref row at all for this class — method_origin/3 must
+            %% answer `nil`, not crash, and the refusal must not fire.
+            try
+                ?assertBtError(
+                    no_workspace,
+                    beamtalk_class_refactor:classRemoveSelector(
+                        ClassObj, 'ordinaryMethod3592'
                     )
-                after
-                    ok
-                end
-            end)
-        ]
-    end}.
-
-class_rename_selector_protocol_provided_refused_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_extensions:init(),
-                ensure_xref_started(),
-                ClassName = 'BT3592RenSelProtoProvided',
-                MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
-                {ClassObj, Pid} = register_class(
-                    ClassName, #{}, #{'maxOf:' => MethodFun}
-                ),
-                ok = beamtalk_xref:register_class(ClassName, [
-                    #{
-                        class_side => false,
-                        selector => 'maxOf:',
-                        line => 1,
-                        sends => [],
-                        references => [],
-                        source_status => indexed,
-                        provenance => protocol,
-                        origin => 'BT3592ComparableFixture'
-                    }
-                ]),
-                try
-                    ?assertBtError(
-                        protocol_provided_selector,
-                        beamtalk_selector_refactor:classRenameSelector(
-                            ClassObj, 'maxOf:', 'maxOfRenamed3592'
-                        )
-                    ),
-                    %% Refused before any mutation — the old selector is
-                    %% still there, the new one is not.
-                    ?assert(
-                        beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'maxOf:')
-                    ),
-                    ?assertNot(
-                        beamtalk_behaviour_intrinsics:classIncludesSelector(
-                            ClassObj, 'maxOfRenamed3592'
-                        )
+                )
+            after
+                ok
+            end
+        end),
+        ?_test(begin
+            beamtalk_extensions:init(),
+            ensure_xref_started(),
+            ClassName = 'BT3592RenSelProtoProvided',
+            MethodFun = fun(_Self, _Args, State) -> {reply, ok, State, _Self} end,
+            {ClassObj, Pid} = register_class(
+                ClassName, #{}, #{'maxOf:' => MethodFun}
+            ),
+            ok = beamtalk_xref:register_class(ClassName, [
+                #{
+                    class_side => false,
+                    selector => 'maxOf:',
+                    line => 1,
+                    sends => [],
+                    references => [],
+                    source_status => indexed,
+                    provenance => protocol,
+                    origin => 'BT3592ComparableFixture'
+                }
+            ]),
+            try
+                ?assertBtError(
+                    protocol_provided_selector,
+                    beamtalk_selector_refactor:classRenameSelector(
+                        ClassObj, 'maxOf:', 'maxOfRenamed3592'
                     )
-                after
-                    beamtalk_xref:purge_class(ClassName),
-                    try
-                        gen_server:stop(Pid, normal, 5000)
-                    catch
-                        _:_ -> ok
-                    end
-                end
-            end)
-        ]
-    end}.
+                ),
+                %% Refused before any mutation — the old selector is
+                %% still there, the new one is not.
+                ?assert(
+                    beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'maxOf:')
+                ),
+                ?assertNot(
+                    beamtalk_behaviour_intrinsics:classIncludesSelector(
+                        ClassObj, 'maxOfRenamed3592'
+                    )
+                )
+            after
+                beamtalk_xref:purge_class(ClassName),
+                beamtalk_test_proc:stop(Pid)
+            end
+        end)
+    ]}.
 
 %%% ============================================================================
 %%% objectIsKindOf/2 (BT-4065) — `self class includesBehaviour: aClass` in the
@@ -3273,6 +2338,7 @@ outcome(F) ->
 
 object_is_kind_of_test_() ->
     Names = ['BT4065Grand', 'BT4065Middle', 'BT4065Bottom', 'BT4065Other'],
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun setup/0, fun(_) -> teardown(Names) end, fun(_) ->
         [
             ?_test(begin
@@ -3381,6 +2447,7 @@ stop_without_terminate(Pid) ->
 
 object_is_kind_of_fast_path_test_() ->
     Names = ['BT4221Grand', 'BT4221Bottom', 'BT4221Other'],
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun setup/0, fun(_) -> teardown(Names) end, fun(_) ->
         [
             ?_test(begin
@@ -3500,6 +2567,7 @@ named_values(Names) ->
 
 is_kind_of_named_test_() ->
     Names = ['BT4757Grand', 'BT4757Middle', 'BT4757Bottom', 'BT4757Other'],
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun setup/0, fun(_) -> teardown(Names) end, fun(_) ->
         [
             ?_test(begin
@@ -3619,6 +2687,7 @@ is_kind_of_named_test_() ->
 %% the compiled caller reads in line.
 is_kind_of_named_verdicts_test_() ->
     Names = ['BT4769Grand', 'BT4769Bottom', 'BT4769Other', 'BT4769Proxy'],
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun setup/0, fun(_) -> teardown(Names) end, fun(_) ->
         [
             ?_test(begin
@@ -3686,6 +2755,7 @@ is_kind_of_named_verdicts_test_() ->
 %% lookup); a receiver of any other class still has its own class checked.
 is_kind_of_named_probe_pid_test_() ->
     Names = ['BT4754Grand', 'BT4754Bottom'],
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun setup/0, fun(_) -> teardown(Names) end, fun(_) ->
         [
             ?_test(begin
@@ -3771,6 +2841,7 @@ override_flag_key_matches_shared_fixture_test() ->
 
 value_is_kind_of_class_test_() ->
     Classes = ['BT4319Base', 'BT4319Mid', 'BT4319Leaf', 'BT4319Other'],
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun setup/0, fun(_) -> teardown(Classes) end, fun(_) ->
         [
             ?_test(begin

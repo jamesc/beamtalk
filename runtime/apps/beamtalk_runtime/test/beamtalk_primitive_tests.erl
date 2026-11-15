@@ -61,78 +61,72 @@ is_utf8_test() ->
 %%% ============================================================================
 
 send_shared_selector_on_non_utf8_binary_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        Bin = <<255, 254, 253, 0, 200>>,
-        ?assertNot(beamtalk_primitive:is_utf8(Bin)),
-        ?assertEqual('Binary', beamtalk_primitive:class_of(Bin)),
-        ?assertEqual(255, beamtalk_primitive:send(Bin, 'byteAt:', [0])),
-        ?assertEqual(5, beamtalk_primitive:send(Bin, size, [])),
-        ?assertEqual([255, 254, 253, 0, 200], beamtalk_primitive:send(Bin, toBytes, []))
-    end}.
-
-send_shared_selector_on_valid_utf8_binary_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% Valid UTF-8 bytes in a bare binary still route as Binary.
-        Bin = <<"hello">>,
-        ?assertEqual('Binary', beamtalk_primitive:class_of(Bin)),
-        ?assertEqual(104, beamtalk_primitive:send(Bin, 'byteAt:', [0])),
-        ?assertEqual(5, beamtalk_primitive:send(Bin, size, [])),
-        %% The same bytes constructed as a String route as String.
-        Str = {beamtalk_string, <<"hello">>},
-        ?assertEqual('String', beamtalk_primitive:class_of(Str)),
-        ?assertEqual(5, beamtalk_primitive:send(Str, size, [])),
-        ?assertEqual(
-            {beamtalk_string, <<"h">>}, beamtalk_primitive:send(Str, 'at:', [1])
-        )
-    end}.
-
-responds_to_shared_selector_on_non_utf8_binary_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        Bin = crypto:strong_rand_bytes(64),
-        ?assert(beamtalk_primitive:responds_to(Bin, 'byteAt:')),
-        ?assert(beamtalk_primitive:responds_to(Bin, size)),
-        ?assert(beamtalk_primitive:responds_to(Bin, 'part:size:')),
-        %% BT-4173: byteSize is deleted — neither class answers it.
-        ?assertNot(beamtalk_primitive:responds_to(Bin, byteSize)),
-        ?assertNot(
-            beamtalk_primitive:responds_to({beamtalk_string, <<"hi">>}, byteSize)
-        )
-    end}.
-
-send_non_shared_selector_still_classifies_correctly_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% `size`/`at:` route by construction type: byte-level on a bare
-        %% binary, grapheme-level on a tagged String.
-        NonUtf8 = <<255, 254, 253, 0, 200>>,
-        ?assertEqual(5, beamtalk_primitive:send(NonUtf8, size, [])),
-        ?assertEqual(255, beamtalk_primitive:send(NonUtf8, 'at:', [1])),
-        %% Valid-UTF-8 bytes in a bare binary are still byte-level.
-        Utf8Bin = <<"café"/utf8>>,
-        ?assertEqual(5, beamtalk_primitive:send(Utf8Bin, size, [])),
-        %% First byte is `c` (99); é is the last char (bytes 195, 169).
-        ?assertEqual(99, beamtalk_primitive:send(Utf8Bin, 'at:', [1])),
-        ?assertEqual(195, beamtalk_primitive:send(Utf8Bin, 'at:', [4])),
-        %% The same bytes as a String are grapheme-level.
-        Utf8Str = {beamtalk_string, <<"café"/utf8>>},
-        ?assertEqual(4, beamtalk_primitive:send(Utf8Str, size, [])),
-        ?assertEqual(
-            {beamtalk_string, <<"c"/utf8>>},
-            beamtalk_primitive:send(Utf8Str, 'at:', [1])
-        )
-    end}.
-
-send_string_only_selector_dnu_on_non_utf8_binary_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% A String-only selector (not on Binary at all) must still DNU on
-        %% invalid UTF-8 — never silently routed through the String module.
-        NonUtf8 = <<255, 254, 253>>,
-        ?assertBtError(
-            does_not_understand,
-            'Binary',
-            uppercase,
-            beamtalk_primitive:send(NonUtf8, uppercase, [])
-        )
-    end}.
+    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+        fun() ->
+            Bin = <<255, 254, 253, 0, 200>>,
+            ?assertNot(beamtalk_primitive:is_utf8(Bin)),
+            ?assertEqual('Binary', beamtalk_primitive:class_of(Bin)),
+            ?assertEqual(255, beamtalk_primitive:send(Bin, 'byteAt:', [0])),
+            ?assertEqual(5, beamtalk_primitive:send(Bin, size, [])),
+            ?assertEqual([255, 254, 253, 0, 200], beamtalk_primitive:send(Bin, toBytes, []))
+        end,
+        fun() ->
+            %% Valid UTF-8 bytes in a bare binary still route as Binary.
+            Bin = <<"hello">>,
+            ?assertEqual('Binary', beamtalk_primitive:class_of(Bin)),
+            ?assertEqual(104, beamtalk_primitive:send(Bin, 'byteAt:', [0])),
+            ?assertEqual(5, beamtalk_primitive:send(Bin, size, [])),
+            %% The same bytes constructed as a String route as String.
+            Str = {beamtalk_string, <<"hello">>},
+            ?assertEqual('String', beamtalk_primitive:class_of(Str)),
+            ?assertEqual(5, beamtalk_primitive:send(Str, size, [])),
+            ?assertEqual(
+                {beamtalk_string, <<"h">>}, beamtalk_primitive:send(Str, 'at:', [1])
+            )
+        end,
+        fun() ->
+            Bin = crypto:strong_rand_bytes(64),
+            ?assert(beamtalk_primitive:responds_to(Bin, 'byteAt:')),
+            ?assert(beamtalk_primitive:responds_to(Bin, size)),
+            ?assert(beamtalk_primitive:responds_to(Bin, 'part:size:')),
+            %% BT-4173: byteSize is deleted — neither class answers it.
+            ?assertNot(beamtalk_primitive:responds_to(Bin, byteSize)),
+            ?assertNot(
+                beamtalk_primitive:responds_to({beamtalk_string, <<"hi">>}, byteSize)
+            )
+        end,
+        fun() ->
+            %% `size`/`at:` route by construction type: byte-level on a bare
+            %% binary, grapheme-level on a tagged String.
+            NonUtf8 = <<255, 254, 253, 0, 200>>,
+            ?assertEqual(5, beamtalk_primitive:send(NonUtf8, size, [])),
+            ?assertEqual(255, beamtalk_primitive:send(NonUtf8, 'at:', [1])),
+            %% Valid-UTF-8 bytes in a bare binary are still byte-level.
+            Utf8Bin = <<"café"/utf8>>,
+            ?assertEqual(5, beamtalk_primitive:send(Utf8Bin, size, [])),
+            %% First byte is `c` (99); é is the last char (bytes 195, 169).
+            ?assertEqual(99, beamtalk_primitive:send(Utf8Bin, 'at:', [1])),
+            ?assertEqual(195, beamtalk_primitive:send(Utf8Bin, 'at:', [4])),
+            %% The same bytes as a String are grapheme-level.
+            Utf8Str = {beamtalk_string, <<"café"/utf8>>},
+            ?assertEqual(4, beamtalk_primitive:send(Utf8Str, size, [])),
+            ?assertEqual(
+                {beamtalk_string, <<"c"/utf8>>},
+                beamtalk_primitive:send(Utf8Str, 'at:', [1])
+            )
+        end,
+        fun() ->
+            %% A String-only selector (not on Binary at all) must still DNU on
+            %% invalid UTF-8 — never silently routed through the String module.
+            NonUtf8 = <<255, 254, 253>>,
+            ?assertBtError(
+                does_not_understand,
+                'Binary',
+                uppercase,
+                beamtalk_primitive:send(NonUtf8, uppercase, [])
+            )
+        end
+    ]}.
 
 %% ADR 0066: extending a sealed primitive (`String >> byteAt: => ...`) is
 %% legal today for any selector `string.bt` doesn't locally define.
@@ -141,6 +135,7 @@ send_string_only_selector_dnu_on_non_utf8_binary_test_() ->
 %% through it when a String extension shadows the selector — that would let
 %% String-only logic run against bytes `class_of/1` reports as Binary.
 send_shared_selector_with_string_extension_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_extensions:init(),
@@ -271,6 +266,7 @@ responds_to_beamtalk_object_test() ->
 %% responds_to for actor instances delegates to beamtalk_dispatch:responds_to
 %% which walks the full hierarchy, so inherited methods are detected correctly.
 responds_to_actor_inherited_method_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             application:ensure_all_started(beamtalk_runtime),
@@ -305,6 +301,7 @@ responds_to_table_test_() ->
     Str = {beamtalk_string, <<"hello">>},
     Block = fun() -> ok end,
     Ref = make_ref(),
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
         {Label, ?_assertEqual(Expected, beamtalk_primitive:responds_to(Receiver, Selector))}
      || {Label, Expected, Receiver, Selector} <- [
@@ -417,6 +414,7 @@ reflection_responds_to_test_() ->
             'unknownMethod', 'fooBar'
         ]}
     ],
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
         {
             lists:flatten(io_lib:format("~s ~s ~p", [Name, verb(Expected), Selector])),
@@ -706,6 +704,7 @@ print_string_beamtalk_error_test() ->
     ?assert(byte_size(Result) > 0).
 
 print_string_plain_map_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -731,6 +730,7 @@ class_of_object_metaclass_sentinel_test() ->
     ?assertMatch({beamtalk_object, _, _, _}, Result).
 
 class_of_object_primitive_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -767,6 +767,7 @@ class_of_object_primitive_test_() ->
 %%% ============================================================================
 
 class_of_object_by_name_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -916,11 +917,7 @@ stop_named_class(Name) ->
         undefined ->
             ok;
         Pid ->
-            try
-                gen_server:stop(Pid, normal, 5000)
-            catch
-                _:_ -> ok
-            end,
+            beamtalk_test_proc:stop(Pid),
             ok
     end.
 
@@ -953,60 +950,47 @@ display_string_float_test() ->
 %%% ============================================================================
 
 send_boolean_not_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual(false, beamtalk_primitive:send(true, 'not', [])),
-        ?assertEqual(true, beamtalk_primitive:send(false, 'not', []))
-    end}.
-
-send_boolean_if_true_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        Block = fun() -> yes end,
-        ?assertEqual(yes, beamtalk_primitive:send(true, 'ifTrue:', [Block])),
-        %% false ifTrue: [block] returns false (self), not nil
-        ?assertEqual(false, beamtalk_primitive:send(false, 'ifTrue:', [Block]))
-    end}.
-
-send_boolean_if_false_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        Block = fun() -> no end,
-        %% true ifFalse: [block] returns true (self), not nil
-        ?assertEqual(true, beamtalk_primitive:send(true, 'ifFalse:', [Block])),
-        ?assertEqual(no, beamtalk_primitive:send(false, 'ifFalse:', [Block]))
-    end}.
-
-send_boolean_if_true_if_false_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        TBlock = fun() -> yes end,
-        FBlock = fun() -> no end,
-        ?assertEqual(yes, beamtalk_primitive:send(true, 'ifTrue:ifFalse:', [TBlock, FBlock])),
-        ?assertEqual(no, beamtalk_primitive:send(false, 'ifTrue:ifFalse:', [TBlock, FBlock]))
-    end}.
-
-send_boolean_class_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual('True', beamtalk_primitive:send(true, 'class', [])),
-        ?assertEqual('False', beamtalk_primitive:send(false, 'class', []))
-    end}.
-
-%%% ============================================================================
-%%% send/3 — Nil dispatch
-%%% ============================================================================
-
-send_nil_is_nil_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual(true, beamtalk_primitive:send(nil, 'isNil', []))
-    end}.
-
-send_nil_if_nil_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        Block = fun() -> found_nil end,
-        ?assertEqual(found_nil, beamtalk_primitive:send(nil, 'ifNil:', [Block]))
-    end}.
-
-send_nil_class_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual('UndefinedObject', beamtalk_primitive:send(nil, 'class', []))
-    end}.
+    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+        fun() ->
+            ?assertEqual(false, beamtalk_primitive:send(true, 'not', [])),
+            ?assertEqual(true, beamtalk_primitive:send(false, 'not', []))
+        end,
+        fun() ->
+            Block = fun() -> yes end,
+            ?assertEqual(yes, beamtalk_primitive:send(true, 'ifTrue:', [Block])),
+            %% false ifTrue: [block] returns false (self), not nil
+            ?assertEqual(false, beamtalk_primitive:send(false, 'ifTrue:', [Block]))
+        end,
+        fun() ->
+            Block = fun() -> no end,
+            %% true ifFalse: [block] returns true (self), not nil
+            ?assertEqual(true, beamtalk_primitive:send(true, 'ifFalse:', [Block])),
+            ?assertEqual(no, beamtalk_primitive:send(false, 'ifFalse:', [Block]))
+        end,
+        fun() ->
+            TBlock = fun() -> yes end,
+            FBlock = fun() -> no end,
+            ?assertEqual(yes, beamtalk_primitive:send(true, 'ifTrue:ifFalse:', [TBlock, FBlock])),
+            ?assertEqual(no, beamtalk_primitive:send(false, 'ifTrue:ifFalse:', [TBlock, FBlock]))
+        end,
+        fun() ->
+            ?assertEqual('True', beamtalk_primitive:send(true, 'class', [])),
+            ?assertEqual('False', beamtalk_primitive:send(false, 'class', []))
+        end,
+        %%% ============================================================================
+        %%% send/3 — Nil dispatch
+        %%% ============================================================================
+        fun() ->
+            ?assertEqual(true, beamtalk_primitive:send(nil, 'isNil', []))
+        end,
+        fun() ->
+            Block = fun() -> found_nil end,
+            ?assertEqual(found_nil, beamtalk_primitive:send(nil, 'ifNil:', [Block]))
+        end,
+        fun() ->
+            ?assertEqual('UndefinedObject', beamtalk_primitive:send(nil, 'class', []))
+        end
+    ]}.
 
 %%% ============================================================================
 %%% send/3 — Block dispatch
@@ -1017,47 +1001,41 @@ send_nil_class_test_() ->
 %% Use valueWithArguments: or test directly via the block module exports instead.
 
 send_block_valueWithArguments_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
         Block = fun(X, Y) -> X + Y end,
         ?assertEqual(7, beamtalk_primitive:send(Block, 'valueWithArguments:', [[3, 4]]))
     end}.
 
 send_block_arity_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual(0, beamtalk_primitive:send(fun() -> ok end, 'arity', [])),
-        ?assertEqual(1, beamtalk_primitive:send(fun(_) -> ok end, 'arity', [])),
-        ?assertEqual(2, beamtalk_primitive:send(fun(_, _) -> ok end, 'arity', []))
-    end}.
-
-send_block_class_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual('Block', beamtalk_primitive:send(fun() -> ok end, 'class', []))
-    end}.
-
-%%% ============================================================================
-%%% send/3 — Symbol dispatch
-%%% ============================================================================
-
-send_symbol_class_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual('Symbol', beamtalk_primitive:send(hello, 'class', [])),
-        ?assertEqual('Symbol', beamtalk_primitive:send(ok, 'class', []))
-    end}.
-
-send_symbol_equality_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% Symbol uses =:= (Erlang term equality), not =
-        ?assertEqual(true, beamtalk_primitive:send(hello, '=:=', [hello])),
-        ?assertEqual(false, beamtalk_primitive:send(hello, '=:=', [world]))
-    end}.
-
-send_symbol_print_string_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual(
-            {beamtalk_string, <<"#hello">>},
-            beamtalk_primitive:send(hello, 'printString', [])
-        )
-    end}.
+    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+        fun() ->
+            ?assertEqual(0, beamtalk_primitive:send(fun() -> ok end, 'arity', [])),
+            ?assertEqual(1, beamtalk_primitive:send(fun(_) -> ok end, 'arity', [])),
+            ?assertEqual(2, beamtalk_primitive:send(fun(_, _) -> ok end, 'arity', []))
+        end,
+        fun() ->
+            ?assertEqual('Block', beamtalk_primitive:send(fun() -> ok end, 'class', []))
+        end,
+        %%% ============================================================================
+        %%% send/3 — Symbol dispatch
+        %%% ============================================================================
+        fun() ->
+            ?assertEqual('Symbol', beamtalk_primitive:send(hello, 'class', [])),
+            ?assertEqual('Symbol', beamtalk_primitive:send(ok, 'class', []))
+        end,
+        fun() ->
+            %% Symbol uses =:= (Erlang term equality), not =
+            ?assertEqual(true, beamtalk_primitive:send(hello, '=:=', [hello])),
+            ?assertEqual(false, beamtalk_primitive:send(hello, '=:=', [world]))
+        end,
+        fun() ->
+            ?assertEqual(
+                {beamtalk_string, <<"#hello">>},
+                beamtalk_primitive:send(hello, 'printString', [])
+            )
+        end
+    ]}.
 
 %%% ============================================================================
 %%% send/3 — Extended integer arithmetic
@@ -1122,14 +1100,16 @@ send_dnu_unknown_method_on_string_test() ->
     ).
 
 send_dnu_unknown_method_on_boolean_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertBtError(
-            does_not_understand,
-            'True',
-            'unknownBoolMethod',
-            beamtalk_primitive:send(true, 'unknownBoolMethod', [])
-        )
-    end}.
+    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+        fun() ->
+            ?assertBtError(
+                does_not_understand,
+                'True',
+                'unknownBoolMethod',
+                beamtalk_primitive:send(true, 'unknownBoolMethod', [])
+            )
+        end
+    ]}.
 
 send_dnu_unknown_method_on_float_test() ->
     ?assertBtError(
@@ -1259,6 +1239,7 @@ print_string_port_uses_opaque_ops_test() ->
     end.
 
 print_string_plain_map_empty_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -1273,6 +1254,7 @@ print_string_plain_map_empty_test_() ->
         end}.
 
 print_string_plain_map_sorted_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -1290,6 +1272,7 @@ print_string_plain_map_sorted_test_() ->
         end}.
 
 print_string_beamtalk_object_instance_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -1312,6 +1295,7 @@ print_string_beamtalk_object_instance_test_() ->
         end}.
 
 print_string_class_object_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -1343,6 +1327,7 @@ print_string_class_object_test_() ->
 %%% ============================================================================
 
 display_string_map_dispatch_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -1358,6 +1343,7 @@ display_string_map_dispatch_test_() ->
         end}.
 
 display_string_beamtalk_object_instance_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -1381,6 +1367,7 @@ display_string_beamtalk_object_instance_test_() ->
         end}.
 
 display_string_class_object_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -1427,49 +1414,40 @@ responds_to_map_plain_dictionary_test() ->
     ?assertEqual(false, beamtalk_primitive:responds_to(#{}, 'nonexistentMethod99')).
 
 responds_to_port_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        {ok, Port} = gen_tcp:listen(0, []),
-        try
-            ?assertEqual(true, beamtalk_primitive:responds_to(Port, 'class')),
-            ?assertEqual(false, beamtalk_primitive:responds_to(Port, 'nonexistent99'))
-        after
-            gen_tcp:close(Port)
+    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+        fun() ->
+            {ok, Port} = gen_tcp:listen(0, []),
+            try
+                ?assertEqual(true, beamtalk_primitive:responds_to(Port, 'class')),
+                ?assertEqual(false, beamtalk_primitive:responds_to(Port, 'nonexistent99'))
+            after
+                gen_tcp:close(Port)
+            end
+        end,
+        %%% ============================================================================
+        %%% responds_to/2 — Tuple dispatch (non-object)
+        %%% ============================================================================
+        fun() ->
+            ?assertEqual(true, beamtalk_primitive:responds_to({a, b}, 'size')),
+            ?assertEqual(false, beamtalk_primitive:responds_to({a, b}, 'nonexistent99'))
+        end,
+        %%% ============================================================================
+        %%% send/3 — Tuple dispatch (non-object tuples)
+        %%% ============================================================================
+        fun() ->
+            ?assertEqual(2, beamtalk_primitive:send({a, b}, 'size', [])),
+            ?assertEqual(3, beamtalk_primitive:send({a, b, c}, 'size', []))
+        end,
+        fun() ->
+            ?assertEqual('Tuple', beamtalk_primitive:send({a, b}, 'class', []))
+        end,
+        %%% ============================================================================
+        %%% send/3 — Pid dispatch (non-future selectors)
+        %%% ============================================================================
+        fun() ->
+            ?assertEqual('Pid', beamtalk_primitive:send(self(), 'class', []))
         end
-    end}.
-
-%%% ============================================================================
-%%% responds_to/2 — Tuple dispatch (non-object)
-%%% ============================================================================
-
-responds_to_tuple_non_object_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual(true, beamtalk_primitive:responds_to({a, b}, 'size')),
-        ?assertEqual(false, beamtalk_primitive:responds_to({a, b}, 'nonexistent99'))
-    end}.
-
-%%% ============================================================================
-%%% send/3 — Tuple dispatch (non-object tuples)
-%%% ============================================================================
-
-send_tuple_size_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual(2, beamtalk_primitive:send({a, b}, 'size', [])),
-        ?assertEqual(3, beamtalk_primitive:send({a, b, c}, 'size', []))
-    end}.
-
-send_tuple_class_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual('Tuple', beamtalk_primitive:send({a, b}, 'class', []))
-    end}.
-
-%%% ============================================================================
-%%% send/3 — Pid dispatch (non-future selectors)
-%%% ============================================================================
-
-send_pid_class_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual('Pid', beamtalk_primitive:send(self(), 'class', []))
-    end}.
+    ]}.
 
 %%% ============================================================================
 %%% class_of_object/1 — Metaclass self-grounding (ADR 0036)
@@ -1486,6 +1464,7 @@ class_of_object_metaclass_self_grounding_test() ->
     ?assertEqual(MetaObj, Result).
 
 class_of_object_non_class_beamtalk_object_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -1511,6 +1490,7 @@ class_of_object_non_class_beamtalk_object_test_() ->
 %%% ============================================================================
 
 responds_to_beamtalk_object_unknown_tag_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -1566,15 +1546,15 @@ dispatch_via_module_dnu_test() ->
 %%% ============================================================================
 
 send_list_class_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual('List', beamtalk_primitive:send([1, 2, 3], 'class', []))
-    end}.
-
-send_list_includes_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual(true, beamtalk_primitive:send([1, 2, 3], 'includes:', [2])),
-        ?assertEqual(false, beamtalk_primitive:send([1, 2, 3], 'includes:', [99]))
-    end}.
+    {foreach, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+        fun() ->
+            ?assertEqual('List', beamtalk_primitive:send([1, 2, 3], 'class', []))
+        end,
+        fun() ->
+            ?assertEqual(true, beamtalk_primitive:send([1, 2, 3], 'includes:', [2])),
+            ?assertEqual(false, beamtalk_primitive:send([1, 2, 3], 'includes:', [99]))
+        end
+    ]}.
 
 %%% ============================================================================
 %%% print_string/1 — Float edge cases
@@ -1595,6 +1575,7 @@ class_of_future_autoawait_test() ->
     ?assertEqual('Integer', beamtalk_primitive:class_of(F)).
 
 class_of_object_future_autoawait_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -1628,6 +1609,7 @@ send_future_autoawait_test() ->
     ?assertEqual(8, beamtalk_primitive:send(F, '+', [3])).
 
 responds_to_future_autoawait_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             application:ensure_all_started(beamtalk_runtime),
@@ -1725,6 +1707,7 @@ class_name_to_module_unknown_class_test() ->
 %%% ============================================================================
 
 value_type_responds_to_via_exports_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             application:ensure_all_started(beamtalk_runtime),
@@ -1745,6 +1728,7 @@ value_type_responds_to_via_exports_test_() ->
 %% has_method/1 or dispatch/3) it is neither understood nor sent.
 value_type_module_info_is_not_a_method_test_() ->
     Module = 'bt@mod_info_plain_value',
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             application:ensure_all_started(beamtalk_runtime),
@@ -1780,6 +1764,7 @@ value_type_module_info_is_not_a_method_test_() ->
 %%% ============================================================================
 
 module_for_value_tagged_variants_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             application:ensure_all_started(beamtalk_runtime),
@@ -1823,6 +1808,7 @@ module_for_value_tagged_variants_test_() ->
 %%% ============================================================================
 
 responds_to_beamtalk_object_non_class_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             application:ensure_all_started(beamtalk_runtime),
