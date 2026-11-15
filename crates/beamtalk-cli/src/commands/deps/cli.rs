@@ -19,8 +19,9 @@ use crate::commands::util::find_project_root;
 use beamtalk_package::manifest::{self, format_name_error, validate_package_name};
 
 use super::git;
+use super::graph;
 use super::lockfile::{LockEntry, Lockfile};
-use super::registry::{self, RegistryLocation};
+use super::registry;
 
 /// Dependency management subcommands.
 #[derive(Debug, Subcommand)]
@@ -498,16 +499,20 @@ fn shorten_git_url(url: &str) -> String {
 
 /// Update dependencies to the latest matching their spec.
 ///
-/// For git deps: re-fetches and resolves to the latest SHA.
-/// For registry deps: refreshes the registry index and re-resolves the
-/// pinned version to a fresh SHA (picks up a moved tag or a corrected index
-/// entry — the pinned version itself never changes; bumping it is a manifest
-/// edit).
+/// For git and registry deps: re-resolves the dependency **and everything it
+/// pulls in** (BT-4920) — `deps update <name>` re-resolves `<name>` and its
+/// whole subtree, a bare `deps update` re-resolves every lock entry. A
+/// registry dep refreshes the index and re-resolves its pinned version to a
+/// fresh SHA (picks up a moved tag or a corrected index entry); the pinned
+/// version itself never changes here — bumping it is a manifest edit, and
+/// `deps update` then brings in the transitive versions the new one declares.
+/// Lock entries the new versions no longer require are removed; a transitive
+/// another direct dependency also needs stays pinned on `deps update <name>`.
 /// For native deps (hex.pm and git, ADR 0072 Phase 2): clears the locked
 /// versions so the next build re-resolves via rebar3 — all of them, or just
 /// the named one (direct or transitive). Native locks are cleared whenever
 /// `beamtalk.lock` has any, including ones only a dependency declares.
-fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
+pub(super) fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
     let manifest_path = project_root.join("beamtalk.toml");
     let manifest = manifest::parse_manifest_full(&manifest_path)?;
 
@@ -536,7 +541,8 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
         })
         .collect();
 
-    let has_native_locks = Lockfile::read(project_root)?.is_some_and(|l| l.has_native_packages());
+    let old_lock = Lockfile::read(project_root)?;
+    let has_native_locks = old_lock.as_ref().is_some_and(Lockfile::has_native_packages);
 
     if let Some(target_name) = name {
         // Update a single dep — check existence before emptiness
@@ -546,62 +552,30 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
             }
             miette::bail!("Dependency '{target_name}' not found in beamtalk.toml");
         }
-
-        if registry_deps.contains_key(target_name) {
-            let version = registry_deps[target_name];
-            let registry_location =
-                registry::resolve_registry_location(project_root, manifest.registry.as_ref());
-            let registry_identity = registry::registry_identity(manifest.registry.as_ref());
-            // Refresh once up front so a moved tag or corrected index entry is
-            // picked up before resolving.
-            registry::ensure_index(&registry_location, project_root, true)?;
-            update_single_registry_dep(
-                target_name,
-                version,
-                &registry_location,
-                &registry_identity,
-                project_root,
-            )?;
-        } else if git_deps.contains_key(target_name) {
-            let (url, reference) = git_deps[target_name];
-            update_single_git_dep(target_name, url, reference, project_root)?;
-        } else {
+        if !registry_deps.contains_key(target_name) && !git_deps.contains_key(target_name) {
             miette::bail!(
                 "Dependency '{target_name}' is a path dependency — \
                  only git and registry dependencies can be updated"
             );
         }
+        relock(
+            project_root,
+            &manifest,
+            old_lock.as_ref(),
+            &graph::Unlock::Subtree(target_name),
+        )?;
     } else {
         // Update all git and registry deps
-        let has_git_deps = !git_deps.is_empty();
-        let has_registry_deps = !registry_deps.is_empty();
-        if !has_git_deps && !has_registry_deps && !has_native_locks {
+        if git_deps.is_empty() && registry_deps.is_empty() && !has_native_locks {
             println!("No git, registry, or native dependencies to update");
             return Ok(());
         }
-
-        for (dep_name, (url, reference)) in &git_deps {
-            update_single_git_dep(dep_name, url, reference, project_root)?;
-        }
-
-        if has_registry_deps {
-            let registry_location =
-                registry::resolve_registry_location(project_root, manifest.registry.as_ref());
-            let registry_identity = registry::registry_identity(manifest.registry.as_ref());
-            // Refresh once for the whole batch rather than once per
-            // dependency — same effect, without N redundant index
-            // clones/pulls when a git-backed registry has several deps.
-            registry::ensure_index(&registry_location, project_root, true)?;
-            for (dep_name, version) in &registry_deps {
-                update_single_registry_dep(
-                    dep_name,
-                    version,
-                    &registry_location,
-                    &registry_identity,
-                    project_root,
-                )?;
-            }
-        }
+        relock(
+            project_root,
+            &manifest,
+            old_lock.as_ref(),
+            &graph::Unlock::All,
+        )?;
 
         // Clear native package locks so the next build re-resolves via rebar3
         if has_native_locks {
@@ -612,6 +586,62 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+/// Re-resolve the part of the dependency graph `unlock` selects (BT-4920),
+/// write `beamtalk.lock`, and report what moved.
+///
+/// The lock is written once, after the whole graph resolved: a conflict or
+/// fetch failure anywhere leaves it exactly as it was.
+fn relock(
+    project_root: &Utf8Path,
+    manifest: &manifest::ParsedManifest,
+    old_lock: Option<&Lockfile>,
+    unlock: &graph::Unlock<'_>,
+) -> Result<()> {
+    let has_registry_locks =
+        old_lock.is_some_and(|l| l.packages.values().any(|e| e.registry_version.is_some()));
+    let has_registry_deps = manifest
+        .dependencies
+        .values()
+        .any(|spec| matches!(spec.source, DependencySource::Registry { .. }));
+    if has_registry_deps || has_registry_locks {
+        let registry_location =
+            registry::resolve_registry_location(project_root, manifest.registry.as_ref());
+        // Refresh once for the whole batch rather than once per dependency —
+        // a moved tag or corrected index entry must be picked up before
+        // resolving, without N redundant index clones/pulls.
+        registry::ensure_index(&registry_location, project_root, true)?;
+    }
+
+    let relocked = graph::relock_dependency_graph(project_root, unlock)?;
+    relocked.lockfile.write(project_root)?;
+
+    let old_packages = old_lock.map(|l| &l.packages);
+    for (dep_name, entry) in &relocked.lockfile.packages {
+        if !relocked.reachable.contains(dep_name) {
+            continue;
+        }
+        let short_sha = &entry.resolved_sha[..7.min(entry.resolved_sha.len())];
+        match old_packages.and_then(|p| p.get(dep_name)) {
+            Some(old) if old.resolved_sha == entry.resolved_sha && old == entry => {
+                println!("  {dep_name}: already up-to-date ({short_sha})");
+            }
+            Some(old) => {
+                let old_short = &old.resolved_sha[..7.min(old.resolved_sha.len())];
+                println!("  {dep_name}: {old_short} -> {short_sha}");
+            }
+            None => println!("  {dep_name}: resolved to {short_sha}"),
+        }
+    }
+    if let Some(old) = old_packages {
+        for dep_name in old.keys() {
+            if !relocked.lockfile.packages.contains_key(dep_name) {
+                println!("  {dep_name}: removed (no longer required)");
+            }
+        }
+    }
     Ok(())
 }
 
@@ -651,111 +681,6 @@ fn unlock_native_package(project_root: &Utf8Path, name: &str) -> Result<bool> {
     lockfile.write(project_root)?;
     println!("Unlocked native package '{name}' — next build will re-resolve it via rebar3");
     Ok(true)
-}
-
-/// Update a single git dependency: re-fetch, resolve SHA, update lockfile.
-fn update_single_git_dep(
-    name: &str,
-    url: &str,
-    reference: &GitReference,
-    project_root: &Utf8Path,
-) -> Result<()> {
-    // Force a fresh resolve (ignore lockfile)
-    let resolved = git::resolve_git_dep(name, url, reference, project_root, None)?;
-
-    // Read existing lockfile
-    let mut lockfile = Lockfile::read(project_root)?.unwrap_or_default();
-    let old_sha = lockfile.get(name).map(|e| e.resolved_sha.clone());
-
-    // Update the lockfile entry
-    lockfile.insert(LockEntry {
-        name: name.to_string(),
-        url: url.to_string(),
-        reference: reference.clone(),
-        resolved_sha: resolved.resolved_sha.clone(),
-        registry_version: None,
-    });
-    lockfile.write(project_root)?;
-
-    let short_sha = &resolved.resolved_sha[..7.min(resolved.resolved_sha.len())];
-    if let Some(old) = old_sha {
-        let old_short = &old[..7.min(old.len())];
-        if old == resolved.resolved_sha {
-            println!("  {name}: already up-to-date ({short_sha})");
-        } else {
-            println!("  {name}: {old_short} -> {short_sha}");
-        }
-    } else {
-        println!("  {name}: resolved to {short_sha}");
-    }
-
-    Ok(())
-}
-
-/// Re-resolve a single registry dependency's pinned version to a (possibly
-/// new) git SHA, and update the lockfile.
-///
-/// Callers are expected to have already refreshed `location`'s index (once
-/// per `deps update` invocation, not once per dependency — see call sites).
-/// The pinned version itself never changes here — bumping it is a manifest
-/// edit. This only picks up a moved tag or a corrected index entry.
-///
-/// `identity` is `location`'s stable identity (see
-/// [`registry::registry_identity`]) — passed separately because, unlike
-/// `location`, it must not be `location.to_string()` (see that function's
-/// doc comment for why).
-fn update_single_registry_dep(
-    name: &str,
-    version: &str,
-    location: &RegistryLocation,
-    identity: &str,
-    project_root: &Utf8Path,
-) -> Result<()> {
-    let release = registry::resolve_release(project_root, location, name, version)?;
-
-    // Force a fresh resolve (ignore any existing checkout's lockfile pin)
-    let reference = GitReference::Tag(release.tag.clone());
-    let resolved = git::resolve_git_dep(name, &release.git, &reference, project_root, None)?;
-
-    // Same guard `deps add` and every `beamtalk build` apply: catch a moved
-    // tag whose package now declares a different version than the one this
-    // manifest still pins.
-    super::graph::validate_checkout_version(
-        name,
-        version,
-        &resolved.checkout_path,
-        &release.git,
-        &reference,
-    )?;
-
-    let mut lockfile = Lockfile::read(project_root)?.unwrap_or_default();
-    let old_sha = lockfile.get(name).map(|e| e.resolved_sha.clone());
-
-    lockfile.insert(LockEntry {
-        name: name.to_string(),
-        url: release.git.clone(),
-        reference,
-        resolved_sha: resolved.resolved_sha.clone(),
-        registry_version: Some(super::lockfile::RegistryVersion {
-            version: version.to_string(),
-            registry: Some(identity.to_string()),
-        }),
-    });
-    lockfile.write(project_root)?;
-
-    let short_sha = &resolved.resolved_sha[..7.min(resolved.resolved_sha.len())];
-    if let Some(old) = old_sha {
-        let old_short = &old[..7.min(old.len())];
-        if old == resolved.resolved_sha {
-            println!("  {name}: already up-to-date ({short_sha})");
-        } else {
-            println!("  {name}: {old_short} -> {short_sha}");
-        }
-    } else {
-        println!("  {name}: resolved to {short_sha}");
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`beamtalk deps update` re-resolves the whole dependency subtree (BT-4920).**
+  - Changed: `deps update <name>` now re-resolves `<name>` and every package it pulls in, and a bare `deps update` re-resolves every git and registry lock entry. Before, only direct dependencies moved, so a new version that needed a newer transitive release (A@2 needs B@2) left B at the old version in `beamtalk.lock`. Four more behaviours follow from this:
+    - `deps update <name>` removes the lock entry of a transitive package that the new version of `<name>` no longer depends on. A bare `deps update` removes every lock entry that nothing in the manifest graph reaches any more.
+    - `deps update <name>` keeps a transitive package that another direct dependency also needs pinned as it is; a bare `deps update` re-resolves it.
+    - `deps update <name>` resolves the whole graph before it writes anything, so a single-version conflict with another dependent (A@2 needs B@2, C still needs B@1) is now reported by `deps update` and `beamtalk.lock` is left unchanged. Any other failed fetch also leaves the lock as it was.
+    - `deps update` now also fails when an unrelated locked dependency cannot be resolved the way `beamtalk build` would resolve it, for example a moved tag; run `beamtalk deps update <that name>` first.
+  - Not changed: `beamtalk build` already re-resolved a lock entry whose version or reference no longer matches what its dependent declares; a stale transitive entry is repaired on the next build, not reported as an error.
+  - Do: after bumping a pin in `beamtalk.toml`, run `beamtalk deps update <name>` and commit the new `beamtalk.lock`.
 - **Behaviour change: E0402 now applies to extension methods (BT-4923).**
   - Changed: a standalone `Foo >> sel` or `Foo class >> sel` method whose parameter or return type names an `internal` class of the current package is now a hard error (E0402, "Internal class 'X' appears in public signature of 'Foo >> sel'"), the same as for a method written in the class body. This includes an extension in a different file than `Foo`, and an extension on another package's public class. An `internal` extension method that satisfies a public protocol requirement is the same error. Before, these compiled silently. Extensions marked `internal`, and extensions on an `internal` class, are still exempt. The stdlib and the in-repo examples build clean; downstream packages were not scanned.
   - Do: make the class public, change the signature, or mark the extension method `internal` (`Foo >> internal sel => …`).
