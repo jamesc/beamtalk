@@ -2191,6 +2191,11 @@ compile_file_named(Source, Path, StdlibMode, PrebuiltIndexes) ->
 %% same rejection `beamtalk build` gives.
 -spec compute_package_module_name(string()) ->
     {ok, binary() | undefined} | {error, {compile_error, binary()}}.
+compute_package_module_name("") ->
+    %% No backing file (a REPL-defined class, e.g. in protocol fan-out): let the
+    %% port derive the module name from the class. `filename:absname("")` is
+    %% the VM's cwd, which must never name a module.
+    {ok, undefined};
 compute_package_module_name(Path) ->
     case beamtalk_workspace_meta:get_metadata() of
         {ok, #{package_name := PackageName, project_path := ProjectPath}} when

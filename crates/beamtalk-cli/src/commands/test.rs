@@ -1753,20 +1753,30 @@ fn check_duplicate_test_module(
     test_file: &Utf8Path,
     package: Option<&str>,
 ) -> Result<()> {
-    if let Some(existing) = compiled_tests.iter().find(|c| {
-        c.test_class.module_name == test_class.module_name
-            || (c.test_class.class_name == test_class.class_name && c.package.as_deref() == package)
-    }) {
+    if let Some(existing) = compiled_tests
+        .iter()
+        .find(|c| c.test_class.module_name == test_class.module_name)
+    {
         miette::bail!(
-            "Duplicate test class '{}': test class '{}' in '{}' and test class '{}' in '{}' \
-             collide (module '{}' / '{}'). Rename one of the test classes.",
-            test_class.class_name,
+            "Duplicate test module '{}': '{}' and '{}' compile to the same module \
+             (test class '{}' in '{}', test class '{}' in '{}'). Rename or move one of the files.",
+            test_class.module_name,
+            existing.source_file,
+            test_file,
             existing.test_class.class_name,
             existing.source_file,
             test_class.class_name,
-            test_file,
-            existing.test_class.module_name,
-            test_class.module_name
+            test_file
+        );
+    }
+    if let Some(existing) = compiled_tests.iter().find(|c| {
+        c.test_class.class_name == test_class.class_name && c.package.as_deref() == package
+    }) {
+        miette::bail!(
+            "Duplicate test class '{}': defined in '{}' and '{}'. Rename one of the test classes.",
+            test_class.class_name,
+            existing.source_file,
+            test_file
         );
     }
     Ok(())
@@ -1796,9 +1806,9 @@ fn test_file_module_name(
     let (relative, package_name, root_kind) = match &package {
         Some((root, name)) => match file.strip_prefix(root.join("test")) {
             Ok(relative) => (relative, *name, ModuleRootKind::Test),
-            Err(_) => (file.as_path(), *name, ModuleRootKind::None),
+            Err(_) => (file.as_path(), *name, ModuleRootKind::OutOfTree),
         },
-        None => (file.as_path(), "", ModuleRootKind::None),
+        None => (file.as_path(), "", ModuleRootKind::OutOfTree),
     };
     module_name_for_path(relative, package_name, root_kind)
         .map_err(|e| miette::miette!("Cannot name test file '{test_file}': {e}"))
@@ -3013,7 +3023,7 @@ mod tests {
         let err = check_duplicate_test_module(&compiled, &classes_b[0], &file_b, Some("web"))
             .expect_err("duplicate test class must be rejected");
         let msg = err.to_string();
-        assert!(msg.contains("ProtocolTest"), "{msg}");
+        assert!(msg.contains("Duplicate test class 'ProtocolTest'"), "{msg}");
         assert!(msg.contains(file_a.as_str()), "{msg}");
         assert!(msg.contains(file_b.as_str()), "{msg}");
 
@@ -3026,7 +3036,10 @@ mod tests {
         same_module.module_name = compiled[0].test_class.module_name.clone();
         let err = check_duplicate_test_module(&compiled, &same_module, &file_b, Some("other"))
             .expect_err("duplicate module name must be rejected");
-        assert!(err.to_string().contains("bt@web@test@http1@protocol_test"));
+        let msg = err.to_string();
+        assert!(msg.contains("Duplicate test module"), "{msg}");
+        assert!(msg.contains("bt@web@test@http1@protocol_test"), "{msg}");
+        assert!(msg.contains("Rename or move one of the files"), "{msg}");
 
         // A distinct class name in the same package is fine.
         let file_c = dir.join("test/http1/http1_protocol_test.bt");

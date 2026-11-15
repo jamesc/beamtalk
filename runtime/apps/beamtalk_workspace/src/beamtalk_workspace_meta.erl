@@ -1388,7 +1388,9 @@ module the class was actually compiled under, whatever path-based name
 rule gave it (BT-4868). This function derives no module name from a path or a
 package, so it cannot drift from that rule. A class with no metadata row falls
 back to the static class-name convention `bt@{snake_case}` (ADR 0016,
-`beamtalk_module_name:to_module_atom/1`).
+`beamtalk_module_name:to_module_atom/1`). A packaged class whose module is
+loaded but that has no metadata row (rows survive a workspace restart within
+the same VM, so this is rare) is therefore dropped, not guessed.
 
 Returns `{true, SourcePath}` (SourcePath possibly `undefined`, e.g. a
 REPL-typed class with no backing file) on success.

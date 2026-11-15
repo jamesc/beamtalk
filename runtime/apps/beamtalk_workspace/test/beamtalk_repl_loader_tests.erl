@@ -363,6 +363,11 @@ compute_package_module_name_no_metadata_test() ->
     Result = beamtalk_repl_loader:compute_package_module_name("/some/path/src/Foo.bt"),
     ?assertEqual({ok, undefined}, Result).
 
+compute_package_module_name_empty_path_test() ->
+    %% A class with no backing file passes "" (protocol fan-out); it must not be
+    %% named after the cwd. Holds with or without package metadata.
+    ?assertEqual({ok, undefined}, beamtalk_repl_loader:compute_package_module_name("")).
+
 compute_package_module_name_no_metadata_camel_case_test() ->
     %% Same: no metadata → undefined (class-name-based naming).
     Result = beamtalk_repl_loader:compute_package_module_name("/some/path/MyCounter.bt"),

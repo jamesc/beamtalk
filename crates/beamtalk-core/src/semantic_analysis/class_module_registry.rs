@@ -245,7 +245,7 @@ pub enum ModuleRootKind {
     Test,
     /// The file is under neither root (`examples/`, a fixture, a loose
     /// file): `bt@{stem}` from the file name alone.
-    None,
+    OutOfTree,
 }
 
 impl ModuleRootKind {
@@ -255,7 +255,7 @@ impl ModuleRootKind {
         match s {
             "src" => Some(Self::Src),
             "test" => Some(Self::Test),
-            "none" => Some(Self::None),
+            "none" => Some(Self::OutOfTree),
             _ => None,
         }
     }
@@ -268,7 +268,7 @@ impl ModuleRootKind {
 ///   to `src/`.
 /// - [`ModuleRootKind::Test`]: `bt@{package}@test@{segments}` for `path`
 ///   relative to `test/`.
-/// - [`ModuleRootKind::None`]: `bt@{stem}`; only the file name is used and
+/// - [`ModuleRootKind::OutOfTree`]: `bt@{stem}`; only the file name is used and
 ///   `package` is ignored.
 ///
 /// Built on [`relative_module_segments`], so an invalid segment is rejected
@@ -290,7 +290,7 @@ pub fn module_name_for_path(
     };
     let segments = match root {
         ModuleRootKind::Src | ModuleRootKind::Test => relative_module_segments(path)?,
-        ModuleRootKind::None => {
+        ModuleRootKind::OutOfTree => {
             let file_name = path.file_name().ok_or_else(empty)?;
             relative_module_segments(Utf8Path::new(file_name))?
         }
@@ -302,7 +302,7 @@ pub fn module_name_for_path(
     Ok(match root {
         ModuleRootKind::Src => format!("bt@{package}@{joined}"),
         ModuleRootKind::Test => format!("bt@{package}@test@{joined}"),
-        ModuleRootKind::None => format!("bt@{joined}"),
+        ModuleRootKind::OutOfTree => format!("bt@{joined}"),
     })
 }
 
@@ -827,7 +827,7 @@ mod tests {
             "bt@web@test@sub@foo"
         );
         assert_eq!(
-            name("/abs/examples/MyCounter.bt", ModuleRootKind::None).unwrap(),
+            name("/abs/examples/MyCounter.bt", ModuleRootKind::OutOfTree).unwrap(),
             "bt@my_counter"
         );
     }
@@ -837,7 +837,7 @@ mod tests {
         for (path, kind) in [
             ("my-class.bt", ModuleRootKind::Src),
             ("bad-dir/ok.bt", ModuleRootKind::Test),
-            ("/x/my-class.bt", ModuleRootKind::None),
+            ("/x/my-class.bt", ModuleRootKind::OutOfTree),
             ("", ModuleRootKind::Src),
         ] {
             assert!(
@@ -854,7 +854,10 @@ mod tests {
     fn module_root_kind_parses_wire_spelling() {
         assert_eq!(ModuleRootKind::parse("src"), Some(ModuleRootKind::Src));
         assert_eq!(ModuleRootKind::parse("test"), Some(ModuleRootKind::Test));
-        assert_eq!(ModuleRootKind::parse("none"), Some(ModuleRootKind::None));
+        assert_eq!(
+            ModuleRootKind::parse("none"),
+            Some(ModuleRootKind::OutOfTree)
+        );
         assert_eq!(ModuleRootKind::parse("lib"), None);
     }
 
