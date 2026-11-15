@@ -13,13 +13,13 @@ use crate::ast::{Expression, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::type_checker::binary_string_compare;
+use crate::semantic_analysis::type_checker::diagnostic_facts::{
+    AssignmentTypeMismatch, ClassObjectType, CrossObjectFieldMutation,
+};
 use crate::semantic_analysis::type_checker::known_remote;
 use crate::semantic_analysis::type_checker::narrowing::facts::AliasFacts;
 use crate::semantic_analysis::type_checker::shape_assignability::ShapeMismatch;
 use crate::semantic_analysis::type_checker::type_resolver;
-use crate::semantic_analysis::type_checker::types::{
-    AssignmentTypeMismatch, ClassObjectType, CrossObjectFieldMutation,
-};
 use crate::semantic_analysis::type_checker::{EnvKey, InferredType, TypeChecker, TypeEnv};
 use crate::source_analysis::Span;
 use ecow::EcoString;

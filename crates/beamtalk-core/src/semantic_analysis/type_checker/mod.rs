@@ -54,6 +54,7 @@ thread_local! {
 }
 
 mod binary_string_compare;
+mod diagnostic_facts;
 mod env_key;
 mod exhaustiveness;
 mod inference;
@@ -75,6 +76,7 @@ mod shape_keyed;
 pub mod sendability;
 #[cfg(test)]
 mod tests;
+mod type_algebra;
 mod type_resolver;
 mod types;
 mod validation;
