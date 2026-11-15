@@ -478,8 +478,8 @@ diffSeconds(_, _) ->
 %%% ============================================================================
 %%
 %% selector_to_function/1 extracts the first keyword segment as the function name.
-%% These shims bridge camelCase/short FFI names to the existing colon-suffix
-%% and operator-named implementations.
+%% The operator selectors have no valid Erlang function name, so these shims
+%% bridge the FFI names to the operator-named implementations.
 
 %% `subtract:with:` → strips to `subtract`, arity 2 (DateTime difference)
 -spec subtract(t(), t()) -> beamtalk_duration:t().

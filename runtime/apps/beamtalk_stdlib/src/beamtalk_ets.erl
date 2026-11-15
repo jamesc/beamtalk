@@ -64,7 +64,7 @@ A use the table's protection forbids raises `access_denied`, never a raw
 - ADR 0055: Erlang-Backed Class Protocol
 """.
 
-%% Class methods — canonical colon forms (for EUnit tests and Beamtalk dispatch)
+%% Class methods
 -define(RECEIVER_HINT, <<"Receiver must be an Ets instance">>).
 
 -export([new/2, named/1, exists/1, newOrExisting/2]).
@@ -91,8 +91,6 @@ A use the table's protection forbids raises `access_denied`, never a raw
 
 %% Opt-out of the FFI proxy's ok/error -> Result coercion: Ets returns user data.
 -export([beamtalk_ffi_raw_results/0]).
-
-%% Entry points for class methods: `(Erlang beamtalk_ets) new: name type: t` → `new/2`
 
 -type t() :: #{'$beamtalk_class' := 'Ets', atom() => term()}.
 -export_type([t/0]).
@@ -740,8 +738,8 @@ entries(TableName, Selector) ->
 %%% beamtalk_erlang_proxy:native_call, which names the function with
 %%% selector_to_function/1 (first keyword, trailing colon stripped). These
 %%% colon-free functions are the implementations, not forwarders:
-%%%   `(Erlang beamtalk_ets) new: name type: t` → `new(name, t)` → `'new:type:'`
-%%%   `(Erlang beamtalk_ets) named: name`       → `named(name)` → `'named:'`
+%%%   `(Erlang beamtalk_ets) new: name type: t` → `new(name, t)`
+%%%   `(Erlang beamtalk_ets) named: name`       → `named(name)`
 %%% ============================================================================
 
 %%% ============================================================================

@@ -378,8 +378,8 @@ from_tuple_shim_delegates_to_from_tuple_test() ->
         Result
     ).
 
-try_do_shim_delegates_to_try_do_test() ->
-    %% tryDo/1 is the FFI shim for 'tryDo:'(Block)
+try_do_tier1_success_test() ->
+    %% tryDo/1 (Tier 1 block)
     Result = beamtalk_result:tryDo(fun() -> 42 end),
     ?assertMatch(
         #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := 42, 'errReason' := nil},

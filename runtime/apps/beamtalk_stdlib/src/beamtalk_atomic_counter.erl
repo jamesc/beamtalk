@@ -49,7 +49,7 @@ AtomicCounter objects are represented as tagged maps:
 - Existing FFI pattern: `beamtalk_ets.erl`
 """.
 
-%% Class methods — canonical colon forms (for EUnit tests and Beamtalk dispatch)
+%% Class methods
 -export([new/1, named/1]).
 
 %% Instance methods — no-colon forms used by the FFI proxy
@@ -250,8 +250,8 @@ delete(_Self) ->
 %%% The (Erlang beamtalk_atomic_counter) FFI and `self delegate` resolve through
 %%% beamtalk_erlang_proxy:native_call, which names the function with
 %%% selector_to_function/1 (first keyword, trailing colon stripped).
-%%%   `(Erlang beamtalk_atomic_counter) new: name` → `new(name)` → `'new:'`
-%%%   `(Erlang beamtalk_atomic_counter) named: name` → `named(name)` → `'named:'`
+%%%   `(Erlang beamtalk_atomic_counter) new: name` → `new(name)`
+%%%   `(Erlang beamtalk_atomic_counter) named: name` → `named(name)`
 %%% ============================================================================
 
 %%% ============================================================================

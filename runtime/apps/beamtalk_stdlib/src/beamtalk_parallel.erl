@@ -51,7 +51,7 @@ error:` for that slot. It never crashes the caller.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
-%% Class methods (canonical colon forms)
+%% Class methods
 -export([all/1, all/2, any/1]).
 
 -type worker_result() :: beamtalk_result:t().
@@ -138,15 +138,6 @@ any(Blocks) ->
             got => Blocks
         }
     ).
-
-%%% ============================================================================
-%%% FFI Shims
-%%%
-%%% `self delegate` / `(Erlang beamtalk_parallel) ...` dispatch derives the
-%%% Erlang function name from the first keyword of the Beamtalk selector
-%%% (stripping the trailing colon) — these shims bridge to the canonical
-%%% colon-quoted implementations above.
-%%% ============================================================================
 
 %%% ============================================================================
 %%% Internal — shared worker spawn

@@ -27,10 +27,6 @@ digest — callers convert to hex/base64 via `beamtalk_binary`.
 %% Class methods — quoted colon-suffixed names are the real implementations.
 -export([sha256/1, sha512/1, md5/1, hmacSha256/2, hmacSha512/2]).
 
-%% Entry points for `(Erlang beamtalk_digest) sel: args` dispatch —
-%% selector_to_function/1 strips the first keyword's colon (see
-%% docs/beamtalk-native-erlang.md "The naming rule").
-
 %%% ============================================================================
 %%% Public API
 %%% ============================================================================
@@ -102,10 +98,6 @@ hmacSha512(_Input, _Key) ->
     beamtalk_error:raise_type_error(
         'Digest', 'hmacSha512:key:', <<"Argument must be a String or Binary">>
     ).
-
-%%% ============================================================================
-%%% FFI Shims — (Erlang beamtalk_digest) dispatch
-%%% ============================================================================
 
 %%% ============================================================================
 %%% Internal Functions

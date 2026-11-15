@@ -39,7 +39,7 @@ through named shims (`add`, `subtract`, `multiply`, `lt`, `gt`, `lte`,
 Erlang BIFs without dispatching (ADR 0002).
 """.
 
-%% Class methods (canonical colon forms)
+%% Class methods
 -export([milliseconds/1, seconds/1, minutes/1, hours/1, days/1]).
 -export([fromString/1]).
 

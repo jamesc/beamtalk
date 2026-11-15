@@ -50,8 +50,6 @@ directly to `next/1` / `nextInteger/2` (ADR 0101).
 -export([next/1, nextInteger/2]).
 -export(['atRandom'/1]).
 
-%% Entry points for (Erlang beamtalk_random) dispatch
-
 -type t() :: #{'$beamtalk_class' := 'Random', atom() => term()}.
 -export_type([t/0]).
 
