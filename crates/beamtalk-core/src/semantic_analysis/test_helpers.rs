@@ -4,6 +4,7 @@
 //! Shared test helpers for `semantic_analysis` tests.
 
 use crate::ast::Module;
+use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Severity, Span};
 
 pub fn test_span() -> Span {
@@ -27,4 +28,18 @@ pub fn parse_module(src: &str) -> Module {
         "fixture must parse: {diags:?}"
     );
     module
+}
+
+/// Parses `src` (no Error or Warning diagnostics allowed, via
+/// [`parse_ok`](crate::test_helpers::test_support::parse_ok)) and builds its
+/// [`ClassHierarchy`], unwrapping the build.
+///
+/// # Panics
+///
+/// Panics if `src` does not parse cleanly or its hierarchy cannot be built —
+/// a broken test fixture, not a bug under test.
+pub fn parse_and_build(src: &str) -> (Module, ClassHierarchy) {
+    let module = crate::test_helpers::test_support::parse_ok(src);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    (module, hierarchy)
 }

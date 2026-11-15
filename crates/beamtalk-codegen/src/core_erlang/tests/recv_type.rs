@@ -18,22 +18,12 @@ use beamtalk_core::semantic_analysis::type_checker::{
 use beamtalk_core::semantic_analysis::{
     AnalysisContext, InferredType, TypeProvenance, analyse_full,
 };
-
-fn parse_fixture(src: &str) -> beamtalk_core::ast::Module {
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-    let errors: Vec<_> = diagnostics
-        .iter()
-        .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "fixture failed to parse: {errors:?}");
-    module
-}
+use beamtalk_core::test_helpers::test_support::parse_ok;
 
 /// Self-sufficient codegen (no pre-run analysis) — exercises the
 /// `infer_types_and_returns` swap at `codegen/core_erlang/mod.rs:944`.
 fn codegen_self_sufficient(src: &str) -> String {
-    let module = parse_fixture(src);
+    let module = parse_ok(src);
     crate::core_erlang::generate_module(&module, crate::core_erlang::CodegenOptions::new("test"))
         .expect("codegen should succeed")
 }
@@ -41,7 +31,7 @@ fn codegen_self_sufficient(src: &str) -> String {
 /// Self-sufficient codegen with a native type registry wired in (for FFI /
 /// native-type-typed-local cases).
 fn codegen_with_native_registry(src: &str, registry: NativeTypeRegistry) -> String {
-    let module = parse_fixture(src);
+    let module = parse_ok(src);
     crate::core_erlang::generate_module(
         &module,
         crate::core_erlang::CodegenOptions::new("test")
@@ -54,7 +44,7 @@ fn codegen_with_native_registry(src: &str, registry: NativeTypeRegistry) -> Stri
 /// resolves protocols/aliases declared in the same module (the self-sufficient
 /// path's plain `check_module` has no protocol/alias registry at all).
 fn codegen_with_full_analysis(src: &str) -> String {
-    let module = parse_fixture(src);
+    let module = parse_ok(src);
     let analysis = analyse_full(&module, AnalysisContext::default());
     crate::core_erlang::generate_module(
         &module,

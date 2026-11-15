@@ -72,12 +72,13 @@ fn compass_type() -> InferredType {
 /// environment, and returns every "non-exhaustive" warning produced.
 fn exhaustiveness_warnings(scrutinee_ty: InferredType, arms: Vec<MatchArm>) -> Vec<Diagnostic> {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    env.set_local("compass", scrutinee_ty);
+    let mut session = InferSession::new();
+    session.env.set_local("compass", scrutinee_ty);
     let expr = match_expr(var("compass"), arms);
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    checker
+
+    let _ = session.infer(&expr, &hierarchy);
+    session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("non-exhaustive"))
@@ -319,7 +320,7 @@ fn union_of_ordinary_classes_is_silent() {
 #[test]
 fn result_constructor_match_is_not_touched_by_singleton_check() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
     let expr = match_expr(
         var("r"),
         vec![MatchArm::new(
@@ -332,9 +333,10 @@ fn result_constructor_match_is_not_touched_by_singleton_check() {
             span(),
         )],
     );
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    let non_exhaustive: Vec<_> = checker
+
+    let _ = session.infer(&expr, &hierarchy);
+    let non_exhaustive: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("non-exhaustive"))

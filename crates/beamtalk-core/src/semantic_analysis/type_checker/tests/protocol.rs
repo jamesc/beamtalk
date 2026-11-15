@@ -186,12 +186,7 @@ fn test_non_self_field_assignment_produces_warning_not_error() {
     // consistent with the module's "Warnings only, never errors" design principle.
     use crate::source_analysis::Severity;
     let source = "Value subclass: Point\n  state: x\n  state: y\n  bad: other =>\n    other.x := 1";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
     let checker = check(&module, &hierarchy);
     let field_diags: Vec<_> = checker
         .diagnostics()

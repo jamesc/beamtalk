@@ -293,15 +293,10 @@ fn build_diagnostic(slot: &str, entry_selector: &str, span: Span) -> Diagnostic 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantic_analysis::ClassHierarchy;
-    use crate::source_analysis::lex_with_eof;
-    use crate::source_analysis::parse;
+    use crate::semantic_analysis::test_helpers::parse_and_build;
 
     fn diagnostics_for(src: &str) -> Vec<Diagnostic> {
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
         check_unguarded_late_reads_in_lifecycle_hooks(&module, &hierarchy, &mut diagnostics);
         diagnostics

@@ -9,9 +9,7 @@
 use super::common::*;
 
 fn analyse_source(source: &str) -> crate::semantic_analysis::AnalysisResult {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     crate::semantic_analysis::analyse(&module)
 }
 
