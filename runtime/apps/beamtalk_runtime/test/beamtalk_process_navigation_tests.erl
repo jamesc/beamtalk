@@ -188,9 +188,10 @@ snapshot_small_tree_test() ->
 beamtalk_actor_classified_test() ->
     application:ensure_all_started(beamtalk_runtime),
     Self = self(),
-    %% 'Integer' is a registered stdlib class, so behaviourClass resolves to a
-    %% real class object.
-    SupPid = start_supervisor([worker_spec(a1, start_actor_worker, [Self, 'Integer'])]),
+    %% The test registers its own class, so behaviourClass resolves to a real
+    %% class object without depending on stdlib state left by earlier modules.
+    ClassName = start_nav_class(),
+    SupPid = start_supervisor([worker_spec(a1, start_actor_worker, [Self, ClassName])]),
     try
         Nodes = beamtalk_process_navigation:snapshot_from_pids([SupPid], default),
         [Actor] = [N || N <- Nodes, maps:get(parent_pid, N) =:= SupPid],
@@ -198,8 +199,23 @@ beamtalk_actor_classified_test() ->
         BClass = maps:get(behaviourClass, Actor),
         ?assert(beamtalk_class_registry:is_class_object(BClass))
     after
-        gen_server:stop(SupPid)
+        gen_server:stop(SupPid),
+        beamtalk_test_class:stop(ClassName)
     end.
+
+%% Register the class the navigation tests above and below classify actors as.
+-define(NAV_CLASS, 'BT4892NavTestClass').
+-spec start_nav_class() -> atom().
+start_nav_class() ->
+    beamtalk_test_boot:registry(),
+    beamtalk_test_class:start_or_get(?NAV_CLASS, #{
+        name => ?NAV_CLASS,
+        module => test_class,
+        superclass => 'Object',
+        instance_methods => #{},
+        instance_variables => []
+    }),
+    ?NAV_CLASS.
 
 beamtalk_actor_unknown_class_has_nil_behaviour_test() ->
     application:ensure_all_started(beamtalk_runtime),
@@ -307,12 +323,29 @@ deny_list_parity_test() ->
                 undefined ->
                     ok;
                 Pid ->
-                    ?assert(sets:is_element(Pid, SystemPids)),
+                    case Name =:= beamtalk_runtime_sup orelse under_runtime_sup(Pid) of
+                        true -> ?assert(sets:is_element(Pid, SystemPids));
+                        %% Started outside the supervision tree by an earlier
+                        %% test module (e.g. `beamtalk_xref:start_link/0` from
+                        %% a test process): not reachable from a snapshot root.
+                        false -> ok
+                    end,
                     ?assertNot(sets:is_element(Pid, DefaultPids))
             end
         end,
         InfraNames
     ).
+
+%% True when `Pid` was started under `beamtalk_runtime_sup` (proc_lib records
+%% the starting supervisors, by registered name, in `$ancestors`).
+-spec under_runtime_sup(pid()) -> boolean().
+under_runtime_sup(Pid) ->
+    case process_info(Pid, dictionary) of
+        {dictionary, Dict} ->
+            lists:member(beamtalk_runtime_sup, proplists:get_value('$ancestors', Dict, []));
+        undefined ->
+            false
+    end.
 
 %%====================================================================
 %% Tests: partial tree under mid-walk mutation
@@ -643,23 +676,25 @@ node_field_accessors_test() ->
 child_handles_beamtalk_actor_child_has_live_handle_test() ->
     application:ensure_all_started(beamtalk_runtime),
     Self = self(),
-    %% 'Integer' is a registered stdlib class, so the child resolves to a class.
-    SupPid = start_supervisor([worker_spec(a1, start_actor_worker, [Self, 'Integer'])]),
+    %% The test registers its own class (see start_nav_class/0).
+    ClassName = start_nav_class(),
+    SupPid = start_supervisor([worker_spec(a1, start_actor_worker, [Self, ClassName])]),
     try
         {ok, Rows} = beamtalk_process_navigation:child_handles(pid_to_list(SupPid)),
         ?assertEqual(1, length(Rows)),
         [Row] = Rows,
         ?assertEqual(<<"beamtalkActor">>, maps:get(<<"kind">>, Row)),
-        ?assertEqual(<<"Integer">>, maps:get(<<"className">>, Row)),
+        ?assertEqual(atom_to_binary(ClassName, utf8), maps:get(<<"className">>, Row)),
         ?assertEqual(false, maps:get(<<"isSupervisor">>, Row)),
         %% The pid is the textual form, and a live drillable handle is minted.
         ?assert(is_binary(maps:get(<<"pid">>, Row))),
         Handle = maps:get(<<"handle">>, Row),
-        ?assertMatch({beamtalk_object, 'Integer', _Mod, _Pid}, Handle),
+        ?assertMatch({beamtalk_object, ClassName, _Mod, _Pid}, Handle),
         {beamtalk_object, _, _, HandlePid} = Handle,
         ?assert(is_pid(HandlePid))
     after
-        gen_server:stop(SupPid)
+        gen_server:stop(SupPid),
+        beamtalk_test_class:stop(ClassName)
     end.
 
 %% A supervisor whose child is itself a (foreign) supervisor lists that child
