@@ -40,6 +40,7 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
+                // Declared `-> Integer`.
                 return_type: Some(DeclaredType::parse("Integer")),
                 param_types: vec![],
                 doc: None,
@@ -57,6 +58,7 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
+                // Inferred from body (`^self.count`) — resolved to Integer.
                 return_type: Some(DeclaredType::parse("Integer")),
                 param_types: vec![],
                 doc: None,

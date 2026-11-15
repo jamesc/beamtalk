@@ -27,6 +27,7 @@ fn hierarchy_with(class: &str, superclass: &str) -> ClassHierarchy {
             is_internal: false,
             spawns_block: false,
             return_type: None,
+            // Untyped parameter: the sendability check must fire regardless.
             param_types: vec![None],
             doc: None,
 

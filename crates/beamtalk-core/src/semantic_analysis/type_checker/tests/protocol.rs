@@ -792,6 +792,16 @@ fn setup_intersection_param_fixture() -> (
                 is_internal: false,
                 spawns_block: false,
                 return_type: Some(DeclaredType::parse("String")),
+                // A real `:: Printable & Serializable` parameter annotation
+                // builds a structural `DeclaredType::Intersection`
+                // now, not this opaque `Simple`. Kept as a `Simple` here
+                // deliberately: this test exercises the protocol checker's
+                // *string-level* intersection-splitting path
+                // (`check_protocol_conformance_in_expr` renders the declared
+                // type via `Display` — byte-identical either way, see
+                // `DeclaredType`'s doc — before splitting on `&`), which
+                // behaves identically for a `Simple` whose text happens to
+                // look like an intersection and a real `Intersection` node.
                 param_types: vec![Some(DeclaredType::parse("Printable & Serializable"))],
                 doc: None,
 
