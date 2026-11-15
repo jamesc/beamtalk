@@ -56,10 +56,10 @@ Returns `Result ok: value` on success, `Result error:` on invalid JSON.
 Type error (non-String argument) still raises.
 """.
 -spec parse(beamtalk_string:t() | binary()) -> beamtalk_result:t().
-%% BT-4173: a bare binary spells the same text (pre-flip calls stay valid).
-parse(JsonStr) when is_binary(JsonStr) ->
-    parse({beamtalk_string, JsonStr});
-parse({beamtalk_string, JsonStr}) when is_binary(JsonStr) ->
+parse(Arg) ->
+    JsonStr = beamtalk_text:unwrap_or_raise(
+        Arg, 'Json', 'parse:', <<"Argument must be a String">>
+    ),
     try
         Value = json:decode(JsonStr),
         normalize_ok(Value)
@@ -76,9 +76,7 @@ parse({beamtalk_string, JsonStr}) when is_binary(JsonStr) ->
                 #{reason => Reason}
             ),
             beamtalk_result:from_tagged_tuple({error, Error})
-    end;
-parse(_) ->
-    beamtalk_error:raise_type_error('Json', 'parse:', <<"Argument must be a String">>).
+    end.
 
 -doc """
 Generate a JSON string from a Beamtalk value.

@@ -211,10 +211,10 @@ format_event(#{level := Level, msg := Msg, meta := Meta}) ->
         time => format_time(Meta),
         msg => format_msg(Msg, Meta)
     },
-    M1 = maybe_put(domain, format_domain(Meta), Base),
+    M1 = maybe_put(domain, beamtalk_log_format:format_domain(Meta), Base),
     M2 = maybe_put(class, format_class(Meta), M1),
     M3 = maybe_put(selector, format_selector(Meta), M2),
-    M4 = maybe_put(mfa, format_mfa(Meta), M3),
+    M4 = maybe_put(mfa, beamtalk_log_format:format_mfa(Meta), M3),
     maybe_put(pid, format_pid(Meta), M4).
 
 -spec format_time(map()) -> binary().
@@ -224,32 +224,10 @@ format_time(Meta) ->
 -spec format_msg(term(), map()) -> binary().
 format_msg({string, Msg}, _Meta) ->
     log_text_to_binary(Msg);
-format_msg({report, Report}, Meta) when is_map(Report) ->
-    case maps:get(report_cb, Meta, undefined) of
-        undefined ->
-            log_text_to_binary(io_lib:format("~tp", [Report]));
-        Fun when is_function(Fun, 1) ->
-            {Format, Args} = Fun(Report),
-            log_text_to_binary(io_lib:format(Format, Args));
-        Fun when is_function(Fun, 2) ->
-            log_text_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
-    end;
 format_msg({report, Report}, Meta) ->
-    format_msg_report_list(Report, Meta);
+    log_text_to_binary(beamtalk_log_format:report_chardata(Report, Meta));
 format_msg({Format, Args}, _Meta) ->
     log_text_to_binary(io_lib:format(Format, Args)).
-
--spec format_msg_report_list(term(), map()) -> binary().
-format_msg_report_list(Report, Meta) ->
-    case maps:get(report_cb, Meta, undefined) of
-        undefined ->
-            log_text_to_binary(io_lib:format("~tp", [Report]));
-        Fun when is_function(Fun, 1) ->
-            {Format, Args} = Fun(Report),
-            log_text_to_binary(io_lib:format(Format, Args));
-        Fun when is_function(Fun, 2) ->
-            log_text_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
-    end.
 
 %% Callers format log text with either `~s` on a UTF-8 binary (bytes surface as
 %% latin1 chars; `iolist_to_binary/1` passes them back through unchanged) or
@@ -268,12 +246,6 @@ log_text_to_binary(Chardata) ->
         error:badarg -> beamtalk_error:chars_to_binary(Chardata)
     end.
 
--spec format_domain(map()) -> binary() | undefined.
-format_domain(#{domain := Domain}) when is_list(Domain) ->
-    iolist_to_binary(lists:join($., [atom_to_list(D) || D <- Domain]));
-format_domain(_) ->
-    undefined.
-
 -spec format_class(map()) -> binary() | undefined.
 format_class(#{beamtalk_class := Class}) when is_atom(Class) ->
     atom_to_binary(Class, utf8);
@@ -284,12 +256,6 @@ format_class(_) ->
 format_selector(#{beamtalk_selector := Sel}) when is_atom(Sel) ->
     atom_to_binary(Sel, utf8);
 format_selector(_) ->
-    undefined.
-
--spec format_mfa(map()) -> binary() | undefined.
-format_mfa(#{mfa := {M, F, A} = Mfa}) when is_atom(M), is_atom(F), is_integer(A) ->
-    beamtalk_stack_frame:raw_mfa(Mfa);
-format_mfa(_) ->
     undefined.
 
 -spec format_pid(map()) -> binary() | undefined.
