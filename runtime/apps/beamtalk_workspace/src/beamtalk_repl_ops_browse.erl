@@ -1981,25 +1981,23 @@ disk_source(ClassName) ->
 %% an existing atom only (untrusted client input must not grow the atom table).
 -spec validate_module(map()) -> {ok, atom()} | none | {error, binary()}.
 validate_module(Params) ->
-    case maps:get(<<"module">>, Params, undefined) of
-        Mod when is_binary(Mod), byte_size(Mod) > 0 ->
-            resolve_module(Mod);
-        _ ->
-            none
+    case beamtalk_repl_params:nonempty_binary(Params, <<"module">>) of
+        {ok, Mod} -> resolve_module(Mod);
+        error -> none
     end.
 
 %% Resolve a module-name binary to an atom only if it names a loaded module. An
 %% unknown module is a structured not-found error, never an atom-table growth.
 -spec resolve_module(binary()) -> {ok, atom()} | {error, binary()}.
 resolve_module(Mod) ->
-    case beamtalk_text:to_existing_atom(Mod) of
+    case beamtalk_repl_params:existing_atom_param(Mod, {error, fun module_not_found_message/1}) of
         {ok, Module} ->
             case code:is_loaded(Module) of
                 {file, _} -> {ok, Module};
                 false -> {error, module_not_found_message(Mod)}
             end;
-        error ->
-            {error, module_not_found_message(Mod)}
+        {error, _} = Err ->
+            Err
     end.
 
 -spec module_not_found_message(binary()) -> binary().
@@ -2072,14 +2070,14 @@ validate_selector(Params) ->
 %% unknown class is a structured not-found error, not an atom-table growth.
 -spec resolve_class(binary()) -> {ok, atom()} | {error, binary()}.
 resolve_class(Cls) ->
-    case beamtalk_text:to_existing_atom(Cls) of
+    case beamtalk_repl_params:existing_atom_param(Cls, {error, fun class_not_found_message/1}) of
         {ok, Name} ->
             case beamtalk_runtime_api:whereis_class(Name) of
                 undefined -> {error, class_not_found_message(Cls)};
                 _Pid -> {ok, Name}
             end;
-        error ->
-            {error, class_not_found_message(Cls)}
+        {error, _} = Err ->
+            Err
     end.
 
 -spec class_not_found_message(binary()) -> binary().
