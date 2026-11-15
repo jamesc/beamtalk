@@ -21,18 +21,6 @@ atom-safety sentinel invariants under selector/class floods.
 %% Helpers
 %%====================================================================
 
-%% Construct a minimal protocol_msg record.
-%% The tuple form mirrors #protocol_msg{op, id, session, params}.
-make_msg() ->
-    {protocol_msg, <<"nav-query">>, <<"t1">>, <<"s1">>, #{}}.
-
-%% Decode a JSON binary and assert it represents an error response.
-assert_error_response(Response) ->
-    Decoded = json:decode(Response),
-    ?assertMatch(#{<<"status">> := [<<"done">>, <<"error">>]}, Decoded),
-    ?assert(is_binary(maps:get(<<"error">>, Decoded))),
-    Decoded.
-
 %%====================================================================
 %% describe_ops/0
 %%====================================================================
@@ -59,7 +47,10 @@ describe_ops_nav_query_optional_includes_selector_and_class_test() ->
 
 kw_selector(Params) ->
     beamtalk_repl_ops_nav:handle_term(
-        <<"nav-query">>, Params#{<<"kind">> => <<"keyword_selector">>}, make_msg(), self()
+        <<"nav-query">>,
+        Params#{<<"kind">> => <<"keyword_selector">>},
+        beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
+        self()
     ).
 
 keyword_selector_first_keyword_resolves_full_selector_test() ->
@@ -106,170 +97,170 @@ keyword_selector_requires_code_test() ->
 %%====================================================================
 
 handle_callers_missing_module_returns_error_mentioning_module_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>, #{<<"kind">> => <<"callers_of_native_module">>}, Msg, self()
     ),
-    Decoded = assert_error_response(Response),
+    Decoded = beamtalk_test_repl:assert_error_response(Response),
     ErrBin = maps:get(<<"error">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(ErrBin, <<"module">>)).
 
 handle_callers_empty_module_returns_error_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>,
         #{<<"kind">> => <<"callers_of_native_module">>, <<"module">> => <<>>},
         Msg,
         self()
     ),
-    assert_error_response(Response).
+    beamtalk_test_repl:assert_error_response(Response).
 
 %%====================================================================
 %% handle/4 — validation error paths (no xref dependency)
 %%====================================================================
 
 handle_missing_kind_returns_error_mentioning_kind_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(<<"nav-query">>, #{}, Msg, self()),
-    Decoded = assert_error_response(Response),
+    Decoded = beamtalk_test_repl:assert_error_response(Response),
     ErrBin = maps:get(<<"error">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(ErrBin, <<"kind">>)).
 
 handle_unknown_kind_returns_error_mentioning_the_value_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>, #{<<"kind">> => <<"bogus">>}, Msg, self()
     ),
-    Decoded = assert_error_response(Response),
+    Decoded = beamtalk_test_repl:assert_error_response(Response),
     ErrBin = maps:get(<<"error">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(ErrBin, <<"bogus">>)).
 
 handle_kind_not_a_string_returns_error_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>, #{<<"kind">> => 42}, Msg, self()
     ),
-    assert_error_response(Response).
+    beamtalk_test_repl:assert_error_response(Response).
 
 handle_kind_as_map_returns_error_test() ->
     %% Non-binary kind variants other than numbers — JSON-shaped objects also
     %% hit the catch-all clause in validate_params/1.
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>, #{<<"kind">> => #{<<"nested">> => <<"value">>}}, Msg, self()
     ),
-    assert_error_response(Response).
+    beamtalk_test_repl:assert_error_response(Response).
 
 handle_kind_as_list_returns_error_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>, #{<<"kind">> => [<<"senders">>]}, Msg, self()
     ),
-    assert_error_response(Response).
+    beamtalk_test_repl:assert_error_response(Response).
 
 handle_senders_missing_selector_returns_error_mentioning_selector_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>, #{<<"kind">> => <<"senders">>}, Msg, self()
     ),
-    Decoded = assert_error_response(Response),
+    Decoded = beamtalk_test_repl:assert_error_response(Response),
     ErrBin = maps:get(<<"error">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(ErrBin, <<"selector">>)).
 
 handle_senders_empty_selector_returns_error_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>,
         #{<<"kind">> => <<"senders">>, <<"selector">> => <<>>},
         Msg,
         self()
     ),
-    assert_error_response(Response).
+    beamtalk_test_repl:assert_error_response(Response).
 
 handle_implementors_missing_selector_returns_error_mentioning_selector_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>, #{<<"kind">> => <<"implementors">>}, Msg, self()
     ),
-    Decoded = assert_error_response(Response),
+    Decoded = beamtalk_test_repl:assert_error_response(Response),
     ErrBin = maps:get(<<"error">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(ErrBin, <<"selector">>)).
 
 handle_implementors_empty_selector_returns_error_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>,
         #{<<"kind">> => <<"implementors">>, <<"selector">> => <<>>},
         Msg,
         self()
     ),
-    assert_error_response(Response).
+    beamtalk_test_repl:assert_error_response(Response).
 
 handle_references_missing_class_returns_error_mentioning_class_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>, #{<<"kind">> => <<"references">>}, Msg, self()
     ),
-    Decoded = assert_error_response(Response),
+    Decoded = beamtalk_test_repl:assert_error_response(Response),
     ErrBin = maps:get(<<"error">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(ErrBin, <<"class">>)).
 
 handle_references_empty_class_returns_error_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>,
         #{<<"kind">> => <<"references">>, <<"class">> => <<>>},
         Msg,
         self()
     ),
-    assert_error_response(Response).
+    beamtalk_test_repl:assert_error_response(Response).
 
 %%====================================================================
 %% handle/4 — protocol kinds validation
 %%====================================================================
 
 handle_required_methods_missing_class_returns_error_mentioning_class_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>, #{<<"kind">> => <<"required_methods">>}, Msg, self()
     ),
-    Decoded = assert_error_response(Response),
+    Decoded = beamtalk_test_repl:assert_error_response(Response),
     ErrBin = maps:get(<<"error">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(ErrBin, <<"class">>)).
 
 handle_conforming_classes_missing_class_returns_error_mentioning_class_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>, #{<<"kind">> => <<"conforming_classes">>}, Msg, self()
     ),
-    Decoded = assert_error_response(Response),
+    Decoded = beamtalk_test_repl:assert_error_response(Response),
     ErrBin = maps:get(<<"error">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(ErrBin, <<"class">>)).
 
 handle_required_methods_empty_class_returns_error_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>,
         #{<<"kind">> => <<"required_methods">>, <<"class">> => <<>>},
         Msg,
         self()
     ),
-    assert_error_response(Response).
+    beamtalk_test_repl:assert_error_response(Response).
 
 handle_conforming_classes_empty_class_returns_error_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>,
         #{<<"kind">> => <<"conforming_classes">>, <<"class">> => <<>>},
         Msg,
         self()
     ),
-    assert_error_response(Response).
+    beamtalk_test_repl:assert_error_response(Response).
 
 %% An unknown protocol name resolves to an empty site list (not a validation
 %% error), mirroring senders/implementors degradation for unknown selectors.
 handle_required_methods_unknown_protocol_returns_empty_sites_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>,
         #{<<"kind">> => <<"required_methods">>, <<"class">> => <<"__no_such_protocol_nav__">>},
@@ -281,7 +272,7 @@ handle_required_methods_unknown_protocol_returns_empty_sites_test() ->
     ?assertMatch(#{<<"value">> := #{<<"sites">> := []}}, Decoded).
 
 handle_conforming_classes_unknown_protocol_returns_empty_sites_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav:handle(
         <<"nav-query">>,
         #{<<"kind">> => <<"conforming_classes">>, <<"class">> => <<"__no_such_protocol_nav__">>},
@@ -297,34 +288,12 @@ handle_conforming_classes_unknown_protocol_returns_empty_sites_test() ->
 %%====================================================================
 
 xref_setup() ->
-    Pid =
-        case whereis(beamtalk_xref) of
-            undefined ->
-                {ok, P} = beamtalk_xref:start_link(),
-                P;
-            P ->
-                P
-        end,
     %% Start each test from a clean slate to avoid bleed from other suites.
-    clear_xref_tables(),
-    Pid.
+    ok = beamtalk_test_repl:ensure_xref(),
+    whereis(beamtalk_xref).
 
 xref_cleanup(_Pid) ->
-    clear_xref_tables(),
-    ok.
-
-clear_xref_tables() ->
-    try
-        sys:replace_state(beamtalk_xref, fun(S) ->
-            ets:delete_all_objects(beamtalk_xref_methods),
-            ets:delete_all_objects(beamtalk_xref_senders),
-            ets:delete_all_objects(beamtalk_xref_references),
-            ets:delete_all_objects(xref_class_gen),
-            S
-        end)
-    catch
-        _:_ -> ok
-    end.
+    beamtalk_test_repl:clear_xref().
 
 nav_query_test_() ->
     {setup, fun xref_setup/0, fun xref_cleanup/1, fun nav_tests/1}.
@@ -333,7 +302,7 @@ nav_tests(_Pid) ->
     [
         {"senders of non-existent atom returns empty sites list", fun() ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             %% Atom does not exist in VM → binary_to_existing_atom catches badarg
             %% → uses '__nav_query_unknown__' sentinel → senders returns []
             Response = beamtalk_repl_ops_nav:handle(
@@ -348,7 +317,7 @@ nav_tests(_Pid) ->
         end},
         {"senders of known selector returns non-empty sites list", fun() ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             %% 'increment' sends '+', so senders_of('+') should return a site
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
@@ -363,7 +332,7 @@ nav_tests(_Pid) ->
         end},
         {"site row has all required fields", fun() ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"senders">>, <<"selector">> => <<"+">>},
@@ -380,7 +349,7 @@ nav_tests(_Pid) ->
         end},
         {"site row class field matches registered class name", fun() ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"senders">>, <<"selector">> => <<"+">>},
@@ -393,7 +362,7 @@ nav_tests(_Pid) ->
         end},
         {"implementors of known selector returns non-empty list", fun() ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"implementors">>, <<"selector">> => <<"increment">>},
@@ -407,7 +376,7 @@ nav_tests(_Pid) ->
         end},
         {"implementors of unknown selector returns empty list", fun() ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"implementors">>, <<"selector">> => <<"__no_such_method__">>},
@@ -419,7 +388,7 @@ nav_tests(_Pid) ->
         end},
         {"implementor row has all required fields", fun() ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"implementors">>, <<"selector">> => <<"increment">>},
@@ -436,7 +405,7 @@ nav_tests(_Pid) ->
         end},
         {"implementor row method field matches queried selector", fun() ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"implementors">>, <<"selector">> => <<"increment">>},
@@ -449,7 +418,7 @@ nav_tests(_Pid) ->
         end},
         {"references to known class returns non-empty sites list", fun() ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             %% nav_test_xref references 'Integer' in increment method
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
@@ -464,7 +433,7 @@ nav_tests(_Pid) ->
         end},
         {"references to non-existent class returns empty sites list", fun() ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"references">>, <<"class">> => <<"__no_such_class__">>},
@@ -478,7 +447,7 @@ nav_tests(_Pid) ->
             %% NavTestClass is registered in xref only, not in the class registry,
             %% so source_file_of/1 returns null for it.
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"senders">>, <<"selector">> => <<"+">>},
@@ -491,7 +460,7 @@ nav_tests(_Pid) ->
         end},
         {"senders row line field is populated from xref `sends` line", fun() ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"senders">>, <<"selector">> => <<"+">>},
@@ -505,7 +474,7 @@ nav_tests(_Pid) ->
         end},
         {"implementor row line field is populated from xref method_info", fun() ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"implementors">>, <<"selector">> => <<"increment">>},
@@ -519,7 +488,7 @@ nav_tests(_Pid) ->
         end},
         {"references row has all required fields", fun() ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"references">>, <<"class">> => <<"Integer">>},
@@ -539,7 +508,7 @@ nav_tests(_Pid) ->
             %% class — here NavTestClass references Integer, so the row's
             %% `class` should be NavTestClass (not Integer).
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"references">>, <<"class">> => <<"Integer">>},
@@ -556,7 +525,7 @@ nav_tests(_Pid) ->
             %% because the handler uses binary_to_existing_atom/2 and falls
             %% back to a single shared sentinel atom on badarg.
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             %% Warm up: ensure all involved modules and code paths are loaded
             %% before measuring, so lazy-loading atoms don't skew the baseline.
             _ = code:ensure_loaded(beamtalk_repl_ops_nav),
@@ -595,7 +564,7 @@ nav_tests(_Pid) ->
         end},
         {"callers_of_native_module returns the calling sites", fun() ->
             ok = beamtalk_xref:register_class('NavFfiCaller', nav_ffi_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"callers_of_native_module">>, <<"module">> => <<"lists">>},
@@ -614,7 +583,7 @@ nav_tests(_Pid) ->
         end},
         {"callers_of_native_module is empty for a module with no callers", fun() ->
             ok = beamtalk_xref:register_class('NavFfiCaller', nav_ffi_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"callers_of_native_module">>, <<"module">> => <<"maps">>},
@@ -626,7 +595,7 @@ nav_tests(_Pid) ->
         end},
         {"callers_of_native_module unknown module returns empty sites list", fun() ->
             ok = beamtalk_xref:register_class('NavFfiCaller', nav_ffi_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             %% A never-loaded module name has no existing atom → sentinel → [].
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
@@ -642,7 +611,7 @@ nav_tests(_Pid) ->
         end},
         {"atom table stable under flood of unknown native modules", fun() ->
             ok = beamtalk_xref:register_class('NavFfiCaller', nav_ffi_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             _ = code:ensure_loaded(beamtalk_repl_ops_nav),
             _ = code:ensure_loaded(json),
             _ =
@@ -684,7 +653,7 @@ nav_tests(_Pid) ->
             %% Same invariant for the `references` kind, which routes through
             %% with_class/1 → binary_to_existing_atom/2.
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             %% Warm up: ensure all involved modules and code paths are loaded
             %% before measuring, so lazy-loading atoms don't skew the baseline.
             _ = code:ensure_loaded(beamtalk_repl_ops_nav),
@@ -755,7 +724,7 @@ protocol_query_test_() ->
 protocol_tests(_) ->
     [
         {"required_methods returns the protocol's required selectors", fun() ->
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"required_methods">>, <<"class">> => <<"NavTestProtocol">>},
@@ -770,7 +739,7 @@ protocol_tests(_) ->
             ?assert(lists:member(<<"fromString:">>, Methods))
         end},
         {"required_methods class-side requirement carries class_side=true", fun() ->
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"required_methods">>, <<"class">> => <<"NavTestProtocol">>},
@@ -786,7 +755,7 @@ protocol_tests(_) ->
             ?assertEqual(false, maps:get(<<"class_side">>, InstRow))
         end},
         {"required_methods row carries the owning protocol as `class`", fun() ->
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"required_methods">>, <<"class">> => <<"NavTestProtocol">>},
@@ -802,7 +771,7 @@ protocol_tests(_) ->
         {"conforming_classes returns an (possibly empty) sites list", fun() ->
             %% No live classes are registered in this unit suite, so the result is
             %% an empty list — the key invariant is the wire shape, not membership.
-            Msg = make_msg(),
+            Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"conforming_classes">>, <<"class">> => <<"NavTestProtocol">>},
@@ -838,7 +807,7 @@ delegate_callers_setup() ->
             P ->
                 P
         end,
-    clear_xref_tables(),
+    beamtalk_test_repl:clear_xref(),
     %% Load the facade so its `__beamtalk_meta/0` + `dispatch_<selector>` exports
     %% are visible to the reflection reads (and the backing-module atom interned
     %% for the op's `binary_to_existing_atom`).
@@ -893,7 +862,7 @@ delegate_callers_cleanup(#{class := {ClassName, ClassPid, Owned}}) ->
         false ->
             ok
     end,
-    clear_xref_tables(),
+    beamtalk_test_repl:clear_xref(),
     ok.
 
 delegate_method_row(Selector, Line, Sends) ->
@@ -918,7 +887,7 @@ delegate_callers_tests(#{class := {ClassName, _Pid, _Owned}}) ->
                 <<"kind">> => <<"callers_of_native_module">>,
                 <<"module">> => <<"bt_test_native_backing">>
             },
-            make_msg(),
+            beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             self()
         ),
         #{<<"value">> := #{<<"sites">> := Sites}} = json:decode(Response),

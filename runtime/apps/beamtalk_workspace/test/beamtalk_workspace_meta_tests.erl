@@ -1382,8 +1382,7 @@ class_source_survives_restart_when_module_loaded_test() ->
         gen_server:stop(Pid2)
     after
         _ = file:delete(MetaFile),
-        _ = code:purge(ModuleAtom),
-        _ = code:delete(ModuleAtom)
+        beamtalk_test_module:unload(ModuleAtom)
     end.
 
 %% a class_sources entry for a class in a
@@ -1431,8 +1430,7 @@ class_source_survives_restart_for_packaged_project_test() ->
         _ = beamtalk_class_metadata:delete('Bt3108Pkg'),
         _ = file:delete(MetaFile),
         _ = file:del_dir_r(ProjectDir),
-        _ = code:purge(ModuleAtom),
-        _ = code:delete(ModuleAtom)
+        beamtalk_test_module:unload(ModuleAtom)
     end.
 
 %% BT-4868: a class in a src/ SUBDIRECTORY (module bt@{pkg}@util@{snake}) used to
@@ -1547,8 +1545,7 @@ class_source_dropped_when_source_file_newer_than_snapshot_test() ->
     after
         _ = file:delete(MetaFile),
         _ = file:del_dir_r(Tmp),
-        _ = code:purge(ModuleAtom),
-        _ = code:delete(ModuleAtom)
+        beamtalk_test_module:unload(ModuleAtom)
     end.
 
 %%% loaded_modules entries are also validated against code:is_loaded

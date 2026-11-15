@@ -1050,30 +1050,12 @@ selector_arity_covered_binary_chars_test() ->
 %% ClassBuilder install path's method_xref forwarding has somewhere to write.
 xref_setup() ->
     Acc = setup(),
-    case whereis(beamtalk_xref) of
-        undefined -> {ok, _} = beamtalk_xref:start_link();
-        _ -> ok
-    end,
-    clear_xref_tables(),
+    ok = beamtalk_test_repl:ensure_xref(),
     Acc.
 
 xref_teardown(Acc) ->
-    clear_xref_tables(),
+    beamtalk_test_repl:clear_xref(),
     teardown(Acc).
-
-clear_xref_tables() ->
-    try
-        sys:replace_state(beamtalk_xref, fun(S) ->
-            ets:delete_all_objects(beamtalk_xref_methods),
-            ets:delete_all_objects(beamtalk_xref_senders),
-            ets:delete_all_objects(xref_class_gen),
-            ets:delete_all_objects(beamtalk_xref_references),
-            S
-        end)
-    catch
-        _:_ -> ok
-    end,
-    ok.
 
 %% True when the compiler AST FFI walker that backs runtime xref send-parsing
 %% is loaded and reachable. A bare EUnit node may lack the compiler port, in

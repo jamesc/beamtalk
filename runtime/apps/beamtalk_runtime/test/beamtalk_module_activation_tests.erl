@@ -248,8 +248,7 @@ activate_module_register_class_crash_test() ->
         Result = beamtalk_module_activation:activate_module(Mod),
         ?assertMatch({error, {error, register_class_boom}}, Result)
     after
-        code:purge(bt_test_crashing_register),
-        code:delete(bt_test_crashing_register)
+        beamtalk_test_module:unload(bt_test_crashing_register)
     end.
 
 %%% ============================================================================
@@ -695,9 +694,7 @@ write_crashing_register_beam(Dir, ModName) ->
 purge_mod(ModName) when is_list(ModName) ->
     purge_mod(list_to_atom(ModName));
 purge_mod(Mod) when is_atom(Mod) ->
-    _ = code:purge(Mod),
-    _ = code:delete(Mod),
-    _ = code:purge(Mod),
+    beamtalk_test_module:unload(Mod),
     ok.
 
 %% Recursively remove a temp directory tree (for nested _build layouts).

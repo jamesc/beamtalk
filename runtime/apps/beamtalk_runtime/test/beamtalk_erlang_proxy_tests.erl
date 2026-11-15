@@ -1515,9 +1515,7 @@ direct_call_handle_undefined_function_test() ->
                 )
         end
     after
-        _ = code:purge(Mod),
-        _ = code:delete(Mod),
-        _ = code:purge(Mod)
+        beamtalk_test_module:unload(Mod)
     end.
 
 %% Load an in-memory module `Mod` exporting each `{Name, Return}` as a
@@ -1560,8 +1558,7 @@ direct_call_tracks_hot_reload_and_purge_test() ->
                 )
         end,
         %% Delete + purge: the module (in-memory only) can no longer be loaded.
-        _ = code:purge(Mod),
-        true = code:delete(Mod),
+        beamtalk_test_module:unload(Mod),
         _ = code:purge(Mod),
         try
             beamtalk_erlang_proxy:direct_call(Mod, answer, []),
@@ -1575,9 +1572,7 @@ direct_call_tracks_hot_reload_and_purge_test() ->
                 )
         end
     after
-        _ = code:purge(Mod),
-        _ = code:delete(Mod),
-        _ = code:purge(Mod)
+        beamtalk_test_module:unload(Mod)
     end.
 
 %%% ============================================================================
@@ -1622,9 +1617,7 @@ load_bt_raiser(Mod) ->
     Mod.
 
 unload_bt_raiser(Mod) ->
-    _ = code:purge(Mod),
-    _ = code:delete(Mod),
-    _ = code:purge(Mod),
+    beamtalk_test_module:unload(Mod),
     ok.
 
 native_call_block_error_from_beamtalk_code_is_unchanged_test() ->

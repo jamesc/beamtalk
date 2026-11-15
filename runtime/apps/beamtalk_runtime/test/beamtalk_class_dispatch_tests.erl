@@ -38,9 +38,6 @@ Test groups:
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
-%% Logger handler callback for the BT-4115 relay-logging tests.
--export([log/2]).
-
 %% Selector used in undef-classification tests.
 -define(TEST_SELECTOR, bt999_dispatch_test_method).
 
@@ -3151,11 +3148,6 @@ class_send_not_found_fallthrough_does_not_message_stalled_class_test_() ->
 %%% relay does not carry.
 %%% ----------------------------------------------------------------------------
 
-%% Logger handler callback for the relay-logging test below.
-log(LogEvent, #{config := #{parent := Parent}}) ->
-    Parent ! {bt4115_log_event, LogEvent},
-    ok.
-
 relayed_class_method_raise_log_level_test_() ->
     {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
         [
@@ -3193,42 +3185,29 @@ test_relayed_dnu_logged_at_error() ->
 %% Start a one-method class, run Body against it with every log level captured,
 %% and answer the "Class method ~p:~p failed" events it produced.
 relay_log_events(ClassName, Selector, Body) ->
-    OldLevel = maps:get(level, logger:get_primary_config()),
-    ok = logger:set_primary_config(level, all),
-    HandlerId = bt4115_relay_log_handler,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{
-        config => #{parent => self()}, level => all
-    }),
-    {ok, Pid} = beamtalk_object_class:start_link(ClassName, #{
-        superclass => none,
-        module => beamtalk_class_dispatch_test_helper,
-        class_methods => #{Selector => <<>>},
-        class_state => #{}
-    }),
-    try
-        Body(Pid),
-        %% The handler runs in the class process, before its reply reaches us,
-        %% so every event is already in the mailbox.
-        drain_relay_events([])
-    after
-        logger:remove_handler(HandlerId),
-        logger:set_primary_config(level, OldLevel),
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
-    end.
-
-drain_relay_events(Acc) ->
-    receive
-        {bt4115_log_event, #{msg := {"Class method ~p:~p failed", _}} = Event} ->
-            drain_relay_events([Event | Acc]);
-        {bt4115_log_event, _} ->
-            drain_relay_events(Acc)
-    after 0 ->
-        lists:reverse(Acc)
-    end.
+    beamtalk_test_log:with_capture(all, fun() ->
+        {ok, Pid} = beamtalk_object_class:start_link(ClassName, #{
+            superclass => none,
+            module => beamtalk_class_dispatch_test_helper,
+            class_methods => #{Selector => <<>>},
+            class_state => #{}
+        }),
+        try
+            Body(Pid),
+            %% The handler runs in the class process, before its reply reaches us,
+            %% so every event is already in the mailbox.
+            [
+                Event
+             || #{msg := {"Class method ~p:~p failed", _}} = Event <- beamtalk_test_log:drain()
+            ]
+        after
+            (try
+                gen_server:stop(Pid, normal, 5000)
+            catch
+                _:_ -> ok
+            end)
+        end
+    end).
 
 assert_relay_logged_at_debug_only(Events) ->
     ?assertMatch([#{level := debug}], Events).

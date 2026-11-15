@@ -130,15 +130,6 @@ stop_if_alive(Pid) when is_pid(Pid) ->
 stop_if_alive(_) ->
     ok.
 
-%% A plain, non-trapping process — `watch/2` only needs a pid to monitor,
-%% not a gen_server or a real class process.
-spawn_dummy() ->
-    spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end).
-
 kill_and_wait(Pid, Reason) ->
     MRef = erlang:monitor(process, Pid),
     exit(Pid, Reason),
@@ -224,10 +215,10 @@ watch_dedup_test_() ->
             timed(fun() ->
                 meck:new(beamtalk_class_registry, [passthrough]),
                 meck:expect(beamtalk_class_registry, restart_class, fun(_Name) ->
-                    {ok, spawn_dummy()}
+                    {ok, beamtalk_test_proc:spawn_idle()}
                 end),
                 try
-                    Dummy = spawn_dummy(),
+                    Dummy = beamtalk_test_proc:spawn_idle(),
                     ok = beamtalk_class_monitor:watch('DedupClass', Dummy),
                     %% Second watch/2 on the same still-live pid must be a no-op
                     %% (do_watch/3's `maps:is_key(Pid, Watched) -> true` branch) —
@@ -276,10 +267,10 @@ deliberate_stop_shutdown_test_() ->
 assert_no_restart_on_exit(ClassName, ExitReason) ->
     meck:new(beamtalk_class_registry, [passthrough]),
     meck:expect(beamtalk_class_registry, restart_class, fun(_Name) ->
-        {ok, spawn_dummy()}
+        {ok, beamtalk_test_proc:spawn_idle()}
     end),
     try
-        Dummy = spawn_dummy(),
+        Dummy = beamtalk_test_proc:spawn_idle(),
         ok = beamtalk_class_monitor:watch(ClassName, Dummy),
         kill_and_wait(Dummy, ExitReason),
         %% Give a wrongly-triggered restart time to happen, then assert none did.
@@ -304,7 +295,7 @@ restart_failure_test_() ->
                         {error, injected_failure}
                     end),
                     try
-                        Dummy = spawn_dummy(),
+                        Dummy = beamtalk_test_proc:spawn_idle(),
                         ok = beamtalk_class_monitor:watch('RestartFailClass', Dummy),
                         kill_and_wait(Dummy, kill),
                         ?assertEqual(
@@ -327,7 +318,7 @@ restart_failure_test_() ->
                         error(injected_crash)
                     end),
                     try
-                        Dummy = spawn_dummy(),
+                        Dummy = beamtalk_test_proc:spawn_idle(),
                         ok = beamtalk_class_monitor:watch('RestartCrashClass', Dummy),
                         kill_and_wait(Dummy, kill),
                         ?assertEqual(
@@ -356,10 +347,10 @@ restart_budget_exhausted_test_() ->
             timed(fun() ->
                 meck:new(beamtalk_class_registry, [passthrough]),
                 meck:expect(beamtalk_class_registry, restart_class, fun(_Name) ->
-                    {ok, spawn_dummy()}
+                    {ok, beamtalk_test_proc:spawn_idle()}
                 end),
                 try
-                    Dummy1 = spawn_dummy(),
+                    Dummy1 = beamtalk_test_proc:spawn_idle(),
                     ok = beamtalk_class_monitor:watch('BudgetClass', Dummy1),
                     kill_and_wait(Dummy1, kill),
                     ?assertEqual(
@@ -374,7 +365,7 @@ restart_budget_exhausted_test_() ->
                     %% chain would — re-watch a fresh dummy to stand in for "the
                     %% restarted instance", so the second crash lands inside the same
                     %% budget window as the first.
-                    Dummy2 = spawn_dummy(),
+                    Dummy2 = beamtalk_test_proc:spawn_idle(),
                     ok = beamtalk_class_monitor:watch('BudgetClass', Dummy2),
                     %% watch/2 is a synchronous call here, so Dummy2 is already watched.
                     ?assert(is_watched(Dummy2)),

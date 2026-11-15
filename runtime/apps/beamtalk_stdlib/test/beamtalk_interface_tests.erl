@@ -239,20 +239,27 @@ version_matches_app_vsn_when_loaded_test() ->
 
 dispatch_version_matches_app_vsn_when_loaded_test() ->
     _ = application:load(beamtalk_runtime),
-    Result = beamtalk_interface:dispatch(version, [], fake_self()),
+    Result = beamtalk_interface:dispatch(
+        version, [], beamtalk_test_repl:fake_self(beamtalk, self())
+    ),
     case application:get_key(beamtalk_runtime, vsn) of
         {ok, Vsn} -> ?assertEqual({beamtalk_string, list_to_binary(Vsn)}, Result);
         _ -> ?assertEqual({beamtalk_string, <<"unknown">>}, Result)
     end.
 
 dispatch_version_returns_string_test() ->
-    ?assertMatch({beamtalk_string, _}, beamtalk_interface:dispatch(version, [], fake_self())).
+    ?assertMatch(
+        {beamtalk_string, _},
+        beamtalk_interface:dispatch(version, [], beamtalk_test_repl:fake_self(beamtalk, self()))
+    ).
 
 dispatch_unknown_selector_raises_dnu_test() ->
     ?assertBtError(
         does_not_understand,
         'Beamtalk',
-        beamtalk_interface:dispatch(noSuchSelectorXyz, [], fake_self())
+        beamtalk_interface:dispatch(
+            noSuchSelectorXyz, [], beamtalk_test_repl:fake_self(beamtalk, self())
+        )
     ).
 
 %%% ============================================================================
@@ -264,10 +271,6 @@ dispatch_unknown_selector_raises_dnu_test() ->
 %%% format_class_help / format_method_help / collect_flattened_methods /
 %%% find_defining_class hierarchy-walking helpers and the not-found error paths.
 %%% ============================================================================
-
-%% A fake Self value — Beamtalk primitives ignore Self entirely.
-fake_self() ->
-    {beamtalk_object, 'Beamtalk class', 'bt@stdlib@beamtalk', self()}.
 
 live_setup() ->
     %% Boot through the shared beamtalk_test_boot helper rather than
@@ -413,17 +416,19 @@ live_registry_test_() ->
             end},
             {"dispatch help: routes to handle_help", fun() ->
                 {beamtalk_string, H} = beamtalk_interface:dispatch(
-                    'help:', ['Integer'], fake_self()
+                    'help:', ['Integer'], beamtalk_test_repl:fake_self(beamtalk, self())
                 )
             end},
             {"dispatch help:selector: routes to handle_help_selector", fun() ->
                 {beamtalk_string, H} = beamtalk_interface:dispatch(
-                    'help:selector:', ['Integer', '+'], fake_self()
+                    'help:selector:',
+                    ['Integer', '+'],
+                    beamtalk_test_repl:fake_self(beamtalk, self())
                 )
             end},
             {"dispatch erlangHelp: routes through", fun() ->
                 {beamtalk_string, H} = beamtalk_interface:dispatch(
-                    'erlangHelp:', [<<"lists">>], fake_self()
+                    'erlangHelp:', [<<"lists">>], beamtalk_test_repl:fake_self(beamtalk, self())
                 )
             end},
             {"erlangHelp: on a known module returns docs", fun() ->
@@ -469,19 +474,25 @@ live_registry_test_() ->
                 ?assert(is_list(R))
             end},
             {"dispatch allClasses routes to allClasses/0", fun() ->
-                R = beamtalk_interface:dispatch(allClasses, [], fake_self()),
+                R = beamtalk_interface:dispatch(
+                    allClasses, [], beamtalk_test_repl:fake_self(beamtalk, self())
+                ),
                 ?assert(is_list(R)),
                 ?assert(length(R) > 0)
             end},
             {"dispatch classNamed: routes to handle_class_named", fun() ->
                 ?assertMatch(
                     {beamtalk_object, 'Integer class', _, _},
-                    beamtalk_interface:dispatch('classNamed:', ['Integer'], fake_self())
+                    beamtalk_interface:dispatch(
+                        'classNamed:', ['Integer'], beamtalk_test_repl:fake_self(beamtalk, self())
+                    )
                 )
             end},
             {"dispatch erlangHelp:selector: routes through", fun() ->
                 {beamtalk_string, R} = beamtalk_interface:dispatch(
-                    'erlangHelp:selector:', [<<"lists">>, <<"reverse">>], fake_self()
+                    'erlangHelp:selector:',
+                    [<<"lists">>, <<"reverse">>],
+                    beamtalk_test_repl:fake_self(beamtalk, self())
                 )
             end},
             {"help: on the root class renders a header without '<'", fun() ->
@@ -532,7 +543,9 @@ live_registry_test_() ->
                 ?assertBtError(
                     class_not_found,
                     beamtalk_interface:dispatch(
-                        'help:selector:', ['ZzzNoSuchClass', foo], fake_self()
+                        'help:selector:',
+                        ['ZzzNoSuchClass', foo],
+                        beamtalk_test_repl:fake_self(beamtalk, self())
                     )
                 )
             end},

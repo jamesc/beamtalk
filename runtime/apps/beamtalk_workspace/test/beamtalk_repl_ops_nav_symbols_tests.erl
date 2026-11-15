@@ -23,15 +23,6 @@ beamtalk_repl_ops_nav_tests.
 %% Helpers
 %%====================================================================
 
-make_msg() ->
-    {protocol_msg, <<"nav-symbols">>, <<"t1">>, <<"s1">>, #{}}.
-
-assert_error_response(Response) ->
-    Decoded = json:decode(Response),
-    ?assertMatch(#{<<"status">> := [<<"done">>, <<"error">>]}, Decoded),
-    ?assert(is_binary(maps:get(<<"error">>, Decoded))),
-    Decoded.
-
 %%====================================================================
 %% describe_ops/0
 %%====================================================================
@@ -56,20 +47,20 @@ describe_ops_nav_symbols_optional_includes_scope_test() ->
 %%====================================================================
 
 handle_unknown_scope_returns_error_mentioning_the_value_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-symbols">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav_symbols:handle(
         <<"nav-symbols">>, #{<<"scope">> => <<"galactic">>}, Msg, self()
     ),
-    Decoded = assert_error_response(Response),
+    Decoded = beamtalk_test_repl:assert_error_response(Response),
     ErrBin = maps:get(<<"error">>, Decoded),
     ?assertNotEqual(nomatch, binary:match(ErrBin, <<"galactic">>)).
 
 handle_scope_not_a_string_returns_error_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-symbols">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav_symbols:handle(
         <<"nav-symbols">>, #{<<"scope">> => 42}, Msg, self()
     ),
-    assert_error_response(Response).
+    beamtalk_test_repl:assert_error_response(Response).
 
 %%====================================================================
 %% handle/4 — success paths
@@ -84,7 +75,7 @@ handle_scope_not_a_string_returns_error_test() ->
 
 handle_default_scope_returns_done_status_test() ->
     %% No `scope` in params → defaults to `all`.
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-symbols">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav_symbols:handle(
         <<"nav-symbols">>, #{}, Msg, self()
     ),
@@ -94,7 +85,7 @@ handle_default_scope_returns_done_status_test() ->
     ?assertMatch(#{<<"value">> := #{<<"classes">> := _}}, Decoded).
 
 handle_scope_all_returns_classes_list_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-symbols">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav_symbols:handle(
         <<"nav-symbols">>, #{<<"scope">> => <<"all">>}, Msg, self()
     ),
@@ -104,7 +95,7 @@ handle_scope_all_returns_classes_list_test() ->
     ?assert(is_list(Classes)).
 
 handle_scope_user_returns_classes_list_test() ->
-    Msg = make_msg(),
+    Msg = beamtalk_test_repl:make_msg(<<"nav-symbols">>, <<"t1">>, <<"s1">>),
     Response = beamtalk_repl_ops_nav_symbols:handle(
         <<"nav-symbols">>, #{<<"scope">> => <<"user">>}, Msg, self()
     ),

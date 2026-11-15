@@ -262,8 +262,7 @@ cleanup_activation_test_class() ->
     end.
 
 purge_activation_fixture_module() ->
-    code:purge('bt@BT748ActivationFixture'),
-    code:delete('bt@BT748ActivationFixture'),
+    beamtalk_test_module:unload('bt@BT748ActivationFixture'),
     ok.
 
 make_temp_project_dir() ->
@@ -443,8 +442,7 @@ cleanup_bt745_classes() ->
 purge_bt745_modules() ->
     lists:foreach(
         fun(Mod) ->
-            code:purge(Mod),
-            code:delete(Mod)
+            beamtalk_test_module:unload(Mod)
         end,
         ['bt@BT745Parent', 'bt@BT745Child']
     ),
@@ -548,8 +546,7 @@ activate_project_modules_empty_binary_test() ->
 activate_project_modules_activation_error_test_() ->
     {setup, fun() -> ensure_runtime() end,
         fun(_) ->
-            code:purge('bt@BT_FailActivation'),
-            code:delete('bt@BT_FailActivation')
+            beamtalk_test_module:unload('bt@BT_FailActivation')
         end,
         fun(_) ->
             [
@@ -594,8 +591,7 @@ store_bootstrap_class_source_missing_file_test_() ->
     {setup, fun() -> ensure_runtime() end,
         fun(_) ->
             cleanup_test_source_class('BT_SrcMissing'),
-            code:purge('bt@BT_SrcMissing'),
-            code:delete('bt@BT_SrcMissing')
+            beamtalk_test_module:unload('bt@BT_SrcMissing')
         end,
         fun(_) ->
             [
@@ -649,8 +645,7 @@ store_bootstrap_class_source_success_test_() ->
         end,
         fun(_) ->
             cleanup_test_source_class('BT_SrcPresent'),
-            code:purge('bt@BT_SrcPresent'),
-            code:delete('bt@BT_SrcPresent'),
+            beamtalk_test_module:unload('bt@BT_SrcPresent'),
             beamtalk_test_proc:stop_registered(beamtalk_workspace_meta)
         end,
         fun(_) ->
