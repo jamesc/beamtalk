@@ -65,7 +65,7 @@ use crate::ast::{
 };
 use crate::ast_walker::walk_expression;
 use crate::semantic_analysis::ClassHierarchy;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, MethodSide, Span};
 use ecow::EcoString;
 use std::collections::BTreeSet;
 
@@ -83,27 +83,24 @@ pub(crate) fn check_unguarded_late_reads_in_lifecycle_hooks(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // Instance-side methods per class name, inline and standalone together,
-    // in source order of first appearance. `class.methods` never holds
-    // class-side methods (the parser routes those to `class.class_methods`),
-    // so only the standalone list needs an `is_class_method` filter.
+    // in source order of first appearance. Every declared class gets an entry
+    // up front, so the order of classes does not depend on which of them have
+    // instance methods. (Only the wrapper's `is_class_method` flag is ever set
+    // on a standalone definition, so `methods_with_owner`'s side is complete.)
     let mut by_class: Vec<(&str, Vec<&MethodDefinition>)> = Vec::new();
-
     for class in &module.classes {
         let name = class.name.name.as_str();
-        let idx = by_class.iter().position(|(n, _)| *n == name);
-        match idx {
-            Some(i) => by_class[i].1.extend(class.methods.iter()),
-            None => by_class.push((name, class.methods.iter().collect())),
+        if !by_class.iter().any(|(n, _)| *n == name) {
+            by_class.push((name, Vec::new()));
         }
     }
-    for standalone in &module.method_definitions {
-        if standalone.is_class_method || standalone.method.is_class_method {
+    for (name, side, method) in module.methods_with_owner() {
+        if side != MethodSide::Instance {
             continue;
         }
-        let name = standalone.class_name.name.as_str();
         match by_class.iter().position(|(n, _)| *n == name) {
-            Some(i) => by_class[i].1.push(&standalone.method),
-            None => by_class.push((name, vec![&standalone.method])),
+            Some(i) => by_class[i].1.push(method),
+            None => by_class.push((name, vec![method])),
         }
     }
 

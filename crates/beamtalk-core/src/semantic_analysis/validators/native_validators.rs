@@ -13,7 +13,7 @@
 
 use crate::ast::{MessageSelector, MethodDefinition, Module};
 use crate::semantic_analysis::ClassHierarchy;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, MethodSide};
 
 // ── Native actor validation (ADR 0056) ───────────────────────────────────────
 
@@ -94,24 +94,12 @@ pub(crate) fn check_native_actor_instance_method_bodies(
         hierarchy.is_native(class_name) && hierarchy.is_actor_subclass(class_name)
     };
 
-    for class in &module.classes {
-        let class_name = class.name.name.as_str();
-        if class.backing_module.is_none() || !hierarchy.is_actor_subclass(class_name) {
-            continue;
-        }
-        for method in class.methods.iter().filter(|m| !m.is_self_delegate()) {
-            emit_native_actor_instance_body_error(class_name, method, diagnostics);
-        }
-    }
-
-    // Standalone (Tonel-style) definitions: `MyActor >> sel => ...`.
-    for standalone in &module.method_definitions {
-        let class_name = standalone.class_name.name.as_str();
-        if !standalone.is_class_method
-            && is_native_actor(class_name)
-            && !standalone.method.is_self_delegate()
+    // Inline and standalone (Tonel-style `MyActor >> sel => ...`) instance
+    // methods alike; `is_native` is `backing_module.is_some()`.
+    for (class_name, side, method) in module.methods_with_owner() {
+        if side == MethodSide::Instance && is_native_actor(class_name) && !method.is_self_delegate()
         {
-            emit_native_actor_instance_body_error(class_name, &standalone.method, diagnostics);
+            emit_native_actor_instance_body_error(class_name, method, diagnostics);
         }
     }
 }
@@ -148,37 +136,18 @@ pub(crate) fn check_native_delegate_return_type(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Check inline class methods.
-    for class in &module.classes {
-        // Only check classes that have a backing module (native: classes).
-        // On non-native classes, `self delegate` is a regular message send to
-        // Actor.delegate (which raises at runtime), so no special warning needed.
-        if class.backing_module.is_none() {
-            continue;
-        }
-
-        for method in &class.methods {
-            if method.is_self_delegate() && method.return_type.is_none() {
-                emit_delegate_return_type_warning(&method.selector, method.span, diagnostics);
-            }
-        }
-    }
-
-    // Check standalone (Tonel-style) method definitions: `MyActor >> selector => self delegate`.
-    for standalone in &module.method_definitions {
-        if standalone.is_class_method {
-            continue;
-        }
-        let class_name = standalone.class_name.name.as_str();
-        if hierarchy.is_native(class_name)
-            && standalone.method.is_self_delegate()
-            && standalone.method.return_type.is_none()
+    // Instance methods, inline and standalone (Tonel-style
+    // `MyActor >> selector => self delegate`). Only native classes (a backing
+    // module) are checked: on non-native classes `self delegate` is a regular
+    // message send to Actor.delegate (which raises at runtime), so no special
+    // warning is needed.
+    for (class_name, side, method) in module.methods_with_owner() {
+        if side == MethodSide::Instance
+            && hierarchy.is_native(class_name)
+            && method.is_self_delegate()
+            && method.return_type.is_none()
         {
-            emit_delegate_return_type_warning(
-                &standalone.method.selector,
-                standalone.method.span,
-                diagnostics,
-            );
+            emit_delegate_return_type_warning(&method.selector, method.span, diagnostics);
         }
     }
 }
@@ -204,27 +173,11 @@ pub(crate) fn check_native_delegate_reserved_word(
         hierarchy.is_native(class_name) && !hierarchy.is_actor_subclass(class_name)
     };
 
-    // Inline class methods (instance- and class-side).
-    for class in &module.classes {
-        if class.backing_module.is_none() || !is_native_object(class.name.name.as_str()) {
-            continue;
-        }
-        for method in class.methods.iter().chain(class.class_methods.iter()) {
-            if method.is_self_delegate() {
-                check_selector_reserved_word(&method.selector, method.span, diagnostics);
-            }
-        }
-    }
-
-    // Standalone (Tonel-style) method definitions: `MyClass >> sel => self delegate`.
-    for standalone in &module.method_definitions {
-        let class_name = standalone.class_name.name.as_str();
-        if is_native_object(class_name) && standalone.method.is_self_delegate() {
-            check_selector_reserved_word(
-                &standalone.method.selector,
-                standalone.method.span,
-                diagnostics,
-            );
+    // Inline and standalone (Tonel-style `MyClass >> sel => self delegate`)
+    // methods, instance- and class-side.
+    for (class_name, _side, method) in module.methods_with_owner() {
+        if is_native_object(class_name) && method.is_self_delegate() {
+            check_selector_reserved_word(&method.selector, method.span, diagnostics);
         }
     }
 }

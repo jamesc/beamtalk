@@ -264,7 +264,7 @@ impl TypeChecker {
 /// Whether `receiver` is a plain local that `x := x …` can reassign: an
 /// identifier other than `self`/`super`.
 fn is_assignable_local(receiver: &Expression) -> bool {
-    matches!(receiver, Expression::Identifier(id) if id.name != "self" && id.name != "super")
+    matches!(receiver, Expression::Identifier(id) if id.name != "super") && !receiver.is_self()
 }
 
 /// Whether a non-final cascade message `selector` sent to a receiver of

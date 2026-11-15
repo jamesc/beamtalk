@@ -24,7 +24,7 @@ use crate::ast::{
 };
 use crate::ast_walker::{walk_expression, walk_module};
 use crate::semantic_analysis::ClassHierarchy;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, MethodSide, Span};
 use ecow::EcoString;
 
 /// Check for attempts to instantiate abstract classes.
@@ -747,49 +747,19 @@ pub(crate) fn check_value_slot_assignment(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for class in &module.classes {
-        let class_name = class.name.name.as_str();
+    // Instance methods only (inline and standalone Tonel-style
+    // `Counter >> setX: v => ...`): `classState:` slots on class methods are
+    // separate and not subject to value-type immutability rules.
+    for (class_name, side, method) in module.methods_with_owner() {
         // TestCase subclasses are permanently exempt from slot
         // assignment checks (see this function's own doc comment) — not a
         // migration in progress.
-        if hierarchy.is_testcase_subclass(class_name) {
+        if side != MethodSide::Instance || hierarchy.is_testcase_subclass(class_name) {
             continue;
         }
         let is_value = hierarchy.rejects_slot_assignment(class_name);
-
-        // Check instance methods only — classState: slots on class methods are
-        // separate and not subject to value-type immutability rules.
-        for method in &class.methods {
-            let method_selector = method.selector.name();
-            for stmt in &method.body {
-                walk_expression(&stmt.expression, &mut |e| {
-                    check_slot_assignment_at(
-                        e,
-                        class_name,
-                        &method_selector,
-                        is_value,
-                        hierarchy,
-                        diagnostics,
-                    );
-                });
-            }
-        }
-    }
-
-    // Also check standalone method definitions (Tonel-style: `Counter >> setX: v => ...`).
-    for standalone in &module.method_definitions {
-        if standalone.is_class_method {
-            continue; // Class-side methods are not subject to value-type rules.
-        }
-        let class_name = standalone.class_name.name.as_str();
-        // TestCase subclasses exempt (see above).
-        if hierarchy.is_testcase_subclass(class_name) {
-            continue;
-        }
-        let is_value = hierarchy.rejects_slot_assignment(class_name);
-
-        let method_selector = standalone.method.selector.name();
-        for stmt in &standalone.method.body {
+        let method_selector = method.selector.name();
+        for stmt in &method.body {
             walk_expression(&stmt.expression, &mut |e| {
                 check_slot_assignment_at(
                     e,
@@ -955,9 +925,10 @@ pub(crate) fn check_value_nil_return(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for class in &module.classes {
-        let class_name = class.name.name.as_str();
-        if !hierarchy.is_value_subclass(class_name) {
+    // Instance methods only, inline and standalone (Tonel-style): class-side
+    // methods are exempt.
+    for (class_name, side, method) in module.methods_with_owner() {
+        if side != MethodSide::Instance || !hierarchy.is_value_subclass(class_name) {
             continue;
         }
         // TestCase is a Value subclass whose assertion methods
@@ -966,25 +937,7 @@ pub(crate) fn check_value_nil_return(
         if hierarchy.is_testcase_subclass(class_name) {
             continue;
         }
-        // Only check instance methods — class_methods are exempt.
-        for method in &class.methods {
-            check_method_nil_return(method, class_name, diagnostics);
-        }
-    }
-    // Also check standalone method definitions (Tonel-style).
-    for standalone in &module.method_definitions {
-        if standalone.is_class_method {
-            continue;
-        }
-        let class_name = standalone.class_name.name.as_str();
-        if !hierarchy.is_value_subclass(class_name) {
-            continue;
-        }
-        // Exempt TestCase and its subclasses (see above).
-        if hierarchy.is_testcase_subclass(class_name) {
-            continue;
-        }
-        check_method_nil_return(&standalone.method, class_name, diagnostics);
+        check_method_nil_return(method, class_name, diagnostics);
     }
 }
 

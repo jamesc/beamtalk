@@ -35,20 +35,8 @@ impl TypeChecker {
         protocol_registry: &ProtocolRegistry,
     ) {
         // Walk all expressions looking for message sends with protocol-typed parameters
-        for class in &module.classes {
-            for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for stmt in &method.body {
-                    self.check_protocol_conformance_in_expr(
-                        &stmt.expression,
-                        hierarchy,
-                        protocol_registry,
-                    );
-                }
-            }
-        }
-
-        for standalone in &module.method_definitions {
-            for stmt in &standalone.method.body {
+        for method in module.all_methods() {
+            for stmt in &method.body {
                 self.check_protocol_conformance_in_expr(
                     &stmt.expression,
                     hierarchy,
@@ -447,16 +435,8 @@ impl TypeChecker {
         }
 
         // Check message send arguments with generic parameter types
-        for class in &module.classes {
-            for method in class.methods.iter().chain(class.class_methods.iter()) {
-                for stmt in &method.body {
-                    self.check_variance_in_expr(&stmt.expression, hierarchy, protocol_registry);
-                }
-            }
-        }
-
-        for standalone in &module.method_definitions {
-            for stmt in &standalone.method.body {
+        for method in module.all_methods() {
+            for stmt in &method.body {
                 self.check_variance_in_expr(&stmt.expression, hierarchy, protocol_registry);
             }
         }
