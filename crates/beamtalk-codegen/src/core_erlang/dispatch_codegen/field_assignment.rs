@@ -98,64 +98,6 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// Generates the opening part of a `self fieldAt: name put: value` with state threading.
-    ///
-    /// Similar to `generate_field_assignment_open` but with a dynamic field name.
-    /// Generates:
-    /// ```erlang
-    /// let _Name = <name> in
-    /// let _Val = <value> in
-    /// let StateN = call 'maps':'put'(_Name, _Val, StateN-1) in
-    /// ```
-    ///
-    /// The caller is responsible for closing the expression.
-    pub(in crate::core_erlang) fn generate_self_field_at_put_open(
-        &mut self,
-        expr: &Expression,
-    ) -> Result<(Document<'static>, String)> {
-        if let Expression::MessageSend { arguments, .. } = expr {
-            // BT-4369: a dynamic-key field write records itself for the loop checkout.
-            self.note_field_write("<dynamic>", expr.span());
-            let name_var = self.fresh_var("Name");
-            let val_var = self.fresh_temp_var("Val");
-            let name_code = self.expression_doc(&arguments[0])?;
-            // The state the put builds on. Every caller has sequenced the name
-            // and value first (BT-4310, `thread_send_arguments`), so a value
-            // that changes the state (a self-send, a nested field write, a
-            // State-only fold) has already stepped it, and this is the state
-            // after the value: its change survives the put. (Before BT-4310
-            // this read the state from before the value and dropped it.)
-            let current_state = self.current_state_var();
-            let val_code = self.expression_doc(&arguments[1])?;
-            let new_state = self.next_state_var();
-
-            let doc = docvec![
-                "let ",
-                leaf::var(name_var.clone()),
-                " = ",
-                name_code,
-                " in let ",
-                leaf::var(val_var.clone()),
-                " = ",
-                val_code,
-                " in let ",
-                leaf::var(new_state),
-                " = call 'maps':'put'(",
-                leaf::var(name_var),
-                ", ",
-                leaf::var(val_var.clone()),
-                ", ",
-                leaf::var(current_state),
-                ") in ",
-            ];
-
-            return Ok((doc, val_var));
-        }
-        Err(CodeGenError::Internal(
-            "generate_self_field_at_put_open called on non-fieldAt:put: expression".to_string(),
-        ))
-    }
-
     /// Generates the opening part of `self clearField: name` with state
     /// threading (ADR 0124 §1/§4f, B4) — the instance-`State` counterpart to
     /// [`Self::generate_self_field_at_put_open`], which this mirrors exactly

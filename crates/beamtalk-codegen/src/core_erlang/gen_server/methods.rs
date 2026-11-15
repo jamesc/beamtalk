@@ -804,7 +804,9 @@ impl CoreErlangGenerator {
             }
 
             match kind {
-                BodyExprKind::SelfFieldAtPut => self.lower_reply_self_field_at_put(cx, &mut stmts),
+                BodyExprKind::SelfFieldAtPut => {
+                    self.lower_stmt_self_field_at_put(cx, &mut StmtTail::Reply, &mut stmts)
+                }
                 BodyExprKind::SelfClearField => self.lower_reply_self_clear_field(cx, &mut stmts),
                 BodyExprKind::FieldAssignment => {
                     self.lower_stmt_field_assignment(cx, &mut StmtTail::Reply, &mut stmts)
@@ -1036,44 +1038,6 @@ impl CoreErlangGenerator {
             let expr_str = self.threaded_value_doc(&tv.value);
             stmts.push(ThreadedStmt::Statement(
                 docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in "],
-                span,
-            ));
-        }
-        Ok(())
-    }
-
-    // Mutation hidden inside a shared multi-module helper
-    // (`generate_self_field_at_put_open` — also called from
-    // conditionals.rs): stays an opaque Statement; the version
-    // step it performs is accounted for by
-    // `verify_body_with_opaque_version_gaps`'s backfill.
-    fn lower_reply_self_field_at_put(
-        &mut self,
-        cx: StmtCx<'_>,
-        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
-    ) -> Result<()> {
-        use threaded_ir::ThreadedStmt;
-        let StmtCx {
-            expr,
-            span,
-            is_last,
-            ..
-        } = cx;
-        // BT-4310: the name and value are sequenced ahead of the put.
-        let scope = self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, stmts)?;
-        let (doc, val_var) = self.generate_self_field_at_put_open(expr)?;
-        self.finish_precompiled_scope(scope)?;
-        stmts.push(ThreadedStmt::Statement(doc, span));
-        if is_last {
-            let final_state = self.current_state_var();
-            stmts.push(ThreadedStmt::Statement(
-                docvec![
-                    "{'reply', ",
-                    leaf::var(val_var),
-                    ", ",
-                    leaf::var(final_state),
-                    "}",
-                ],
                 span,
             ));
         }
