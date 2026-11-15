@@ -12,7 +12,7 @@
 
 use crate::ast::{Expression, MethodDefinition, Module};
 use crate::semantic_analysis::ClassHierarchy;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, MethodSide};
 
 /// Validate that `class supervisionPolicy` override returns a valid symbol.
 ///
@@ -256,35 +256,18 @@ pub(crate) fn check_children_supervision_policy(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    for class in &module.classes {
-        let class_name = class.name.name.as_str();
-        // Look for `childSpecs` methods in Supervisor subclasses
-        if !hierarchy.is_supervisor_subclass(class_name) {
+    // `childSpecs` is instance-side. A standalone definition counts even when
+    // the supervisor class is declared in another file (BT-4923): the class is
+    // looked up in the hierarchy, not required to be in `module.classes`.
+    for (class_name, side, method) in module.methods_with_owner() {
+        if side != MethodSide::Instance
+            || method.selector.name() != "childSpecs"
+            || !hierarchy.is_supervisor_subclass(class_name)
+        {
             continue;
         }
-        // Check inline instance-side methods
-        for method in &class.methods {
-            if method.selector.name() != "childSpecs" {
-                continue;
-            }
-            for stmt in &method.body {
-                check_children_literal_for_policy(&stmt.expression, hierarchy, diagnostics);
-            }
-        }
-        // Check standalone instance-side method definitions
-        for standalone in &module.method_definitions {
-            if standalone.is_class_method {
-                continue;
-            }
-            if standalone.class_name.name.as_str() != class_name {
-                continue;
-            }
-            if standalone.method.selector.name() != "childSpecs" {
-                continue;
-            }
-            for stmt in &standalone.method.body {
-                check_children_literal_for_policy(&stmt.expression, hierarchy, diagnostics);
-            }
+        for stmt in &method.body {
+            check_children_literal_for_policy(&stmt.expression, hierarchy, diagnostics);
         }
     }
 }
