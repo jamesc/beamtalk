@@ -9,6 +9,10 @@
 
 use super::*;
 
+// BT-4908: the tests that build `Literal` / `Identifier` / `Span` values by hand call
+// generator internals directly (`literal_doc`, scope and state helpers) or feed
+// free-standing AST that no source snippet can produce, so they stay hand-built.
+
 #[test]
 fn test_generate_literal_integer() {
     let lit = Literal::Integer(42);

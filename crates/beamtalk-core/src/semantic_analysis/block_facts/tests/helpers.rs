@@ -114,6 +114,159 @@ fn non_value_selectors_are_not_safe() {
     }
 }
 
+// ─── stored_block_var_uses: parsed-source cases (BT-4908) ───────────────────
+//
+// Rows are `(name, source, expected (unsafe_ref, safe_value_send))` for the
+// stored block variable `blk`. Cases that build the AST by hand or make more
+// than one assertion stay as their own tests above and below.
+
+const SBU_PARSED_CASES: &[(&str, &str, (bool, bool))] = &[
+    (
+        "sbu_block_literal_no_ref_is_clean",
+        "[x value]",
+        (false, false),
+    ),
+    // A bare identifier reference inside a nested block is unsafe.
+    (
+        "sbu_block_literal_ref_in_body_becomes_unsafe_regardless_of_shape",
+        "[blk]",
+        (true, false),
+    ),
+    ("sbu_assignment_scans_value_side", "x := blk", (true, false)),
+    // Target is usually an identifier or field access; identifier matches are unsafe.
+    (
+        "sbu_assignment_scans_target_side",
+        "blk := 1",
+        (true, false),
+    ),
+    (
+        "sbu_assignment_unrelated_is_clean",
+        "x := 1",
+        (false, false),
+    ),
+    (
+        "sbu_destructure_assignment_scans_value",
+        "{a, b} := blk",
+        (true, false),
+    ),
+    ("sbu_return_delegates_to_value", "^blk", (true, false)),
+    ("sbu_return_no_match_is_clean", "^x", (false, false)),
+    (
+        "sbu_cascade_all_safe_value_sends_is_safe",
+        "blk value: 1; value: 2",
+        (false, true),
+    ),
+    (
+        "sbu_cascade_unary_value_send_is_safe",
+        "blk value; value: 1",
+        (false, true),
+    ),
+    (
+        "sbu_cascade_non_value_send_makes_it_unsafe",
+        "blk foo; value: 1",
+        (true, false),
+    ),
+    ("sbu_cascade_no_ref_is_clean", "x foo; bar", (false, false)),
+    // The parser folds the first cascade message into the receiver as a MessageSend.
+    // `blk value: blk; value: 1` — blk is both the receiver (safe send) and an arg (unsafe).
+    (
+        "sbu_cascade_scans_args_of_folded_first_message",
+        "blk value: blk; value: 1",
+        (true, true),
+    ),
+    (
+        "sbu_parenthesized_safe_send_is_safe",
+        "(blk value)",
+        (false, true),
+    ),
+    (
+        "sbu_parenthesized_bare_ref_is_unsafe",
+        "(blk)",
+        (true, false),
+    ),
+    // blk is the matched value: bare identifier → unsafe
+    (
+        "sbu_match_scans_matched_value",
+        "blk match: [1 -> 1; _ -> 2]",
+        (true, false),
+    ),
+    // blk referenced in arm body as a safe value send
+    (
+        "sbu_match_scans_arm_bodies",
+        "x match: [1 -> blk value; _ -> 2]",
+        (false, true),
+    ),
+    // The parser unwraps `when: [expr]` and stores the inner expression directly
+    // as the guard, so `blk value` in the guard is a safe value send.
+    (
+        "sbu_match_scans_arm_guards",
+        "x match: [n when: [blk value] -> n; _ -> 0]",
+        (false, true),
+    ),
+    (
+        "sbu_list_literal_scans_elements",
+        "#(blk, 1)",
+        (true, false),
+    ),
+    // `#(1 | blk)` — blk is the tail expression
+    ("sbu_list_literal_scans_tail", "#(1 | blk)", (true, false)),
+    (
+        "sbu_list_literal_no_ref_is_clean",
+        "#(1, 2)",
+        (false, false),
+    ),
+    // Map keys must be symbols or complex expressions; use a message send as the key.
+    (
+        "sbu_map_literal_scans_keys",
+        "#{blk printString => 1}",
+        (true, false),
+    ),
+    (
+        "sbu_map_literal_scans_values",
+        "#{#key => blk}",
+        (true, false),
+    ),
+    (
+        "sbu_map_literal_no_ref_is_clean",
+        "#{#key => 1}",
+        (false, false),
+    ),
+    // blk used as receiver inside the interpolation — bare ref is unsafe
+    (
+        "sbu_string_interpolation_scans_expressions",
+        "\"count: {blk printString}\"",
+        (true, false),
+    ),
+    (
+        "sbu_string_interpolation_safe_send_is_safe",
+        "\"val: {blk value}\"",
+        (false, true),
+    ),
+    // `<<blk/binary>>` — blk is the segment value
+    (
+        "sbu_binary_construction_scans_segment_values",
+        "<<blk/binary>>",
+        (true, false),
+    ),
+    (
+        "sbu_binary_construction_no_ref_is_clean",
+        "<<16:8>>",
+        (false, false),
+    ),
+];
+
+#[test]
+fn stored_block_var_uses_parsed_cases() {
+    for (name, src, expected) in SBU_PARSED_CASES {
+        let expr = parse_first_expr(src);
+        assert_eq!(
+            stored_block_var_uses(&expr, "blk"),
+            *expected,
+            "[{name}] {src}"
+        );
+    }
+}
+
 // ─── stored_block_var_uses ─────────────────────────────────────────────────
 
 // --- Spread ---
@@ -152,131 +305,15 @@ fn sbu_block_literal_any_ref_is_unsafe() {
     assert_eq!(stored_block_var_uses(&with_safe_send, "blk"), (true, false));
 }
 
-#[test]
-fn sbu_block_literal_no_ref_is_clean() {
-    let expr = parse_first_expr("[x value]");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (false, false));
-}
-
-#[test]
-fn sbu_block_literal_ref_in_body_becomes_unsafe_regardless_of_shape() {
-    // A bare identifier reference inside a nested block is unsafe.
-    let expr = parse_first_expr("[blk]");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
 // --- Assignment ---
-
-#[test]
-fn sbu_assignment_scans_value_side() {
-    let expr = parse_first_expr("x := blk");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
-#[test]
-fn sbu_assignment_scans_target_side() {
-    // Target is usually an identifier or field access; identifier matches are unsafe.
-    let expr = parse_first_expr("blk := 1");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
-#[test]
-fn sbu_assignment_unrelated_is_clean() {
-    let expr = parse_first_expr("x := 1");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (false, false));
-}
 
 // --- DestructureAssignment / Return ---
 
-#[test]
-fn sbu_destructure_assignment_scans_value() {
-    let expr = parse_first_expr("{a, b} := blk");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
-#[test]
-fn sbu_return_delegates_to_value() {
-    let expr = parse_first_expr("^blk");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
-#[test]
-fn sbu_return_no_match_is_clean() {
-    let expr = parse_first_expr("^x");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (false, false));
-}
-
 // --- Cascade ---
-
-#[test]
-fn sbu_cascade_all_safe_value_sends_is_safe() {
-    let expr = parse_first_expr("blk value: 1; value: 2");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (false, true));
-}
-
-#[test]
-fn sbu_cascade_unary_value_send_is_safe() {
-    let expr = parse_first_expr("blk value; value: 1");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (false, true));
-}
-
-#[test]
-fn sbu_cascade_non_value_send_makes_it_unsafe() {
-    let expr = parse_first_expr("blk foo; value: 1");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
-#[test]
-fn sbu_cascade_no_ref_is_clean() {
-    let expr = parse_first_expr("x foo; bar");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (false, false));
-}
-
-#[test]
-fn sbu_cascade_scans_args_of_folded_first_message() {
-    // The parser folds the first cascade message into the receiver as a MessageSend.
-    // `blk value: blk; value: 1` — blk is both the receiver (safe send) and an arg (unsafe).
-    let expr = parse_first_expr("blk value: blk; value: 1");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, true));
-}
 
 // --- Parenthesized ---
 
-#[test]
-fn sbu_parenthesized_safe_send_is_safe() {
-    let expr = parse_first_expr("(blk value)");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (false, true));
-}
-
-#[test]
-fn sbu_parenthesized_bare_ref_is_unsafe() {
-    let expr = parse_first_expr("(blk)");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
 // --- Match ---
-
-#[test]
-fn sbu_match_scans_matched_value() {
-    let expr = parse_first_expr("blk match: [1 -> 1; _ -> 2]");
-    // blk is the matched value: bare identifier → unsafe
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
-#[test]
-fn sbu_match_scans_arm_bodies() {
-    let expr = parse_first_expr("x match: [1 -> blk value; _ -> 2]");
-    // blk referenced in arm body as a safe value send
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (false, true));
-}
-
-#[test]
-fn sbu_match_scans_arm_guards() {
-    // The parser unwraps `when: [expr]` and stores the inner expression directly
-    // as the guard, so `blk value` in the guard is a safe value send.
-    let expr = parse_first_expr("x match: [n when: [blk value] -> n; _ -> 0]");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (false, true));
-}
 
 // --- TupleLiteral ---
 
@@ -291,25 +328,6 @@ fn sbu_tuple_literal_scans_elements() {
 
 // --- ListLiteral ---
 
-#[test]
-fn sbu_list_literal_scans_elements() {
-    let expr = parse_first_expr("#(blk, 1)");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
-#[test]
-fn sbu_list_literal_scans_tail() {
-    // `#(1 | blk)` — blk is the tail expression
-    let expr = parse_first_expr("#(1 | blk)");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
-#[test]
-fn sbu_list_literal_no_ref_is_clean() {
-    let expr = parse_first_expr("#(1, 2)");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (false, false));
-}
-
 // --- ArrayLiteral ---
 
 #[test]
@@ -323,51 +341,6 @@ fn sbu_array_literal_scans_elements() {
 
 // --- MapLiteral ---
 
-#[test]
-fn sbu_map_literal_scans_keys() {
-    // Map keys must be symbols or complex expressions; use a message send as the key.
-    let expr = parse_first_expr("#{blk printString => 1}");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
-#[test]
-fn sbu_map_literal_scans_values() {
-    let expr = parse_first_expr("#{#key => blk}");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
-#[test]
-fn sbu_map_literal_no_ref_is_clean() {
-    let expr = parse_first_expr("#{#key => 1}");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (false, false));
-}
-
 // --- StringInterpolation ---
 
-#[test]
-fn sbu_string_interpolation_scans_expressions() {
-    // blk used as receiver inside the interpolation — bare ref is unsafe
-    let expr = parse_first_expr("\"count: {blk printString}\"");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
-#[test]
-fn sbu_string_interpolation_safe_send_is_safe() {
-    let expr = parse_first_expr("\"val: {blk value}\"");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (false, true));
-}
-
 // --- BinaryConstruction ---
-
-#[test]
-fn sbu_binary_construction_scans_segment_values() {
-    // `<<blk/binary>>` — blk is the segment value
-    let expr = parse_first_expr("<<blk/binary>>");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (true, false));
-}
-
-#[test]
-fn sbu_binary_construction_no_ref_is_clean() {
-    let expr = parse_first_expr("<<16:8>>");
-    assert_eq!(stored_block_var_uses(&expr, "blk"), (false, false));
-}

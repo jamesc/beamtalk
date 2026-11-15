@@ -333,4 +333,3 @@ fn rhs_running_a_negation_typed_value_voids_field_facts() {
     );
     assert_field_leak(&diags);
 }
-
