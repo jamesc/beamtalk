@@ -453,6 +453,11 @@ pub mod test_support {
     /// side by side; `erlc` requires the `.core` file stem to equal the module
     /// name.
     ///
+    /// # Errors
+    ///
+    /// Returns the combined `erlc` output when any module is rejected or
+    /// `erlc` cannot be spawned.
+    ///
     /// # Panics
     ///
     /// Panics if a `.core` file cannot be written into `dir`.
@@ -498,6 +503,10 @@ pub mod test_support {
     /// [`erlc_batched`] into a fresh temporary directory (named after
     /// `prefix`), removed afterwards — for callers that only need the verdict,
     /// not the `.beam` files.
+    ///
+    /// # Errors
+    ///
+    /// As [`erlc_batched`].
     ///
     /// # Panics
     ///
