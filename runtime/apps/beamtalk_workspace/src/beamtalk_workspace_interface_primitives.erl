@@ -829,7 +829,7 @@ discard a concurrent out-of-band edit).
 
 Reads `SourceFile` off disk and compares it byte-for-byte against `PrevBody`
 (the entry's recorded whole-file `prev_source_ref` snapshot), the same
-comparison mechanism `beamtalk_workspace_flush:splice_with_prev/5` uses to
+comparison mechanism `beamtalk_workspace_flush_sites:splice_with_prev/5` uses to
 detect an `external_edit` conflict on the ordinary flush path — just applied
 to a whole file instead of a byte span, since a `'remove-class'` entry
 records the whole prior file rather than a span. Three outcomes:
@@ -854,7 +854,7 @@ caller (`reinstall_reverted_class/3`) never reaches the reinstall step.
 """.
 -spec check_no_external_drift(binary(), binary(), binary()) -> ok | {error, #beamtalk_error{}}.
 check_no_external_drift(SourceFile, PrevBody, ClassNameBin) ->
-    %% `binary_to_list/1` here mirrors `beamtalk_workspace_flush:prepare_splice/2`'s
+    %% `binary_to_list/1` here mirrors `beamtalk_workspace_flush_sites:prepare_splice/2`'s
     %% / `prepare_remove_class/3`'s own `file:read_file(binary_to_list(File))`
     %% convention for a ChangeEntry's recorded `sourceFile` binary, rather than
     %% passing the binary straight through.
