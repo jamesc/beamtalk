@@ -1360,15 +1360,11 @@ impl TypeAnnotation {
     /// Used by the class hierarchy to store declared state field types
     /// and method parameter/return types.
     ///
-    /// Two other renderers must produce byte-identical text for the same
-    /// type: `DeclaredType`'s `Display` impl (a separate, span-free type —
-    /// see `semantic_analysis::class_hierarchy::declared_type`) and
-    /// `unparse::unparse_type_annotation_display` (the `Document`-based
-    /// pretty-printer). All three are independent implementations for
-    /// structural reasons (different input types / rendering mechanisms),
-    /// not accidental duplication — kept honest by the
-    /// `assert_display_parity` fixture tests in `declared_type`'s test
-    /// module rather than by comment alone.
+    /// This is the single text renderer: `DeclaredType`'s `Display` rebuilds
+    /// an annotation and calls it. The `Document`-based pretty-printer
+    /// `unparse::unparse_type_annotation_display` is a separate mechanism and
+    /// is kept byte-identical by the `assert_display_parity` fixture tests in
+    /// `declared_type`'s test module.
     #[must_use]
     pub fn type_name(&self) -> EcoString {
         match self {

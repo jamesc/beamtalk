@@ -507,109 +507,16 @@ impl DeclaredType {
             },
         }
     }
-
-    /// `true` when `self`, used as an operand of `\`, must be parenthesised
-    /// for the printed form to re-parse to the same value — mirrors
-    /// [`TypeAnnotation::needs_parens_in_difference`].
-    fn needs_parens_in_difference(&self, is_excluded: bool) -> bool {
-        match self {
-            Self::Union(_) | Self::FalseOr(_) | Self::Intersection { .. } => true,
-            Self::Difference { .. } => is_excluded,
-            _ => false,
-        }
-    }
-
-    /// `true` when `self`, used as an operand of `&`, must be parenthesised
-    /// — mirrors [`TypeAnnotation::needs_parens_in_intersection`].
-    fn needs_parens_in_intersection(&self, is_right: bool) -> bool {
-        match self {
-            Self::Union(_) | Self::FalseOr(_) | Self::Difference { .. } => true,
-            Self::Intersection { .. } => is_right,
-            _ => false,
-        }
-    }
 }
 
-/// Byte-identical to [`TypeAnnotation::type_name`] — see that method for the
-/// per-variant rendering rules this mirrors. `DeclaredType` is a separate,
-/// span-free type (see the module docs), so this can't literally call
-/// `TypeAnnotation::type_name` — keep them in sync by hand, matching what
-/// `TypeAnnotation` itself does across `type_name` / `needs_parens_in_*`.
-/// This invariant (and parity with the third independent renderer,
-/// `unparse::unparse_type_annotation_display`) is enforced by the
-/// `assert_display_parity` fixture tests below — not just this
-/// comment, per this repo's "No duplicate implementations" rule.
+/// Renders via [`TypeAnnotation::type_name`] (the single renderer) by
+/// rebuilding a span-free annotation with [`DeclaredType::to_annotation`], so
+/// the two cannot drift. Parity with the `Document`-based
+/// `unparse::unparse_type_annotation_display` is enforced by the
+/// `assert_display_parity` fixture tests below.
 impl fmt::Display for DeclaredType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Simple(name) => write!(f, "{name}"),
-            Self::Singleton(name) => write!(f, "#{name}"),
-            Self::Union(types) => {
-                for (i, ty) in types.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " | ")?;
-                    }
-                    write!(f, "{ty}")?;
-                }
-                Ok(())
-            }
-            Self::Generic { base, parameters } => {
-                write!(f, "{base}(")?;
-                for (i, ty) in parameters.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{ty}")?;
-                }
-                write!(f, ")")
-            }
-            Self::FalseOr(inner) => match inner.as_ref() {
-                Self::Union(_) | Self::FalseOr(_) => write!(f, "({inner}) | False"),
-                _ => write!(f, "{inner} | False"),
-            },
-            Self::Difference { base, excluded } => {
-                if base.needs_parens_in_difference(false) {
-                    write!(f, "({base})")?;
-                } else {
-                    write!(f, "{base}")?;
-                }
-                write!(f, " \\ ")?;
-                if excluded.needs_parens_in_difference(true) {
-                    write!(f, "({excluded})")
-                } else {
-                    write!(f, "{excluded}")
-                }
-            }
-            Self::Intersection { left, right } => {
-                if left.needs_parens_in_intersection(false) {
-                    write!(f, "({left})")?;
-                } else {
-                    write!(f, "{left}")?;
-                }
-                write!(f, " & ")?;
-                if right.needs_parens_in_intersection(true) {
-                    write!(f, "({right})")
-                } else {
-                    write!(f, "{right}")
-                }
-            }
-            Self::SelfType => write!(f, "Self"),
-            Self::SelfClass => write!(f, "Self class"),
-            Self::ClassOf(name) => write!(f, "{name} class"),
-            Self::Shape { fields, open } => write!(
-                f,
-                "{}",
-                crate::ast::render_shape(
-                    fields.iter().map(|fl| (
-                        fl.optional,
-                        &fl.key,
-                        EcoString::from(fl.value.to_string())
-                    )),
-                    *open,
-                    0,
-                )
-            ),
-        }
+        f.write_str(&self.to_annotation(Span::default()).type_name())
     }
 }
 
@@ -1075,6 +982,25 @@ mod tests {
             crate::unparse::unparse_type_annotation_display(&ann),
             expected,
             "unparse_type_annotation_display parity mismatch for {src:?}"
+        );
+    }
+
+    /// `FalseOr` is only built by the `false_or` constructor, never parsed, so
+    /// pin the union-inner parenthesisation across all three renderers.
+    #[test]
+    fn display_parity_false_or_with_union_inner() {
+        let sp = Span::default();
+        let id = |n: &str| TypeAnnotation::Simple(Identifier::new(EcoString::from(n), sp));
+        let ann = TypeAnnotation::false_or(
+            TypeAnnotation::union(vec![id("Integer"), id("String")], sp),
+            sp,
+        );
+        let expected = "(Integer | String) | False";
+        assert_eq!(ann.type_name(), expected);
+        assert_eq!(DeclaredType::from(&ann).to_string(), expected);
+        assert_eq!(
+            crate::unparse::unparse_type_annotation_display(&ann),
+            expected
         );
     }
 
