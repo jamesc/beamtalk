@@ -27,7 +27,7 @@ use std::collections::{HashSet, VecDeque};
 /// registry dependencies (`_build/deps/<name>/`).
 #[must_use]
 pub fn dependency_checkouts_dir(project_root: &Utf8Path) -> Utf8PathBuf {
-    project_root.join("_build").join("deps")
+    beamtalk_core::build_layout::BuildLayout::new(project_root).deps_dir()
 }
 
 /// Normalize a path by resolving `.` and `..` components without filesystem access.

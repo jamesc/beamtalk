@@ -42,7 +42,7 @@ with_port(Fun) ->
 
 simple_expression_test() ->
     with_port(fun(Port) ->
-        {ok, CoreErlang, []} =
+        {ok, CoreErlang, [], _} =
             beamtalk_compiler_port:compile_expression(Port, <<"1 + 2">>, <<"test">>, []),
         %% The port emits `call 'erlang':'+'\n\t\t    (1, 2)`. Check both
         %% the qualified BIF and the literal operand pair so that operand-order
@@ -51,9 +51,61 @@ simple_expression_test() ->
         ?assert(binary:match(CoreErlang, <<"1, 2">>) =/= nomatch)
     end).
 
+%% BT-4911: the port reports the variable a single `name := ...' statement
+%% assigns (binary, `none' otherwise) and one entry per trace step.
+expression_info_assigned_var_test() ->
+    with_port(fun(Port) ->
+        {ok, _, [], Assigned} =
+            beamtalk_compiler_port:compile_expression(Port, <<"x := 1 + 2">>, <<"t">>, []),
+        ?assertEqual(#{assigned_var => <<"x">>}, Assigned),
+        {ok, _, [], Plain} =
+            beamtalk_compiler_port:compile_expression(Port, <<"1 + 2">>, <<"t">>, []),
+        ?assertEqual(#{assigned_var => none}, Plain),
+        {ok, _, [], Multi} =
+            beamtalk_compiler_port:compile_expression(
+                Port, <<"a := 1. b := 2">>, <<"t">>, []
+            ),
+        ?assertEqual(#{assigned_var => none}, Multi)
+    end).
+
+expression_info_trace_steps_test() ->
+    with_port(fun(Port) ->
+        %% (`a + 1' draws a "no effect" warning; only the info is under test.)
+        {ok, _, _Warnings, Info} =
+            beamtalk_compiler_port:compile_expression_trace(
+                Port, <<"a := 1. a + 1. b := 2">>, <<"t">>, []
+            ),
+        ?assertEqual(#{step_assignments => [<<"a">>, none, <<"b">>]}, Info)
+    end).
+
+%% An older port binary that omits the new keys decodes as "no assignment".
+expression_info_defaults_when_absent_test() ->
+    ?assertMatch(
+        {ok, _, [], #{assigned_var := none}},
+        beamtalk_compiler_port:handle_response(#{
+            status => ok, core_erlang => <<"module 't' []">>, warnings => []
+        })
+    ).
+
+complete_method_source_test() ->
+    with_port(fun(Port) ->
+        ?assertEqual(
+            {ok, <<"inc => 1 + 1">>},
+            beamtalk_compiler_port:complete_method_source(Port, <<"1 + 1">>, <<"inc">>)
+        ),
+        ?assertEqual(
+            {ok, <<"inc => 1 + 1">>},
+            beamtalk_compiler_port:complete_method_source(Port, <<"inc => 1 + 1">>, <<"inc">>)
+        ),
+        ?assertMatch(
+            {error, bad_argument, _},
+            beamtalk_compiler_port:complete_method_source(Port, not_binary, <<"inc">>)
+        )
+    end).
+
 known_vars_test() ->
     with_port(fun(Port) ->
-        {ok, CoreErlang, []} =
+        {ok, CoreErlang, [], _} =
             beamtalk_compiler_port:compile_expression(Port, <<"x + 1">>, <<"test">>, [<<"x">>]),
         %% ADR 0081: REPL free identifiers now look up via `maps:find` with a
         %% `beamtalk_workspace:resolve_name/2` fallthrough (locals-first, then
@@ -73,18 +125,18 @@ invalid_expression_returns_error_test() ->
 
 multiple_compiles_on_same_port_test() ->
     with_port(fun(Port) ->
-        {ok, _, []} = beamtalk_compiler_port:compile_expression(Port, <<"1 + 2">>, <<"m1">>, []),
-        {ok, _, []} = beamtalk_compiler_port:compile_expression(Port, <<"3 * 4">>, <<"m2">>, []),
-        {ok, _, []} = beamtalk_compiler_port:compile_expression(Port, <<"5 - 1">>, <<"m3">>, [])
+        {ok, _, [], _} = beamtalk_compiler_port:compile_expression(Port, <<"1 + 2">>, <<"m1">>, []),
+        {ok, _, [], _} = beamtalk_compiler_port:compile_expression(Port, <<"3 * 4">>, <<"m2">>, []),
+        {ok, _, [], _} = beamtalk_compiler_port:compile_expression(Port, <<"5 - 1">>, <<"m3">>, [])
     end).
 
 port_reopens_after_close_test() ->
     Port1 = beamtalk_compiler_port:open(compiler_binary()),
-    {ok, _, []} = beamtalk_compiler_port:compile_expression(Port1, <<"1">>, <<"t">>, []),
+    {ok, _, [], _} = beamtalk_compiler_port:compile_expression(Port1, <<"1">>, <<"t">>, []),
     beamtalk_compiler_port:close(Port1),
     %% Reopen — BEAM is fine
     Port2 = beamtalk_compiler_port:open(compiler_binary()),
-    {ok, _, []} = beamtalk_compiler_port:compile_expression(Port2, <<"2">>, <<"t">>, []),
+    {ok, _, [], _} = beamtalk_compiler_port:compile_expression(Port2, <<"2">>, <<"t">>, []),
     beamtalk_compiler_port:close(Port2).
 
 empty_expression_returns_error_test() ->
@@ -127,7 +179,7 @@ compile_on_closed_port_returns_error_test() ->
 handle_response_expression_ok_test() ->
     Response = #{status => ok, core_erlang => <<"core">>, warnings => []},
     ?assertEqual(
-        {ok, <<"core">>, []},
+        {ok, <<"core">>, [], #{assigned_var => none}},
         beamtalk_compiler_port:handle_response(Response)
     ).
 
@@ -138,7 +190,10 @@ handle_response_expression_with_warnings_test() ->
         warnings => [#{message => <<"unused var">>}, #{message => <<"m">>, hint => <<"h">>}]
     },
     ?assertEqual(
-        {ok, <<"core">>, [#{message => <<"unused var">>}, #{message => <<"m">>, hint => <<"h">>}]},
+        {ok, <<"core">>, [#{message => <<"unused var">>}, #{message => <<"m">>, hint => <<"h">>}],
+            #{
+                assigned_var => none
+            }},
         beamtalk_compiler_port:handle_response(Response)
     ).
 
@@ -294,7 +349,7 @@ class_module_index_used_for_spawn_expression_test() ->
                 <<"Counter">> => <<"bt@getting_started@counter">>
             }
         },
-        {ok, CoreErlang, []} =
+        {ok, CoreErlang, [], _} =
             beamtalk_compiler_port:compile_expression(
                 Port, <<"Counter spawn">>, <<"repl_test">>, [], Options
             ),
@@ -316,7 +371,7 @@ class_module_index_used_for_spawn_with_args_expression_test() ->
                 <<"Counter">> => <<"bt@getting_started@counter">>
             }
         },
-        {ok, CoreErlang, []} =
+        {ok, CoreErlang, [], _} =
             beamtalk_compiler_port:compile_expression(
                 Port, <<"Counter spawnWith: #{#value => 10}">>, <<"repl_test">>, [], Options
             ),
@@ -336,7 +391,7 @@ class_module_index_used_for_spawn_with_args_expression_test() ->
 
 compile_expression_trace_test() ->
     with_port(fun(Port) ->
-        {ok, CoreErlang, []} =
+        {ok, CoreErlang, [], _} =
             beamtalk_compiler_port:compile_expression_trace(Port, <<"1 + 2">>, <<"tr">>, []),
         ?assert(is_binary(CoreErlang)),
         ?assert(binary:match(CoreErlang, <<"'erlang':'+'">>) =/= nomatch)
@@ -351,7 +406,7 @@ compile_expression_trace_with_options_test() ->
             class_module_index => #{<<"Counter">> => <<"bt@app@counter">>},
             class_hierarchy => #{'Counter' => #{superclass => 'Object'}}
         },
-        {ok, CoreErlang, _Warnings} =
+        {ok, CoreErlang, _Warnings, _} =
             beamtalk_compiler_port:compile_expression_trace(
                 Port, <<"1 + 2">>, <<"tr_opts">>, [], Options
             ),

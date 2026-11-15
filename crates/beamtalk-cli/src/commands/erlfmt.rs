@@ -12,6 +12,7 @@ use miette::{IntoDiagnostic, Result};
 use std::process::Command;
 use tracing::warn;
 
+use super::build_layout::BuildLayout;
 use super::erlang_eval::{self, ErlangEval};
 
 /// Result of an erlfmt invocation.
@@ -44,7 +45,7 @@ pub fn run_erlfmt(
         return Ok(ErlfmtResult::default());
     }
 
-    let build_dir = project_root.join("_build").join("dev");
+    let build_dir = BuildLayout::new(project_root).profile_dir();
     let tool_dir = build_dir.join(ERLFMT_TOOL_DIR);
     let ebin_dir = tool_dir.join(ERLFMT_EBIN_REL);
 

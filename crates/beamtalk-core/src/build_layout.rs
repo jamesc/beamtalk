@@ -6,12 +6,35 @@
 //! All `_build/dev/*` paths are constructed through [`BuildLayout`] to ensure
 //! consistency across commands (build, test, run, repl, deps).
 //!
-//! This module lives in the `beamtalk_cli` **library** crate (not
-//! the `beamtalk` binary) so `beamtalk-mcp` can depend on it too — see the
-//! same note in `crate::manifest` for why every item here must stay `pub`
-//! rather than `pub(crate)`.
+//! This module lives in `beamtalk-core` (below `beamtalk-project`,
+//! `beamtalk-package` and the lint pipeline) so every consumer — the CLI, the
+//! compiler port, the LSP and MCP — reaches the one `_build/` convention
+//! without depending on the lint pipeline (BT-4884). It is also the only
+//! place that spells the `_build`, `dev`, `deps` and `type_cache` names.
 
 use camino::{Utf8Path, Utf8PathBuf};
+use std::path::Path;
+
+/// `_build` — the build-output directory name under a project root.
+pub const BUILD_DIR_NAME: &str = "_build";
+/// `dev` — the profile directory name under `_build/`.
+pub const PROFILE_DIR_NAME: &str = "dev";
+/// `deps` — the dependency-checkout directory name under `_build/`.
+pub const DEPS_DIR_NAME: &str = "deps";
+/// `type_cache` — the FFI type-cache directory name under `_build/`.
+pub const TYPE_CACHE_DIR_NAME: &str = "type_cache";
+
+/// `Some(<project>)` when `dir` is a fetched dependency checkout
+/// `<project>/_build/deps/<name>` — the inverse of
+/// [`BuildLayout::dep_checkout_dir`] for a directory path.
+#[must_use]
+pub fn project_root_of_dep_checkout(dir: &Path) -> Option<&Path> {
+    let deps = dir.parent()?;
+    let build = deps.parent()?;
+    (deps.file_name()? == DEPS_DIR_NAME && build.file_name()? == BUILD_DIR_NAME)
+        .then(|| build.parent())
+        .flatten()
+}
 
 /// Provides all build-output paths relative to a project root.
 ///
@@ -56,12 +79,12 @@ impl BuildLayout {
     /// outside it (source, `native/` source, `beamtalk.toml`, …) is ever a
     /// build artifact.
     pub fn build_root(&self) -> Utf8PathBuf {
-        self.project_root.join("_build")
+        self.project_root.join(BUILD_DIR_NAME)
     }
 
     /// `_build/dev/` — the build output for the `dev` profile.
     pub fn profile_dir(&self) -> Utf8PathBuf {
-        self.build_root().join("dev")
+        self.build_root().join(PROFILE_DIR_NAME)
     }
 
     // ── Package output ───────────────────────────────────────────────
@@ -79,6 +102,13 @@ impl BuildLayout {
     }
 
     // ── Native Erlang ────────────────────────────────────────────────
+
+    /// Whether `dir` is a project's own compiled `native/` ebin
+    /// (`…/_build/dev/native/ebin`), whatever the project root. The single
+    /// recogniser matching [`native_ebin_dir`](Self::native_ebin_dir) (BT-4626).
+    pub fn is_native_ebin_dir(dir: &Utf8Path) -> bool {
+        dir.ends_with(Self::new("").native_ebin_dir())
+    }
 
     /// `_build/dev/native/` — base directory for native Erlang builds.
     pub fn native_dir(&self) -> Utf8PathBuf {
@@ -104,15 +134,16 @@ impl BuildLayout {
 
     /// `_build/type_cache/` — cached Erlang FFI type specs.
     pub fn type_cache_dir(&self) -> Utf8PathBuf {
-        self.build_root().join("type_cache")
+        self.build_root().join(TYPE_CACHE_DIR_NAME)
     }
 
     // ── Dependencies ─────────────────────────────────────────────────
 
     /// `_build/deps/` — top-level dependency directory. The convention is
-    /// shared with the offline dependency-graph walk (MCP lint, the LSP).
+    /// shared with the offline dependency-graph walk (MCP lint, the LSP), which
+    /// reaches it through `beamtalk_project::dependency_graph::dependency_checkouts_dir`.
     pub fn deps_dir(&self) -> Utf8PathBuf {
-        beamtalk_project::dependency_graph::dependency_checkouts_dir(&self.project_root)
+        self.build_root().join(DEPS_DIR_NAME)
     }
 
     /// `_build/deps/.dep-graph.json` — snapshot of the effective dependency
@@ -130,7 +161,7 @@ impl BuildLayout {
     /// makes it safe — a dotless name would be equally well protected.
     pub fn dep_graph_path(&self) -> Utf8PathBuf {
         self.deps_dir()
-            .join(beamtalk_core::compilation::dep_graph::DEP_GRAPH_SNAPSHOT_FILE)
+            .join(crate::compilation::dep_graph::DEP_GRAPH_SNAPSHOT_FILE)
     }
 
     /// `_build/deps/<name>/` — checkout directory for a single dependency.
@@ -192,6 +223,25 @@ impl BuildLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_root_of_dep_checkout_inverts_dep_checkout_dir() {
+        let layout = BuildLayout::new("/home/user/my_app");
+        let checkout = layout.dep_checkout_dir("utils");
+        assert_eq!(
+            project_root_of_dep_checkout(checkout.as_std_path()),
+            Some(Path::new("/home/user/my_app"))
+        );
+        assert_eq!(
+            project_root_of_dep_checkout(Path::new("/home/user/my_app")),
+            None
+        );
+        assert_eq!(
+            project_root_of_dep_checkout(Path::new("/p/deps/utils")),
+            None,
+            "`deps` must sit directly under `_build`"
+        );
+    }
 
     #[test]
     fn test_build_root() {

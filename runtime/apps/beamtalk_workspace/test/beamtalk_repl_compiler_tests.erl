@@ -321,7 +321,9 @@ compile_for_codegen_noproc_test() ->
 
 compile_standard_expression_bad_core_test() ->
     %% Invalid core erlang → compile_core_erlang fails → {error, _}
-    Result = beamtalk_repl_compiler:compile_standard_expression(<<"not valid core erlang">>, []),
+    Result = beamtalk_repl_compiler:compile_standard_expression(
+        <<"not valid core erlang">>, [], #{assigned_var => none}
+    ),
     ?assertMatch({error, _}, Result).
 
 %%====================================================================
@@ -508,16 +510,20 @@ compile_file_for_codegen_invalid() ->
 
 compile_standard_expression_ok() ->
     %% Generate real Core Erlang from the compiler, then feed it back to
-    %% compile_standard_expression/2 to exercise the success branch.
-    {ok, CoreErlang, _} =
+    %% compile_standard_expression/3 to exercise the success branch.
+    {ok, CoreErlang, _, _} =
         beamtalk_compiler:compile_expression(<<"40 + 2">>, <<"std_expr_core">>, []),
-    Result = beamtalk_repl_compiler:compile_standard_expression(CoreErlang, [<<"w">>]),
-    {ok, Binary, {port_compiled}, Warnings} = Result,
+    Result = beamtalk_repl_compiler:compile_standard_expression(
+        CoreErlang, [<<"w">>], #{assigned_var => <<"v">>}
+    ),
+    {ok, Binary, ExprInfo, Warnings} = Result,
+    %% The compiler's assigned-variable answer arrives decoded to an atom.
+    ?assertEqual(#{assigned_var => v}, ExprInfo),
     ?assert(is_binary(Binary)),
     ?assertEqual([<<"w">>], Warnings).
 
 compile_file_core_ok() ->
-    {ok, CoreErlang, _} =
+    {ok, CoreErlang, _, _} =
         beamtalk_compiler:compile_expression(<<"1 + 1">>, <<"file_core_ok">>, []),
     %% binary_to_atom of the module name in the Core Erlang would mismatch, but
     %% compile_file_core only needs a valid atom + the class metadata transform.

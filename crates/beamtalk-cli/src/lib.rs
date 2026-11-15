@@ -28,7 +28,7 @@
 //! - [`repl_meta_exprs`] — REPL meta-command → Beamtalk-expression builders,
 //!   shared with `tests/repl_protocol.rs`
 
-pub use beamtalk_package::build_layout;
+pub use beamtalk_core::build_layout;
 pub mod compiler_port;
 pub use beamtalk_package::content_hash;
 pub use beamtalk_package::dependency_classes;

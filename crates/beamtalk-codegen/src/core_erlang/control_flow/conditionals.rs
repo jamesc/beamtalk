@@ -57,6 +57,7 @@
 
 use super::super::gen_server::BodyExprKind;
 use super::super::patterns::MatchThreading;
+use super::super::statement_kinds::{StmtCx, StmtTail};
 use super::super::synced_call::ActorStateSource;
 use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
@@ -165,16 +166,6 @@ impl FieldWriteSite {
             }
         }
     }
-}
-
-/// The conditional-arm statement a `lower_arm_*` lowerer is lowering, and the
-/// frame it is lowered in.
-#[derive(Clone, Copy)]
-struct ArmStmtCx<'a> {
-    expr: &'a Expression,
-    span: Span,
-    is_last: bool,
-    frame: FrameId,
 }
 
 impl CoreErlangGenerator {
@@ -2938,7 +2929,7 @@ impl CoreErlangGenerator {
             let is_last = i == body.len() - 1;
             let span = expr.span();
 
-            let cx = ArmStmtCx {
+            let cx = StmtCx {
                 expr,
                 span,
                 is_last,
@@ -2981,7 +2972,13 @@ impl CoreErlangGenerator {
                 // C5 — exempt from Bind modeling: no state version is
                 // produced or consumed, every binding is a plain local.
                 BodyExprKind::DestructureAssignment => {
-                    self.lower_arm_destructure_assignment(cx, &mut last_result, &mut stmts)?;
+                    self.lower_stmt_destructure_assignment(
+                        cx,
+                        &mut StmtTail::Arm {
+                            last_result: &mut last_result,
+                        },
+                        &mut stmts,
+                    )?;
                 }
                 // C6 — self.field := <control-flow-with-mutations>.
                 // The sanctioned Gensym two-hop.
@@ -3095,7 +3092,13 @@ impl CoreErlangGenerator {
                 // opposed to a direct `self.field := value`) is silently
                 // dropped once the branch closes.
                 BodyExprKind::DispatchingSelfSend => {
-                    self.lower_arm_dispatching_self_send(cx, &mut last_result, &mut stmts)?;
+                    self.lower_stmt_dispatching_self_send(
+                        cx,
+                        &mut StmtTail::Arm {
+                            last_result: &mut last_result,
+                        },
+                        &mut stmts,
+                    )?;
                 }
                 // C12 — catch-all pure statements (EarlyReturn, SuperSend,
                 // ErrorSend, Pure).
@@ -3184,12 +3187,12 @@ impl CoreErlangGenerator {
     // fix.
     fn lower_arm_early_return_value(
         &mut self,
-        cx: ArmStmtCx<'_>,
+        cx: StmtCx<'_>,
         value: &Expression,
         last_result: &mut Option<ValueRef>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<bool> {
-        let ArmStmtCx {
+        let StmtCx {
             span,
             is_last,
             frame,
@@ -3273,11 +3276,11 @@ impl CoreErlangGenerator {
 
     fn lower_arm_catch_all(
         &mut self,
-        cx: ArmStmtCx<'_>,
+        cx: StmtCx<'_>,
         last_result: &mut Option<ValueRef>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
-        let ArmStmtCx {
+        let StmtCx {
             expr,
             span,
             is_last,
@@ -3312,54 +3315,13 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    fn lower_arm_dispatching_self_send(
-        &mut self,
-        cx: ArmStmtCx<'_>,
-        last_result: &mut Option<ValueRef>,
-        stmts: &mut Vec<ThreadedStmt>,
-    ) -> Result<()> {
-        let ArmStmtCx {
-            expr,
-            span,
-            is_last,
-            frame,
-            ..
-        } = cx;
-        // ADR 0118 phase 2a: `self log: (self
-        // nextId)` — `threaded_expression`'s producer path
-        // (`is_prelude_producer`, matching this arm's own
-        // `is_dispatching_actor_self_send` classification
-        // exactly) sequences the arguments' own self-sends
-        // ahead of this dispatch and builds the
-        // `Statement`+`Bind` pair — the same shape the
-        // pre-ADR-0118 planner built by hand.
-        let tv = self.threaded_expression(expr, frame)?;
-        stmts.extend(tv.prelude);
-        if is_last {
-            let result_var = self.fresh_temp_var("SDResultVal");
-            let value_doc = self.threaded_value_doc(&tv.value);
-            stmts.push(ThreadedStmt::Statement(
-                docvec![
-                    "let ",
-                    leaf::var(result_var.clone()),
-                    " = ",
-                    value_doc,
-                    " in "
-                ],
-                span,
-            ));
-            *last_result = Some(ValueRef::Var(result_var));
-        }
-        Ok(())
-    }
-
     fn lower_arm_tier2_value_call(
         &mut self,
-        cx: ArmStmtCx<'_>,
+        cx: StmtCx<'_>,
         last_result: &mut Option<ValueRef>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
-        let ArmStmtCx {
+        let StmtCx {
             expr,
             span,
             is_last,
@@ -3459,11 +3421,11 @@ impl CoreErlangGenerator {
 
     fn lower_arm_control_flow_with_mutations(
         &mut self,
-        cx: ArmStmtCx<'_>,
+        cx: StmtCx<'_>,
         last_result: &mut Option<ValueRef>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
-        let ArmStmtCx {
+        let StmtCx {
             expr,
             span,
             is_last,
@@ -3539,11 +3501,11 @@ impl CoreErlangGenerator {
 
     fn lower_arm_control_flow_producer(
         &mut self,
-        cx: ArmStmtCx<'_>,
+        cx: StmtCx<'_>,
         last_result: &mut Option<ValueRef>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
-        let ArmStmtCx {
+        let StmtCx {
             expr,
             span,
             is_last,
@@ -3566,11 +3528,11 @@ impl CoreErlangGenerator {
 
     fn lower_arm_destructure_assignment_control_flow(
         &mut self,
-        cx: ArmStmtCx<'_>,
+        cx: StmtCx<'_>,
         last_result: &mut Option<ValueRef>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
-        let ArmStmtCx {
+        let StmtCx {
             expr,
             span,
             is_last,
@@ -3627,11 +3589,11 @@ impl CoreErlangGenerator {
 
     fn lower_arm_destructure_assignment_producer(
         &mut self,
-        cx: ArmStmtCx<'_>,
+        cx: StmtCx<'_>,
         last_result: &mut Option<ValueRef>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
-        let ArmStmtCx {
+        let StmtCx {
             expr,
             span,
             is_last,
@@ -3671,11 +3633,11 @@ impl CoreErlangGenerator {
 
     fn lower_arm_self_field_at_put_control_flow(
         &mut self,
-        cx: ArmStmtCx<'_>,
+        cx: StmtCx<'_>,
         last_result: &mut Option<ValueRef>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
-        let ArmStmtCx {
+        let StmtCx {
             expr,
             span,
             is_last,
@@ -3748,11 +3710,11 @@ impl CoreErlangGenerator {
 
     fn lower_arm_self_clear_field(
         &mut self,
-        cx: ArmStmtCx<'_>,
+        cx: StmtCx<'_>,
         last_result: &mut Option<ValueRef>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
-        let ArmStmtCx {
+        let StmtCx {
             expr,
             span,
             is_last,
@@ -3801,11 +3763,11 @@ impl CoreErlangGenerator {
 
     fn lower_arm_self_field_at_put(
         &mut self,
-        cx: ArmStmtCx<'_>,
+        cx: StmtCx<'_>,
         last_result: &mut Option<ValueRef>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
-        let ArmStmtCx {
+        let StmtCx {
             expr,
             span,
             is_last,
@@ -3868,11 +3830,11 @@ impl CoreErlangGenerator {
 
     fn lower_arm_field_assignment_control_flow(
         &mut self,
-        cx: ArmStmtCx<'_>,
+        cx: StmtCx<'_>,
         last_result: &mut Option<ValueRef>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
-        let ArmStmtCx {
+        let StmtCx {
             expr,
             span,
             is_last,
@@ -3942,67 +3904,19 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    fn lower_arm_destructure_assignment(
-        &mut self,
-        cx: ArmStmtCx<'_>,
-        last_result: &mut Option<ValueRef>,
-        stmts: &mut Vec<ThreadedStmt>,
-    ) -> Result<()> {
-        let ArmStmtCx {
-            expr,
-            span,
-            is_last,
-            frame,
-            ..
-        } = cx;
-        if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-            // BT-3495: `{a, b} := (self.field := ...)` — the
-            // RHS is itself a field write, at any
-            // parenthesization depth (mirrors C2z's `r := (self.x
-            // := ...)` fix in `lower_local_var_assignment_bind`,
-            // for `{a, b} :=` instead of a plain local
-            // assignment). Lower the field write through its own
-            // real-`Bind` producer C1 uses, then destructure the
-            // pattern from the already-evaluated assigned value
-            // (`lower_destructure_bind_from_var`, which writes
-            // each name to the arm's slot, BT-4439).
-            if let Some(field_write) = self.local_assign_field_write(value) {
-                let field_val_var =
-                    self.lower_field_assignment_bind(field_write, frame, span, stmts)?;
-                let _ = self.lower_destructure_bind_from_var(
-                    pattern,
-                    &field_val_var,
-                    frame,
-                    span,
-                    stmts,
-                    &|_| LocalWrite::Slot,
-                )?;
-                if is_last {
-                    // BT-3889: the arm answers the right-hand side.
-                    *last_result = Some(ValueRef::Var(field_val_var));
-                }
-            } else {
-                // BT-4439: each name is written to the arm's
-                // slot, as C2 writes `name := ...`.
-                let (rhs_var, _) =
-                    self.lower_destructure_bind(pattern, value, frame, span, stmts, &|_| {
-                        LocalWrite::Slot
-                    })?;
-                if is_last {
-                    *last_result = Some(ValueRef::Var(rhs_var));
-                }
-            }
-        }
-        Ok(())
-    }
-
+    // Not shared with the actor-method walker (`lower_reply_local_assign_*`):
+    // an arm writes the local to its frame's scratch slot (`push_local_slot_put`)
+    // so `StateAcc` carries it out of the conditional, and for a Tier 2 or
+    // control-flow right-hand side threads the call's `NewState` through a
+    // Gensym state. A method body binds the local's own Core var and advances
+    // the `State` version directly. See `lower_reply_local_assign_pure`.
     fn lower_arm_local_assign(
         &mut self,
-        cx: ArmStmtCx<'_>,
+        cx: StmtCx<'_>,
         last_result: &mut Option<ValueRef>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
-        let ArmStmtCx {
+        let StmtCx {
             expr,
             span,
             is_last,
@@ -4018,11 +3932,11 @@ impl CoreErlangGenerator {
 
     fn lower_arm_field_assignment(
         &mut self,
-        cx: ArmStmtCx<'_>,
+        cx: StmtCx<'_>,
         last_result: &mut Option<ValueRef>,
         stmts: &mut Vec<ThreadedStmt>,
     ) -> Result<()> {
-        let ArmStmtCx {
+        let StmtCx {
             expr,
             span,
             is_last,
