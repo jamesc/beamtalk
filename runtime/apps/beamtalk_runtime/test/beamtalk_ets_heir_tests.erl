@@ -323,7 +323,11 @@ boot_tables_name_heir() ->
     %% Restart the app with the table removed so it is created by
     %% beamtalk_runtime_app:start/2, whatever ran before.
     ok = application:stop(beamtalk_runtime),
-    _ = catch ets:delete(beamtalk_class_state_snapshot),
+    try
+        ets:delete(beamtalk_class_state_snapshot)
+    catch
+        error:badarg -> ok
+    end,
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
     HeirPid = whereis(beamtalk_ets_heir),
     %% beamtalk_class_state_snapshot is created by beamtalk_runtime_app:start/2
