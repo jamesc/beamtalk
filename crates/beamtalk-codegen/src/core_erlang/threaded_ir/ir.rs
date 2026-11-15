@@ -1237,9 +1237,6 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// the set the arm's closer packs into its seeded `StateAcc`'s
     /// `__local__` keys (`seed_conditional_locals`'s set). Renders `body`
     /// straight-line.
-    ///
-    /// No production caller yet: ADR 0131 Phase 3 is the first.
-    #[allow(dead_code)]
     BranchArm {
         frame: FrameId,
         threads: Vec<String>,

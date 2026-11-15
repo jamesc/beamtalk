@@ -64,12 +64,6 @@ impl ClassMap {
         self.0.keys()
     }
 
-    /// Whole-map read: records a scan.
-    pub(super) fn values(&self) -> std::collections::hash_map::Values<'_, EcoString, ClassInfo> {
-        record_scan(ScanKind::Classes);
-        self.0.values()
-    }
-
     /// Construction-time read of the whole map; **not recorded**. Only for
     /// passes that read the map in order to rebuild or merge into it.
     pub(super) fn iter_unrecorded(

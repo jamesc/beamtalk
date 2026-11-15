@@ -150,6 +150,7 @@ impl MethodInfo {
     ///
     /// A method cannot override a sealed method with the same selector.
     /// Different selectors are never overrides.
+    #[cfg(test)]
     #[must_use]
     pub fn can_override(&self, ancestor: &MethodInfo) -> bool {
         if self.selector != ancestor.selector {

@@ -39,6 +39,7 @@ pub mod lowering;
 pub(crate) mod method_validators;
 pub mod module_validator;
 pub mod name_resolver;
+mod namespace_collision;
 pub(crate) mod pattern_bindings;
 pub mod primitive_validator;
 pub mod protocol_registry;
@@ -536,6 +537,9 @@ impl<'a> AnalysisContext<'a> {
 
     /// Known package names for package-qualifier validation (ADR 0070 Phase
     /// 2). Unknown package qualifiers produce compile errors.
+    ///
+    /// No production caller sets this yet, so the check is off everywhere;
+    /// BT-4921 decides whether to wire it into `build`/`lint` or remove it.
     #[allow(clippy::implicit_hasher)] // concrete HashSet is simpler for callers
     #[must_use]
     pub fn with_known_packages(
