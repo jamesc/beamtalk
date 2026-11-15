@@ -34,13 +34,7 @@ fn bt3382_self_dispatch_receiver_of_conditional_threads_state_and_compiles_throu
     // the generated code is real, erlc-valid Core Erlang (not just
     // parseable).
     let src = "Actor subclass: MutProbe\n  state: timestamps = 0\n\n  triggerDirectly: which =>\n    (self recordOnce: which)\n      ifTrue: [1]\n      ifFalse: [2].\n    self.timestamps\n\n  internal recordOnce: which =>\n    self.timestamps := self.timestamps + 1.\n    true\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3382_self_dispatch_receiver_of_conditional"),
-    );
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = codegen_named(src, "bt3382_self_dispatch_receiver_of_conditional");
     assert!(
         code.contains("erlang':'element'(2, "),
         "the self-dispatch's new state must be extracted, not discarded. Got:\n{code}"
@@ -57,13 +51,7 @@ fn bt3392_self_dispatch_nested_in_binary_op_operand_threads_state_and_compiles_t
     // Confirms the self-send's mutation is threaded via a real `Bind` AND
     // the generated code is real, erlc-valid Core Erlang.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly: flag =>\n    flag ifTrue: [\n      1 + (self bumpCount)\n    ] ifFalse: [\n      0\n    ].\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3392_self_dispatch_nested_in_binary_op_operand"),
-    );
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = codegen_named(src, "bt3392_self_dispatch_nested_in_binary_op_operand");
     assert!(
         code.contains("erlang':'element'(2, "),
         "the self-dispatch's new state must be extracted, not discarded. Got:\n{code}"
@@ -93,13 +81,7 @@ fn bt3433_pure_block_arg_state_mutation_does_not_leak_state_version_and_compiles
     // the first block's closure — an unbound variable `erlc` failure
     // discovered compiling a real actor.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: callback = nil\n\n  trigger: x =>\n    x\n      ifOk: [:v |\n        true\n          ifTrue: [self.callback value: v]\n          ifFalse: [nil]\n      ]\n      ifError: [:e |\n        nil\n      ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3433_pure_block_arg_state_mutation"),
-    );
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = codegen_named(src, "bt3433_pure_block_arg_state_mutation");
     assert_compiles_through_erlc("bt3433_pure_block_arg_state_mutation", &code);
 }
 
@@ -114,13 +96,7 @@ fn bt3392_binary_op_hoist_does_not_reorder_past_a_non_self_send_operand() {
     // statement — rather than pulled out ahead of `at:`'s evaluation. The
     // generated code must still be real, erlc-valid Core Erlang.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n  state: items = 0\n\n  triggerDirectly: flag =>\n    flag ifTrue: [\n      (self.items at: 1) + (self bumpCount)\n    ] ifFalse: [\n      0\n    ].\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3392_binary_op_hoist_order_safety"),
-    );
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = codegen_named(src, "bt3392_binary_op_hoist_order_safety");
     assert_compiles_through_erlc("bt3392_binary_op_hoist_order_safety", &code);
 }
 
@@ -180,13 +156,10 @@ fn bt3396_self_dispatch_nested_in_conditional_receiver_and_threads_state_and_com
     // dispatch ahead of the `and:` send. The generated code must be real,
     // erlc-valid Core Erlang.
     let src = "Actor subclass: MutProbe\n  state: timestamps = 0\n\n  triggerDirectly: which =>\n    ((self recordOnce: which) and: [true])\n      ifTrue: [1]\n      ifFalse: [2].\n    self.timestamps\n\n  internal recordOnce: which =>\n    self.timestamps := self.timestamps + 1.\n    which\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3396_self_dispatch_nested_in_conditional_receiver_and"),
+    let code = codegen_named(
+        src,
+        "bt3396_self_dispatch_nested_in_conditional_receiver_and",
     );
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
     assert!(
         code.contains("erlang':'element'(2, "),
         "the nested self-dispatch's new state must be extracted, not discarded. Got:\n{code}"
@@ -211,13 +184,7 @@ fn bt3396_self_dispatch_as_keyword_argument_in_method_body_threads_state_and_com
     // keyword send. The method-body `Pure` arm must hoist it as a real
     // ROOT-frame `Bind` ahead of the statement.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    #(10, 20, 30) at: (self bumpCount).\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3396_self_dispatch_as_keyword_argument"),
-    );
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = codegen_named(src, "bt3396_self_dispatch_as_keyword_argument");
     assert!(
         code.contains("erlang':'element'(2, "),
         "the self-dispatch's new state must be extracted, not discarded. Got:\n{code}"
@@ -247,13 +214,7 @@ fn bt3396_self_dispatch_in_field_assignment_rhs_snapshots_prior_field_read_and_c
     // planner's `FieldSnap` snapshot is the same rule applied to one node
     // kind, and is no longer what this position goes through.
     let src = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    self.count := self.count + (self bumpCount).\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3396_self_dispatch_in_field_assignment_rhs"),
-    );
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = codegen_named(src, "bt3396_self_dispatch_in_field_assignment_rhs");
     let read_at = code.find("let _Tmp").unwrap_or_else(|| {
         panic!("the preceding self.count read must be temp-bound. Got:\n{code}")
     });
@@ -793,13 +754,7 @@ fn bt3416_self_dispatch_in_later_interpolation_segment_now_threads_after_earlier
     // (`"n={self bumpCount}"`) has nothing before it and was already
     // threaded before this phase.
     let later = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly: x =>\n    \"{x}-{self bumpCount}\".\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(later);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3416_later_interpolation_segment_threaded"),
-    );
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = codegen_named(later, "bt3416_later_interpolation_segment_threaded");
     assert!(
         code.contains("erlang':'element'(2, _SD"),
         "a self-send in a later interpolation segment must now thread its NewState. Got:\n{code}"
@@ -817,13 +772,7 @@ fn bt3416_self_dispatch_in_later_interpolation_segment_now_threads_after_earlier
     assert_compiles_through_erlc("bt3416_later_interpolation_segment_threaded", &code);
 
     let first = "Actor subclass: MutProbe\n  state: count = 0\n\n  triggerDirectly =>\n    \"n={self bumpCount}\".\n    self.count\n\n  internal bumpCount =>\n    self.count := self.count + 1.\n    1\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(first);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3396_first_interpolation_segment_hoisted"),
-    );
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = codegen_named(first, "bt3396_first_interpolation_segment_hoisted");
     assert!(
         code.contains("erlang':'element'(2, _SD"),
         "a self-send in the first interpolation segment has nothing before it and must still be hoisted. Got:\n{code}"

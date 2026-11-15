@@ -621,6 +621,9 @@ classify_receiver_token(<<H, _/binary>> = Receiver, Bindings) when H >= $A, H =<
     end;
 classify_receiver_token(<<H, _/binary>> = Receiver, _Bindings) when H >= $0, H =< $9 ->
     literal_instance(beamtalk_repl_editor_context:receiver_literal_class(Receiver));
+classify_receiver_token(<<$-, D, _/binary>> = Receiver, _Bindings) when D >= $0, D =< $9 ->
+    %% Negative integer literal (`-5`): the lexer folds the sign into the token.
+    literal_instance(beamtalk_repl_editor_context:receiver_literal_class(Receiver));
 classify_receiver_token(<<$", _/binary>> = Receiver, _Bindings) ->
     %% String literal — complete String instance methods
     literal_instance(beamtalk_repl_editor_context:receiver_literal_class(Receiver));

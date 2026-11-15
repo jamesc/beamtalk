@@ -18,12 +18,7 @@ fn test_match_arm_self_mutating_value_block_threads_actor_state() {
     // Integer -> x`, non-mutating) so this exercises `generate_match_chain`,
     // the exact path the original bug report's repro takes.
     let src = "Actor subclass: Registry\n  state: count :: Integer\n\n  initialize -> Nil =>\n    self.count := 0\n    nil\n\n  bumpMatch -> Integer =>\n    nil match: [\n      nil -> [\n        self.count := self.count + 1\n        self.count\n      ] value;\n      x :: Integer -> x\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("registry")).expect("codegen should succeed");
-
-    eprintln!("Generated code for match: arm self-mutating value block:\n{code}");
+    let code = codegen_named(src, "registry");
 
     assert!(
         code.contains("'maps':'put'('count'"),
@@ -66,12 +61,7 @@ fn test_match_two_adjacent_mutating_arms_each_thread_from_the_same_base_state() 
     // re-confirms the all-native fast path handles more than one mutating
     // arm.
     let src = "Actor subclass: TwoMutatingArms\n  state: a :: Integer = 0\n  state: b :: Integer = 0\n\n  run: choice -> Integer =>\n    choice match: [\n      1 -> [self.a := self.a + 1. self.a] value;\n      2 -> [self.b := self.b + 1. self.b] value\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("two_mutating_arms"))
-        .expect("codegen should succeed");
-
-    eprintln!("Generated code for match: with two adjacent mutating arms:\n{code}");
+    let code = codegen_named(src, "two_mutating_arms");
 
     assert!(
         code.contains("'maps':'put'('a'") && code.contains("'maps':'put'('b'"),
@@ -117,12 +107,7 @@ fn test_match_arm_cascade_tier2_value_call_compiles_without_double_wrapping() {
     //   already applied to `self.field value:` in sub-expression position
     //   everywhere else, not a regression.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item -> Integer =>\n    blk := [:x | self.total := self.total + x]\n    nil match: [\n      nil -> (blk value: item; value: item);\n      x :: Integer -> x\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("ctr")).expect("codegen should succeed");
-
-    eprintln!("Generated code for match: arm cascade tier2 value: call:\n{code}");
+    let code = codegen_named(src, "ctr");
 
     // ADR 0137: `blk` writes only a field, so it is a closure over the actor's
     // state rather than a Tier 2 block; the cascade's two sends are calls that run
@@ -146,12 +131,7 @@ fn test_match_arm_nested_if_true_mutation_without_value_wrapper_threads_actor_st
     // gen_server reply's unwrap machinery, since `Expression::Match` was
     // invisible to `control_flow_has_mutations`.
     let src = "Actor subclass: Registry\n  state: count :: Integer\n\n  initialize -> Nil =>\n    self.count := 0\n    nil\n\n  bumpMatch: flag -> Integer =>\n    nil match: [\n      nil -> flag ifTrue: [self.count := self.count + 1] ifFalse: [self.count := self.count - 1];\n      x :: Integer -> x\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("registry")).expect("codegen should succeed");
-
-    eprintln!("Generated code for match: arm nested ifTrue:/ifFalse: mutation:\n{code}");
+    let code = codegen_named(src, "registry");
 
     assert!(
         code.contains("'maps':'put'('count'"),
@@ -202,12 +182,7 @@ fn test_match_two_adjacent_nested_if_true_mutation_arms_thread_from_the_same_bas
     // `state_version` counter itself, so arm 2's `expression_doc` call must
     // see the exact same pre-match `base_state` arm 1's did.
     let src = "Actor subclass: TwoIfTrueArms\n  state: a :: Integer = 0\n  state: b :: Integer = 0\n\n  run: choice -> Integer =>\n    choice match: [\n      1 -> true ifTrue: [self.a := self.a + 1] ifFalse: [self.a := self.a - 1];\n      2 -> true ifTrue: [self.b := self.b + 1] ifFalse: [self.b := self.b - 1]\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("two_if_true_arms"))
-        .expect("codegen should succeed");
-
-    eprintln!("Generated code for match: with two adjacent nested ifTrue: mutation arms:\n{code}");
+    let code = codegen_named(src, "two_if_true_arms");
 
     assert!(
         code.contains("'maps':'put'('a'") && code.contains("'maps':'put'('b'"),
@@ -252,12 +227,7 @@ fn test_match_arm_self_mutating_value_block_threads_actor_state_all_native_fast_
     // tests exercise via their `x :: Integer` arm. Both arm-body compile
     // call sites needed the same fix.
     let src = "Actor subclass: Registry\n  state: count :: Integer\n\n  initialize -> Nil =>\n    self.count := 0\n    nil\n\n  bumpMatch -> Integer =>\n    nil match: [\n      nil -> [\n        self.count := self.count + 1\n        self.count\n      ] value;\n      _ -> -1\n    ]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("registry")).expect("codegen should succeed");
-
-    eprintln!("Generated code for match: arm self-mutating value block (fast path):\n{code}");
+    let code = codegen_named(src, "registry");
 
     assert!(
         code.contains("'maps':'put'('count'"),
@@ -288,7 +258,6 @@ fn test_vt_count_predicate_threads_outer_local() {
     // thread the mutation back so the post-`count:` read sees the final value.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    n := 0\n    #(1, 2, 3) count: [:i | n := n + 1. i > 0]\n    n\n";
     let code = codegen(src);
-    eprintln!("Generated code for vt count: threading:\n{code}");
     // The count: foldl packs the threaded local into the StateAcc; the open
     // extraction must read it back via maps:get('__local__n', ...).
     assert!(
@@ -307,7 +276,6 @@ fn test_vt_detect_if_none_predicate_threads_outer_local() {
     // local must thread the mutation back.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    n := 0\n    #(1, 2, 3) detect: [:i | n := n + 1. i > 10] ifNone: [-1]\n    n\n";
     let code = codegen(src);
-    eprintln!("Generated code for vt detect:ifNone: threading:\n{code}");
     assert!(
         code.contains("'__local__n'"),
         "detect:ifNone: must thread the captured outer local 'n' via the StateAcc. Got:\n{code}"
@@ -320,7 +288,6 @@ fn test_vt_loop_as_parenthesized_assign_rhs_threads_sibling_local() {
     // [...])` — must thread its sibling outer local (`sum`) into method scope.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    sum := 0\n    _r := (1 to: 5 do: [:i | sum := sum + i])\n    sum\n";
     let code = codegen(src);
-    eprintln!("Generated code for vt parenthesized loop assign-RHS:\n{code}");
     // The loop packs sum into the StateAcc; the assignment must extract it back
     // (element 2 of the {value, StateAcc} tuple → maps:get('__local__sum', ...)).
     assert!(
@@ -336,7 +303,6 @@ fn test_vt_conditional_as_assign_rhs_threads_sibling_local() {
     // value AND thread the sibling local (`x`) into method scope.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run: flag =>\n    x := 0\n    _r := flag ifTrue: [x := 5. 42] ifFalse: [0]\n    x\n";
     let code = codegen(src);
-    eprintln!("Generated code for vt conditional assign-RHS:\n{code}");
     // Each branch returns {LogicalValue, X}; the assignment binds the target to
     // element 1 and rebinds x from element 2 of the case result.
     assert!(
@@ -356,7 +322,6 @@ fn test_vt_nested_loop_in_conditional_assign_rhs_threads_local() {
     // later read in the same branch (and after) sees the update.
     let src = "Value subclass: V\n  state: dummy = 0\n\n  run: flag =>\n    sum := 0\n    _r := flag ifTrue: [1 to: 5 do: [:i | sum := sum + i]. sum] ifFalse: [0]\n    sum\n";
     let code = codegen(src);
-    eprintln!("Generated code for nested loop in conditional assign-RHS:\n{code}");
     // The nested loop packs sum into its StateAcc; the branch must extract it
     // back via maps:get('__local__sum', ...).
     assert!(
@@ -377,7 +342,6 @@ fn test_actor_conditional_last_expr_lower_actor_threaded_last() {
     // the `lower_actor_threaded_last` path that was completely uncovered.
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  setByFlag: flag =>\n    flag ifTrue: [self.count := 1] ifFalse: [self.count := -1]\n";
     let code = codegen(src);
-    eprintln!("Generated code for actor conditional-as-last:\n{code}");
 
     // lower_actor_threaded_last binds element 1 (reply value) and element 2 (State).
     assert!(
@@ -409,7 +373,6 @@ fn test_actor_conditional_assign_rhs_emit_actor_threaded_assign_rhs() {
     //   - rebind sibling outer locals (here `x`) from the new State map
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  compute: flag =>\n    x := 0\n    result := flag ifTrue: [x := 1. x] ifFalse: [x := -1. x]\n    result\n";
     let code = codegen(src);
-    eprintln!("Generated code for actor conditional assign-RHS:\n{code}");
 
     // emit_actor_threaded_assign_rhs must extract value (element 1) and State (element 2).
     assert!(

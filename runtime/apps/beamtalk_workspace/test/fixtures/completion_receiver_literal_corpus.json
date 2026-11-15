@@ -105,23 +105,93 @@
   },
   {
     "receiver": "16rFF",
-    "class": null,
+    "class": "Integer",
     "tokens": [
       "integer"
     ],
-    "lexer_class": "Integer",
-    "divergence": "The lexer reads a radix literal as an Integer; the Erlang rule only accepts an all-digit token, so `16rFF ` completes nothing. Conservative gap, not a crash.",
-    "why": "radix integer literal"
+    "why": "radix integer literal: the lexer reads `digits r alphanumerics` as one Integer"
+  },
+  {
+    "receiver": "2r1010",
+    "class": "Integer",
+    "tokens": [
+      "integer"
+    ],
+    "why": "binary radix integer literal"
+  },
+  {
+    "receiver": "16r",
+    "class": "Integer",
+    "tokens": [
+      "integer"
+    ],
+    "why": "half-typed radix literal: the lexer still reads one Integer token"
   },
   {
     "receiver": "-5",
-    "class": null,
+    "class": "Integer",
     "tokens": [
       "integer"
     ],
-    "lexer_class": "Integer",
-    "divergence": "The lexer folds the sign into the Integer token; the Erlang rule requires a leading digit, so `-5 ` completes nothing. Conservative gap, not a crash.",
-    "why": "negative integer literal"
+    "why": "negative integer literal: the lexer folds a `-` directly followed by a digit into the Integer token"
+  },
+  {
+    "receiver": "-007",
+    "class": "Integer",
+    "tokens": [
+      "integer"
+    ],
+    "why": "negative integer with leading zeros"
+  },
+  {
+    "receiver": "-",
+    "class": null,
+    "tokens": [
+      "binary_selector"
+    ],
+    "why": "a lone minus is a binary selector, not a literal"
+  },
+  {
+    "receiver": "-1.5",
+    "class": null,
+    "tokens": [
+      "float"
+    ],
+    "why": "negative float literal: one Float token; floats are not classified (the receiver rule has no Float class), same as `3.14`"
+  },
+  {
+    "receiver": "-1e3",
+    "class": null,
+    "tokens": [
+      "float"
+    ],
+    "why": "negative exponent literal is a Float token; not classified, same as `1e10`"
+  },
+  {
+    "receiver": "1e-3",
+    "class": null,
+    "tokens": [
+      "float"
+    ],
+    "why": "exponent with a negative power is a Float token; not classified, same as `1e10`"
+  },
+  {
+    "receiver": "-16rFF",
+    "class": null,
+    "tokens": [
+      "integer",
+      "identifier"
+    ],
+    "why": "the lexer has no negative radix form: `-16` is an Integer and `rFF` a separate identifier, so this is not one literal"
+  },
+  {
+    "receiver": "5abs",
+    "class": null,
+    "tokens": [
+      "integer",
+      "identifier"
+    ],
+    "why": "digits glued to a selector are two tokens, not one Integer"
   },
   {
     "receiver": "\"hello",

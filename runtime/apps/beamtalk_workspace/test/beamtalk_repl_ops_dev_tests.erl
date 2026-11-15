@@ -796,6 +796,18 @@ classify_receiver_self_without_context_is_an_ordinary_name_test() ->
         undefined, beamtalk_repl_ops_dev_complete:classify_receiver(<<"self">>, #{}, undefined)
     ).
 
+hover_docs_negative_and_radix_literal_receivers_match_integer_test() ->
+    %% BT-4927: hover shares the tokenizer, so `-5 factorial` / `16rFF factorial`
+    %% hover exactly what `42 factorial` does.
+    Expected = beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"42 factorial">>, <<>>, #{}),
+    ?assertNotEqual(<<>>, Expected),
+    ?assertEqual(
+        Expected, beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"-5 factorial">>, <<>>, #{})
+    ),
+    ?assertEqual(
+        Expected, beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"16rFF factorial">>, <<>>, #{})
+    ).
+
 hover_docs_self_unary_and_keyword_match_a_literal_receiver_test() ->
     Ctx = {'Integer', instance},
     %% Unary: `self factorial` hovers exactly what `42 factorial` does.
@@ -1328,6 +1340,12 @@ dev_runtime_test_() ->
                 fun context_completion_class_empty_prefix/0},
             {"context completion: integer literal receiver",
                 fun context_completion_integer_literal/0},
+            {"context completion: radix integer literal receiver",
+                fun context_completion_radix_integer_literal/0},
+            {"context completion: negative integer literal receiver",
+                fun context_completion_negative_integer_literal/0},
+            {"context completion: negative/radix floats stay unclassified",
+                fun context_completion_negative_and_radix_floats_unclassified/0},
             {"context completion: string literal receiver",
                 fun context_completion_string_literal/0},
             {"context completion: binding receiver", fun context_completion_binding_receiver/0},
@@ -1731,6 +1749,36 @@ context_completion_integer_literal() ->
     %% Integer literal receiver -> instance methods of Integer ("abs").
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"42 ab">>),
     ?assert(lists:member(<<"abs">>, Result)).
+
+context_completion_radix_integer_literal() ->
+    %% BT-4927: a radix literal is an Integer, same as `42`.
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"16r1F ab">>),
+    ?assert(lists:member(<<"abs">>, Result)),
+    ?assert(
+        lists:member(
+            <<"abs">>, beamtalk_repl_ops_dev_complete:get_context_completions(<<"2r1010 ">>)
+        )
+    ).
+
+context_completion_negative_integer_literal() ->
+    %% BT-4927: a negative literal is an Integer.
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"-5 ab">>),
+    ?assert(lists:member(<<"abs">>, Result)),
+    %% ...and a send chain off it resolves through the same receiver.
+    ?assert(
+        lists:member(
+            <<"abs">>, beamtalk_repl_ops_dev_complete:get_context_completions(<<"-5 abs ab">>)
+        )
+    ).
+
+context_completion_negative_and_radix_floats_unclassified() ->
+    %% Floats are not classified (see completion_receiver_literal_corpus.json).
+    lists:foreach(
+        fun(Line) ->
+            ?assertEqual([], beamtalk_repl_ops_dev_complete:get_context_completions(Line))
+        end,
+        [<<"-1.5 ab">>, <<"1e-3 ab">>, <<"-16rFF ab">>]
+    ).
 
 context_completion_string_literal() ->
     %% String literal receiver -> String instance methods ("uppercase").

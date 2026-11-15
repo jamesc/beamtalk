@@ -484,5 +484,92 @@
     },
     "divergence": "Erlang reads `x+1` as one receiver token because there is no whitespace; the resulting receiver is not a binding or class so completion yields nothing. The lexer sees three tokens.",
     "why": "binary operator written without surrounding spaces"
+  },
+  {
+    "expr": "-5 abs",
+    "tokens": [
+      "integer",
+      "identifier"
+    ],
+    "unary": {
+      "receiver": "-5",
+      "selectors": [
+        "abs"
+      ]
+    },
+    "binary": {
+      "receiver": "-5",
+      "hops": [
+        [
+          "unary",
+          "abs"
+        ]
+      ]
+    },
+    "why": "negative integer literal receiver (BT-4927): the lexer folds `-` into the Integer token"
+  },
+  {
+    "expr": "a - 5 abs",
+    "tokens": [
+      "identifier",
+      "binary_selector",
+      "integer",
+      "identifier"
+    ],
+    "unary": null,
+    "binary": {
+      "receiver": "a",
+      "hops": [
+        [
+          "binary",
+          "-"
+        ],
+        [
+          "unary",
+          "abs"
+        ]
+      ]
+    },
+    "why": "spaced minus is a binary send, never a negative literal (BT-4927); this chain walks left to right"
+  },
+  {
+    "expr": "a -5 abs",
+    "tokens": [
+      "identifier",
+      "integer",
+      "identifier"
+    ],
+    "unary": null,
+    "binary": null,
+    "why": "`-5` is one Integer token even after an operand (BT-4927), so it is not a binary selector: no chain"
+  },
+  {
+    "expr": "a-5 abs",
+    "tokens": [
+      "identifier",
+      "integer",
+      "identifier"
+    ],
+    "unary": {
+      "receiver": "a-5",
+      "selectors": [
+        "abs"
+      ]
+    },
+    "binary": {
+      "receiver": "a-5",
+      "hops": [
+        [
+          "unary",
+          "abs"
+        ]
+      ]
+    },
+    "lexer_view": {
+      "unary": null,
+      "binary": null
+    },
+    "divergence": "Erlang reads `a-5` as one receiver token because there is no whitespace; it is not a binding or class, so completion yields nothing. The lexer sees `a` then the literal `-5`.",
+    "why": "minus written without surrounding spaces"
   }
 ]

@@ -23,10 +23,7 @@ fn test_actor_with_initialize_defers_to_handle_continue() {
         "    self.value := 10\n\n",
         "  getValue => self.value\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+    let code = codegen_named(src, "counter");
 
     // init/1 must contain the __skip_initialize__ guard so that when
     // a subclass calls this as a parent state-builder, initialize is not
@@ -63,10 +60,7 @@ fn test_handle_continue_dispatches_initialize_chain() {
         "    self.value := 10\n\n",
         "  getValue => self.value\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+    let code = codegen_named(src, "counter");
 
     // The callback function must be present.
     assert!(
@@ -120,10 +114,7 @@ fn test_init_parent_actor_subclass_calls_parent_init() {
         "Counter subclass: LoggingCounter\n",
         "  state: logCount = 0\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("logging_counter"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "logging_counter");
 
     // init/1 must delegate to the parent module's init/1.
     assert!(
@@ -173,10 +164,7 @@ fn test_init_base_actor_writes_shape_version_one() {
         "Actor subclass: Counter\n", //
         "  state: value = 0\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+    let code = codegen_named(src, "counter");
 
     assert!(
         code.contains("'__shape_version__' => 1"),
@@ -192,10 +180,7 @@ fn test_init_subclass_actor_writes_shape_version_one() {
         "Counter subclass: LoggingCounter\n",
         "  state: logCount = 0\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("logging_counter"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "logging_counter");
 
     assert!(
         code.contains("'__shape_version__' => 1"),
@@ -212,10 +197,7 @@ fn test_init_actor_with_declared_shape_version_writes_real_value() {
         "  shapeVersion: 3\n",
         "  state: items = #()\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("cart")).expect("codegen should succeed");
+    let code = codegen_named(src, "cart");
 
     assert!(
         code.contains("'__shape_version__' => 3"),
@@ -706,10 +688,7 @@ fn test_actor_with_parent_init_and_initialize_defers_to_handle_continue() {
         "    super increment\n\n",
         "  getLogCount => self.logCount\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("logging_init_counter"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "logging_init_counter");
 
     // init/1 must delegate to the parent module's init/1.
     assert!(

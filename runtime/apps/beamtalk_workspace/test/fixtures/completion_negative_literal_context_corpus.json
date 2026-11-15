@@ -1,0 +1,99 @@
+[
+  {
+    "source": "-5",
+    "tokens": [
+      "integer"
+    ],
+    "receiver_token": "-5",
+    "class": "Integer",
+    "why": "start of input: a negative literal receiver"
+  },
+  {
+    "source": "(-5",
+    "tokens": [
+      "left_paren",
+      "integer"
+    ],
+    "receiver_token": "(-5",
+    "class": null,
+    "why": "after `(`: the lexer sees a literal; the whitespace token here is `(-5`, so this classifier says nothing and completion resolves the line through the compiler port (resolve_chain_type)",
+    "lexer_class": "Integer",
+    "divergence": "after `(`: the lexer sees a literal; the whitespace token here is `(-5`, so this classifier says nothing and completion resolves the line through the compiler port (resolve_chain_type)"
+  },
+  {
+    "source": "x := -5",
+    "tokens": [
+      "identifier",
+      "other",
+      "integer"
+    ],
+    "receiver_token": "-5",
+    "class": "Integer",
+    "why": "after `:=`: the last token is a negative literal"
+  },
+  {
+    "source": "at: -5",
+    "tokens": [
+      "keyword",
+      "integer"
+    ],
+    "receiver_token": "-5",
+    "class": "Integer",
+    "why": "after a keyword part"
+  },
+  {
+    "source": "a + -5",
+    "tokens": [
+      "identifier",
+      "binary_selector",
+      "integer"
+    ],
+    "receiver_token": "-5",
+    "class": "Integer",
+    "why": "after a binary operator: `+` is a send, `-5` is its literal argument"
+  },
+  {
+    "source": "a; -5",
+    "tokens": [
+      "identifier",
+      "other",
+      "integer"
+    ],
+    "receiver_token": "-5",
+    "class": "Integer",
+    "why": "after a cascade `;`"
+  },
+  {
+    "source": "a - 5",
+    "tokens": [
+      "identifier",
+      "binary_selector",
+      "integer"
+    ],
+    "receiver_token": "5",
+    "class": "Integer",
+    "why": "spaced minus is the binary selector `-` and the receiver token is the positive `5`"
+  },
+  {
+    "source": "a -5",
+    "tokens": [
+      "identifier",
+      "integer"
+    ],
+    "receiver_token": "-5",
+    "class": "Integer",
+    "why": "`-` directly before a digit is part of the literal even after an operand; the lexer applies no left-context rule"
+  },
+  {
+    "source": "a-5",
+    "tokens": [
+      "identifier",
+      "integer"
+    ],
+    "receiver_token": "a-5",
+    "class": null,
+    "why": "no whitespace: the lexer splits `a` and the literal `-5`, this tokeniser keeps `a-5` as one word, which classifies as nothing (same family as `x+1`)",
+    "lexer_class": "Integer",
+    "divergence": "no whitespace: the lexer splits `a` and the literal `-5`, this tokeniser keeps `a-5` as one word, which classifies as nothing (same family as `x+1`)"
+  }
+]
