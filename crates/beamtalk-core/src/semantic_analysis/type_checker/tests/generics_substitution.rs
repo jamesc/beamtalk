@@ -198,8 +198,7 @@ fn check_return_type_handles_generic_declared_type() {
     };
 
     let body_type = InferredType::known("GenResult");
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     // Should NOT warn: GenResult is compatible with declared GenResult(Integer, Error)
     let type_warnings: Vec<_> = checker
@@ -398,8 +397,7 @@ fn constructor_inference_flows_to_instance_sends() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_result_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
 
     // r := GenResult ok: 42
     let assign_expr = Expression::Assignment {
@@ -412,14 +410,12 @@ fn constructor_inference_flows_to_instance_sends() {
         type_annotation: None,
         span: span(),
     };
-    checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
+    session.infer(&assign_expr, &hierarchy);
 
     // r unwrap — should return Integer via T substitution
-    let unwrap_ty = checker.infer_expr(
+    let unwrap_ty = session.infer(
         &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
     );
 
     assert_eq!(
@@ -436,8 +432,7 @@ fn constructor_inference_error_flows_to_error_accessor() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_result_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
 
     // r := GenResult error: #not_found
     let assign_expr = Expression::Assignment {
@@ -453,14 +448,12 @@ fn constructor_inference_error_flows_to_error_accessor() {
         type_annotation: None,
         span: span(),
     };
-    checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
+    session.infer(&assign_expr, &hierarchy);
 
     // r error — should return Symbol via E substitution
-    let error_ty = checker.infer_expr(
+    let error_ty = session.infer(
         &msg_send(var("r"), MessageSelector::Unary("error".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
     );
 
     assert_eq!(

@@ -86,18 +86,21 @@ fn infer_expr_class_reference() {
 #[test]
 fn infer_expr_assignment_tracks_type() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     let expr = Expression::Assignment {
         target: Box::new(var("x")),
         value: Box::new(int_lit(42)),
         type_annotation: None,
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = session.infer(&expr, &hierarchy);
     assert_eq!(ty, InferredType::known("Integer"));
     // The variable should now be tracked in the environment
-    assert_eq!(env.get_local("x"), Some(InferredType::known("Integer")));
+    assert_eq!(
+        session.env.get_local("x"),
+        Some(InferredType::known("Integer"))
+    );
 }
 
 #[test]

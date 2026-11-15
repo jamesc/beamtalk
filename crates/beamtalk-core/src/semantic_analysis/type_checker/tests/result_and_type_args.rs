@@ -519,9 +519,9 @@ fn union_dnu_all_missing_emits_warning() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
+    let mut session = InferSession::new();
+
+    session.env.set_local(
         "x",
         InferredType::Union {
             members: vec![InferredType::known("Integer"), InferredType::known("Float")],
@@ -529,14 +529,10 @@ fn union_dnu_all_missing_emits_warning() {
         },
     );
 
-    let _ty = checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    let _ty = session.infer(&module.expressions[0].expression, &hierarchy);
 
-    let dnu_diags: Vec<_> = checker
+    let dnu_diags: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("not understand"))
@@ -568,18 +564,16 @@ fn union_dnu_partial_missing_emits_hint() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
+    let mut session = InferSession::new();
 
-    let _ty = checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    session
+        .env
+        .set_local("x", InferredType::simple_union(&["String", "Integer"]));
 
-    let dnu_diags: Vec<_> = checker
+    let _ty = session.infer(&module.expressions[0].expression, &hierarchy);
+
+    let dnu_diags: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("not understand"))

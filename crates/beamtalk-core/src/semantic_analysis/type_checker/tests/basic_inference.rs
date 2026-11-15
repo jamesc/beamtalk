@@ -462,20 +462,19 @@ fn test_unknown_variable_is_dynamic() {
 
 #[test]
 fn test_true_false_nil_types() {
-    let mut checker = TypeChecker::new();
+    let mut session = InferSession::new();
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
 
     assert_eq!(
-        checker.infer_expr(&var("true"), &hierarchy, &mut env, false),
+        session.infer(&var("true"), &hierarchy),
         InferredType::known("Boolean")
     );
     assert_eq!(
-        checker.infer_expr(&var("false"), &hierarchy, &mut env, false),
+        session.infer(&var("false"), &hierarchy),
         InferredType::known("Boolean")
     );
     assert_eq!(
-        checker.infer_expr(&var("nil"), &hierarchy, &mut env, false),
+        session.infer(&var("nil"), &hierarchy),
         InferredType::known("UndefinedObject")
     );
 }

@@ -727,15 +727,15 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
         ..ClassInfo::test("Weird", Some("Object"))
     }]);
 
-    let mut checker = TypeChecker::new();
+    let mut session = InferSession::new();
     // Simulate being inside a `typed` class so the Dynamic-in-typed-class
     // lint has a context to warn on.
-    checker.typed_class_context = Some(eco_string("Repro"));
-    let mut env = TypeEnv::new();
-    env.set_local("recv", InferredType::known("Weird"));
+    session.checker.typed_class_context = Some(eco_string("Repro"));
+
+    session.env.set_local("recv", InferredType::known("Weird"));
 
     let expr = if_true(var("recv"), block_expr(vec![int_lit(42)]));
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = session.infer(&expr, &hierarchy);
 
     assert_eq!(
         ty,
@@ -745,13 +745,14 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
          got {ty:?}"
     );
     assert!(
-        checker
+        session
+            .checker
             .diagnostics()
             .iter()
             .any(|d| d.message.contains("inferred as Dynamic in typed class")
                 && d.message.contains("unannotated return")),
         "UnannotatedReturn is not in the Dynamic-in-typed-class suppression \
          list, so the warning should fire now that the reason is honest; got: {:?}",
-        checker.diagnostics()
+        session.checker.diagnostics()
     );
 }

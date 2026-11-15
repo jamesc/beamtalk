@@ -202,18 +202,16 @@ fn union_receiver_warns_when_non_nil_member_lacks_selector() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
+    let mut session = InferSession::new();
 
-    let _ty = checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    session
+        .env
+        .set_local("x", InferredType::simple_union(&["String", "Integer"]));
 
-    let dnu_hints: Vec<_> = checker
+    let _ty = session.infer(&module.expressions[0].expression, &hierarchy);
+
+    let dnu_hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("does not understand"))
@@ -243,21 +241,17 @@ fn union_receiver_nil_skipped_no_warning() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
+    let mut session = InferSession::new();
+
+    session.env.set_local(
         "x",
         InferredType::simple_union(&["String", "UndefinedObject"]),
     );
 
-    let ty = checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    let ty = session.infer(&module.expressions[0].expression, &hierarchy);
 
-    let dnu_hints: Vec<_> = checker
+    let dnu_hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("does not understand"))
@@ -293,21 +287,17 @@ fn union_receiver_nullable_hint_with_non_nil_missing() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
+    let mut session = InferSession::new();
+
+    session.env.set_local(
         "x",
         InferredType::simple_union(&["Float", "UndefinedObject"]),
     );
 
-    checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    session.infer(&module.expressions[0].expression, &hierarchy);
 
-    let dnu_hints: Vec<_> = checker
+    let dnu_hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("does not understand"))
@@ -356,21 +346,17 @@ fn union_receiver_single_culprit_dnu_keeps_union_context_and_did_you_mean() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
+    let mut session = InferSession::new();
+
+    session.env.set_local(
         "x",
         InferredType::simple_union(&["String", "UndefinedObject"]),
     );
 
-    checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    session.infer(&module.expressions[0].expression, &hierarchy);
 
-    let dnu: Vec<_> = checker
+    let dnu: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("does not understand"))
@@ -379,7 +365,7 @@ fn union_receiver_single_culprit_dnu_keeps_union_context_and_did_you_mean() {
         dnu.len(),
         1,
         "expected exactly one DNU diagnostic, got: {:?}",
-        checker.diagnostics()
+        session.checker.diagnostics()
     );
     assert_eq!(
         dnu[0].message.as_str(),
@@ -415,21 +401,17 @@ fn union_receiver_single_culprit_dnu_falls_back_to_generic_hint_with_no_suggesti
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
+    let mut session = InferSession::new();
+
+    session.env.set_local(
         "x",
         InferredType::simple_union(&["String", "UndefinedObject"]),
     );
 
-    checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    session.infer(&module.expressions[0].expression, &hierarchy);
 
-    let dnu: Vec<_> = checker
+    let dnu: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("does not understand"))
@@ -438,7 +420,7 @@ fn union_receiver_single_culprit_dnu_falls_back_to_generic_hint_with_no_suggesti
         dnu.len(),
         1,
         "expected exactly one DNU diagnostic, got: {:?}",
-        checker.diagnostics()
+        session.checker.diagnostics()
     );
     assert_eq!(
         dnu[0].hint.as_deref(),
@@ -462,18 +444,16 @@ fn union_receiver_no_warning_when_all_understand() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["Integer", "String"]));
+    let mut session = InferSession::new();
 
-    checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    session
+        .env
+        .set_local("x", InferredType::simple_union(&["Integer", "String"]));
 
-    let dnu_hints: Vec<_> = checker
+    session.infer(&module.expressions[0].expression, &hierarchy);
+
+    let dnu_hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("does not understand"))
@@ -499,10 +479,10 @@ fn union_receiver_dynamic_member_no_warning() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     // Union with a Dynamic member — should fall through to Dynamic result
-    env.set_local(
+    session.env.set_local(
         "x",
         InferredType::Union {
             members: vec![
@@ -513,14 +493,10 @@ fn union_receiver_dynamic_member_no_warning() {
         },
     );
 
-    let ty = checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    let ty = session.infer(&module.expressions[0].expression, &hierarchy);
 
-    let dnu_hints: Vec<_> = checker
+    let dnu_hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("does not understand"))
@@ -567,20 +543,18 @@ fn bt3469_union_member_with_cross_file_parent_downgrades_to_open() {
         ))],
         span(),
     );
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     // `String` is closed-and-complete and genuinely doesn't understand
     // `widgetize`; `PartialA` is the uncertain member.
-    env.set_local("x", InferredType::simple_union(&["PartialA", "String"]));
+    session
+        .env
+        .set_local("x", InferredType::simple_union(&["PartialA", "String"]));
 
-    checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    session.infer(&module.expressions[0].expression, &hierarchy);
 
-    let dnu: Vec<_> = checker
+    let dnu: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("does not understand"))
@@ -589,7 +563,7 @@ fn bt3469_union_member_with_cross_file_parent_downgrades_to_open() {
         dnu.len(),
         1,
         "expected exactly one DNU diagnostic (for String only), got: {:?}",
-        checker.diagnostics()
+        session.checker.diagnostics()
     );
     // PartialA legitimately appears in the trailing `(in union ...)`
     // context (it's still a real member of the union type), but the
@@ -656,10 +630,10 @@ fn union_receiver_nil_only_returns_dynamic() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     // Degenerate case: union of just Nil
-    env.set_local(
+    session.env.set_local(
         "x",
         InferredType::Union {
             members: vec![InferredType::known("UndefinedObject")],
@@ -667,14 +641,10 @@ fn union_receiver_nil_only_returns_dynamic() {
         },
     );
 
-    let _ty = checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    let _ty = session.infer(&module.expressions[0].expression, &hierarchy);
 
-    let dnu_hints: Vec<_> = checker
+    let dnu_hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("does not understand"))
@@ -700,16 +670,13 @@ fn union_receiver_non_responding_member_does_not_widen_return_type() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
+    let mut session = InferSession::new();
 
-    let ty = checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    session
+        .env
+        .set_local("x", InferredType::simple_union(&["String", "Integer"]));
+
+    let ty = session.infer(&module.expressions[0].expression, &hierarchy);
 
     // String.size returns Integer. Integer doesn't understand `size`.
     // The return type should be just Integer, NOT Integer | Dynamic.
@@ -719,7 +686,8 @@ fn union_receiver_non_responding_member_does_not_widen_return_type() {
     );
 
     // Should still warn about Integer not understanding `size`
-    let dnu_hints: Vec<_> = checker
+    let dnu_hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("does not understand"))
@@ -1028,16 +996,14 @@ fn infer_singleton_union_send(
         span(),
     );
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["Integer", "#infinity"]));
-    let ty = checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
-    let diags = checker
+    let mut session = InferSession::new();
+
+    session
+        .env
+        .set_local("x", InferredType::simple_union(&["Integer", "#infinity"]));
+    let ty = session.infer(&module.expressions[0].expression, &hierarchy);
+    let diags = session
+        .checker
         .diagnostics()
         .iter()
         .map(|d| format!("{:?}: {}", d.severity, d.message))
@@ -1146,16 +1112,12 @@ fn infer_singleton_send(
         span(),
     );
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::known("#infinity"));
-    let ty = checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
-    let diags = checker
+    let mut session = InferSession::new();
+
+    session.env.set_local("x", InferredType::known("#infinity"));
+    let ty = session.infer(&module.expressions[0].expression, &hierarchy);
+    let diags = session
+        .checker
         .diagnostics()
         .iter()
         .map(|d| format!("{:?}: {}", d.severity, d.message))
@@ -1231,10 +1193,12 @@ fn bt2679_singleton_binary_send_bypasses_symbol_redirect() {
         vec![var("x")],
     );
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["Integer", "String"]));
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let mut session = InferSession::new();
+
+    session
+        .env
+        .set_local("x", InferredType::simple_union(&["Integer", "String"]));
+    let ty = session.infer(&expr, &hierarchy);
 
     // Had the singleton routed through `Symbol`, `=:=` would resolve to Boolean.
     assert!(
@@ -1243,7 +1207,8 @@ fn bt2679_singleton_binary_send_bypasses_symbol_redirect() {
     );
 
     // The impossible-comparison hint must still fire.
-    let hints: Vec<_> = checker
+    let hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("can never be true") && d.message.contains("#infinity"))
@@ -1252,6 +1217,6 @@ fn bt2679_singleton_binary_send_bypasses_symbol_redirect() {
         hints.len(),
         1,
         "expected the impossible-comparison hint to fire, got: {:?}",
-        checker.diagnostics()
+        session.checker.diagnostics()
     );
 }

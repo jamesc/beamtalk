@@ -354,6 +354,15 @@ pub(super) fn check_bounds(
     checker
 }
 
+/// `refine_class_narrowing` of `info` against `env`.
+pub(super) fn refine_narrowing(
+    info: super::super::narrowing::info::NarrowingInfo,
+    env: &TypeEnv,
+    hierarchy: &ClassHierarchy,
+) -> super::super::narrowing::info::NarrowingInfo {
+    TypeChecker::new().refine_class_narrowing(info, env, hierarchy, span())
+}
+
 /// Source to the diagnostics of `check_module_with_protocols` against an empty
 /// protocol registry, with the user's classes merged onto the built-ins.
 pub(super) fn run_with_protocols(source: &str) -> Vec<Diagnostic> {

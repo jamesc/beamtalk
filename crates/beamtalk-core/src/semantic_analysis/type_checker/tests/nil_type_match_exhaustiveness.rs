@@ -78,12 +78,13 @@ fn string_or_nil() -> InferredType {
 /// diagnostic produced by a plain `match:` (`exhaustive: false`).
 fn advisory_diagnostics(scrutinee_ty: InferredType, arms: Vec<MatchArm>) -> Vec<Diagnostic> {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    env.set_local("raw", scrutinee_ty);
+    let mut session = InferSession::new();
+    session.env.set_local("raw", scrutinee_ty);
     let expr = match_expr(false, var("raw"), arms);
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    checker
+
+    let _ = session.infer(&expr, &hierarchy);
+    session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("non-exhaustive"))

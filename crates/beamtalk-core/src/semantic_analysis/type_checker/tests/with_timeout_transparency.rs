@@ -129,10 +129,10 @@ fn forwarded_call_on_proxy_infers_wrapped_return_type() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_slow_db_actor(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("db", InferredType::known("SlowDb"));
-    env.set_local("sql", InferredType::known("String"));
+    let mut session = InferSession::new();
+
+    session.env.set_local("db", InferredType::known("SlowDb"));
+    session.env.set_local("sql", InferredType::known("String"));
 
     let query = msg_send(
         with_timeout(var("db"), 30000),
@@ -140,7 +140,7 @@ fn forwarded_call_on_proxy_infers_wrapped_return_type() {
         vec![var("sql")],
     );
 
-    let ty = checker.infer_expr(&query, &hierarchy, &mut env, false);
+    let ty = session.infer(&query, &hierarchy);
 
     assert_eq!(
         ty,
@@ -149,7 +149,8 @@ fn forwarded_call_on_proxy_infers_wrapped_return_type() {
          return type List through the transparent proxy"
     );
     assert!(
-        checker
+        session
+            .checker
             .take_diagnostics()
             .iter()
             .all(|d| d.category != Some(DiagnosticCategory::Dnu)),
@@ -198,16 +199,15 @@ fn proxy_binding_forwards_wrapped_return_type() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_slow_db_actor(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("db", InferredType::known("SlowDb"));
-    env.set_local("sql", InferredType::known("String"));
+    let mut session = InferSession::new();
+
+    session.env.set_local("db", InferredType::known("SlowDb"));
+    session.env.set_local("sql", InferredType::known("String"));
 
     // slowDb := db withTimeout: 30000
-    let slow_db_ty =
-        checker.infer_expr(&with_timeout(var("db"), 30000), &hierarchy, &mut env, false);
+    let slow_db_ty = session.infer(&with_timeout(var("db"), 30000), &hierarchy);
     assert_eq!(slow_db_ty, InferredType::known("SlowDb"));
-    env.set_local("slowDb", slow_db_ty);
+    session.env.set_local("slowDb", slow_db_ty);
 
     // slowDb query: sql
     let query = msg_send(
@@ -215,7 +215,7 @@ fn proxy_binding_forwards_wrapped_return_type() {
         MessageSelector::Keyword(vec![KeywordPart::new("query:", span())]),
         vec![var("sql")],
     );
-    let ty = checker.infer_expr(&query, &hierarchy, &mut env, false);
+    let ty = session.infer(&query, &hierarchy);
 
     assert_eq!(
         ty,
@@ -346,19 +346,22 @@ fn timeout_proxy_forwarded_selectors_do_not_warn() {
         "TimeoutProxy must override doesNotUnderstand:args: for forwarding"
     );
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("proxy", InferredType::known("TimeoutProxy"));
+    let mut session = InferSession::new();
+
+    session
+        .env
+        .set_local("proxy", InferredType::known("TimeoutProxy"));
 
     let send = msg_send(
         var("proxy"),
         MessageSelector::Keyword(vec![KeywordPart::new("anyForwardedSelector:", span())]),
         vec![int_lit(1)],
     );
-    checker.infer_expr(&send, &hierarchy, &mut env, false);
+    session.infer(&send, &hierarchy);
 
     assert!(
-        checker
+        session
+            .checker
             .take_diagnostics()
             .iter()
             .all(|d| d.category != Some(DiagnosticCategory::Dnu)),

@@ -45,8 +45,7 @@ fn bt2022_generic_return_type_inner_arg_mismatch_warns() {
         type_args: vec![InferredType::known("String"), InferredType::known("Error")],
         provenance: TypeProvenance::Inferred(span()),
     };
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -111,8 +110,7 @@ fn bt2022_generic_return_type_matching_inner_args_no_warning() {
         type_args: vec![InferredType::known("Integer"), InferredType::known("Error")],
         provenance: TypeProvenance::Inferred(span()),
     };
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -159,8 +157,7 @@ fn bt2022_generic_return_type_bare_body_no_warning() {
 
     // Body infers as bare GenResult (no type_args) — no enough info to warn
     let body_type = InferredType::known("GenResult");
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -209,8 +206,7 @@ fn bt2022_dictionary_inner_arg_mismatch_warns() {
         type_args: vec![InferredType::known("Symbol"), InferredType::known("String")],
         provenance: TypeProvenance::Inferred(span()),
     };
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -256,8 +252,7 @@ fn bt2022_list_inner_arg_mismatch_warns() {
         type_args: vec![InferredType::known("String")],
         provenance: TypeProvenance::Inferred(span()),
     };
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -341,8 +336,7 @@ fn bt2022_generic_type_param_in_declared_args_not_warned() {
         type_args: vec![InferredType::known("String"), InferredType::known("Error")],
         provenance: TypeProvenance::Inferred(span()),
     };
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -382,8 +376,7 @@ fn bt2033_never_return_with_known_body_warns() {
 
     // Body infers as Integer — clearly not divergent
     let body_type = InferredType::known("Integer");
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("NeverProbe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "NeverProbe", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -433,8 +426,7 @@ fn bt2033_never_return_with_never_body_no_warning() {
 
     // Body is divergent (e.g. always `self error: ...`)
     let body_type = InferredType::Never;
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("NeverProbe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "NeverProbe", &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
