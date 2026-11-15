@@ -48,7 +48,7 @@ invalid/unknown pid.
 -spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
     beamtalk_repl_ops:op_result().
 handle_term(<<"pid-stats">>, Params, _Msg, _SessionPid) ->
-    PidStr = binary_to_list(maps:get(<<"actor">>, Params, maps:get(<<"pid">>, Params, <<>>))),
+    PidStr = binary_to_list(maps:get(<<"actor">>, Params, <<>>)),
     case beamtalk_repl_ops_actors:validate_actor_pid(PidStr) of
         {ok, Pid} ->
             {value, pid_stats(Pid)};
