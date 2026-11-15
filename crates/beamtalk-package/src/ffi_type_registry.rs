@@ -7,7 +7,7 @@
 //!
 //! **DDD Context:** Compilation (CLI glue)
 //!
-//! Lives in the lib target so `beamtalk build`/`lint`/`check`/`test` and the
+//! Lives in `beamtalk-package` so `beamtalk build`/`lint`/`check`/`test` and the
 //! MCP `lint`/`diagnostic_summary` tools build the registry with the same
 //! functions (BT-4643). Everything here is quiet: each stub file's
 //! diagnostics and each sibling-package collision come back as

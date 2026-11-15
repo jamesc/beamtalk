@@ -12,8 +12,8 @@ use miette::{IntoDiagnostic, Result};
 use std::process::Command;
 use tracing::warn;
 
-use super::build_layout::BuildLayout;
 use super::erlang_eval::{self, ErlangEval};
+use beamtalk_core::build_layout::BuildLayout;
 
 /// Result of an erlfmt invocation.
 #[derive(Debug, Default)]

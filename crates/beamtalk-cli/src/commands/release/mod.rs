@@ -29,9 +29,9 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use tracing::info;
 
-use super::build_layout::BuildLayout;
 use super::build_stamp;
-use super::manifest;
+use beamtalk_core::build_layout::BuildLayout;
+use beamtalk_package::manifest;
 
 /// Build a release for the project at `project_root`.
 ///

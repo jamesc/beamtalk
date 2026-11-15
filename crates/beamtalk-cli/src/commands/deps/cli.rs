@@ -15,8 +15,8 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::collections::BTreeMap;
 use tracing::info;
 
-use crate::commands::manifest::{self, format_name_error, validate_package_name};
 use crate::commands::util::find_project_root;
+use beamtalk_package::manifest::{self, format_name_error, validate_package_name};
 
 use super::git;
 use super::lockfile::{LockEntry, Lockfile};
@@ -450,7 +450,7 @@ fn dep_version(project_root: &Utf8Path, name: &str, source: &DependencySource) -
             project_root.join(&utf8)
         }
         DependencySource::Git { .. } | DependencySource::Registry { .. } => {
-            crate::commands::build_layout::BuildLayout::new(project_root).dep_checkout_dir(name)
+            beamtalk_core::build_layout::BuildLayout::new(project_root).dep_checkout_dir(name)
         }
     };
 
@@ -630,7 +630,7 @@ fn unlock_native_package(project_root: &Utf8Path, name: &str) -> Result<bool> {
         return Ok(false);
     }
 
-    let layout = crate::commands::build_layout::BuildLayout::new(project_root);
+    let layout = beamtalk_core::build_layout::BuildLayout::new(project_root);
     // Same lock a build's native step holds while it rewrites `beamtalk.lock`
     // and touches the checkouts; read the lockfile again under it.
     let _native_build_lock =
@@ -1392,7 +1392,7 @@ utils = { path = \"utils\" }
         lockfile.insert_native(NativePackageLock::hex("gun", "2.1.0", "A").at_level(0));
         lockfile.insert_native(NativePackageLock::hex("cowlib", "2.13.0", "B").at_level(1));
         lockfile.write(&root).unwrap();
-        let checkout = crate::commands::build_layout::BuildLayout::new(&root)
+        let checkout = beamtalk_core::build_layout::BuildLayout::new(&root)
             .rebar_lib_dir()
             .join("cowlib");
         std::fs::create_dir_all(&checkout).unwrap();

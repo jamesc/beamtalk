@@ -31,9 +31,9 @@ use miette::{IntoDiagnostic, Result, WrapErr};
 use std::process::Command;
 
 use crate::commands::deps::registry::{self, RegistryEntry, RegistryLocation};
-use crate::commands::manifest;
 use crate::commands::toml_utils::escape_toml_string;
 use crate::commands::util::find_project_root;
+use beamtalk_package::manifest;
 
 /// Run `beamtalk publish`.
 ///

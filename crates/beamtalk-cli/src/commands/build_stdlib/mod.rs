@@ -28,7 +28,3 @@ mod orchestrate;
 mod tests;
 
 pub use orchestrate::build_stdlib;
-
-/// The stdlib's FFI type registry, from the runtime's own `.beam` specs —
-/// shared with `beamtalk lint` and MCP `lint` through the lib target.
-pub(crate) use beamtalk_cli::native_type_specs::extract_stdlib_type_specs;

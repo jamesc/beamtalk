@@ -4,7 +4,7 @@
 //! Transitive native-dependency detection (ADR 0072), class-header generation, and `validate_native_class_references` checks.
 
 use super::*;
-use crate::commands::manifest::{self, NativeDependencyMap, NativeOverrideMap};
+use beamtalk_package::manifest::{self, NativeDependencyMap, NativeOverrideMap};
 
 // ---- Transitive native dependency detection tests (ADR 0072) ----
 
@@ -39,7 +39,7 @@ fn make_resolved_dep(
         is_direct: true,
         via_chain: Vec::new(),
         stubs_dir: None,
-        extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
+        extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(),
     }
 }
 

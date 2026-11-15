@@ -69,15 +69,15 @@ pub(crate) fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
 }
 
 /// The checker scope for a test/fixture file (BT-4334): by the shared
-/// [`manifest::package_checker_scope`](crate::commands::manifest::package_checker_scope)
+/// [`manifest::package_checker_scope`](beamtalk_package::manifest::package_checker_scope)
 /// rule, a file inside a package is analysed with project-complete knowledge and
 /// "has dependencies" as unknown-extension surface, a manifest-less file keeps
 /// the conservative `ModuleOnly` default - the same split `build` makes.
 pub(crate) fn test_compile_scope(
     source_path: &Utf8Path,
-) -> crate::commands::manifest::PackageCheckerScope {
-    crate::commands::manifest::package_checker_scope(
-        crate::commands::lint::find_package_root(source_path).as_deref(),
+) -> beamtalk_package::manifest::PackageCheckerScope {
+    beamtalk_package::manifest::package_checker_scope(
+        beamtalk_package::lint_pipeline::find_package_root(source_path).as_deref(),
     )
 }
 

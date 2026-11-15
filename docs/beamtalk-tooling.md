@@ -146,7 +146,7 @@ same scope as `build`.
   tool applies the same table and takes the same gate as an optional
   `warnings_as_errors` flag, classified by the same shared rule
   (`diagnostics_policy::is_live_recheck_failure`; BT-4336). Both surfaces
-  run the same analysis pipeline (`beamtalk_cli::lint_pipeline`, BT-4585),
+  run the same analysis pipeline (`beamtalk_package::lint_pipeline`, BT-4585),
   `.erl` linting included, so they report the same diagnostics and
   verdict. Both build the FFI type registry the same way too, ADR 0075
   stub tiers included, and for `stdlib/src` targets from the stdlib's

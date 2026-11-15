@@ -73,8 +73,8 @@ use std::fmt::Write as _;
 use std::process::Command;
 use tracing::{debug, info};
 
-use crate::commands::build_layout::BuildLayout;
-use crate::commands::manifest::RegistryConfig;
+use beamtalk_core::build_layout::BuildLayout;
+use beamtalk_package::manifest::RegistryConfig;
 
 /// The environment variable overriding the registry index location.
 pub const REGISTRY_ENV_VAR: &str = "BEAMTALK_REGISTRY";
