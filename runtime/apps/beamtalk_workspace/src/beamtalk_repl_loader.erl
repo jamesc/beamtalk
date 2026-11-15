@@ -151,9 +151,7 @@ handle_load(Path, State) ->
                     PrebuiltIndexes = with_ambient_protocol_sources(
                         beamtalk_repl_compiler:build_class_indexes()
                     ),
-                    case
-                        compile_file_named(Source, Path, StdlibMode, PrebuiltIndexes)
-                    of
+                    case compile_file_named(Source, Path, StdlibMode, PrebuiltIndexes) of
                         %% Protocol definition from file compilation.
                         %% Must be matched before the generic 4-tuple to avoid
                         %% {ok, protocol_definition, Info, Warnings} binding to
