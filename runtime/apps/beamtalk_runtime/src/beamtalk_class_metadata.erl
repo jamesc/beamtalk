@@ -1453,7 +1453,7 @@ put_process_bound_selectors(Name, Selectors) when is_list(Selectors); Selectors 
         #class_metadata.process_bound_selectors,
         Selectors,
         fun() ->
-        beamtalk_class_derived_cache:invalidate()
+            beamtalk_class_derived_cache:invalidate()
         end
     ).
 
@@ -1491,12 +1491,12 @@ put_direct_constructors(Name, Ctors) when is_list(Ctors) ->
         #class_metadata.direct_constructors,
         Ctors,
         fun() ->
-        %% Flush the memo before erasing the keys: the locked re-check in
-        %% `static_call_target/4` reads the memoised constructor verdict,
-        %% so a key install that lands between an erase and a later flush
-        %% would re-derive from the old row and survive.
-        beamtalk_class_derived_cache:invalidate(),
-        beamtalk_class_shadow_flags:invalidate(Name)
+            %% Flush the memo before erasing the keys: the locked re-check in
+            %% `static_call_target/4` reads the memoised constructor verdict,
+            %% so a key install that lands between an erase and a later flush
+            %% would re-derive from the old row and survive.
+            beamtalk_class_derived_cache:invalidate(),
+            beamtalk_class_shadow_flags:invalidate(Name)
         end
     ).
 
@@ -1524,7 +1524,7 @@ put_constant_class_methods(Name, Constants) when is_map(Constants) ->
         #class_metadata.constant_class_methods,
         Constants,
         fun() ->
-        beamtalk_class_shadow_flags:invalidate(Name)
+            beamtalk_class_shadow_flags:invalidate(Name)
         end
     ).
 
@@ -1548,7 +1548,7 @@ put_caller_safe_primitives(Name, Primitives) when is_map(Primitives) ->
         #class_metadata.caller_safe_primitives,
         Primitives,
         fun() ->
-        beamtalk_class_shadow_flags:invalidate(Name)
+            beamtalk_class_shadow_flags:invalidate(Name)
         end
     ).
 
@@ -1596,7 +1596,7 @@ put_defines_user_class_new1(Name, Defines) when is_boolean(Defines); Defines =:=
         #class_metadata.defines_user_class_new1,
         Defines,
         fun() ->
-        beamtalk_class_derived_cache:invalidate()
+            beamtalk_class_derived_cache:invalidate()
         end
     ).
 
@@ -1688,12 +1688,12 @@ put_defines_user_class_new0(Name, Defines) when is_boolean(Defines); Defines =:=
         #class_metadata.defines_user_class_new0,
         Defines,
         fun() ->
-        %% Flush the memo before erasing the keys (see `put_direct_constructors/2`):
-        %% a descendant's static `new` key is installed only while the
-        %% memoised verdict, which reads this fact, allows it, and
-        %% `invalidate/1` also erases the descendants' keys.
-        beamtalk_class_derived_cache:invalidate(),
-        beamtalk_class_shadow_flags:invalidate(Name)
+            %% Flush the memo before erasing the keys (see `put_direct_constructors/2`):
+            %% a descendant's static `new` key is installed only while the
+            %% memoised verdict, which reads this fact, allows it, and
+            %% `invalidate/1` also erases the descendants' keys.
+            beamtalk_class_derived_cache:invalidate(),
+            beamtalk_class_shadow_flags:invalidate(Name)
         end
     ).
 

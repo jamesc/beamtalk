@@ -337,7 +337,9 @@ Uses {heir, ...} to prevent table loss when owner dies.
 """.
 -spec ensure_class_warnings_table() -> ok.
 ensure_class_warnings_table() ->
-    beamtalk_ets_heir:ensure_shared_table(beamtalk_class_warnings, [bag, public, named_table, {write_concurrency, true}]).
+    beamtalk_ets_heir:ensure_shared_table(beamtalk_class_warnings, [
+        bag, public, named_table, {write_concurrency, true}
+    ]).
 
 -doc """
 Record a class collision warning keyed by {Package, ClassName}.
@@ -616,7 +618,9 @@ Uses {heir, ...} to prevent table loss when owner dies.
 """.
 -spec ensure_pending_errors_table() -> ok.
 ensure_pending_errors_table() ->
-    beamtalk_ets_heir:ensure_shared_table(beamtalk_pending_load_errors, [set, public, named_table, {write_concurrency, true}]).
+    beamtalk_ets_heir:ensure_shared_table(beamtalk_pending_load_errors, [
+        set, public, named_table, {write_concurrency, true}
+    ]).
 
 %%====================================================================
 %% Hierarchy Queries
@@ -792,7 +796,9 @@ Uses {heir, ...} to prevent table loss when owner dies.
 """.
 -spec ensure_pid_table() -> ok.
 ensure_pid_table() ->
-    beamtalk_ets_heir:ensure_shared_table(beamtalk_class_pids, [set, public, named_table, {read_concurrency, true}]).
+    beamtalk_ets_heir:ensure_shared_table(beamtalk_class_pids, [
+        set, public, named_table, {read_concurrency, true}
+    ]).
 
 -doc """
 Record a class pid→classname mapping.
@@ -992,7 +998,9 @@ Read-concurrency + `{heir, ...}` mirrors `ensure_pid_table/0`.
 """.
 -spec ensure_class_state_table() -> ok.
 ensure_class_state_table() ->
-    beamtalk_ets_heir:ensure_shared_table(beamtalk_class_state_snapshot, [set, public, named_table, {read_concurrency, true}]).
+    beamtalk_ets_heir:ensure_shared_table(beamtalk_class_state_snapshot, [
+        set, public, named_table, {read_concurrency, true}
+    ]).
 
 -doc """
 Record the current `classState:` map for a class process.
@@ -1098,7 +1106,9 @@ overwrites its own row with the new pid.
 """.
 -spec ensure_loaded_classes_table() -> ok.
 ensure_loaded_classes_table() ->
-    beamtalk_ets_heir:ensure_shared_table(beamtalk_loaded_classes, [set, public, named_table, {read_concurrency, true}, {write_concurrency, true}]).
+    beamtalk_ets_heir:ensure_shared_table(beamtalk_loaded_classes, [
+        set, public, named_table, {read_concurrency, true}, {write_concurrency, true}
+    ]).
 
 -doc """
 Record a class as loaded in the fast loaded-class name index.
@@ -1220,7 +1230,9 @@ heir-protected so it survives the owner's death.
 """.
 -spec ensure_backing_module_index_table() -> ok.
 ensure_backing_module_index_table() ->
-    beamtalk_ets_heir:ensure_shared_table(beamtalk_backing_module_index, [bag, public, named_table, {read_concurrency, true}, {write_concurrency, true}]).
+    beamtalk_ets_heir:ensure_shared_table(beamtalk_backing_module_index, [
+        bag, public, named_table, {read_concurrency, true}, {write_concurrency, true}
+    ]).
 
 -doc """
 Record (or clear) a class's row in the backing-module reverse index.
@@ -1551,7 +1563,9 @@ tags without scanning every `persistent_term`. Public, heir-protected like
 """.
 -spec ensure_static_call_keys_table() -> ok.
 ensure_static_call_keys_table() ->
-    beamtalk_ets_heir:ensure_shared_table(?STATIC_CALL_KEYS, [set, public, named_table, {write_concurrency, true}]).
+    beamtalk_ets_heir:ensure_shared_table(?STATIC_CALL_KEYS, [
+        set, public, named_table, {write_concurrency, true}
+    ]).
 
 -doc """
 Record that the class tagged `Tag` may have a per-class static call key.
