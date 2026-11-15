@@ -17,10 +17,10 @@ use crate::semantic_analysis::string_utils::is_symbol_singleton_name;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span, equality_operator_is_negated};
 use ecow::EcoString;
 
+use super::super::diagnostic_facts::ClassObjectType;
 use super::super::known_remote;
 use super::super::sendability;
 use super::super::type_resolver;
-use super::super::types::ClassObjectType;
 use super::super::well_known::WellKnownClass;
 use super::super::{DynamicReason, InferredType, TypeChecker};
 use super::UnionArgCompat;

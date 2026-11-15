@@ -126,303 +126,218 @@ pub(crate) fn generate_integer_bif(selector: &str, params: &[String]) -> Option<
 
 #[cfg(test)]
 mod tests {
-    use super::super::doc_to_string;
+    use super::super::{assert_bif_none_table, assert_bif_table};
     use super::*;
 
-    // Arithmetic
-
     #[test]
-    fn test_plus() {
-        let result = doc_to_string(generate_integer_bif("+", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'+'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_minus() {
-        let result = doc_to_string(generate_integer_bif("-", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'-'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_multiply() {
-        let result = doc_to_string(generate_integer_bif("*", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'*'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_divide() {
-        let result = doc_to_string(generate_integer_bif("/", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'/'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_div() {
-        let result = doc_to_string(generate_integer_bif("div:", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'div'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_modulo() {
-        let result = doc_to_string(generate_integer_bif("%", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'rem'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_power() {
-        let result = doc_to_string(generate_integer_bif("**", &["Other".to_string()]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'erlang':'round'(call 'math':'pow'(\
-                 call 'erlang':'float'(Self), call 'erlang':'float'(Other)))"
-                    .to_string()
-            )
-        );
-    }
-
-    // Comparisons
-
-    #[test]
-    fn test_eq() {
-        let result = doc_to_string(generate_integer_bif("=:=", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'=:='(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_neq() {
-        let result = doc_to_string(generate_integer_bif("/=", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'/='(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_strict_neq() {
-        let result = doc_to_string(generate_integer_bif("=/=", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'=/='(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_lt() {
-        let result = doc_to_string(generate_integer_bif("<", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'<'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_gt() {
-        let result = doc_to_string(generate_integer_bif(">", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'>'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_le() {
-        let result = doc_to_string(generate_integer_bif("<=", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'=<'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_ge() {
-        let result = doc_to_string(generate_integer_bif(">=", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'>='(Self, Other)".to_string()));
-    }
-
-    // Conversion
-
-    #[test]
-    fn test_as_string() {
-        let result = doc_to_string(generate_integer_bif("asString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'integer_to_binary'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_print_string() {
-        let result = doc_to_string(generate_integer_bif("printString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'integer_to_binary'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_as_float() {
-        let result = doc_to_string(generate_integer_bif("asFloat", &[]));
-        assert_eq!(result, Some("call 'erlang':'float'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_parse_radix() {
-        let result = doc_to_string(generate_integer_bif(
-            "parse:radix:",
-            &["Text".to_string(), "Base".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_string':'parse_integer'(Text, Base)".to_string())
-        );
-    }
-
-    // Bitwise operations
-
-    #[test]
-    fn test_bit_and() {
-        let result = doc_to_string(generate_integer_bif("bitAnd:", &["Other".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'band'(Self, Other)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_bit_or() {
-        let result = doc_to_string(generate_integer_bif("bitOr:", &["Other".to_string()]));
-        assert_eq!(result, Some("call 'erlang':'bor'(Self, Other)".to_string()));
-    }
-
-    #[test]
-    fn test_bit_xor() {
-        let result = doc_to_string(generate_integer_bif("bitXor:", &["Other".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'bxor'(Self, Other)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_bit_not() {
-        let result = doc_to_string(generate_integer_bif("bitNot", &[]));
-        assert_eq!(result, Some("call 'erlang':'bnot'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_bit_shift_with_param() {
-        let result = doc_to_string(generate_integer_bif("bitShift:", &["N".to_string()]));
-        assert_eq!(
-            result,
-            Some(
-                "case call 'erlang':'>='(N, 0) of \
+    #[allow(clippy::too_many_lines)] // one contiguous table; splitting hurts readability
+    fn generate_integer_bif_table() {
+        assert_bif_table(
+            generate_integer_bif,
+            &[
+                // Arithmetic
+                (
+                    "test_plus",
+                    "+",
+                    &["Other"],
+                    "call 'erlang':'+'(Self, Other)",
+                ),
+                (
+                    "test_minus",
+                    "-",
+                    &["Other"],
+                    "call 'erlang':'-'(Self, Other)",
+                ),
+                (
+                    "test_multiply",
+                    "*",
+                    &["Other"],
+                    "call 'erlang':'*'(Self, Other)",
+                ),
+                (
+                    "test_divide",
+                    "/",
+                    &["Other"],
+                    "call 'erlang':'/'(Self, Other)",
+                ),
+                (
+                    "test_div",
+                    "div:",
+                    &["Other"],
+                    "call 'erlang':'div'(Self, Other)",
+                ),
+                (
+                    "test_modulo",
+                    "%",
+                    &["Other"],
+                    "call 'erlang':'rem'(Self, Other)",
+                ),
+                (
+                    "test_power",
+                    "**",
+                    &["Other"],
+                    "call 'erlang':'round'(call 'math':'pow'(\
+                 call 'erlang':'float'(Self), call 'erlang':'float'(Other)))",
+                ),
+                // Comparisons
+                (
+                    "test_eq",
+                    "=:=",
+                    &["Other"],
+                    "call 'erlang':'=:='(Self, Other)",
+                ),
+                (
+                    "test_neq",
+                    "/=",
+                    &["Other"],
+                    "call 'erlang':'/='(Self, Other)",
+                ),
+                (
+                    "test_strict_neq",
+                    "=/=",
+                    &["Other"],
+                    "call 'erlang':'=/='(Self, Other)",
+                ),
+                ("test_lt", "<", &["Other"], "call 'erlang':'<'(Self, Other)"),
+                ("test_gt", ">", &["Other"], "call 'erlang':'>'(Self, Other)"),
+                (
+                    "test_le",
+                    "<=",
+                    &["Other"],
+                    "call 'erlang':'=<'(Self, Other)",
+                ),
+                (
+                    "test_ge",
+                    ">=",
+                    &["Other"],
+                    "call 'erlang':'>='(Self, Other)",
+                ),
+                // Conversion
+                (
+                    "test_as_string",
+                    "asString",
+                    &[],
+                    "call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'integer_to_binary'(Self))",
+                ),
+                (
+                    "test_print_string",
+                    "printString",
+                    &[],
+                    "call 'beamtalk_primitive':'string_from_binary'(call 'erlang':'integer_to_binary'(Self))",
+                ),
+                (
+                    "test_as_float",
+                    "asFloat",
+                    &[],
+                    "call 'erlang':'float'(Self)",
+                ),
+                (
+                    "test_parse_radix",
+                    "parse:radix:",
+                    &["Text", "Base"],
+                    "call 'beamtalk_string':'parse_integer'(Text, Base)",
+                ),
+                // Bitwise operations
+                (
+                    "test_bit_and",
+                    "bitAnd:",
+                    &["Other"],
+                    "call 'erlang':'band'(Self, Other)",
+                ),
+                (
+                    "test_bit_or",
+                    "bitOr:",
+                    &["Other"],
+                    "call 'erlang':'bor'(Self, Other)",
+                ),
+                (
+                    "test_bit_xor",
+                    "bitXor:",
+                    &["Other"],
+                    "call 'erlang':'bxor'(Self, Other)",
+                ),
+                ("test_bit_not", "bitNot", &[], "call 'erlang':'bnot'(Self)"),
+                (
+                    "test_bit_shift_with_param",
+                    "bitShift:",
+                    &["N"],
+                    "case call 'erlang':'>='(N, 0) of \
                  'true' when 'true' -> call 'erlang':'bsl'(Self, N) \
-                 'false' when 'true' -> call 'erlang':'bsr'(Self, call 'erlang':'-'(0, N)) end"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_bit_shift_missing_param_returns_none() {
-        assert_eq!(doc_to_string(generate_integer_bif("bitShift:", &[])), None);
-    }
-
-    // Character predicates
-
-    #[test]
-    fn test_is_letter() {
-        let result = doc_to_string(generate_integer_bif("isLetter", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_letter'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_is_digit() {
-        let result = doc_to_string(generate_integer_bif("isDigit", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_digit'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_is_uppercase() {
-        let result = doc_to_string(generate_integer_bif("isUppercase", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_uppercase'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_is_lowercase() {
-        let result = doc_to_string(generate_integer_bif("isLowercase", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_lowercase'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_is_whitespace() {
-        let result = doc_to_string(generate_integer_bif("isWhitespace", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_character':'is_whitespace'(Self)".to_string())
-        );
-    }
-
-    // Math functions
-
-    #[test]
-    fn test_sqrt() {
-        let result = doc_to_string(generate_integer_bif("sqrt", &[]));
-        assert_eq!(
-            result,
-            Some("call 'math':'sqrt'(call 'erlang':'float'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_log() {
-        let result = doc_to_string(generate_integer_bif("log", &[]));
-        assert_eq!(
-            result,
-            Some("call 'math':'log'(call 'erlang':'float'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_ln() {
-        let result = doc_to_string(generate_integer_bif("ln", &[]));
-        assert_eq!(
-            result,
-            Some("call 'math':'log'(call 'erlang':'float'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_log2() {
-        let result = doc_to_string(generate_integer_bif("log2", &[]));
-        assert_eq!(
-            result,
-            Some("call 'math':'log2'(call 'erlang':'float'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_log10() {
-        let result = doc_to_string(generate_integer_bif("log10", &[]));
-        assert_eq!(
-            result,
-            Some("call 'math':'log10'(call 'erlang':'float'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_exp() {
-        let result = doc_to_string(generate_integer_bif("exp", &[]));
-        assert_eq!(
-            result,
-            Some("call 'math':'exp'(call 'erlang':'float'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_raised_to_with_param() {
-        let result = doc_to_string(generate_integer_bif("raisedTo:", &["Exp".to_string()]));
-        assert_eq!(
-            result,
-            Some(
-                "case call 'erlang':'is_integer'(Exp) of \
+                 'false' when 'true' -> call 'erlang':'bsr'(Self, call 'erlang':'-'(0, N)) end",
+                ),
+                // Character predicates
+                (
+                    "test_is_letter",
+                    "isLetter",
+                    &[],
+                    "call 'beamtalk_character':'is_letter'(Self)",
+                ),
+                (
+                    "test_is_digit",
+                    "isDigit",
+                    &[],
+                    "call 'beamtalk_character':'is_digit'(Self)",
+                ),
+                (
+                    "test_is_uppercase",
+                    "isUppercase",
+                    &[],
+                    "call 'beamtalk_character':'is_uppercase'(Self)",
+                ),
+                (
+                    "test_is_lowercase",
+                    "isLowercase",
+                    &[],
+                    "call 'beamtalk_character':'is_lowercase'(Self)",
+                ),
+                (
+                    "test_is_whitespace",
+                    "isWhitespace",
+                    &[],
+                    "call 'beamtalk_character':'is_whitespace'(Self)",
+                ),
+                // Math functions
+                (
+                    "test_sqrt",
+                    "sqrt",
+                    &[],
+                    "call 'math':'sqrt'(call 'erlang':'float'(Self))",
+                ),
+                (
+                    "test_log",
+                    "log",
+                    &[],
+                    "call 'math':'log'(call 'erlang':'float'(Self))",
+                ),
+                (
+                    "test_ln",
+                    "ln",
+                    &[],
+                    "call 'math':'log'(call 'erlang':'float'(Self))",
+                ),
+                (
+                    "test_log2",
+                    "log2",
+                    &[],
+                    "call 'math':'log2'(call 'erlang':'float'(Self))",
+                ),
+                (
+                    "test_log10",
+                    "log10",
+                    &[],
+                    "call 'math':'log10'(call 'erlang':'float'(Self))",
+                ),
+                (
+                    "test_exp",
+                    "exp",
+                    &[],
+                    "call 'math':'exp'(call 'erlang':'float'(Self))",
+                ),
+                (
+                    "test_raised_to_with_param",
+                    "raisedTo:",
+                    &["Exp"],
+                    "case call 'erlang':'is_integer'(Exp) of \
                  'true' when 'true' -> \
                    case call 'erlang':'>='(Exp, 0) of \
                      'true' when 'true' -> \
@@ -432,31 +347,32 @@ mod tests {
                    end \
                  'false' when 'true' -> \
                    call 'math':'pow'(call 'erlang':'float'(Self), call 'erlang':'float'(Exp)) \
-               end"
-                    .to_string()
-            )
+               end",
+                ),
+            ],
         );
     }
 
     #[test]
-    fn test_raised_to_missing_param_returns_none() {
-        assert_eq!(doc_to_string(generate_integer_bif("raisedTo:", &[])), None);
-    }
-
-    // Edge cases
-
-    #[test]
-    fn test_plus_missing_param_returns_none() {
-        assert_eq!(doc_to_string(generate_integer_bif("+", &[])), None);
-    }
-
-    #[test]
-    fn test_power_missing_param_returns_none() {
-        assert_eq!(doc_to_string(generate_integer_bif("**", &[])), None);
-    }
-
-    #[test]
-    fn test_unknown_selector_returns_none() {
-        assert_eq!(doc_to_string(generate_integer_bif("notAMethod", &[])), None);
+    fn generate_integer_bif_none_table() {
+        assert_bif_none_table(
+            generate_integer_bif,
+            &[
+                (
+                    "test_bit_shift_missing_param_returns_none",
+                    "bitShift:",
+                    &[],
+                ),
+                (
+                    "test_raised_to_missing_param_returns_none",
+                    "raisedTo:",
+                    &[],
+                ),
+                // Edge cases
+                ("test_plus_missing_param_returns_none", "+", &[]),
+                ("test_power_missing_param_returns_none", "**", &[]),
+                ("test_unknown_selector_returns_none", "notAMethod", &[]),
+            ],
+        );
     }
 }

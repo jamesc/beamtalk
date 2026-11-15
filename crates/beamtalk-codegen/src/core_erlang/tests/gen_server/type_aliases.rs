@@ -9,40 +9,12 @@ use super::*;
 #[test]
 fn generate_module_with_pre_class_hierarchy_does_not_panic() {
     use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
-    use std::collections::HashMap;
 
     let src = "Object subclass: MyService\n  greet => \"hello\"";
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
 
-    let pre_class = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: ecow::EcoString::from("Helper"),
-        superclass: Some(ecow::EcoString::from("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
-    };
+    let pre_class = ClassInfo::test("Helper", Some("Object"));
 
     let result = generate_module(
         &module,

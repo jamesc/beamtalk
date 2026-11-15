@@ -14,8 +14,10 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
 use ecow::EcoString;
 
 use super::super::TypeChecker;
+use super::super::diagnostic_facts::{
+    AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass,
+};
 use super::super::shape_assignability::ShapeMismatch;
-use super::super::types::{AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass};
 
 impl TypeChecker {
     /// Render an [`AssignmentTypeMismatch`] detected by

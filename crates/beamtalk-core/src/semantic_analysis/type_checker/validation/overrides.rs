@@ -14,9 +14,9 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 
 use super::super::TypeChecker;
+use super::super::diagnostic_facts::OverrideReturnWidening;
 use super::super::shape_assignability::declared_type_has_shape;
 use super::super::type_resolver;
-use super::super::types::OverrideReturnWidening;
 
 impl TypeChecker {
     /// Emit an error for any parameter annotated with `Self`.
