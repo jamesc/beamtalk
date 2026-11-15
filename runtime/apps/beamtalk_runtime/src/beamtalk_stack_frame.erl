@@ -114,7 +114,8 @@ loaded class modules share it. Which frames are listed is not decided here.
     structured_frame/1,
     structured_frames/1,
     frame_source_path/1,
-    lookup_method_line/2
+    lookup_method_line/2,
+    relative_to/3
 ]).
 
 -doc """
@@ -865,22 +866,79 @@ format_file_path(Module, File) ->
 
 -spec make_relative(string()) -> string().
 make_relative(File) ->
-    case filename:pathtype(File) of
-        relative ->
+    Cwd =
+        case file:get_cwd() of
+            {ok, Dir} -> Dir;
+            _ -> undefined
+        end,
+    relative_to(File, Cwd, os:type() =:= {win32, nt}).
+
+-doc """
+Render an absolute `File` relative to `Cwd` with `/` separators (a relative
+`File` is returned unchanged), falling back to the basename when `File` is not
+under `Cwd` (BT-4839). `Windows` selects Windows path rules: `\` and `/` both
+separate components, a verbatim `\\?\` prefix is ignored, and components
+compare case-insensitively (`d:` vs `D:`), so a file under the cwd is recognised
+whichever way the compiler and `file:get_cwd/0` spelled the path. The rules
+are a parameter so the Windows behaviour is testable on any OS.
+""".
+-spec relative_to(string(), string() | undefined, boolean()) -> string().
+relative_to(File, Cwd, Windows) ->
+    case path_is_absolute(File, Windows) of
+        false ->
             File;
-        _ ->
-            case file:get_cwd() of
-                {ok, Cwd} ->
-                    CwdComps = filename:split(Cwd),
-                    FileComps = filename:split(File),
-                    case lists:prefix(CwdComps, FileComps) of
-                        true -> filename:join(lists:nthtail(length(CwdComps), FileComps));
-                        false -> filename:basename(File)
-                    end;
+        true ->
+            FileComps = path_components(File, Windows),
+            case Cwd of
+                undefined ->
+                    last_component(FileComps);
                 _ ->
-                    filename:basename(File)
+                    CwdComps = path_components(Cwd, Windows),
+                    case
+                        length(FileComps) > length(CwdComps) andalso
+                            comps_prefix(CwdComps, FileComps, Windows)
+                    of
+                        true -> string:join(lists:nthtail(length(CwdComps), FileComps), "/");
+                        false -> last_component(FileComps)
+                    end
             end
     end.
+
+-spec path_is_absolute(string(), boolean()) -> boolean().
+path_is_absolute(File, true) ->
+    case strip_verbatim(File) of
+        [C, $: | _] when (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z) -> true;
+        [S | _] when S =:= $/; S =:= $\\ -> true;
+        _ -> false
+    end;
+path_is_absolute(File, false) ->
+    filename:pathtype(File) =/= relative.
+
+%% Rust's `canonicalize` records Windows paths in verbatim form
+%% (`\\?\C:\...`); the prefix carries no path component.
+-spec strip_verbatim(string()) -> string().
+strip_verbatim("\\\\?\\UNC\\" ++ Rest) -> "\\\\" ++ Rest;
+strip_verbatim("\\\\?\\" ++ Rest) -> Rest;
+strip_verbatim("//?/" ++ Rest) -> Rest;
+strip_verbatim(Path) -> Path.
+
+-spec path_components(string(), boolean()) -> [string()].
+path_components(Path, true) ->
+    string:tokens(strip_verbatim(Path), "/\\");
+path_components(Path, false) ->
+    filename:split(Path).
+
+-spec comps_prefix([string()], [string()], boolean()) -> boolean().
+comps_prefix(Prefix, Comps, true) ->
+    lists:prefix(
+        [string:lowercase(C) || C <- Prefix], [string:lowercase(C) || C <- Comps]
+    );
+comps_prefix(Prefix, Comps, false) ->
+    lists:prefix(Prefix, Comps).
+
+-spec last_component([string()]) -> string().
+last_component([]) -> "";
+last_component(Comps) -> lists:last(Comps).
 
 -spec fun_name_parts(atom()) -> {binary(), boolean()}.
 fun_name_parts(Fun) ->
