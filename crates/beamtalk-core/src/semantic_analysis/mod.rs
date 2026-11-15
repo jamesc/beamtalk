@@ -469,7 +469,7 @@ impl<'a> AnalysisContext<'a> {
     /// Applies the subset of [`crate::CompilerOptions`] that semantic
     /// analysis cares about: `stdlib_mode`, `skip_module_expression_lint`,
     /// `current_package`, `knowledge_scope`, `dependency_extensions_unknown`,
-    /// `known_erlang_modules`.
+    /// `known_erlang_modules`, `known_packages`.
     #[must_use]
     pub fn with_options(mut self, options: &'a crate::CompilerOptions) -> Self {
         self.stdlib_mode = options.stdlib_mode;
@@ -620,7 +620,7 @@ impl<'a> AnalysisContext<'a> {
 /// implicitly.
 ///
 /// The one rule every compile path shares (`build`, `check`, `lint`, `test`,
-/// the compiler port behind the REPL, the LSP). Callers with no package
+/// the compiler port behind the REPL; the LSP is a known gap, BT-4928). Callers with no package
 /// (single files, an unreadable manifest) pass no set at all, which skips
 /// the check.
 #[must_use]
