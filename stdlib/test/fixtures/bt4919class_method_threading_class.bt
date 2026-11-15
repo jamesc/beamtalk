@@ -1,0 +1,43 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4919: class methods classify their non-last statements with
+// `classify_vt_body_expr`, so a loop, fold, conditional or `on:do:` that
+// threads a method local in non-last position must keep rebinding it.
+
+Object subclass: Bt4919ClassMethodThreadingClass
+
+  class loopSum: n =>
+    total := 0
+    1 to: n do: [:i | total := total + i]
+    total
+
+  class doSum: items =>
+    total := 0
+    items do: [:e | total := total + e]
+    total
+
+  class foldSum: items =>
+    total := 0
+    items collect: [:e | total := total + e]
+    total
+
+  class conditional: flag =>
+    r := 0
+    flag ifTrue: [r := 5]
+    r
+
+  class whileCount: n =>
+    i := 0
+    [i < n] whileTrue: [i := i + 1]
+    i
+
+  class handledQuietly =>
+    r := 0
+    [r := 1] on: Error do: [:e | r := 99]
+    r
+
+  class handledRaise =>
+    r := 0
+    [Error signal: "x"] on: Error do: [:e | r := 7]
+    r

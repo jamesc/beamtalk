@@ -2589,7 +2589,7 @@ fn test_field_operation_codegen_table() {
         },
         // `self clearField: name` inside an actor must NOT route through
         // sync_send (deadlock risk) — must thread state via maps:remove
-        // (`generate_self_clear_field_open`, mirroring `fieldAt:put:`'s
+        // (`lower_stmt_self_clear_field`, mirroring `fieldAt:put:`'s
         // `maps:put`; ADR 0124 §4f).
         FieldCase {
             label: "self clearField: does not sync_send and threads state via maps:remove",

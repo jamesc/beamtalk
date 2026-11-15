@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4919: the actor a last-position field write calls (a synchronous send
+// that runs user code). See bt4919last_field_write_test.bt.
+
+Actor subclass: Bt4919LastFieldWriteHelper
+  state: calls :: Integer = 0
+
+  double: x =>
+    self.calls := self.calls + 1
+    x * 2
+
+  calls => self.calls
