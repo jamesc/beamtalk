@@ -943,7 +943,8 @@ impl CoreErlangGenerator {
                 BodyKind::FoldlSort { state_key_var } => {
                     self.lower_foldl_epilogue_sort(state_key_var, cx, &mut stmts);
                 }
-                _ => {}
+                // These bind no predicate variable, so they have no epilogue.
+                BodyKind::FoldlDo | BodyKind::FoldlCollect | BodyKind::FoldlInject => {}
             }
         }
 
