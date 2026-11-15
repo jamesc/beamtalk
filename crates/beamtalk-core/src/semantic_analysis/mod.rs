@@ -88,8 +88,9 @@ pub use block_facts::analyze_block;
 pub use class_hierarchy::ClassHierarchy;
 pub use class_kind_writeback::apply_class_kind_writeback;
 pub use class_module_registry::{
-    ClassModuleRegistry, ClassModuleRegistryError, ModuleName, ModuleNamingScheme, PackageId,
-    RegistryEntry, relative_module_segments, validate_stdlib_module_name,
+    ClassModuleRegistry, ClassModuleRegistryError, ModuleName, ModuleNamingScheme, ModuleRootKind,
+    PackageId, RegistryEntry, module_name_for_path, relative_module_segments,
+    validate_stdlib_module_name,
 };
 pub use collision_checker::{
     DepInfo, DependencyRegistry, ShadowedClassNames, build_dependency_registry,
