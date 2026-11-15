@@ -269,6 +269,11 @@ fn count_args(text: &str) -> Option<usize> {
             '-' if chars.peek() == Some(&'>') => {
                 chars.next();
             }
+            // `=>` in an Erlang map literal (the CLI's eval strings) likewise.
+            '=' if chars.peek() == Some(&'>') => {
+                chars.next();
+                saw_arg = true;
+            }
             '(' | '[' | '{' | '<' => {
                 saw_arg = true;
                 depth += 1;
@@ -608,6 +613,131 @@ fn every_runtime_call_the_codegen_emits_is_exported() {
          them from the runtime module, or delete the codegen arm if it is \
          unreachable:\n  {}",
         problems.join("\n  ")
+    );
+}
+
+/// Calls the CLI writes as plain Erlang text (`beamtalk_m:f(Args)`) in the
+/// eval strings it hands to `erl -eval` / `escript` (BT-4901): REPL start-up,
+/// `beamtalk run`, `beamtalk test`, the release assembler. Unlike the codegen,
+/// these are Erlang source, not Core Erlang, so the atoms are usually bare and
+/// the argument list may continue across `\`-joined lines.
+///
+/// Only production code is read (comments and the in-file unit tests are
+/// dropped, as for the codegen scan). A Rust path (`beamtalk_core::x`) is not a
+/// call: the `:` must not be followed by another `:`.
+fn cli_eval_string_calls(root: &Path) -> Vec<EmittedCall> {
+    let mut files = Vec::new();
+    non_test_rust_files(&root.join("crates/beamtalk-cli/src"), &mut files);
+    let mut out = Vec::new();
+    for file in files {
+        let src = std::fs::read_to_string(&file)
+            .unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
+        let rel = origin_path(&file, root);
+        // An escaped quote would end `count_args`' string skipping early.
+        let text = production_source(&src).replace("\\\"", "Q");
+        let bytes = text.as_bytes();
+        let mut from = 0;
+        while let Some(rel_pos) = text[from..].find("beamtalk_") {
+            let start = from + rel_pos;
+            from = start + "beamtalk_".len();
+            if start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_') {
+                continue;
+            }
+            let module_len = text[start..]
+                .bytes()
+                .take_while(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'_')
+                .count();
+            let after = &text[start + module_len..];
+            let Some(fn_part) = after.strip_prefix(':') else {
+                continue;
+            };
+            if fn_part.starts_with(':') {
+                continue;
+            }
+            let (quoted, fn_part) = fn_part
+                .strip_prefix('\'')
+                .map_or((false, fn_part), |r| (true, r));
+            let function: String = fn_part
+                .bytes()
+                .take_while(|b| b.is_ascii_alphanumeric() || *b == b'_')
+                .map(char::from)
+                .collect();
+            if function.is_empty() {
+                continue;
+            }
+            let tail = &fn_part[function.len()..];
+            let tail = if quoted {
+                tail.strip_prefix('\'')
+            } else {
+                Some(tail)
+            };
+            let Some(args) = tail.and_then(|t| t.strip_prefix('(')) else {
+                continue;
+            };
+            out.push(EmittedCall {
+                module: text[start..start + module_len].to_string(),
+                function,
+                arity: count_args(args),
+                origin: format!("{rel}:{}", text[..start].matches('\n').count() + 1),
+            });
+        }
+    }
+    out
+}
+
+#[test]
+fn every_runtime_call_in_a_cli_eval_string_is_exported() {
+    let root = super::tests::repo_root();
+    let exports = runtime_exports(&root);
+    let calls = cli_eval_string_calls(&root);
+    // A floor against the scan silently finding nothing (the issue lists
+    // twelve sites; the scan sees more because it reads every call).
+    assert!(
+        calls.len() >= 12,
+        "CLI eval-string scan found only {} runtime calls: {calls:#?}",
+        calls.len()
+    );
+    // The arity must be readable for the sites the issue names, so a
+    // parsing regression cannot turn the check into a name-only one.
+    for needle in ["repl_startup.rs", "run.rs", "release/assembly.rs"] {
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.origin.contains(needle) && c.arity.is_some()),
+            "no arity-checked call from {needle}: {calls:#?}"
+        );
+    }
+    let problems = unexported(&calls, &exports);
+    assert!(
+        problems.is_empty(),
+        "the CLI evals runtime functions that are not exported:\n  {}",
+        problems.join("\n  ")
+    );
+}
+
+#[test]
+fn cli_scan_reads_bare_and_quoted_calls_and_skips_rust_paths() {
+    // Exercise the reader on a synthetic root.
+    let root = std::env::temp_dir().join(format!("bt4901-cli-scan-{}", std::process::id()));
+    let src = root.join("crates/beamtalk-cli/src");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        src.join("x.rs"),
+        "use beamtalk_core::thing;\nconst E: &str = \"beamtalk_m:f(A, [B, C]), beamtalk_m:'g'(), \\\"q\\\"\";\n// beamtalk_m:commented(1)\n",
+    )
+    .unwrap();
+    let calls = cli_eval_string_calls(&root);
+    let _ = std::fs::remove_dir_all(&root);
+    let shown: Vec<(String, Option<usize>)> = calls
+        .iter()
+        .map(|c| (format!("{}:{}", c.module, c.function), c.arity))
+        .collect();
+    assert_eq!(
+        shown,
+        vec![
+            ("beamtalk_m:f".to_string(), Some(2)),
+            ("beamtalk_m:g".to_string(), Some(0)),
+        ]
     );
 }
 

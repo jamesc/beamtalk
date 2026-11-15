@@ -14,6 +14,7 @@
 use crate::core_erlang::CodeGenContext;
 use crate::core_erlang::actor_state_access::{actor_state_call, actor_state_helper};
 use crate::core_erlang::generator::CoreErlangGenerator;
+use crate::core_erlang::sentinel_tags;
 use crate::core_erlang::synced_call::ActorStateSource;
 use crate::core_erlang::threaded_ir::{self, NlrCarry};
 use beamtalk_cerl_doc::docvec;
@@ -221,7 +222,9 @@ impl NlrCatchVars {
             leaf::var(self.err_var.clone()),
             "} of",
             nest(INDENT + 4, line()),
-            "<{'throw', {'$bt_nlr', ",
+            "<{'throw', {",
+            leaf::atom(sentinel_tags::NLR),
+            ", ",
             leaf::var(self.ctk_var.clone()),
             ", ",
             leaf::var(self.val_var.clone()),

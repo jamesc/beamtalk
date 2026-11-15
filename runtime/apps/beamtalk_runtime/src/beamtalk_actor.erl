@@ -233,11 +233,11 @@ handle_getValue([], State) ->
 %% per sync call, nothing otherwise.
 -define(CALL_FROM_KEY, '$bt_call_from').
 
-%% BT-3992: start-args key carrying the starter's `{StarterPid, AckRef}`
-%% initialize-ack target (see with_init_ack/1 and await_initialize/3), and
-%% the process-dictionary key the actor keeps it under between init/1 and
-%% the `initialize` step of handle_continue/2.
--define(BT_INIT_ACK_KEY, '$bt_init_ack').
+%% BT-3992: `?BT_INIT_ACK_KEY` (beamtalk_sentinel_tags.hrl, generated) is the
+%% start-args key carrying the starter's `{StarterPid, AckRef}` initialize-ack
+%% target (see with_init_ack/1 and await_initialize/3), and the process-dictionary
+%% key the actor keeps it under between init/1 and the `initialize` step of
+%% handle_continue/2.
 
 %% BT-3992: how long a starter waits for `initialize` to finish —
 %% `?BT_INITIALIZE_TIMEOUT` lives in beamtalk.hrl (BT-4033: shared with
@@ -1525,7 +1525,7 @@ async_send(ActorPid, Selector, Args, FuturePid) ->
                             {ok, WireArgs} ->
                                 gen_server:cast(
                                     ActorPid,
-                                    {'$beamtalk_wire', ?BT_WIRE_VERSION, async, Selector, WireArgs,
+                                    {?BT_WIRE_TAG, ?BT_WIRE_VERSION, async, Selector, WireArgs,
                                         FuturePid, PropCtx}
                                 ),
                                 spawn_future_watcher(ActorPid, FuturePid, Selector),
@@ -1613,7 +1613,7 @@ cast_send_pid(ActorPid, Selector, Args, ClassHint) ->
                     {ok, WireArgs} ->
                         gen_server:cast(
                             ActorPid,
-                            {'$beamtalk_wire', ?BT_WIRE_VERSION, cast, Selector, WireArgs, PropCtx}
+                            {?BT_WIRE_TAG, ?BT_WIRE_VERSION, cast, Selector, WireArgs, PropCtx}
                         ),
                         {ok, cast};
                     {error, Error} ->
@@ -1945,7 +1945,7 @@ wire_sync_call(ActorPid, Selector, Args, PropCtx, CallTimeout) ->
         true ->
             case beamtalk_wire:encode(Args) of
                 {ok, WireArgs} ->
-                    Msg = {'$beamtalk_wire', ?BT_WIRE_VERSION, call, Selector, WireArgs, PropCtx},
+                    Msg = {?BT_WIRE_TAG, ?BT_WIRE_VERSION, call, Selector, WireArgs, PropCtx},
                     RawResult = local_call(ActorPid, Msg, CallTimeout),
                     decode_call_result(RawResult, Selector);
                 {error, EncErr} ->
@@ -2152,7 +2152,7 @@ both the stashed actor state and the call stack.
 restore_dispatch_pdict(OldState) ->
     ok = beamtalk_actor_state:uninstall(OldState),
     _ = erase(?CALL_FROM_KEY),
-    erase('$bt_call_stack'),
+    erase(?BT_CALL_STACK_KEY),
     ok.
 
 -doc """
@@ -2164,7 +2164,7 @@ Raises a structured deadlock_detected error with the cycle path.
 """.
 -spec check_call_stack(pid(), atom()) -> ok.
 check_call_stack(ActorPid, Selector) ->
-    case get('$bt_call_stack') of
+    case get(?BT_CALL_STACK_KEY) of
         undefined ->
             ok;
         CallStack ->
@@ -3123,7 +3123,7 @@ because the sender is not blocked, so B calling A back is not a deadlock.
 -spec get_sync_propagated_ctx() -> map().
 get_sync_propagated_ctx() ->
     ExistingStack =
-        case get('$bt_call_stack') of
+        case get(?BT_CALL_STACK_KEY) of
             undefined -> [];
             CS -> CS
         end,
@@ -3212,12 +3212,12 @@ restore_propagated_ctx(PropCtx) when is_map(PropCtx) ->
     %% sync_send checks this before gen_server:call to detect A->B->C->A cycles.
     case maps:get(call_stack, PropCtx, undefined) of
         undefined ->
-            erase('$bt_call_stack');
+            erase(?BT_CALL_STACK_KEY);
         CallStack when is_list(CallStack) ->
-            put('$bt_call_stack', CallStack);
+            put(?BT_CALL_STACK_KEY, CallStack);
         _ ->
             %% Ignore invalid values from untrusted/forward-compatible payloads
-            erase('$bt_call_stack')
+            erase(?BT_CALL_STACK_KEY)
     end,
     ok;
 restore_propagated_ctx(_) ->
@@ -3403,12 +3403,12 @@ handle_continue(_Continue, State) ->
 %% turns into a livelock, not a crash. Restricting `kind` here means any
 %% such message instead falls through to the ordinary "unknown cast
 %% message" catch-all below (log and ignore).
-do_handle_cast({'$beamtalk_wire', _, cast, _, _, _} = Msg, State) ->
+do_handle_cast({?BT_WIRE_TAG, _, cast, _, _, _} = Msg, State) ->
     case decode_wire_cast(Msg) of
         {redispatch, Msg2} -> do_handle_cast(Msg2, State);
         noreply -> {noreply, State}
     end;
-do_handle_cast({'$beamtalk_wire', _, async, _, _, _, _} = Msg, State) ->
+do_handle_cast({?BT_WIRE_TAG, _, async, _, _, _, _} = Msg, State) ->
     case decode_wire_cast(Msg) of
         {redispatch, Msg2} -> do_handle_cast(Msg2, State);
         noreply -> {noreply, State}
@@ -3555,7 +3555,7 @@ handle_call(Msg, From, State) ->
 %% unexpected-kind message back unchanged, re-entering this same clause
 %% with the identical term and livelocking (worse here, since the caller
 %% also blocks forever in `gen_server:call` waiting on a reply).
-do_handle_call({'$beamtalk_wire', _, call, _, _, _} = Msg, From, State) ->
+do_handle_call({?BT_WIRE_TAG, _, call, _, _, _} = Msg, From, State) ->
     case decode_wire_call(Msg) of
         {redispatch, Msg2} -> do_handle_call(Msg2, From, State);
         {reply, ReplyVal} -> {reply, ReplyVal, State}
@@ -3737,14 +3737,14 @@ Any other message (not a wire envelope) passes through unchanged as
 through this function uniformly if it chooses to.
 """.
 -spec decode_wire_call(term()) -> {redispatch, term()} | {reply, term()}.
-decode_wire_call({'$beamtalk_wire', ?BT_WIRE_VERSION, call, Selector, WireArgs, PropCtx}) ->
+decode_wire_call({?BT_WIRE_TAG, ?BT_WIRE_VERSION, call, Selector, WireArgs, PropCtx}) ->
     case beamtalk_wire:decode(WireArgs) of
         {ok, Args} ->
             {redispatch, {Selector, Args, PropCtx}};
         {error, Error} ->
             {reply, {error, Error#beamtalk_error{selector = Selector}}}
     end;
-decode_wire_call({'$beamtalk_wire', SentVersion, call, Selector, _WireArgs, _PropCtx}) ->
+decode_wire_call({?BT_WIRE_TAG, SentVersion, call, Selector, _WireArgs, _PropCtx}) ->
     {reply, {error, wire_version_unsupported_error(Selector, SentVersion)}};
 decode_wire_call(Msg) ->
     {redispatch, Msg}.
@@ -3788,7 +3788,7 @@ un-wire-tagged async cast to a compiled actor already does today
 """.
 -spec decode_wire_cast(term()) -> {redispatch, term()} | noreply.
 decode_wire_cast(
-    {'$beamtalk_wire', ?BT_WIRE_VERSION, async, Selector, WireArgs, FuturePid, PropCtx}
+    {?BT_WIRE_TAG, ?BT_WIRE_VERSION, async, Selector, WireArgs, FuturePid, PropCtx}
 ) ->
     case beamtalk_wire:decode(WireArgs) of
         {ok, Args} ->
@@ -3798,11 +3798,11 @@ decode_wire_cast(
             noreply
     end;
 decode_wire_cast(
-    {'$beamtalk_wire', SentVersion, async, Selector, _WireArgs, FuturePid, _PropCtx}
+    {?BT_WIRE_TAG, SentVersion, async, Selector, _WireArgs, FuturePid, _PropCtx}
 ) ->
     beamtalk_future:reject(FuturePid, wire_version_unsupported_error(Selector, SentVersion)),
     noreply;
-decode_wire_cast({'$beamtalk_wire', ?BT_WIRE_VERSION, cast, Selector, WireArgs, PropCtx}) ->
+decode_wire_cast({?BT_WIRE_TAG, ?BT_WIRE_VERSION, cast, Selector, WireArgs, PropCtx}) ->
     case beamtalk_wire:decode(WireArgs) of
         {ok, Args} ->
             {redispatch, {cast, Selector, Args, PropCtx}};
@@ -3810,7 +3810,7 @@ decode_wire_cast({'$beamtalk_wire', ?BT_WIRE_VERSION, cast, Selector, WireArgs, 
             log_wire_cast_rejected(Selector, Error),
             noreply
     end;
-decode_wire_cast({'$beamtalk_wire', SentVersion, cast, Selector, _WireArgs, _PropCtx}) ->
+decode_wire_cast({?BT_WIRE_TAG, SentVersion, cast, Selector, _WireArgs, _PropCtx}) ->
     log_wire_cast_rejected(Selector, wire_version_unsupported_error(Selector, SentVersion)),
     noreply;
 decode_wire_cast(Msg) ->
