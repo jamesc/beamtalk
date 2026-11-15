@@ -362,12 +362,10 @@ record_class_collision_warning(ClassName, OldModule, NewModule) ->
 Drain collision warnings for the given class names after a file load.
 Called by the REPL load handler after loading a file, to collect
 warnings and surface them to the client. Removes entries from the table.
-Drains ALL packages for each class name. Use
-drain_class_warnings_by_qualified_names/1 for per-package precision.
+Drains ALL packages for each class name.
 
 Non-atomic (`match_object` then `delete_object`) — a concurrent
-insert landing between the two survives, unlike
-`drain_class_warnings_by_qualified_names/1`'s atomic `ets:take/2`. Acceptable
+insert landing between the two survives. Acceptable
 here because "ALL packages for a class name" is inherently a wider,
 best-effort sweep (the caller already can't pin down which package's warning
 it wants); a warning added mid-drain is picked up by the next drain instead of
