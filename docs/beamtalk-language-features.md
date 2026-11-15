@@ -8097,7 +8097,7 @@ Internal class 'TokenBuffer' appears in public signature of 'Parser >> tokenize:
   help: 'TokenBuffer' is declared 'internal' — make it public, or change the type
 ```
 
-All methods on an internal class are effectively internal. The method-level modifier is only meaningful on public classes.
+All methods on an internal class are effectively internal. The method-level modifier is only meaningful on public classes. The check applies equally to a standalone extension method (`Parser >> tokenize: …`), wherever it is declared.
 
 #### Metadata
 

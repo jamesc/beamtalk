@@ -1099,14 +1099,22 @@ api_find_field_writers() ->
     ?assert(lists:member(1, Lines)).
 
 api_find_ffi_sites() ->
-    {ok, Lines} =
-        beamtalk_compiler_server:find_ffi_sites_in_source(
-            <<"(Erlang lists) reverse: x">>, lists, reverse, any
-        ),
-    %% BT-4908: asserting `[1]` failed (got `[]`) with the compiler port up, although
-    %% beamtalk_compiler_port_tests documents this source as an FFI call site. Left as a
-    %% type check pending investigation; see the BT-4908 comments.
-    ?assert(is_list(Lines)).
+    %% BT-4908: the source must be a method definition (the port wraps it in a
+    %% synthetic class); a bare expression has no method to scope the call to and
+    %% yields no sites.
+    Source = <<"rev: x => (Erlang lists) reverse: x">>,
+    ?assertEqual(
+        {ok, [1]},
+        beamtalk_compiler_server:find_ffi_sites_in_source(Source, lists, reverse, any)
+    ),
+    ?assertEqual(
+        {ok, [1]},
+        beamtalk_compiler_server:find_ffi_sites_in_source(Source, lists, reverse, 1)
+    ),
+    ?assertEqual(
+        {ok, []},
+        beamtalk_compiler_server:find_ffi_sites_in_source(Source, lists, reverse, 2)
+    ).
 
 api_resolve_method_span() ->
     Source = <<

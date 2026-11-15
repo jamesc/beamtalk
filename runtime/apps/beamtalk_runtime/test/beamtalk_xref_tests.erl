@@ -162,54 +162,52 @@ value_class_with_synthetic_xref() ->
 %%====================================================================
 
 register_and_read_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
+    {foreach, fun setup/0, fun cleanup/1, [
+        ?_test(begin
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
 
-                %% defined_selectors
-                Instance = lists:sort(beamtalk_xref:defined_selectors('Counter', false)),
-                ?assertEqual(['increment', 'value'], Instance),
-                ?assertEqual(['new'], beamtalk_xref:defined_selectors('Counter', true)),
-                ?assertEqual([], beamtalk_xref:defined_selectors('NoSuchClass', false)),
+            %% defined_selectors
+            Instance = lists:sort(beamtalk_xref:defined_selectors('Counter', false)),
+            ?assertEqual(['increment', 'value'], Instance),
+            ?assertEqual(['new'], beamtalk_xref:defined_selectors('Counter', true)),
+            ?assertEqual([], beamtalk_xref:defined_selectors('NoSuchClass', false)),
 
-                %% implementors_of
-                ?assertEqual([{'Counter', false}], beamtalk_xref:implementors_of('increment')),
-                ?assertEqual([{'Counter', true}], beamtalk_xref:implementors_of('new')),
-                ?assertEqual([], beamtalk_xref:implementors_of('noSuchSelector')),
+            %% implementors_of
+            ?assertEqual([{'Counter', false}], beamtalk_xref:implementors_of('increment')),
+            ?assertEqual([{'Counter', true}], beamtalk_xref:implementors_of('new')),
+            ?assertEqual([], beamtalk_xref:implementors_of('noSuchSelector')),
 
-                %% senders_of
-                PlusSites = beamtalk_xref:senders_of('+'),
-                ?assertEqual(1, length(PlusSites)),
-                [PlusSite] = PlusSites,
-                ?assertEqual('Counter', maps:get(owner, PlusSite)),
-                ?assertEqual('increment', maps:get(method, PlusSite)),
-                ?assertEqual(false, maps:get(class_side, PlusSite)),
-                ?assertEqual(self_recv, maps:get(recv_kind, PlusSite)),
-                ?assertEqual(17, maps:get(line, PlusSite)),
-                ?assertEqual(1, maps:get(gen, PlusSite)),
-                %% `counter_xref/0`'s `+` send carries no `recv_type`
-                %% key at all (a pre-ADR-0115 shape) — `insert_one_method`
-                %% must default it to `dynamic`, exactly like `recv_kind`
-                %% already defaults to `other` for legacy rows.
-                ?assertEqual(dynamic, maps:get(recv_type, PlusSite)),
+            %% senders_of
+            PlusSites = beamtalk_xref:senders_of('+'),
+            ?assertEqual(1, length(PlusSites)),
+            [PlusSite] = PlusSites,
+            ?assertEqual('Counter', maps:get(owner, PlusSite)),
+            ?assertEqual('increment', maps:get(method, PlusSite)),
+            ?assertEqual(false, maps:get(class_side, PlusSite)),
+            ?assertEqual(self_recv, maps:get(recv_kind, PlusSite)),
+            ?assertEqual(17, maps:get(line, PlusSite)),
+            ?assertEqual(1, maps:get(gen, PlusSite)),
+            %% `counter_xref/0`'s `+` send carries no `recv_type`
+            %% key at all (a pre-ADR-0115 shape) — `insert_one_method`
+            %% must default it to `dynamic`, exactly like `recv_kind`
+            %% already defaults to `other` for legacy rows.
+            ?assertEqual(dynamic, maps:get(recv_type, PlusSite)),
 
-                BasicNewSites = beamtalk_xref:senders_of('basicNew'),
-                ?assertEqual(1, length(BasicNewSites)),
-                [BasicNewSite] = BasicNewSites,
-                ?assertEqual(true, maps:get(class_side, BasicNewSite)),
-                ?assertEqual(super_recv, maps:get(recv_kind, BasicNewSite)),
+            BasicNewSites = beamtalk_xref:senders_of('basicNew'),
+            ?assertEqual(1, length(BasicNewSites)),
+            [BasicNewSite] = BasicNewSites,
+            ?assertEqual(true, maps:get(class_side, BasicNewSite)),
+            ?assertEqual(super_recv, maps:get(recv_kind, BasicNewSite)),
 
-                %% references_to
-                IntRefs = beamtalk_xref:references_to('Integer'),
-                ?assertEqual(1, length(IntRefs)),
-                [IntRef] = IntRefs,
-                ?assertEqual('Counter', maps:get(owner, IntRef)),
-                ?assertEqual('increment', maps:get(method, IntRef)),
-                ?assertEqual([], beamtalk_xref:references_to('NoSuchClass'))
-            end)
-        ]
-    end}.
+            %% references_to
+            IntRefs = beamtalk_xref:references_to('Integer'),
+            ?assertEqual(1, length(IntRefs)),
+            [IntRef] = IntRefs,
+            ?assertEqual('Counter', maps:get(owner, IntRef)),
+            ?assertEqual('increment', maps:get(method, IntRef)),
+            ?assertEqual([], beamtalk_xref:references_to('NoSuchClass'))
+        end)
+    ]}.
 
 %%====================================================================
 %% ADR 0115 Phase 2: recv_type propagation
@@ -237,900 +235,767 @@ typed_xref() ->
     ].
 
 recv_type_propagates_through_senders_of_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                ok = beamtalk_xref:register_class('Runner', typed_xref()),
+    {foreach, fun setup/0, fun cleanup/1, [
+        ?_test(begin
+            ok = beamtalk_xref:register_class('Runner', typed_xref()),
 
-                [PingSite] = beamtalk_xref:senders_of('ping'),
-                ?assertEqual('Widget', maps:get(recv_type, PingSite)),
+            [PingSite] = beamtalk_xref:senders_of('ping'),
+            ?assertEqual('Widget', maps:get(recv_type, PingSite)),
 
-                [NewSite] = beamtalk_xref:senders_of('new'),
-                ?assertEqual('Widget class', maps:get(recv_type, NewSite)),
+            [NewSite] = beamtalk_xref:senders_of('new'),
+            ?assertEqual('Widget class', maps:get(recv_type, NewSite)),
 
-                [FooSite] = beamtalk_xref:senders_of('foo'),
-                ?assertEqual(dynamic, maps:get(recv_type, FooSite))
-            end)
-        ]
-    end}.
+            [FooSite] = beamtalk_xref:senders_of('foo'),
+            ?assertEqual(dynamic, maps:get(recv_type, FooSite))
+        end),
+        %% A `put_method/4` single-method patch (the ADR 0082 live-edit path) carries
+        %% the same compile-time-populated `recv_type` through, identically to a
+        %% whole-class `register_class/2`.
+        ?_test(begin
+            [Entry] = typed_xref(),
+            ok = beamtalk_xref:put_method('Runner', false, 'run:', Entry),
 
-%% A `put_method/4` single-method patch (the ADR 0082 live-edit path) carries
-%% the same compile-time-populated `recv_type` through, identically to a
-%% whole-class `register_class/2`.
-recv_type_propagates_through_put_method_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                [Entry] = typed_xref(),
-                ok = beamtalk_xref:put_method('Runner', false, 'run:', Entry),
+            [PingSite] = beamtalk_xref:senders_of('ping'),
+            ?assertEqual('Widget', maps:get(recv_type, PingSite))
+        end),
+        ?_test(begin
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
+            ok = beamtalk_xref:register_class('Point', point_xref()),
 
-                [PingSite] = beamtalk_xref:senders_of('ping'),
-                ?assertEqual('Widget', maps:get(recv_type, PingSite))
-            end)
-        ]
-    end}.
+            %% Both classes contribute to senders_of('+').
+            PlusSites = beamtalk_xref:senders_of('+'),
+            ?assertEqual(2, length(PlusSites)),
+            Owners = lists:sort([maps:get(owner, S) || S <- PlusSites]),
+            ?assertEqual(['Counter', 'Point'], Owners),
 
-multi_class_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-                ok = beamtalk_xref:register_class('Point', point_xref()),
+            %% Both classes reference Integer.
+            IntRefs = beamtalk_xref:references_to('Integer'),
+            ?assertEqual(2, length(IntRefs)),
 
-                %% Both classes contribute to senders_of('+').
-                PlusSites = beamtalk_xref:senders_of('+'),
-                ?assertEqual(2, length(PlusSites)),
-                Owners = lists:sort([maps:get(owner, S) || S <- PlusSites]),
-                ?assertEqual(['Counter', 'Point'], Owners),
+            %% implementors_of is class-specific.
+            ?assertEqual([{'Point', false}], beamtalk_xref:implementors_of('distanceTo:'))
+        end),
+        %%====================================================================
+        %% ADR 0087 Phase 6: synthetic auto-accessor parity
+        %%====================================================================
+        ?_test(begin
+            ok = beamtalk_xref:register_class(
+                'Boxed', value_class_with_synthetic_xref()
+            ),
 
-                %% Both classes reference Integer.
-                IntRefs = beamtalk_xref:references_to('Integer'),
-                ?assertEqual(2, length(IntRefs)),
+            %% Parity exception: the synthetic `value` getter IS an
+            %% implementor of `#value` — non-empty where a source-scan query
+            %% returned empty pre-index (the auto-accessor has no source).
+            ?assertEqual([{'Boxed', false}], beamtalk_xref:implementors_of('value')),
+            ?assertEqual(
+                [{'Boxed', false}], beamtalk_xref:implementors_of('withValue:')
+            ),
 
-                %% implementors_of is class-specific.
-                ?assertEqual([{'Point', false}], beamtalk_xref:implementors_of('distanceTo:'))
-            end)
-        ]
-    end}.
+            %% Synthetic accessors are defined selectors like any other.
+            Defined = lists:sort(beamtalk_xref:defined_selectors('Boxed', false)),
+            ?assertEqual(['doubled', 'value', 'withValue:'], Defined),
 
-%%====================================================================
-%% ADR 0087 Phase 6: synthetic auto-accessor parity
-%%====================================================================
+            %% The synthetic rows are tagged `synthetic` (the filterable
+            %% parity marker), distinct from the hand-written `indexed` row.
+            ValueInfo = beamtalk_xref:method_info('Boxed', false, 'value'),
+            ?assertEqual(synthetic, maps:get(source_status, ValueInfo)),
+            SetterInfo = beamtalk_xref:method_info('Boxed', false, 'withValue:'),
+            ?assertEqual(synthetic, maps:get(source_status, SetterInfo)),
+            DoubledInfo = beamtalk_xref:method_info('Boxed', false, 'doubled'),
+            ?assertEqual(indexed, maps:get(source_status, DoubledInfo)),
 
-synthetic_accessor_visibility_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                ok = beamtalk_xref:register_class(
-                    'Boxed', value_class_with_synthetic_xref()
-                ),
+            %% The synthetic getter's `line` is the derived origin (the slot
+            %% declaration line) so LSP / System Browser can navigate to it.
+            ?assertEqual(2, maps:get(line, ValueInfo)),
 
-                %% Parity exception: the synthetic `value` getter IS an
-                %% implementor of `#value` — non-empty where a source-scan query
-                %% returned empty pre-index (the auto-accessor has no source).
-                ?assertEqual([{'Boxed', false}], beamtalk_xref:implementors_of('value')),
-                ?assertEqual(
-                    [{'Boxed', false}], beamtalk_xref:implementors_of('withValue:')
-                ),
+            %% The slot type reference (`Integer`) rides along: the synthetic
+            %% accessor contributes a reference exactly like a hand-written
+            %% typed accessor would.
+            IntRefs = beamtalk_xref:references_to('Integer'),
+            IntMethods = lists:sort([maps:get(method, R) || R <- IntRefs]),
+            ?assertEqual(['value', 'withValue:'], IntMethods),
 
-                %% Synthetic accessors are defined selectors like any other.
-                Defined = lists:sort(beamtalk_xref:defined_selectors('Boxed', false)),
-                ?assertEqual(['doubled', 'value', 'withValue:'], Defined),
+            %% Synthetic accessors delegate to runtime map primitives, so they
+            %% contribute no senders — `value` / `withValue:` send nothing.
+            %% Assert both the getter and the setter to catch a regression
+            %% where synthetic setters start recording sends.
+            ?assertEqual([], beamtalk_xref:senders_of('value')),
+            ?assertEqual([], beamtalk_xref:senders_of('withValue:'))
+        end),
+        %%====================================================================
+        %% purge_class
+        %%====================================================================
+        ?_test(begin
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
+            ok = beamtalk_xref:register_class('Point', point_xref()),
 
-                %% The synthetic rows are tagged `synthetic` (the filterable
-                %% parity marker), distinct from the hand-written `indexed` row.
-                ValueInfo = beamtalk_xref:method_info('Boxed', false, 'value'),
-                ?assertEqual(synthetic, maps:get(source_status, ValueInfo)),
-                SetterInfo = beamtalk_xref:method_info('Boxed', false, 'withValue:'),
-                ?assertEqual(synthetic, maps:get(source_status, SetterInfo)),
-                DoubledInfo = beamtalk_xref:method_info('Boxed', false, 'doubled'),
-                ?assertEqual(indexed, maps:get(source_status, DoubledInfo)),
+            ?assertEqual(2, length(beamtalk_xref:senders_of('+'))),
 
-                %% The synthetic getter's `line` is the derived origin (the slot
-                %% declaration line) so LSP / System Browser can navigate to it.
-                ?assertEqual(2, maps:get(line, ValueInfo)),
+            ok = beamtalk_xref:purge_class('Counter'),
 
-                %% The slot type reference (`Integer`) rides along: the synthetic
-                %% accessor contributes a reference exactly like a hand-written
-                %% typed accessor would.
-                IntRefs = beamtalk_xref:references_to('Integer'),
-                IntMethods = lists:sort([maps:get(method, R) || R <- IntRefs]),
-                ?assertEqual(['value', 'withValue:'], IntMethods),
+            %% Counter rows are gone, Point rows remain.
+            ?assertEqual([], beamtalk_xref:defined_selectors('Counter', false)),
+            ?assertEqual([], beamtalk_xref:defined_selectors('Counter', true)),
+            ?assertEqual([], beamtalk_xref:implementors_of('increment')),
+            ?assertEqual([], beamtalk_xref:implementors_of('new')),
 
-                %% Synthetic accessors delegate to runtime map primitives, so they
-                %% contribute no senders — `value` / `withValue:` send nothing.
-                %% Assert both the getter and the setter to catch a regression
-                %% where synthetic setters start recording sends.
-                ?assertEqual([], beamtalk_xref:senders_of('value')),
-                ?assertEqual([], beamtalk_xref:senders_of('withValue:'))
-            end)
-        ]
-    end}.
+            PlusSites = beamtalk_xref:senders_of('+'),
+            ?assertEqual(1, length(PlusSites)),
+            [Site] = PlusSites,
+            ?assertEqual('Point', maps:get(owner, Site)),
 
-%%====================================================================
-%% purge_class
-%%====================================================================
+            IntRefs = beamtalk_xref:references_to('Integer'),
+            ?assertEqual(1, length(IntRefs)),
+            [IntRef] = IntRefs,
+            ?assertEqual('Point', maps:get(owner, IntRef)),
 
-purge_class_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-                ok = beamtalk_xref:register_class('Point', point_xref()),
+            %% Purging an unknown class is a no-op.
+            ok = beamtalk_xref:purge_class('NoSuchClass')
+        end),
+        %%====================================================================
+        %% State-var (instance-variable) declaration-line index
+        %%====================================================================
+        ?_test(begin
+            %% Unregistered class/name -> undefined.
+            ?assertEqual(undefined, beamtalk_xref:state_var_line('Counter', value)),
 
-                ?assertEqual(2, length(beamtalk_xref:senders_of('+'))),
+            ok = beamtalk_xref:register_state_vars('Counter', [
+                #{name => value, line => 5}
+            ]),
+            ?assertEqual(5, beamtalk_xref:state_var_line('Counter', value)),
+            %% A name never registered for this class -> undefined, even
+            %% though the class itself has rows.
+            ?assertEqual(undefined, beamtalk_xref:state_var_line('Counter', missing)),
+            %% A different class entirely -> undefined.
+            ?assertEqual(undefined, beamtalk_xref:state_var_line('Point', value)),
 
-                ok = beamtalk_xref:purge_class('Counter'),
+            %% Re-registering replaces the class's rows outright — no
+            %% generation/bag semantics, unlike register_class/2 (see the
+            %% module doc: instance variables are never hot-patched one at
+            %% a time, only via a whole-class reload).
+            ok = beamtalk_xref:register_state_vars('Counter', [
+                #{name => total, line => 9}
+            ]),
+            ?assertEqual(undefined, beamtalk_xref:state_var_line('Counter', value)),
+            ?assertEqual(9, beamtalk_xref:state_var_line('Counter', total)),
 
-                %% Counter rows are gone, Point rows remain.
-                ?assertEqual([], beamtalk_xref:defined_selectors('Counter', false)),
-                ?assertEqual([], beamtalk_xref:defined_selectors('Counter', true)),
-                ?assertEqual([], beamtalk_xref:implementors_of('increment')),
-                ?assertEqual([], beamtalk_xref:implementors_of('new')),
+            %% Registering an empty list clears the class's rows.
+            ok = beamtalk_xref:register_state_vars('Counter', []),
+            ?assertEqual(undefined, beamtalk_xref:state_var_line('Counter', total))
+        end),
+        %% register_state_vars/2 inserts the new rows
+        %% before deleting any now-stale ones, rather than delete-then-insert, so a
+        %% concurrent state_var_line/2 reader can never observe a retained field as
+        %% momentarily absent (see that function's doc for the full rationale — the
+        %% true race isn't unit-testable, but this pins the observable end state the
+        %% insert-first/delete-stale-only ordering must still produce: a kept key's
+        %% value is updated in place, a dropped key is gone, an added key appears).
+        ?_test(begin
+            ok = beamtalk_xref:register_state_vars('Counter', [
+                #{name => value, line => 5},
+                #{name => total, line => 9}
+            ]),
+            %% Re-register with `value` kept (new line), `total` dropped,
+            %% `count` added.
+            ok = beamtalk_xref:register_state_vars('Counter', [
+                #{name => value, line => 6},
+                #{name => count, line => 12}
+            ]),
+            ?assertEqual(6, beamtalk_xref:state_var_line('Counter', value)),
+            ?assertEqual(12, beamtalk_xref:state_var_line('Counter', count)),
+            ?assertEqual(undefined, beamtalk_xref:state_var_line('Counter', total))
+        end),
+        ?_test(begin
+            ok = beamtalk_xref:register_state_vars('Counter', [
+                #{name => value, line => 5}
+            ]),
+            ok = beamtalk_xref:register_state_vars('Point', [
+                #{name => x, line => 3}
+            ]),
 
-                PlusSites = beamtalk_xref:senders_of('+'),
-                ?assertEqual(1, length(PlusSites)),
-                [Site] = PlusSites,
-                ?assertEqual('Point', maps:get(owner, Site)),
+            ok = beamtalk_xref:purge_class('Counter'),
 
-                IntRefs = beamtalk_xref:references_to('Integer'),
-                ?assertEqual(1, length(IntRefs)),
-                [IntRef] = IntRefs,
-                ?assertEqual('Point', maps:get(owner, IntRef)),
+            ?assertEqual(undefined, beamtalk_xref:state_var_line('Counter', value)),
+            %% Point's rows are untouched by Counter's purge.
+            ?assertEqual(3, beamtalk_xref:state_var_line('Point', x))
+        end),
+        %%====================================================================
+        %% Generation counter
+        %%====================================================================
+        ?_test(begin
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
+            Gen1 = current_gen('Counter'),
+            ?assertEqual(1, Gen1),
 
-                %% Purging an unknown class is a no-op.
-                ok = beamtalk_xref:purge_class('NoSuchClass')
-            end)
-        ]
-    end}.
+            %% Inspect the gen embedded in a senders row.
+            [Site1] = beamtalk_xref:senders_of('basicNew'),
+            ?assertEqual(1, maps:get(gen, Site1)),
 
-%%====================================================================
-%% State-var (instance-variable) declaration-line index
-%%====================================================================
+            %% Re-register bumps the gen.
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
+            ?assertEqual(2, current_gen('Counter')),
 
-register_state_vars_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                %% Unregistered class/name -> undefined.
-                ?assertEqual(undefined, beamtalk_xref:state_var_line('Counter', value)),
+            %% put_method is a surgical single-method patch and must NOT
+            %% bump the class generation (Phase 4) — a bump would
+            %% strand the unbumped sibling methods behind the reader's
+            %% current-gen filter. The patched method joins the class's
+            %% current generation, leaving it unchanged at 2.
+            NewEntry = #{
+                class_side => false,
+                selector => 'increment',
+                line => 14,
+                sends => [],
+                references => [],
+                source_status => indexed,
+                provenance => put_method
+            },
+            ok = beamtalk_xref:put_method('Counter', false, 'increment', NewEntry),
+            ?assertEqual(2, current_gen('Counter')),
 
-                ok = beamtalk_xref:register_state_vars('Counter', [
-                    #{name => value, line => 5}
-                ]),
-                ?assertEqual(5, beamtalk_xref:state_var_line('Counter', value)),
-                %% A name never registered for this class -> undefined, even
-                %% though the class itself has rows.
-                ?assertEqual(undefined, beamtalk_xref:state_var_line('Counter', missing)),
-                %% A different class entirely -> undefined.
-                ?assertEqual(undefined, beamtalk_xref:state_var_line('Point', value)),
+            %% A fresh class starts at gen 1.
+            ok = beamtalk_xref:register_class('Point', point_xref()),
+            ?assertEqual(1, current_gen('Point'))
+        end),
+        %%====================================================================
+        %% put_method isolation
+        %%====================================================================
+        ?_test(begin
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
 
-                %% Re-registering replaces the class's rows outright — no
-                %% generation/bag semantics, unlike register_class/2 (see the
-                %% module doc: instance variables are never hot-patched one at
-                %% a time, only via a whole-class reload).
-                ok = beamtalk_xref:register_state_vars('Counter', [
-                    #{name => total, line => 9}
-                ]),
-                ?assertEqual(undefined, beamtalk_xref:state_var_line('Counter', value)),
-                ?assertEqual(9, beamtalk_xref:state_var_line('Counter', total)),
+            %% Sanity: the sibling 'value' method is present and 'increment'
+            %% sends '+'.
+            ?assert(lists:member('value', beamtalk_xref:defined_selectors('Counter', false))),
+            ?assertEqual(1, length(beamtalk_xref:senders_of('+'))),
 
-                %% Registering an empty list clears the class's rows.
-                ok = beamtalk_xref:register_state_vars('Counter', []),
-                ?assertEqual(undefined, beamtalk_xref:state_var_line('Counter', total))
-            end)
-        ]
-    end}.
+            %% Replace `increment` with a version that sends `-` instead.
+            NewEntry = #{
+                class_side => false,
+                selector => 'increment',
+                line => 14,
+                sends => [
+                    #{selector => '-', line => 17, recv_kind => self_recv}
+                ],
+                references => [
+                    #{class => 'Float', line => 16}
+                ],
+                source_status => indexed,
+                provenance => put_method
+            },
+            ok = beamtalk_xref:put_method('Counter', false, 'increment', NewEntry),
 
-%% register_state_vars/2 inserts the new rows
-%% before deleting any now-stale ones, rather than delete-then-insert, so a
-%% concurrent state_var_line/2 reader can never observe a retained field as
-%% momentarily absent (see that function's doc for the full rationale — the
-%% true race isn't unit-testable, but this pins the observable end state the
-%% insert-first/delete-stale-only ordering must still produce: a kept key's
-%% value is updated in place, a dropped key is gone, an added key appears).
-register_state_vars_overlapping_reregister_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                ok = beamtalk_xref:register_state_vars('Counter', [
-                    #{name => value, line => 5},
-                    #{name => total, line => 9}
-                ]),
-                %% Re-register with `value` kept (new line), `total` dropped,
-                %% `count` added.
-                ok = beamtalk_xref:register_state_vars('Counter', [
-                    #{name => value, line => 6},
-                    #{name => count, line => 12}
-                ]),
-                ?assertEqual(6, beamtalk_xref:state_var_line('Counter', value)),
-                ?assertEqual(12, beamtalk_xref:state_var_line('Counter', count)),
-                ?assertEqual(undefined, beamtalk_xref:state_var_line('Counter', total))
-            end)
-        ]
-    end}.
+            %% Sibling `value` untouched.
+            ?assert(lists:member('value', beamtalk_xref:defined_selectors('Counter', false))),
+            %% Class-side `new` untouched.
+            ?assertEqual(['new'], beamtalk_xref:defined_selectors('Counter', true)),
+            %% Class-side `basicNew` site preserved (was on `new`, not `increment`).
+            ?assertEqual(1, length(beamtalk_xref:senders_of('basicNew'))),
 
-purge_class_clears_state_vars_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                ok = beamtalk_xref:register_state_vars('Counter', [
-                    #{name => value, line => 5}
-                ]),
-                ok = beamtalk_xref:register_state_vars('Point', [
-                    #{name => x, line => 3}
-                ]),
+            %% Old `+` send from `increment` is gone, new `-` send is present.
+            ?assertEqual([], beamtalk_xref:senders_of('+')),
+            MinusSites = beamtalk_xref:senders_of('-'),
+            ?assertEqual(1, length(MinusSites)),
+            [MinusSite] = MinusSites,
+            ?assertEqual('increment', maps:get(method, MinusSite)),
 
-                ok = beamtalk_xref:purge_class('Counter'),
+            %% References updated: Integer dropped, Float added.
+            ?assertEqual([], beamtalk_xref:references_to('Integer')),
+            FloatRefs = beamtalk_xref:references_to('Float'),
+            ?assertEqual(1, length(FloatRefs))
+        end),
+        ?_test(begin
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
 
-                ?assertEqual(undefined, beamtalk_xref:state_var_line('Counter', value)),
-                %% Point's rows are untouched by Counter's purge.
-                ?assertEqual(3, beamtalk_xref:state_var_line('Point', x))
-            end)
-        ]
-    end}.
+            %% Even if the entry omits class_side/selector or has stale
+            %% values, the call args win — the entry is addressed by
+            %% {Class, ClassSide, Selector}.
+            BareEntry = #{
+                line => 20,
+                sends => [#{selector => 'foo', line => 21}],
+                references => [],
+                source_status => indexed,
+                provenance => put_method
+            },
+            ok = beamtalk_xref:put_method('Counter', false, 'value', BareEntry),
 
-%%====================================================================
-%% Generation counter
-%%====================================================================
+            %% The row lands under 'value', not under whatever was in the map.
+            ?assert(lists:member('value', beamtalk_xref:defined_selectors('Counter', false))),
+            FooSites = beamtalk_xref:senders_of('foo'),
+            ?assertEqual(1, length(FooSites)),
+            [FooSite] = FooSites,
+            ?assertEqual('value', maps:get(method, FooSite)),
+            ?assertEqual(false, maps:get(class_side, FooSite))
+        end),
+        %%====================================================================
+        %% method_info reads — current generation wins on stale bag rows
+        %%====================================================================
+        ?_test(begin
+            %% `?METHODS_TABLE` is a bag; `register_class` inserts under a
+            %% new gen and publishes it before the async old-gen sweep
+            %% runs, so a window exists where rows from two generations
+            %% coexist. `method_info/3` must return the row carrying the
+            %% class's *current* gen, never a stale one (Phase 4).
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
+            Info1 = beamtalk_xref:method_info('Counter', false, 'increment'),
+            ?assertEqual(1, maps:get(gen, Info1)),
+            ?assertEqual(14, maps:get(line, Info1)),
 
-generation_increments_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-                Gen1 = current_gen('Counter'),
-                ?assertEqual(1, Gen1),
+            %% Re-register the same selector at a different line. Before the
+            %% async sweep lands, the old line-14 (gen 1) row can still sit
+            %% in the bag beside the new line-42 (gen 2) row. `method_info/3`
+            %% must return the gen-2 row regardless of ETS bag order.
+            Counter2 = lists:map(
+                fun
+                    (#{selector := 'increment'} = E) ->
+                        E#{line => 42};
+                    (E) ->
+                        E
+                end,
+                counter_xref()
+            ),
+            ok = beamtalk_xref:register_class('Counter', Counter2),
+            Info2 = beamtalk_xref:method_info('Counter', false, 'increment'),
+            ?assertEqual(2, maps:get(gen, Info2)),
+            ?assertEqual(42, maps:get(line, Info2)),
 
-                %% Inspect the gen embedded in a senders row.
-                [Site1] = beamtalk_xref:senders_of('basicNew'),
-                ?assertEqual(1, maps:get(gen, Site1)),
+            %% After the async sweep drains, only the current-gen row
+            %% survives in the bag (memory hygiene, ADR 0087 §Atomicity
+            %% step 4). Flush the gen_server mailbox so the sweep cast has
+            %% certainly been processed before asserting.
+            flush_xref(),
+            Rows = ets:lookup(beamtalk_xref_methods, {'Counter', false, 'increment'}),
+            ?assertEqual(1, length(Rows)),
+            [{_, OnlyInfo}] = Rows,
+            ?assertEqual(2, maps:get(gen, OnlyInfo)),
+            ?assertEqual(42, maps:get(line, OnlyInfo)),
 
-                %% Re-register bumps the gen.
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-                ?assertEqual(2, current_gen('Counter')),
+            %% Unknown method → undefined.
+            ?assertEqual(
+                undefined,
+                beamtalk_xref:method_info('Counter', false, 'no_such_method')
+            ),
+            %% Unknown class → undefined.
+            ?assertEqual(
+                undefined,
+                beamtalk_xref:method_info('NoSuchClass', false, 'increment')
+            )
+        end),
+        %%====================================================================
+        %% xref_gen_epoch recreated on demand (BT-4071)
+        %%====================================================================
+        %% A `beamtalk_xref` hot-upgraded in place keeps its old tables, so the epoch
+        %% table may be missing: the first write must recreate it, owned by the xref
+        %% gen_server (the only process allowed to write a `protected` table).
+        ?_test(begin
+            sys:replace_state(beamtalk_xref, fun(S) ->
+                true = ets:delete(xref_gen_epoch),
+                S
+            end),
+            ?assertEqual(undefined, ets:whereis(xref_gen_epoch)),
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
+            ?assertNotEqual(undefined, ets:whereis(xref_gen_epoch)),
+            ?assertEqual(whereis(beamtalk_xref), ets:info(xref_gen_epoch, owner)),
+            ?assertEqual(
+                ['increment', 'value'],
+                beamtalk_xref:defined_selectors('Counter', false)
+            )
+        end),
+        %%====================================================================
+        %% method_origin/3 — ADR 0127 §12 trait provenance
+        %%====================================================================
+        ?_test(begin
+            %% A `class_body` row (every entry in counter_xref/0) has no
+            %% origin — `nil`, the Beamtalk null value, not `undefined`.
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
+            ?assertEqual(nil, beamtalk_xref:method_origin('Counter', false, 'increment')),
 
-                %% put_method is a surgical single-method patch and must NOT
-                %% bump the class generation (Phase 4) — a bump would
-                %% strand the unbumped sibling methods behind the reader's
-                %% current-gen filter. The patched method joins the class's
-                %% current generation, leaving it unchanged at 2.
-                NewEntry = #{
+            %% A `protocol`-provenance row (ADR 0127 §12: a flattened
+            %% trait provision) carries its protocol name as `origin`.
+            FlattenedXref = [
+                #{
                     class_side => false,
-                    selector => 'increment',
-                    line => 14,
+                    selector => 'between:and:',
+                    line => 3,
                     sends => [],
                     references => [],
                     source_status => indexed,
-                    provenance => put_method
-                },
-                ok = beamtalk_xref:put_method('Counter', false, 'increment', NewEntry),
-                ?assertEqual(2, current_gen('Counter')),
+                    provenance => protocol,
+                    origin => 'Comparable'
+                }
+            ],
+            ok = beamtalk_xref:register_class('DateTime', FlattenedXref),
+            ?assertEqual(
+                'Comparable',
+                beamtalk_xref:method_origin('DateTime', false, 'between:and:')
+            ),
 
-                %% A fresh class starts at gen 1.
-                ok = beamtalk_xref:register_class('Point', point_xref()),
-                ?assertEqual(1, current_gen('Point'))
-            end)
-        ]
-    end}.
+            %% Unregistered selector / class → nil, not undefined or a crash.
+            ?assertEqual(nil, beamtalk_xref:method_origin('DateTime', false, 'nonexistent')),
+            ?assertEqual(nil, beamtalk_xref:method_origin('NoSuchClass', false, 'foo'))
+        end),
+        %%====================================================================
+        %% Generation filtering on the read path (Phase 4)
+        %%====================================================================
+        %% A re-register that drops a method/send/reference must not leave the
+        %% dropped item visible through any list reader, even before the async
+        %% old-gen sweep has run. Correctness comes from the reader's current-gen
+        %% filter, not from the sweep — so this test deliberately does NOT flush.
+        ?_test(begin
+            %% Gen 1: increment sends '+' and references Integer; value and
+            %% class-side new also present.
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
+            ?assertEqual(1, length(beamtalk_xref:senders_of('+'))),
+            ?assertEqual(1, length(beamtalk_xref:references_to('Integer'))),
+            ?assertEqual([{'Counter', false}], beamtalk_xref:implementors_of('value')),
+            ?assert(lists:member('value', beamtalk_xref:defined_selectors('Counter', false))),
 
-%%====================================================================
-%% put_method isolation
-%%====================================================================
-
-put_method_replaces_one_method_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-
-                %% Sanity: the sibling 'value' method is present and 'increment'
-                %% sends '+'.
-                ?assert(lists:member('value', beamtalk_xref:defined_selectors('Counter', false))),
-                ?assertEqual(1, length(beamtalk_xref:senders_of('+'))),
-
-                %% Replace `increment` with a version that sends `-` instead.
-                NewEntry = #{
+            %% Gen 2: re-register WITHOUT the `value` method, with
+            %% `increment` now sending '-' (not '+') and referencing Float
+            %% (not Integer). The gen-1 rows linger in the bag until the
+            %% async sweep, but no reader may surface them.
+            Gen2Xref = [
+                #{
                     class_side => false,
                     selector => 'increment',
                     line => 14,
-                    sends => [
-                        #{selector => '-', line => 17, recv_kind => self_recv}
-                    ],
-                    references => [
-                        #{class => 'Float', line => 16}
-                    ],
+                    sends => [#{selector => '-', line => 17, recv_kind => self_recv}],
+                    references => [#{class => 'Float', line => 16}],
                     source_status => indexed,
-                    provenance => put_method
+                    provenance => class_body
                 },
-                ok = beamtalk_xref:put_method('Counter', false, 'increment', NewEntry),
-
-                %% Sibling `value` untouched.
-                ?assert(lists:member('value', beamtalk_xref:defined_selectors('Counter', false))),
-                %% Class-side `new` untouched.
-                ?assertEqual(['new'], beamtalk_xref:defined_selectors('Counter', true)),
-                %% Class-side `basicNew` site preserved (was on `new`, not `increment`).
-                ?assertEqual(1, length(beamtalk_xref:senders_of('basicNew'))),
-
-                %% Old `+` send from `increment` is gone, new `-` send is present.
-                ?assertEqual([], beamtalk_xref:senders_of('+')),
-                MinusSites = beamtalk_xref:senders_of('-'),
-                ?assertEqual(1, length(MinusSites)),
-                [MinusSite] = MinusSites,
-                ?assertEqual('increment', maps:get(method, MinusSite)),
-
-                %% References updated: Integer dropped, Float added.
-                ?assertEqual([], beamtalk_xref:references_to('Integer')),
-                FloatRefs = beamtalk_xref:references_to('Float'),
-                ?assertEqual(1, length(FloatRefs))
-            end)
-        ]
-    end}.
-
-put_method_normalises_selector_and_side_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-
-                %% Even if the entry omits class_side/selector or has stale
-                %% values, the call args win — the entry is addressed by
-                %% {Class, ClassSide, Selector}.
-                BareEntry = #{
-                    line => 20,
-                    sends => [#{selector => 'foo', line => 21}],
+                #{
+                    class_side => true,
+                    selector => 'new',
+                    line => 8,
+                    sends => [#{selector => 'basicNew', line => 9, recv_kind => super_recv}],
                     references => [],
                     source_status => indexed,
-                    provenance => put_method
-                },
-                ok = beamtalk_xref:put_method('Counter', false, 'value', BareEntry),
+                    provenance => class_body
+                }
+            ],
+            ok = beamtalk_xref:register_class('Counter', Gen2Xref),
 
-                %% The row lands under 'value', not under whatever was in the map.
-                ?assert(lists:member('value', beamtalk_xref:defined_selectors('Counter', false))),
-                FooSites = beamtalk_xref:senders_of('foo'),
-                ?assertEqual(1, length(FooSites)),
-                [FooSite] = FooSites,
-                ?assertEqual('value', maps:get(method, FooSite)),
-                ?assertEqual(false, maps:get(class_side, FooSite))
-            end)
-        ]
-    end}.
+            %% senders_of: the dropped '+' send is gone; the new '-' is live.
+            ?assertEqual([], beamtalk_xref:senders_of('+')),
+            MinusSites = beamtalk_xref:senders_of('-'),
+            ?assertEqual(1, length(MinusSites)),
+            [MinusSite] = MinusSites,
+            ?assertEqual(2, maps:get(gen, MinusSite)),
 
-%%====================================================================
-%% method_info reads — current generation wins on stale bag rows
-%%====================================================================
+            %% references_to: Integer dropped, Float live.
+            ?assertEqual([], beamtalk_xref:references_to('Integer')),
+            ?assertEqual(1, length(beamtalk_xref:references_to('Float'))),
 
-method_info_picks_current_generation_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                %% `?METHODS_TABLE` is a bag; `register_class` inserts under a
-                %% new gen and publishes it before the async old-gen sweep
-                %% runs, so a window exists where rows from two generations
-                %% coexist. `method_info/3` must return the row carrying the
-                %% class's *current* gen, never a stale one (Phase 4).
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-                Info1 = beamtalk_xref:method_info('Counter', false, 'increment'),
-                ?assertEqual(1, maps:get(gen, Info1)),
-                ?assertEqual(14, maps:get(line, Info1)),
+            %% implementors_of: the removed `value` no longer reports Counter.
+            ?assertEqual([], beamtalk_xref:implementors_of('value')),
+            ?assertEqual([{'Counter', false}], beamtalk_xref:implementors_of('increment')),
 
-                %% Re-register the same selector at a different line. Before the
-                %% async sweep lands, the old line-14 (gen 1) row can still sit
-                %% in the bag beside the new line-42 (gen 2) row. `method_info/3`
-                %% must return the gen-2 row regardless of ETS bag order.
-                Counter2 = lists:map(
-                    fun
-                        (#{selector := 'increment'} = E) ->
-                            E#{line => 42};
-                        (E) ->
-                            E
-                    end,
-                    counter_xref()
-                ),
-                ok = beamtalk_xref:register_class('Counter', Counter2),
-                Info2 = beamtalk_xref:method_info('Counter', false, 'increment'),
-                ?assertEqual(2, maps:get(gen, Info2)),
-                ?assertEqual(42, maps:get(line, Info2)),
+            %% defined_selectors: `value` dropped, `increment` retained.
+            InstSels = beamtalk_xref:defined_selectors('Counter', false),
+            ?assertEqual(['increment'], InstSels),
+            ?assertEqual(['new'], beamtalk_xref:defined_selectors('Counter', true))
+        end),
+        %% The async sweep eventually reclaims the stale-gen rows from every table.
+        %% Filtering already hides them; this asserts the memory-hygiene step.
+        ?_test(begin
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
 
-                %% After the async sweep drains, only the current-gen row
-                %% survives in the bag (memory hygiene, ADR 0087 §Atomicity
-                %% step 4). Flush the gen_server mailbox so the sweep cast has
-                %% certainly been processed before asserting.
-                flush_xref(),
-                Rows = ets:lookup(beamtalk_xref_methods, {'Counter', false, 'increment'}),
-                ?assertEqual(1, length(Rows)),
-                [{_, OnlyInfo}] = Rows,
-                ?assertEqual(2, maps:get(gen, OnlyInfo)),
-                ?assertEqual(42, maps:get(line, OnlyInfo)),
+            %% Drain the sweep casts.
+            flush_xref(),
 
-                %% Unknown method → undefined.
-                ?assertEqual(
-                    undefined,
-                    beamtalk_xref:method_info('Counter', false, 'no_such_method')
-                ),
-                %% Unknown class → undefined.
-                ?assertEqual(
-                    undefined,
-                    beamtalk_xref:method_info('NoSuchClass', false, 'increment')
-                )
-            end)
-        ]
-    end}.
+            %% Only the current generation (3) survives in every table.
+            MethodRows = ets:tab2list(beamtalk_xref_methods),
+            CounterMethodGens = [
+                maps:get(gen, Info)
+             || {{'Counter', _, _}, Info} <- MethodRows
+            ],
+            ?assertEqual([3], lists:usort(CounterMethodGens)),
 
-%%====================================================================
-%% xref_gen_epoch recreated on demand (BT-4071)
-%%====================================================================
+            SenderGens = [
+                maps:get(gen, Site)
+             || {_, Site} <- ets:tab2list(beamtalk_xref_senders),
+                maps:get(owner, Site) =:= 'Counter'
+            ],
+            ?assertEqual([3], lists:usort(SenderGens)),
 
-%% A `beamtalk_xref` hot-upgraded in place keeps its old tables, so the epoch
-%% table may be missing: the first write must recreate it, owned by the xref
-%% gen_server (the only process allowed to write a `protected` table).
-gen_epoch_table_recreated_on_first_write_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                sys:replace_state(beamtalk_xref, fun(S) ->
-                    true = ets:delete(xref_gen_epoch),
-                    S
-                end),
-                ?assertEqual(undefined, ets:whereis(xref_gen_epoch)),
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-                ?assertNotEqual(undefined, ets:whereis(xref_gen_epoch)),
-                ?assertEqual(whereis(beamtalk_xref), ets:info(xref_gen_epoch, owner)),
-                ?assertEqual(
-                    ['increment', 'value'],
-                    beamtalk_xref:defined_selectors('Counter', false)
-                )
-            end)
-        ]
-    end}.
+            RefGens = [
+                maps:get(gen, Site)
+             || {_, Site} <- ets:tab2list(beamtalk_xref_references),
+                maps:get(owner, Site) =:= 'Counter'
+            ],
+            ?assertEqual([3], lists:usort(RefGens)),
 
-%%====================================================================
-%% method_origin/3 — ADR 0127 §12 trait provenance
-%%====================================================================
+            %% The view is still complete after the sweep.
+            ?assertEqual(1, length(beamtalk_xref:senders_of('+'))),
+            ?assert(lists:member('value', beamtalk_xref:defined_selectors('Counter', false)))
+        end),
+        %% A never-registered class patched via put_method/4 establishes generation 1
+        %% and the patched method is immediately visible through the read path — the
+        %% reader's current-gen filter must not hide it.
+        ?_test(begin
+            Entry = #{
+                class_side => false,
+                selector => 'ping',
+                line => 3,
+                sends => [#{selector => 'pong', line => 4, recv_kind => self_recv}],
+                references => [#{class => 'Boolean', line => 5}],
+                source_status => indexed,
+                provenance => put_method
+            },
+            ok = beamtalk_xref:put_method('Fresh', false, 'ping', Entry),
 
-method_origin_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                %% A `class_body` row (every entry in counter_xref/0) has no
-                %% origin — `nil`, the Beamtalk null value, not `undefined`.
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-                ?assertEqual(nil, beamtalk_xref:method_origin('Counter', false, 'increment')),
-
-                %% A `protocol`-provenance row (ADR 0127 §12: a flattened
-                %% trait provision) carries its protocol name as `origin`.
-                FlattenedXref = [
-                    #{
-                        class_side => false,
-                        selector => 'between:and:',
-                        line => 3,
-                        sends => [],
-                        references => [],
-                        source_status => indexed,
-                        provenance => protocol,
-                        origin => 'Comparable'
-                    }
-                ],
-                ok = beamtalk_xref:register_class('DateTime', FlattenedXref),
-                ?assertEqual(
-                    'Comparable',
-                    beamtalk_xref:method_origin('DateTime', false, 'between:and:')
-                ),
-
-                %% Unregistered selector / class → nil, not undefined or a crash.
-                ?assertEqual(nil, beamtalk_xref:method_origin('DateTime', false, 'nonexistent')),
-                ?assertEqual(nil, beamtalk_xref:method_origin('NoSuchClass', false, 'foo'))
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Generation filtering on the read path (Phase 4)
-%%====================================================================
-
-%% A re-register that drops a method/send/reference must not leave the
-%% dropped item visible through any list reader, even before the async
-%% old-gen sweep has run. Correctness comes from the reader's current-gen
-%% filter, not from the sweep — so this test deliberately does NOT flush.
-read_path_filters_stale_generation_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                %% Gen 1: increment sends '+' and references Integer; value and
-                %% class-side new also present.
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-                ?assertEqual(1, length(beamtalk_xref:senders_of('+'))),
-                ?assertEqual(1, length(beamtalk_xref:references_to('Integer'))),
-                ?assertEqual([{'Counter', false}], beamtalk_xref:implementors_of('value')),
-                ?assert(lists:member('value', beamtalk_xref:defined_selectors('Counter', false))),
-
-                %% Gen 2: re-register WITHOUT the `value` method, with
-                %% `increment` now sending '-' (not '+') and referencing Float
-                %% (not Integer). The gen-1 rows linger in the bag until the
-                %% async sweep, but no reader may surface them.
-                Gen2Xref = [
-                    #{
-                        class_side => false,
-                        selector => 'increment',
-                        line => 14,
-                        sends => [#{selector => '-', line => 17, recv_kind => self_recv}],
-                        references => [#{class => 'Float', line => 16}],
-                        source_status => indexed,
-                        provenance => class_body
-                    },
-                    #{
-                        class_side => true,
-                        selector => 'new',
-                        line => 8,
-                        sends => [#{selector => 'basicNew', line => 9, recv_kind => super_recv}],
-                        references => [],
-                        source_status => indexed,
-                        provenance => class_body
-                    }
-                ],
-                ok = beamtalk_xref:register_class('Counter', Gen2Xref),
-
-                %% senders_of: the dropped '+' send is gone; the new '-' is live.
-                ?assertEqual([], beamtalk_xref:senders_of('+')),
-                MinusSites = beamtalk_xref:senders_of('-'),
-                ?assertEqual(1, length(MinusSites)),
-                [MinusSite] = MinusSites,
-                ?assertEqual(2, maps:get(gen, MinusSite)),
-
-                %% references_to: Integer dropped, Float live.
-                ?assertEqual([], beamtalk_xref:references_to('Integer')),
-                ?assertEqual(1, length(beamtalk_xref:references_to('Float'))),
-
-                %% implementors_of: the removed `value` no longer reports Counter.
-                ?assertEqual([], beamtalk_xref:implementors_of('value')),
-                ?assertEqual([{'Counter', false}], beamtalk_xref:implementors_of('increment')),
-
-                %% defined_selectors: `value` dropped, `increment` retained.
-                InstSels = beamtalk_xref:defined_selectors('Counter', false),
-                ?assertEqual(['increment'], InstSels),
-                ?assertEqual(['new'], beamtalk_xref:defined_selectors('Counter', true))
-            end)
-        ]
-    end}.
-
-%% The async sweep eventually reclaims the stale-gen rows from every table.
-%% Filtering already hides them; this asserts the memory-hygiene step.
-async_sweep_reclaims_old_generation_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-
-                %% Drain the sweep casts.
-                flush_xref(),
-
-                %% Only the current generation (3) survives in every table.
-                MethodRows = ets:tab2list(beamtalk_xref_methods),
-                CounterMethodGens = [
-                    maps:get(gen, Info)
-                 || {{'Counter', _, _}, Info} <- MethodRows
-                ],
-                ?assertEqual([3], lists:usort(CounterMethodGens)),
-
-                SenderGens = [
-                    maps:get(gen, Site)
-                 || {_, Site} <- ets:tab2list(beamtalk_xref_senders),
-                    maps:get(owner, Site) =:= 'Counter'
-                ],
-                ?assertEqual([3], lists:usort(SenderGens)),
-
-                RefGens = [
-                    maps:get(gen, Site)
-                 || {_, Site} <- ets:tab2list(beamtalk_xref_references),
-                    maps:get(owner, Site) =:= 'Counter'
-                ],
-                ?assertEqual([3], lists:usort(RefGens)),
-
-                %% The view is still complete after the sweep.
-                ?assertEqual(1, length(beamtalk_xref:senders_of('+'))),
-                ?assert(lists:member('value', beamtalk_xref:defined_selectors('Counter', false)))
-            end)
-        ]
-    end}.
-
-%% A never-registered class patched via put_method/4 establishes generation 1
-%% and the patched method is immediately visible through the read path — the
-%% reader's current-gen filter must not hide it.
-put_method_on_fresh_class_is_visible_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                Entry = #{
+            ?assertEqual(1, current_gen('Fresh')),
+            ?assert(lists:member('ping', beamtalk_xref:defined_selectors('Fresh', false))),
+            ?assertEqual([{'Fresh', false}], beamtalk_xref:implementors_of('ping')),
+            ?assertEqual(1, length(beamtalk_xref:senders_of('pong'))),
+            ?assertEqual(1, length(beamtalk_xref:references_to('Boolean'))),
+            #{owner := 'Fresh'} = beamtalk_xref:method_info('Fresh', false, 'ping')
+        end),
+        %%====================================================================
+        %% callers_of_native_module/1
+        %%====================================================================
+        ?_test(begin
+            %% Two classes call into `lists`; one also calls into `maps`.
+            AlphaRows = [
+                #{
                     class_side => false,
-                    selector => 'ping',
-                    line => 3,
-                    sends => [#{selector => 'pong', line => 4, recv_kind => self_recv}],
-                    references => [#{class => 'Boolean', line => 5}],
+                    selector => 'reverseIt',
+                    line => 10,
+                    sends => [
+                        #{
+                            selector => 'reverse:',
+                            line => 11,
+                            recv_kind => erlang_ffi,
+                            target_module => 'lists'
+                        }
+                    ],
+                    references => [],
                     source_status => indexed,
-                    provenance => put_method
+                    provenance => class_body
                 },
-                ok = beamtalk_xref:put_method('Fresh', false, 'ping', Entry),
+                #{
+                    class_side => true,
+                    selector => 'sortIt',
+                    line => 20,
+                    sends => [
+                        #{
+                            selector => 'sort:',
+                            line => 21,
+                            recv_kind => erlang_ffi,
+                            target_module => 'lists'
+                        }
+                    ],
+                    references => [],
+                    source_status => indexed,
+                    provenance => class_body
+                }
+            ],
+            BetaRows = [
+                #{
+                    class_side => false,
+                    selector => 'mergeMaps',
+                    line => 5,
+                    sends => [
+                        #{
+                            selector => 'merge:',
+                            line => 6,
+                            recv_kind => erlang_ffi,
+                            target_module => 'maps'
+                        },
+                        %% A non-FFI send to a same-named selector must NOT
+                        %% appear as a native caller.
+                        #{selector => 'reverse:', line => 7, recv_kind => self_recv}
+                    ],
+                    references => [],
+                    source_status => indexed,
+                    provenance => class_body
+                }
+            ],
+            ok = beamtalk_xref:register_class('NativeCallerAlpha', AlphaRows),
+            ok = beamtalk_xref:register_class('NativeCallerBeta', BetaRows),
 
-                ?assertEqual(1, current_gen('Fresh')),
-                ?assert(lists:member('ping', beamtalk_xref:defined_selectors('Fresh', false))),
-                ?assertEqual([{'Fresh', false}], beamtalk_xref:implementors_of('ping')),
-                ?assertEqual(1, length(beamtalk_xref:senders_of('pong'))),
-                ?assertEqual(1, length(beamtalk_xref:references_to('Boolean'))),
-                #{owner := 'Fresh'} = beamtalk_xref:method_info('Fresh', false, 'ping')
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% callers_of_native_module/1
-%%====================================================================
-
-callers_of_native_module_basic_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                %% Two classes call into `lists`; one also calls into `maps`.
-                AlphaRows = [
+            ListsCallers = beamtalk_xref:callers_of_native_module('lists'),
+            %% Both Alpha methods call `lists`; Beta's self-recv `reverse:`
+            %% is excluded.
+            ?assertEqual(2, length(ListsCallers)),
+            ?assert(
+                lists:member(
                     #{
+                        owner => 'NativeCallerAlpha',
                         class_side => false,
-                        selector => 'reverseIt',
-                        line => 10,
-                        sends => [
-                            #{
-                                selector => 'reverse:',
-                                line => 11,
-                                recv_kind => erlang_ffi,
-                                target_module => 'lists'
-                            }
-                        ],
-                        references => [],
-                        source_status => indexed,
-                        provenance => class_body
+                        method => 'reverseIt',
+                        line => 11
                     },
-                    #{
-                        class_side => true,
-                        selector => 'sortIt',
-                        line => 20,
-                        sends => [
-                            #{
-                                selector => 'sort:',
-                                line => 21,
-                                recv_kind => erlang_ffi,
-                                target_module => 'lists'
-                            }
-                        ],
-                        references => [],
-                        source_status => indexed,
-                        provenance => class_body
-                    }
-                ],
-                BetaRows = [
-                    #{
-                        class_side => false,
-                        selector => 'mergeMaps',
-                        line => 5,
-                        sends => [
-                            #{
-                                selector => 'merge:',
-                                line => 6,
-                                recv_kind => erlang_ffi,
-                                target_module => 'maps'
-                            },
-                            %% A non-FFI send to a same-named selector must NOT
-                            %% appear as a native caller.
-                            #{selector => 'reverse:', line => 7, recv_kind => self_recv}
-                        ],
-                        references => [],
-                        source_status => indexed,
-                        provenance => class_body
-                    }
-                ],
-                ok = beamtalk_xref:register_class('NativeCallerAlpha', AlphaRows),
-                ok = beamtalk_xref:register_class('NativeCallerBeta', BetaRows),
-
-                ListsCallers = beamtalk_xref:callers_of_native_module('lists'),
-                %% Both Alpha methods call `lists`; Beta's self-recv `reverse:`
-                %% is excluded.
-                ?assertEqual(2, length(ListsCallers)),
-                ?assert(
-                    lists:member(
-                        #{
-                            owner => 'NativeCallerAlpha',
-                            class_side => false,
-                            method => 'reverseIt',
-                            line => 11
-                        },
-                        ListsCallers
-                    )
-                ),
-                ?assert(
-                    lists:member(
-                        #{
-                            owner => 'NativeCallerAlpha',
-                            class_side => true,
-                            method => 'sortIt',
-                            line => 21
-                        },
-                        ListsCallers
-                    )
-                ),
-                ?assertNot(
-                    lists:any(
-                        fun(R) -> maps:get(owner, R) =:= 'NativeCallerBeta' end,
-                        ListsCallers
-                    )
-                ),
-
-                MapsCallers = beamtalk_xref:callers_of_native_module('maps'),
-                ?assertEqual(
-                    [
-                        #{
-                            owner => 'NativeCallerBeta',
-                            class_side => false,
-                            method => 'mergeMaps',
-                            line => 6
-                        }
-                    ],
-                    MapsCallers
-                ),
-
-                %% A module with no Beamtalk callers yields the empty state.
-                ?assertEqual([], beamtalk_xref:callers_of_native_module('no_such_native_mod'))
-            end)
-        ]
-    end}.
-
-callers_of_native_module_dedup_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                %% Multiple FFI calls into the same module from one method collapse
-                %% to a single caller row anchored at the first (lowest) line.
-                Rows = [
-                    #{
-                        class_side => false,
-                        selector => 'multiCall',
-                        line => 30,
-                        sends => [
-                            #{
-                                selector => 'foldl:',
-                                line => 33,
-                                recv_kind => erlang_ffi,
-                                target_module => 'lists'
-                            },
-                            #{
-                                selector => 'map:',
-                                line => 31,
-                                recv_kind => erlang_ffi,
-                                target_module => 'lists'
-                            }
-                        ],
-                        references => [],
-                        source_status => indexed,
-                        provenance => class_body
-                    }
-                ],
-                ok = beamtalk_xref:register_class('NativeCallerMulti', Rows),
-                ?assertEqual(
-                    [
-                        #{
-                            owner => 'NativeCallerMulti',
-                            class_side => false,
-                            method => 'multiCall',
-                            line => 31
-                        }
-                    ],
-                    beamtalk_xref:callers_of_native_module('lists')
+                    ListsCallers
                 )
-            end)
-        ]
-    end}.
-
-callers_of_native_module_purge_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                %% Purging a calling class removes it from the callers index
-                %% (stale-row drop honoured by the live-gen filter).
-                Rows = [
+            ),
+            ?assert(
+                lists:member(
                     #{
+                        owner => 'NativeCallerAlpha',
+                        class_side => true,
+                        method => 'sortIt',
+                        line => 21
+                    },
+                    ListsCallers
+                )
+            ),
+            ?assertNot(
+                lists:any(
+                    fun(R) -> maps:get(owner, R) =:= 'NativeCallerBeta' end,
+                    ListsCallers
+                )
+            ),
+
+            MapsCallers = beamtalk_xref:callers_of_native_module('maps'),
+            ?assertEqual(
+                [
+                    #{
+                        owner => 'NativeCallerBeta',
                         class_side => false,
-                        selector => 'callsLists',
-                        line => 1,
-                        sends => [
-                            #{
-                                selector => 'flatten:',
-                                line => 2,
-                                recv_kind => erlang_ffi,
-                                target_module => 'lists'
-                            }
-                        ],
-                        references => [],
-                        source_status => indexed,
-                        provenance => class_body
+                        method => 'mergeMaps',
+                        line => 6
                     }
                 ],
-                ok = beamtalk_xref:register_class('NativeCallerPurge', Rows),
-                ?assertEqual(1, length(beamtalk_xref:callers_of_native_module('lists'))),
-                ok = beamtalk_xref:purge_class('NativeCallerPurge'),
-                ?assertEqual([], beamtalk_xref:callers_of_native_module('lists'))
-            end)
-        ]
-    end}.
+                MapsCallers
+            ),
 
-%%====================================================================
-%% Concurrent reader during write
-%%====================================================================
-
-concurrent_reader_during_write_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            {timeout, 30,
-                ?_test(begin
-                    %% Seed the table so the reader always has something to
-                    %% observe — even before any writer's first call lands.
-                    ok = beamtalk_xref:register_class('Counter', counter_xref()),
-
-                    Parent = self(),
-                    Writers = 4,
-                    Iterations = 50,
-
-                    %% Spawn writers that repeatedly register_class — each call
-                    %% bumps the per-class gen and re-inserts rows.
-                    WriterPids = [
-                        spawn_link(fun() ->
-                            lists:foreach(
-                                fun(_) ->
-                                    ok = beamtalk_xref:register_class('Counter', counter_xref())
-                                end,
-                                lists:seq(1, Iterations)
-                            ),
-                            Parent ! {writer_done, self()}
-                        end)
-                     || _ <- lists:seq(1, Writers)
+            %% A module with no Beamtalk callers yields the empty state.
+            ?assertEqual([], beamtalk_xref:callers_of_native_module('no_such_native_mod'))
+        end),
+        ?_test(begin
+            %% Multiple FFI calls into the same module from one method collapse
+            %% to a single caller row anchored at the first (lowest) line.
+            Rows = [
+                #{
+                    class_side => false,
+                    selector => 'multiCall',
+                    line => 30,
+                    sends => [
+                        #{
+                            selector => 'foldl:',
+                            line => 33,
+                            recv_kind => erlang_ffi,
+                            target_module => 'lists'
+                        },
+                        #{
+                            selector => 'map:',
+                            line => 31,
+                            recv_kind => erlang_ffi,
+                            target_module => 'lists'
+                        }
                     ],
+                    references => [],
+                    source_status => indexed,
+                    provenance => class_body
+                }
+            ],
+            ok = beamtalk_xref:register_class('NativeCallerMulti', Rows),
+            ?assertEqual(
+                [
+                    #{
+                        owner => 'NativeCallerMulti',
+                        class_side => false,
+                        method => 'multiCall',
+                        line => 31
+                    }
+                ],
+                beamtalk_xref:callers_of_native_module('lists')
+            )
+        end),
+        ?_test(begin
+            %% Purging a calling class removes it from the callers index
+            %% (stale-row drop honoured by the live-gen filter).
+            Rows = [
+                #{
+                    class_side => false,
+                    selector => 'callsLists',
+                    line => 1,
+                    sends => [
+                        #{
+                            selector => 'flatten:',
+                            line => 2,
+                            recv_kind => erlang_ffi,
+                            target_module => 'lists'
+                        }
+                    ],
+                    references => [],
+                    source_status => indexed,
+                    provenance => class_body
+                }
+            ],
+            ok = beamtalk_xref:register_class('NativeCallerPurge', Rows),
+            ?assertEqual(1, length(beamtalk_xref:callers_of_native_module('lists'))),
+            ok = beamtalk_xref:purge_class('NativeCallerPurge'),
+            ?assertEqual([], beamtalk_xref:callers_of_native_module('lists'))
+        end),
+        %%====================================================================
+        %% Concurrent reader during write
+        %%====================================================================
+        {timeout, 30,
+            ?_test(begin
+                %% Seed the table so the reader always has something to
+                %% observe — even before any writer's first call lands.
+                ok = beamtalk_xref:register_class('Counter', counter_xref()),
 
-                    %% Reader runs concurrently and must see a non-empty,
-                    %% well-formed view at every observation. Phase 1
-                    %% guarantees `register_class` always leaves rows in the
-                    %% table (delete-then-reinsert under a single gen_server
-                    %% call would expose a gap; we instead just insert under
-                    %% a new gen — old rows stay until purge), so the reader
-                    %% never sees an empty Counter view between writes.
-                    ReaderPid = spawn_link(fun() -> reader_loop(Parent) end),
+                Parent = self(),
+                Writers = 4,
+                Iterations = 50,
 
-                    lists:foreach(
-                        fun(_) ->
-                            receive
-                                {writer_done, _} -> ok
-                            after 10000 ->
-                                ?assert(false)
-                            end
-                        end,
-                        WriterPids
-                    ),
+                %% Spawn writers that repeatedly register_class — each call
+                %% bumps the per-class gen and re-inserts rows.
+                WriterPids = [
+                    spawn_link(fun() ->
+                        lists:foreach(
+                            fun(_) ->
+                                ok = beamtalk_xref:register_class('Counter', counter_xref())
+                            end,
+                            lists:seq(1, Iterations)
+                        ),
+                        Parent ! {writer_done, self()}
+                    end)
+                 || _ <- lists:seq(1, Writers)
+                ],
 
-                    %% Tell the reader the writers are done; it should also
-                    %% finish soon after.
-                    ReaderPid ! stop,
-                    receive
-                        {reader_done, Count, Errors} ->
-                            ?assert(Count > 0),
-                            ?assertEqual([], Errors)
-                    after 10000 ->
-                        ?assert(false)
+                %% Reader runs concurrently and must see a non-empty,
+                %% well-formed view at every observation. Phase 1
+                %% guarantees `register_class` always leaves rows in the
+                %% table (delete-then-reinsert under a single gen_server
+                %% call would expose a gap; we instead just insert under
+                %% a new gen — old rows stay until purge), so the reader
+                %% never sees an empty Counter view between writes.
+                ReaderPid = spawn_link(fun() -> reader_loop(Parent) end),
+
+                lists:foreach(
+                    fun(_) ->
+                        receive
+                            {writer_done, _} -> ok
+                        after 10000 ->
+                            ?assert(false)
+                        end
                     end,
+                    WriterPids
+                ),
 
-                    %% Final consistency check: the table is non-empty and gen
-                    %% is at least 1 (in fact >= Writers*Iterations + 1, but
-                    %% we don't assume that to keep the test robust).
-                    ?assert(current_gen('Counter') >= 1),
-                    ?assertNotEqual([], beamtalk_xref:defined_selectors('Counter', false))
-                end)}
-        ]
-    end}.
+                %% Tell the reader the writers are done; it should also
+                %% finish soon after.
+                ReaderPid ! stop,
+                receive
+                    {reader_done, Count, Errors} ->
+                        ?assert(Count > 0),
+                        ?assertEqual([], Errors)
+                after 10000 ->
+                    ?assert(false)
+                end,
+
+                %% Final consistency check: the table is non-empty and gen
+                %% is at least 1 (in fact >= Writers*Iterations + 1, but
+                %% we don't assume that to keep the test robust).
+                ?assert(current_gen('Counter') >= 1),
+                ?assertNotEqual([], beamtalk_xref:defined_selectors('Counter', false))
+            end)}
+    ]}.
 
 reader_loop(Parent) ->
     reader_loop(Parent, 0, []).
@@ -1194,55 +1059,47 @@ check_counter_view() ->
 %%====================================================================
 
 purge_method_removes_one_method_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
+    {foreach, fun setup/0, fun cleanup/1, [
+        ?_test(begin
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
 
-                %% Sanity: increment is present and sends '+'; sibling 'value' present.
-                ?assert(
-                    lists:member('increment', beamtalk_xref:defined_selectors('Counter', false))
-                ),
-                ?assertEqual(1, length(beamtalk_xref:senders_of('+'))),
-                ?assertEqual(1, length(beamtalk_xref:references_to('Integer'))),
+            %% Sanity: increment is present and sends '+'; sibling 'value' present.
+            ?assert(
+                lists:member('increment', beamtalk_xref:defined_selectors('Counter', false))
+            ),
+            ?assertEqual(1, length(beamtalk_xref:senders_of('+'))),
+            ?assertEqual(1, length(beamtalk_xref:references_to('Integer'))),
 
-                %% Purge just `increment`.
-                ok = beamtalk_xref:purge_method('Counter', false, 'increment'),
+            %% Purge just `increment`.
+            ok = beamtalk_xref:purge_method('Counter', false, 'increment'),
 
-                %% `increment` gone — method row, its '+' send, and its Integer ref.
-                ?assertEqual([], beamtalk_xref:implementors_of('increment')),
-                ?assertNot(
-                    lists:member('increment', beamtalk_xref:defined_selectors('Counter', false))
-                ),
-                ?assertEqual([], beamtalk_xref:senders_of('+')),
-                ?assertEqual([], beamtalk_xref:references_to('Integer')),
+            %% `increment` gone — method row, its '+' send, and its Integer ref.
+            ?assertEqual([], beamtalk_xref:implementors_of('increment')),
+            ?assertNot(
+                lists:member('increment', beamtalk_xref:defined_selectors('Counter', false))
+            ),
+            ?assertEqual([], beamtalk_xref:senders_of('+')),
+            ?assertEqual([], beamtalk_xref:references_to('Integer')),
 
-                %% Siblings untouched: instance `value`, class-side `new` + its
-                %% `basicNew` send all survive.
-                ?assert(
-                    lists:member('value', beamtalk_xref:defined_selectors('Counter', false))
-                ),
-                ?assertEqual(['new'], beamtalk_xref:defined_selectors('Counter', true)),
-                ?assertEqual(1, length(beamtalk_xref:senders_of('basicNew')))
-            end)
-        ]
-    end}.
-
-purge_method_unknown_is_noop_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            ?_test(begin
-                ok = beamtalk_xref:register_class('Counter', counter_xref()),
-                %% Purging an unknown method / class is a harmless no-op.
-                ?assertEqual(ok, beamtalk_xref:purge_method('Counter', false, 'no_such_method')),
-                ?assertEqual(ok, beamtalk_xref:purge_method('NoSuchClass', false, 'increment')),
-                %% Existing rows intact.
-                ?assert(
-                    lists:member('increment', beamtalk_xref:defined_selectors('Counter', false))
-                )
-            end)
-        ]
-    end}.
+            %% Siblings untouched: instance `value`, class-side `new` + its
+            %% `basicNew` send all survive.
+            ?assert(
+                lists:member('value', beamtalk_xref:defined_selectors('Counter', false))
+            ),
+            ?assertEqual(['new'], beamtalk_xref:defined_selectors('Counter', true)),
+            ?assertEqual(1, length(beamtalk_xref:senders_of('basicNew')))
+        end),
+        ?_test(begin
+            ok = beamtalk_xref:register_class('Counter', counter_xref()),
+            %% Purging an unknown method / class is a harmless no-op.
+            ?assertEqual(ok, beamtalk_xref:purge_method('Counter', false, 'no_such_method')),
+            ?assertEqual(ok, beamtalk_xref:purge_method('NoSuchClass', false, 'increment')),
+            %% Existing rows intact.
+            ?assert(
+                lists:member('increment', beamtalk_xref:defined_selectors('Counter', false))
+            )
+        end)
+    ]}.
 
 %%====================================================================
 %% build_method_entry/5 — runtime xref-entry construction
@@ -1319,7 +1176,7 @@ build_method_entry_sends_always_carry_dynamic_recv_type_test_() ->
 %% that class. Runs against the live runtime app so `beamtalk_class_registry`
 %% reports the bootstrap stub classes as loaded.
 miss_policy_fallback_test_() ->
-    {setup, fun setup_app/0, fun cleanup_app/1, fun(_) ->
+    {foreach, fun setup_app/0, fun cleanup_app/1, [
         {timeout, 30,
             ?_test(begin
                 %% Pick a loaded class that actually defines methods — the miss
@@ -1371,22 +1228,17 @@ miss_policy_fallback_test_() ->
                     %% state and start seeing fallback scans / xref_miss warnings.
                     ok = beamtalk_xref:register_class(Class, StubRows)
                 end
-            end)}
-    end}.
-
-%%====================================================================
-%% Miss-policy fallback for referencesTo: / implementorsOf: /
-%% selectorsMatching: (ADR 0087 Phase 5)
-%%====================================================================
-
-%% The three navigation queries share the `senders_of_bt/1`
-%% partition shape: while a method-bearing class is indexed its rows come from
-%% the index and it never appears as a fallback class; once artificially purged
-%% (loaded-but-unindexed) it falls back and emits exactly one `xref_miss`
-%% warning tagged with the right query name. This exercises all three new
-%% `_bt/0,1` read APIs against the live runtime app.
-nav_query_miss_policy_test_() ->
-    {setup, fun setup_app/0, fun cleanup_app/1, fun(_) ->
+            end)},
+        %%====================================================================
+        %% Miss-policy fallback for referencesTo: / implementorsOf: /
+        %% selectorsMatching: (ADR 0087 Phase 5)
+        %%====================================================================
+        %% The three navigation queries share the `senders_of_bt/1`
+        %% partition shape: while a method-bearing class is indexed its rows come from
+        %% the index and it never appears as a fallback class; once artificially purged
+        %% (loaded-but-unindexed) it falls back and emits exactly one `xref_miss`
+        %% warning tagged with the right query name. This exercises all three new
+        %% `_bt/0,1` read APIs against the live runtime app.
         {timeout, 30,
             ?_test(begin
                 Class = first_method_bearing_class(),
@@ -1479,16 +1331,12 @@ nav_query_miss_policy_test_() ->
                     %% Restore so later tests in the same VM see a clean index.
                     ok = beamtalk_xref:register_class(Class, StubRows)
                 end
-            end)}
-    end}.
-
-%% A prior review finding: the `indexed`
-%% partition of senders_of_bt/1 must be filtered to the live generation so a
-%% re-register never exposes a stale sender row. Re-register a loaded class
-%% twice with a *different* send selector each generation and assert the
-%% partition only ever reflects the current generation.
-senders_of_bt_indexed_is_gen_filtered_test_() ->
-    {setup, fun setup_app/0, fun cleanup_app/1, fun(_) ->
+            end)},
+        %% A prior review finding: the `indexed`
+        %% partition of senders_of_bt/1 must be filtered to the live generation so a
+        %% re-register never exposes a stale sender row. Re-register a loaded class
+        %% twice with a *different* send selector each generation and assert the
+        %% partition only ever reflects the current generation.
         {timeout, 30,
             ?_test(begin
                 Class = first_method_bearing_class(),
@@ -1540,22 +1388,17 @@ senders_of_bt_indexed_is_gen_filtered_test_() ->
                     %% Drop the synthetic rows so sibling tests are unaffected.
                     ok = beamtalk_xref:purge_class(Class)
                 end
-            end)}
-    end}.
-
-%%====================================================================
-%% Composite-query aggregate readers: all_sends_bt/0 + all_sent_selectors_bt/0
-%% (ADR 0087 Phase 5)
-%%====================================================================
-
-%% The two composite queries (`unimplementedSelectors` / `unusedSelectors`) read
-%% the whole-universe aggregate readers. While a class is indexed its sends come
-%% from the index (carrying the sent selector, the containing-method site, and
-%% the FFI-facing recv tag); once artificially purged it falls back and emits one
-%% `xref_miss` per reader tagged with the right query name. Erlang-FFI sends are
-%% dropped from the sent-selector set but kept (tagged) in the send-row stream.
-composite_query_aggregate_readers_test_() ->
-    {setup, fun setup_app/0, fun cleanup_app/1, fun(_) ->
+            end)},
+        %%====================================================================
+        %% Composite-query aggregate readers: all_sends_bt/0 + all_sent_selectors_bt/0
+        %% (ADR 0087 Phase 5)
+        %%====================================================================
+        %% The two composite queries (`unimplementedSelectors` / `unusedSelectors`) read
+        %% the whole-universe aggregate readers. While a class is indexed its sends come
+        %% from the index (carrying the sent selector, the containing-method site, and
+        %% the FFI-facing recv tag); once artificially purged it falls back and emits one
+        %% `xref_miss` per reader tagged with the right query name. Erlang-FFI sends are
+        %% dropped from the sent-selector set but kept (tagged) in the send-row stream.
         {timeout, 30,
             ?_test(begin
                 Class = first_method_bearing_class(),
@@ -1656,14 +1499,10 @@ composite_query_aggregate_readers_test_() ->
                     %% Drop the synthetic rows so sibling tests are unaffected.
                     ok = beamtalk_xref:purge_class(Class)
                 end
-            end)}
-    end}.
-
-%% The aggregate readers' indexed partitions must be gen-filtered: a re-register
-%% under a new generation must not leak a stale send row (mirrors the deferred
-%% CodeRabbit finding for senders_of_bt/1).
-all_sends_bt_indexed_is_gen_filtered_test_() ->
-    {setup, fun setup_app/0, fun cleanup_app/1, fun(_) ->
+            end)},
+        %% The aggregate readers' indexed partitions must be gen-filtered: a re-register
+        %% under a new generation must not leak a stale send row (mirrors the deferred
+        %% CodeRabbit finding for senders_of_bt/1).
         {timeout, 30,
             ?_test(begin
                 Class = first_method_bearing_class(),
@@ -1738,7 +1577,7 @@ all_sends_bt_indexed_is_gen_filtered_test_() ->
                     ok = beamtalk_xref:purge_class(Class)
                 end
             end)}
-    end}.
+    ]}.
 
 %% Assert exactly one xref_miss warning for `Class` tagged with `Query`. Drains
 %% the capture mailbox of misses for the class and checks the metadata. Each
@@ -1865,6 +1704,7 @@ bt3218_hierarchy_cleanup() ->
 %% class, direct subclass, transitive subclass, direct/transitive ancestor,
 %% unrelated sibling branch.
 hierarchy_related_classes_relatedness_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             Pid = setup(),
@@ -1946,11 +1786,7 @@ bt3218_protocol_fixture_setup() ->
 bt3218_protocol_fixture_cleanup(Pids) ->
     lists:foreach(
         fun(Pid) ->
-            (try
-                gen_server:stop(Pid, normal, 5000)
-            catch
-                _:_ -> ok
-            end)
+            beamtalk_test_proc:stop(Pid)
         end,
         Pids
     ),
@@ -1960,6 +1796,7 @@ bt3218_protocol_fixture_cleanup(Pids) ->
 %% class, a non-conforming class, a class conforming via inherited default
 %% methods.
 protocol_conformance_predicate_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             setup(),
@@ -2042,6 +1879,7 @@ protocol_conformance_predicate_test_() ->
 %% EUnit: legacy row (no `recv_type` field) always included, regardless of
 %% `ChangedClass`.
 legacy_row_always_included_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             Pid = setup(),
@@ -2094,6 +1932,7 @@ legacy_row_always_included_test_() ->
 %% from the spike's fixture table: a name unknown to both registries, and a
 %% protocol not currently registered.
 unresolvable_name_defaults_to_relevant_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             Pid = setup(),
@@ -2162,6 +2001,7 @@ unresolvable_name_defaults_to_relevant_test_() ->
 %% ancestor/descendant class-side method), and NOT relevant for an
 %% instance-side change to the same class name.
 meta_class_object_receiver_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             Pid = setup(),
@@ -2265,98 +2105,96 @@ meta_class_object_receiver_test_() ->
 %% this is a call-count reduction, not a timing measurement (timings are
 %% noisy; this is a correctness-of-caching property).
 memoization_call_count_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
-        [
-            {timeout, 30,
-                ?_test(begin
-                    ok = beamtalk_protocol_registry:init(),
-                    ProtoName = 'Bt3218MemoProto',
-                    %% Empty required-method lists: conforms_to/2 is trivially
-                    %% true for any class name without needing a live class
-                    %% process, isolating the assertion to purely "how many
-                    %% times was conforms_to/2 (and is_protocol/1) actually
-                    %% invoked".
-                    ok = beamtalk_protocol_registry:register_protocol(#{
-                        name => ProtoName,
-                        module => bt3218_memo_proto_test_mod,
-                        required_methods => [],
-                        required_class_methods => [],
-                        type_params => [],
-                        extending => undefined
-                    }),
-                    N = 5,
-                    MethodXref = [
-                        #{
-                            class_side => false,
-                            selector => list_to_atom("bt3218MemoMethod" ++ integer_to_list(I)),
-                            line => I,
-                            sends => [
-                                #{
-                                    selector => 'bt3218MemoSel',
-                                    line => I,
-                                    recv_kind => other,
-                                    recv_type => ProtoName
-                                }
-                            ],
-                            references => [],
-                            source_status => indexed,
-                            provenance => class_body
-                        }
-                     || I <- lists:seq(1, N)
-                    ],
-                    ok = beamtalk_xref:register_class('Bt3218MemoOwner', MethodXref),
-                    try
-                        Self = self(),
-                        Worker = spawn(fun() ->
-                            receive
-                                go -> ok
-                            end,
-                            Result = beamtalk_xref:senders_of(
-                                'bt3218MemoSel', 'Bt3218MemoAnyChangedClass'
-                            ),
-                            Self ! {bt3218_memo_result, Result}
-                        end),
-                        1 = erlang:trace(Worker, true, [call, {tracer, Self}]),
-                        1 = erlang:trace_pattern(
-                            {beamtalk_protocol_registry, conforms_to, 2}, true, [global]
+    {foreach, fun setup/0, fun cleanup/1, [
+        {timeout, 30,
+            ?_test(begin
+                ok = beamtalk_protocol_registry:init(),
+                ProtoName = 'Bt3218MemoProto',
+                %% Empty required-method lists: conforms_to/2 is trivially
+                %% true for any class name without needing a live class
+                %% process, isolating the assertion to purely "how many
+                %% times was conforms_to/2 (and is_protocol/1) actually
+                %% invoked".
+                ok = beamtalk_protocol_registry:register_protocol(#{
+                    name => ProtoName,
+                    module => bt3218_memo_proto_test_mod,
+                    required_methods => [],
+                    required_class_methods => [],
+                    type_params => [],
+                    extending => undefined
+                }),
+                N = 5,
+                MethodXref = [
+                    #{
+                        class_side => false,
+                        selector => list_to_atom("bt3218MemoMethod" ++ integer_to_list(I)),
+                        line => I,
+                        sends => [
+                            #{
+                                selector => 'bt3218MemoSel',
+                                line => I,
+                                recv_kind => other,
+                                recv_type => ProtoName
+                            }
+                        ],
+                        references => [],
+                        source_status => indexed,
+                        provenance => class_body
+                    }
+                 || I <- lists:seq(1, N)
+                ],
+                ok = beamtalk_xref:register_class('Bt3218MemoOwner', MethodXref),
+                try
+                    Self = self(),
+                    Worker = spawn(fun() ->
+                        receive
+                            go -> ok
+                        end,
+                        Result = beamtalk_xref:senders_of(
+                            'bt3218MemoSel', 'Bt3218MemoAnyChangedClass'
                         ),
-                        1 = erlang:trace_pattern(
-                            {beamtalk_protocol_registry, is_protocol, 1}, true, [global]
-                        ),
-                        Worker ! go,
-                        Sites =
-                            receive
-                                {bt3218_memo_result, R} -> R
-                            after 5000 ->
-                                erlang:error(bt3218_memo_worker_timeout)
-                            end,
-                        _ = erlang:trace_pattern(
-                            {beamtalk_protocol_registry, conforms_to, 2}, false, [global]
-                        ),
-                        _ = erlang:trace_pattern(
-                            {beamtalk_protocol_registry, is_protocol, 1}, false, [global]
-                        ),
-                        %% The worker may already have exited by the time we
-                        %% get here (it sends its result then terminates) —
-                        %% disabling a dead pid's trace flags raises `badarg`
-                        %% and is a no-op anyway (flags die with the process).
-                        (try
-                            erlang:trace(Worker, false, [call])
-                        catch
-                            error:badarg -> ok
-                        end),
+                        Self ! {bt3218_memo_result, Result}
+                    end),
+                    1 = erlang:trace(Worker, true, [call, {tracer, Self}]),
+                    1 = erlang:trace_pattern(
+                        {beamtalk_protocol_registry, conforms_to, 2}, true, [global]
+                    ),
+                    1 = erlang:trace_pattern(
+                        {beamtalk_protocol_registry, is_protocol, 1}, true, [global]
+                    ),
+                    Worker ! go,
+                    Sites =
+                        receive
+                            {bt3218_memo_result, R} -> R
+                        after 5000 ->
+                            erlang:error(bt3218_memo_worker_timeout)
+                        end,
+                    _ = erlang:trace_pattern(
+                        {beamtalk_protocol_registry, conforms_to, 2}, false, [global]
+                    ),
+                    _ = erlang:trace_pattern(
+                        {beamtalk_protocol_registry, is_protocol, 1}, false, [global]
+                    ),
+                    %% The worker may already have exited by the time we
+                    %% get here (it sends its result then terminates) —
+                    %% disabling a dead pid's trace flags raises `badarg`
+                    %% and is a no-op anyway (flags die with the process).
+                    (try
+                        erlang:trace(Worker, false, [call])
+                    catch
+                        error:badarg -> ok
+                    end),
 
-                        ?assertEqual(N, length(Sites)),
+                    ?assertEqual(N, length(Sites)),
 
-                        {ConformsCalls, IsProtocolCalls} = bt3218_drain_trace_counts(),
-                        ?assertEqual(1, ConformsCalls),
-                        ?assertEqual(1, IsProtocolCalls)
-                    after
-                        ok = beamtalk_xref:purge_class('Bt3218MemoOwner')
-                    end
-                end)}
-        ]
-    end}.
+                    {ConformsCalls, IsProtocolCalls} = bt3218_drain_trace_counts(),
+                    ?assertEqual(1, ConformsCalls),
+                    ?assertEqual(1, IsProtocolCalls)
+                after
+                    ok = beamtalk_xref:purge_class('Bt3218MemoOwner')
+                end
+            end)}
+    ]}.
 
 bt3218_drain_trace_counts() ->
     bt3218_drain_trace_counts(0, 0).
@@ -2381,6 +2219,7 @@ bt3218_drain_trace_counts(Conforms, IsProtocol) ->
 %% two levels down the Mid branch), so a `ChangedClass` can be related to
 %% exactly one, the other, both, or neither.
 union_recv_type_relevant_iff_any_member_matches_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             Pid = setup(),
@@ -2462,6 +2301,7 @@ union_recv_type_relevant_iff_any_member_matches_test_() ->
 %% `ChangedClass` matching `Root` alone (without also matching `Sibling`) is
 %% the case that distinguishes AND from OR.
 intersection_recv_type_relevant_iff_all_members_match_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             Pid = setup(),
@@ -2537,6 +2377,7 @@ intersection_recv_type_relevant_iff_all_members_match_test_() ->
 %% paths are unaffected by the `{union, _}`/`{intersection, _}` clauses added
 %% to `is_relevant/5`.
 single_name_and_dynamic_recv_type_unaffected_by_composed_types_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             Pid = setup(),

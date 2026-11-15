@@ -15,7 +15,7 @@ deliberately wipes `method_signatures`/`method_return_types` per ADR 0050 —
 overwrites it with the *new* generation, losing the *previous* one just as
 surely). Either way, once a patch installs, the pre-patch signature is gone
 from live class state. This store is the plumbing that survives the wipe: the
-install hook (`beamtalk_repl_loader:load_recompiled_method/8`) calls
+install hook (`beamtalk_repl_loader_methods:load_recompiled_method/8`) calls
 `capture/4` with the freshly-compiled signature *before* the patch installs,
 so the diff always compares the new generation against the one actually
 recorded at the previous patch — never against wiped/overwritten class state.
@@ -79,7 +79,7 @@ diffing it against whatever was recorded at the previous patch (or the
 class's original `__beamtalk_meta/0` for a never-patched method).
 
 `NewSignature` is either a `signature()` map (a patch installing a method) or
-the atom `removed` (a method being deleted — `beamtalk_repl_loader:remove_method/3`).
+the atom `removed` (a method being deleted — `beamtalk_repl_loader_methods:remove_method/3`).
 
 **Must be called *before* the install** (before `code:load_binary/3` for a
 patch, before the recompile-without-the-method for a removal) — never after.

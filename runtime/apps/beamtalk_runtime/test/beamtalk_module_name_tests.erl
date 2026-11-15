@@ -42,7 +42,7 @@ camel_to_snake_conformance_test_() ->
         Expected <- [unicode:characters_to_list(ExpectedBin)]
     ].
 
-%% Regression: beamtalk_repl_loader:to_snake_case/1 (copy D) used to
+%% Regression: beamtalk_repl_loader_support:to_snake_case/1 (copy D) used to
 %% force-lowercase the first character unconditionally, discarding whether it
 %% actually started lowercase — so a lowercase-initial name immediately
 %% followed by an uppercase letter (no lowercase letter in between to

@@ -647,7 +647,7 @@ the noproc exit is translated to a structured class_not_found error.
 ) -> beamtalk_repl_ops:op_result().
 show_codegen_class_method(ClassBin, SelectorBin) ->
     %% Support package-qualified class names (e.g. "json@Parser")
-    case beamtalk_repl_ops_dev_complete:resolve_qualified_class_name(ClassBin) of
+    case beamtalk_repl_errors:resolve_qualified_class_name(ClassBin) of
         {error, badarg} ->
             {error, make_class_not_found_error(ClassBin)};
         {ok, ClassAtom} ->
@@ -1031,7 +1031,7 @@ Each entry is a map with <<"name">>, <<"selector">>, <<"side">>, <<"line">>,
 -spec list_class_methods_for_ws(binary()) -> [map()].
 list_class_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
     %% Support package-qualified class names (e.g. "json@Parser")
-    case beamtalk_repl_ops_dev_complete:resolve_qualified_class_name(ClassBin) of
+    case beamtalk_repl_errors:resolve_qualified_class_name(ClassBin) of
         {error, badarg} ->
             [];
         {ok, ClassName} ->
@@ -1072,7 +1072,7 @@ Each entry has the same shape as `method_ws_entry/4` plus a
 """.
 -spec list_inherited_methods_for_ws(binary()) -> [map()].
 list_inherited_methods_for_ws(ClassBin) when is_binary(ClassBin) ->
-    case beamtalk_repl_ops_dev_complete:resolve_qualified_class_name(ClassBin) of
+    case beamtalk_repl_errors:resolve_qualified_class_name(ClassBin) of
         {error, badarg} ->
             [];
         {ok, ClassName} ->

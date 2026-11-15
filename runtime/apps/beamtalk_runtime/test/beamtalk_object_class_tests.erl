@@ -151,410 +151,320 @@ teardown(_) ->
 %%====================================================================
 
 start_link_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            ClassInfo = #{
+                name => 'StartLinkTestClass',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                instance_variables => []
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('StartLinkTestClass', ClassInfo),
+            ?assert(is_pid(Pid)),
+            ?assert(is_process_alive(Pid))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'RegistryTestClass',
+                module => test_class,
+                superclass => none
+            },
+            {ok, _Pid} = beamtalk_object_class:start_link('RegistryTestClass', ClassInfo),
+            RegPid = beamtalk_class_registry:whereis_class('RegistryTestClass'),
+            ?assert(is_pid(RegPid)),
+            ?assertEqual(RegPid, whereis(beamtalk_class_RegistryTestClass))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'PgMembershipTestClass',
+                module => test_class,
+                superclass => none
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('PgMembershipTestClass', ClassInfo),
+            Members = pg:get_members(beamtalk_classes),
+            ?assert(lists:member(Pid, Members))
+        end),
+        %% BT-3810 regression guard: stopping a class that `beamtalk_class_monitor` is
+        %% watching (every class started via `start/2` while the runtime tree is up)
+        %% must not let the monitor resurrect it. The class's ETS metadata is left in
+        %% place on purpose, so without the unwatch in
+        %% beamtalk_test_class_teardown:stop_class_process/1 the monitor's eager
+        %% restart succeeds and the class reappears under its registered name, which
+        %% is how 'Counter' leaked into methods_test_/0.
+        ?_test(begin
+            OwnMonitor =
+                case whereis(beamtalk_class_monitor) of
+                    undefined ->
+                        {ok, Mon} = beamtalk_class_monitor:start_link(),
+                        Mon;
+                    _ ->
+                        undefined
+                end,
+            try
                 ClassInfo = #{
-                    name => 'StartLinkTestClass',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    instance_variables => []
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('StartLinkTestClass', ClassInfo),
-                ?assert(is_pid(Pid)),
-                ?assert(is_process_alive(Pid))
-            end)
-        ]
-    end}.
-
-registry_name_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'RegistryTestClass',
+                    name => 'BT3810GuardClass',
                     module => test_class,
                     superclass => none
                 },
-                {ok, _Pid} = beamtalk_object_class:start_link('RegistryTestClass', ClassInfo),
-                RegPid = beamtalk_class_registry:whereis_class('RegistryTestClass'),
-                ?assert(is_pid(RegPid)),
-                ?assertEqual(RegPid, whereis(beamtalk_class_RegistryTestClass))
-            end)
-        ]
-    end}.
-
-pg_group_membership_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'PgMembershipTestClass',
-                    module => test_class,
-                    superclass => none
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('PgMembershipTestClass', ClassInfo),
-                Members = pg:get_members(beamtalk_classes),
-                ?assert(lists:member(Pid, Members))
-            end)
-        ]
-    end}.
-
-%% BT-3810 regression guard: stopping a class that `beamtalk_class_monitor` is
-%% watching (every class started via `start/2` while the runtime tree is up)
-%% must not let the monitor resurrect it. The class's ETS metadata is left in
-%% place on purpose, so without the unwatch in
-%% beamtalk_test_class_teardown:stop_class_process/1 the monitor's eager
-%% restart succeeds and the class reappears under its registered name, which
-%% is how 'Counter' leaked into methods_test_/0.
-stopped_watched_class_is_not_resurrected_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                OwnMonitor =
-                    case whereis(beamtalk_class_monitor) of
-                        undefined ->
-                            {ok, Mon} = beamtalk_class_monitor:start_link(),
-                            Mon;
-                        _ ->
-                            undefined
-                    end,
-                try
-                    ClassInfo = #{
-                        name => 'BT3810GuardClass',
-                        module => test_class,
-                        superclass => none
-                    },
-                    {ok, Pid} = beamtalk_object_class:start('BT3810GuardClass', ClassInfo),
-                    ?assert(is_process_alive(Pid)),
-                    beamtalk_test_class_teardown:stop_pg_class_processes(),
-                    ?assertNot(is_process_alive(Pid)),
-                    %% Give an (erroneous) eager restart ample time to land.
-                    %% sleep: asserts nothing happens within a window (class 4)
-                    timer:sleep(200),
-                    ?assertEqual(undefined, whereis(beamtalk_class_BT3810GuardClass))
-                after
-                    case OwnMonitor of
-                        undefined -> ok;
-                        _ -> gen_server:stop(OwnMonitor)
-                    end
+                {ok, Pid} = beamtalk_object_class:start('BT3810GuardClass', ClassInfo),
+                ?assert(is_process_alive(Pid)),
+                beamtalk_test_class_teardown:stop_pg_class_processes(),
+                ?assertNot(is_process_alive(Pid)),
+                %% Give an (erroneous) eager restart ample time to land.
+                %% sleep: asserts nothing happens within a window (class 4)
+                timer:sleep(200),
+                ?assertEqual(undefined, whereis(beamtalk_class_BT3810GuardClass))
+            after
+                case OwnMonitor of
+                    undefined -> ok;
+                    _ -> gen_server:stop(OwnMonitor)
                 end
-            end)
-        ]
-    end}.
+            end
+        end),
+        %%====================================================================
+        %% Introspection Tests
+        %%====================================================================
+        ?_test(begin
+            Methods = #{
+                increment => #{arity => 0},
+                add => #{arity => 1},
+                getValue => #{arity => 0}
+            },
+            ClassInfo = #{
+                name => 'Counter',
+                module => counter,
+                instance_methods => Methods
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
+            Result = beamtalk_object_class:methods(Pid),
+            ?assertEqual(lists:sort([increment, add, getValue]), lists:sort(Result))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'Counter',
+                module => counter,
+                superclass => 'Object'
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
+            ?assertEqual('Object', beamtalk_object_class:superclass(Pid))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'ProtoObject',
+                module => proto_object,
+                superclass => none
+            },
+            {ok, Pid} =
+                case beamtalk_object_class:start_link('ProtoObject', ClassInfo) of
+                    {ok, P} -> {ok, P};
+                    {error, {already_started, P}} -> {ok, P}
+                end,
+            ?assertEqual(none, beamtalk_object_class:superclass(Pid))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'Counter',
+                module => counter
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
+            ?assertEqual('Counter', beamtalk_object_class:class_name(Pid))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'Beamtalk',
+                module => 'Beamtalk'
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('Beamtalk', ClassInfo),
+            ?assertEqual('Beamtalk', beamtalk_object_class:class_name(Pid))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'Counter',
+                module => counter
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
+            ?assertEqual(counter, beamtalk_object_class:module_name(Pid))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'Beamtalk',
+                module => 'Beamtalk'
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('Beamtalk', ClassInfo),
+            ?assertEqual('Beamtalk', beamtalk_object_class:module_name(Pid))
+        end),
+        ?_test(begin
+            Methods = #{
+                increment => #{arity => 0, block => fun() -> ok end}
+            },
+            MethodSource = #{
+                increment => <<"increment => self.count := self.count + 1">>
+            },
+            ClassInfo = #{
+                name => 'Counter',
+                module => counter,
+                instance_methods => Methods,
+                method_source => MethodSource
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
+            MethodObj = beamtalk_object_class:method(Pid, increment),
+            ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
+            ?assertEqual(increment, maps:get('__selector__', MethodObj)),
+            ?assertEqual(
+                <<"increment => self.count := self.count + 1">>,
+                maps:get('__source__', MethodObj)
+            )
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'CounterNoMethods',
+                module => counter,
+                instance_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('CounterNoMethods', ClassInfo),
+            ?assertEqual(nil, beamtalk_object_class:method(Pid, nonexistent))
+        end),
+        %% Tests for beamtalk_method_resolver domain service
+        %% Resolve via class object tuple
+        ?_test(begin
+            Methods = #{
+                getValue => #{arity => 0, block => fun() -> ok end}
+            },
+            MethodSource = #{
+                getValue => <<"getValue => ^self.value">>
+            },
+            ClassInfo = #{
+                name => 'ResolverTest',
+                module => resolver_test,
+                instance_methods => Methods,
+                method_source => MethodSource
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('ResolverTest', ClassInfo),
+            ClassObj = {beamtalk_object, 'ResolverTest class', resolver_test, Pid},
+            MethodObj = beamtalk_method_resolver:resolve(ClassObj, getValue),
+            ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
+            ?assertEqual(getValue, maps:get('__selector__', MethodObj))
+        end),
+        %% Resolve via class object tuple returns nil for missing method
+        ?_test(begin
+            ClassInfo = #{
+                name => 'ResolverNilTest',
+                module => resolver_nil_test,
+                instance_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('ResolverNilTest', ClassInfo),
+            ClassObj = {beamtalk_object, 'ResolverNilTest class', resolver_nil_test, Pid},
+            ?assertEqual(nil, beamtalk_method_resolver:resolve(ClassObj, nonexistent))
+        end),
+        %% Type error for non-class receiver (integer)
+        ?_test(begin
+            ?assertException(
+                error,
+                _,
+                beamtalk_method_resolver:resolve(42, foo)
+            )
+        end),
+        %% Type error for instance object (not a class)
+        ?_test(begin
+            InstanceObj = {beamtalk_object, 'Counter', counter, self()},
+            ?assertException(
+                error,
+                _,
+                beamtalk_method_resolver:resolve(InstanceObj, foo)
+            )
+        end),
+        %% Malformed tuple with non-atom ClassTag falls through to catch-all
+        ?_test(begin
+            BadTuple = {beamtalk_object, 123, counter, self()},
+            ?assertException(
+                error,
+                _,
+                beamtalk_method_resolver:resolve(BadTuple, foo)
+            )
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'Counter',
+                module => counter,
+                fields => [count, name]
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
+            IVars = beamtalk_object_class:instance_variables(Pid),
+            ?assertEqual([count, name], IVars)
+        end),
+        %%====================================================================
+        %% Hot Patching Tests
+        %%====================================================================
+        ?_test(begin
+            ClassInfo = #{
+                name => 'Counter',
+                module => counter,
+                instance_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
 
-%%====================================================================
-%% Introspection Tests
-%%====================================================================
+            %% Add a new method
+            NewFun = fun() -> 42 end,
+            Source = <<"newMethod => 42">>,
+            ok = beamtalk_object_class:put_method(Pid, newMethod, NewFun, Source),
 
-methods_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Methods = #{
-                    increment => #{arity => 0},
-                    add => #{arity => 1},
-                    getValue => #{arity => 0}
-                },
-                ClassInfo = #{
-                    name => 'Counter',
-                    module => counter,
-                    instance_methods => Methods
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
-                Result = beamtalk_object_class:methods(Pid),
-                ?assertEqual(lists:sort([increment, add, getValue]), lists:sort(Result))
-            end)
-        ]
-    end}.
+            %% Verify it's in the method list
+            Methods = beamtalk_object_class:methods(Pid),
+            ?assert(lists:member(newMethod, Methods)),
 
-superclass_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'Counter',
-                    module => counter,
-                    superclass => 'Object'
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
-                ?assertEqual('Object', beamtalk_object_class:superclass(Pid))
-            end),
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'ProtoObject',
-                    module => proto_object,
-                    superclass => none
-                },
-                {ok, Pid} =
-                    case beamtalk_object_class:start_link('ProtoObject', ClassInfo) of
-                        {ok, P} -> {ok, P};
-                        {error, {already_started, P}} -> {ok, P}
-                    end,
-                ?assertEqual(none, beamtalk_object_class:superclass(Pid))
-            end)
-        ]
-    end}.
+            %% Verify we can retrieve it
+            MethodObj = beamtalk_object_class:method(Pid, newMethod),
+            ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
+            ?assertEqual(newMethod, maps:get('__selector__', MethodObj)),
+            ?assertEqual(Source, maps:get('__source__', MethodObj))
+        end),
+        ?_test(begin
+            OldFun = fun() -> old_behavior end,
+            ClassInfo = #{
+                name => 'Counter',
+                module => counter,
+                instance_methods => #{
+                    someMethod => #{block => OldFun}
+                }
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
 
-class_name_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'Counter',
-                    module => counter
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
-                ?assertEqual('Counter', beamtalk_object_class:class_name(Pid))
-            end),
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'Beamtalk',
-                    module => 'Beamtalk'
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('Beamtalk', ClassInfo),
-                ?assertEqual('Beamtalk', beamtalk_object_class:class_name(Pid))
-            end)
-        ]
-    end}.
+            %% Replace with new implementation
+            NewFun = fun() -> new_behavior end,
+            ok = beamtalk_object_class:put_method(Pid, someMethod, NewFun, <<"new">>),
 
-module_name_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'Counter',
-                    module => counter
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
-                ?assertEqual(counter, beamtalk_object_class:module_name(Pid))
-            end),
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'Beamtalk',
-                    module => 'Beamtalk'
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('Beamtalk', ClassInfo),
-                ?assertEqual('Beamtalk', beamtalk_object_class:module_name(Pid))
-            end)
-        ]
-    end}.
+            %% Verify replacement
+            MethodObj = beamtalk_object_class:method(Pid, someMethod),
+            MethodInfo = maps:get('__method_info__', MethodObj),
+            RetrievedFun = maps:get(block, MethodInfo),
+            ?assertEqual(NewFun, RetrievedFun)
+        end),
+        %%====================================================================
+        %% All Classes Enumeration
+        %%====================================================================
+        ?_test(begin
+            %% Test that all_classes returns a list
+            %% More thorough testing happens in other tests
+            AllClasses = beamtalk_class_registry:all_classes(),
+            ?assert(is_list(AllClasses))
+        end),
+        %%====================================================================
+        %% Error Handling Tests
+        %%====================================================================
+        ?_test(begin
+            ClassInfo = #{
+                name => 'DuplicateTestClass',
+                module => test_class,
+                superclass => none
+            },
+            {ok, _Pid1} = beamtalk_object_class:start_link('DuplicateTestClass', ClassInfo),
 
-method_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Methods = #{
-                    increment => #{arity => 0, block => fun() -> ok end}
-                },
-                MethodSource = #{
-                    increment => <<"increment => self.count := self.count + 1">>
-                },
-                ClassInfo = #{
-                    name => 'Counter',
-                    module => counter,
-                    instance_methods => Methods,
-                    method_source => MethodSource
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
-                MethodObj = beamtalk_object_class:method(Pid, increment),
-                ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
-                ?assertEqual(increment, maps:get('__selector__', MethodObj)),
-                ?assertEqual(
-                    <<"increment => self.count := self.count + 1">>,
-                    maps:get('__source__', MethodObj)
-                )
-            end),
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'CounterNoMethods',
-                    module => counter,
-                    instance_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('CounterNoMethods', ClassInfo),
-                ?assertEqual(nil, beamtalk_object_class:method(Pid, nonexistent))
-            end)
-        ]
-    end}.
-
-%% Tests for beamtalk_method_resolver domain service
-method_resolver_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            %% Resolve via class object tuple
-            ?_test(begin
-                Methods = #{
-                    getValue => #{arity => 0, block => fun() -> ok end}
-                },
-                MethodSource = #{
-                    getValue => <<"getValue => ^self.value">>
-                },
-                ClassInfo = #{
-                    name => 'ResolverTest',
-                    module => resolver_test,
-                    instance_methods => Methods,
-                    method_source => MethodSource
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('ResolverTest', ClassInfo),
-                ClassObj = {beamtalk_object, 'ResolverTest class', resolver_test, Pid},
-                MethodObj = beamtalk_method_resolver:resolve(ClassObj, getValue),
-                ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
-                ?assertEqual(getValue, maps:get('__selector__', MethodObj))
-            end),
-            %% Resolve via class object tuple returns nil for missing method
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'ResolverNilTest',
-                    module => resolver_nil_test,
-                    instance_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('ResolverNilTest', ClassInfo),
-                ClassObj = {beamtalk_object, 'ResolverNilTest class', resolver_nil_test, Pid},
-                ?assertEqual(nil, beamtalk_method_resolver:resolve(ClassObj, nonexistent))
-            end),
-            %% Type error for non-class receiver (integer)
-            ?_test(begin
-                ?assertException(
-                    error,
-                    _,
-                    beamtalk_method_resolver:resolve(42, foo)
-                )
-            end),
-            %% Type error for instance object (not a class)
-            ?_test(begin
-                InstanceObj = {beamtalk_object, 'Counter', counter, self()},
-                ?assertException(
-                    error,
-                    _,
-                    beamtalk_method_resolver:resolve(InstanceObj, foo)
-                )
-            end),
-            %% Malformed tuple with non-atom ClassTag falls through to catch-all
-            ?_test(begin
-                BadTuple = {beamtalk_object, 123, counter, self()},
-                ?assertException(
-                    error,
-                    _,
-                    beamtalk_method_resolver:resolve(BadTuple, foo)
-                )
-            end)
-        ]
-    end}.
-
-instance_variables_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'Counter',
-                    module => counter,
-                    fields => [count, name]
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
-                IVars = beamtalk_object_class:instance_variables(Pid),
-                ?assertEqual([count, name], IVars)
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Hot Patching Tests
-%%====================================================================
-
-put_method_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'Counter',
-                    module => counter,
-                    instance_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
-
-                %% Add a new method
-                NewFun = fun() -> 42 end,
-                Source = <<"newMethod => 42">>,
-                ok = beamtalk_object_class:put_method(Pid, newMethod, NewFun, Source),
-
-                %% Verify it's in the method list
-                Methods = beamtalk_object_class:methods(Pid),
-                ?assert(lists:member(newMethod, Methods)),
-
-                %% Verify we can retrieve it
-                MethodObj = beamtalk_object_class:method(Pid, newMethod),
-                ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
-                ?assertEqual(newMethod, maps:get('__selector__', MethodObj)),
-                ?assertEqual(Source, maps:get('__source__', MethodObj))
-            end)
-        ]
-    end}.
-
-replace_method_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                OldFun = fun() -> old_behavior end,
-                ClassInfo = #{
-                    name => 'Counter',
-                    module => counter,
-                    instance_methods => #{
-                        someMethod => #{block => OldFun}
-                    }
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('Counter', ClassInfo),
-
-                %% Replace with new implementation
-                NewFun = fun() -> new_behavior end,
-                ok = beamtalk_object_class:put_method(Pid, someMethod, NewFun, <<"new">>),
-
-                %% Verify replacement
-                MethodObj = beamtalk_object_class:method(Pid, someMethod),
-                MethodInfo = maps:get('__method_info__', MethodObj),
-                RetrievedFun = maps:get(block, MethodInfo),
-                ?assertEqual(NewFun, RetrievedFun)
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% All Classes Enumeration
-%%====================================================================
-
-all_classes_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Test that all_classes returns a list
-                %% More thorough testing happens in other tests
-                AllClasses = beamtalk_class_registry:all_classes(),
-                ?assert(is_list(AllClasses))
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% Error Handling Tests
-%%====================================================================
-
-duplicate_registration_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'DuplicateTestClass',
-                    module => test_class,
-                    superclass => none
-                },
-                {ok, _Pid1} = beamtalk_object_class:start_link('DuplicateTestClass', ClassInfo),
-
-                %% Try to register the same name again
-                Result = beamtalk_object_class:start_link('DuplicateTestClass', ClassInfo),
-                ?assertMatch({error, _}, Result)
-            end)
-        ]
-    end}.
+            %% Try to register the same name again
+            Result = beamtalk_object_class:start_link('DuplicateTestClass', ClassInfo),
+            ?assertMatch({error, _}, Result)
+        end)
+    ]}.
 
 whereis_nonexistent_class_test() ->
     Result = beamtalk_class_registry:whereis_class('NonexistentClass'),
@@ -565,352 +475,276 @@ whereis_nonexistent_class_test() ->
 %%====================================================================
 
 async_cast_methods_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'AsyncTestClass',
-                    module => test_class,
-                    superclass => none,
-                    instance_methods => #{
-                        increment => #{arity => 0}
-                    }
-                },
-                {ok, ClassPid} = beamtalk_object_class:start_link('AsyncTestClass', ClassInfo),
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            ClassInfo = #{
+                name => 'AsyncTestClass',
+                module => test_class,
+                superclass => none,
+                instance_methods => #{
+                    increment => #{arity => 0}
+                }
+            },
+            {ok, ClassPid} = beamtalk_object_class:start_link('AsyncTestClass', ClassInfo),
 
-                %% Test async methods query
-                FuturePid = self(),
-                gen_server:cast(ClassPid, {methods, [], FuturePid}),
-                receive
-                    {resolve, Methods} ->
-                        ?assert(is_list(Methods)),
-                        ?assert(lists:member(increment, Methods))
-                after 1000 ->
-                    ?assert(false)
-                end
-            end)
-        ]
-    end}.
+            %% Test async methods query
+            FuturePid = self(),
+            gen_server:cast(ClassPid, {methods, [], FuturePid}),
+            receive
+                {resolve, Methods} ->
+                    ?assert(is_list(Methods)),
+                    ?assert(lists:member(increment, Methods))
+            after 1000 ->
+                ?assert(false)
+            end
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'AsyncSuperTest',
+                module => test_class,
+                superclass => 'Object'
+            },
+            {ok, ClassPid} = beamtalk_object_class:start_link('AsyncSuperTest', ClassInfo),
 
-async_cast_superclass_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'AsyncSuperTest',
-                    module => test_class,
-                    superclass => 'Object'
-                },
-                {ok, ClassPid} = beamtalk_object_class:start_link('AsyncSuperTest', ClassInfo),
+            FuturePid = self(),
+            gen_server:cast(ClassPid, {superclass, [], FuturePid}),
+            receive
+                {resolve, Super} ->
+                    ?assertEqual('Object', Super)
+            after 1000 ->
+                ?assert(false)
+            end
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'AsyncNameTest',
+                module => test_class,
+                superclass => none
+            },
+            {ok, ClassPid} = beamtalk_object_class:start_link('AsyncNameTest', ClassInfo),
 
-                FuturePid = self(),
-                gen_server:cast(ClassPid, {superclass, [], FuturePid}),
-                receive
-                    {resolve, Super} ->
-                        ?assertEqual('Object', Super)
-                after 1000 ->
-                    ?assert(false)
-                end
-            end)
-        ]
-    end}.
+            FuturePid = self(),
+            gen_server:cast(ClassPid, {class_name, [], FuturePid}),
+            receive
+                {resolve, Name} ->
+                    ?assertEqual('AsyncNameTest', Name)
+            after 1000 ->
+                ?assert(false)
+            end
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'AsyncModTest',
+                module => test_class,
+                superclass => none
+            },
+            {ok, ClassPid} = beamtalk_object_class:start_link('AsyncModTest', ClassInfo),
 
-async_cast_class_name_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'AsyncNameTest',
-                    module => test_class,
-                    superclass => none
-                },
-                {ok, ClassPid} = beamtalk_object_class:start_link('AsyncNameTest', ClassInfo),
+            FuturePid = self(),
+            gen_server:cast(ClassPid, {module_name, [], FuturePid}),
+            receive
+                {resolve, Mod} ->
+                    ?assertEqual(test_class, Mod)
+            after 1000 ->
+                ?assert(false)
+            end
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'AsyncUnkTest',
+                module => test_class,
+                superclass => none
+            },
+            {ok, ClassPid} = beamtalk_object_class:start_link('AsyncUnkTest', ClassInfo),
 
-                FuturePid = self(),
-                gen_server:cast(ClassPid, {class_name, [], FuturePid}),
-                receive
-                    {resolve, Name} ->
-                        ?assertEqual('AsyncNameTest', Name)
-                after 1000 ->
-                    ?assert(false)
-                end
-            end)
-        ]
-    end}.
+            FuturePid = self(),
+            gen_server:cast(ClassPid, {unknownSelector, [arg1], FuturePid}),
+            receive
+                {reject, #beamtalk_error{
+                    kind = does_not_understand, selector = unknownSelector
+                }} ->
+                    ok
+            after 1000 ->
+                ?assert(false)
+            end
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'AsyncIgnoreTest',
+                module => test_class,
+                superclass => none
+            },
+            {ok, ClassPid} = beamtalk_object_class:start_link('AsyncIgnoreTest', ClassInfo),
 
-async_cast_module_name_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'AsyncModTest',
-                    module => test_class,
-                    superclass => none
-                },
-                {ok, ClassPid} = beamtalk_object_class:start_link('AsyncModTest', ClassInfo),
+            gen_server:cast(ClassPid, some_random_atom),
+            ok = beamtalk_test_wait:sync(ClassPid),
+            ?assert(is_process_alive(ClassPid))
+        end),
+        %%====================================================================
+        %% handle_info / terminate / code_change tests
+        %%====================================================================
+        ?_test(begin
+            ClassInfo = #{
+                name => 'InfoTestClass',
+                module => test_class,
+                superclass => none
+            },
+            {ok, ClassPid} = beamtalk_object_class:start_link('InfoTestClass', ClassInfo),
 
-                FuturePid = self(),
-                gen_server:cast(ClassPid, {module_name, [], FuturePid}),
-                receive
-                    {resolve, Mod} ->
-                        ?assertEqual(test_class, Mod)
-                after 1000 ->
-                    ?assert(false)
-                end
-            end)
-        ]
-    end}.
+            ClassPid ! random_info_message,
+            ok = beamtalk_test_wait:sync(ClassPid),
+            ?assert(is_process_alive(ClassPid))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'TermTestClass',
+                module => test_class,
+                superclass => none
+            },
+            {ok, ClassPid} = beamtalk_object_class:start_link('TermTestClass', ClassInfo),
+            gen_server:stop(ClassPid),
+            beamtalk_test_wait:dead(ClassPid),
+            ?assertNot(is_process_alive(ClassPid))
+        end),
+        %%====================================================================
+        %% ETS Class Hierarchy Tests
+        %%====================================================================
+        %% Test that class registration populates the hierarchy ETS table
+        ?_test(begin
+            %% Register root, then child with superclass
+            RootInfo = #{
+                name => 'HierRoot',
+                module => hier_root,
+                superclass => none,
+                instance_methods => #{rootMethod => #{arity => 0}}
+            },
+            {ok, _} = beamtalk_object_class:start_link('HierRoot', RootInfo),
+            %% ETS table should have an entry for root
+            ?assertEqual(
+                {ok, none},
+                beamtalk_class_metadata:lookup_superclass('HierRoot')
+            ),
+            %% Register child with superclass
+            ChildInfo = #{
+                name => 'HierMid',
+                module => hier_mid,
+                superclass => 'HierRoot',
+                instance_methods => #{midMethod => #{arity => 0}}
+            },
+            {ok, _} = beamtalk_object_class:start_link('HierMid', ChildInfo),
+            ?assertEqual(
+                {ok, 'HierRoot'},
+                beamtalk_class_metadata:lookup_superclass('HierMid')
+            )
+        end),
+        %% Test inherits_from/2 uses ETS for fast hierarchy lookups
+        ?_test(begin
+            %% Build 3-level hierarchy: Root -> Mid -> Leaf
+            {ok, _} = beamtalk_object_class:start_link('HierRoot', #{
+                name => 'HierRoot',
+                module => hier_root,
+                superclass => none,
+                instance_methods => #{rootMethod => #{arity => 0}}
+            }),
+            {ok, _} = beamtalk_object_class:start_link('HierMid', #{
+                name => 'HierMid',
+                module => hier_mid,
+                superclass => 'HierRoot',
+                instance_methods => #{midMethod => #{arity => 0}}
+            }),
+            {ok, _} = beamtalk_object_class:start_link('HierLeaf', #{
+                name => 'HierLeaf',
+                module => hier_leaf,
+                superclass => 'HierMid',
+                instance_methods => #{leafMethod => #{arity => 0}}
+            }),
+            %% Direct parent
+            ?assert(beamtalk_class_registry:inherits_from('HierMid', 'HierRoot')),
+            %% Grandparent
+            ?assert(beamtalk_class_registry:inherits_from('HierLeaf', 'HierRoot')),
+            %% Self
+            ?assert(beamtalk_class_registry:inherits_from('HierRoot', 'HierRoot')),
+            %% Not an ancestor
+            ?assertNot(beamtalk_class_registry:inherits_from('HierRoot', 'HierLeaf')),
+            %% Unrelated class
+            ?assertNot(beamtalk_class_registry:inherits_from('HierRoot', 'NonExistent')),
+            %% none base case
+            ?assertNot(beamtalk_class_registry:inherits_from(none, 'HierRoot'))
+        end),
+        %% ADR 0032 Phase 1: methods/1 returns local-only selectors.
+        %% Out-of-order registration no longer affects the methods list;
+        %% hierarchy walk happens at dispatch time via beamtalk_dispatch:responds_to/2.
+        ?_test(begin
+            {ok, ChildPid} = beamtalk_object_class:start_link('HierChild', #{
+                name => 'HierChild',
+                module => hier_child,
+                superclass => 'HierParent',
+                instance_methods => #{childMethod => #{arity => 0}}
+            }),
+            %% methods/1 returns local-only selectors — never inherited
+            MethodsBefore = beamtalk_object_class:methods(ChildPid),
+            ?assert(lists:member(childMethod, MethodsBefore)),
+            ?assertNot(lists:member(parentMethod, MethodsBefore)),
 
-async_cast_unknown_message_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'AsyncUnkTest',
-                    module => test_class,
-                    superclass => none
-                },
-                {ok, ClassPid} = beamtalk_object_class:start_link('AsyncUnkTest', ClassInfo),
+            %% Register parent
+            {ok, _ParentPid} = beamtalk_object_class:start_link('HierParent', #{
+                name => 'HierParent',
+                module => hier_parent,
+                superclass => none,
+                instance_methods => #{parentMethod => #{arity => 0}}
+            }),
 
-                FuturePid = self(),
-                gen_server:cast(ClassPid, {unknownSelector, [arg1], FuturePid}),
-                receive
-                    {reject, #beamtalk_error{
-                        kind = does_not_understand, selector = unknownSelector
-                    }} ->
-                        ok
-                after 1000 ->
-                    ?assert(false)
-                end
-            end)
-        ]
-    end}.
+            %% methods/1 still returns only local selectors after parent is registered
+            MethodsAfter = beamtalk_object_class:methods(ChildPid),
+            ?assert(lists:member(childMethod, MethodsAfter)),
+            ?assertNot(lists:member(parentMethod, MethodsAfter)),
 
-async_cast_non_tuple_ignored_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'AsyncIgnoreTest',
-                    module => test_class,
-                    superclass => none
-                },
-                {ok, ClassPid} = beamtalk_object_class:start_link('AsyncIgnoreTest', ClassInfo),
-
-                gen_server:cast(ClassPid, some_random_atom),
-                ok = beamtalk_test_wait:sync(ClassPid),
-                ?assert(is_process_alive(ClassPid))
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% handle_info / terminate / code_change tests
-%%====================================================================
-
-handle_info_unknown_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'InfoTestClass',
-                    module => test_class,
-                    superclass => none
-                },
-                {ok, ClassPid} = beamtalk_object_class:start_link('InfoTestClass', ClassInfo),
-
-                ClassPid ! random_info_message,
-                ok = beamtalk_test_wait:sync(ClassPid),
-                ?assert(is_process_alive(ClassPid))
-            end)
-        ]
-    end}.
-
-terminate_graceful_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'TermTestClass',
-                    module => test_class,
-                    superclass => none
-                },
-                {ok, ClassPid} = beamtalk_object_class:start_link('TermTestClass', ClassInfo),
-                gen_server:stop(ClassPid),
-                beamtalk_test_wait:dead(ClassPid),
-                ?assertNot(is_process_alive(ClassPid))
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% ETS Class Hierarchy Tests
-%%====================================================================
-
-%% Test that class registration populates the hierarchy ETS table
-hierarchy_ets_populated_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Register root, then child with superclass
-                RootInfo = #{
-                    name => 'HierRoot',
-                    module => hier_root,
-                    superclass => none,
-                    instance_methods => #{rootMethod => #{arity => 0}}
-                },
-                {ok, _} = beamtalk_object_class:start_link('HierRoot', RootInfo),
-                %% ETS table should have an entry for root
-                ?assertEqual(
-                    {ok, none},
-                    beamtalk_class_metadata:lookup_superclass('HierRoot')
-                ),
-                %% Register child with superclass
-                ChildInfo = #{
-                    name => 'HierMid',
-                    module => hier_mid,
-                    superclass => 'HierRoot',
-                    instance_methods => #{midMethod => #{arity => 0}}
-                },
-                {ok, _} = beamtalk_object_class:start_link('HierMid', ChildInfo),
-                ?assertEqual(
-                    {ok, 'HierRoot'},
-                    beamtalk_class_metadata:lookup_superclass('HierMid')
-                )
-            end)
-        ]
-    end}.
-
-%% Test inherits_from/2 uses ETS for fast hierarchy lookups
-hierarchy_inherits_from_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Build 3-level hierarchy: Root -> Mid -> Leaf
-                {ok, _} = beamtalk_object_class:start_link('HierRoot', #{
-                    name => 'HierRoot',
-                    module => hier_root,
-                    superclass => none,
-                    instance_methods => #{rootMethod => #{arity => 0}}
-                }),
-                {ok, _} = beamtalk_object_class:start_link('HierMid', #{
-                    name => 'HierMid',
-                    module => hier_mid,
-                    superclass => 'HierRoot',
-                    instance_methods => #{midMethod => #{arity => 0}}
-                }),
-                {ok, _} = beamtalk_object_class:start_link('HierLeaf', #{
-                    name => 'HierLeaf',
-                    module => hier_leaf,
-                    superclass => 'HierMid',
-                    instance_methods => #{leafMethod => #{arity => 0}}
-                }),
-                %% Direct parent
-                ?assert(beamtalk_class_registry:inherits_from('HierMid', 'HierRoot')),
-                %% Grandparent
-                ?assert(beamtalk_class_registry:inherits_from('HierLeaf', 'HierRoot')),
-                %% Self
-                ?assert(beamtalk_class_registry:inherits_from('HierRoot', 'HierRoot')),
-                %% Not an ancestor
-                ?assertNot(beamtalk_class_registry:inherits_from('HierRoot', 'HierLeaf')),
-                %% Unrelated class
-                ?assertNot(beamtalk_class_registry:inherits_from('HierRoot', 'NonExistent')),
-                %% none base case
-                ?assertNot(beamtalk_class_registry:inherits_from(none, 'HierRoot'))
-            end)
-        ]
-    end}.
-
-%% ADR 0032 Phase 1: methods/1 returns local-only selectors.
-%% Out-of-order registration no longer affects the methods list;
-%% hierarchy walk happens at dispatch time via beamtalk_dispatch:responds_to/2.
-hierarchy_methods_inherited_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, ChildPid} = beamtalk_object_class:start_link('HierChild', #{
-                    name => 'HierChild',
-                    module => hier_child,
-                    superclass => 'HierParent',
-                    instance_methods => #{childMethod => #{arity => 0}}
-                }),
-                %% methods/1 returns local-only selectors — never inherited
-                MethodsBefore = beamtalk_object_class:methods(ChildPid),
-                ?assert(lists:member(childMethod, MethodsBefore)),
-                ?assertNot(lists:member(parentMethod, MethodsBefore)),
-
-                %% Register parent
-                {ok, _ParentPid} = beamtalk_object_class:start_link('HierParent', #{
-                    name => 'HierParent',
-                    module => hier_parent,
-                    superclass => none,
-                    instance_methods => #{parentMethod => #{arity => 0}}
-                }),
-
-                %% methods/1 still returns only local selectors after parent is registered
-                MethodsAfter = beamtalk_object_class:methods(ChildPid),
-                ?assert(lists:member(childMethod, MethodsAfter)),
-                ?assertNot(lists:member(parentMethod, MethodsAfter)),
-
-                %% Inherited method is found via responds_to (chain walk at dispatch time)
-                ?assert(beamtalk_dispatch:responds_to(parentMethod, 'HierChild'))
-            end)
-        ]
-    end}.
-
-%% ADR 0032 Phase 1: Normal order — parent first, child local-only in methods/1.
-%% Inherited method is visible via responds_to (chain walk), not methods/1.
-hierarchy_methods_normal_order_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                {ok, _} = beamtalk_object_class:start_link('HierParent', #{
-                    name => 'HierParent',
-                    module => hier_parent,
-                    superclass => none,
-                    instance_methods => #{parentMethod => #{arity => 0}}
-                }),
-                {ok, ChildPid} = beamtalk_object_class:start_link('HierChild', #{
-                    name => 'HierChild',
-                    module => hier_child,
-                    superclass => 'HierParent',
-                    instance_methods => #{childMethod => #{arity => 0}}
-                }),
-                %% methods/1 returns local-only selectors
-                Methods = beamtalk_object_class:methods(ChildPid),
-                ?assert(lists:member(childMethod, Methods)),
-                ?assertNot(lists:member(parentMethod, Methods)),
-                %% Inherited method found via responds_to (chain walk)
-                ?assert(beamtalk_dispatch:responds_to(parentMethod, 'HierChild'))
-            end)
-        ]
-    end}.
-
-%% Test that ETS hierarchy records orphan relationships
-hierarchy_orphan_registration_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Register orphan class whose superclass doesn't exist yet
-                {ok, _Pid} = beamtalk_object_class:start_link('HierOrphan', #{
-                    name => 'HierOrphan',
-                    module => hier_orphan,
-                    superclass => 'NonExistentParent',
-                    instance_methods => #{orphanMethod => #{arity => 0}}
-                }),
-                %% ETS records the declared relationship regardless
-                ?assertEqual(
-                    {ok, 'NonExistentParent'},
-                    beamtalk_class_metadata:lookup_superclass('HierOrphan')
-                ),
-                %% inherits_from follows the declared chain:
-                %% HierOrphan -> NonExistentParent (self-match = true)
-                ?assert(beamtalk_class_registry:inherits_from('HierOrphan', 'NonExistentParent')),
-                %% But NonExistentParent has no entry, so deeper queries stop
-                ?assertNot(beamtalk_class_registry:inherits_from('HierOrphan', 'SomeOtherClass'))
-            end)
-        ]
-    end}.
+            %% Inherited method is found via responds_to (chain walk at dispatch time)
+            ?assert(beamtalk_dispatch:responds_to(parentMethod, 'HierChild'))
+        end),
+        %% ADR 0032 Phase 1: Normal order — parent first, child local-only in methods/1.
+        %% Inherited method is visible via responds_to (chain walk), not methods/1.
+        ?_test(begin
+            {ok, _} = beamtalk_object_class:start_link('HierParent', #{
+                name => 'HierParent',
+                module => hier_parent,
+                superclass => none,
+                instance_methods => #{parentMethod => #{arity => 0}}
+            }),
+            {ok, ChildPid} = beamtalk_object_class:start_link('HierChild', #{
+                name => 'HierChild',
+                module => hier_child,
+                superclass => 'HierParent',
+                instance_methods => #{childMethod => #{arity => 0}}
+            }),
+            %% methods/1 returns local-only selectors
+            Methods = beamtalk_object_class:methods(ChildPid),
+            ?assert(lists:member(childMethod, Methods)),
+            ?assertNot(lists:member(parentMethod, Methods)),
+            %% Inherited method found via responds_to (chain walk)
+            ?assert(beamtalk_dispatch:responds_to(parentMethod, 'HierChild'))
+        end),
+        %% Test that ETS hierarchy records orphan relationships
+        ?_test(begin
+            %% Register orphan class whose superclass doesn't exist yet
+            {ok, _Pid} = beamtalk_object_class:start_link('HierOrphan', #{
+                name => 'HierOrphan',
+                module => hier_orphan,
+                superclass => 'NonExistentParent',
+                instance_methods => #{orphanMethod => #{arity => 0}}
+            }),
+            %% ETS records the declared relationship regardless
+            ?assertEqual(
+                {ok, 'NonExistentParent'},
+                beamtalk_class_metadata:lookup_superclass('HierOrphan')
+            ),
+            %% inherits_from follows the declared chain:
+            %% HierOrphan -> NonExistentParent (self-match = true)
+            ?assert(beamtalk_class_registry:inherits_from('HierOrphan', 'NonExistentParent')),
+            %% But NonExistentParent has no entry, so deeper queries stop
+            ?assertNot(beamtalk_class_registry:inherits_from('HierOrphan', 'SomeOtherClass'))
+        end)
+    ]}.
 
 %%====================================================================
 %% raise/1 inside handle_call — unwrap_class_call idempotency
@@ -937,153 +771,133 @@ compile_bt525_test_module() ->
 %% Guards against raise/1 in handle_call producing an already-wrapped
 %% Exception map that unwrap_class_call then re-wraps via raise/1 → double-wrap.
 new_with_non_map_raises_type_error_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Mod = compile_bt525_test_module(),
-                ClassInfo = #{
-                    name => 'NewErrorTestClass',
-                    module => Mod,
-                    superclass => none,
-                    instance_methods => #{}
-                },
-                {ok, ClassPid} = beamtalk_object_class:start_link('NewErrorTestClass', ClassInfo),
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            Mod = compile_bt525_test_module(),
+            ClassInfo = #{
+                name => 'NewErrorTestClass',
+                module => Mod,
+                superclass => none,
+                instance_methods => #{}
+            },
+            {ok, ClassPid} = beamtalk_object_class:start_link('NewErrorTestClass', ClassInfo),
 
-                %% class_send new: with integer (not a map) should raise
-                %% a singly-wrapped Exception with type_error kind.
-                %% The '$beamtalk_class' key uses := (match) to verify
-                %% the error is a proper Exception map, not double-wrapped.
-                ?assertBtErrorTagged(
-                    'TypeError',
-                    type_error,
-                    _,
-                    'new:',
-                    beamtalk_object_class:class_send(ClassPid, 'new:', [42])
-                ),
+            %% class_send new: with integer (not a map) should raise
+            %% a singly-wrapped Exception with type_error kind.
+            %% The '$beamtalk_class' key uses := (match) to verify
+            %% the error is a proper Exception map, not double-wrapped.
+            ?assertBtErrorTagged(
+                'TypeError',
+                type_error,
+                _,
+                'new:',
+                beamtalk_object_class:class_send(ClassPid, 'new:', [42])
+            ),
 
-                %% Class process must survive the error
-                ?assert(is_process_alive(ClassPid)),
+            %% Class process must survive the error
+            ?assert(is_process_alive(ClassPid)),
 
-                %% Class still responds to normal queries
-                ?assertEqual(
-                    'NewErrorTestClass',
-                    gen_server:call(ClassPid, class_name)
-                )
-            end)
-        ]
-    end}.
+            %% Class still responds to normal queries
+            ?assertEqual(
+                'NewErrorTestClass',
+                gen_server:call(ClassPid, class_name)
+            )
+        end),
+        %% Test that the error from new: is singly-wrapped — the inner 'error'
+        %% field must be a #beamtalk_error{} record, NOT another Exception map.
+        %% This is the specific assertion that would have caught double-wrapping.
+        ?_test(begin
+            Mod = compile_bt525_test_module(),
+            ClassInfo = #{
+                name => 'DoubleWrapTestClass',
+                module => Mod,
+                superclass => none,
+                instance_methods => #{}
+            },
+            {ok, ClassPid} = beamtalk_object_class:start_link('DoubleWrapTestClass', ClassInfo),
 
-%% Test that the error from new: is singly-wrapped — the inner 'error'
-%% field must be a #beamtalk_error{} record, NOT another Exception map.
-%% This is the specific assertion that would have caught double-wrapping.
-new_with_non_map_not_double_wrapped_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Mod = compile_bt525_test_module(),
-                ClassInfo = #{
-                    name => 'DoubleWrapTestClass',
-                    module => Mod,
-                    superclass => none,
-                    instance_methods => #{}
-                },
-                {ok, ClassPid} = beamtalk_object_class:start_link('DoubleWrapTestClass', ClassInfo),
+            %% Catch the error and inspect its structure directly
+            CaughtError =
+                try
+                    beamtalk_object_class:class_send(ClassPid, 'new:', [42]),
+                    no_error
+                catch
+                    error:E -> E
+                end,
+            ?assertNotEqual(no_error, CaughtError),
 
-                %% Catch the error and inspect its structure directly
-                CaughtError =
-                    try
-                        beamtalk_object_class:class_send(ClassPid, 'new:', [42]),
-                        no_error
-                    catch
-                        error:E -> E
-                    end,
-                ?assertNotEqual(no_error, CaughtError),
+            %% Must be a map with '$beamtalk_class' key (Exception object)
+            ?assertMatch(#{'$beamtalk_class' := _}, CaughtError),
 
-                %% Must be a map with '$beamtalk_class' key (Exception object)
-                ?assertMatch(#{'$beamtalk_class' := _}, CaughtError),
+            %% The inner 'error' field must be a #beamtalk_error{} record,
+            %% NOT another Exception map (which would indicate double-wrapping)
+            #{error := Inner} = CaughtError,
+            ?assert(is_record(Inner, beamtalk_error)),
 
-                %% The inner 'error' field must be a #beamtalk_error{} record,
-                %% NOT another Exception map (which would indicate double-wrapping)
-                #{error := Inner} = CaughtError,
-                ?assert(is_record(Inner, beamtalk_error)),
+            %% Verify the inner error has the expected fields
+            ?assertEqual(type_error, Inner#beamtalk_error.kind),
+            ?assertEqual('new:', Inner#beamtalk_error.selector)
+        end),
+        %%====================================================================
+        %% Class Collision Warning Tests
+        %%====================================================================
+        %% Test that update_class with DIFFERENT module emits a warning in ETS.
+        ?_test(begin
+            %% Ensure warnings table exists
+            beamtalk_test_boot:registry(),
+            ets:delete_all_objects(beamtalk_class_warnings),
 
-                %% Verify the inner error has the expected fields
-                ?assertEqual(type_error, Inner#beamtalk_error.kind),
-                ?assertEqual('new:', Inner#beamtalk_error.selector)
-            end)
-        ]
-    end}.
+            %% Start class with module_a
+            ClassInfo = #{
+                name => 'DuplicateTestClass',
+                module => module_a,
+                superclass => none,
+                instance_methods => #{}
+            },
+            {ok, _Pid} = beamtalk_object_class:start_link('DuplicateTestClass', ClassInfo),
 
-%%====================================================================
-%% Class Collision Warning Tests
-%%====================================================================
+            %% Call update_class with module_b (cross-package collision)
+            NewInfo = ClassInfo#{module => module_b},
+            {ok, _IVars} = beamtalk_object_class:update_class('DuplicateTestClass', NewInfo),
 
-%% Test that update_class with DIFFERENT module emits a warning in ETS.
-update_class_different_module_records_warning_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Ensure warnings table exists
-                beamtalk_test_boot:registry(),
-                ets:delete_all_objects(beamtalk_class_warnings),
+            %% Warning should be recorded in ETS keyed by class name
+            Warnings = beamtalk_class_registry:drain_class_warnings_by_names([
+                'DuplicateTestClass'
+            ]),
+            ?assertEqual([{'DuplicateTestClass', module_a, module_b}], Warnings)
+        end),
+        %% Test that update_class with SAME module does NOT emit a warning.
+        ?_test(begin
+            %% Ensure warnings table exists and is clean
+            beamtalk_test_boot:registry(),
+            ets:delete_all_objects(beamtalk_class_warnings),
 
-                %% Start class with module_a
-                ClassInfo = #{
-                    name => 'DuplicateTestClass',
-                    module => module_a,
-                    superclass => none,
-                    instance_methods => #{}
-                },
-                {ok, _Pid} = beamtalk_object_class:start_link('DuplicateTestClass', ClassInfo),
+            %% Start class with same_module
+            ClassInfo = #{
+                name => 'DuplicateTestClass',
+                module => same_module,
+                superclass => none,
+                instance_methods => #{}
+            },
+            {ok, _Pid} = beamtalk_object_class:start_link('DuplicateTestClass', ClassInfo),
 
-                %% Call update_class with module_b (cross-package collision)
-                NewInfo = ClassInfo#{module => module_b},
-                {ok, _IVars} = beamtalk_object_class:update_class('DuplicateTestClass', NewInfo),
+            %% Call update_class with the SAME module (hot reload — no warning)
+            NewInfo = ClassInfo#{instance_methods => #{greet => #{arity => 0}}},
+            {ok, _IVars} = beamtalk_object_class:update_class('DuplicateTestClass', NewInfo),
 
-                %% Warning should be recorded in ETS keyed by class name
-                Warnings = beamtalk_class_registry:drain_class_warnings_by_names([
-                    'DuplicateTestClass'
-                ]),
-                ?assertEqual([{'DuplicateTestClass', module_a, module_b}], Warnings)
-            end)
-        ]
-    end}.
-
-%% Test that update_class with SAME module does NOT emit a warning.
-update_class_same_module_no_warning_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Ensure warnings table exists and is clean
-                beamtalk_test_boot:registry(),
-                ets:delete_all_objects(beamtalk_class_warnings),
-
-                %% Start class with same_module
-                ClassInfo = #{
-                    name => 'DuplicateTestClass',
-                    module => same_module,
-                    superclass => none,
-                    instance_methods => #{}
-                },
-                {ok, _Pid} = beamtalk_object_class:start_link('DuplicateTestClass', ClassInfo),
-
-                %% Call update_class with the SAME module (hot reload — no warning)
-                NewInfo = ClassInfo#{instance_methods => #{greet => #{arity => 0}}},
-                {ok, _IVars} = beamtalk_object_class:update_class('DuplicateTestClass', NewInfo),
-
-                %% No warning should be recorded
-                Warnings = beamtalk_class_registry:drain_class_warnings_by_names([
-                    'DuplicateTestClass'
-                ]),
-                ?assertEqual([], Warnings)
-            end)
-        ]
-    end}.
+            %% No warning should be recorded
+            Warnings = beamtalk_class_registry:drain_class_warnings_by_names([
+                'DuplicateTestClass'
+            ]),
+            ?assertEqual([], Warnings)
+        end)
+    ]}.
 
 %% Test that new: errors from non-constructible classes (e.g. primitives)
 %% also go through unwrap_class_call correctly without double-wrapping.
 %% This exercises the is_constructible=false → Module:new/0 error path.
 new_on_primitive_not_double_wrapped_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             setup(),
@@ -1131,298 +945,264 @@ new_on_primitive_not_double_wrapped_test_() ->
 %% Test that draining by qualified name only removes the target package's
 %% warnings, leaving the other package's warnings intact.
 qualified_drain_isolates_packages_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_test_boot:registry(),
-                ets:delete_all_objects(beamtalk_class_warnings),
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            beamtalk_test_boot:registry(),
+            ets:delete_all_objects(beamtalk_class_warnings),
 
-                %% Record collision warnings for two different packages
-                %% with the same class name 'Parser'.
-                beamtalk_class_registry:record_class_collision_warning(
-                    'Parser', 'bt@json@parser_v1', 'bt@json@parser'
-                ),
-                beamtalk_class_registry:record_class_collision_warning(
-                    'Parser', 'bt@xml@parser_v1', 'bt@xml@parser'
-                ),
+            %% Record collision warnings for two different packages
+            %% with the same class name 'Parser'.
+            beamtalk_class_registry:record_class_collision_warning(
+                'Parser', 'bt@json@parser_v1', 'bt@json@parser'
+            ),
+            beamtalk_class_registry:record_class_collision_warning(
+                'Parser', 'bt@xml@parser_v1', 'bt@xml@parser'
+            ),
 
-                %% Drain only the json package's warnings.
-                JsonWarnings = beamtalk_class_registry:drain_class_warnings_by_qualified_names([
-                    {<<"json">>, 'Parser'}
-                ]),
-                ?assertEqual([{'Parser', 'bt@json@parser_v1', 'bt@json@parser'}], JsonWarnings),
+            %% Drain only the json package's warnings.
+            JsonWarnings = beamtalk_class_registry:drain_class_warnings_by_qualified_names([
+                {<<"json">>, 'Parser'}
+            ]),
+            ?assertEqual([{'Parser', 'bt@json@parser_v1', 'bt@json@parser'}], JsonWarnings),
 
-                %% The xml package's warning should still be in the table.
-                XmlWarnings = beamtalk_class_registry:drain_class_warnings_by_qualified_names([
-                    {<<"xml">>, 'Parser'}
-                ]),
-                ?assertEqual([{'Parser', 'bt@xml@parser_v1', 'bt@xml@parser'}], XmlWarnings)
-            end)
-        ]
-    end}.
+            %% The xml package's warning should still be in the table.
+            XmlWarnings = beamtalk_class_registry:drain_class_warnings_by_qualified_names([
+                {<<"xml">>, 'Parser'}
+            ]),
+            ?assertEqual([{'Parser', 'bt@xml@parser_v1', 'bt@xml@parser'}], XmlWarnings)
+        end),
+        %% Test that drain_class_warnings_by_names (unqualified) drains ALL
+        %% packages for a given class name — backward-compatible behavior.
+        ?_test(begin
+            beamtalk_test_boot:registry(),
+            ets:delete_all_objects(beamtalk_class_warnings),
 
-%% Test that drain_class_warnings_by_names (unqualified) drains ALL
-%% packages for a given class name — backward-compatible behavior.
-unqualified_drain_gets_all_packages_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                beamtalk_test_boot:registry(),
-                ets:delete_all_objects(beamtalk_class_warnings),
+            beamtalk_class_registry:record_class_collision_warning(
+                'Counter', 'bt@pkg_a@counter_v1', 'bt@pkg_a@counter'
+            ),
+            beamtalk_class_registry:record_class_collision_warning(
+                'Counter', 'bt@pkg_b@counter_v1', 'bt@pkg_b@counter'
+            ),
 
-                beamtalk_class_registry:record_class_collision_warning(
-                    'Counter', 'bt@pkg_a@counter_v1', 'bt@pkg_a@counter'
-                ),
-                beamtalk_class_registry:record_class_collision_warning(
-                    'Counter', 'bt@pkg_b@counter_v1', 'bt@pkg_b@counter'
-                ),
+            %% Unqualified drain should get BOTH packages' warnings.
+            AllWarnings = beamtalk_class_registry:drain_class_warnings_by_names([
+                'Counter'
+            ]),
+            ?assertEqual(2, length(AllWarnings)),
 
-                %% Unqualified drain should get BOTH packages' warnings.
-                AllWarnings = beamtalk_class_registry:drain_class_warnings_by_names([
-                    'Counter'
-                ]),
-                ?assertEqual(2, length(AllWarnings)),
+            %% Table should be empty after the drain.
+            Remaining = beamtalk_class_registry:drain_class_warnings_by_names([
+                'Counter'
+            ]),
+            ?assertEqual([], Remaining)
+        end),
+        %%====================================================================
+        %% Stdlib class shadowing protection tests
+        %%====================================================================
+        %% Test that update_class returns a structured error when user code tries
+        %% to shadow a stdlib class (bt@stdlib@* module → non-stdlib module).
+        ?_test(begin
+            %% Ensure the pending errors ETS table exists and is clean
+            beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
+            ets:delete_all_objects(beamtalk_pending_load_errors),
 
-                %% Table should be empty after the drain.
-                Remaining = beamtalk_class_registry:drain_class_warnings_by_names([
-                    'Counter'
-                ]),
-                ?assertEqual([], Remaining)
-            end)
-        ]
-    end}.
+            %% Register a class with a stdlib module (simulating a loaded stdlib class)
+            ClassInfo = #{
+                name => 'StdlibShadowTest',
+                module => 'bt@stdlib@integer',
+                superclass => none,
+                instance_methods => #{}
+            },
+            {ok, _Pid} = beamtalk_object_class:start_link('StdlibShadowTest', ClassInfo),
 
-%%====================================================================
-%% Stdlib class shadowing protection tests
-%%====================================================================
+            %% Attempt to update_class with a non-stdlib module (user code shadowing)
+            UserInfo = ClassInfo#{module => 'bt@user_app@integer'},
+            Result = beamtalk_object_class:update_class('StdlibShadowTest', UserInfo),
 
-%% Test that update_class returns a structured error when user code tries
-%% to shadow a stdlib class (bt@stdlib@* module → non-stdlib module).
-update_class_stdlib_shadowing_returns_error_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Ensure the pending errors ETS table exists and is clean
-                beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
-                ets:delete_all_objects(beamtalk_pending_load_errors),
+            %% Must return a structured stdlib_shadowing error
+            ?assertMatch({error, #beamtalk_error{kind = stdlib_shadowing}}, Result),
 
-                %% Register a class with a stdlib module (simulating a loaded stdlib class)
-                ClassInfo = #{
-                    name => 'StdlibShadowTest',
-                    module => 'bt@stdlib@integer',
-                    superclass => none,
-                    instance_methods => #{}
-                },
-                {ok, _Pid} = beamtalk_object_class:start_link('StdlibShadowTest', ClassInfo),
+            %% Error must be recorded in the pending errors ETS table
+            Errors = beamtalk_class_registry:drain_pending_load_errors_by_names([
+                'StdlibShadowTest'
+            ]),
+            ?assertMatch(
+                [{'StdlibShadowTest', #beamtalk_error{kind = stdlib_shadowing}}], Errors
+            )
+        end),
+        %% Test that update_class with a stdlib-to-stdlib reload does NOT return an error.
+        %% (E.g. hot-reloading the stdlib itself is allowed.)
+        ?_test(begin
+            %% Ensure the pending errors ETS table exists and is clean
+            beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
+            ets:delete_all_objects(beamtalk_pending_load_errors),
 
-                %% Attempt to update_class with a non-stdlib module (user code shadowing)
-                UserInfo = ClassInfo#{module => 'bt@user_app@integer'},
-                Result = beamtalk_object_class:update_class('StdlibShadowTest', UserInfo),
+            %% Register a class with a stdlib module
+            ClassInfo = #{
+                name => 'StdlibShadowTest',
+                module => 'bt@stdlib@integer',
+                superclass => none,
+                instance_methods => #{}
+            },
+            {ok, _Pid} = beamtalk_object_class:start_link('StdlibShadowTest', ClassInfo),
 
-                %% Must return a structured stdlib_shadowing error
-                ?assertMatch({error, #beamtalk_error{kind = stdlib_shadowing}}, Result),
+            %% Update with the SAME stdlib module (hot-reload — allowed)
+            NewStdlibInfo = ClassInfo#{module => 'bt@stdlib@integer'},
+            Result = beamtalk_object_class:update_class('StdlibShadowTest', NewStdlibInfo),
 
-                %% Error must be recorded in the pending errors ETS table
-                Errors = beamtalk_class_registry:drain_pending_load_errors_by_names([
-                    'StdlibShadowTest'
-                ]),
-                ?assertMatch(
-                    [{'StdlibShadowTest', #beamtalk_error{kind = stdlib_shadowing}}], Errors
-                )
-            end)
-        ]
-    end}.
+            %% Must succeed (ok or warning, but not stdlib_shadowing error)
+            ?assertNotMatch({error, #beamtalk_error{kind = stdlib_shadowing}}, Result),
 
-%% Test that update_class with a stdlib-to-stdlib reload does NOT return an error.
-%% (E.g. hot-reloading the stdlib itself is allowed.)
-update_class_stdlib_to_stdlib_no_error_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Ensure the pending errors ETS table exists and is clean
-                beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
-                ets:delete_all_objects(beamtalk_pending_load_errors),
+            %% No pending error should be recorded
+            Errors = beamtalk_class_registry:drain_pending_load_errors_by_names([
+                'StdlibShadowTest'
+            ]),
+            ?assertEqual([], Errors)
+        end),
+        %% Test that update_class with two non-stdlib modules does NOT trigger stdlib
+        %% shadowing protection — it only emits a cross-package collision warning.
+        ?_test(begin
+            %% Ensure ETS tables are clean
+            beamtalk_test_boot:registry(),
+            ets:delete_all_objects(beamtalk_class_warnings),
+            beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
+            ets:delete_all_objects(beamtalk_pending_load_errors),
 
-                %% Register a class with a stdlib module
-                ClassInfo = #{
-                    name => 'StdlibShadowTest',
-                    module => 'bt@stdlib@integer',
-                    superclass => none,
-                    instance_methods => #{}
-                },
-                {ok, _Pid} = beamtalk_object_class:start_link('StdlibShadowTest', ClassInfo),
+            %% Register a class with a non-stdlib module
+            ClassInfo = #{
+                name => 'StdlibShadowTest',
+                module => 'bt@pkg_a@counter',
+                superclass => none,
+                instance_methods => #{}
+            },
+            {ok, _Pid} = beamtalk_object_class:start_link('StdlibShadowTest', ClassInfo),
 
-                %% Update with the SAME stdlib module (hot-reload — allowed)
-                NewStdlibInfo = ClassInfo#{module => 'bt@stdlib@integer'},
-                Result = beamtalk_object_class:update_class('StdlibShadowTest', NewStdlibInfo),
+            %% Update with a different non-stdlib module (cross-package collision)
+            NewInfo = ClassInfo#{module => 'bt@pkg_b@counter'},
+            Result = beamtalk_object_class:update_class('StdlibShadowTest', NewInfo),
 
-                %% Must succeed (ok or warning, but not stdlib_shadowing error)
-                ?assertNotMatch({error, #beamtalk_error{kind = stdlib_shadowing}}, Result),
+            %% Must succeed (returns ok with instance vars) — stdlib shadowing NOT triggered
+            ?assertNotMatch({error, #beamtalk_error{kind = stdlib_shadowing}}, Result),
 
-                %% No pending error should be recorded
-                Errors = beamtalk_class_registry:drain_pending_load_errors_by_names([
-                    'StdlibShadowTest'
-                ]),
-                ?assertEqual([], Errors)
-            end)
-        ]
-    end}.
+            %% No pending stdlib error
+            Errors = beamtalk_class_registry:drain_pending_load_errors_by_names([
+                'StdlibShadowTest'
+            ]),
+            ?assertEqual([], Errors)
+        end),
+        %%====================================================================
+        %% Multi-class stdlib shadowing integration tests
+        %%====================================================================
+        %% Integration test for the multi-class short-circuit behaviour
+        %% validated at the codegen level.
+        %%
+        %% Simulates the generated register_class/0 for a two-class module where
+        %% the first class (Integer) shadows a stdlib class.  The short-circuit
+        %% must propagate the error and prevent the second class (MyHelper) from
+        %% being registered.
+        ?_test(begin
+            %% Ensure ETS tables exist and are clean
+            beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
+            ets:delete_all_objects(beamtalk_pending_load_errors),
 
-%% Test that update_class with two non-stdlib modules does NOT trigger stdlib
-%% shadowing protection — it only emits a cross-package collision warning.
-update_class_non_stdlib_no_shadowing_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Ensure ETS tables are clean
-                beamtalk_test_boot:registry(),
-                ets:delete_all_objects(beamtalk_class_warnings),
-                beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
-                ets:delete_all_objects(beamtalk_pending_load_errors),
+            %% --- Pre-condition: register a fake stdlib class for Integer ---
+            StdlibInfo = #{
+                name => 'MultiShadowInteger',
+                module => 'bt@stdlib@integer',
+                superclass => none,
+                instance_methods => #{}
+            },
+            {ok, _StdPid} = beamtalk_object_class:start_link('MultiShadowInteger', StdlibInfo),
 
-                %% Register a class with a non-stdlib module
-                ClassInfo = #{
-                    name => 'StdlibShadowTest',
-                    module => 'bt@pkg_a@counter',
-                    superclass => none,
-                    instance_methods => #{}
-                },
-                {ok, _Pid} = beamtalk_object_class:start_link('StdlibShadowTest', ClassInfo),
+            %% ============================================================
+            %% Simulate register_class/0 for a two-class module:
+            %%   Class 0: "Integer" (shadows stdlib)
+            %%   Class 1: "MyHelper" (innocent bystander)
+            %%
+            %% Generated Core Erlang looks like:
+            %%   _Reg0 = case start(...Integer...) of ... end
+            %%   case _Reg0 of
+            %%     <{'error', Err}> -> {'error', Err}   % short-circuit
+            %%     <_> -> _Reg1 = case start(...MyHelper...) of ... end
+            %%            in _Reg1
+            %%   end
+            %% ============================================================
 
-                %% Update with a different non-stdlib module (cross-package collision)
-                NewInfo = ClassInfo#{module => 'bt@pkg_b@counter'},
-                Result = beamtalk_object_class:update_class('StdlibShadowTest', NewInfo),
+            %% --- Class 0: start + update_class for Integer ---
+            UserIntegerInfo = #{
+                name => 'MultiShadowInteger',
+                module => 'bt@user_app@integer',
+                superclass => 'Object',
+                instance_methods => #{}
+            },
+            Reg0 =
+                case beamtalk_object_class:start('MultiShadowInteger', UserIntegerInfo) of
+                    {ok, _Pid0} ->
+                        beamtalk_object_class:update_class(
+                            'MultiShadowInteger', UserIntegerInfo
+                        );
+                    {error, {already_started, _Pid0}} ->
+                        beamtalk_object_class:update_class(
+                            'MultiShadowInteger', UserIntegerInfo
+                        );
+                    {error, Reason0} ->
+                        {error, Reason0}
+                end,
 
-                %% Must succeed (returns ok with instance vars) — stdlib shadowing NOT triggered
-                ?assertNotMatch({error, #beamtalk_error{kind = stdlib_shadowing}}, Result),
+            %% --- Short-circuit check (mirrors generated case expression) ---
+            FinalResult =
+                case Reg0 of
+                    {error, _RegErr0} ->
+                        {error, _RegErr0};
+                    _ ->
+                        %% Class 1: start + update_class for MyHelper
+                        HelperInfo = #{
+                            name => 'MultiShadowHelper',
+                            module => 'bt@user_app@integer',
+                            superclass => 'Object',
+                            instance_methods => #{}
+                        },
+                        case beamtalk_object_class:start('MultiShadowHelper', HelperInfo) of
+                            {ok, _Pid1} ->
+                                beamtalk_object_class:update_class(
+                                    'MultiShadowHelper', HelperInfo
+                                );
+                            {error, {already_started, _Pid1}} ->
+                                beamtalk_object_class:update_class(
+                                    'MultiShadowHelper', HelperInfo
+                                );
+                            {error, Reason1} ->
+                                {error, Reason1}
+                        end
+                end,
 
-                %% No pending stdlib error
-                Errors = beamtalk_class_registry:drain_pending_load_errors_by_names([
-                    'StdlibShadowTest'
-                ]),
-                ?assertEqual([], Errors)
-            end)
-        ]
-    end}.
+            %% === Acceptance Criteria ===
 
-%%====================================================================
-%% Multi-class stdlib shadowing integration tests
-%%====================================================================
+            %% 1. Loading must produce a stdlib_shadowing error
+            ?assertMatch({error, #beamtalk_error{kind = stdlib_shadowing}}, FinalResult),
 
-%% Integration test for the multi-class short-circuit behaviour
-%% validated at the codegen level.
-%%
-%% Simulates the generated register_class/0 for a two-class module where
-%% the first class (Integer) shadows a stdlib class.  The short-circuit
-%% must propagate the error and prevent the second class (MyHelper) from
-%% being registered.
-multi_class_stdlib_shadowing_short_circuits_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Ensure ETS tables exist and are clean
-                beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
-                ets:delete_all_objects(beamtalk_pending_load_errors),
+            %% 2. MyHelper must NOT be registered (short-circuit skipped it)
+            ?assertEqual(
+                undefined,
+                beamtalk_class_registry:whereis_class('MultiShadowHelper')
+            ),
 
-                %% --- Pre-condition: register a fake stdlib class for Integer ---
-                StdlibInfo = #{
-                    name => 'MultiShadowInteger',
-                    module => 'bt@stdlib@integer',
-                    superclass => none,
-                    instance_methods => #{}
-                },
-                {ok, _StdPid} = beamtalk_object_class:start_link('MultiShadowInteger', StdlibInfo),
+            %% 3. The error must be in the pending load errors ETS table
+            PendingErrors = beamtalk_class_registry:drain_pending_load_errors_by_names(
+                ['MultiShadowInteger', 'MultiShadowHelper']
+            ),
+            ?assertMatch(
+                [{'MultiShadowInteger', #beamtalk_error{kind = stdlib_shadowing}}],
+                PendingErrors
+            ),
 
-                %% ============================================================
-                %% Simulate register_class/0 for a two-class module:
-                %%   Class 0: "Integer" (shadows stdlib)
-                %%   Class 1: "MyHelper" (innocent bystander)
-                %%
-                %% Generated Core Erlang looks like:
-                %%   _Reg0 = case start(...Integer...) of ... end
-                %%   case _Reg0 of
-                %%     <{'error', Err}> -> {'error', Err}   % short-circuit
-                %%     <_> -> _Reg1 = case start(...MyHelper...) of ... end
-                %%            in _Reg1
-                %%   end
-                %% ============================================================
-
-                %% --- Class 0: start + update_class for Integer ---
-                UserIntegerInfo = #{
-                    name => 'MultiShadowInteger',
-                    module => 'bt@user_app@integer',
-                    superclass => 'Object',
-                    instance_methods => #{}
-                },
-                Reg0 =
-                    case beamtalk_object_class:start('MultiShadowInteger', UserIntegerInfo) of
-                        {ok, _Pid0} ->
-                            beamtalk_object_class:update_class(
-                                'MultiShadowInteger', UserIntegerInfo
-                            );
-                        {error, {already_started, _Pid0}} ->
-                            beamtalk_object_class:update_class(
-                                'MultiShadowInteger', UserIntegerInfo
-                            );
-                        {error, Reason0} ->
-                            {error, Reason0}
-                    end,
-
-                %% --- Short-circuit check (mirrors generated case expression) ---
-                FinalResult =
-                    case Reg0 of
-                        {error, _RegErr0} ->
-                            {error, _RegErr0};
-                        _ ->
-                            %% Class 1: start + update_class for MyHelper
-                            HelperInfo = #{
-                                name => 'MultiShadowHelper',
-                                module => 'bt@user_app@integer',
-                                superclass => 'Object',
-                                instance_methods => #{}
-                            },
-                            case beamtalk_object_class:start('MultiShadowHelper', HelperInfo) of
-                                {ok, _Pid1} ->
-                                    beamtalk_object_class:update_class(
-                                        'MultiShadowHelper', HelperInfo
-                                    );
-                                {error, {already_started, _Pid1}} ->
-                                    beamtalk_object_class:update_class(
-                                        'MultiShadowHelper', HelperInfo
-                                    );
-                                {error, Reason1} ->
-                                    {error, Reason1}
-                            end
-                    end,
-
-                %% === Acceptance Criteria ===
-
-                %% 1. Loading must produce a stdlib_shadowing error
-                ?assertMatch({error, #beamtalk_error{kind = stdlib_shadowing}}, FinalResult),
-
-                %% 2. MyHelper must NOT be registered (short-circuit skipped it)
-                ?assertEqual(
-                    undefined,
-                    beamtalk_class_registry:whereis_class('MultiShadowHelper')
-                ),
-
-                %% 3. The error must be in the pending load errors ETS table
-                PendingErrors = beamtalk_class_registry:drain_pending_load_errors_by_names(
-                    ['MultiShadowInteger', 'MultiShadowHelper']
-                ),
-                ?assertMatch(
-                    [{'MultiShadowInteger', #beamtalk_error{kind = stdlib_shadowing}}],
-                    PendingErrors
-                ),
-
-                %% 4. No stale ETS entry for MyHelper
-                ?assertEqual(
-                    [],
-                    beamtalk_class_registry:drain_pending_load_errors_by_names(['MultiShadowHelper'])
-                )
-            end)
-        ]
-    end}.
+            %% 4. No stale ETS entry for MyHelper
+            ?assertEqual(
+                [],
+                beamtalk_class_registry:drain_pending_load_errors_by_names(['MultiShadowHelper'])
+            )
+        end)
+    ]}.
 
 %%====================================================================
 %% Class method self-call (new/new: on own class)
@@ -1497,96 +1277,81 @@ class_method_self_call_class_name_in_error_test() ->
 %% then update_class is called carrying meta => #{superclass => 'Behaviour'}
 %% (as the compiled module's on-load hook would do).
 apply_class_info_corrects_stale_superclass_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Register with placeholder superclass (simulates bootstrap stub)
-                BootstrapInfo = #{
-                    name => 'BT1185StaleSuper',
-                    module => test_module_v1,
-                    superclass => 'Object',
-                    instance_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('BT1185StaleSuper', BootstrapInfo),
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            %% Register with placeholder superclass (simulates bootstrap stub)
+            BootstrapInfo = #{
+                name => 'BT1185StaleSuper',
+                module => test_module_v1,
+                superclass => 'Object',
+                instance_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('BT1185StaleSuper', BootstrapInfo),
 
-                %% Sanity: placeholder is in effect before update
-                ?assertEqual('Object', gen_server:call(Pid, superclass)),
-                ?assertEqual(
-                    {ok, 'Object'},
-                    beamtalk_class_metadata:lookup_superclass('BT1185StaleSuper')
-                ),
+            %% Sanity: placeholder is in effect before update
+            ?assertEqual('Object', gen_server:call(Pid, superclass)),
+            ?assertEqual(
+                {ok, 'Object'},
+                beamtalk_class_metadata:lookup_superclass('BT1185StaleSuper')
+            ),
 
-                %% Simulate compiled stdlib module on-load: update_class with
-                %% corrected superclass in meta (as __beamtalk_meta/0 provides)
-                UpdateInfo = #{
-                    name => 'BT1185StaleSuper',
-                    module => test_module_v1,
-                    meta => #{superclass => 'Behaviour'}
-                },
-                {ok, _} = beamtalk_object_class:update_class('BT1185StaleSuper', UpdateInfo),
+            %% Simulate compiled stdlib module on-load: update_class with
+            %% corrected superclass in meta (as __beamtalk_meta/0 provides)
+            UpdateInfo = #{
+                name => 'BT1185StaleSuper',
+                module => test_module_v1,
+                meta => #{superclass => 'Behaviour'}
+            },
+            {ok, _} = beamtalk_object_class:update_class('BT1185StaleSuper', UpdateInfo),
 
-                %% gen_server state must now hold the corrected superclass
-                ?assertEqual('Behaviour', gen_server:call(Pid, superclass)),
+            %% gen_server state must now hold the corrected superclass
+            ?assertEqual('Behaviour', gen_server:call(Pid, superclass)),
 
-                %% ETS hierarchy table must also be updated
-                ?assertEqual(
-                    {ok, 'Behaviour'},
-                    beamtalk_class_metadata:lookup_superclass('BT1185StaleSuper')
-                )
-            end)
-        ]
-    end}.
+            %% ETS hierarchy table must also be updated
+            ?assertEqual(
+                {ok, 'Behaviour'},
+                beamtalk_class_metadata:lookup_superclass('BT1185StaleSuper')
+            )
+        end),
+        %% Dynamic classes (no compiled module, Meta = #{}) must be unaffected:
+        %% apply_class_info must preserve their existing superclass unchanged.
+        ?_test(begin
+            %% Register dynamic class (no meta)
+            DynInfo = #{
+                name => 'BT1185StaleSuper',
+                module => test_module_dyn,
+                superclass => 'Actor',
+                instance_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('BT1185StaleSuper', DynInfo),
 
-%% Dynamic classes (no compiled module, Meta = #{}) must be unaffected:
-%% apply_class_info must preserve their existing superclass unchanged.
-apply_class_info_preserves_dynamic_class_superclass_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Register dynamic class (no meta)
-                DynInfo = #{
-                    name => 'BT1185StaleSuper',
-                    module => test_module_dyn,
-                    superclass => 'Actor',
-                    instance_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('BT1185StaleSuper', DynInfo),
+            %% Update without meta key — simulates dynamic class reload
+            UpdateInfo = #{
+                name => 'BT1185StaleSuper',
+                module => test_module_dyn,
+                instance_methods => #{greet => #{arity => 0}}
+            },
+            {ok, _} = beamtalk_object_class:update_class('BT1185StaleSuper', UpdateInfo),
 
-                %% Update without meta key — simulates dynamic class reload
-                UpdateInfo = #{
-                    name => 'BT1185StaleSuper',
-                    module => test_module_dyn,
-                    instance_methods => #{greet => #{arity => 0}}
-                },
-                {ok, _} = beamtalk_object_class:update_class('BT1185StaleSuper', UpdateInfo),
-
-                %% Superclass must be unchanged
-                ?assertEqual('Actor', gen_server:call(Pid, superclass)),
-                ?assertEqual(
-                    {ok, 'Actor'},
-                    beamtalk_class_metadata:lookup_superclass('BT1185StaleSuper')
-                )
-            end)
-        ]
-    end}.
-
-%%====================================================================
-%% local_call/3 Tests
-%%====================================================================
-
-local_call_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            {"local_call success path — calls class method in caller's process",
-                fun test_local_call_success/0},
-            {"local_call with keyword argument", fun test_local_call_keyword_arg/0},
-            {"local_call method not found raises does_not_understand",
-                fun test_local_call_method_not_found/0},
-            {"local_call on non-class receiver raises type_error",
-                fun test_local_call_non_class_receiver/0},
-            {"local_call on non-object raises type_error", fun test_local_call_non_object/0}
-        ]
-    end}.
+            %% Superclass must be unchanged
+            ?assertEqual('Actor', gen_server:call(Pid, superclass)),
+            ?assertEqual(
+                {ok, 'Actor'},
+                beamtalk_class_metadata:lookup_superclass('BT1185StaleSuper')
+            )
+        end),
+        %%====================================================================
+        %% local_call/3 Tests
+        %%====================================================================
+        {"local_call success path — calls class method in caller's process",
+            fun test_local_call_success/0},
+        {"local_call with keyword argument", fun test_local_call_keyword_arg/0},
+        {"local_call method not found raises does_not_understand",
+            fun test_local_call_method_not_found/0},
+        {"local_call on non-class receiver raises type_error",
+            fun test_local_call_non_class_receiver/0},
+        {"local_call on non-object raises type_error", fun test_local_call_non_object/0}
+    ]}.
 
 test_local_call_success() ->
     ClassInfo = #{
@@ -1662,18 +1427,16 @@ class_lcWrite(ClassSelf) -> beamtalk_class_vars:put(ClassSelf, n, 99).
 class_lcSelf(ClassSelf) -> ClassSelf.
 
 local_call_snapshot_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            {"passes the receiver as ClassSelf, not nil", fun test_local_call_passes_receiver/0},
-            {"reads the mirror snapshot", fun test_local_call_reads_snapshot/0},
-            {"write raises class_state_read_only and erases the snapshot",
-                fun test_local_call_write_raises/0},
-            {"mid-invocation on the same class reads and writes the live map",
-                fun test_local_call_live_same_class/0},
-            {"mid-invocation of X calling performLocally: on Y keeps X's home",
-                fun test_local_call_other_class_keeps_home/0}
-        ]
-    end}.
+    {foreach, fun setup/0, fun teardown/1, [
+        {"passes the receiver as ClassSelf, not nil", fun test_local_call_passes_receiver/0},
+        {"reads the mirror snapshot", fun test_local_call_reads_snapshot/0},
+        {"write raises class_state_read_only and erases the snapshot",
+            fun test_local_call_write_raises/0},
+        {"mid-invocation on the same class reads and writes the live map",
+            fun test_local_call_live_same_class/0},
+        {"mid-invocation of X calling performLocally: on Y keeps X's home",
+            fun test_local_call_other_class_keeps_home/0}
+    ]}.
 
 lc_class(Name, N) ->
     ClassInfo = #{
@@ -1745,13 +1508,10 @@ test_local_call_other_class_keeps_home() ->
 %%====================================================================
 
 put_class_method_arity_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            {"accepts an n+1 fun", fun test_put_class_method_accepts_n_plus_1/0},
-            {"rejects an old n+2 fun naming the selector",
-                fun test_put_class_method_rejects_n_plus_2/0}
-        ]
-    end}.
+    {foreach, fun setup/0, fun teardown/1, [
+        {"accepts an n+1 fun", fun test_put_class_method_accepts_n_plus_1/0},
+        {"rejects an old n+2 fun naming the selector", fun test_put_class_method_rejects_n_plus_2/0}
+    ]}.
 
 pcm_class(Name) ->
     ClassInfo = #{
@@ -1803,590 +1563,443 @@ test_put_class_method_rejects_n_plus_2() ->
 %% Test that killing a class process and looking it up via restart_class
 %% produces a new live process.
 crash_recovery_restart_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            ClassInfo = #{
+                name => 'CrashRecoveryTest',
+                module => beamtalk_class_bt,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid1} = beamtalk_object_class:start('CrashRecoveryTest', ClassInfo),
+            ?assert(is_process_alive(Pid1)),
+
+            %% BT-4748: start/2 registers the class with beamtalk_class_monitor,
+            %% whose 'DOWN' handler restarts a killed class eagerly (BT-4622).
+            %% That would race the "not yet restarted" assertions below, so
+            %% unwatch (synchronous; no-op if the monitor is not running) to
+            %% keep the manual restart_class/1 path the one under test.
+            ok = beamtalk_class_monitor:unwatch('CrashRecoveryTest'),
+
+            %% Kill the class process (simulates crash)
+            MRef = monitor(process, Pid1),
+            exit(Pid1, kill),
+            receive
+                {'DOWN', MRef, process, Pid1, _} -> ok
+            after 1000 -> ?assert(false)
+            end,
+            ?assertNot(is_process_alive(Pid1)),
+
+            %% whereis_class returns undefined for the dead process
+            ?assertEqual(undefined, beamtalk_class_registry:whereis_class('CrashRecoveryTest')),
+
+            %% Pid reverse index should still have the mapping
+            ?assertMatch(
+                {ok, 'CrashRecoveryTest'},
+                beamtalk_class_registry:class_name_for_pid(Pid1)
+            ),
+
+            %% restart_class should bring it back
+            {ok, Pid2} = beamtalk_class_registry:restart_class('CrashRecoveryTest'),
+            ?assert(is_process_alive(Pid2)),
+            ?assertNotEqual(Pid1, Pid2),
+
+            %% Class is registered again
+            ?assertEqual(Pid2, beamtalk_class_registry:whereis_class('CrashRecoveryTest')),
+
+            %% Class name is accessible on the restarted process
+            ?assertEqual('CrashRecoveryTest', beamtalk_object_class:class_name(Pid2))
+        end),
+        %% Test that class_send auto-recovers when the class process has crashed.
+        ?_test(begin
+            ClassInfo = #{
+                name => 'CrashRecoverySendTest',
+                module => beamtalk_class_bt,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid1} = beamtalk_object_class:start('CrashRecoverySendTest', ClassInfo),
+            ?assert(is_process_alive(Pid1)),
+
+            %% Kill the class process
+            MRef = monitor(process, Pid1),
+            exit(Pid1, kill),
+            receive
+                {'DOWN', MRef, process, Pid1, _} -> ok
+            after 1000 -> ?assert(false)
+            end,
+
+            %% class_send with the stale pid should auto-recover.
+            %% The class has no user methods, so any method call will raise
+            %% does_not_understand — but it should NOT raise noproc/timeout.
+            %% It will try the Class chain fallthrough which also raises DNU.
+            ?assertBtError(
+                does_not_understand, beamtalk_class_dispatch:class_send(Pid1, someMethod, [])
+            ),
+
+            %% The class should be alive again after the auto-recovery
+            NewPid = beamtalk_class_registry:whereis_class('CrashRecoverySendTest'),
+            ?assertNotEqual(undefined, NewPid),
+            ?assert(is_process_alive(NewPid))
+        end),
+        %% Test that class_name_for_pid returns not_found for unknown pids.
+        ?_assertEqual(
+            not_found,
+            beamtalk_class_registry:class_name_for_pid(list_to_pid("<0.99999.0>"))
+        ),
+        %% Test that restart_class fails gracefully when the module table has no entry.
+        ?_assertMatch(
+            {error, {no_module_for_class, 'NonexistentClass'}},
+            beamtalk_class_registry:restart_class('NonexistentClass')
+        ),
+        %%% ============================================================================
+        %%% is_sealed / is_abstract / is_internal Tests
+        %%% ============================================================================
+        ?_test(begin
+            ClassInfo = #{
+                name => 'SealedDefaultTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            ?assertNot(beamtalk_object_class:is_sealed(Pid))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'SealedTrueTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{},
+                meta => #{is_sealed => true}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            ?assert(beamtalk_object_class:is_sealed(Pid))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'AbstractDefaultTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            ?assertNot(beamtalk_object_class:is_abstract(Pid))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'AbstractTrueTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{},
+                meta => #{is_abstract => true}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            ?assert(beamtalk_object_class:is_abstract(Pid))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'InternalDefaultTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            ?assertNot(beamtalk_object_class:is_internal(Pid))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'InternalVisTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{},
+                meta => #{visibility => internal}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            ?assert(beamtalk_object_class:is_internal(Pid))
+        end),
+        %%% ============================================================================
+        %%% Doc Accessor Tests (ADR 0033)
+        %%% ============================================================================
+        ?_test(begin
+            ClassInfo = #{
+                name => 'DocDefaultTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            ?assertEqual(none, gen_server:call(Pid, get_doc))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'DocSetGetTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            ok = gen_server:call(Pid, {set_doc, <<"A documented class.">>}),
+            ?assertEqual(<<"A documented class.">>, gen_server:call(Pid, get_doc))
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'MethodDocTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{
+                    'doSomething' => #{arity => 0, block => fun(_, _) -> ok end}
+                },
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            ok = gen_server:call(Pid, {set_method_doc, 'doSomething', <<"Does something.">>}),
+            %% Verify method doc is embedded in method lookup result
+            Result = gen_server:call(Pid, {method, 'doSomething'}),
+            ?assertEqual(<<"Does something.">>, maps:get('__doc__', Result))
+        end),
+        %%% ============================================================================
+        %%% Class Variable Tests
+        %%% ============================================================================
+        ?_test(begin
+            ClassInfo = #{
+                name => 'ClassVarDefaultTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            ?assertEqual(nil, gen_server:call(Pid, {get_class_var, someVar}))
+        end),
+        %% BT-3807: the class-side `get_class_var` of an absent name follows the
+        %% method-body read rule: a class whose own declared set lacks the name replies
+        %% a safe `{error, undeclared_class_variable}` (process survives); a declared
+        %% name still answers nil; a class with no readable metadata (the test above)
+        %% stays lenient and answers nil.
+        ?_test(begin
+            Mod = beamtalk_test_module:meta_module(
+                bt3807_undeclared_classvar_mod,
+                #{class_field_kinds => #{count => eager}}
+            ),
+            try
                 ClassInfo = #{
-                    name => 'CrashRecoveryTest',
-                    module => beamtalk_class_bt,
+                    name => 'BT3807UndeclaredClassVar',
+                    module => Mod,
                     superclass => 'Object',
                     instance_methods => #{},
                     class_methods => #{}
                 },
-                {ok, Pid1} = beamtalk_object_class:start('CrashRecoveryTest', ClassInfo),
-                ?assert(is_process_alive(Pid1)),
-
-                %% BT-4748: start/2 registers the class with beamtalk_class_monitor,
-                %% whose 'DOWN' handler restarts a killed class eagerly (BT-4622).
-                %% That would race the "not yet restarted" assertions below, so
-                %% unwatch (synchronous; no-op if the monitor is not running) to
-                %% keep the manual restart_class/1 path the one under test.
-                ok = beamtalk_class_monitor:unwatch('CrashRecoveryTest'),
-
-                %% Kill the class process (simulates crash)
-                MRef = monitor(process, Pid1),
-                exit(Pid1, kill),
-                receive
-                    {'DOWN', MRef, process, Pid1, _} -> ok
-                after 1000 -> ?assert(false)
-                end,
-                ?assertNot(is_process_alive(Pid1)),
-
-                %% whereis_class returns undefined for the dead process
-                ?assertEqual(undefined, beamtalk_class_registry:whereis_class('CrashRecoveryTest')),
-
-                %% Pid reverse index should still have the mapping
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
                 ?assertMatch(
-                    {ok, 'CrashRecoveryTest'},
-                    beamtalk_class_registry:class_name_for_pid(Pid1)
+                    {error, #beamtalk_error{kind = undeclared_class_variable}},
+                    gen_server:call(Pid, {get_class_var, typo})
                 ),
-
-                %% restart_class should bring it back
-                {ok, Pid2} = beamtalk_class_registry:restart_class('CrashRecoveryTest'),
-                ?assert(is_process_alive(Pid2)),
-                ?assertNotEqual(Pid1, Pid2),
-
-                %% Class is registered again
-                ?assertEqual(Pid2, beamtalk_class_registry:whereis_class('CrashRecoveryTest')),
-
-                %% Class name is accessible on the restarted process
-                ?assertEqual('CrashRecoveryTest', beamtalk_object_class:class_name(Pid2))
-            end)
-        ]
-    end}.
-
-%% Test that class_send auto-recovers when the class process has crashed.
-crash_recovery_class_send_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
+                ?assert(is_process_alive(Pid)),
+                %% Declared but unassigned: nil, as before.
+                ?assertEqual(nil, gen_server:call(Pid, {get_class_var, count})),
+                ?assertEqual(3, gen_server:call(Pid, {set_class_var, count, 3})),
+                ?assertEqual(3, gen_server:call(Pid, {get_class_var, count}))
+            after
+                beamtalk_test_module:unload(Mod)
+            end
+        end),
+        ?_test(begin
+            ClassInfo = #{
+                name => 'ClassVarSetGetTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            ?assertEqual(42, gen_server:call(Pid, {set_class_var, count, 42})),
+            ?assertEqual(42, gen_server:call(Pid, {get_class_var, count}))
+        end),
+        %% ADR 0124 §1/§4i/B4: `get_class_var` on a declared-`late` unassigned class
+        %% variable replies `{error, #beamtalk_error{kind = uninitialized_state_error}}`
+        %% rather than answering `nil` — and, critically, the class gen_server
+        %% itself survives the call (a business error, not a crash): `get_class_var`
+        %% is a raw `handle_call` clause outside the
+        %% `dispatch_class_method`/`apply_class_method_in_context` machinery that
+        %% normally catches a `#beamtalk_error{}` raise from a class-method body, so
+        %% an uncaught `beamtalk_error:raise/1` here would take down the whole
+        %% class instead of just answering the caller.
+        %%
+        %% `class_var_declared_late/2` needs real `__beamtalk_meta/0` metadata
+        %% (`class_field_kinds => #{current => late}`) to take the "declared late"
+        %% branch — a bare `module => test_class` fixture (as every other test in
+        %% this section uses) has none and always degrades to `eager`/`nil`, so this
+        %% builds a real meta-carrying module via `compile:forms/2`, mirroring
+        %% `bt1982_has_class_new_in_chain_test_` above.
+        ?_test(begin
+            Mod = beamtalk_test_module:meta_module(
+                bt3551_late_classvar_mod,
+                #{class_field_kinds => #{current => late}}
+            ),
+            try
                 ClassInfo = #{
-                    name => 'CrashRecoverySendTest',
-                    module => beamtalk_class_bt,
+                    name => 'BT3551LateClassVar',
+                    module => Mod,
                     superclass => 'Object',
                     instance_methods => #{},
                     class_methods => #{}
                 },
-                {ok, Pid1} = beamtalk_object_class:start('CrashRecoverySendTest', ClassInfo),
-                ?assert(is_process_alive(Pid1)),
-
-                %% Kill the class process
-                MRef = monitor(process, Pid1),
-                exit(Pid1, kill),
-                receive
-                    {'DOWN', MRef, process, Pid1, _} -> ok
-                after 1000 -> ?assert(false)
-                end,
-
-                %% class_send with the stale pid should auto-recover.
-                %% The class has no user methods, so any method call will raise
-                %% does_not_understand — but it should NOT raise noproc/timeout.
-                %% It will try the Class chain fallthrough which also raises DNU.
-                ?assertBtError(
-                    does_not_understand, beamtalk_class_dispatch:class_send(Pid1, someMethod, [])
+                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+                %% Unassigned + declared late -> a safe {error, _} reply.
+                Result = gen_server:call(Pid, {get_class_var, current}),
+                ?assertMatch(
+                    {error, #beamtalk_error{kind = uninitialized_state_error}}, Result
                 ),
-
-                %% The class should be alive again after the auto-recovery
-                NewPid = beamtalk_class_registry:whereis_class('CrashRecoverySendTest'),
-                ?assertNotEqual(undefined, NewPid),
-                ?assert(is_process_alive(NewPid))
-            end)
-        ]
-    end}.
-
-%% Test that class_name_for_pid returns not_found for unknown pids.
-class_name_for_pid_unknown_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_assertEqual(
-                not_found,
-                beamtalk_class_registry:class_name_for_pid(list_to_pid("<0.99999.0>"))
-            )
-        ]
-    end}.
-
-%% Test that restart_class fails gracefully when the module table has no entry.
-restart_class_no_module_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_assertMatch(
-                {error, {no_module_for_class, 'NonexistentClass'}},
-                beamtalk_class_registry:restart_class('NonexistentClass')
-            )
-        ]
-    end}.
-
-%%% ============================================================================
-%%% is_sealed / is_abstract / is_internal Tests
-%%% ============================================================================
-
-is_sealed_default_false_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'SealedDefaultTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
+                ?assert(is_process_alive(Pid)),
+                %% Assigned -> answers the value, same declared-late branch.
+                ?assertEqual(7, gen_server:call(Pid, {set_class_var, current, 7})),
+                ?assertEqual(7, gen_server:call(Pid, {get_class_var, current})),
+                %% BT-4061: a stored `nil` is present, so it answers
+                %% `nil` — agreeing with `beamtalk_class_vars:has_value/2`
+                %% (the presence test `hasField:` uses) — not an error.
+                ?assertEqual(nil, gen_server:call(Pid, {set_class_var, current, nil})),
+                ?assertEqual(nil, gen_server:call(Pid, {get_class_var, current})),
+                {ok, Snapshot} = beamtalk_class_registry:class_state_snapshot_lookup(Pid),
+                ?assertEqual(true, beamtalk_class_vars:has_value(Snapshot, current))
+            after
+                beamtalk_test_module:unload(Mod)
+            end
+        end),
+        %%% ============================================================================
+        %%% is_constructible Tests
+        %%% ============================================================================
+        ?_test(begin
+            ClassInfo = #{
+                name => 'ConstructibleDefaultTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            %% Default is_constructible is undefined, resolved lazily
+            Result = beamtalk_object_class:is_constructible(Pid),
+            ?assert(is_boolean(Result))
+        end),
+        %%% ============================================================================
+        %%% handle_info ignores unknown messages
+        %%% ============================================================================
+        ?_test(begin
+            ClassInfo = #{
+                name => 'HandleInfoTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            %% Send arbitrary info message — should be ignored
+            Pid ! {some_random_message, 42},
+            %% Process should still be alive once it has handled the message
+            ok = beamtalk_test_wait:sync(Pid),
+            ?assert(is_process_alive(Pid))
+        end),
+        %%% ============================================================================
+        %%% get_instance_methods Tests
+        %%% ============================================================================
+        ?_test(begin
+            Methods = #{
+                'increment' => #{arity => 0, block => fun(_, _) -> ok end},
+                'getValue' => #{arity => 0, block => fun(_, _) -> 0 end}
+            },
+            ClassInfo = #{
+                name => 'InstanceMethodsTest',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => Methods,
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
+            {ok, ReturnedMethods} = gen_server:call(Pid, get_instance_methods),
+            ?assertEqual(lists:sort(maps:keys(Methods)), lists:sort(maps:keys(ReturnedMethods)))
+        end),
+        %%% ============================================================================
+        %%% Additional coverage for class system modules (→ 90%)
+        %%% ============================================================================
+        %% local_class_methods/1 returns the selector list (0% → covered).
+        ?_test(begin
+            ClassInfo = #{
+                name => 'BT1982LocalCM',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{
+                    'new:' => #{arity => 1, block => fun(_, _, _) -> ok end},
+                    'factory' => #{arity => 0, block => fun(_, _, _) -> ok end}
+                }
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('BT1982LocalCM', ClassInfo),
+            Selectors = beamtalk_object_class:local_class_methods(Pid),
+            ?assert(lists:member('new:', Selectors)),
+            ?assert(lists:member('factory', Selectors))
+        end),
+        %% local_instance_methods/1 returns the instance selector list (0% → covered).
+        ?_test(begin
+            ClassInfo = #{
+                name => 'BT1982LocalIM',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{
+                    'foo' => #{arity => 0, block => fun(_, _) -> ok end},
+                    'bar:' => #{arity => 1, block => fun(_, _) -> ok end}
                 },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                ?assertNot(beamtalk_object_class:is_sealed(Pid))
-            end)
-        ]
-    end}.
-
-is_sealed_true_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'SealedTrueTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{},
-                    meta => #{is_sealed => true}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                ?assert(beamtalk_object_class:is_sealed(Pid))
-            end)
-        ]
-    end}.
-
-is_abstract_default_false_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'AbstractDefaultTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                ?assertNot(beamtalk_object_class:is_abstract(Pid))
-            end)
-        ]
-    end}.
-
-is_abstract_true_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'AbstractTrueTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{},
-                    meta => #{is_abstract => true}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                ?assert(beamtalk_object_class:is_abstract(Pid))
-            end)
-        ]
-    end}.
-
-is_internal_default_false_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'InternalDefaultTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                ?assertNot(beamtalk_object_class:is_internal(Pid))
-            end)
-        ]
-    end}.
-
-is_internal_true_via_visibility_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'InternalVisTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{},
-                    meta => #{visibility => internal}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                ?assert(beamtalk_object_class:is_internal(Pid))
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% Doc Accessor Tests (ADR 0033)
-%%% ============================================================================
-
-get_doc_default_none_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'DocDefaultTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                ?assertEqual(none, gen_server:call(Pid, get_doc))
-            end)
-        ]
-    end}.
-
-set_and_get_doc_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'DocSetGetTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                ok = gen_server:call(Pid, {set_doc, <<"A documented class.">>}),
-                ?assertEqual(<<"A documented class.">>, gen_server:call(Pid, get_doc))
-            end)
-        ]
-    end}.
-
-set_method_doc_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'MethodDocTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{
-                        'doSomething' => #{arity => 0, block => fun(_, _) -> ok end}
-                    },
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                ok = gen_server:call(Pid, {set_method_doc, 'doSomething', <<"Does something.">>}),
-                %% Verify method doc is embedded in method lookup result
-                Result = gen_server:call(Pid, {method, 'doSomething'}),
-                ?assertEqual(<<"Does something.">>, maps:get('__doc__', Result))
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% Class Variable Tests
-%%% ============================================================================
-
-get_class_var_default_nil_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'ClassVarDefaultTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                ?assertEqual(nil, gen_server:call(Pid, {get_class_var, someVar}))
-            end)
-        ]
-    end}.
-
-%% BT-3807: the class-side `get_class_var` of an absent name follows the
-%% method-body read rule: a class whose own declared set lacks the name replies
-%% a safe `{error, undeclared_class_variable}` (process survives); a declared
-%% name still answers nil; a class with no readable metadata (the test above)
-%% stays lenient and answers nil.
-get_class_var_undeclared_name_errors_without_crashing_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Mod = beamtalk_test_module:meta_module(
-                    bt3807_undeclared_classvar_mod,
-                    #{class_field_kinds => #{count => eager}}
-                ),
-                try
-                    ClassInfo = #{
-                        name => 'BT3807UndeclaredClassVar',
-                        module => Mod,
-                        superclass => 'Object',
-                        instance_methods => #{},
-                        class_methods => #{}
-                    },
-                    {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                    ?assertMatch(
-                        {error, #beamtalk_error{kind = undeclared_class_variable}},
-                        gen_server:call(Pid, {get_class_var, typo})
-                    ),
-                    ?assert(is_process_alive(Pid)),
-                    %% Declared but unassigned: nil, as before.
-                    ?assertEqual(nil, gen_server:call(Pid, {get_class_var, count})),
-                    ?assertEqual(3, gen_server:call(Pid, {set_class_var, count, 3})),
-                    ?assertEqual(3, gen_server:call(Pid, {get_class_var, count}))
-                after
-                    beamtalk_test_module:unload(Mod)
-                end
-            end)
-        ]
-    end}.
-
-set_and_get_class_var_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'ClassVarSetGetTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                ?assertEqual(42, gen_server:call(Pid, {set_class_var, count, 42})),
-                ?assertEqual(42, gen_server:call(Pid, {get_class_var, count}))
-            end)
-        ]
-    end}.
-
-%% ADR 0124 §1/§4i/B4: `get_class_var` on a declared-`late` unassigned class
-%% variable replies `{error, #beamtalk_error{kind = uninitialized_state_error}}`
-%% rather than answering `nil` — and, critically, the class gen_server
-%% itself survives the call (a business error, not a crash): `get_class_var`
-%% is a raw `handle_call` clause outside the
-%% `dispatch_class_method`/`apply_class_method_in_context` machinery that
-%% normally catches a `#beamtalk_error{}` raise from a class-method body, so
-%% an uncaught `beamtalk_error:raise/1` here would take down the whole
-%% class instead of just answering the caller.
-%%
-%% `class_var_declared_late/2` needs real `__beamtalk_meta/0` metadata
-%% (`class_field_kinds => #{current => late}`) to take the "declared late"
-%% branch — a bare `module => test_class` fixture (as every other test in
-%% this section uses) has none and always degrades to `eager`/`nil`, so this
-%% builds a real meta-carrying module via `compile:forms/2`, mirroring
-%% `bt1982_has_class_new_in_chain_test_` above.
-get_class_var_declared_late_unassigned_errors_without_crashing_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Mod = beamtalk_test_module:meta_module(
-                    bt3551_late_classvar_mod,
-                    #{class_field_kinds => #{current => late}}
-                ),
-                try
-                    ClassInfo = #{
-                        name => 'BT3551LateClassVar',
-                        module => Mod,
-                        superclass => 'Object',
-                        instance_methods => #{},
-                        class_methods => #{}
-                    },
-                    {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                    %% Unassigned + declared late -> a safe {error, _} reply.
-                    Result = gen_server:call(Pid, {get_class_var, current}),
-                    ?assertMatch(
-                        {error, #beamtalk_error{kind = uninitialized_state_error}}, Result
-                    ),
-                    ?assert(is_process_alive(Pid)),
-                    %% Assigned -> answers the value, same declared-late branch.
-                    ?assertEqual(7, gen_server:call(Pid, {set_class_var, current, 7})),
-                    ?assertEqual(7, gen_server:call(Pid, {get_class_var, current})),
-                    %% BT-4061: a stored `nil` is present, so it answers
-                    %% `nil` — agreeing with `beamtalk_class_vars:has_value/2`
-                    %% (the presence test `hasField:` uses) — not an error.
-                    ?assertEqual(nil, gen_server:call(Pid, {set_class_var, current, nil})),
-                    ?assertEqual(nil, gen_server:call(Pid, {get_class_var, current})),
-                    {ok, Snapshot} = beamtalk_class_registry:class_state_snapshot_lookup(Pid),
-                    ?assertEqual(true, beamtalk_class_vars:has_value(Snapshot, current))
-                after
-                    beamtalk_test_module:unload(Mod)
-                end
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% is_constructible Tests
-%%% ============================================================================
-
-is_constructible_default_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'ConstructibleDefaultTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                %% Default is_constructible is undefined, resolved lazily
-                Result = beamtalk_object_class:is_constructible(Pid),
-                ?assert(is_boolean(Result))
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% handle_info ignores unknown messages
-%%% ============================================================================
-
-handle_info_returns_noreply_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'HandleInfoTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                %% Send arbitrary info message — should be ignored
-                Pid ! {some_random_message, 42},
-                %% Process should still be alive once it has handled the message
-                ok = beamtalk_test_wait:sync(Pid),
-                ?assert(is_process_alive(Pid))
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% get_instance_methods Tests
-%%% ============================================================================
-
-get_instance_methods_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Methods = #{
-                    'increment' => #{arity => 0, block => fun(_, _) -> ok end},
-                    'getValue' => #{arity => 0, block => fun(_, _) -> 0 end}
-                },
-                ClassInfo = #{
-                    name => 'InstanceMethodsTest',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => Methods,
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(ClassInfo),
-                {ok, ReturnedMethods} = gen_server:call(Pid, get_instance_methods),
-                ?assertEqual(lists:sort(maps:keys(Methods)), lists:sort(maps:keys(ReturnedMethods)))
-            end)
-        ]
-    end}.
-
-%%% ============================================================================
-%%% Additional coverage for class system modules (→ 90%)
-%%% ============================================================================
-
-%% local_class_methods/1 returns the selector list (0% → covered).
-bt1982_local_class_methods_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'BT1982LocalCM',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{
-                        'new:' => #{arity => 1, block => fun(_, _, _) -> ok end},
-                        'factory' => #{arity => 0, block => fun(_, _, _) -> ok end}
-                    }
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('BT1982LocalCM', ClassInfo),
-                Selectors = beamtalk_object_class:local_class_methods(Pid),
-                ?assert(lists:member('new:', Selectors)),
-                ?assert(lists:member('factory', Selectors))
-            end)
-        ]
-    end}.
-
-%% local_instance_methods/1 returns the instance selector list (0% → covered).
-bt1982_local_instance_methods_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'BT1982LocalIM',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{
-                        'foo' => #{arity => 0, block => fun(_, _) -> ok end},
-                        'bar:' => #{arity => 1, block => fun(_, _) -> ok end}
-                    },
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('BT1982LocalIM', ClassInfo),
-                Selectors = beamtalk_object_class:local_instance_methods(Pid),
-                ?assertEqual(['bar:', 'foo'], lists:sort(Selectors))
-            end)
-        ]
-    end}.
-
-%% put_method/3 (3-arity variant) delegates to /4 with empty source (0% → covered).
-bt1982_put_method_three_arity_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'BT1982PutMethod3',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('BT1982PutMethod3', ClassInfo),
-                ok = beamtalk_object_class:put_method(Pid, 'greet', fun() -> hi end),
-                %% Verify it was installed with default empty source.
-                MethodObj = beamtalk_object_class:method(Pid, 'greet'),
-                ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
-                ?assertEqual('greet', maps:get('__selector__', MethodObj)),
-                ?assertEqual(<<"">>, maps:get('__source__', MethodObj))
-            end)
-        ]
-    end}.
-
-%% set_class_var/3 on a registered class updates the class var map (0% → covered).
-bt1982_set_class_var_updates_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'BT1982SetClassVar',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{},
-                    class_state => #{counter => 0}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('BT1982SetClassVar', ClassInfo),
-                %% Name-based set_class_var resolves via the registry.
-                Result = beamtalk_object_class:set_class_var('BT1982SetClassVar', counter, 42),
-                ?assertEqual(42, Result),
-                %% Verify it persisted.
-                ?assertEqual(42, gen_server:call(Pid, {get_class_var, counter}))
-            end)
-        ]
-    end}.
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('BT1982LocalIM', ClassInfo),
+            Selectors = beamtalk_object_class:local_instance_methods(Pid),
+            ?assertEqual(['bar:', 'foo'], lists:sort(Selectors))
+        end),
+        %% put_method/3 (3-arity variant) delegates to /4 with empty source (0% → covered).
+        ?_test(begin
+            ClassInfo = #{
+                name => 'BT1982PutMethod3',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('BT1982PutMethod3', ClassInfo),
+            ok = beamtalk_object_class:put_method(Pid, 'greet', fun() -> hi end),
+            %% Verify it was installed with default empty source.
+            MethodObj = beamtalk_object_class:method(Pid, 'greet'),
+            ?assertEqual('CompiledMethod', maps:get('$beamtalk_class', MethodObj)),
+            ?assertEqual('greet', maps:get('__selector__', MethodObj)),
+            ?assertEqual(<<"">>, maps:get('__source__', MethodObj))
+        end),
+        %% set_class_var/3 on a registered class updates the class var map (0% → covered).
+        ?_test(begin
+            ClassInfo = #{
+                name => 'BT1982SetClassVar',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{},
+                class_state => #{counter => 0}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('BT1982SetClassVar', ClassInfo),
+            %% Name-based set_class_var resolves via the registry.
+            Result = beamtalk_object_class:set_class_var('BT1982SetClassVar', counter, 42),
+            ?assertEqual(42, Result),
+            %% Verify it persisted.
+            ?assertEqual(42, gen_server:call(Pid, {get_class_var, counter}))
+        end)
+    ]}.
 
 %% set_class_var/3 on an unknown class raises class_not_found (0% → covered).
 bt1982_set_class_var_unknown_raises_test_() ->
@@ -2399,51 +2012,43 @@ bt1982_set_class_var_unknown_raises_test_() ->
 %% Abstract class refuses construction — exercises the handle_call({new, []}, ... is_abstract=true)
 %% branch.
 bt1982_new_on_abstract_class_errors_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'BT1982AbstractNew',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{},
-                    is_abstract => true
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('BT1982AbstractNew', ClassInfo),
-                %% new/1 delegates to new/2 with []
-                ?assertMatch({error, #beamtalk_error{}}, beamtalk_object_class:new(Pid)),
-                %% new/2 with args also errors on abstract
-                ?assertMatch(
-                    {error, #beamtalk_error{}},
-                    beamtalk_object_class:new(Pid, [#{}])
-                )
-            end)
-        ]
-    end}.
-
-%% has_method/2 fallback: when the gen_server reports nil, we fall back to the
-%% module's has_method/1 export (uncovered fallback path).
-bt1982_has_method_module_fallback_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'BT1982HasMethodFb',
-                    %% Module does not export has_method/1 — fallback returns false.
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('BT1982HasMethodFb', ClassInfo),
-                ?assertNot(beamtalk_object_class:has_method(Pid, 'neverDefined')),
-                %% Positive case: method present in gen_server state.
-                ok = beamtalk_object_class:put_method(Pid, 'ping', fun() -> pong end),
-                ?assert(beamtalk_object_class:has_method(Pid, 'ping'))
-            end)
-        ]
-    end}.
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            ClassInfo = #{
+                name => 'BT1982AbstractNew',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{},
+                is_abstract => true
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('BT1982AbstractNew', ClassInfo),
+            %% new/1 delegates to new/2 with []
+            ?assertMatch({error, #beamtalk_error{}}, beamtalk_object_class:new(Pid)),
+            %% new/2 with args also errors on abstract
+            ?assertMatch(
+                {error, #beamtalk_error{}},
+                beamtalk_object_class:new(Pid, [#{}])
+            )
+        end),
+        %% has_method/2 fallback: when the gen_server reports nil, we fall back to the
+        %% module's has_method/1 export (uncovered fallback path).
+        ?_test(begin
+            ClassInfo = #{
+                name => 'BT1982HasMethodFb',
+                %% Module does not export has_method/1 — fallback returns false.
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('BT1982HasMethodFb', ClassInfo),
+            ?assertNot(beamtalk_object_class:has_method(Pid, 'neverDefined')),
+            %% Positive case: method present in gen_server state.
+            ok = beamtalk_object_class:put_method(Pid, 'ping', fun() -> pong end),
+            ?assert(beamtalk_object_class:has_method(Pid, 'ping'))
+        end)
+    ]}.
 
 %% update_class on an unknown class returns {error, {class_not_found, _}}.
 bt1982_update_class_unknown_test_() ->
@@ -2454,168 +2059,148 @@ bt1982_update_class_unknown_test_() ->
 
 %% code_change/3 delegates to beamtalk_hot_reload and clears is_constructible.
 bt1982_code_change_delegates_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'BT1982CodeChange',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('BT1982CodeChange', ClassInfo),
-                %% Trigger code_change via sys:change_code (OTP hot-reload entry).
-                %% If beamtalk_hot_reload:code_change/3 is not exported in this
-                %% test env we accept {error, _}; the goal is coverage of our
-                %% code_change/3 callback body.
-                _Result = sys:change_code(Pid, beamtalk_object_class, 0, []),
-                ?assert(is_process_alive(Pid))
-            end)
-        ]
-    end}.
-
-%% has_class_new_in_chain/3 returns true when the class's own module exports
-%% class_new:/2. Uses a dynamically-compiled module exporting class_new:/2.
-bt1982_has_class_new_in_chain_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Compile a tiny module that exports class_new:/2 (ADR 0130: ClassSelf, Arg).
-                Forms = [
-                    {attribute, 1, module, bt1982_new_colon_mod},
-                    {attribute, 2, export, [{'class_new:', 2}]},
-                    {function, 3, 'class_new:', 2, [
-                        {clause, 3, [{var, 3, '_'}, {var, 3, '_'}], [], [
-                            {tuple, 3, [{atom, 3, reply}, {atom, 3, ok}, {atom, 3, none}]}
-                        ]}
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            ClassInfo = #{
+                name => 'BT1982CodeChange',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('BT1982CodeChange', ClassInfo),
+            %% Trigger code_change via sys:change_code (OTP hot-reload entry).
+            %% If beamtalk_hot_reload:code_change/3 is not exported in this
+            %% test env we accept {error, _}; the goal is coverage of our
+            %% code_change/3 callback body.
+            _Result = sys:change_code(Pid, beamtalk_object_class, 0, []),
+            ?assert(is_process_alive(Pid))
+        end),
+        %% has_class_new_in_chain/3 returns true when the class's own module exports
+        %% class_new:/2. Uses a dynamically-compiled module exporting class_new:/2.
+        ?_test(begin
+            %% Compile a tiny module that exports class_new:/2 (ADR 0130: ClassSelf, Arg).
+            Forms = [
+                {attribute, 1, module, bt1982_new_colon_mod},
+                {attribute, 2, export, [{'class_new:', 2}]},
+                {function, 3, 'class_new:', 2, [
+                    {clause, 3, [{var, 3, '_'}, {var, 3, '_'}], [], [
+                        {tuple, 3, [{atom, 3, reply}, {atom, 3, ok}, {atom, 3, none}]}
                     ]}
-                ],
-                {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-                {module, Mod} = code:load_binary(
-                    Mod, "bt1982_new_colon_mod.erl", Bin
-                ),
-                ClassInfo = #{
-                    name => 'BT1982HasClassNew',
-                    module => Mod,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{
-                        'new:' => #{arity => 1}
-                    }
+                ]}
+            ],
+            {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
+            {module, Mod} = code:load_binary(
+                Mod, "bt1982_new_colon_mod.erl", Bin
+            ),
+            ClassInfo = #{
+                name => 'BT1982HasClassNew',
+                module => Mod,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{
+                    'new:' => #{arity => 1}
+                }
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('BT1982HasClassNew', ClassInfo),
+            %% Calling new/2 with non-empty args triggers the
+            %% has_class_new_in_chain/3 branch and dispatches through the
+            %% compiled class_new:/2.
+            Result = beamtalk_object_class:new(Pid, [anything]),
+            %% The compiled class_new:/2 returns its raw {reply, ...}
+            %% tuple which handle_class_method_call passes back — we just
+            %% need to confirm the has_class_new_in_chain branch executed
+            %% (not the generic field-init path, which would try to treat
+            %% `anything` as a map and fail differently).
+            ?assertMatch({ok, {reply, ok, _}}, Result)
+        end),
+        %% find_inherited_class_method walks the superclass chain (0% → covered).
+        %% Register parent with a class method, then child without it; `{class_method, Sel}`
+        %% on the child should fall through to the parent via find_inherited_class_method/2.
+        ?_test(begin
+            ParentMethod = fun(_, CVars, _) -> {reply, parent_cm, CVars} end,
+            ParentInfo = #{
+                name => 'BT1982InhParent',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{
+                    'inheritedCM' => #{arity => 0, block => ParentMethod}
+                }
+            },
+            {ok, ParentPid} = beamtalk_object_class:start_link('BT1982InhParent', ParentInfo),
+
+            ChildInfo = #{
+                name => 'BT1982InhChild',
+                module => test_class,
+                superclass => 'BT1982InhParent',
+                instance_methods => #{},
+                class_methods => #{}
+            },
+            {ok, ChildPid} = beamtalk_object_class:start_link('BT1982InhChild', ChildInfo),
+
+            %% Sanity: parent has it locally.
+            ParentResult = gen_server:call(ParentPid, {class_method, 'inheritedCM'}),
+            ?assertMatch(#{'$beamtalk_class' := 'CompiledMethod'}, ParentResult),
+
+            %% Child lookup walks to parent and returns the compiled-method map.
+            ChildResult = gen_server:call(ChildPid, {class_method, 'inheritedCM'}),
+            ?assertMatch(#{'$beamtalk_class' := 'CompiledMethod'}, ChildResult),
+            ?assertEqual('inheritedCM', maps:get('__selector__', ChildResult)),
+
+            %% Missing method → nil (find_inherited_class_method returns nil).
+            ?assertEqual(
+                nil, gen_server:call(ChildPid, {class_method, 'noSuchMethod'})
+            )
+        end),
+        %% class_method_source flows from ClassInfo through init/1 into the
+        %% per-class state and shows up in the `{class_method, Sel}` CompiledMethod
+        %% reply's `__source__` field, so SystemNavigation's source-text scanners
+        %% can see class-side bodies instead of a hard-coded `<<"">>`.
+        ?_test(begin
+            Method = fun(_, CVars, _) -> {reply, cm_ok, CVars} end,
+            Source = <<"helper => self new">>,
+            ClassInfo = #{
+                name => 'BT2195SrcClass',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{
+                    'helper' => #{arity => 0, block => Method}
                 },
-                {ok, Pid} = beamtalk_object_class:start_link('BT1982HasClassNew', ClassInfo),
-                %% Calling new/2 with non-empty args triggers the
-                %% has_class_new_in_chain/3 branch and dispatches through the
-                %% compiled class_new:/2.
-                Result = beamtalk_object_class:new(Pid, [anything]),
-                %% The compiled class_new:/2 returns its raw {reply, ...}
-                %% tuple which handle_class_method_call passes back — we just
-                %% need to confirm the has_class_new_in_chain branch executed
-                %% (not the generic field-init path, which would try to treat
-                %% `anything` as a map and fail differently).
-                ?assertMatch({ok, {reply, ok, _}}, Result)
-            end)
-        ]
-    end}.
-
-%% find_inherited_class_method walks the superclass chain (0% → covered).
-%% Register parent with a class method, then child without it; `{class_method, Sel}`
-%% on the child should fall through to the parent via find_inherited_class_method/2.
-bt1982_find_inherited_class_method_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ParentMethod = fun(_, CVars, _) -> {reply, parent_cm, CVars} end,
-                ParentInfo = #{
-                    name => 'BT1982InhParent',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{
-                        'inheritedCM' => #{arity => 0, block => ParentMethod}
-                    }
-                },
-                {ok, ParentPid} = beamtalk_object_class:start_link('BT1982InhParent', ParentInfo),
-
-                ChildInfo = #{
-                    name => 'BT1982InhChild',
-                    module => test_class,
-                    superclass => 'BT1982InhParent',
-                    instance_methods => #{},
-                    class_methods => #{}
-                },
-                {ok, ChildPid} = beamtalk_object_class:start_link('BT1982InhChild', ChildInfo),
-
-                %% Sanity: parent has it locally.
-                ParentResult = gen_server:call(ParentPid, {class_method, 'inheritedCM'}),
-                ?assertMatch(#{'$beamtalk_class' := 'CompiledMethod'}, ParentResult),
-
-                %% Child lookup walks to parent and returns the compiled-method map.
-                ChildResult = gen_server:call(ChildPid, {class_method, 'inheritedCM'}),
-                ?assertMatch(#{'$beamtalk_class' := 'CompiledMethod'}, ChildResult),
-                ?assertEqual('inheritedCM', maps:get('__selector__', ChildResult)),
-
-                %% Missing method → nil (find_inherited_class_method returns nil).
-                ?assertEqual(
-                    nil, gen_server:call(ChildPid, {class_method, 'noSuchMethod'})
-                )
-            end)
-        ]
-    end}.
-
-%% class_method_source flows from ClassInfo through init/1 into the
-%% per-class state and shows up in the `{class_method, Sel}` CompiledMethod
-%% reply's `__source__` field, so SystemNavigation's source-text scanners
-%% can see class-side bodies instead of a hard-coded `<<"">>`.
-bt2195_class_method_source_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                Method = fun(_, CVars, _) -> {reply, cm_ok, CVars} end,
-                Source = <<"helper => self new">>,
-                ClassInfo = #{
-                    name => 'BT2195SrcClass',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{
-                        'helper' => #{arity => 0, block => Method}
-                    },
-                    class_method_source => #{
-                        'helper' => Source
-                    }
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(
-                    'BT2195SrcClass', ClassInfo
-                ),
-                Result = gen_server:call(Pid, {class_method, 'helper'}),
-                ?assertMatch(#{'$beamtalk_class' := 'CompiledMethod'}, Result),
-                ?assertEqual(Source, maps:get('__source__', Result))
-            end),
-            %% Selectors without a source entry fall back to empty binary —
-            %% preserves the default for primitives / dynamic
-            %% methods that have no source.
-            ?_test(begin
-                Method = fun(_, CVars, _) -> {reply, cm_ok, CVars} end,
-                ClassInfo = #{
-                    name => 'BT2195NoSrcClass',
-                    module => test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    class_methods => #{
-                        'helper' => #{arity => 0, block => Method}
-                    }
-                    %% No class_method_source key — exercise the default.
-                },
-                {ok, Pid} = beamtalk_object_class:start_link(
-                    'BT2195NoSrcClass', ClassInfo
-                ),
-                Result = gen_server:call(Pid, {class_method, 'helper'}),
-                ?assertEqual(<<"">>, maps:get('__source__', Result))
-            end)
-        ]
-    end}.
+                class_method_source => #{
+                    'helper' => Source
+                }
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(
+                'BT2195SrcClass', ClassInfo
+            ),
+            Result = gen_server:call(Pid, {class_method, 'helper'}),
+            ?assertMatch(#{'$beamtalk_class' := 'CompiledMethod'}, Result),
+            ?assertEqual(Source, maps:get('__source__', Result))
+        end),
+        %% Selectors without a source entry fall back to empty binary —
+        %% preserves the default for primitives / dynamic
+        %% methods that have no source.
+        ?_test(begin
+            Method = fun(_, CVars, _) -> {reply, cm_ok, CVars} end,
+            ClassInfo = #{
+                name => 'BT2195NoSrcClass',
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                class_methods => #{
+                    'helper' => #{arity => 0, block => Method}
+                }
+                %% No class_method_source key — exercise the default.
+            },
+            {ok, Pid} = beamtalk_object_class:start_link(
+                'BT2195NoSrcClass', ClassInfo
+            ),
+            Result = gen_server:call(Pid, {class_method, 'helper'}),
+            ?assertEqual(<<"">>, maps:get('__source__', Result))
+        end)
+    ]}.
 
 %%====================================================================
 %% ADR 0087 Phase 2: method_xref forwarded to beamtalk_xref
@@ -2691,275 +2276,264 @@ xref_fixture() ->
     ].
 
 method_xref_forwarded_on_class_creation_test_() ->
-    {setup, fun xref_setup/0, fun xref_teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'XrefCounter',
-                    module => xref_counter,
-                    superclass => 'Object',
-                    instance_methods => #{
-                        increment => #{arity => 0}, value => #{arity => 0}
-                    },
-                    class_methods => #{default => #{arity => 0}},
-                    method_xref => xref_fixture()
+    {foreach, fun xref_setup/0, fun xref_teardown/1, [
+        ?_test(begin
+            ClassInfo = #{
+                name => 'XrefCounter',
+                module => xref_counter,
+                superclass => 'Object',
+                instance_methods => #{
+                    increment => #{arity => 0}, value => #{arity => 0}
                 },
-                {ok, _Pid} = beamtalk_object_class:start_link('XrefCounter', ClassInfo),
+                class_methods => #{default => #{arity => 0}},
+                method_xref => xref_fixture()
+            },
+            {ok, _Pid} = beamtalk_object_class:start_link('XrefCounter', ClassInfo),
 
-                %% After class creation the index already has the rows — the
-                %% forwarding is synchronous inside init/1.
-                PlusSenders = beamtalk_xref:senders_of('+'),
-                ?assertEqual(1, length(PlusSenders)),
-                [PlusSite] = PlusSenders,
-                ?assertEqual('XrefCounter', maps:get(owner, PlusSite)),
-                ?assertEqual('increment', maps:get(method, PlusSite)),
-                ?assertEqual(self_recv, maps:get(recv_kind, PlusSite)),
+            %% After class creation the index already has the rows — the
+            %% forwarding is synchronous inside init/1.
+            PlusSenders = beamtalk_xref:senders_of('+'),
+            ?assertEqual(1, length(PlusSenders)),
+            [PlusSite] = PlusSenders,
+            ?assertEqual('XrefCounter', maps:get(owner, PlusSite)),
+            ?assertEqual('increment', maps:get(method, PlusSite)),
+            ?assertEqual(self_recv, maps:get(recv_kind, PlusSite)),
 
-                NewSenders = beamtalk_xref:senders_of('new'),
-                ?assertEqual(1, length(NewSenders)),
-                [NewSite] = NewSenders,
-                ?assertEqual('default', maps:get(method, NewSite)),
-                ?assertEqual(true, maps:get(class_side, NewSite)),
+            NewSenders = beamtalk_xref:senders_of('new'),
+            ?assertEqual(1, length(NewSenders)),
+            [NewSite] = NewSenders,
+            ?assertEqual('default', maps:get(method, NewSite)),
+            ?assertEqual(true, maps:get(class_side, NewSite)),
 
-                IntRefs = beamtalk_xref:references_to('Integer'),
-                ?assertEqual(1, length(IntRefs)),
+            IntRefs = beamtalk_xref:references_to('Integer'),
+            ?assertEqual(1, length(IntRefs)),
 
-                CounterRefs = beamtalk_xref:references_to('XrefCounter'),
-                ?assertEqual(1, length(CounterRefs)),
+            CounterRefs = beamtalk_xref:references_to('XrefCounter'),
+            ?assertEqual(1, length(CounterRefs)),
 
-                %% implementors_of returns {Class, ClassSide} pairs.
-                ?assertEqual(
-                    [{'XrefCounter', false}], beamtalk_xref:implementors_of('increment')
-                ),
-                ?assertEqual(
-                    [{'XrefCounter', true}], beamtalk_xref:implementors_of('default')
-                ),
+            %% implementors_of returns {Class, ClassSide} pairs.
+            ?assertEqual(
+                [{'XrefCounter', false}], beamtalk_xref:implementors_of('increment')
+            ),
+            ?assertEqual(
+                [{'XrefCounter', true}], beamtalk_xref:implementors_of('default')
+            ),
 
-                ?assertEqual(
-                    lists:sort([increment, value]),
-                    lists:sort(beamtalk_xref:defined_selectors('XrefCounter', false))
-                ),
-                ?assertEqual(
-                    [default], beamtalk_xref:defined_selectors('XrefCounter', true)
+            ?assertEqual(
+                lists:sort([increment, value]),
+                lists:sort(beamtalk_xref:defined_selectors('XrefCounter', false))
+            ),
+            ?assertEqual(
+                [default], beamtalk_xref:defined_selectors('XrefCounter', true)
+            )
+        end),
+        %% Backward compatibility: a ClassInfo without a method_xref key (a
+        %% hand-coded stub class) registers no rows and does not crash.
+        ?_test(begin
+            ClassInfo = #{
+                name => 'XrefNoIndexClass',
+                module => xref_no_index,
+                superclass => 'Object',
+                instance_methods => #{noop => #{arity => 0}}
+            },
+            {ok, _Pid} = beamtalk_object_class:start_link(
+                'XrefNoIndexClass', ClassInfo
+            ),
+            ?assertEqual(
+                [], beamtalk_xref:defined_selectors('XrefNoIndexClass', false)
+            )
+        end),
+        %% update_class/2 must refresh the xref
+        %% index. The metaclass-tower stubs register with bootstrap rows, then
+        %% get update_class'd by their compiled module — the compiled rows must
+        %% replace the stub rows, not accumulate alongside them.
+        ?_test(begin
+            %% Initial registration: one stub method, no real xref.
+            StubInfo = #{
+                name => 'XrefRedefClass',
+                module => xref_redef,
+                superclass => 'Object',
+                instance_methods => #{stubMethod => #{arity => 0}},
+                method_xref => [
+                    #{
+                        class_side => false,
+                        selector => stubMethod,
+                        line => 1,
+                        sends => [],
+                        references => [],
+                        source_status => unindexed_runtime_fun,
+                        provenance => class_body
+                    }
+                ]
+            },
+            {ok, _Pid} = beamtalk_object_class:start_link(
+                'XrefRedefClass', StubInfo
+            ),
+            ?assertEqual(
+                [stubMethod],
+                beamtalk_xref:defined_selectors('XrefRedefClass', false)
+            ),
+
+            %% Redefinition via update_class/2 with the compiled xref. The
+            %% old stub row must be gone and the new indexed rows present.
+            NewInfo = #{
+                name => 'XrefRedefClass',
+                module => xref_redef,
+                superclass => 'Object',
+                instance_methods => #{realMethod => #{arity => 0}},
+                method_xref => [
+                    #{
+                        class_side => false,
+                        selector => realMethod,
+                        line => 2,
+                        sends => [
+                            %% Distinct selector so this assertion is
+                            %% independent of other tests under the shared
+                            %% fixture (no clear between ?_test generators).
+                            #{
+                                selector => redefRealSend,
+                                line => 3,
+                                recv_kind => self_recv
+                            }
+                        ],
+                        references => [],
+                        source_status => indexed,
+                        provenance => class_body
+                    }
+                ]
+            },
+            {ok, _} = beamtalk_object_class:update_class(
+                'XrefRedefClass', NewInfo
+            ),
+            ?assertEqual(
+                [realMethod],
+                beamtalk_xref:defined_selectors('XrefRedefClass', false)
+            ),
+            ?assertEqual(
+                1, length(beamtalk_xref:senders_of(redefRealSend))
+            ),
+            Info = beamtalk_xref:method_info('XrefRedefClass', false, realMethod),
+            ?assertEqual(indexed, maps:get(source_status, Info))
+        end),
+        %%====================================================================
+        %% ADR 0087 Phase 4: put_method/4 re-indexes the patched
+        %% method in beamtalk_xref from its Source.
+        %%====================================================================
+        ?_test(begin
+            %% Start a class carrying an initial xref row for `greet` whose
+            %% body sends `#asString`.
+            ClassInfo = #{
+                name => 'XrefPatchClass',
+                module => xref_patch,
+                instance_methods => #{},
+                method_xref => [
+                    #{
+                        class_side => false,
+                        selector => 'greet',
+                        line => 1,
+                        sends => [#{selector => 'asString', line => 1, recv_kind => self_recv}],
+                        references => [],
+                        source_status => indexed,
+                        provenance => class_body
+                    }
+                ]
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('XrefPatchClass', ClassInfo),
+
+            %% Baseline: `greet` is an implementor and sends `asString`.
+            ?assertEqual(
+                [{'XrefPatchClass', false}], beamtalk_xref:implementors_of('greet')
+            ),
+            AsStringBefore = beamtalk_xref:senders_of('asString'),
+            ?assert(
+                lists:any(
+                    fun(S) -> maps:get(method, S) =:= 'greet' end, AsStringBefore
                 )
-            end),
-            %% Backward compatibility: a ClassInfo without a method_xref key (a
-            %% hand-coded stub class) registers no rows and does not crash.
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'XrefNoIndexClass',
-                    module => xref_no_index,
-                    superclass => 'Object',
-                    instance_methods => #{noop => #{arity => 0}}
-                },
-                {ok, _Pid} = beamtalk_object_class:start_link(
-                    'XrefNoIndexClass', ClassInfo
-                ),
-                ?assertEqual(
-                    [], beamtalk_xref:defined_selectors('XrefNoIndexClass', false)
-                )
-            end),
-            %% update_class/2 must refresh the xref
-            %% index. The metaclass-tower stubs register with bootstrap rows, then
-            %% get update_class'd by their compiled module — the compiled rows must
-            %% replace the stub rows, not accumulate alongside them.
-            ?_test(begin
-                %% Initial registration: one stub method, no real xref.
-                StubInfo = #{
-                    name => 'XrefRedefClass',
-                    module => xref_redef,
-                    superclass => 'Object',
-                    instance_methods => #{stubMethod => #{arity => 0}},
-                    method_xref => [
-                        #{
-                            class_side => false,
-                            selector => stubMethod,
-                            line => 1,
-                            sends => [],
-                            references => [],
-                            source_status => unindexed_runtime_fun,
-                            provenance => class_body
-                        }
-                    ]
-                },
-                {ok, _Pid} = beamtalk_object_class:start_link(
-                    'XrefRedefClass', StubInfo
-                ),
-                ?assertEqual(
-                    [stubMethod],
-                    beamtalk_xref:defined_selectors('XrefRedefClass', false)
-                ),
+            ),
 
-                %% Redefinition via update_class/2 with the compiled xref. The
-                %% old stub row must be gone and the new indexed rows present.
-                NewInfo = #{
-                    name => 'XrefRedefClass',
-                    module => xref_redef,
-                    superclass => 'Object',
-                    instance_methods => #{realMethod => #{arity => 0}},
-                    method_xref => [
-                        #{
-                            class_side => false,
-                            selector => realMethod,
-                            line => 2,
-                            sends => [
-                                %% Distinct selector so this assertion is
-                                %% independent of other tests under the shared
-                                %% fixture (no clear between ?_test generators).
-                                #{
-                                    selector => redefRealSend,
-                                    line => 3,
-                                    recv_kind => self_recv
-                                }
-                            ],
-                            references => [],
-                            source_status => indexed,
-                            provenance => class_body
-                        }
-                    ]
-                },
-                {ok, _} = beamtalk_object_class:update_class(
-                    'XrefRedefClass', NewInfo
-                ),
-                ?assertEqual(
-                    [realMethod],
-                    beamtalk_xref:defined_selectors('XrefRedefClass', false)
-                ),
-                ?assertEqual(
-                    1, length(beamtalk_xref:senders_of(redefRealSend))
-                ),
-                Info = beamtalk_xref:method_info('XrefRedefClass', false, realMethod),
-                ?assertEqual(indexed, maps:get(source_status, Info))
-            end)
-        ]
-    end}.
+            %% Live-patch `greet` with a body whose sends are DISJOINT from
+            %% the pre-patch body (#asString → #asUppercase only). Keeping the
+            %% selectors disjoint lets us assert the old `asString` send row is
+            %% gone *and* the new `asUppercase` row appears, without the result
+            %% depending on whether the walker happens to re-parse `asString`.
+            NewFun = fun(_Args, Self, State) -> {Self, State} end,
+            PatchedSource = <<"greet => self asUppercase">>,
+            ok = beamtalk_object_class:put_method(Pid, greet, NewFun, PatchedSource),
 
-%%====================================================================
-%% ADR 0087 Phase 4: put_method/4 re-indexes the patched
-%% method in beamtalk_xref from its Source.
-%%====================================================================
+            %% `greet` still an implementor (one row, replaced not duplicated
+            %% in the live view via method_info gen selection).
+            ?assertEqual(
+                [{'XrefPatchClass', false}], beamtalk_xref:implementors_of('greet')
+            ),
+            Info = beamtalk_xref:method_info('XrefPatchClass', false, 'greet'),
+            ?assertEqual(put_method, maps:get(provenance, Info)),
 
-put_method_reindexes_xref_test_() ->
-    {setup, fun xref_setup/0, fun xref_teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Start a class carrying an initial xref row for `greet` whose
-                %% body sends `#asString`.
-                ClassInfo = #{
-                    name => 'XrefPatchClass',
-                    module => xref_patch,
-                    instance_methods => #{},
-                    method_xref => [
-                        #{
-                            class_side => false,
-                            selector => 'greet',
-                            line => 1,
-                            sends => [#{selector => 'asString', line => 1, recv_kind => self_recv}],
-                            references => [],
-                            source_status => indexed,
-                            provenance => class_body
-                        }
-                    ]
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('XrefPatchClass', ClassInfo),
+            %% The old `asString` send row from the pre-patch body is gone:
+            %% put_method replaced the method's rows wholesale.
+            ?assertEqual([], beamtalk_xref:senders_of('asString')),
 
-                %% Baseline: `greet` is an implementor and sends `asString`.
-                ?assertEqual(
-                    [{'XrefPatchClass', false}], beamtalk_xref:implementors_of('greet')
-                ),
-                AsStringBefore = beamtalk_xref:senders_of('asString'),
-                ?assert(
-                    lists:any(
-                        fun(S) -> maps:get(method, S) =:= 'greet' end, AsStringBefore
-                    )
-                ),
-
-                %% Live-patch `greet` with a body whose sends are DISJOINT from
-                %% the pre-patch body (#asString → #asUppercase only). Keeping the
-                %% selectors disjoint lets us assert the old `asString` send row is
-                %% gone *and* the new `asUppercase` row appears, without the result
-                %% depending on whether the walker happens to re-parse `asString`.
-                NewFun = fun(_Args, Self, State) -> {Self, State} end,
-                PatchedSource = <<"greet => self asUppercase">>,
-                ok = beamtalk_object_class:put_method(Pid, greet, NewFun, PatchedSource),
-
-                %% `greet` still an implementor (one row, replaced not duplicated
-                %% in the live view via method_info gen selection).
-                ?assertEqual(
-                    [{'XrefPatchClass', false}], beamtalk_xref:implementors_of('greet')
-                ),
-                Info = beamtalk_xref:method_info('XrefPatchClass', false, 'greet'),
-                ?assertEqual(put_method, maps:get(provenance, Info)),
-
-                %% The old `asString` send row from the pre-patch body is gone:
-                %% put_method replaced the method's rows wholesale.
-                ?assertEqual([], beamtalk_xref:senders_of('asString')),
-
-                %% When the compiler app is available the patched body's
-                %% `asUppercase` send is re-parsed and indexed under greet. In a
-                %% bare EUnit node without the compiler port the index degrades
-                %% to empty sends — assert the parsed-send visibility only when
-                %% the walker is actually present.
-                case compiler_walker_available() of
-                    false ->
-                        ok;
-                    true ->
-                        UpperSites = beamtalk_xref:senders_of('asUppercase'),
-                        ?assert(
-                            lists:any(
-                                fun(S) ->
-                                    maps:get(owner, S) =:= 'XrefPatchClass' andalso
-                                        maps:get(method, S) =:= 'greet'
-                                end,
-                                UpperSites
-                            )
+            %% When the compiler app is available the patched body's
+            %% `asUppercase` send is re-parsed and indexed under greet. In a
+            %% bare EUnit node without the compiler port the index degrades
+            %% to empty sends — assert the parsed-send visibility only when
+            %% the walker is actually present.
+            case compiler_walker_available() of
+                false ->
+                    ok;
+                true ->
+                    UpperSites = beamtalk_xref:senders_of('asUppercase'),
+                    ?assert(
+                        lists:any(
+                            fun(S) ->
+                                maps:get(owner, S) =:= 'XrefPatchClass' andalso
+                                    maps:get(method, S) =:= 'greet'
+                            end,
+                            UpperSites
                         )
-                end
-            end)
-        ]
-    end}.
+                    )
+            end
+        end)
+    ]}.
 
 %%====================================================================
 %% BT-3820: name/module lookups that must not queue behind a busy class
 %%====================================================================
 
 safe_name_lookups_do_not_message_class_process_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_test(begin
-                ClassInfo = #{
-                    name => 'SafeLookupTestClass',
-                    module => safe_lookup_test_class,
-                    superclass => 'Object',
-                    instance_methods => #{},
-                    instance_variables => []
-                },
-                {ok, Pid} = beamtalk_object_class:start_link('SafeLookupTestClass', ClassInfo),
-                ok = sys:suspend(Pid),
-                try
-                    ?assertEqual(
-                        'SafeLookupTestClass', beamtalk_object_class:class_name_safe(Pid)
-                    ),
-                    ?assertEqual(
-                        safe_lookup_test_class, beamtalk_object_class:module_name_safe(Pid)
-                    ),
-                    %% The unsafe form really does block on a suspended
-                    %% process -- the failure shape from BT-3820.
-                    ?assertExit(
-                        {timeout, {gen_server, call, [Pid, class_name, 100]}},
-                        gen_server:call(Pid, class_name, 100)
-                    )
-                after
-                    ok = sys:resume(Pid)
-                end,
-                %% Once resumed the ETS-backed and call-backed answers agree.
+    {foreach, fun setup/0, fun teardown/1, [
+        ?_test(begin
+            ClassInfo = #{
+                name => 'SafeLookupTestClass',
+                module => safe_lookup_test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                instance_variables => []
+            },
+            {ok, Pid} = beamtalk_object_class:start_link('SafeLookupTestClass', ClassInfo),
+            ok = sys:suspend(Pid),
+            try
                 ?assertEqual(
-                    beamtalk_object_class:class_name(Pid),
-                    beamtalk_object_class:class_name_safe(Pid)
+                    'SafeLookupTestClass', beamtalk_object_class:class_name_safe(Pid)
+                ),
+                ?assertEqual(
+                    safe_lookup_test_class, beamtalk_object_class:module_name_safe(Pid)
+                ),
+                %% The unsafe form really does block on a suspended
+                %% process -- the failure shape from BT-3820.
+                ?assertExit(
+                    {timeout, {gen_server, call, [Pid, class_name, 100]}},
+                    gen_server:call(Pid, class_name, 100)
                 )
-            end)
-        ]
-    end}.
+            after
+                ok = sys:resume(Pid)
+            end,
+            %% Once resumed the ETS-backed and call-backed answers agree.
+            ?assertEqual(
+                beamtalk_object_class:class_name(Pid),
+                beamtalk_object_class:class_name_safe(Pid)
+            )
+        end)
+    ]}.
 
 class_var_reflection_selectors_match_shared_fixture_test() ->
     %% BT-4148: the runtime's class-variable reflection selector set

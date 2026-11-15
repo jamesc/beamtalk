@@ -227,7 +227,7 @@ BEAM or loading it (BT-4285).
 Loading a generated class module is never side-effect free: its
 `on_load' (`register_class/0') registers the class with the live runtime.
 A caller that only wants to *inspect* a pending compile (e.g.
-`beamtalk_repl_loader:precheck_class_shape/2') reads the metadata here
+`beamtalk_repl_loader_methods:precheck_class_shape/2') reads the metadata here
 instead, so no module is ever loaded and nothing is registered.
 
 `__beamtalk_meta/0' is generated as a body that is a single constant map

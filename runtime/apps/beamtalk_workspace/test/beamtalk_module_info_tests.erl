@@ -37,7 +37,7 @@ setup() ->
 %% The uniquely-named class and its module stay loaded, like the compiled
 %% fixtures other suites load. Stopping the class process and deleting its
 %% module left stale class-index state that made a later suite's
-%% `beamtalk_repl_loader:precheck_class_shape/2` find nothing.
+%% `beamtalk_repl_loader_methods:precheck_class_shape/2` find nothing.
 teardown(_) ->
     ok.
 

@@ -11,7 +11,7 @@
 // here against the real, currently-reachable surfaces, in order:
 //
 //   1. `>>` / `compile:source:` — do NOT reproduce the gap. Both route
-//      through `beamtalk_repl_loader:install_method/9` /
+//      through `beamtalk_repl_loader_methods:install_method/9` /
 //      `reload_method_definition/4`, which recompile the WHOLE class via
 //      `beamtalk_repl_compiler:compile_method_reload/3` + `code:load_binary/3`,
 //      producing a complete compiler-computed `method_xref` (references

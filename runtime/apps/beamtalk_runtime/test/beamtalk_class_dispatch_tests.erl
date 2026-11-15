@@ -56,11 +56,7 @@ setup_minimal() ->
 teardown_pids(Pids) ->
     lists:foreach(
         fun(Pid) ->
-            try
-                gen_server:stop(Pid, normal, 5000)
-            catch
-                _:_ -> ok
-            end
+            beamtalk_test_proc:stop(Pid)
         end,
         Pids
     ).
@@ -230,19 +226,16 @@ is_test_execution_selector_test_() ->
 %%% ============================================================================
 
 handle_class_method_call_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"selector not in local methods and not in chain returns not_found",
-                fun test_hcmc_not_found/0},
-            {"selector in local methods, successful return", fun test_hcmc_success/0},
-            {"selector in local methods, class-variable write is read back",
-                fun test_hcmc_class_var_write/0},
-            {"runAll selector with TestCase class returns test_spawn", fun test_hcmc_test_spawn/0},
-            {"run: selector with TestCase class returns test_spawn",
-                fun test_hcmc_test_spawn_run/0},
-            {"keyword selector with one argument dispatches correctly", fun test_hcmc_keyword_arg/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"selector not in local methods and not in chain returns not_found",
+            fun test_hcmc_not_found/0},
+        {"selector in local methods, successful return", fun test_hcmc_success/0},
+        {"selector in local methods, class-variable write is read back",
+            fun test_hcmc_class_var_write/0},
+        {"runAll selector with TestCase class returns test_spawn", fun test_hcmc_test_spawn/0},
+        {"run: selector with TestCase class returns test_spawn", fun test_hcmc_test_spawn_run/0},
+        {"keyword selector with one argument dispatches correctly", fun test_hcmc_keyword_arg/0}
+    ]}.
 
 %% Selector absent from both local map and class chain → {error, not_found}.
 %% Class not in hierarchy table so chain immediately returns not_found.
@@ -510,12 +503,10 @@ unwrap_class_call_test_() ->
 %%% ============================================================================
 
 dispatch_undef_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"module not loaded returns class_not_found error", fun test_module_not_loaded/0},
-            {"method not found returns does_not_understand error", fun test_method_not_found/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"module not loaded returns class_not_found error", fun test_module_not_loaded/0},
+        {"method not found returns does_not_understand error", fun test_method_not_found/0}
+    ]}.
 
 %% When the class module is not loaded, `{class_method_call, …}` returns
 %% a structured `class_not_found` error instead of a raw Erlang `undef`.
@@ -530,11 +521,7 @@ test_module_not_loaded() ->
         {error, #beamtalk_error{hint = Hint}} = Result,
         ?assert(binary:match(element(2, Hint), atom_to_binary(ClassName, utf8)) =/= nomatch)
     after
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% When the module IS loaded but the class method function is absent,
@@ -553,11 +540,7 @@ test_method_not_found() ->
             binary:match(element(2, Hint), atom_to_binary(?TEST_SELECTOR, utf8)) =/= nomatch
         )
     after
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %%% ============================================================================
@@ -565,25 +548,22 @@ test_method_not_found() ->
 %%% ============================================================================
 
 class_send_test_() ->
-    {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
-        [
-            {"class_send with undefined pid raises class_not_found",
-                fun test_class_send_undefined/0},
-            {"class_send spawn creates an actor instance", fun test_class_send_new/0},
-            {"class_send unknown selector raises does_not_understand", fun test_class_send_dnu/0},
-            {"class_send successful user-defined class method", fun test_class_send_user_method/0},
-            {"class_send re-raises a connected Program exit: as a throw",
-                fun test_class_send_script_exit_propagates/0},
-            {"class_send leaves the class group leader alone without an entry sink",
-                fun test_class_send_keeps_group_leader_by_default/0},
-            {"class_send adopts the caller's entry group leader for the call",
-                fun test_class_send_adopts_entry_group_leader/0},
-            {"class_send restores the class group leader after the call",
-                fun test_class_send_restores_group_leader/0},
-            {"class_send ignores a dead entry group leader",
-                fun test_class_send_ignores_dead_entry_group_leader/0}
-        ]
-    end}.
+    {foreach, fun setup_runtime/0, fun teardown_runtime/1, [
+        {"class_send with undefined pid raises class_not_found", fun test_class_send_undefined/0},
+        {"class_send spawn creates an actor instance", fun test_class_send_new/0},
+        {"class_send unknown selector raises does_not_understand", fun test_class_send_dnu/0},
+        {"class_send successful user-defined class method", fun test_class_send_user_method/0},
+        {"class_send re-raises a connected Program exit: as a throw",
+            fun test_class_send_script_exit_propagates/0},
+        {"class_send leaves the class group leader alone without an entry sink",
+            fun test_class_send_keeps_group_leader_by_default/0},
+        {"class_send adopts the caller's entry group leader for the call",
+            fun test_class_send_adopts_entry_group_leader/0},
+        {"class_send restores the class group leader after the call",
+            fun test_class_send_restores_group_leader/0},
+        {"class_send ignores a dead entry group leader",
+            fun test_class_send_ignores_dead_entry_group_leader/0}
+    ]}.
 
 %% class_send(undefined, ...) raises class_not_found immediately.
 test_class_send_undefined() ->
@@ -610,11 +590,7 @@ test_class_send_new() ->
         %% Clean up the spawned actor process to prevent cross-test leakage.
         case Result of
             #beamtalk_object{pid = ActorPid} when is_pid(ActorPid) ->
-                (try
-                    gen_server:stop(ActorPid, normal, 5000)
-                catch
-                    _:_ -> ok
-                end);
+                beamtalk_test_proc:stop(ActorPid);
             _ ->
                 ok
         end
@@ -645,11 +621,7 @@ test_class_send_user_method() ->
         Result = beamtalk_class_dispatch:class_send(Pid, testSuccess, []),
         ?assertEqual(test_success_result, Result)
     after
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% ADR 0099 §3: a connected `Program exit: N` raised inside a class
@@ -674,11 +646,7 @@ test_class_send_script_exit_propagates() ->
             beamtalk_class_dispatch:class_send(Pid, testScriptExit, [])
         )
     after
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %%% ----------------------------------------------------------------------------
@@ -707,11 +675,7 @@ with_group_leader_probe_class(ClassName, Body) ->
     try
         Body(Pid)
     after
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% A live process to stand in for the IO-capture sink. Idles until told to stop
@@ -814,15 +778,13 @@ test_class_send_ignores_dead_entry_group_leader() ->
 %%% ============================================================================
 
 self_class_name_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"dictionary class name is used", fun test_class_name_from_dictionary/0},
-            {"unregistered process yields unknown class name",
-                fun test_class_name_from_unregistered_pid/0},
-            {"registered name is not parsed for the class name",
-                fun test_class_name_ignores_registered_name/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"dictionary class name is used", fun test_class_name_from_dictionary/0},
+        {"unregistered process yields unknown class name",
+            fun test_class_name_from_unregistered_pid/0},
+        {"registered name is not parsed for the class name",
+            fun test_class_name_ignores_registered_name/0}
+    ]}.
 
 %% beamtalk_class_name in the process dictionary, but no module: the
 %% self-instantiation fallback error names that class.
@@ -875,16 +837,13 @@ test_class_name_ignores_registered_name() ->
 %%% ============================================================================
 
 class_method_chain_traversal_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"selector found in parent class is returned", fun test_chain_finds_parent_method/0},
-            {"selector not in any ancestor returns not_found", fun test_chain_not_found_anywhere/0},
-            {"max depth guard fires at depth > 20 via 22-class chain",
-                fun test_chain_depth_limit/0},
-            {"ETS-missing class terminates with none before depth guard",
-                fun test_chain_none_termination/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"selector found in parent class is returned", fun test_chain_finds_parent_method/0},
+        {"selector not in any ancestor returns not_found", fun test_chain_not_found_anywhere/0},
+        {"max depth guard fires at depth > 20 via 22-class chain", fun test_chain_depth_limit/0},
+        {"ETS-missing class terminates with none before depth guard",
+            fun test_chain_none_termination/0}
+    ]}.
 
 %% Register a parent and child class; child's handle_class_method_call
 %% walks to parent and finds the method there.
@@ -913,16 +872,8 @@ test_chain_finds_parent_method() ->
         Result = gen_server:call(ChildPid, {class_method_call, testSuccess, []}),
         ?assertMatch({ok, test_success_result}, Result)
     after
-        (try
-            gen_server:stop(ChildPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end),
-        (try
-            gen_server:stop(ParentPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(ChildPid),
+        beamtalk_test_proc:stop(ParentPid)
     end.
 
 %% Selector not found in any ancestor → {error, not_found}.
@@ -939,11 +890,7 @@ test_chain_not_found_anywhere() ->
         Result = gen_server:call(Pid, {class_method_call, completelyAbsentSelector, []}),
         ?assertEqual({error, not_found}, Result)
     after
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% The ?MAX_HIERARCHY_DEPTH guard terminates runaway chain walks gracefully.
@@ -992,11 +939,7 @@ test_chain_depth_limit() ->
     after
         lists:foreach(
             fun(P) ->
-                try
-                    gen_server:stop(P, normal, 5000)
-                catch
-                    _:_ -> ok
-                end
+                beamtalk_test_proc:stop(P)
             end,
             Pids
         )
@@ -1017,12 +960,9 @@ test_chain_none_termination() ->
 %%% ============================================================================
 
 metaclass_send_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"metaclass_method_call found locally returns result",
-                fun test_metaclass_method_found/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"metaclass_method_call found locally returns result", fun test_metaclass_method_found/0}
+    ]}.
 
 test_metaclass_method_found() ->
     ClassName = 'BT1085MetaTest',
@@ -1038,11 +978,7 @@ test_metaclass_method_found() ->
         Result = gen_server:call(Pid, {metaclass_method_call, testSuccess, []}),
         ?assertMatch({ok, test_success_result}, Result)
     after
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %%% ============================================================================
@@ -1050,18 +986,16 @@ test_metaclass_method_found() ->
 %%% ============================================================================
 
 undef_classification_extended_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"local method, module not loaded → class_not_found with local hint",
-                fun test_undef_local_module_not_loaded/0},
-            {"local method, module loaded but method absent → does_not_understand with local hint",
-                fun test_undef_local_method_not_found/0},
-            {"inherited method, module not loaded → class_not_found with inheritance hint",
-                fun test_undef_inherited_module_not_loaded/0},
-            {"inherited method, module loaded, absent → does_not_understand, inheritance hint",
-                fun test_undef_inherited_method_not_found/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"local method, module not loaded → class_not_found with local hint",
+            fun test_undef_local_module_not_loaded/0},
+        {"local method, module loaded but method absent → does_not_understand with local hint",
+            fun test_undef_local_method_not_found/0},
+        {"inherited method, module not loaded → class_not_found with inheritance hint",
+            fun test_undef_inherited_module_not_loaded/0},
+        {"inherited method, module loaded, absent → does_not_understand, inheritance hint",
+            fun test_undef_inherited_method_not_found/0}
+    ]}.
 
 %% Local class method, module not loaded → class_not_found with hint naming the class.
 test_undef_local_module_not_loaded() ->
@@ -1114,16 +1048,8 @@ test_undef_inherited_module_not_loaded() ->
         {error, #beamtalk_error{hint = Hint}} = Result,
         ?assert(binary:match(element(2, Hint), <<"inherits">>) =/= nomatch)
     after
-        try
-            gen_server:stop(ChildPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end,
-        try
-            gen_server:stop(ParentPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(ChildPid),
+        beamtalk_test_proc:stop(ParentPid)
     end.
 
 %% Inherited method, defining class module loaded but function absent → does_not_understand.
@@ -1151,16 +1077,8 @@ test_undef_inherited_method_not_found() ->
         {error, #beamtalk_error{hint = Hint}} = Result,
         ?assert(binary:match(element(2, Hint), <<"inherited">>) =/= nomatch)
     after
-        try
-            gen_server:stop(ChildPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end,
-        try
-            gen_server:stop(ParentPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(ChildPid),
+        beamtalk_test_proc:stop(ParentPid)
     end.
 
 %%% ============================================================================
@@ -1168,36 +1086,33 @@ test_undef_inherited_method_not_found() ->
 %%% ============================================================================
 
 invoke_class_method_errors_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"internal undef in method body returns {error, undef}",
-                fun test_invoke_internal_undef/0},
-            {"method that raises error returns {error, Reason}", fun test_invoke_raises_error/0},
-            {"connected Program exit: passes through the apply catch",
-                fun test_invoke_script_exit_passthrough/0},
-            {"multi-arg keyword selector dispatches correctly", fun test_invoke_two_arg_keyword/0},
-            {"NLR relay without writes replies with the pre-call class vars",
-                fun test_invoke_nlr_relay_keeps_pre_call_vars_when_no_writes/0},
-            {"NLR relay keeps the writes made before the unwind",
-                fun test_invoke_nlr_relay_keeps_writes/0},
-            {"a genuine error discards the invocation's writes",
-                fun test_invoke_error_discards_writes/0},
-            {"a normal return replies with the live map and uninstalls the home",
-                fun test_invoke_ok_keeps_writes_and_uninstalls/0},
-            {"the home is installed under the class key while the method runs",
-                fun test_invoke_installs_home_during_method/0},
-            {"assert_absent fires on a nested invocation with the outer map intact",
-                fun test_invoke_nested_invocation_fails_loudly_outer_map_intact/0},
-            {"assert_absent fires for another class's live home (extension entry)",
-                fun test_invoke_extension_nested_other_class_home_fails_loudly/0},
-            {"invoke_class_extension/7 keeps writes after a normal return",
-                fun test_invoke_extension_writes_kept_after_return/0},
-            {"invoke_class_extension/7 discards writes after a raise",
-                fun test_invoke_extension_error_discards_writes/0},
-            {"invoke_class_extension/7 keeps writes made before a foreign ^",
-                fun test_invoke_extension_nlr_keeps_writes/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"internal undef in method body returns {error, undef}", fun test_invoke_internal_undef/0},
+        {"method that raises error returns {error, Reason}", fun test_invoke_raises_error/0},
+        {"connected Program exit: passes through the apply catch",
+            fun test_invoke_script_exit_passthrough/0},
+        {"multi-arg keyword selector dispatches correctly", fun test_invoke_two_arg_keyword/0},
+        {"NLR relay without writes replies with the pre-call class vars",
+            fun test_invoke_nlr_relay_keeps_pre_call_vars_when_no_writes/0},
+        {"NLR relay keeps the writes made before the unwind",
+            fun test_invoke_nlr_relay_keeps_writes/0},
+        {"a genuine error discards the invocation's writes",
+            fun test_invoke_error_discards_writes/0},
+        {"a normal return replies with the live map and uninstalls the home",
+            fun test_invoke_ok_keeps_writes_and_uninstalls/0},
+        {"the home is installed under the class key while the method runs",
+            fun test_invoke_installs_home_during_method/0},
+        {"assert_absent fires on a nested invocation with the outer map intact",
+            fun test_invoke_nested_invocation_fails_loudly_outer_map_intact/0},
+        {"assert_absent fires for another class's live home (extension entry)",
+            fun test_invoke_extension_nested_other_class_home_fails_loudly/0},
+        {"invoke_class_extension/7 keeps writes after a normal return",
+            fun test_invoke_extension_writes_kept_after_return/0},
+        {"invoke_class_extension/7 discards writes after a raise",
+            fun test_invoke_extension_error_discards_writes/0},
+        {"invoke_class_extension/7 keeps writes made before a foreign ^",
+            fun test_invoke_extension_nlr_keeps_writes/0}
+    ]}.
 
 %% class method that calls a non-existent function internally → {error, undef}.
 test_invoke_internal_undef() ->
@@ -1481,12 +1396,10 @@ assert_home_absent(ClassName) ->
 %%% ============================================================================
 
 class_send_instantiation_test_() ->
-    {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
-        [
-            {"class_send spawnWith: with map creates actor", fun test_class_send_spawn_with_map/0},
-            {"class_send new: exercises the new: clause path", fun test_class_send_new_colon/0}
-        ]
-    end}.
+    {foreach, fun setup_runtime/0, fun teardown_runtime/1, [
+        {"class_send spawnWith: with map creates actor", fun test_class_send_spawn_with_map/0},
+        {"class_send new: exercises the new: clause path", fun test_class_send_new_colon/0}
+    ]}.
 
 %% class_send(Pid, 'spawnWith:', [Map]) creates an actor with initial state.
 test_class_send_spawn_with_map() ->
@@ -1500,11 +1413,7 @@ test_class_send_spawn_with_map() ->
     after
         case Result of
             #beamtalk_object{pid = ActorPid} when is_pid(ActorPid) ->
-                try
-                    gen_server:stop(ActorPid, normal, 5000)
-                catch
-                    _:_ -> ok
-                end;
+                beamtalk_test_proc:stop(ActorPid);
             _ ->
                 ok
         end
@@ -1531,11 +1440,7 @@ test_class_send_new_colon() ->
         Result = beamtalk_class_dispatch:class_send(Pid, 'new:', [#{}]),
         ?assert(is_map(Result))
     after
-        try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %%% ============================================================================
@@ -1543,14 +1448,12 @@ test_class_send_new_colon() ->
 %%% ============================================================================
 
 self_instantiation_error_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"self-send new: without process dict raises instantiation_error",
-                fun test_self_instantiation_new_colon_error/0},
-            {"self-send spawnWith: without process dict raises instantiation_error",
-                fun test_self_instantiation_spawn_with_error/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"self-send new: without process dict raises instantiation_error",
+            fun test_self_instantiation_new_colon_error/0},
+        {"self-send spawnWith: without process dict raises instantiation_error",
+            fun test_self_instantiation_spawn_with_error/0}
+    ]}.
 
 %% class_send(self(), 'new:', [Map]) when process dict has no class metadata
 %% triggers handle_self_instantiation → handle_self_instantiation_error.
@@ -1569,14 +1472,11 @@ test_self_instantiation_spawn_with_error() ->
 %%% ============================================================================
 
 class_send_recovery_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"class_send to dead pid with unknown class raises class_not_found",
-                fun test_send_dead_pid_unknown/0},
-            {"class_send to dead pid logs structured error",
-                fun test_send_dead_pid_structured_error/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"class_send to dead pid with unknown class raises class_not_found",
+            fun test_send_dead_pid_unknown/0},
+        {"class_send to dead pid logs structured error", fun test_send_dead_pid_structured_error/0}
+    ]}.
 
 %% Sending to a dead pid that isn't in the class registry raises class_not_found.
 test_send_dead_pid_unknown() ->
@@ -1603,13 +1503,11 @@ test_send_dead_pid_structured_error() ->
 %%% ============================================================================
 
 metaclass_send_extended_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"metaclass_method_call not found returns {error, not_found}",
-                fun test_metaclass_method_not_found/0},
-            {"metaclass_send to dead pid raises class_not_found", fun test_metaclass_dead_pid/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"metaclass_method_call not found returns {error, not_found}",
+            fun test_metaclass_method_not_found/0},
+        {"metaclass_send to dead pid raises class_not_found", fun test_metaclass_dead_pid/0}
+    ]}.
 
 %% metaclass_method_call for absent selector returns {error, not_found}.
 test_metaclass_method_not_found() ->
@@ -1625,11 +1523,7 @@ test_metaclass_method_not_found() ->
         Result = gen_server:call(Pid, {metaclass_method_call, absentSelector, []}),
         ?assertEqual({error, not_found}, Result)
     after
-        try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% metaclass_send to a dead pid raises class_not_found (crash recovery path).
@@ -1650,12 +1544,10 @@ test_metaclass_dead_pid() ->
 %%% ============================================================================
 
 class_chain_fallthrough_test_() ->
-    {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
-        [
-            {"class_send falls through to Class chain for printString",
-                fun test_fallthrough_print_string/0}
-        ]
-    end}.
+    {foreach, fun setup_runtime/0, fun teardown_runtime/1, [
+        {"class_send falls through to Class chain for printString",
+            fun test_fallthrough_print_string/0}
+    ]}.
 
 %% When a class method is not found locally, class_send_dispatch falls
 %% through to try_class_chain_fallthrough which checks the Class chain.
@@ -1679,12 +1571,9 @@ test_fallthrough_print_string() ->
 %% verifies that a successful {ok, Value} is correctly unwrapped when a
 %% user-defined class method returns a simple value.
 class_send_user_method_unwrap_test_() ->
-    {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
-        [
-            {"user-defined class method returns unwrapped value",
-                fun test_class_send_unwrap_ok_tuple/0}
-        ]
-    end}.
+    {foreach, fun setup_runtime/0, fun teardown_runtime/1, [
+        {"user-defined class method returns unwrapped value", fun test_class_send_unwrap_ok_tuple/0}
+    ]}.
 
 test_class_send_unwrap_ok_tuple() ->
     ClassName = 'BT1981UnwrapTestClass',
@@ -1701,11 +1590,7 @@ test_class_send_unwrap_ok_tuple() ->
         Result = beamtalk_class_dispatch:class_send(Pid, testSuccess, []),
         ?assertEqual(test_success_result, Result)
     after
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% BT-4679: the former class_send_self_instantiation_* tests. Directly invoking class_send
@@ -1842,12 +1727,10 @@ class_method_fun_name_keyword_test() ->
 %% class_send_dispatch 'Other' branch: a method that returns {error, RealError}
 %% (not not_found) flows through unwrap_class_call which re-raises.
 class_send_dispatch_returns_real_error_test_() ->
-    {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
-        [
-            {"class method returning {error, beamtalk_error} is re-raised",
-                fun test_class_send_dispatch_real_error/0}
-        ]
-    end}.
+    {foreach, fun setup_runtime/0, fun teardown_runtime/1, [
+        {"class method returning {error, beamtalk_error} is re-raised",
+            fun test_class_send_dispatch_real_error/0}
+    ]}.
 
 test_class_send_dispatch_real_error() ->
     %% beamtalk_class_dispatch_test_helper:class_testRaise/1 does error(test_deliberate_error),
@@ -1867,17 +1750,14 @@ test_class_send_dispatch_real_error() ->
             beamtalk_class_dispatch:class_send(Pid, testRaise, [])
         )
     after
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% try_class_chain_fallthrough with a class method that raises a non-DNU error.
 %% class_send routes to the fallthrough, which returns {error, Error} — the
 %% real-error branch wraps and re-raises via error(Wrapped).
 class_chain_fallthrough_real_error_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
         [{"fallthrough propagates real Class chain errors", fun test_fallthrough_real_error/0}]
     end}.
@@ -1917,12 +1797,10 @@ metaclass_send_unregistered_pid_test() ->
 %% not_found, dispatch falls through to beamtalk_dispatch:lookup on 'Metaclass'.
 %% If 'Metaclass' is not registered, class_not_found gracefully raises DNU.
 metaclass_send_fallthrough_class_not_found_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"metaclass fallthrough raises DNU when Metaclass not registered",
-                fun test_metaclass_fallthrough_dnu/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"metaclass fallthrough raises DNU when Metaclass not registered",
+            fun test_metaclass_fallthrough_dnu/0}
+    ]}.
 
 test_metaclass_fallthrough_dnu() ->
     ClassName = 'BT1981MetaFallthrough',
@@ -1943,11 +1821,7 @@ test_metaclass_fallthrough_dnu() ->
             beamtalk_class_dispatch:metaclass_send(Pid, zzFakeSelector, [], Self)
         )
     after
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% class_send test selector uses long timeout (300000ms); exercise the
@@ -1955,12 +1829,10 @@ test_metaclass_fallthrough_dnu() ->
 %% a class that doesn't define it → {error, not_found} → fallthrough
 %% raises DNU.
 class_send_test_selector_timeout_branch_test_() ->
-    {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
-        [
-            {"test selector uses longer timeout in class_send_dispatch",
-                fun test_class_send_test_selector/0}
-        ]
-    end}.
+    {foreach, fun setup_runtime/0, fun teardown_runtime/1, [
+        {"test selector uses longer timeout in class_send_dispatch",
+            fun test_class_send_test_selector/0}
+    ]}.
 
 test_class_send_test_selector() ->
     ClassName = 'BT1981TestSelectorClass',
@@ -1979,25 +1851,19 @@ test_class_send_test_selector() ->
             beamtalk_class_dispatch:class_send(Pid, runAll, [])
         )
     after
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% handle_self_instantiation successful type-dispatch branches — fire the
 %% Type=new/Type=spawn cases with a bogus module so instantiation itself
 %% fails, but the dispatch branch executes first.
 class_send_self_instantiation_new_dispatch_test_() ->
-    {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
-        [
-            {"handle_self_instantiation Type=new dispatch branch fires",
-                fun test_self_instantiation_new_branch/0},
-            {"handle_self_instantiation Type=spawn dispatch branch fires",
-                fun test_self_instantiation_spawn_branch/0}
-        ]
-    end}.
+    {foreach, fun setup_runtime/0, fun teardown_runtime/1, [
+        {"handle_self_instantiation Type=new dispatch branch fires",
+            fun test_self_instantiation_new_branch/0},
+        {"handle_self_instantiation Type=spawn dispatch branch fires",
+            fun test_self_instantiation_spawn_branch/0}
+    ]}.
 
 test_self_instantiation_new_branch() ->
     put(beamtalk_class_name, 'BT1981SelfInstNew'),
@@ -2042,26 +1908,24 @@ test_self_instantiation_spawn_branch() ->
 %%% ============================================================================
 
 runtime_class_method_fun_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"register-time class-method fun is callable and threads class vars",
-                fun test_runtime_fun_threads_class_vars/0},
-            {"live put_class_method installs a callable class-method fun",
-                fun test_put_class_method_live/0},
-            {"subclass dispatches an inherited runtime class method via the store",
-                fun test_inherited_runtime_class_method/0},
-            {"a runtime fun shadows a compiled class method of the same selector",
-                fun test_runtime_fun_shadows_compiled/0},
-            {"compiled selectors on a mixed class still dispatch to the module",
-                fun test_mixed_class_compiled_selector/0},
-            {"compile-time-only class keeps the gate flag closed and skips the store",
-                fun test_compile_only_class_gate_closed/0},
-            {"a runtime class-method fun that raises surfaces a structured error",
-                fun test_runtime_fun_raises/0},
-            {"class_self_dispatch_local resolves local, inherited, and DNU",
-                fun test_class_self_dispatch_local/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"register-time class-method fun is callable and threads class vars",
+            fun test_runtime_fun_threads_class_vars/0},
+        {"live put_class_method installs a callable class-method fun",
+            fun test_put_class_method_live/0},
+        {"subclass dispatches an inherited runtime class method via the store",
+            fun test_inherited_runtime_class_method/0},
+        {"a runtime fun shadows a compiled class method of the same selector",
+            fun test_runtime_fun_shadows_compiled/0},
+        {"compiled selectors on a mixed class still dispatch to the module",
+            fun test_mixed_class_compiled_selector/0},
+        {"compile-time-only class keeps the gate flag closed and skips the store",
+            fun test_compile_only_class_gate_closed/0},
+        {"a runtime class-method fun that raises surfaces a structured error",
+            fun test_runtime_fun_raises/0},
+        {"class_self_dispatch_local resolves local, inherited, and DNU",
+            fun test_class_self_dispatch_local/0}
+    ]}.
 
 %% A class-method fun supplied at registration accumulates class-variable state
 %% across calls — the "dropped state" regression must not return.
@@ -2084,11 +1948,7 @@ test_runtime_fun_threads_class_vars() ->
         ?assertEqual(2, beamtalk_class_dispatch:class_send(Pid, bump, [])),
         ?assertEqual(3, beamtalk_class_dispatch:class_send(Pid, bump, []))
     after
-        try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% put_class_method/3 installs a class-method fun on a live class object.
@@ -2109,11 +1969,7 @@ test_put_class_method_live() ->
         ?assert(beamtalk_class_metadata:has_runtime_class_methods(ClassName)),
         ?assertEqual(10, beamtalk_class_dispatch:class_send(Pid, getCount, []))
     after
-        try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% A subclass dispatches a runtime class method defined on an ancestor. The fun
@@ -2150,16 +2006,8 @@ test_inherited_runtime_class_method() ->
         ),
         ?assertNot(beamtalk_class_metadata:has_runtime_class_methods(ChildName))
     after
-        try
-            gen_server:stop(ChildPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end,
-        try
-            gen_server:stop(ParentPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(ChildPid),
+        beamtalk_test_proc:stop(ParentPid)
     end.
 
 %% A runtime fun installed for a selector that the compiled module also exports
@@ -2179,11 +2027,7 @@ test_runtime_fun_shadows_compiled() ->
         %% fun shadows it.
         ?assertEqual(overridden_value, beamtalk_class_dispatch:class_send(Pid, testSuccess, []))
     after
-        try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% On a class carrying both a runtime fun and a compiled-method reference, the
@@ -2211,11 +2055,7 @@ test_mixed_class_compiled_selector() ->
         ),
         ?assertEqual(test_success_result, beamtalk_class_dispatch:class_send(Pid, testSuccess, []))
     after
-        try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% A class with only compiled-method references keeps the gate flag closed, so
@@ -2236,11 +2076,7 @@ test_compile_only_class_gate_closed() ->
         ),
         ?assertEqual(test_success_result, beamtalk_class_dispatch:class_send(Pid, testSuccess, []))
     after
-        try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% A runtime fun that raises is caught and surfaced as a structured error
@@ -2258,11 +2094,7 @@ test_runtime_fun_raises() ->
     try
         ?assertError(_, beamtalk_class_dispatch:class_send(Pid, boom, []))
     after
-        try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% class_self_dispatch_local/3: the self-send primitive for builder class-method
@@ -2331,16 +2163,8 @@ test_class_self_dispatch_local() ->
             )
         )
     after
-        try
-            gen_server:stop(ChildPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end,
-        try
-            gen_server:stop(ParentPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(ChildPid),
+        beamtalk_test_proc:stop(ParentPid)
     end.
 
 %%% ============================================================================
@@ -2360,20 +2184,18 @@ test_class_self_dispatch_local() ->
 %%% ============================================================================
 
 class_extension_dispatch_test_() ->
-    {setup, fun setup_class_extension/0, fun teardown_class_extension/1, fun(_) ->
-        [
-            {"class-side extension (2-arity value fun) is found and invoked",
-                fun test_class_extension_value_fun/0},
-            {"class-side extension writes class variables through beamtalk_class_vars and threads them across dispatches",
-                fun test_class_extension_threads_class_vars/0},
-            {"class-side extension takes priority over a same-named local class method",
-                fun test_class_extension_priority_over_local/0},
-            {"class-side extension receives a ClassSelf tagged with the metaclass atom",
-                fun test_class_extension_receives_class_self/0},
-            {"class-side extension takes priority over a same-named inherited class method",
-                fun test_class_extension_priority_over_inherited/0}
-        ]
-    end}.
+    {foreach, fun setup_class_extension/0, fun teardown_class_extension/1, [
+        {"class-side extension (2-arity value fun) is found and invoked",
+            fun test_class_extension_value_fun/0},
+        {"class-side extension writes class variables through beamtalk_class_vars and threads them across dispatches",
+            fun test_class_extension_threads_class_vars/0},
+        {"class-side extension takes priority over a same-named local class method",
+            fun test_class_extension_priority_over_local/0},
+        {"class-side extension receives a ClassSelf tagged with the metaclass atom",
+            fun test_class_extension_receives_class_self/0},
+        {"class-side extension takes priority over a same-named inherited class method",
+            fun test_class_extension_priority_over_inherited/0}
+    ]}.
 
 setup_class_extension() ->
     setup_minimal(),
@@ -2512,16 +2334,8 @@ test_class_extension_priority_over_inherited() ->
             beamtalk_extensions:unregister(ChildName, shared, true)
         end
     after
-        try
-            gen_server:stop(ChildPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end,
-        try
-            gen_server:stop(ParentPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(ChildPid),
+        beamtalk_test_proc:stop(ParentPid)
     end.
 
 %% End-to-end via the real gen_server message: an ordinary `Target sel` send
@@ -2544,11 +2358,7 @@ test_class_send_class_side_extension() ->
         ?assertEqual(bt3192_extension_result, Result)
     after
         beamtalk_extensions:unregister(ClassName, bt3192ExtSel, true),
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% End-to-end via the metaclass message type: `Target class sel`
@@ -2573,11 +2383,7 @@ test_metaclass_method_class_side_extension() ->
         ?assertMatch({ok, bt3192_meta_extension_result}, Result)
     after
         beamtalk_extensions:unregister(ClassName, bt3192MetaExtSel, true),
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %% A crashing extension body must not
@@ -2610,24 +2416,18 @@ test_class_extension_crash_does_not_kill_class_process() ->
         )
     after
         beamtalk_extensions:unregister(ClassName, crashExt, true),
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 class_send_and_metaclass_extension_e2e_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"class_send (Target sel) dispatches to a class-side extension",
-                fun test_class_send_class_side_extension/0},
-            {"metaclass_method_call (Target class sel) dispatches to the same extension",
-                fun test_metaclass_method_class_side_extension/0},
-            {"a crashing class-side extension does not kill the class gen_server",
-                fun test_class_extension_crash_does_not_kill_class_process/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"class_send (Target sel) dispatches to a class-side extension",
+            fun test_class_send_class_side_extension/0},
+        {"metaclass_method_call (Target class sel) dispatches to the same extension",
+            fun test_metaclass_method_class_side_extension/0},
+        {"a crashing class-side extension does not kill the class gen_server",
+            fun test_class_extension_crash_does_not_kill_class_process/0}
+    ]}.
 
 %%% ============================================================================
 %%% 18. class_self_send/3 & class_self_dispatch_local/3 — self-send
@@ -2645,16 +2445,14 @@ class_send_and_metaclass_extension_e2e_test_() ->
 %%% ============================================================================
 
 class_self_dispatch_extension_test_() ->
-    {setup, fun setup_class_self_extension/0, fun teardown_class_self_extension/1, fun(_) ->
-        [
-            {"class_self_send/3 finds an extension on the class's own tag",
-                fun test_class_self_dispatch_extension_found/0},
-            {"class_self_send/3 extension writes go to the live home",
-                fun test_class_self_dispatch_extension_threads_class_vars/0},
-            {"a crashing self-dispatched extension surfaces the raised error, not a raw exit",
-                fun test_class_self_dispatch_extension_crash_surfaces_error/0}
-        ]
-    end}.
+    {foreach, fun setup_class_self_extension/0, fun teardown_class_self_extension/1, [
+        {"class_self_send/3 finds an extension on the class's own tag",
+            fun test_class_self_dispatch_extension_found/0},
+        {"class_self_send/3 extension writes go to the live home",
+            fun test_class_self_dispatch_extension_threads_class_vars/0},
+        {"a crashing self-dispatched extension surfaces the raised error, not a raw exit",
+            fun test_class_self_dispatch_extension_crash_surfaces_error/0}
+    ]}.
 
 setup_class_self_extension() ->
     setup_minimal(),
@@ -2743,14 +2541,12 @@ test_class_self_dispatch_extension_crash_surfaces_error() ->
     ).
 
 class_self_dispatch_extension_priority_test_() ->
-    {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"class_self_send/3 checks the extension before walking the class chain",
-                fun test_class_self_dispatch_extension_priority_over_inherited/0},
-            {"class_self_dispatch_local/3 checks the extension before its own runtime class method",
-                fun test_class_self_dispatch_local_extension_priority_over_runtime_fun/0}
-        ]
-    end}.
+    {foreach, fun setup_minimal/0, fun teardown_pids/1, [
+        {"class_self_send/3 checks the extension before walking the class chain",
+            fun test_class_self_dispatch_extension_priority_over_inherited/0},
+        {"class_self_dispatch_local/3 checks the extension before its own runtime class method",
+            fun test_class_self_dispatch_local_extension_priority_over_runtime_fun/0}
+    ]}.
 
 %% Extension checked before the superclass-chain walk (mirroring
 %% handle_class_method_call/6's extension-before-local-table order):
@@ -2793,16 +2589,8 @@ test_class_self_dispatch_extension_priority_over_inherited() ->
             beamtalk_extensions:unregister(ChildName, shared, true)
         end
     after
-        try
-            gen_server:stop(ChildPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end,
-        try
-            gen_server:stop(ParentPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(ChildPid),
+        beamtalk_test_proc:stop(ParentPid)
     end.
 
 %% Same priority rule for class_self_dispatch_local/4's own-runtime-method
@@ -2840,11 +2628,7 @@ test_class_self_dispatch_local_extension_priority_over_runtime_fun() ->
             beamtalk_extensions:unregister(ClassName, shared, true)
         end
     after
-        try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %%% ============================================================================
@@ -2858,20 +2642,18 @@ test_class_self_dispatch_local_extension_priority_over_runtime_fun() ->
 %%% ============================================================================
 
 class_super_dispatch_test_() ->
-    {setup, fun setup_class_self_extension/0, fun teardown_pids/1, fun(_) ->
-        [
-            {"skips the sending class's own class-side extension",
-                fun test_class_super_dispatch_skips_own_extension/0},
-            {"reaches a superclass method defined only as a class-side extension",
-                fun test_class_super_dispatch_reaches_superclass_extension/0},
-            {"a superclass's extension is checked before its class methods",
-                fun test_class_super_dispatch_superclass_extension_before_method/0},
-            {"runs the found method under the live receiver's tag",
-                fun test_class_super_dispatch_passes_receiver_tag/0},
-            {"raises does_not_understand when no ancestor defines the selector",
-                fun test_class_super_dispatch_dnu/0}
-        ]
-    end}.
+    {foreach, fun setup_class_self_extension/0, fun teardown_pids/1, [
+        {"skips the sending class's own class-side extension",
+            fun test_class_super_dispatch_skips_own_extension/0},
+        {"reaches a superclass method defined only as a class-side extension",
+            fun test_class_super_dispatch_reaches_superclass_extension/0},
+        {"a superclass's extension is checked before its class methods",
+            fun test_class_super_dispatch_superclass_extension_before_method/0},
+        {"runs the found method under the live receiver's tag",
+            fun test_class_super_dispatch_passes_receiver_tag/0},
+        {"raises does_not_understand when no ancestor defines the selector",
+            fun test_class_super_dispatch_dnu/0}
+    ]}.
 
 %% Parent defines `shared` (a runtime class-method fun); Child does not.
 with_super_parent_child(Prefix, Body) ->
@@ -2899,16 +2681,8 @@ with_super_parent_child(Prefix, Body) ->
     try
         Body(ParentName, ChildName)
     after
-        try
-            gen_server:stop(ChildPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end,
-        try
-            gen_server:stop(ParentPid, normal, 5000)
-        catch
-            _:_ -> ok
-        end
+        beamtalk_test_proc:stop(ChildPid),
+        beamtalk_test_proc:stop(ParentPid)
     end.
 
 test_class_super_dispatch_skips_own_extension() ->
@@ -3017,6 +2791,7 @@ tag_self(Tag) ->
 %%% ============================================================================
 
 class_self_direct_ok_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup, fun setup_runtime/0, fun teardown_runtime/1, [
         {"defining-class receiver with no shadowing takes the direct call", fun() ->
             ?assert(
@@ -3067,6 +2842,7 @@ class_self_direct_ok_test_() ->
 %% would time out. With the ETS-backed lookups the send completes (here with the
 %% expected does_not_understand, `Class` not being registered in this test).
 class_send_not_found_fallthrough_does_not_message_stalled_class_test_() ->
+    %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
             beamtalk_test_boot:registry(),
@@ -3148,16 +2924,14 @@ class_send_not_found_fallthrough_does_not_message_stalled_class_test_() ->
 %%% ----------------------------------------------------------------------------
 
 relayed_class_method_raise_log_level_test_() ->
-    {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
-        [
-            {"caught Error signal: in a class method logs exactly one debug event",
-                fun test_relayed_signal_not_logged_at_error/0},
-            {"a raw Erlang crash in a class method still logs at error",
-                fun test_relayed_raw_error_logged_at_error/0},
-            {"a does_not_understand in a class method still logs at error",
-                fun test_relayed_dnu_logged_at_error/0}
-        ]
-    end}.
+    {foreach, fun setup_runtime/0, fun teardown_runtime/1, [
+        {"caught Error signal: in a class method logs exactly one debug event",
+            fun test_relayed_signal_not_logged_at_error/0},
+        {"a raw Erlang crash in a class method still logs at error",
+            fun test_relayed_raw_error_logged_at_error/0},
+        {"a does_not_understand in a class method still logs at error",
+            fun test_relayed_dnu_logged_at_error/0}
+    ]}.
 
 test_relayed_signal_not_logged_at_error() ->
     Events = relay_log_events('BT4115SignalLogClass', testSignal, fun(Pid) ->
@@ -3200,11 +2974,7 @@ relay_log_events(ClassName, Selector, Body) ->
              || #{msg := {"Class method ~p:~p failed", _}} = Event <- beamtalk_test_log:drain()
             ]
         after
-            (try
-                gen_server:stop(Pid, normal, 5000)
-            catch
-                _:_ -> ok
-            end)
+            beamtalk_test_proc:stop(Pid)
         end
     end).
 
@@ -3261,33 +3031,27 @@ start_bt4073_class(ClassName, Superclass, ClassMethods, ClassVars) ->
     Pid.
 
 stop_quietly(Pid) ->
-    try
-        gen_server:stop(Pid, normal, 5000)
-    catch
-        _:_ -> ok
-    end.
+    beamtalk_test_proc:stop(Pid).
 
 class_chain_skip_test_() ->
-    {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
-        [
-            {"Behaviour/Class-chain sends make no gen_server call to a class process",
-                fun test_class_chain_send_makes_no_gen_call/0},
-            {"a user class method still runs in the class process",
-                fun test_user_class_method_still_routes_to_class/0},
-            {"an inherited class method still runs in the class process",
-                fun test_inherited_class_method_still_routes_to_class/0},
-            {"a runtime-installed class-method fun shadows the Class chain",
-                fun test_runtime_class_fun_shadows_class_chain/0},
-            {"a class-side extension shadows the Class chain",
-                fun test_class_extension_shadows_class_chain/0},
-            {"hasField:/clearField: still answer from the class process",
-                fun test_class_var_reflection_still_routes_to_class/0},
-            {"BT-4148: fieldAt:/fieldAt:put: answer from the class process, which survives",
-                fun test_class_field_at_routes_to_class/0},
-            {"an unknown selector still raises does_not_understand on the class",
-                fun test_class_chain_skip_dnu/0}
-        ]
-    end}.
+    {foreach, fun setup_runtime/0, fun teardown_runtime/1, [
+        {"Behaviour/Class-chain sends make no gen_server call to a class process",
+            fun test_class_chain_send_makes_no_gen_call/0},
+        {"a user class method still runs in the class process",
+            fun test_user_class_method_still_routes_to_class/0},
+        {"an inherited class method still runs in the class process",
+            fun test_inherited_class_method_still_routes_to_class/0},
+        {"a runtime-installed class-method fun shadows the Class chain",
+            fun test_runtime_class_fun_shadows_class_chain/0},
+        {"a class-side extension shadows the Class chain",
+            fun test_class_extension_shadows_class_chain/0},
+        {"hasField:/clearField: still answer from the class process",
+            fun test_class_var_reflection_still_routes_to_class/0},
+        {"BT-4148: fieldAt:/fieldAt:put: answer from the class process, which survives",
+            fun test_class_field_at_routes_to_class/0},
+        {"an unknown selector still raises does_not_understand on the class",
+            fun test_class_chain_skip_dnu/0}
+    ]}.
 
 test_class_chain_send_makes_no_gen_call() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
