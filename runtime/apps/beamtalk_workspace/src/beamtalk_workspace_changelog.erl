@@ -88,6 +88,7 @@ release nodes do not start a workspace, so this code is a no-op there.
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include("beamtalk_workspace_changelog.hrl").
+-include("beamtalk_workspace_changelog_state.hrl").
 
 %% Public API
 -export([

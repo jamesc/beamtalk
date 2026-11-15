@@ -12,6 +12,7 @@ ChangeLog persistence: the `changes.jsonl` append/load path, transactional rotat
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include("beamtalk_workspace_changelog.hrl").
+-include("beamtalk_workspace_changelog_state.hrl").
 
 -export([
     changes_dir/1,

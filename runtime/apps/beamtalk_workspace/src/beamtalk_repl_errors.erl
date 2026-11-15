@@ -64,7 +64,8 @@ Used by protocol handlers and op modules.
     ensure_structured_error/2,
     format_name/1,
     normalize_diagnostic/1,
-    safe_to_existing_atom/1
+    safe_to_existing_atom/1,
+    resolve_qualified_class_name/1
 ]).
 
 %%% Public API
@@ -463,3 +464,38 @@ normalize_diagnostic(D) when is_binary(D) ->
     #{message => D};
 normalize_diagnostic(D) ->
     #{message => beamtalk_error:chars_to_binary(io_lib:format("~tp", [D]))}.
+
+-doc """
+Resolve a class name that may be package-qualified (ADR 0070 Phase 6).
+
+Parses `<<"json@Parser">>` into `{ok, 'Parser'}` by looking up the
+package-qualified BEAM module name (`bt@json@parser`) in the class registry.
+Plain class names (`<<"Counter">>`) are resolved directly via `safe_to_existing_atom`.
+
+Returns `{ok, ClassAtom}` on success, or `{error, badarg}` if the class
+is not found (whether qualified or unqualified).
+""".
+-spec resolve_qualified_class_name(binary()) -> {ok, atom()} | {error, badarg}.
+resolve_qualified_class_name(ClassBin) when is_binary(ClassBin) ->
+    case binary:match(ClassBin, <<"@">>) of
+        nomatch ->
+            %% Plain class name — existing behavior
+            beamtalk_repl_errors:safe_to_existing_atom(ClassBin);
+        {Pos, _Len} ->
+            %% Package-qualified: "json@Parser" → package=json, class=Parser
+            PkgBin = binary:part(ClassBin, 0, Pos),
+            ClassNameBin = binary:part(ClassBin, Pos + 1, byte_size(ClassBin) - Pos - 1),
+            %% Convert class name to snake_case module name: bt@{pkg}@{snake_case}
+            %% Delegates to beamtalk_module_name, the single
+            %% Erlang-side authority for the ClassName ⇄ bt@[pkg@]snake_case
+            %% convention. Never creates an atom for the untrusted ClassBin —
+            %% to_qualified_module_atom/2 only checks list_to_existing_atom.
+            SnakeCase = beamtalk_module_name:camel_to_snake(binary_to_list(ClassNameBin)),
+            case beamtalk_module_name:to_qualified_module_atom(SnakeCase, PkgBin) of
+                undefined ->
+                    {error, badarg};
+                _ModAtom ->
+                    %% Module name atom exists — now resolve the class name atom
+                    beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin)
+            end
+    end.
