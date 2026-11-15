@@ -103,14 +103,16 @@ detect_not_found_test() ->
 
 %% The message names the condition rather than a missing selector.
 detect_not_found_message_test() ->
-    Message =
-        try
-            beamtalk_list:detect([1, 2, 3], fun(X) -> X > 10 end)
-        catch
-            error:#{error := #beamtalk_error{message = M}} -> M
+    ?assertBtErrorWith(
+        _,
+        _,
+        _,
+        fun(#beamtalk_error{message = {beamtalk_string, Message}}) ->
+            ?assertNotEqual(nomatch, binary:match(Message, <<"not found">>)),
+            ?assertEqual(nomatch, binary:match(Message, <<"does not understand">>))
         end,
-    ?assertNotEqual(nomatch, binary:match(element(2, Message), <<"not found">>)),
-    ?assertEqual(nomatch, binary:match(element(2, Message), <<"does not understand">>)).
+        beamtalk_list:detect([1, 2, 3], fun(X) -> X > 10 end)
+    ).
 
 detect_invalid_block_test() ->
     ?assertBtErrorTagged(

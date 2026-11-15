@@ -10,6 +10,7 @@ EUnit tests for beamtalk_exception_handler module.
 Tests exception wrapping, ensure_wrapped/1, and exception map patterns (ADR 0015).
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%% Tests for ensure_wrapped/1 (ADR 0015) — pure, no class system needed
@@ -309,32 +310,26 @@ hierarchy_test_() ->
             ?assertEqual(false, beamtalk_exception_handler:matches_class('TypeError', Wrapped))
         end},
         {"signal_message/2 preserves exception class", fun() ->
-            try
-                beamtalk_exception_handler:signal_message(<<"test msg">>, 'RuntimeError'),
-                % Should never reach here — signal_message is no_return
-                ?assert(false)
-            catch
-                error:#{error := Inner} ->
-                    ?assertEqual('RuntimeError', Inner#beamtalk_error.class),
-                    ?assertEqual(signal, Inner#beamtalk_error.kind),
-                    ?assertEqual({beamtalk_string, <<"test msg">>}, Inner#beamtalk_error.message)
-            end
+            ?assertBtErrorMessage(
+                signal,
+                'RuntimeError',
+                _,
+                {beamtalk_string, <<"test msg">>},
+                beamtalk_exception_handler:signal_message(<<"test msg">>, 'RuntimeError')
+            )
         end}
     ]}.
 
 %% signal_from_class/1 unit test
 signal_from_class_test_() ->
     {"signal_from_class preserves class and uses class name as message", fun() ->
-        try
-            beamtalk_exception_handler:signal_from_class('MyCustomError'),
-            % Should never reach here — signal_from_class is no_return
-            ?assert(false)
-        catch
-            error:#{error := Inner} ->
-                ?assertEqual('MyCustomError', Inner#beamtalk_error.class),
-                ?assertEqual(signal, Inner#beamtalk_error.kind),
-                ?assertEqual({beamtalk_string, <<"MyCustomError">>}, Inner#beamtalk_error.message)
-        end
+        ?assertBtErrorMessage(
+            signal,
+            'MyCustomError',
+            _,
+            {beamtalk_string, <<"MyCustomError">>},
+            beamtalk_exception_handler:signal_from_class('MyCustomError')
+        )
     end}.
 
 %%% ===================================================================
@@ -533,25 +528,17 @@ dispatch_class_test() ->
 
 dispatch_signal_raises_test() ->
     Ex = make_test_exception(),
-    try
-        beamtalk_exception_handler:dispatch('signal', [], Ex),
-        ?assert(false)
-    catch
-        error:#{error := Inner} ->
-            ?assertEqual(does_not_understand, Inner#beamtalk_error.kind)
-    end.
+    ?assertBtError(does_not_understand, beamtalk_exception_handler:dispatch('signal', [], Ex)).
 
 dispatch_signal_colon_raises_test() ->
     Ex = make_test_exception(),
-    try
-        beamtalk_exception_handler:dispatch('signal:', [<<"custom msg">>], Ex),
-        ?assert(false)
-    catch
-        error:#{error := Inner} ->
-            ?assertEqual(signal, Inner#beamtalk_error.kind),
-            ?assertEqual({beamtalk_string, <<"custom msg">>}, Inner#beamtalk_error.message),
-            ?assertEqual('RuntimeError', Inner#beamtalk_error.class)
-    end.
+    ?assertBtErrorMessage(
+        signal,
+        'RuntimeError',
+        _,
+        {beamtalk_string, <<"custom msg">>},
+        beamtalk_exception_handler:dispatch('signal:', [<<"custom msg">>], Ex)
+    ).
 
 dispatch_unknown_selector_raises_test() ->
     Ex = make_test_exception(),
@@ -1072,46 +1059,34 @@ kind_to_class_timeout_error_test() ->
 %%% ===================================================================
 
 signal_message_binary_test() ->
-    try
-        beamtalk_exception_handler:signal_message(<<"error msg">>),
-        ?assert(false)
-    catch
-        error:#{error := Inner} ->
-            ?assertEqual(signal, Inner#beamtalk_error.kind),
-            ?assertEqual({beamtalk_string, <<"error msg">>}, Inner#beamtalk_error.message)
-    end.
+    ?assertBtErrorMessage(
+        signal,
+        _,
+        _,
+        {beamtalk_string, <<"error msg">>},
+        beamtalk_exception_handler:signal_message(<<"error msg">>)
+    ).
 
 signal_message_atom_test() ->
-    try
-        beamtalk_exception_handler:signal_message(some_atom),
-        ?assert(false)
-    catch
-        error:#{error := Inner} ->
-            ?assertEqual({beamtalk_string, <<"some_atom">>}, Inner#beamtalk_error.message)
-    end.
+    ?assertBtErrorMessage(
+        _,
+        _,
+        _,
+        {beamtalk_string, <<"some_atom">>},
+        beamtalk_exception_handler:signal_message(some_atom)
+    ).
 
 signal_message_other_test() ->
-    try
-        beamtalk_exception_handler:signal_message(12345),
-        ?assert(false)
-    catch
-        error:#{error := Inner} ->
-            ?assertMatch({beamtalk_string, _}, Inner#beamtalk_error.message)
-    end.
+    ?assertBtErrorMessage(
+        _, _, _, {beamtalk_string, _}, beamtalk_exception_handler:signal_message(12345)
+    ).
 
 %%% ===================================================================
 %%% signal/1 tests
 %%% ===================================================================
 
 signal_atom_kind_test() ->
-    try
-        beamtalk_exception_handler:signal(runtime_error),
-        ?assert(false)
-    catch
-        error:#{error := Inner} ->
-            ?assertEqual(runtime_error, Inner#beamtalk_error.kind),
-            ?assertEqual('Exception', Inner#beamtalk_error.class)
-    end.
+    ?assertBtError(runtime_error, 'Exception', beamtalk_exception_handler:signal(runtime_error)).
 
 %%% ===================================================================
 %%% class_signal_message/2 and class_signal/1 tests
@@ -1123,15 +1098,13 @@ class_signal_message_with_beamtalk_object_test() ->
         class_mod = 'bt@stdlib@my_custom_error',
         pid = self()
     },
-    try
-        beamtalk_exception_handler:class_signal_message(<<"test msg">>, ClassSelf),
-        ?assert(false)
-    catch
-        error:#{error := Inner} ->
-            ?assertEqual('MyCustomError', Inner#beamtalk_error.class),
-            ?assertEqual(signal, Inner#beamtalk_error.kind),
-            ?assertEqual({beamtalk_string, <<"test msg">>}, Inner#beamtalk_error.message)
-    end.
+    ?assertBtErrorMessage(
+        signal,
+        'MyCustomError',
+        _,
+        {beamtalk_string, <<"test msg">>},
+        beamtalk_exception_handler:class_signal_message(<<"test msg">>, ClassSelf)
+    ).
 
 class_signal_message_without_class_suffix_test() ->
     %% Class tag without " class" suffix should also work
@@ -1140,25 +1113,23 @@ class_signal_message_without_class_suffix_test() ->
         class_mod = 'bt@stdlib@exception',
         pid = self()
     },
-    try
-        beamtalk_exception_handler:class_signal_message(<<"oops">>, ClassSelf),
-        ?assert(false)
-    catch
-        error:#{error := Inner} ->
-            ?assertEqual('Exception', Inner#beamtalk_error.class),
-            ?assertEqual({beamtalk_string, <<"oops">>}, Inner#beamtalk_error.message)
-    end.
+    ?assertBtErrorMessage(
+        _,
+        'Exception',
+        _,
+        {beamtalk_string, <<"oops">>},
+        beamtalk_exception_handler:class_signal_message(<<"oops">>, ClassSelf)
+    ).
 
 class_signal_message_fallback_test() ->
     %% Neither a beamtalk_object nor a class-name atom: falls back to 'Exception'
-    try
-        beamtalk_exception_handler:class_signal_message(<<"fallback">>, {not_an_object}),
-        ?assert(false)
-    catch
-        error:#{error := Inner} ->
-            ?assertEqual('Exception', Inner#beamtalk_error.class),
-            ?assertEqual({beamtalk_string, <<"fallback">>}, Inner#beamtalk_error.message)
-    end.
+    ?assertBtErrorMessage(
+        _,
+        'Exception',
+        _,
+        {beamtalk_string, <<"fallback">>},
+        beamtalk_exception_handler:class_signal_message(<<"fallback">>, {not_an_object})
+    ).
 
 class_signal_with_beamtalk_object_test() ->
     ClassSelf = #beamtalk_object{
@@ -1166,25 +1137,22 @@ class_signal_with_beamtalk_object_test() ->
         class_mod = 'bt@stdlib@runtime_error',
         pid = self()
     },
-    try
-        beamtalk_exception_handler:class_signal(ClassSelf),
-        ?assert(false)
-    catch
-        error:#{error := Inner} ->
-            ?assertEqual('RuntimeError', Inner#beamtalk_error.class),
-            ?assertEqual(signal, Inner#beamtalk_error.kind),
-            ?assertEqual({beamtalk_string, <<"RuntimeError">>}, Inner#beamtalk_error.message)
-    end.
+    ?assertBtErrorMessage(
+        signal,
+        'RuntimeError',
+        _,
+        {beamtalk_string, <<"RuntimeError">>},
+        beamtalk_exception_handler:class_signal(ClassSelf)
+    ).
 
 class_signal_fallback_test() ->
-    try
-        beamtalk_exception_handler:class_signal({not_an_object}),
-        ?assert(false)
-    catch
-        error:#{error := Inner} ->
-            ?assertEqual('Exception', Inner#beamtalk_error.class),
-            ?assertEqual({beamtalk_string, <<"Exception">>}, Inner#beamtalk_error.message)
-    end.
+    ?assertBtErrorMessage(
+        _,
+        'Exception',
+        _,
+        {beamtalk_string, <<"Exception">>},
+        beamtalk_exception_handler:class_signal({not_an_object})
+    ).
 
 %% BT-4115: a class-literal send (`Error signal: m`) raises in the caller and
 %% passes the class-name atom; the error matches the class-object path.
@@ -1425,6 +1393,7 @@ class_signal_message_reason_records_reason_test() ->
         ),
         ?assert(false)
     catch
+        %% BT-4900: kept hand-written - also needs the raised wrapper map (Wrapped)
         error:#{error := Inner} = Wrapped ->
             ?assertEqual({tls, closed}, beamtalk_exception_handler:dispatch('reason', [], Wrapped)),
             ?assertEqual('MyErr', Inner#beamtalk_error.class),
@@ -1442,6 +1411,7 @@ class_signal_message_reason_string_and_details_test() ->
         ),
         ?assert(false)
     catch
+        %% BT-4900: kept hand-written - also needs the raised wrapper map (Wrapped)
         error:#{error := Inner} = Wrapped ->
             ?assertEqual(#{}, beamtalk_exception_handler:dispatch('details', [], Wrapped)),
             ?assertNotEqual(

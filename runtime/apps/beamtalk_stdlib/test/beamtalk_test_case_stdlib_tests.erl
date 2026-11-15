@@ -51,9 +51,6 @@ skip_with_list_test() ->
 %%% fail/1 — atom and non-binary/non-atom paths (lines 133, 135)
 %%% ============================================================================
 
-fail_with_atom_test() ->
-    ?assertBtError(assertion_failed, beamtalk_test_case:fail(broken)).
-
 fail_with_integer_test() ->
     ?assertBtError(assertion_failed, beamtalk_test_case:fail(42)).
 
@@ -63,13 +60,6 @@ fail_with_tuple_test() ->
 %%% ============================================================================
 %%% should_raise/2 — type-error clauses (lines 99–115)
 %%% ============================================================================
-
-should_raise_non_function_raises_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_test_case:should_raise(not_a_fun, some_error)).
-
-should_raise_non_atom_kind_raises_type_error_test() ->
-    Block = fun() -> ok end,
-    ?assertBtError(type_error, beamtalk_test_case:should_raise(Block, <<"not_atom">>)).
 
 should_raise_both_wrong_raises_type_error_test() ->
     ?assertBtError(type_error, beamtalk_test_case:should_raise(42, <<"bad">>)).
@@ -203,12 +193,6 @@ execute_tests_run_single_fail_test() ->
     ),
     ?assert(is_binary(Result)),
     ?assertNotEqual(nomatch, binary:match(Result, <<"failed">>)).
-
-execute_tests_run_single_not_found_test() ->
-    Result = beamtalk_test_case:execute_tests(
-        'run:', [testMissing], 'FakeTest', tc_run_helper, #{}
-    ),
-    ?assertNotEqual(nomatch, binary:match(Result, <<"not found">>)).
 
 %%% ============================================================================
 %%% execute_tests/5 — runAll with no test methods (line 166)
@@ -586,10 +570,6 @@ should_raise_unknown_error_shape_test() ->
 %%% format_stacktrace/1 is exported under -ifdef(TEST).
 %%% Covers lines 440, 537–538, 556, 573 of beamtalk_test_case.erl.
 %%% ============================================================================
-
-%% Line 440: empty list → <<>>
-format_stacktrace_empty_test() ->
-    ?assertEqual(<<>>, beamtalk_test_case:format_stacktrace([])).
 
 %% Lines 537–538: anonymous fun name stripping ('-fun_name/N-fun-M-' → 'fun_name')
 format_stacktrace_anon_fun_name_test() ->

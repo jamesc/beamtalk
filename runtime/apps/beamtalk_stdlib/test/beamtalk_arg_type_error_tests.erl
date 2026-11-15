@@ -22,6 +22,7 @@ raised(Fun) ->
         Fun(),
         no_error
     catch
+        %% BT-4900: kept hand-written - value-returning helper (maps the error to a comparison tuple)
         error:#{error := #beamtalk_error{} = E} ->
             Text =
                 case E#beamtalk_error.hint of

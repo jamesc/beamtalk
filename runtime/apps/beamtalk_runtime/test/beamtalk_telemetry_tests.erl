@@ -85,11 +85,9 @@ no_more() ->
     end.
 
 kind_of(Fun) ->
-    try
-        Fun(),
-        no_error
-    catch
-        error:#{error := #beamtalk_error{kind = Kind}} -> Kind
+    case beamtalk_test_assert:raised_error(Fun) of
+        no_error -> no_error;
+        #beamtalk_error{kind = Kind} -> Kind
     end.
 
 %%====================================================================

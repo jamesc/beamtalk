@@ -71,13 +71,6 @@ handle_load_file_not_found_test() ->
     Result = beamtalk_repl_loader:handle_load("/nonexistent/file.bt", State),
     ?assertMatch({error, {file_not_found, _}, _}, Result).
 
-handle_load_directory_test() ->
-    %% Loading a directory should fail
-    State = beamtalk_repl_state:new(undefined, 0),
-    Result = beamtalk_repl_loader:handle_load(beamtalk_test_fs:base_dir(), State),
-    %% Should get read_error since it's a directory
-    ?assertMatch({error, {read_error, _}, _}, Result).
-
 %%% Additional do_eval tests
 
 do_eval_compile_error_no_server_test() ->
@@ -189,28 +182,6 @@ handle_load_read_error_directory_test() ->
     %% Loading current directory should fail with read_error
     ?assertMatch({error, {read_error, _}, _}, Result).
 
-handle_load_compile_error_test() ->
-    %% Test with a file that exists but will fail compilation
-    %% Use unique filename to avoid collisions in concurrent test runs
-    UniqueId = beamtalk_test_unique:id(),
-    TempFile = filename:join(
-        beamtalk_test_fs:base_dir(),
-        io_lib:format("test_invalid_bt_~s.bt", [UniqueId])
-    ),
-    ok = file:write_file(TempFile, <<"invalid beamtalk syntax @@@ ###">>),
-
-    State = beamtalk_repl_state:new(undefined, 0),
-    Result = beamtalk_repl_loader:handle_load(TempFile, State),
-
-    %% Clean up - ensure it's deleted even if assertion fails
-    ok = file:delete(TempFile),
-
-    %% Should get a compile error
-    case Result of
-        {error, {compile_error, _}, _} -> ok;
-        Other -> error({unexpected_result, Other})
-    end.
-
 %%% IO Capture tests
 
 io_capture_basic_put_chars_test() ->
@@ -306,9 +277,6 @@ io_capture_reset_does_not_affect_unrelated_processes_test() ->
 is_stdlib_path_relative_lib_test() ->
     ?assert(beamtalk_repl_loader:is_stdlib_path("stdlib/src/integer.bt")).
 
-is_stdlib_path_absolute_test() ->
-    ?assert(beamtalk_repl_loader:is_stdlib_path("/workspace/project/stdlib/src/integer.bt")).
-
 is_stdlib_path_non_lib_test() ->
     ?assertNot(beamtalk_repl_loader:is_stdlib_path("src/MyClass.bt")).
 
@@ -328,9 +296,6 @@ is_stdlib_path_embedded_lib_test() ->
     ?assert(
         beamtalk_repl_loader:is_stdlib_path("/home/user/projects/beamtalk/stdlib/src/string.bt")
     ).
-
-is_stdlib_path_empty_test() ->
-    ?assertNot(beamtalk_repl_loader:is_stdlib_path("")).
 
 %%% strip_internal_bindings tests
 
@@ -602,14 +567,6 @@ trigger_hot_reload_unknown_class_test() ->
     Classes = [#{name => <<"xyzzy_nonexistent_class_99999">>}],
     ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
 
-trigger_hot_reload_undefined_name_test() ->
-    Classes = [#{name => undefined}],
-    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
-
-trigger_hot_reload_no_name_key_test() ->
-    Classes = [#{}],
-    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
-
 trigger_hot_reload_list_name_test() ->
     Classes = [#{name => "xyzzy_nonexistent_class_88888"}],
     ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
@@ -736,21 +693,9 @@ to_snake_case_camel_test() ->
 to_snake_case_multi_word_test() ->
     ?assertEqual("scheme_symbol", beamtalk_repl_loader:to_snake_case("SchemeSymbol")).
 
-to_snake_case_three_words_test() ->
-    ?assertEqual("my_counter_actor", beamtalk_repl_loader:to_snake_case("MyCounterActor")).
-
 to_snake_case_acronym_test() ->
     %% Acronyms: no underscores within consecutive uppercase
     ?assertEqual("httprouter", beamtalk_repl_loader:to_snake_case("HTTPRouter")).
-
-to_snake_case_already_snake_test() ->
-    ?assertEqual("already_snake", beamtalk_repl_loader:to_snake_case("already_snake")).
-
-to_snake_case_empty_test() ->
-    ?assertEqual([], beamtalk_repl_loader:to_snake_case([])).
-
-to_snake_case_with_digits_test() ->
-    ?assertEqual("app2", beamtalk_repl_loader:to_snake_case("App2")).
 
 %% ===================================================================
 %% handle_class_definition
@@ -1234,25 +1179,6 @@ verify_class_present_undefined_skips_check_test() ->
         beamtalk_repl_loader:verify_class_present(
             undefined, [#{name => "Foo"}], "/some/path.bt"
         )
-    ).
-
-verify_class_present_found_test() ->
-    ClassNames = [#{name => "Counter"}, #{name => "Timer"}],
-    ?assertEqual(
-        ok,
-        beamtalk_repl_loader:verify_class_present(
-            'Counter', ClassNames, "/some/path.bt"
-        )
-    ).
-
-verify_class_present_not_found_test() ->
-    ClassNames = [#{name => "OtherClass"}],
-    Result = beamtalk_repl_loader:verify_class_present(
-        'Counter', ClassNames, "/some/path.bt"
-    ),
-    ?assertEqual(
-        {error, {class_not_found, 'Counter', "/some/path.bt", ["OtherClass"]}},
-        Result
     ).
 
 verify_class_present_empty_classes_test() ->

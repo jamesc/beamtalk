@@ -154,7 +154,7 @@ ensure_structured_error_compile_error_binary_test() ->
     Result = beamtalk_repl_errors:ensure_structured_error(
         {compile_error, <<"syntax error near `+`">>}
     ),
-    ?assertMatch(#beamtalk_error{kind = compile_error}, Result),
+    ?assertMatch(#beamtalk_error{kind = compile_error, class = 'Compiler'}, Result),
     ?assertEqual({beamtalk_string, <<"syntax error near `+`">>}, Result#beamtalk_error.message).
 
 ensure_structured_error_compile_error_list_test() ->
