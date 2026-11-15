@@ -236,8 +236,11 @@ fn prepare_eval_environment(
         false,
     )?;
 
-    let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
-    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+    let repl_startup::DiscoveredRuntime {
+        runtime_dir,
+        layout,
+        paths,
+    } = repl_startup::discover_beam_paths()?;
     ensure_runtime_built(&runtime_dir, layout, &paths)?;
 
     let layout = BuildLayout::new(project_root);
@@ -626,8 +629,11 @@ fn run_package_as_otp_application(
         false,
     )?;
 
-    let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
-    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+    let repl_startup::DiscoveredRuntime {
+        runtime_dir,
+        layout,
+        paths,
+    } = repl_startup::discover_beam_paths()?;
     ensure_runtime_built(&runtime_dir, layout, &paths)?;
 
     let layout = BuildLayout::new(project_root);
@@ -732,8 +738,7 @@ fn probe_running_workspace_app(project_root: &std::path::Path, app_name: &str) -
         return None;
     }
 
-    let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout().ok()?;
-    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+    let repl_startup::DiscoveredRuntime { paths, .. } = repl_startup::discover_beam_paths().ok()?;
     let cookie = workspace::read_workspace_cookie(&workspace_id).ok()?;
     let pid = std::process::id();
     let client_node = format!("beamtalk_run_probe_{pid}@localhost");

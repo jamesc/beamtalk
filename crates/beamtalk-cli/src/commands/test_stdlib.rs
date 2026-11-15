@@ -896,9 +896,12 @@ pub(crate) fn run_all_eunit_tests(
         test_module_names.len()
     );
 
-    let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()
+    let beamtalk_cli::repl_startup::DiscoveredRuntime {
+        runtime_dir,
+        paths: beam_paths,
+        ..
+    } = beamtalk_cli::repl_startup::discover_beam_paths()
         .wrap_err("Cannot find Erlang runtime directory")?;
-    let beam_paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
     let pa_args = beamtalk_cli::repl_startup::beam_pa_args(&beam_paths);
 
     // Build Erlang expression that runs each module and collects failures
@@ -948,8 +951,7 @@ pub(crate) fn run_all_eunit_tests(
 
     let mut cmd = beamtalk_workspace::erl_command();
     cmd.arg("-noshell")
-        .arg("-pa")
-        .arg(util::to_forward_slash(build_dir.as_str()));
+        .args(beamtalk_cli::repl_startup::pa_args([build_dir]));
 
     for arg in &pa_args {
         cmd.arg(arg);
