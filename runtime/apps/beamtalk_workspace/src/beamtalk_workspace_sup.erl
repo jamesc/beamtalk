@@ -397,7 +397,7 @@ live_development_child_specs() ->
         %% patch time so a diff survives the class-state metadata wipe. Only
         %% meaningful in workspace mode — run and release modes execute a
         %% precompiled artifact with no live-edit path (no way to reach
-        %% beamtalk_repl_loader:install_method/9 without a compiler and a
+        %% beamtalk_repl_loader_methods:install_method/9 without a compiler and a
         %% working tree), so there is nothing for it to capture there.
         %% Started before session_sup/repl_server so
         %% it's ready before any REPL connection could trigger an install.
@@ -442,7 +442,7 @@ live_development_child_specs() ->
         },
 
         %% Shape re-check worker (ADR 0105 Phase 2).
-        %% Serialises `beamtalk_repl_loader:activate_module/3`'s shape
+        %% Serialises `beamtalk_repl_loader_activate:activate_module/3`'s shape
         %% re-check behind a single gen_server mailbox so a burst of
         %% class-body reloads can't flood `beamtalk_compiler_server` (ADR
         %% 0022) with unbounded concurrent recheck traffic — see that

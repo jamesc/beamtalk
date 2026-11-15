@@ -1110,7 +1110,7 @@ patch (ADR 0082 Phase 1).
 Backs `@primitive "classCompileSource"' (`Behaviour>>compile:source:') and the
 target of MCP `save_method' / the browser "Save" action. The `>>' patcher form
 and `compile:source:' are distinct front doors that converge at the runtime
-install chokepoint (`beamtalk_repl_loader:load_recompiled_method/7'): `>>' is not
+install chokepoint (`beamtalk_repl_loader_methods:load_recompiled_method/7'): `>>' is not
 parser sugar for this primitive, but both produce the same in-memory patch and
 ChangeLog entry there. `Selector' is a Symbol (atom), `Source' the method body
 String (binary) passed as a value. Installs in memory and attempts (best-effort)

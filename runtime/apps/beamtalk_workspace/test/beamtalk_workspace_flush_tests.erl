@@ -272,13 +272,13 @@ reload_case_teardown(#{
     ok.
 
 %% Compile+load a real, in-project-backed class from `Path` (reusing the
-%% tested `beamtalk_repl_loader:reload_class_file/1` path directly, the same
+%% tested `beamtalk_repl_loader_reload:reload_class_file/1` path directly, the same
 %% mechanism `Counter reload`/`:reload` and `beamtalk_workspace_revert_tests:
 %% define_project_class/3` use) so its compiled module carries a real
 %% `beamtalk_source` attribute pointing at `Path`.
 compile_project_class(Path, Source) ->
     ok = file:write_file(Path, Source),
-    {ok, _ClassNames} = beamtalk_repl_loader:reload_class_file(Path),
+    {ok, _ClassNames} = beamtalk_repl_loader_reload:reload_class_file(Path),
     ok.
 
 %% THE root-cause regression test. Before the fix, `beamtalk_repl_loader:

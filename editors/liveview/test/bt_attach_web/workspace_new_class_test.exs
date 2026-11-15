@@ -224,7 +224,7 @@ defmodule BtAttachWeb.WorkspaceNewClassTest do
 
   describe "snake_case filename derivation (BT-2646)" do
     # The IDE's snake_case derivation MUST match the runtime's
-    # `beamtalk_repl_loader:to_snake_case/1` so the loader's snake-normalised
+    # `beamtalk_repl_loader_support:to_snake_case/1` so the loader's snake-normalised
     # basename validation accepts the created file. These cases pin the exact
     # rule, including the acronym-collapsing behaviour (`HTTPServer` → `httpserver`,
     # NOT `h_t_t_p_server`) — diverging would make the loader reject the file.

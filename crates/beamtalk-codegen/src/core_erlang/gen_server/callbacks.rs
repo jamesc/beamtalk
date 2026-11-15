@@ -94,7 +94,7 @@ struct CommittedStateKeys(Vec<EcoString>);
 /// through whenever the live map had one declared field fewer than the
 /// compile-time count, and a stale subclass can: redefining a superclass
 /// migrates its loaded subclasses' live instances
-/// (`beamtalk_repl_loader:hot_reload_descendants/2`) and their `init/1`
+/// (`beamtalk_repl_loader_activate:hot_reload_descendants/2`) and their `init/1`
 /// calls the new superclass `init/1`, but their own modules are never
 /// recompiled.
 fn clean_state_binding(

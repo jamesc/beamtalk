@@ -415,7 +415,7 @@ flattened_field_kinds(ClassAtom, OwnMeta) ->
 ancestor's own `field_types`, walked via `beamtalk_class_metadata` (module +
 superclass, ETS-resident) and merged closer-ancestor-wins — but, unlike
 `flattened_field_types/2`, **never** folding in `ClassAtom`'s own fields. This
-is what a pre-save precheck (`beamtalk_repl_loader:precheck_class_shape/2`)
+is what a pre-save precheck (`beamtalk_repl_loader_methods:precheck_class_shape/2`)
 needs to recompute a *pending* edit's flattened shape without re-walking the
 ancestor chain: the ancestor contribution alone, which a same-class edit
 cannot itself have changed, kept separate from `own_shape` rather than folded
@@ -491,7 +491,7 @@ Zip a flattened `field_types` map with its matching `field_kinds` map into a
 `shape()` — binary field name -> `{binary type name, binary kind}`
 (ADR 0124 §9/B9). Exported (not `-ifdef(TEST)`-gated, unlike
 `read_shape_from_meta/1`/`read_generation_from_meta/1`) so
-`beamtalk_repl_loader:precheck_class_shape/2`'s pending-generation read can
+`beamtalk_repl_loader_methods:precheck_class_shape/2`'s pending-generation read can
 normalise a *pending*, not-yet-captured pair of maps the exact same way.
 
 Delegates to `beamtalk_class_metadata:normalize_field_shape/2` (ADR 0125

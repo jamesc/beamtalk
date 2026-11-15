@@ -613,7 +613,7 @@ overrides the source-derived guess; the source index only fills in classes the
 registry does not yet know about (the cold-load gap). The module atom each
 source builds for the same class is identical by construction — both lowercase
 the file-stem/path segments via the same snake-case rule
-(`beamtalk_repl_loader:to_snake_case/1` mirrors the Rust
+(`beamtalk_repl_loader_support:to_snake_case/1` mirrors the Rust
 `core_erlang:to_module_name/1`) — so the union never produces a casing-divergent
 duplicate.
 
@@ -1086,7 +1086,7 @@ load_files_sequential(Files, SessionPid) ->
 
 -doc """
 Load files without a session.
-Uses beamtalk_repl_loader:reload_class_file/3 for stateless compilation.
+Uses beamtalk_repl_loader_reload:reload_class_file/3 for stateless compilation.
 Called by sync_project when no SessionPid is available (e.g., from
 the Workspace sync primitive).
 
@@ -1101,7 +1101,7 @@ load_files_stateless(Files) ->
     {RevClasses, RevErrors} =
         lists:foldl(
             fun(Path, {ClassesAcc, ErrorsAcc}) ->
-                case beamtalk_repl_loader:reload_class_file(Path, undefined, Batch) of
+                case beamtalk_repl_loader_reload:reload_class_file(Path, undefined, Batch) of
                     {ok, Classes} ->
                         {lists:reverse(Classes, ClassesAcc), ErrorsAcc};
                     {error, Reason} ->

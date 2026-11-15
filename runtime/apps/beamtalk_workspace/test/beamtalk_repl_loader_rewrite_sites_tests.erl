@@ -52,10 +52,10 @@ compiled successfully (which essentially never happens naturally — see that
 function's own doc), and `stale_snapshot` needs a second writer's edit to
 land in the exact gap between one class-group's validation and that same
 group's own install turn, which a real concurrent process can never be
-reliably scheduled into inside a deterministic test. `meck:new(beamtalk_repl_loader,
+reliably scheduled into inside a deterministic test. `meck:new(beamtalk_repl_loader_reload,
 [passthrough])`, mocking only `install_reload_result/2`
 (`beamtalk_repl_loader_rewrite.erl`'s `install_rewrite_group/5` calls it as
-the remote call `beamtalk_repl_loader:install_reload_result/2` specifically so
+the remote call `beamtalk_repl_loader_reload:install_reload_result/2` specifically so
 this can intercept it — a local call would bypass meck's module-replacement
 entirely), was chosen deliberately over the alternatives: mocking a shared
 system module like `code` or `file` would risk destabilizing every other
@@ -717,7 +717,7 @@ rename_increment_sites(#{counter_path := CounterPath, sub_counter_path := SubCou
     {DefinitionSite, ReferenceSites}.
 
 teardown_with_meck(Fixture) ->
-    meck:unload(beamtalk_repl_loader),
+    meck:unload(beamtalk_repl_loader_reload),
     teardown(Fixture).
 
 %%====================================================================
@@ -733,12 +733,12 @@ rewrite_sites_partial_install_failure_test_() ->
 
 setup_with_install_fault() ->
     Fixture = setup(),
-    meck:new(beamtalk_repl_loader, [passthrough]),
+    meck:new(beamtalk_repl_loader_reload, [passthrough]),
     %% Fail only SubCounter's own group install — Counter's group (processed
     %% first; see group_sites_by_class/1's first-seen-class-order doc) still
     %% installs for real via meck:passthrough/1, so this batch genuinely
     %% partially applies rather than failing on its very first group.
-    meck:expect(beamtalk_repl_loader, install_reload_result, fun(Compiled, LoadPath) ->
+    meck:expect(beamtalk_repl_loader_reload, install_reload_result, fun(Compiled, LoadPath) ->
         case filename:basename(LoadPath) of
             "sub_counter.bt" -> {error, {injected_fault, load_binary_anomaly}};
             _ -> meck:passthrough([Compiled, LoadPath])
@@ -812,8 +812,8 @@ concurrent_sub_counter_source() ->
 
 setup_with_concurrent_write() ->
     Fixture = setup(),
-    meck:new(beamtalk_repl_loader, [passthrough]),
-    meck:expect(beamtalk_repl_loader, install_reload_result, fun(Compiled, LoadPath) ->
+    meck:new(beamtalk_repl_loader_reload, [passthrough]),
+    meck:expect(beamtalk_repl_loader_reload, install_reload_result, fun(Compiled, LoadPath) ->
         Result = meck:passthrough([Compiled, LoadPath]),
         case filename:basename(LoadPath) of
             "counter.bt" ->
@@ -877,8 +877,8 @@ rewrite_sites_stale_snapshot_removed_test_() ->
 
 setup_with_concurrent_removal() ->
     Fixture = setup(),
-    meck:new(beamtalk_repl_loader, [passthrough]),
-    meck:expect(beamtalk_repl_loader, install_reload_result, fun(Compiled, LoadPath) ->
+    meck:new(beamtalk_repl_loader_reload, [passthrough]),
+    meck:expect(beamtalk_repl_loader_reload, install_reload_result, fun(Compiled, LoadPath) ->
         Result = meck:passthrough([Compiled, LoadPath]),
         case filename:basename(LoadPath) of
             "counter.bt" ->
