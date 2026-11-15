@@ -19,6 +19,15 @@ Actor subclass: Bt4919DestructureFieldWriteActor
   // Last position: the method answers the assigned value (the tuple).
   writeLast: x and: y => {_a, _b} := (self.pair := {x, y})
 
+  // Inside a conditional arm: the arm lowers the field write as its own `Bind`.
+  sumInArm: flag and: x and: y =>
+    flag
+      ifTrue: [
+        {a, b} := (self.pair := {x, y})
+        a + b
+      ]
+      ifFalse: [0]
+
   pair => self.pair
 
   count => self.count

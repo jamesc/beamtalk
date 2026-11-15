@@ -25,3 +25,23 @@ TestCase subclass: Bt4919DestructureFieldWriteTest
     a := Bt4919DestructureFieldWriteActor spawn
     self assert: (a writeLast: 5 and: 6) equals: {5, 6}
     self assert: a pair equals: {5, 6}
+
+  testConditionalArmWritesFieldAndBindsNames =>
+    a := Bt4919DestructureFieldWriteActor spawn
+    self
+      assert: (a
+        sumInArm: true
+        and: 8
+        and: 9)
+      equals: 17
+    self assert: a pair equals: {8, 9}
+
+  testConditionalArmNotTakenLeavesFieldAlone =>
+    a := Bt4919DestructureFieldWriteActor spawn
+    self
+      assert: (a
+        sumInArm: false
+        and: 8
+        and: 9)
+      equals: 0
+    self assert: a pair equals: nil
