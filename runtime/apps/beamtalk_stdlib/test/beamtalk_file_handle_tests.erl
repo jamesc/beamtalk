@@ -25,7 +25,7 @@ selectors raise a structured does_not_understand error.
 
 -doc "A unique relative temp path — never /tmp, per testing-strategy.md.".
 temp_path(Tag) ->
-    Tag ++ "_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".tmp".
+    Tag ++ "_" ++ beamtalk_test_unique:id() ++ ".tmp".
 
 -doc "Build a FileHandle map backed by a real open file descriptor.".
 with_temp_handle(Contents, Fun) ->

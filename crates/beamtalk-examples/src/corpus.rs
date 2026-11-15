@@ -86,7 +86,7 @@ impl BundledCorpus {
 }
 
 static BUNDLED: LazyLock<BundledCorpus> =
-    LazyLock::new(|| BundledCorpus::load(beamtalk_sysroot::current_sysroot().as_deref()));
+    LazyLock::new(|| BundledCorpus::load(beamtalk_env::current_sysroot().as_deref()));
 
 /// The running binary's bundled corpus, loaded once on first use.
 pub fn bundled_corpus() -> &'static BundledCorpus {

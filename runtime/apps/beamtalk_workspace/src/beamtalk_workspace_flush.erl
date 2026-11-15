@@ -390,7 +390,6 @@ set. A pending `'remove-class'` entry left out of the applied set because
     %% fix directly — the shadow-key logic is exercised without going
     %% through prepare_splice/2.
     shadow_duplicates/1,
-    target_key/1,
     %% ADR 0113 Phase 2: tier classification, exported for direct unit
     %% coverage independent of a full flush round-trip.
     entry_tier/1,
@@ -909,21 +908,13 @@ shadow_duplicates(Entries) ->
         Shadowed
     }.
 
-%% ADR 0112 required fix: keyed on `(class, selector, side)`, not
-%% just `(class, selector)` — once `kind` is spent distinguishing
-%% `'remove-method'` from a patch, it can no longer also carry side, so a
-%% `(class, selector)`-only key could incorrectly shadow an instance-side
-%% patch of `Counter >> #foo` against a class-side `Counter class
-%% removeSelector: #foo` (or vice versa). `entry_side/1` derives side from
-%% `kind` for legacy `instance`/`class` entries and reads it directly for
-%% `'remove-method'` entries, so both shapes key consistently here.
--spec target_key(term()) -> {binary(), binary() | undefined, instance | class | undefined}.
+%% The shadow key is `beamtalk_workspace_changelog:shadow_key/1` — the single
+%% definition shared with the pending-changes view (BT-4859), so what the
+%% view shows and what flush writes cannot drift. See that function for the
+%% `(class, selector, side)` (ADR 0112) / whole-class-by-kind rules.
+-spec target_key(term()) -> term().
 target_key(E) ->
-    {
-        beamtalk_workspace_changelog:entry_class(E),
-        beamtalk_workspace_changelog:entry_selector(E),
-        beamtalk_workspace_changelog:entry_side(E)
-    }.
+    beamtalk_workspace_changelog:shadow_key(E).
 
 %%% ----------------------------------------------------------------------------
 %%% Grouping

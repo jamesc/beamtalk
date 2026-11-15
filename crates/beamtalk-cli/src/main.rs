@@ -565,13 +565,13 @@ fn compute_sysroot() -> PathBuf {
     }
 }
 
-/// Wraps the shared [`beamtalk_sysroot::sysroot_from_exe_path`] derivation
+/// Wraps the shared [`beamtalk_env::sysroot_from_exe_path`] derivation
 /// with this binary's own fallback behavior — a warning to stderr and
 /// `/usr/local` when the sysroot can't be derived. Split out from
 /// [`compute_sysroot`] so the fallback branch is testable without depending
 /// on `std::env::current_exe()`'s actual value.
 fn sysroot_from_exe_path_or_fallback(exe: &std::path::Path) -> PathBuf {
-    beamtalk_sysroot::sysroot_from_exe_path(exe).unwrap_or_else(|| {
+    beamtalk_env::sysroot_from_exe_path(exe).unwrap_or_else(|| {
         eprintln!(
             "warning: unable to determine sysroot from '{}'; falling back to /usr/local",
             exe.display()
@@ -865,7 +865,7 @@ mod tests {
     // --- sysroot_from_exe_path_or_fallback ---
     //
     // The pure "walk up two parents" derivation itself is tested in
-    // `beamtalk-sysroot` (the shared leaf both this binary and beamtalk-lsp
+    // `beamtalk-env` (the shared leaf both this binary and beamtalk-lsp
     // depend on); these tests cover only this binary's own fallback wrapper.
 
     #[test]

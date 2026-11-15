@@ -175,8 +175,8 @@ live_alias_redefinition_invalidates_a_matchexhaustive_proof_test_() ->
                     %% looks up by key, rather than sweeping every live class.
                     UserPath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("alias_recheck_user_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("alias_recheck_user_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(UserPath, user_source()),
@@ -259,8 +259,8 @@ live_alias_redefinition_to_same_expansion_does_not_produce_findings_test_() ->
 
                     UserPath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("alias_recheck_user_same_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("alias_recheck_user_same_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(UserPath, user_source()),
@@ -316,8 +316,8 @@ live_alias_redefinition_back_to_sound_expansion_announces_clearing_test_() ->
 
                     UserPath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("alias_recheck_user_fix_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("alias_recheck_user_fix_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(UserPath, user_source()),
@@ -447,8 +447,8 @@ compile_method_patch_preserves_file_local_alias_dependency_test_() ->
                         "  hello => 42\n",
                     FilePath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("alias_recheck_method_patch_file_local_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("alias_recheck_method_patch_file_local_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(FilePath, FileSource),
@@ -561,8 +561,8 @@ live_redefinition_of_a_deeply_transitive_alias_triggers_recheck_test_() ->
                     %% guarantee) land in beamtalk_alias_xref's index.
                     UserPath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("alias_recheck_deep_chain_user_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("alias_recheck_deep_chain_user_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(UserPath, deep_chain_user_source()),
@@ -667,8 +667,8 @@ protocol_definition_registers_alias_dependency_test_() ->
                         >>,
                     ProtocolPath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("alias_recheck_protocol_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("alias_recheck_protocol_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(ProtocolPath, ProtocolSource),
@@ -736,8 +736,8 @@ protocol_definition_repl_inline_recompile_preserves_alias_dependency_test_() ->
                     %% dependency_test_ above).
                     ProtocolPath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("alias_recheck_protocol_clobber_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("alias_recheck_protocol_clobber_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(ProtocolPath, ProtocolSource),
@@ -891,8 +891,8 @@ class_definition_repl_inline_redefinition_preserves_file_local_alias_dependency_
                         "  heading: d :: AliasChangeFileLocalDirection => d\n",
                     FilePath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("alias_recheck_file_local_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("alias_recheck_file_local_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(FilePath, FileSource),
@@ -949,8 +949,8 @@ protocol_definition_repl_inline_redefinition_preserves_file_local_alias_dependen
                         "  heading: d :: AliasChangeProtocolFileLocalDirection -> Boolean\n",
                     FilePath = filename:join(
                         beamtalk_test_fs:base_dir(),
-                        io_lib:format("alias_recheck_protocol_file_local_~p.bt", [
-                            erlang:unique_integer([positive])
+                        io_lib:format("alias_recheck_protocol_file_local_~s.bt", [
+                            beamtalk_test_unique:id()
                         ])
                     ),
                     ok = file:write_file(FilePath, FileSource),

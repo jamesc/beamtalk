@@ -972,6 +972,8 @@ server_api_test_() ->
         {"diagnostics/1", fun api_diagnostics/0},
         {"version/0", fun api_version/0},
         {"resolve_completion_type/1", fun api_resolve_completion_type/0},
+        {"resolve_completion_type/1 returns type_unknown on call timeout (BT-4860)",
+            {timeout, 30, fun api_resolve_completion_type_timeout/0}},
         {"find_senders_in_source/2", fun api_find_senders/0},
         {"find_all_sends_in_source/1", fun api_find_all_sends/0},
         {"find_references_to_in_source/2", fun api_find_references/0},
@@ -1035,7 +1037,7 @@ api_diagnostics() ->
 api_diagnostics_source_path_applies_project_table() ->
     Root = filename:join(
         binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
-        "bt4325_" ++ integer_to_list(erlang:unique_integer([positive]))
+        "bt4325_" ++ beamtalk_test_unique:id()
     ),
     SourcePath = filename:join([Root, "src", "bad.bt"]),
     ok = filelib:ensure_dir(SourcePath),
@@ -1100,6 +1102,19 @@ api_resolve_completion_type() ->
         Result =:= {error, type_unknown} orelse
             (is_tuple(Result) andalso element(1, Result) =:= ok)
     ).
+
+%% A gen_server:call timeout exits with {timeout, {gen_server, call, _}}, not
+%% the bare atom `timeout'. Suspending the server makes the 5s call time out.
+api_resolve_completion_type_timeout() ->
+    ok = sys:suspend(beamtalk_compiler_server),
+    try
+        ?assertEqual(
+            {error, type_unknown},
+            beamtalk_compiler_server:resolve_completion_type(<<"42">>)
+        )
+    after
+        ok = sys:resume(beamtalk_compiler_server)
+    end.
 
 api_find_senders() ->
     {ok, Lines} = beamtalk_compiler_server:find_senders_in_source(<<"x printNl">>, printNl),

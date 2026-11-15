@@ -5,7 +5,7 @@
 //!
 //! The Erlang runtime resolves `<home>/.beamtalk[/workspaces]` in
 //! `beamtalk_platform:beamtalk_root_dir/0` / `workspaces_base_dir/0`; the Rust
-//! side resolves it in `beamtalk_home::beamtalk_root_dir` and
+//! side resolves it in `beamtalk_env::beamtalk_root_dir` and
 //! `beamtalk_workspace::workspaces_base_dir`. Both must agree on where
 //! workspace state lives (the node writes `port`/`cookie`/`workspace.log`; the
 //! CLI/MCP/LSP read them), so both are pinned to the shared fixture
@@ -58,7 +58,7 @@ fn rust_resolver_matches_shared_corpus() {
             }
         }
 
-        let root = beamtalk_home::beamtalk_root_dir();
+        let root = beamtalk_env::beamtalk_root_dir();
         let workspaces = beamtalk_workspace::workspaces_base_dir().ok();
         let expect = |key: &str| case[key].as_str().map(PathBuf::from);
         // `Path` equality is component-wise, so `/` in the fixture matches

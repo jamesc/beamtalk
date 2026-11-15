@@ -469,7 +469,7 @@ refresh_app_classes_unknown_package_test() ->
 
 refresh_app_classes_does_not_mint_atoms_test() ->
     %% The name comes from a wire request: an unknown package must not create an atom.
-    Name = iolist_to_binary(["bt3662_unminted_", integer_to_list(erlang:unique_integer([positive]))]),
+    Name = iolist_to_binary(["bt3662_unminted_", beamtalk_test_unique:id()]),
     ?assertEqual([], beamtalk_package:refresh_app_classes(Name)),
     ?assertError(badarg, binary_to_existing_atom(Name, utf8)).
 

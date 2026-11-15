@@ -1,16 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared leaf: Beamtalk installation sysroot resolution from the running
+//! Beamtalk installation sysroot resolution from the running
 //! executable path.
 //!
-//! **DDD Context:** Infrastructure (shared leaf, no domain logic)
-//!
-//! This crate exists to give `beamtalk-cli` (`--print-sysroot`, distribution
-//! FFI stub discovery) and `beamtalk-lsp` (installed stdlib source
-//! discovery) a single authoritative sysroot derivation without either
-//! depending on the other — the "shared-leaf-module pattern" from
-//! `docs/development/architecture-principles.md` §6.
+//! Re-exported at the crate root.
 
 use std::path::{Path, PathBuf};
 

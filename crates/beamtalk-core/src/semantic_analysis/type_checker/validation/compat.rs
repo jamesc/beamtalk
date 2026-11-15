@@ -14,7 +14,9 @@ use crate::ast::TypeAnnotation;
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
-use crate::semantic_analysis::string_utils::{is_symbol_singleton_name, split_top_level};
+use crate::semantic_analysis::string_utils::{
+    intersection_parts, is_symbol_singleton_name, split_top_level, union_members,
+};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
@@ -65,7 +67,7 @@ impl TypeChecker {
         // Split at the top level only, so a map shape's internal `|` is not a
         // member separator; a single piece falls through to the arms below.
         if expected.contains('|') {
-            let members = split_top_level(expected, '|');
+            let members = union_members(expected);
             if members.len() > 1 {
                 return members.into_iter().any(|member| {
                     let member_eco: EcoString = member.into();
@@ -437,21 +439,19 @@ impl TypeChecker {
         protocol_registry: Option<&ProtocolRegistry>,
         tower: fn(&EcoString, &EcoString, &ClassHierarchy) -> bool,
     ) -> bool {
-        let members = crate::semantic_analysis::string_utils::split_top_level(declared_type, '|');
+        let members = union_members(declared_type);
         let union = members.len() > 1;
         members.iter().any(|member| {
-            crate::semantic_analysis::string_utils::split_top_level(member, '&')
-                .iter()
-                .all(|part| {
-                    Self::metatype_assignable_to_part(
-                        value,
-                        part.trim(),
-                        union,
-                        hierarchy,
-                        protocol_registry,
-                        tower,
-                    )
-                })
+            intersection_parts(member).iter().all(|part| {
+                Self::metatype_assignable_to_part(
+                    value,
+                    part.trim(),
+                    union,
+                    hierarchy,
+                    protocol_registry,
+                    tower,
+                )
+            })
         })
     }
 
@@ -549,9 +549,9 @@ impl TypeChecker {
         protocol_registry: Option<&ProtocolRegistry>,
     ) -> Option<MetatypeNonconformance> {
         let registry = protocol_registry?;
-        crate::semantic_analysis::string_utils::split_top_level(declared_type, '|')
+        union_members(declared_type)
             .iter()
-            .flat_map(|member| crate::semantic_analysis::string_utils::split_top_level(member, '&'))
+            .flat_map(|member| intersection_parts(member))
             .filter_map(|part| part.trim().strip_suffix(" class").map(str::trim))
             .filter(|base| Self::is_protocol_type(base, hierarchy, registry))
             .find_map(|base| {
@@ -675,7 +675,7 @@ impl TypeChecker {
         // through to the arms below. Each member is strictly shorter than the
         // whole, so the recursion terminates.
         if value_type.contains('|') {
-            let members = crate::semantic_analysis::string_utils::split_top_level(value_type, '|');
+            let members = union_members(value_type);
             if members.len() > 1 {
                 return members.iter().all(|member| {
                     let member_eco: EcoString = Self::resolve_type_keyword_static(member.trim());
@@ -693,25 +693,21 @@ impl TypeChecker {
         if is_symbol_singleton_name(value_type) && !value_type.contains('|') {
             // For union declared types, check if the singleton is a member
             if declared_type.contains('|') {
-                return split_top_level(declared_type, '|')
-                    .into_iter()
-                    .any(|member| {
-                        let member_eco: EcoString = Self::resolve_type_keyword_static(member);
-                        value_type.as_str() == member_eco.as_str()
-                            || Self::is_type_compatible(value_type, &member_eco, hierarchy)
-                    });
+                return union_members(declared_type).into_iter().any(|member| {
+                    let member_eco: EcoString = Self::resolve_type_keyword_static(member);
+                    value_type.as_str() == member_eco.as_str()
+                        || Self::is_type_compatible(value_type, &member_eco, hierarchy)
+                });
             }
             let symbol: EcoString = "Symbol".into();
             return Self::is_assignable_to(&symbol, declared_type, hierarchy);
         }
         // Union declared types: value must be compatible with at least one member
         if declared_type.contains('|') {
-            return split_top_level(declared_type, '|')
-                .into_iter()
-                .any(|member| {
-                    let member_eco: EcoString = Self::resolve_type_keyword_static(member);
-                    Self::is_type_compatible(value_type, &member_eco, hierarchy)
-                });
+            return union_members(declared_type).into_iter().any(|member| {
+                let member_eco: EcoString = Self::resolve_type_keyword_static(member);
+                Self::is_type_compatible(value_type, &member_eco, hierarchy)
+            });
         }
         // For generic declared types like "Result(Integer, Error)", extract
         // the base type name and compare structurally, going through
@@ -830,7 +826,7 @@ impl TypeChecker {
         let (base, args_slice) = type_resolver::split_generic_base(type_str);
         let args: Vec<String> = args_slice
             .map(|s| {
-                super::super::TypeChecker::split_type_params(s)
+                split_top_level(s, ',')
                     .into_iter()
                     .map(|p| p.trim().to_string())
                     .collect()
@@ -1047,14 +1043,14 @@ impl TypeChecker {
     /// **both** protocol parts, per ADR 0068's protocol-composition use case.
     ///
     /// Thin wrapper over the shared nesting-aware scanner
-    /// (`string_utils::split_top_level`), layering on "no top-level
+    /// (`string_utils::intersection_parts`), layering on "no top-level
     /// `&` found ⇒ `None`" — the one behavioural difference this consumer
     /// actually needs (see doc comment above): callers use `None` to detect
     /// "not an intersection annotation at all" and fall back to single-type
     /// handling, which a bare 1-element `Vec` can't distinguish from "an
     /// intersection of one part".
     pub(in super::super) fn split_intersection_type_string(type_name: &str) -> Option<Vec<&str>> {
-        let parts = crate::semantic_analysis::string_utils::split_top_level(type_name, '&');
+        let parts = intersection_parts(type_name);
         if parts.len() < 2 { None } else { Some(parts) }
     }
 

@@ -20,12 +20,10 @@
 //! (exit by an error and by `^`) are pinned in the REPL protocol suite
 //! (`tests/repl-protocol/cases/bt4589_repeat_binding.btscript`).
 
-mod common;
-
+use crate::common::erlc_batched_in_temp_dir;
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use beamtalk_repl::codegen::generate_repl_expressions;
-use common::erlc_batched_in_temp_dir;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Loop bodies (`EXIT` ends the loop): the issue's repro, a body that reads

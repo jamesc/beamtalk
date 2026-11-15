@@ -97,9 +97,9 @@ find_in_project_no_cargo_toml_returns_error_test() ->
     %% Use the system temp dir (outside the project tree) so that walking up from
     %% TmpDirStr never reaches the repo's Cargo.toml.
     {ok, Cwd} = file:get_cwd(),
-    Unique = erlang:unique_integer([positive, monotonic]),
+    Unique = beamtalk_test_unique:id(),
     SysTmp = binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
-    TmpDirStr = lists:flatten(filename:join(SysTmp, io_lib:format("bt_no_cargo_~p", [Unique]))),
+    TmpDirStr = lists:flatten(filename:join(SysTmp, io_lib:format("bt_no_cargo_~s", [Unique]))),
     ok = file:make_dir(TmpDirStr),
     ExeName =
         case os:type() of

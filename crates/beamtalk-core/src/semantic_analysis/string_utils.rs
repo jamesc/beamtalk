@@ -55,6 +55,22 @@ pub(crate) fn split_top_level(s: &str, sep: char) -> Vec<&str> {
     result
 }
 
+/// Splits a type string into its top-level union members (`A | B` → `[A, B]`).
+///
+/// The one place type strings are split on `|`; nesting-aware, so a `|` inside
+/// a generic argument or map shape is not a member separator. A string with no
+/// top-level `|` yields a single member.
+pub(crate) fn union_members(s: &str) -> Vec<&str> {
+    split_top_level(s, '|')
+}
+
+/// Splits a type string into its top-level intersection parts (`A & B` →
+/// `[A, B]`). The one place type strings are split on `&`; see
+/// [`union_members`].
+pub(crate) fn intersection_parts(s: &str) -> Vec<&str> {
+    split_top_level(s, '&')
+}
+
 /// Returns `true` if the type string names a symbol singleton (`#foo`).
 ///
 /// `#{` opens a map-shape type (ADR 0147), not a singleton, so it answers
@@ -201,6 +217,19 @@ mod tests {
         assert_eq!(edit_distance("abc", "abcd"), 1);
         assert_eq!(edit_distance("abc", "xyz"), 3);
         assert_eq!(edit_distance("lenght", "length"), 2);
+    }
+
+    #[test]
+    fn union_members_and_intersection_parts_split_top_level_only() {
+        assert_eq!(
+            union_members("Array(Integer | String) | Nil"),
+            vec!["Array(Integer | String)", "Nil"]
+        );
+        assert_eq!(union_members("Integer"), vec!["Integer"]);
+        assert_eq!(
+            intersection_parts("Printable & Array(A & B)"),
+            vec!["Printable", "Array(A & B)"]
+        );
     }
 
     // ---- brace-aware splitting / singleton predicate ----

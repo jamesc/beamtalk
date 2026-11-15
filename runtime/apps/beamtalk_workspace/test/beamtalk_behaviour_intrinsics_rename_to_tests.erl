@@ -103,7 +103,7 @@ setup() ->
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
     end,
-    Unique = integer_to_list(erlang:unique_integer([positive])),
+    Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-rename-to-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
     WidgetPath = filename:join(ProjDir, "bt3278_widget.bt"),
@@ -436,7 +436,7 @@ setup_dynamic_with_reference() ->
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
     end,
-    Unique = integer_to_list(erlang:unique_integer([positive])),
+    Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-rename-to-dyn-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
     UserPath = filename:join(ProjDir, "bt3278_dyn_user.bt"),

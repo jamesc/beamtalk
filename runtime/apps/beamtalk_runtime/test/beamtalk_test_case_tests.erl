@@ -797,7 +797,7 @@ ensure_test_context_includes_test_file_test() ->
 with_snippet_file(Content, Fun) ->
     Path = iolist_to_binary(
         filename:absname(
-            "bt4358_snippet_" ++ integer_to_list(erlang:unique_integer([positive])) ++ ".bt"
+            "bt4358_snippet_" ++ beamtalk_test_unique:id() ++ ".bt"
         )
     ),
     ok = file:write_file(Path, Content),
