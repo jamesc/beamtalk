@@ -253,6 +253,7 @@ the structured `regex_error` for `Selector`.
 run_matcher({compiled, MP}, _Selector, Fun) ->
     Fun(MP);
 run_matcher({pattern, Pattern}, Selector, Fun) ->
+    %% bt-catcher-audit: not-applicable-no-block - `Fun` is an internal re:* closure, never a Beamtalk block
     try
         Fun(Pattern)
     catch
