@@ -23,6 +23,8 @@ pub mod lockfile;
 pub mod path;
 pub mod registry;
 mod snapshot;
+#[cfg(test)]
+mod update_tests;
 
 // Re-export commonly used items
 pub use path::collect_dep_ebin_paths;
