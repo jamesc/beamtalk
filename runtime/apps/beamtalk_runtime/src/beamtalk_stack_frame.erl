@@ -917,6 +917,7 @@ path_is_absolute(File, false) ->
 %% Rust's `canonicalize` records Windows paths in verbatim form
 %% (`\\?\C:\...`); the prefix carries no path component.
 -spec strip_verbatim(string()) -> string().
+strip_verbatim("\\\\?\\UNC\\" ++ Rest) -> "\\\\" ++ Rest;
 strip_verbatim("\\\\?\\" ++ Rest) -> Rest;
 strip_verbatim("//?/" ++ Rest) -> Rest;
 strip_verbatim(Path) -> Path.

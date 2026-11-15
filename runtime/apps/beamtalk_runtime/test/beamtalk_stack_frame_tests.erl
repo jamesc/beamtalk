@@ -1079,8 +1079,15 @@ relative_to_windows_test_() ->
                 "src/Main.bt",
                 beamtalk_stack_frame:relative_to(
                     "\\\\?\\C:\\Users\\r\\Temp\\.tmpX\\src\\Main.bt",
-                    "C:\\Users\\r\\Temp\\.tmpX",
+                    "\\\\?\\c:\\Users\\r\\Temp\\.tmpX",
                     true
+                )
+            )},
+        {"verbatim UNC file under plain UNC cwd",
+            ?_assertEqual(
+                "src/Main.bt",
+                beamtalk_stack_frame:relative_to(
+                    "\\\\?\\UNC\\srv\\share\\proj\\src\\Main.bt", "\\\\srv\\share\\proj", true
                 )
             )},
         {"root-relative backslash path is absolute",

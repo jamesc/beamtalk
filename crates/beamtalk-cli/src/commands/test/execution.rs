@@ -203,6 +203,15 @@ fn build_beam_test_command(
     eval_cmd: &str,
 ) -> std::process::Command {
     let mut cmd = beamtalk_workspace::erl_command();
+    // Run the node from the canonical project directory, as `beamtalk run`
+    // does (BT-4839). Stack frames show a source file relative to the node's
+    // cwd, and the compiler records canonical paths. The inherited cwd can be
+    // spelled differently (on Windows CI, `TMP` is the 8.3 short form
+    // `C:\Users\RUNNER~1\...`), which made every frame fall back to its
+    // basename.
+    if let Ok(cwd) = std::fs::canonicalize(".") {
+        cmd.current_dir(cwd);
+    }
     cmd.arg("-noshell")
         .arg("-pa")
         .arg(util::to_forward_slash(pipeline.build_dir.as_str()));
