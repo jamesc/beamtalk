@@ -2040,6 +2040,35 @@ test-runtime: build-stdlib
     @$ErrorActionPreference = 'Continue'; $env:BEAMTALK_NO_FILE_LOG = "1"; $env:BEAMTALK_NO_FOREGROUND_PRUNE = "1"; $output = rebar3 eunit '--cover=false' '--dir=apps/beamtalk_stdlib/test' 2>&1 | Out-String; $exitCode = $LASTEXITCODE; if ($exitCode -ne 0) { Write-Output $output; $output | bash ../scripts/ci/eunit-failure-summary.sh "EUnit stdlib"; exit $exitCode } else { ($output -split "`n") | Select-Object -Last 3 }
     @echo "✅ Runtime tests complete"
 
+# EUnit test-isolation check (BT-4934): catches test modules that rely on state
+# another module left behind. MODE is one of:
+#   alone    each module in its own fresh node, JOBS nodes at a time (default 4)
+#   reverse  the whole suite in reverse module order
+#   random   the whole suite in a shuffled order; the seed is printed and
+#            `--seed S` (in ARGS) reproduces it
+#   forward  the whole suite in sorted order (control for the other modes)
+# Prints a table (module, tests, failures, time); exits non-zero if any module
+# fails. Uses `test-runtime`'s environment (BEAMTALK_NO_FILE_LOG=1,
+# BEAMTALK_NO_FOREGROUND_PRUNE=1, cover off). ARGS: --jobs N, --seed S,
+# --only M1,M2 (e.g. `just test-isolation alone --only beamtalk_wire_tests`).
+# Details: scripts/ci/eunit-isolation.escript. Run nightly (nightly.yml).
+[unix]
+[working-directory: 'runtime']
+test-isolation MODE="alone" *ARGS: build-stdlib
+    escript ../scripts/ci/eunit-isolation.escript {{MODE}} {{ARGS}}
+
+# Every isolation mode in turn (alone, reverse, random); exits non-zero if any fails.
+[unix]
+[working-directory: 'runtime']
+test-isolation-all *ARGS: build-stdlib
+    #!/usr/bin/env bash
+    set -uo pipefail
+    rc=0
+    for mode in alone reverse random; do
+        escript ../scripts/ci/eunit-isolation.escript "$mode" {{ARGS}} || rc=1
+    done
+    exit $rc
+
 # Run performance benchmarks (separate from unit tests, ~30s)
 [working-directory: 'runtime']
 perf: build-stdlib
