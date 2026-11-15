@@ -18,62 +18,21 @@ are covered in beamtalk_compiler_tests.erl.
 %%% compile_core_erlang/1 — direct coverage of the server's function
 %%% ---------------------------------------------------------------
 
-compile_core_erlang_valid_test() ->
-    CoreErlang = valid_core_erlang(),
-    {ok, test_server_mod, Binary} = beamtalk_compiler_server:compile_core_erlang(CoreErlang),
-    ?assert(is_binary(Binary)),
-    ?assert(byte_size(Binary) > 0).
+compile_core_erlang_test_() ->
+    beamtalk_test_core_erlang:compile_tests(
+        fun beamtalk_compiler_server:compile_core_erlang/1,
+        #{
+            valid => test_server_mod,
+            unbound_var => bt_server_unbound_var,
+            warn => bt_server_warn_test
+        }
+    ).
 
 compile_core_erlang_with_warnings_test() ->
     %% A valid module should compile even if compile:forms returns warnings
     CoreErlang = valid_core_erlang(),
     Result = beamtalk_compiler_server:compile_core_erlang(CoreErlang),
     ?assertMatch({ok, _, _}, Result).
-
-%% This is the actual Port-owning gen_server (ADR 0022 Phase 1,
-%% see moduledoc) backing the REPL/LSP/in-memory compile path. Core Erlang
-%% that discards the result of erlang:+/2 via a `do' sequence triggers
-%% sys_core_fold's "ignored result of a call" warning while still compiling
-%% successfully; demonstrates the warning reaches stderr via
-%% `return_warnings'.
-compile_core_erlang_warning_reaches_stderr_test() ->
-    CoreErlang = warning_core_erlang(),
-    Captured = beamtalk_stderr_capture:capture(fun() ->
-        Result = beamtalk_compiler_server:compile_core_erlang(CoreErlang),
-        ?assertMatch({ok, bt_server_warn_test, _}, Result)
-    end),
-    ?assertNotEqual(nomatch, binary:match(Captured, <<"Warning:">>)).
-
-compile_core_erlang_scan_error_test() ->
-    %% Use a character that core_scan cannot tokenize
-    Result = beamtalk_compiler_server:compile_core_erlang(<<"\x00\x01\x02">>),
-    ?assertMatch({error, _}, Result).
-
-compile_core_erlang_parse_error_test() ->
-    Result = beamtalk_compiler_server:compile_core_erlang(<<"module 'x' []\n">>),
-    ?assertMatch({error, {core_parse_error, _}}, Result).
-
-compile_core_erlang_empty_test() ->
-    Result = beamtalk_compiler_server:compile_core_erlang(<<>>),
-    ?assertMatch({error, _}, Result).
-
-%% 'State' is referenced in 'foo'/1 without ever being bound — a
-%% genuine core_lint unbound_var failure. core_lint already runs
-%% unconditionally on the from_core pipeline this call takes (see
-%% beamtalk_compile_diagnostics' moduledoc); this test demonstrates the
-%% failure surfaces as readable prose naming the offending variable, not a
-%% raw `~p` term dump — and that the Port backend (this module) matches the
-%% escript backend's report_errors-driven wording (both go through OTP's
-%% sys_messages formatter).
-compile_core_erlang_unbound_var_test() ->
-    Result = beamtalk_compiler_server:compile_core_erlang(unbound_var_core_erlang()),
-    ?assertMatch({error, {core_compile_error, #{message := _, raw := _}}}, Result),
-    {error, {core_compile_error, #{message := Message}}} = Result,
-    ?assert(is_binary(Message)),
-    ?assertEqual(nomatch, binary:match(Message, <<"{unbound_var,">>)),
-    ?assertNotEqual(nomatch, binary:match(Message, <<"unbound variable">>)),
-    ?assertNotEqual(nomatch, binary:match(Message, <<"'State'">>)),
-    ?assertNotEqual(nomatch, binary:match(Message, <<"foo/1">>)).
 
 %%% ---------------------------------------------------------------
 %%% handle_compile_response/1 — internal response handler
@@ -1165,36 +1124,4 @@ stop_compiler(_) ->
     ok.
 
 valid_core_erlang() ->
-    <<
-        "module 'test_server_mod' ['hello'/0]\n"
-        "  attributes []\n"
-        "  'hello'/0 = fun () -> 'world'\n"
-        "end\n"
-    >>.
-
-%% 'foo'/1 references 'State', which is never a parameter or
-%% let-bound — a genuine core_lint unbound_var failure.
-unbound_var_core_erlang() ->
-    <<
-        "module 'bt_server_unbound_var' ['foo'/1]\n"
-        "  attributes []\n"
-        "  'foo'/1 = fun (X) ->\n"
-        "    let Y = call 'erlang':'+' (X, State)\n"
-        "    in Y\n"
-        "end\n"
-    >>.
-
-%% 'foo'/1 discards the result of `erlang:+/2' via a `do'
-%% sequence -- a genuine `sys_core_fold' "ignored result of a call"
-%% warning, while still compiling successfully.
-warning_core_erlang() ->
-    <<
-        "module 'bt_server_warn_test' ['foo'/1]\n"
-        "  attributes []\n"
-        "  'foo'/1 =\n"
-        "    fun (X) ->\n"
-        "        do\n"
-        "            call 'erlang':'+' (1, 2)\n"
-        "        X\n"
-        "end\n"
-    >>.
+    beamtalk_test_core_erlang:valid_source(test_server_mod).

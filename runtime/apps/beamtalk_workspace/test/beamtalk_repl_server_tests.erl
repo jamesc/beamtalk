@@ -1133,60 +1133,10 @@ get_completions_workspace_binding_prefix_test() ->
 
 %%% parse_receiver_and_prefix/1 tests
 
-parse_receiver_class_and_prefix_test() ->
-    ?assertEqual(
-        {<<"Integer">>, <<"s">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Integer s">>)
-    ).
-
-parse_receiver_class_empty_prefix_test() ->
-    ?assertEqual(
-        {<<"Integer">>, <<>>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Integer ">>)
-    ).
-
-parse_receiver_integer_literal_test() ->
-    ?assertEqual(
-        {<<"42">>, <<"s">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"42 s">>)
-    ).
-
 parse_receiver_float_literal_no_completions_test() ->
     %% Float literal like "3.14" is not an Integer — returns no completions
     Result = beamtalk_repl_ops_dev:get_context_completions(<<"3.14 s">>),
     ?assertEqual([], Result).
-
-parse_no_receiver_single_word_test() ->
-    ?assertEqual(
-        {undefined, <<"Counter">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Counter">>)
-    ).
-
-parse_no_receiver_empty_test() ->
-    ?assertEqual(
-        {undefined, <<>>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<>>)
-    ).
-
-parse_receiver_string_literal_test() ->
-    ?assertEqual(
-        {<<"\"hello\"">>, <<"up">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"\"hello\" up">>)
-    ).
-
-parse_receiver_keyword_selector_test() ->
-    %% Colons are identifier chars — "ifT:" is the prefix, not just "ifT"
-    ?assertEqual(
-        {<<"Integer">>, <<"ifT:">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Integer ifT:">>)
-    ).
-
-parse_receiver_multi_keyword_selector_test() ->
-    %% Multi-keyword selectors like "ifTrue:ifFalse:" complete as a unit
-    ?assertEqual(
-        {<<"Boolean">>, <<"ifTrue:ifFalse:">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Boolean ifTrue:ifFalse:">>)
-    ).
 
 %%% get_context_completions/1 tests
 
@@ -1231,9 +1181,11 @@ context_completions_with_bindings_empty_line_test() ->
 
 %% Class receiver returns both class-side and instance methods
 context_completions_class_receiver_returns_class_methods_test() ->
-    Pid = spawn_mock_class('TestCompletionClassA', #{spawn => ok, 'spawnWith:' => ok}, [
-        increment, decrement
-    ]),
+    Pid = beamtalk_test_mock_class:spawn(
+        'TestCompletionClassA', #{spawn => ok, 'spawnWith:' => ok}, [
+            increment, decrement
+        ]
+    ),
     try
         Result = beamtalk_repl_ops_dev:get_context_completions(
             <<"TestCompletionClassA sp">>, #{}
@@ -1245,12 +1197,12 @@ context_completions_class_receiver_returns_class_methods_test() ->
         ?assertNot(lists:member(<<"increment">>, Result)),
         ?assertNot(lists:member(<<"decrement">>, Result))
     after
-        cleanup_mock_class('TestCompletionClassA', Pid)
+        beamtalk_test_mock_class:cleanup('TestCompletionClassA', Pid)
     end.
 
 %% Class receiver must NOT show instance methods — they can't be called on the class object.
 context_completions_class_receiver_excludes_instance_methods_test() ->
-    Pid = spawn_mock_class('TestCompletionClassA2', #{spawn => ok}, [
+    Pid = beamtalk_test_mock_class:spawn('TestCompletionClassA2', #{spawn => ok}, [
         increment, inspect, decrement
     ]),
     try
@@ -1262,14 +1214,16 @@ context_completions_class_receiver_excludes_instance_methods_test() ->
         ?assertNot(lists:member(<<"inspect">>, Result)),
         ?assertNot(lists:member(<<"decrement">>, Result))
     after
-        cleanup_mock_class('TestCompletionClassA2', Pid)
+        beamtalk_test_mock_class:cleanup('TestCompletionClassA2', Pid)
     end.
 
 %% BT: Core behavior — instance binding returns instance methods, not class-side methods
 context_completions_instance_binding_returns_instance_methods_test() ->
-    Pid = spawn_mock_class('TestCompletionClassB', #{spawn => ok, 'spawnWith:' => ok}, [
-        increment, inspect, decrement
-    ]),
+    Pid = beamtalk_test_mock_class:spawn(
+        'TestCompletionClassB', #{spawn => ok, 'spawnWith:' => ok}, [
+            increment, inspect, decrement
+        ]
+    ),
     try
         Binding = #beamtalk_object{
             class = 'TestCompletionClassB', class_mod = undefined, pid = self()
@@ -1283,7 +1237,7 @@ context_completions_instance_binding_returns_instance_methods_test() ->
         ?assertNot(lists:member(<<"spawn">>, Result)),
         ?assertNot(lists:member(<<"spawnWith:">>, Result))
     after
-        cleanup_mock_class('TestCompletionClassB', Pid)
+        beamtalk_test_mock_class:cleanup('TestCompletionClassB', Pid)
     end.
 
 %% Hidden meta-protocol methods (subclassResponsibility, notImplemented, fieldNames, etc.)
@@ -1306,7 +1260,9 @@ context_completions_instance_hides_meta_protocol_methods_test() ->
 
 %% new/new: must still appear for class-name receivers (they ARE the constructors there).
 context_completions_class_receiver_new_methods_visible_test() ->
-    Pid = spawn_mock_class('TestCompletionNewClass', #{'new' => ok, 'new:' => ok}, []),
+    Pid = beamtalk_test_mock_class:spawn(
+        'TestCompletionNewClass', #{'new' => ok, 'new:' => ok}, []
+    ),
     try
         Result = beamtalk_repl_ops_dev:get_context_completions(
             <<"TestCompletionNewClass n">>, #{}
@@ -1314,14 +1270,16 @@ context_completions_class_receiver_new_methods_visible_test() ->
         ?assert(lists:member(<<"new">>, Result)),
         ?assert(lists:member(<<"new:">>, Result))
     after
-        cleanup_mock_class('TestCompletionNewClass', Pid)
+        beamtalk_test_mock_class:cleanup('TestCompletionNewClass', Pid)
     end.
 
 %% BT: Uppercase global binding (e.g. Transcript) falls back to binding lookup
 context_completions_uppercase_global_binding_returns_instance_methods_test() ->
-    Pid = spawn_mock_class('TestCompletionClassD', #{spawn => ok, 'spawnWith:' => ok}, [
-        show, subscribe, recent
-    ]),
+    Pid = beamtalk_test_mock_class:spawn(
+        'TestCompletionClassD', #{spawn => ok, 'spawnWith:' => ok}, [
+            show, subscribe, recent
+        ]
+    ),
     try
         %% Transcript-style: uppercase name that is a binding, not a class
         Binding = #beamtalk_object{
@@ -1336,14 +1294,16 @@ context_completions_uppercase_global_binding_returns_instance_methods_test() ->
         ?assertNot(lists:member(<<"spawn">>, Result)),
         ?assertNot(lists:member(<<"spawnWith:">>, Result))
     after
-        cleanup_mock_class('TestCompletionClassD', Pid)
+        beamtalk_test_mock_class:cleanup('TestCompletionClassD', Pid)
     end.
 
 %% BT: Value-type binding (tagged map from `new`) returns instance methods
 context_completions_value_type_binding_returns_instance_methods_test() ->
-    Pid = spawn_mock_class('TestCompletionClassC', #{spawn => ok, 'spawnWith:' => ok}, [
-        parse, pairOf, printString
-    ]),
+    Pid = beamtalk_test_mock_class:spawn(
+        'TestCompletionClassC', #{spawn => ok, 'spawnWith:' => ok}, [
+            parse, pairOf, printString
+        ]
+    ),
     try
         %% Value-type instances are tagged maps with '$beamtalk_class' key
         Binding = #{'$beamtalk_class' => 'TestCompletionClassC'},
@@ -1357,7 +1317,7 @@ context_completions_value_type_binding_returns_instance_methods_test() ->
         ?assertNot(lists:member(<<"spawn">>, Result)),
         ?assertNot(lists:member(<<"spawnWith:">>, Result))
     after
-        cleanup_mock_class('TestCompletionClassC', Pid)
+        beamtalk_test_mock_class:cleanup('TestCompletionClassC', Pid)
     end.
 
 %% BT: Integer binding (e.g. i := 42) returns Integer instance methods
@@ -1563,191 +1523,14 @@ session_binding_lookup_pipeline_test() ->
 
 %%% tokenise_send_chain/1 tests
 
-tokenise_send_chain_simple_chain_test() ->
-    %% Single hop unary chain
-    ?assertEqual(
-        {ok, <<"\"hello\"">>, [size]},
-        beamtalk_repl_editor_context:tokenise_send_chain(<<"\"hello\" size">>)
-    ).
-
-tokenise_send_chain_multi_hop_test() ->
-    %% Two-hop unary chain
-    ?assertEqual(
-        {ok, <<"counter">>, [getValue, reversed]},
-        beamtalk_repl_editor_context:tokenise_send_chain(<<"counter getValue reversed">>)
-    ).
-
-tokenise_send_chain_single_token_returns_error_test() ->
-    %% Single token — no sends to chain
-    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_send_chain(<<"hello">>)).
-
-tokenise_send_chain_empty_returns_error_test() ->
-    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_send_chain(<<>>)).
-
-tokenise_send_chain_keyword_mid_chain_returns_error_test() ->
-    %% Keyword send mid-chain is not a unary chain
-    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_send_chain(<<"myList inject: 0">>)).
-
-tokenise_send_chain_paren_returns_error_test() ->
-    %% Parenthesised subexpression — not supported
-    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_send_chain(<<"(myList size)">>)).
-
 %%% parse_receiver_and_prefix/1 multi-token tests
 
-parse_receiver_multi_token_expression_test() ->
-    %% Multi-token receiver returns {expression, ReceiverExpr, Prefix}
-    ?assertEqual(
-        {expression, <<"\"hello\" size">>, <<"cl">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"\"hello\" size cl">>)
-    ).
-
-parse_receiver_multi_token_empty_prefix_test() ->
-    %% Multi-token expression with trailing space (empty prefix)
-    ?assertEqual(
-        {expression, <<"\"hello\" size">>, <<>>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"\"hello\" size ">>)
-    ).
-
-parse_receiver_multi_token_three_tokens_test() ->
-    %% Three-token expression with trailing space
-    ?assertEqual(
-        {expression, <<"counter getValue reversed">>, <<>>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"counter getValue reversed ">>)
-    ).
-
-parse_receiver_leading_whitespace_single_token_test() ->
-    %% Leading whitespace must NOT trigger multi-token expression path
-    ?assertEqual(
-        {<<"Integer">>, <<"s">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"  Integer s">>)
-    ).
-
 %%% walk_chain/2 and walk_chain_class/2 tests
-
-walk_chain_empty_selectors_test() ->
-    %% walk_chain with no selectors returns the class unchanged — no registry call
-    ?assertEqual({ok, 'String', instance}, beamtalk_repl_editor_context:walk_chain('String', [])).
-
-walk_chain_single_hop_found_test() ->
-    Pid = spawn_mock_class_with_return_types(
-        'WalkChainTestA', #{size => 'Integer'}, #{}
-    ),
-    try
-        ?assertEqual(
-            {ok, 'Integer', instance},
-            beamtalk_repl_editor_context:walk_chain('WalkChainTestA', [size])
-        )
-    after
-        cleanup_mock_class('WalkChainTestA', Pid)
-    end.
-
-walk_chain_broken_chain_test() ->
-    %% Selector not in return types → mock returns {error, not_found} → undefined.
-    %% Uses 'size' (a known atom) so tokenise_send_chain can convert it; the mock
-    %% has no return type for it, so the registry returns {error, not_found}.
-    Pid = spawn_mock_class_with_return_types('WalkChainTestB', #{}, #{}),
-    try
-        ?assertEqual(
-            undefined,
-            beamtalk_repl_editor_context:walk_chain('WalkChainTestB', [size])
-        )
-    after
-        cleanup_mock_class('WalkChainTestB', Pid)
-    end.
-
-walk_chain_class_empty_selectors_test() ->
-    %% walk_chain_class with no selectors returns the class unchanged — no registry call
-    ?assertEqual(
-        {ok, 'Integer', class}, beamtalk_repl_editor_context:walk_chain_class('Integer', [])
-    ).
-
-walk_chain_class_single_hop_found_test() ->
-    Pid = spawn_mock_class_with_return_types(
-        'WalkChainClassTestA', #{}, #{new => 'WalkChainClassTestA'}
-    ),
-    try
-        ?assertEqual(
-            {ok, 'WalkChainClassTestA', instance},
-            beamtalk_repl_editor_context:walk_chain_class('WalkChainClassTestA', [new])
-        )
-    after
-        cleanup_mock_class('WalkChainClassTestA', Pid)
-    end.
-
-%% `ClassName class` chain — `class` is an instance method on ProtoObject
-%% (no class-side return-type annotation), but sending it to a class object returns
-%% the metaclass, which has the same class-side methods. The chain should stay on the
-%% class side rather than returning undefined.
-walk_chain_class_class_selector_stays_on_class_side_test() ->
-    ?assertEqual(
-        {ok, 'Integer', class}, beamtalk_repl_editor_context:walk_chain_class('Integer', [class])
-    ).
-
-walk_chain_class_class_then_method_test() ->
-    Pid = spawn_mock_class_with_return_types(
-        'WalkChainClassB', #{}, #{new => 'WalkChainClassB'}
-    ),
-    try
-        %% `WalkChainClassB class new` — `class` stays on class side, then `new` resolves
-        ?assertEqual(
-            {ok, 'WalkChainClassB', instance},
-            beamtalk_repl_editor_context:walk_chain_class('WalkChainClassB', [class, new])
-        )
-    after
-        cleanup_mock_class('WalkChainClassB', Pid)
-    end.
-
-walk_chain_multi_hop_test() ->
-    %% Two-hop chain: WalkChainMultiA →size→ WalkChainMultiB →reversed→ String
-    PidA = spawn_mock_class_with_return_types(
-        'WalkChainMultiA', #{size => 'WalkChainMultiB'}, #{}
-    ),
-    PidB = spawn_mock_class_with_return_types(
-        'WalkChainMultiB', #{reversed => 'String'}, #{}
-    ),
-    try
-        ?assertEqual(
-            {ok, 'String', instance},
-            beamtalk_repl_editor_context:walk_chain('WalkChainMultiA', [size, reversed])
-        )
-    after
-        cleanup_mock_class('WalkChainMultiA', PidA),
-        cleanup_mock_class('WalkChainMultiB', PidB)
-    end.
-
-walk_chain_superclass_inheritance_test() ->
-    %% 'WalkChainSub' has no return type for 'size'; its superclass 'WalkChainSuper'
-    %% does.  get_method_return_type/2 walks the ETS hierarchy table, so walk_chain/2
-    %% should resolve through the superclass.
-    beamtalk_test_boot:registry(),
-    Saved = ets:tab2list(beamtalk_class_metadata),
-    ets:delete_all_objects(beamtalk_class_metadata),
-    beamtalk_class_metadata:insert(
-        'WalkChainSub', undefined, undefined, 'WalkChainSuper', undefined
-    ),
-    PidSub = spawn_mock_class_with_return_types('WalkChainSub', #{}, #{}),
-    PidSuper = spawn_mock_class_with_return_types(
-        'WalkChainSuper', #{size => 'Integer'}, #{}
-    ),
-    try
-        ?assertEqual(
-            {ok, 'Integer', instance},
-            beamtalk_repl_editor_context:walk_chain('WalkChainSub', [size])
-        )
-    after
-        cleanup_mock_class('WalkChainSub', PidSub),
-        cleanup_mock_class('WalkChainSuper', PidSuper),
-        ets:delete_all_objects(beamtalk_class_metadata),
-        ets:insert(beamtalk_class_metadata, Saved),
-        %% A raw restore bypasses the metadata API, so drop derived
-        %% facts cached against the test rows (BT-4064).
-        beamtalk_class_derived_cache:invalidate()
-    end.
 
 %%% resolve_chain_type/2 tests
 
 resolve_chain_type_single_hop_test() ->
-    Pid = spawn_mock_class_with_return_types(
+    Pid = beamtalk_test_mock_class:spawn_with_return_types(
         'ResolveChainTestA', #{getValue => 'Integer'}, #{}
     ),
     try
@@ -1760,15 +1543,15 @@ resolve_chain_type_single_hop_test() ->
             })
         )
     after
-        cleanup_mock_class('ResolveChainTestA', Pid)
+        beamtalk_test_mock_class:cleanup('ResolveChainTestA', Pid)
     end.
 
 resolve_chain_type_multi_hop_test() ->
     %% Two-hop chain: counter getValue reversed → String
-    PidA = spawn_mock_class_with_return_types(
+    PidA = beamtalk_test_mock_class:spawn_with_return_types(
         'ResolveChainMultiA', #{getValue => 'ResolveChainMultiB'}, #{}
     ),
-    PidB = spawn_mock_class_with_return_types(
+    PidB = beamtalk_test_mock_class:spawn_with_return_types(
         'ResolveChainMultiB', #{reversed => 'String'}, #{}
     ),
     try
@@ -1784,8 +1567,8 @@ resolve_chain_type_multi_hop_test() ->
             )
         )
     after
-        cleanup_mock_class('ResolveChainMultiA', PidA),
-        cleanup_mock_class('ResolveChainMultiB', PidB)
+        beamtalk_test_mock_class:cleanup('ResolveChainMultiA', PidA),
+        beamtalk_test_mock_class:cleanup('ResolveChainMultiB', PidB)
     end.
 
 resolve_chain_type_broken_chain_returns_undefined_test() ->
@@ -1820,7 +1603,7 @@ context_completions_chained_no_annotation_returns_empty_test() ->
     %% annotation → mock returns {error, not_found} → walk_chain returns undefined →
     %% empty completions. Uses 'size' (a known atom) so tokenise_send_chain succeeds
     %% and the test exercises the "unannotated selector" path through the mock.
-    Pid = spawn_mock_class_with_return_types('ChainCompletionTestA', #{}, #{}),
+    Pid = beamtalk_test_mock_class:spawn_with_return_types('ChainCompletionTestA', #{}, #{}),
     try
         Bindings = #{
             myObj => #beamtalk_object{
@@ -1832,12 +1615,12 @@ context_completions_chained_no_annotation_returns_empty_test() ->
         ),
         ?assertEqual([], Result)
     after
-        cleanup_mock_class('ChainCompletionTestA', Pid)
+        beamtalk_test_mock_class:cleanup('ChainCompletionTestA', Pid)
     end.
 
 context_completions_chained_with_return_type_test() ->
     %% Chained expression where the method has a return type → Integer completions
-    Pid = spawn_mock_class_with_return_types(
+    Pid = beamtalk_test_mock_class:spawn_with_return_types(
         'ChainCompletionTestB', #{getValue => 'Integer'}, #{}
     ),
     try
@@ -1852,113 +1635,7 @@ context_completions_chained_with_return_type_test() ->
         %% `class` is an Integer (Object) method — should appear in completions
         ?assert(lists:member(<<"class">>, Result))
     after
-        cleanup_mock_class('ChainCompletionTestB', Pid)
-    end.
-
-%% Helper: spawn a mock class gen_server process and register it in the class registry.
-spawn_mock_class(Name, ClassMethods, InstanceMethods) ->
-    RegName = beamtalk_class_registry:registry_name(Name),
-    Self = self(),
-    Pid = spawn(fun() ->
-        erlang:register(RegName, self()),
-        Self ! registered,
-        mock_class_loop(InstanceMethods, ClassMethods)
-    end),
-    receive
-        registered -> ok
-    after 1000 ->
-        error({mock_class_register_timeout, Name})
-    end,
-    Pid.
-
-mock_class_loop(InstanceMethods, ClassMethods) ->
-    receive
-        {'$gen_call', From, methods} ->
-            gen_server:reply(From, InstanceMethods),
-            mock_class_loop(InstanceMethods, ClassMethods);
-        {'$gen_call', From, superclass} ->
-            gen_server:reply(From, none),
-            mock_class_loop(InstanceMethods, ClassMethods);
-        {'$gen_call', From, get_local_class_methods} ->
-            gen_server:reply(From, ClassMethods),
-            mock_class_loop(InstanceMethods, ClassMethods);
-        stop ->
-            ok;
-        _ ->
-            mock_class_loop(InstanceMethods, ClassMethods)
-    end.
-
-cleanup_mock_class(Name, Pid) ->
-    beamtalk_class_metadata:delete(Name),
-    RegName = beamtalk_class_registry:registry_name(Name),
-    (try
-        erlang:unregister(RegName)
-    catch
-        _:_ -> ok
-    end),
-    Pid ! stop.
-
-%% Helper: spawn a mock class that supports return-type lookups for chain resolution.
-%% InstanceReturnTypes: #{selector() => atom()} — instance-side return types
-%% ClassReturnTypes:    #{selector() => atom()} — class-side return types
-spawn_mock_class_with_return_types(Name, InstanceReturnTypes, ClassReturnTypes) ->
-    RegName = beamtalk_class_registry:registry_name(Name),
-    Self = self(),
-    Pid = spawn(fun() ->
-        erlang:register(RegName, self()),
-        Self ! registered,
-        mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes)
-    end),
-    receive
-        registered -> ok
-    after 1000 ->
-        error({mock_class_register_timeout, Name})
-    end,
-    %% BT-3826: return types are read from the class's published metadata row
-    %% (never by messaging the class process), so publish the mock's.
-    %% A test may have pre-seeded the row's superclass edge; keep it.
-    Super =
-        case beamtalk_class_metadata:lookup_superclass(Name) of
-            {ok, S} -> S;
-            not_found -> none
-        end,
-    beamtalk_class_metadata:merge_identity(Name, undefined, undefined, Super, undefined),
-    ok = beamtalk_class_metadata:put_reflection(Name, #{
-        instance_methods => maps:keys(InstanceReturnTypes),
-        instance_variables => [],
-        method_return_types => InstanceReturnTypes,
-        class_method_return_types => ClassReturnTypes
-    }),
-    Pid.
-
-mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes) ->
-    receive
-        {'$gen_call', From, {get_method_return_type, Selector}} ->
-            Reply =
-                case maps:find(Selector, InstanceReturnTypes) of
-                    {ok, ReturnType} -> {ok, ReturnType};
-                    error -> {error, not_found}
-                end,
-            gen_server:reply(From, Reply),
-            mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes);
-        {'$gen_call', From, {get_class_method_return_type, Selector}} ->
-            Reply =
-                case maps:find(Selector, ClassReturnTypes) of
-                    {ok, ReturnType} -> {ok, ReturnType};
-                    error -> {error, not_found}
-                end,
-            gen_server:reply(From, Reply),
-            mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes);
-        {'$gen_call', From, superclass} ->
-            gen_server:reply(From, none),
-            mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes);
-        {'$gen_call', From, methods} ->
-            gen_server:reply(From, maps:keys(InstanceReturnTypes)),
-            mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes);
-        stop ->
-            ok;
-        _ ->
-            mock_class_with_return_types_loop(InstanceReturnTypes, ClassReturnTypes)
+        beamtalk_test_mock_class:cleanup('ChainCompletionTestB', Pid)
     end.
 
 %%% resolve_class_to_module/1 tests
@@ -2041,11 +1718,6 @@ ensure_structured_error_already_structured_test() ->
     Err = beamtalk_error:new(some_kind, 'SomeClass'),
     ?assertEqual(Err, beamtalk_repl_errors:ensure_structured_error(Err)).
 
-ensure_structured_error_compile_error_binary_test() ->
-    Err = beamtalk_repl_errors:ensure_structured_error({compile_error, <<"some msg">>}),
-    ?assertEqual(compile_error, Err#beamtalk_error.kind),
-    ?assertEqual('Compiler', Err#beamtalk_error.class).
-
 ensure_structured_error_compile_error_structured_diagnostics_test() ->
     %% structured diagnostic maps with message field
     Err = beamtalk_repl_errors:ensure_structured_error(
@@ -2067,46 +1739,6 @@ ensure_structured_error_compile_error_structured_with_hint_test() ->
     ),
     ?assertEqual(compile_error, Err#beamtalk_error.kind),
     ?assertEqual({beamtalk_string, <<"prefix with _x">>}, Err#beamtalk_error.hint).
-
-ensure_structured_error_compile_error_list_test() ->
-    Err = beamtalk_repl_errors:ensure_structured_error({compile_error, "some msg"}),
-    ?assertEqual(compile_error, Err#beamtalk_error.kind).
-
-ensure_structured_error_compile_error_other_test() ->
-    Err = beamtalk_repl_errors:ensure_structured_error({compile_error, {some, reason}}),
-    ?assertEqual(compile_error, Err#beamtalk_error.kind).
-
-ensure_structured_error_undefined_variable_test() ->
-    Err = beamtalk_repl_errors:ensure_structured_error({undefined_variable, <<"x">>}),
-    ?assertEqual(undefined_variable, Err#beamtalk_error.kind).
-
-ensure_structured_error_file_not_found_test() ->
-    Err = beamtalk_repl_errors:ensure_structured_error({file_not_found, "/nonexistent/foo.bt"}),
-    ?assertEqual(file_not_found, Err#beamtalk_error.kind).
-
-ensure_structured_error_read_error_test() ->
-    Err = beamtalk_repl_errors:ensure_structured_error({read_error, enoent}),
-    ?assertEqual(io_error, Err#beamtalk_error.kind).
-
-ensure_structured_error_load_error_test() ->
-    Err = beamtalk_repl_errors:ensure_structured_error({load_error, bad_module}),
-    ?assertEqual(io_error, Err#beamtalk_error.kind).
-
-ensure_structured_error_parse_error_test() ->
-    Err = beamtalk_repl_errors:ensure_structured_error({parse_error, {line, 1}}),
-    ?assertEqual(compile_error, Err#beamtalk_error.kind).
-
-ensure_structured_error_invalid_request_test() ->
-    Err = beamtalk_repl_errors:ensure_structured_error({invalid_request, unknown_type}),
-    ?assertEqual(internal_error, Err#beamtalk_error.kind).
-
-ensure_structured_error_empty_expression_test() ->
-    Err = beamtalk_repl_errors:ensure_structured_error(empty_expression),
-    ?assertEqual(empty_expression, Err#beamtalk_error.kind).
-
-ensure_structured_error_timeout_test() ->
-    Err = beamtalk_repl_errors:ensure_structured_error(timeout),
-    ?assertEqual(timeout, Err#beamtalk_error.kind).
 
 ensure_structured_error_unknown_term_test() ->
     Err = beamtalk_repl_errors:ensure_structured_error(some_random_term),
@@ -2179,26 +1811,7 @@ ensure_structured_error_beamtalk_object_test() ->
 
 %%% make_class_not_found_error/1 tests
 
-make_class_not_found_error_atom_test() ->
-    Err = beamtalk_repl_ops_dev:make_class_not_found_error('Counter'),
-    ?assertEqual(class_not_found, Err#beamtalk_error.kind),
-    ?assert(binary:match(element(2, Err#beamtalk_error.message), <<"Counter">>) =/= nomatch).
-
-make_class_not_found_error_binary_test() ->
-    Err = beamtalk_repl_ops_dev:make_class_not_found_error(<<"MyClass">>),
-    ?assertEqual(class_not_found, Err#beamtalk_error.kind),
-    ?assert(binary:match(element(2, Err#beamtalk_error.message), <<"MyClass">>) =/= nomatch).
-
 %%% format_name/1 tests
-
-format_name_atom_test() ->
-    ?assertEqual(<<"hello">>, beamtalk_repl_errors:format_name(hello)).
-
-format_name_binary_test() ->
-    ?assertEqual(<<"world">>, beamtalk_repl_errors:format_name(<<"world">>)).
-
-format_name_list_test() ->
-    ?assertEqual(<<"abc">>, beamtalk_repl_errors:format_name("abc")).
 
 format_name_other_test() ->
     Result = beamtalk_repl_errors:format_name({some, tuple}),
