@@ -4,9 +4,9 @@
 //! BT-4318: `generate_super_send`'s state-threading form reports
 //! `StateEffectEscapesExpression` when compiled outside `super_send_producer`.
 //!
-//! Covers `dispatch_codegen/super_send.rs` lines 148-157: the guard that fires
-//! when `from_producer` is false in an actor-instance context where
-//! `super_send_threads_state()` is true.
+//! Covers the `if !from_producer` guard in `dispatch_codegen/super_send.rs`:
+//! it fires in an actor-instance context where `super_send_threads_state()`
+//! is true and the send was not compiled through `super_send_producer`.
 
 use super::{codegen, verifier_report};
 use crate::core_erlang::fault::Fault;
@@ -22,8 +22,8 @@ const ACTOR_WITH_SUPER: &str = "Actor subclass: SuperProbe
 fn super_send_state_threading_guard_fires_without_producer() {
     // `Fault::SuperSendNotAProducer` makes `is_super_send_producer()` return
     // false, so the fallback path calls `generate_super_send` with
-    // `in_super_send_producer = false` — triggering the guard at
-    // `dispatch_codegen/super_send.rs` lines 148-157.
+    // `in_super_send_producer = false`, which trips the `if !from_producer`
+    // guard in `dispatch_codegen/super_send.rs`.
     let report = verifier_report(ACTOR_WITH_SUPER, Some(Fault::SuperSendNotAProducer))
         .expect("should panic when super send is compiled outside its producer");
     assert!(
