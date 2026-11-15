@@ -45,10 +45,7 @@ fn late_defaultless_slot_skipped_in_own_state_fields() {
         "  late state: audit :: Logger\n",
         "  state: logCount = 0\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("logging_counter"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "logging_counter");
 
     let child_fields = extract_child_fields(&code);
 
@@ -71,10 +68,7 @@ fn own_state_fields_empty_when_only_late_defaultless() {
         "Counter subclass: LoggingCounter\n",
         "  late state: audit :: Logger\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("logging_counter"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "logging_counter");
 
     let child_fields = extract_child_fields(&code);
 

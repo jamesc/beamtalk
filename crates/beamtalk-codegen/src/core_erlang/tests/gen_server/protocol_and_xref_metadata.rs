@@ -166,10 +166,7 @@ fn test_method_xref_baked_into_register_class() {
         "  class default -> Counter =>\n",
         "    Counter new\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+    let code = codegen_named(src, "counter");
 
     // The methodXref field is present and a list (not a `~{ }~` map).
     assert!(
@@ -314,10 +311,7 @@ fn test_method_xref_emits_synthetic_accessors_for_value_class() {
         "  state: x :: Integer = 0\n",
         "  state: y :: Integer = 0\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("point")).expect("codegen should succeed");
+    let code = codegen_named(src, "point");
 
     // Scope the assertions to the `methodXref` payload so they cannot be
     // satisfied by unrelated parts of the generated module (exports, dispatch,
@@ -373,10 +367,7 @@ fn test_method_xref_no_synthetic_rows_for_object_class() {
         "  state: count = 0\n\n",
         "  bump =>\n    count := count + 1\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("plain")).expect("codegen should succeed");
+    let code = codegen_named(src, "plain");
 
     assert!(
         !code.contains("'source_status' => 'synthetic'"),
@@ -395,10 +386,7 @@ fn test_method_xref_user_accessor_suppresses_synthetic() {
         "  state: x :: Integer = 0\n\n",
         "  x =>\n    self.x\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("point")).expect("codegen should succeed");
+    let code = codegen_named(src, "point");
 
     // The hand-written `x` getter is an indexed row; the synthetic getter for
     // `x` is suppressed. The `withX:` setter is still synthetic.
@@ -455,10 +443,7 @@ fn test_method_xref_drops_oversized_selectors() {
         ),
         send_parts
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("big_send")).expect("codegen should succeed");
+    let code = codegen_named(&src, "big_send");
 
     // The methodXref field is still emitted, and the oversized selector is
     // dropped from it: the single method's `sends` list is empty.

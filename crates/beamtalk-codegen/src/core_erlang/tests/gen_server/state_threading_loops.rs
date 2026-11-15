@@ -317,10 +317,7 @@ fn bt3562_plain_bare_field_read_in_while_loop_compiles() {
     // written anywhere in this method) with a bare, discarded `self.proc`
     // read as a non-last statement mid-body.
     let src = "typed Actor subclass: CodexClient\n  state: proc :: Integer = 0\n\n  pump: limit =>\n    i := 0\n    [i < limit] whileTrue: [\n      self.proc\n      i := i + 1\n    ]\n    nil\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(&module, CodegenOptions::new("bt3562_plain_bare_field_read"));
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = codegen_named(src, "bt3562_plain_bare_field_read");
     assert!(
         !code.contains("StateAcc)"),
         "a direct-params loop's letrec fun binds no StateAcc parameter — \
@@ -336,13 +333,7 @@ fn bt3562_plain_bare_late_field_read_in_while_loop_compiles() {
     // defect (and the fix) is general sequencing/state-var-naming, not
     // specific to `late`'s own `maps:find`/nil-arm read shape.
     let src = "typed Actor subclass: CodexClient\n  late state: proc :: Integer\n\n  pump: limit =>\n    i := 0\n    [i < limit] whileTrue: [\n      self.proc\n      i := i + 1\n    ]\n    nil\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3562_plain_bare_late_field_read"),
-    );
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = codegen_named(src, "bt3562_plain_bare_late_field_read");
     assert_compiles_through_erlc("bt3562_plain_bare_late_field_read", &code);
 }
 
@@ -353,13 +344,7 @@ fn bt3562_hybrid_bare_field_read_in_while_loop_compiles() {
     // read (never written anywhere in this method) as a non-last
     // statement mid-body.
     let src = "typed Actor subclass: CodexClient\n  state: proc :: Integer = 0\n  state: other :: Integer = 0\n\n  pump: limit =>\n    i := 0\n    [i < limit] whileTrue: [\n      self.proc\n      self.other := self.other + 1\n      i := i + 1\n    ]\n    nil\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3562_hybrid_bare_field_read"),
-    );
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = codegen_named(src, "bt3562_hybrid_bare_field_read");
     assert_compiles_through_erlc("bt3562_hybrid_bare_field_read", &code);
 }
 
@@ -384,13 +369,7 @@ fn bt3562_plain_bare_field_read_in_nested_while_loop_compiles() {
     // `current_field_read_state_var()`, which returns the already-captured
     // outer value when one exists.
     let src = "typed Actor subclass: CodexClient\n  state: proc :: Integer = 0\n\n  pump: limit =>\n    i := 0\n    [i < limit] whileTrue: [\n      j := 0\n      [j < limit] whileTrue: [\n        self.proc\n        j := j + 1\n      ]\n      i := i + 1\n    ]\n    nil\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let result = generate_module(
-        &module,
-        CodegenOptions::new("bt3562_plain_bare_field_read_nested"),
-    );
-    let code = result.unwrap_or_else(|e| panic!("codegen should succeed. Got: {e:?}"));
+    let code = codegen_named(src, "bt3562_plain_bare_field_read_nested");
     assert!(
         !code.contains("StateAcc)"),
         "neither loop's letrec fun binds a StateAcc parameter — the inner \
