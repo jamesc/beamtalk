@@ -50,7 +50,8 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     reindent_method_source/2,
     find_selector_send_spans/3,
     find_definition_selector_spans/5,
-    build_class_module_index_in_source/3
+    build_class_module_index_in_source/3,
+    scan_source_dependencies/1
 ]).
 
 -doc """
@@ -593,6 +594,16 @@ build_class_module_index_in_source(Source, RelativePath, PackageName) ->
     beamtalk_compiler_server:build_class_module_index_in_source(
         Source, RelativePath, PackageName
     ).
+
+-doc """
+Class declarations (with superclass) and native-module references in `Source',
+from the real parser rather than a regex (BT-4861) — see
+`beamtalk_compiler_port:scan_source_dependencies/2'.
+""".
+-spec scan_source_dependencies(binary()) ->
+    {ok, #{classes := [map()], native_refs := [binary()]}} | {error, atom(), binary()}.
+scan_source_dependencies(Source) ->
+    beamtalk_compiler_server:scan_source_dependencies(Source).
 
 -doc """
 Field-level default-value presence for `ClassName''s `state:'/`field:'
