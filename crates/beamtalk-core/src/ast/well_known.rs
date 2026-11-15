@@ -393,11 +393,7 @@ pub fn is_loop_or_fold_block_arg(selector: &str, arg_index: usize) -> bool {
 /// the `error:` lowering sequences its own operands for every receiver kind.
 #[must_use]
 pub fn is_error_signal_instance_receiver(receiver: &super::Expression) -> bool {
-    match receiver {
-        super::Expression::Identifier(id) => id.name == "self",
-        super::Expression::Literal(..) => true,
-        _ => false,
-    }
+    receiver.is_self() || matches!(receiver, super::Expression::Literal(..))
 }
 
 #[cfg(test)]

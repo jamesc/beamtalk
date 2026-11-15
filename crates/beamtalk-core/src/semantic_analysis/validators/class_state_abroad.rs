@@ -370,7 +370,7 @@ impl ClassCtx<'_> {
     /// name (binds this class's method directly), `None` for anything else.
     fn own_class_receiver(&self, receiver: &Expression) -> Option<bool> {
         match receiver.unwrap_parens() {
-            Expression::Identifier(id) if id.name == "self" => Some(false),
+            _ if receiver.is_self() => Some(false),
             own if crate::semantic_analysis::block_facts::is_own_class_reference(
                 own,
                 self.class_name,

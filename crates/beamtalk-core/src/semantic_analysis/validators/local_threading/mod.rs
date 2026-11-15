@@ -84,12 +84,7 @@ pub(crate) fn check_local_threading(
     let facts = |class_name: &str, class_side: bool| ReceiverFacts {
         hierarchy,
         type_map,
-        self_is_dictionary: !class_side
-            && (class_name == "Dictionary"
-                || hierarchy
-                    .superclass_chain(class_name)
-                    .iter()
-                    .any(|c| c == "Dictionary")),
+        self_is_dictionary: !class_side && hierarchy.is_subclass_of(class_name, "Dictionary"),
         class_name: EcoString::from(class_name),
     };
     let instance_context = |class_name: &str| {

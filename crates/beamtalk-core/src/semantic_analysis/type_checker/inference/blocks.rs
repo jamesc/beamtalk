@@ -272,16 +272,14 @@ impl TypeChecker {
                 let overridden_below = || {
                     hierarchy.class_names().any(|name| {
                         name.as_str() != WellKnownClass::Object.as_str()
+                            && name.as_str() != class
                             && hierarchy.get_class(name).is_some_and(|info| {
                                 info.methods.iter().any(|m| {
                                     m.selector.as_str() == THEN_SELECTOR
                                         && m.defined_in.as_str() == name.as_str()
                                 })
                             })
-                            && hierarchy
-                                .superclass_chain(name)
-                                .iter()
-                                .any(|ancestor| ancestor.as_str() == class)
+                            && hierarchy.is_subclass_of(name, class)
                     })
                 };
                 resolves_to_object(class) && !overridden_below()
@@ -589,17 +587,6 @@ impl TypeChecker {
 
         let arg = arguments.first()?;
         let ty = arg_types.first()?;
-        let InferredType::Known {
-            class_name: block_class,
-            type_args,
-            ..
-        } = ty
-        else {
-            return None;
-        };
-        if block_class.as_str() != "Block" {
-            return None;
-        }
         // `block_has_any_return` is a conservative over-approximation: it
         // reports `true` whenever a `^` appears anywhere in the block body
         // (nested block literals are opaque to it, so a `^` buried inside
@@ -607,15 +594,7 @@ impl TypeChecker {
         // exit the method on every path. Some blocks that may-but-not-always
         // diverge get widened to `Never` here — an accepted imprecision this
         // shares with the mirror function, [`Self::if_nil_solo_union_ret_ty`].
-        let block_ret = if let Expression::Block(block) = arg {
-            if block_has_any_return(block) {
-                InferredType::Never
-            } else {
-                type_args.last().cloned()?
-            }
-        } else {
-            type_args.last().cloned()?
-        };
+        let block_ret = Self::block_arg_result_ty(arg, ty)?;
 
         Some(InferredType::union_of(&[
             InferredType::known(WellKnownClass::Boolean.as_str()),
