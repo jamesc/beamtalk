@@ -20,9 +20,9 @@ use miette::{Context, IntoDiagnostic, Result};
 
 use beamtalk_cli::repl_startup;
 
-use super::super::build_layout::BuildLayout;
 use super::super::deps::collect_dep_ebin_paths;
-use super::super::manifest::{PackageManifest, ReleaseConfig};
+use beamtalk_core::build_layout::BuildLayout;
+use beamtalk_package::manifest::{PackageManifest, ReleaseConfig};
 
 /// One OTP application staged into the release's `lib/` tree.
 #[derive(Debug, Clone)]

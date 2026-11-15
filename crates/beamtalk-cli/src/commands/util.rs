@@ -96,11 +96,10 @@ pub(super) fn content_hash_of(path: &Utf8Path) -> Option<String> {
     Some(sha256_hex(&bytes))
 }
 
-/// SHA-256 hash of arbitrary bytes, as a lowercase hex string — the shared
-/// leaf [`content_hash_of`] and [`protocol_content_hash`] both hash through.
-/// Lives in the lib target so the FFI stub-tier fingerprint
-/// (`beamtalk_cli::ffi_type_registry`) hashes through the same routine.
-pub(crate) use beamtalk_cli::content_hash::sha256_hex;
+// `beamtalk_package::content_hash::sha256_hex` is the shared leaf
+// [`content_hash_of`] and [`protocol_content_hash`] both hash through (the FFI
+// stub-tier fingerprint in `beamtalk_package::ffi_type_registry` uses it too).
+use beamtalk_package::content_hash::sha256_hex;
 
 /// Content hash of a protocol's *own* AST, independent of which file it came
 /// from (ADR 0127 §10a; BT-3591) — used to build a class's build-graph edge

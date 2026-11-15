@@ -29,8 +29,8 @@ use beamtalk_cli::repl_startup;
 
 use beamtalk_cli::erlc::ErlcInvocation;
 
-use super::build_layout::BuildLayout;
-use super::manifest;
+use beamtalk_core::build_layout::BuildLayout;
+use beamtalk_package::manifest;
 
 /// Build a single-file escript for the project at `project_root`.
 ///

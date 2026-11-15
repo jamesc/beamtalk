@@ -340,24 +340,52 @@ pub fn read_port_file(workspace_id: &str) -> Result<Option<(u16, Option<String>)
         Err(err) => return Err(err).into_diagnostic(),
     };
 
-    let mut lines = content.lines();
-    if let Some(port_line) = lines.next() {
-        if let Ok(port) = port_line.trim().parse::<u16>() {
-            let nonce = lines
-                .next()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
-            Ok(Some((port, nonce)))
-        } else {
-            tracing::warn!(
-                path = %port_file_path.display(),
-                "Invalid port file content in workspace port file"
-            );
-            Ok(None)
-        }
+    if let Some(parsed) = parse_port_file(&content) {
+        Ok(Some(parsed))
     } else {
+        tracing::warn!(
+            path = %port_file_path.display(),
+            "Invalid port file content in workspace port file"
+        );
         Ok(None)
     }
+}
+
+/// Parse the contents of a port file: `PORT\nNONCE` (the nonce line is optional).
+///
+/// The single parser for the port-file format; [`read_port_file`] and
+/// [`read_port_file_nonce_in`] both use it. Returns `None` when the first line
+/// is not a valid port.
+fn parse_port_file(content: &str) -> Option<(u16, Option<String>)> {
+    let mut lines = content.lines();
+    let port = lines.next()?.trim().parse::<u16>().ok()?;
+    let nonce = lines
+        .next()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    Some((port, nonce))
+}
+
+/// Find the nonce of the workspace whose port file under `workspaces_root`
+/// names `port`.
+///
+/// Scans every immediate subdirectory of `workspaces_root` (O(N)); callers
+/// that know the workspace ID should use [`read_port_file`] instead.
+/// `workspaces_root` is a parameter so callers can pass the real
+/// `~/.beamtalk/workspaces` directory or a temporary directory in tests.
+///
+/// Returns `None` if no matching port file is found, it has no nonce line,
+/// or on any I/O error.
+#[must_use]
+pub fn read_port_file_nonce_in(workspaces_root: &Path, port: u16) -> Option<String> {
+    fs::read_dir(workspaces_root)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| fs::read_to_string(entry.path().join("port")).ok())
+        .filter_map(|content| parse_port_file(&content))
+        .find(|(file_port, _)| *file_port == port)
+        .and_then(|(_, nonce)| nonce)
 }
 
 /// Read the cookie file for a workspace.
@@ -407,6 +435,70 @@ pub fn parse_repl_workspace_id(stdout: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Write a port file (`PORT\nNONCE\n`) into `workspaces_root/ws_id/port`.
+    fn write_port_file(workspaces_root: &Path, ws_id: &str, port: u16, nonce: Option<&str>) {
+        let ws_dir = workspaces_root.join(ws_id);
+        fs::create_dir_all(&ws_dir).unwrap();
+        let content = match nonce {
+            Some(n) => format!("{port}\n{n}\n"),
+            None => format!("{port}\n"),
+        };
+        fs::write(ws_dir.join("port"), content).unwrap();
+    }
+
+    #[test]
+    fn parse_port_file_reads_port_and_optional_nonce() {
+        assert_eq!(
+            parse_port_file("4040\nabc\n"),
+            Some((4040, Some("abc".to_string())))
+        );
+        assert_eq!(parse_port_file("4040\n"), Some((4040, None)));
+        assert_eq!(parse_port_file("4040\n\n"), Some((4040, None)));
+        assert_eq!(
+            parse_port_file("  4040  \n  abc \n"),
+            Some((4040, Some("abc".to_string())))
+        );
+        assert_eq!(parse_port_file("not-a-port\nabc\n"), None);
+        assert_eq!(parse_port_file(""), None);
+    }
+
+    #[test]
+    fn read_port_file_nonce_in_finds_nonce_for_port() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        write_port_file(tmp.path(), "ws1", 12345, Some("abc123def456"));
+        assert_eq!(
+            read_port_file_nonce_in(tmp.path(), 12345),
+            Some("abc123def456".to_string())
+        );
+    }
+
+    #[test]
+    fn read_port_file_nonce_in_wrong_port_is_none() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        write_port_file(tmp.path(), "ws1", 23456, Some("nonce_value"));
+        assert_eq!(read_port_file_nonce_in(tmp.path(), 54321), None);
+    }
+
+    #[test]
+    fn read_port_file_nonce_in_missing_nonce_line_is_none() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        write_port_file(tmp.path(), "ws1", 11111, None);
+        assert_eq!(read_port_file_nonce_in(tmp.path(), 11111), None);
+    }
+
+    #[test]
+    fn read_port_file_nonce_in_picks_matching_workspace() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        write_port_file(tmp.path(), "ws1", 10001, Some("nonce_a"));
+        write_port_file(tmp.path(), "ws2", 10002, Some("nonce_b"));
+        write_port_file(tmp.path(), "ws3", 10003, Some("nonce_c"));
+        assert_eq!(
+            read_port_file_nonce_in(tmp.path(), 10002),
+            Some("nonce_b".to_string())
+        );
+        assert_eq!(read_port_file_nonce_in(tmp.path(), 10099), None);
+    }
 
     // Guards every test below that reads/mutates `ERL_EPMD_ADDRESS` — Rust
     // runs tests in this binary concurrently by default, and

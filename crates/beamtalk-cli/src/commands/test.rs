@@ -24,13 +24,13 @@ use std::fs;
 use std::time::Instant;
 use tracing::{debug, info, instrument, warn};
 
-use super::build_layout::BuildLayout;
 #[cfg(test)]
 use super::fixture::test_compile_scope;
 use super::fixture::{FixtureCompiler, FixtureScope, fixture_module_name};
-use super::lint::find_package_root;
-use super::manifest;
 use super::util;
+use beamtalk_core::build_layout::BuildLayout;
+use beamtalk_package::lint_pipeline::find_package_root;
+use beamtalk_package::manifest;
 
 mod execution;
 use execution::{TestResults, execute_tests};
@@ -1111,7 +1111,7 @@ fn build_merged_class_indexes(
         match super::deps::ensure_deps_resolved(pkg_root, &dep_options) {
             Ok(resolved_deps) => {
                 dependency_extensions_complete &=
-                    beamtalk_cli::dependency_extensions::merge_dependency_extensions(
+                    beamtalk_project::dependency_extensions::merge_dependency_extensions(
                         resolved_deps.iter().map(|dep| &dep.extensions),
                         &mut extension_index,
                     );
@@ -1212,7 +1212,8 @@ fn compute_native_type_registry(
             .iter()
             .any(|f| beamtalk_project::package::is_under_stdlib_dir(f.as_std_path()));
         return if is_stdlib_target {
-            super::build_stdlib::extract_stdlib_type_specs().map(std::sync::Arc::new)
+            beamtalk_package::native_type_specs::extract_stdlib_type_specs()
+                .map(std::sync::Arc::new)
         } else {
             None
         };

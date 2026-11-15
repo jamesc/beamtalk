@@ -54,7 +54,7 @@ use tracing::{debug, warn};
 use crate::commands::util::write_atomic;
 
 use super::DiscoveredDep;
-use crate::commands::build_layout::BuildLayout;
+use beamtalk_core::build_layout::BuildLayout;
 
 /// Result of comparing the current dependency graph against the recorded one.
 pub(super) enum SnapshotStatus {

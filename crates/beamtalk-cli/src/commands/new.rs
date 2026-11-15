@@ -8,7 +8,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
 
-use super::manifest::{format_name_error, validate_package_name};
+use beamtalk_package::manifest::{format_name_error, validate_package_name};
 
 /// Whether the project is a library or an application.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

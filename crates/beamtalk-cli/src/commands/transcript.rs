@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use miette::{IntoDiagnostic, Result, miette};
 
-use beamtalk_repl_protocol::next_msg_id;
+use beamtalk_repl_protocol::RequestBuilder;
 
 use crate::commands::protocol::ProtocolClient;
 use crate::commands::workspace;
@@ -60,14 +60,7 @@ pub fn run(name_or_id: Option<&str>, recent: Option<usize>) -> Result<()> {
     }
 
     // Read workspace cookie for WebSocket authentication (ADR 0020)
-    let cookie = workspace::read_workspace_cookie(&workspace_id)?
-        .trim()
-        .to_string();
-    if cookie.is_empty() {
-        return Err(miette!(
-            "Workspace cookie is empty; restart workspace with `beamtalk repl`"
-        ));
-    }
+    let cookie = workspace::read_workspace_cookie(&workspace_id)?;
 
     // Connect to workspace REPL backend
     let mut client = TranscriptClient::connect(node_info.connect_host(), node_info.port, &cookie)?;
@@ -159,11 +152,7 @@ impl TranscriptClient {
 
     /// Fetch recent transcript entries via eval.
     fn fetch_recent(&mut self) -> Result<Vec<String>> {
-        let request = serde_json::json!({
-            "op": "eval",
-            "id": next_msg_id(),
-            "code": "Transcript recent"
-        });
+        let request = RequestBuilder::eval("Transcript recent");
 
         let response = self.inner.send_raw(&request)?;
 
@@ -480,7 +469,10 @@ mod tests {
             save_workspace_cookie(&fixture.id, "").expect("save empty cookie");
 
             let err = run(Some(&fixture.id), None).unwrap_err();
-            assert!(err.to_string().contains("cookie is empty"), "got: {err}");
+            assert!(
+                err.to_string().contains("cookie is missing or empty"),
+                "got: {err}"
+            );
             drop(listener);
         }
 

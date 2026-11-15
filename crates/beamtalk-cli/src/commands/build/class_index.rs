@@ -221,7 +221,7 @@ pub(crate) fn build_class_index(
     // them as part of their target classes' method surfaces. Pass 2 lifts
     // the pre-WS3 dependency guard only when all of them were complete.
     let dependency_extensions_complete =
-        beamtalk_cli::dependency_extensions::merge_dependency_extensions(
+        beamtalk_project::dependency_extensions::merge_dependency_extensions(
             dep_ctx.resolved_deps.iter().map(|dep| &dep.extensions),
             &mut extension_index,
         );
@@ -330,12 +330,12 @@ pub(crate) fn build_class_index(
         // way), so the two cannot drift apart.
         let mut globals = String::new();
         if options.dependency_extensions_unknown {
-            let guard = beamtalk_cli::dependency_extensions::dependency_extensions_unknown(
+            let guard = beamtalk_project::dependency_extensions::dependency_extensions_unknown(
                 options.dependency_extensions_unknown,
                 true,
                 dependency_extensions_complete,
             );
-            analysis_surface_hash = crate::commands::util::sha256_hex(
+            analysis_surface_hash = beamtalk_package::content_hash::sha256_hex(
                 format!("{analysis_surface_hash}\ndependency-extensions-unknown:{guard}")
                     .as_bytes(),
             );

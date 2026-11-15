@@ -20,6 +20,8 @@ use super::storage::{
     acquire_workspace_lock, cleanup_stale_node_info, get_node_info, read_workspace_cookie,
     workspace_exists,
 };
+use beamtalk_repl_protocol::RequestBuilder;
+
 use crate::commands::protocol::ProtocolClient;
 
 /// TCP connect timeout for exit probe in milliseconds.
@@ -48,7 +50,7 @@ pub(super) fn tcp_send_shutdown(host: &str, port: u16, cookie: &str) -> Result<(
     )?;
 
     // Send shutdown request with cookie
-    let request = serde_json::json!({"op": "shutdown", "cookie": cookie});
+    let request = RequestBuilder::shutdown(cookie);
     let response = client.send_raw(&request)?;
 
     // Check for error in response
@@ -461,7 +463,7 @@ mod tests {
         // actually gone, not just that the syscall returned 0.
         let status = child.wait().expect("wait on killed child");
         assert!(!status.success(), "SIGKILL'd child should not exit(0)");
-        assert!(!beamtalk_cli::pid_liveness::is_process_alive(pid));
+        assert!(!beamtalk_workspace::pid_liveness::is_process_alive(pid));
     }
 
     #[cfg(unix)]

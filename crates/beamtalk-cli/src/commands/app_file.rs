@@ -12,9 +12,9 @@ use camino::Utf8Path;
 use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
 
-use super::manifest::PackageManifest;
 use crate::beam_compiler::escape_erlang_string;
 use crate::commands::util::format_sorted_atom_list;
+use beamtalk_package::manifest::PackageManifest;
 
 /// Metadata for a class discovered during compilation.
 ///

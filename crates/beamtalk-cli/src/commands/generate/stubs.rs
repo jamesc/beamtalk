@@ -105,7 +105,8 @@ pub fn run(modules: &[String], native_dir: Option<&str>, output: &str) -> Result
     let cache_dir = Utf8PathBuf::from_path_buf(temp_cache)
         .map_err(|p| miette::miette!("Non-UTF8 temp directory: {}", p.display()))?;
 
-    let registry = crate::beam_compiler::extract_beam_specs(&beam_paths, &cache_dir)?;
+    let registry =
+        beamtalk_package::native_type_specs::extract_beam_specs(&beam_paths, &cache_dir)?;
 
     // Create output directory.
     let output_path = Utf8Path::new(output);
