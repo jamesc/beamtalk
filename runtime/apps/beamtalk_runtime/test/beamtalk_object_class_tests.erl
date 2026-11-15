@@ -129,6 +129,9 @@ teardown(_) ->
     catch
         _:_ -> ok
     end,
+    %% A raw wipe bypasses the metadata API, so flush the derived facts
+    %% (e.g. the memoised module->class map) cached against the old rows.
+    beamtalk_class_derived_cache:invalidate(),
     %% Clean up collision warnings table entries
     try
         ets:delete_all_objects(beamtalk_class_warnings)

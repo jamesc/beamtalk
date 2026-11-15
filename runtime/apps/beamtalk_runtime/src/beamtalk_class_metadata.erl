@@ -1133,7 +1133,9 @@ merge_ancestor_map(StartSuper, ReadOwnMapFun, AccSoFar) ->
         end
     end,
     Ctx = #{node_name => fun({Name, _Acc}) -> Name end},
-    case beamtalk_hierarchy:walk_or_warn({StartSuper, AccSoFar}, StepFun, flatten_ancestor_map, Ctx) of
+    case
+        beamtalk_hierarchy:walk_or_warn({StartSuper, AccSoFar}, StepFun, flatten_ancestor_map, Ctx)
+    of
         {found, Result} ->
             Result;
         {cycle, {_CycleClass, Partial}} ->

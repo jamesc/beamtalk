@@ -115,7 +115,6 @@ walk_ancestors(Node, StepFun, MaxDepth, Depth) ->
             not_found
     end.
 
-
 -doc """
 `walk_ancestors/3` bounded by `?MAX_HIERARCHY_DEPTH`, with the shared
 "possible cycle" epilogue: on depth exhaustion it logs one `?LOG_WARNING`

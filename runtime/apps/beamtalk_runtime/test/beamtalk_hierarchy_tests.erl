@@ -31,7 +31,6 @@ log(LogEvent, #{config := #{parent := Parent}}) ->
     Parent ! {hierarchy_log_event, LogEvent},
     ok.
 
-
 %%% ============================================================================
 %%% StartNode = none — walk never invokes StepFun
 %%% ============================================================================
@@ -224,7 +223,9 @@ with_captured_logs(Fun) ->
     OldLevel = maps:get(level, logger:get_primary_config()),
     ok = logger:set_primary_config(level, all),
     % elp:fixme W0023 intentional atom creation
-    HandlerId = list_to_atom("bt4892_hierarchy_" ++ integer_to_list(erlang:unique_integer([positive]))),
+    HandlerId = list_to_atom(
+        "bt4892_hierarchy_" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
     ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{parent => self()}, level => all}),
     try
         Result = Fun(),
