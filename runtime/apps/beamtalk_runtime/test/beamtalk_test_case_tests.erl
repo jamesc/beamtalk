@@ -583,11 +583,13 @@ has_mfa_token(Bin) ->
     match =:=
         re:run(Bin, "[a-z_@]+:[A-Za-z_'-]+/[0-9]+|/[0-9]+-(fun|anonymous)-", [{capture, none}]).
 
+%% Split on CRLF as well as LF: a Windows checkout (`* text=auto`) has CRLF
+%% line endings, and a trailing `\r` would make every pattern miss.
 compiler_made_name_patterns() ->
     {ok, Lines} = file:read_file(compiler_made_name_patterns_path()),
     [
         binary_to_list(L)
-     || L <- binary:split(Lines, <<"\n">>, [global]),
+     || L <- binary:split(Lines, [<<"\r\n">>, <<"\n">>], [global]),
         L =/= <<>>,
         binary:first(L) =/= $#
     ].
