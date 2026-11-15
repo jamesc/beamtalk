@@ -768,11 +768,11 @@ minting a fresh atom from reload-derived text).
 """.
 -spec was_leaf_class(binary()) -> boolean().
 was_leaf_class(SuperclassBin) ->
-    try binary_to_existing_atom(SuperclassBin, utf8) of
-        SuperclassAtom ->
-            beamtalk_class_registry:direct_subclasses(SuperclassAtom) =:= []
-    catch
-        error:badarg -> false
+    case beamtalk_text:to_existing_atom(SuperclassBin) of
+        {ok, SuperclassAtom} ->
+            beamtalk_class_registry:direct_subclasses(SuperclassAtom) =:= [];
+        error ->
+            false
     end.
 
 -doc """

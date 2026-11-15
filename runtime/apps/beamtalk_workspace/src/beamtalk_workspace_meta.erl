@@ -1330,10 +1330,9 @@ normalize_source_path(_) ->
     undefined.
 
 safe_existing_atom(Binary) ->
-    try binary_to_existing_atom(Binary, utf8) of
-        Atom -> Atom
-    catch
-        _:_ -> undefined
+    case beamtalk_text:to_existing_atom(Binary) of
+        {ok, Atom} -> Atom;
+        error -> undefined
     end.
 
 -doc """

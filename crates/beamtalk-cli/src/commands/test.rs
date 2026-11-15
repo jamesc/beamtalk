@@ -14,9 +14,7 @@
 //!
 //! Part of ADR 0014 (Beamtalk Test Framework), Phase 2.
 
-use crate::beam_compiler::{
-    BeamCompiler, ClassHierarchyContext, CompileContext, compile_source_with_bindings,
-};
+use crate::beam_compiler::{BeamCompiler, ClassHierarchyContext};
 use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -27,6 +25,9 @@ use std::time::Instant;
 use tracing::{debug, info, instrument, warn};
 
 use super::build_layout::BuildLayout;
+#[cfg(test)]
+use super::fixture::test_compile_scope;
+use super::fixture::{FixtureCompiler, FixtureScope, fixture_module_name};
 use super::lint::find_package_root;
 use super::manifest;
 use super::util;
@@ -235,16 +236,9 @@ fn test_class_in_module(
 /// on the BEAM code path during test execution, making fixture classes
 /// available without explicit `// @load` directives — similar to how all
 /// classes exist in a Smalltalk image.
-#[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s pipeline.
 fn compile_fixtures_directory(
     fixtures_dir: &Utf8Path,
-    output_dir: &Utf8Path,
-    hierarchy: &ClassHierarchyContext,
-    warnings_as_errors: bool,
-    snapshot_only: bool,
-    current_package: Option<&str>,
-    native_type_registry: Option<&std::sync::Arc<NativeTypeRegistry>>,
-    known_erlang_modules: &beamtalk_core::ffi_type_specs::KnownErlangModules,
+    fixtures: &FixtureCompiler<'_>,
 ) -> Result<Vec<String>> {
     if !fixtures_dir.is_dir() {
         return Ok(Vec::new());
@@ -277,17 +271,9 @@ fn compile_fixtures_directory(
         }
         fixtures_by_module.insert(module_name.clone(), fixture_path.clone());
 
-        let core_file = generate_core_file(
-            fixture_path,
-            &module_name,
-            output_dir,
-            hierarchy,
-            warnings_as_errors,
-            current_package,
-            native_type_registry.cloned(),
-            known_erlang_modules,
-        )
-        .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
+        let core_file = fixtures
+            .generate_core_file(fixture_path, &module_name)
+            .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
         core_files.push(core_file);
         module_names.push(module_name);
     }
@@ -295,63 +281,14 @@ fn compile_fixtures_directory(
     // Batch compile all fixture cores in a single BEAM process startup.
     // Skipped in snapshot-only mode (BT-3887): the `.beam` only ever
     // serves the code path at test execution, which never happens there.
-    if !core_files.is_empty() && !snapshot_only {
-        let compiler = BeamCompiler::new(output_dir.to_owned());
+    if !core_files.is_empty() && !fixtures.snapshot_only {
+        let compiler = BeamCompiler::new(fixtures.output_dir.to_owned());
         compiler
             .compile_batch(&core_files)
             .wrap_err("Failed to compile fixture BEAM files")?;
     }
 
     Ok(module_names)
-}
-
-/// Compile a fixture file referenced by `@load` directive.
-#[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s pipeline.
-fn compile_fixture(
-    fixture_path: &Utf8Path,
-    output_dir: &Utf8Path,
-    hierarchy: &ClassHierarchyContext,
-    warnings_as_errors: bool,
-    snapshot_only: bool,
-    current_package: Option<&str>,
-    native_type_registry: Option<&std::sync::Arc<NativeTypeRegistry>>,
-    known_erlang_modules: &beamtalk_core::ffi_type_specs::KnownErlangModules,
-) -> Result<String> {
-    let module_name = fixture_module_name(fixture_path)?;
-
-    let core_file = generate_core_file(
-        fixture_path,
-        &module_name,
-        output_dir,
-        hierarchy,
-        warnings_as_errors,
-        current_package,
-        native_type_registry.cloned(),
-        known_erlang_modules,
-    )
-    .wrap_err_with(|| format!("Failed to compile fixture '{fixture_path}'"))?;
-
-    // Snapshot-only mode (BT-3887) wants the `.core` above and nothing more.
-    if !snapshot_only {
-        let compiler = BeamCompiler::new(output_dir.to_owned());
-        compiler
-            .compile_batch(&[core_file])
-            .wrap_err_with(|| format!("Failed to compile fixture BEAM for '{fixture_path}'"))?;
-    }
-
-    Ok(module_name)
-}
-
-/// Derive a BEAM module name from a fixture file path (e.g. `counter.bt` →
-/// `bt@counter`) through the one shared path-to-module rule
-/// (`module_name_for_path`, out-of-tree root, ADR 0026), so a fixture whose
-/// name `beamtalk build` or the REPL would reject (`my-helper.bt`) is rejected
-/// here too.
-fn fixture_module_name(fixture_path: &Utf8Path) -> Result<String> {
-    use beamtalk_core::semantic_analysis::{ModuleRootKind, module_name_for_path};
-
-    module_name_for_path(fixture_path, "", ModuleRootKind::OutOfTree)
-        .map_err(|e| miette::miette!("Cannot name fixture '{fixture_path}': {e}"))
 }
 
 /// Build class → module name and class → superclass indexes from fixture files.
@@ -508,95 +445,6 @@ struct FixtureProtocolDefs {
 // Test file compilation
 // ──────────────────────────────────────────────────────────────────────────
 
-/// Compile a `.bt` source file to Core Erlang only (no BEAM compilation).
-///
-/// Returns the path to the generated `.core` file. Callers should collect
-/// multiple core files and batch-compile them with a single `BeamCompiler`
-/// call to avoid repeated Erlang VM startup overhead.
-#[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s pipeline.
-fn generate_core_file(
-    source_path: &Utf8Path,
-    module_name: &str,
-    output_dir: &Utf8Path,
-    hierarchy: &ClassHierarchyContext,
-    warnings_as_errors: bool,
-    current_package: Option<&str>,
-    native_type_registry: Option<std::sync::Arc<NativeTypeRegistry>>,
-    known_erlang_modules: &beamtalk_core::ffi_type_specs::KnownErlangModules,
-) -> Result<Utf8PathBuf> {
-    let core_file = output_dir.join(format!("{module_name}.core"));
-
-    // Set the current package so E0401/E0402 visibility checks fire
-    // when compiling test/fixture files, matching what `beamtalk build` and
-    // `beamtalk lint` enforce — the checks are gated on
-    // `current_package: Some(_)` and silently emit zero diagnostics otherwise.
-    //
-    // BT-4334: declare the same checker scope `build` does. Without
-    // `ProjectComplete`, cross-file receivers stay `Open` and their DNU/Type
-    // diagnostics are suppressed, so `test --warnings-as-errors` passes code
-    // the REPL live recheck (full image hierarchy) rejects.
-    // The pre-WS3 dependency guard starts on whenever the package has
-    // dependencies; analysis lifts it when `hierarchy` holds every
-    // dependency's extensions (ADR 0070 WS3, BT-4608), as for `build`.
-    let (knowledge_scope, has_package_dependencies) = test_compile_scope(source_path);
-    let options = beamtalk_core::CompilerOptions {
-        stdlib_mode: false,
-        allow_primitives: false,
-        warnings_as_errors,
-        current_package: current_package.map(str::to_string),
-        knowledge_scope,
-        dependency_extensions_unknown: has_package_dependencies,
-        // BT-4022: project-known Erlang modules so the `unresolved_ffi`
-        // check agrees with `build`/`lint` on hex-dep and own-`native/`
-        // modules.
-        known_erlang_modules: known_erlang_modules.clone(),
-        ..Default::default()
-    };
-
-    // ADR 0075 FFI typing: without this, `beamtalk test` type-checks every
-    // `(Erlang mod) fn:` call as Dynamic regardless of the module's real
-    // `-spec`, unlike `beamtalk build`/`beamtalk lint` — see
-    // `initialize_pipeline`'s `native_type_registry` computation.
-    let ctx = CompileContext {
-        hierarchy: hierarchy.clone(),
-        native_type_registry,
-        ..CompileContext::default()
-    };
-    compile_source_with_bindings(
-        source_path,
-        module_name,
-        &core_file,
-        &options,
-        &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
-        &ctx,
-        None,
-    )
-    .wrap_err_with(|| format!("Failed to compile '{source_path}'"))?;
-
-    Ok(core_file)
-}
-
-/// Resolve the checker scope for compiling a test/fixture file (BT-4334).
-///
-/// Mirrors what `beamtalk build` declares in `commands::build::build`: a file
-/// inside a package is analysed with project-complete knowledge (every
-/// project file's classes are present in the hierarchy, so a genuinely
-/// unresolved selector is eligible for a DNU/Type diagnostic), while a
-/// manifest-less file keeps the conservative `ModuleOnly` default. `build`
-/// additionally treats "has dependencies" as unknown-extension surface (the
-/// pre-WS3 guard), so that flag is derived from the same manifest read —
-/// without it `test` would emit diagnostics `build` suppresses (and vice
-/// versa), reopening the CLI/REPL verdict split this helper closes.
-///
-/// Returns `(knowledge_scope, has_package_dependencies)`, by the shared
-/// [`manifest::package_checker_scope`] rule.
-fn test_compile_scope(
-    source_path: &Utf8Path,
-) -> (beamtalk_core::semantic_analysis::KnowledgeScope, bool) {
-    let scope = manifest::package_checker_scope(find_package_root(source_path).as_deref());
-    (scope.knowledge_scope, scope.has_package_dependencies)
-}
-
 /// Build the effective class index for a test file: base classes + fixtures.
 ///
 /// For single-package runs, uses the merged index. For multi-package runs,
@@ -701,17 +549,12 @@ fn canonical_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
 /// Parses the file's AST to find `///` doc comments with `// =>` assertions
 /// inside ` ```beamtalk ` code blocks, compiles each expression to Core Erlang,
 /// and generates an `EUnit` wrapper module per class.
-#[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s pipeline.
 fn discover_and_compile_doc_tests(
     source_path: &Utf8Path,
-    build_dir: &Utf8Path,
-    hierarchy: &ClassHierarchyContext,
-    warnings_as_errors: bool,
-    snapshot_only: bool,
-    current_package: Option<&str>,
-    native_type_registry: Option<&std::sync::Arc<NativeTypeRegistry>>,
-    known_erlang_modules: &beamtalk_core::ffi_type_specs::KnownErlangModules,
+    fixtures: &FixtureCompiler<'_>,
 ) -> Result<Vec<CompiledDocTestResult>> {
+    let build_dir = fixtures.output_dir;
+    let snapshot_only = fixtures.snapshot_only;
     let content = fs::read_to_string(source_path)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to read '{source_path}'"))?;
@@ -725,17 +568,9 @@ fn discover_and_compile_doc_tests(
     }
 
     // Compile the containing source file so its classes are available to doc tests
-    compile_fixture(
-        source_path,
-        build_dir,
-        hierarchy,
-        warnings_as_errors,
-        snapshot_only,
-        current_package,
-        native_type_registry,
-        known_erlang_modules,
-    )
-    .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
+    fixtures
+        .compile_fixture(source_path)
+        .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
 
     let mut results = Vec::new();
 
@@ -1020,6 +855,26 @@ impl TestPipeline {
             );
         }
         package
+    }
+
+    /// The shared fixture compiler (`fixture::FixtureCompiler`) for this run,
+    /// analysing files against `hierarchy` as part of `current_package`.
+    fn fixture_compiler<'a>(
+        &'a self,
+        hierarchy: &'a ClassHierarchyContext,
+        current_package: Option<&'a str>,
+    ) -> FixtureCompiler<'a> {
+        FixtureCompiler {
+            output_dir: &self.build_dir,
+            warnings_as_errors: self.warnings_as_errors,
+            snapshot_only: self.snapshot_only,
+            native_type_registry: self.native_type_registry.as_ref(),
+            scope: FixtureScope::Package {
+                hierarchy,
+                current_package,
+                known_erlang_modules: &self.known_erlang_modules,
+            },
+        }
     }
 }
 
@@ -1618,13 +1473,7 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
     let fixtures_package = pipeline.current_package_for(&fixtures_dir);
     let precompiled = compile_fixtures_directory(
         &fixtures_dir,
-        &pipeline.build_dir,
-        &fixture_hierarchy,
-        pipeline.warnings_as_errors,
-        pipeline.snapshot_only,
-        fixtures_package.as_deref(),
-        pipeline.native_type_registry.as_ref(),
-        &pipeline.known_erlang_modules,
+        &pipeline.fixture_compiler(&fixture_hierarchy, fixtures_package.as_deref()),
     )?;
     for module_name in &precompiled {
         pipeline.precompiled_modules.insert(module_name.clone());
@@ -1913,17 +1762,10 @@ fn compile_single_test_file(
         )?;
 
         // Generate Core Erlang for the test file (BEAM compilation is batched below)
-        let core_file = generate_core_file(
-            test_file,
-            &test_class.module_name,
-            &pipeline.build_dir,
-            &file_hierarchy,
-            pipeline.warnings_as_errors,
-            test_file_package.as_deref(),
-            pipeline.native_type_registry.clone(),
-            &pipeline.known_erlang_modules,
-        )
-        .wrap_err_with(|| format!("Failed to compile test file '{test_file}'"))?;
+        let core_file = pipeline
+            .fixture_compiler(&file_hierarchy, test_file_package.as_deref())
+            .generate_core_file(test_file, &test_class.module_name)
+            .wrap_err_with(|| format!("Failed to compile test file '{test_file}'"))?;
         pending_test_cores.push(core_file);
 
         // EUnit wrappers are not generated; beamtalk_test_runner:run_classes/2
@@ -1938,13 +1780,7 @@ fn compile_single_test_file(
     // Discover doc tests in the same file
     let doc_results = discover_and_compile_doc_tests(
         test_file,
-        &pipeline.build_dir,
-        &file_hierarchy,
-        pipeline.warnings_as_errors,
-        pipeline.snapshot_only,
-        test_file_package.as_deref(),
-        pipeline.native_type_registry.as_ref(),
-        &pipeline.known_erlang_modules,
+        &pipeline.fixture_compiler(&file_hierarchy, test_file_package.as_deref()),
     )?;
     for dr in doc_results {
         // Doc test EUnit wrappers are still generated but not compiled here.
@@ -2036,16 +1872,9 @@ fn resolve_load_directives(
             );
         }
         let fixture_package = pipeline.current_package_for(&fixture_path);
-        let module_name = compile_fixture(
-            &fixture_path,
-            &pipeline.build_dir,
-            hierarchy,
-            pipeline.warnings_as_errors,
-            pipeline.snapshot_only,
-            fixture_package.as_deref(),
-            pipeline.native_type_registry.as_ref(),
-            &pipeline.known_erlang_modules,
-        )?;
+        let module_name = pipeline
+            .fixture_compiler(hierarchy, fixture_package.as_deref())
+            .compile_fixture(&fixture_path)?;
         pipeline.all_fixture_modules.push(module_name);
     }
 
@@ -3180,7 +3009,8 @@ mod tests {
         fs::create_dir_all(&src_dir).unwrap();
         let file = src_dir.join("my_test.bt");
         fs::write(&file, "").unwrap();
-        let (scope, has_deps) = test_compile_scope(&file);
+        let scope = test_compile_scope(&file);
+        let (scope, has_deps) = (scope.knowledge_scope, scope.has_package_dependencies);
         assert_eq!(scope, KnowledgeScope::ProjectComplete);
         assert!(!has_deps);
 
@@ -3196,7 +3026,8 @@ mod tests {
         fs::create_dir_all(&src_dir).unwrap();
         let file = src_dir.join("my_test.bt");
         fs::write(&file, "").unwrap();
-        let (scope, has_deps) = test_compile_scope(&file);
+        let scope = test_compile_scope(&file);
+        let (scope, has_deps) = (scope.knowledge_scope, scope.has_package_dependencies);
         assert_eq!(scope, KnowledgeScope::ProjectComplete);
         assert!(has_deps);
 
@@ -3204,7 +3035,8 @@ mod tests {
         let (_temp, dir) = temp_utf8_dir();
         let file = dir.join("loose.bt");
         fs::write(&file, "").unwrap();
-        let (scope, has_deps) = test_compile_scope(&file);
+        let scope = test_compile_scope(&file);
+        let (scope, has_deps) = (scope.knowledge_scope, scope.has_package_dependencies);
         assert_eq!(scope, KnowledgeScope::ModuleOnly);
         assert!(!has_deps);
     }

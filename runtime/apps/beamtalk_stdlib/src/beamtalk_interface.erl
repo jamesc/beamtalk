@@ -668,8 +668,8 @@ handle_erlang_help(ModuleArg) ->
         'erlangHelp:',
         <<"erlangHelp: expects a binary module name">>
     ),
-    try binary_to_existing_atom(ModuleBin, utf8) of
-        Module ->
+    case beamtalk_text:to_existing_atom(ModuleBin) of
+        {ok, Module} ->
             case beamtalk_erlang_help:format_module_help(Module) of
                 {ok, Text} ->
                     Text;
@@ -684,9 +684,8 @@ handle_erlang_help(ModuleArg) ->
                         <<"Check the module name and ensure it is available on the code path.">>
                     ),
                     beamtalk_error:raise(Err2)
-            end
-    catch
-        error:badarg ->
+            end;
+        error ->
             Err = beamtalk_error:new(not_found, 'Beamtalk'),
             Err1 = beamtalk_error:with_message(
                 Err,
@@ -711,8 +710,8 @@ handle_erlang_help(ModuleArg, SelectorArg) ->
     (is_atom(SelectorArg) orelse is_binary(SelectorArg)) orelse
         beamtalk_error:raise_type_error_message('Beamtalk', 'erlangHelp:selector:', Message),
     FunctionBin = to_binary(SelectorArg),
-    try binary_to_existing_atom(ModuleBin, utf8) of
-        Module ->
+    case beamtalk_text:to_existing_atom(ModuleBin) of
+        {ok, Module} ->
             case beamtalk_erlang_help:format_function_help(Module, FunctionBin) of
                 {ok, Text} ->
                     Text;
@@ -731,9 +730,8 @@ handle_erlang_help(ModuleArg, SelectorArg) ->
                         ])
                     ),
                     beamtalk_error:raise(Err2)
-            end
-    catch
-        error:badarg ->
+            end;
+        error ->
             Err = beamtalk_error:new(not_found, 'Beamtalk'),
             Err1 = beamtalk_error:with_message(
                 Err,
@@ -750,14 +748,13 @@ handle_erlang_help(ModuleArg, SelectorArg) ->
 -spec handle_class_named(binary() | atom() | term()) ->
     beamtalk_object() | 'nil' | {error, #beamtalk_error{}}.
 handle_class_named(ClassName) when is_binary(ClassName) ->
-    try
-        ClassAtom = binary_to_existing_atom(ClassName, utf8),
-        handle_class_named(ClassAtom)
-    catch
+    case beamtalk_text:to_existing_atom(ClassName) of
+        {ok, ClassAtom} ->
+            handle_class_named(ClassAtom);
         %% The full tag atom is not interned. It may still be a metaclass tag
         %% (`<<"Foo class">>`) whose base class is live — decode on the binary
         %% so resolution does not depend on the tag atom's interning history.
-        error:badarg ->
+        error ->
             resolve_metaclass_tag(ClassName)
     end;
 handle_class_named(ClassName) when is_atom(ClassName) ->
@@ -846,8 +843,8 @@ resolve_metaclass_tag(Tag) ->
             nil;
         true ->
             BaseName = beamtalk_class_registry:class_display_name(Tag),
-            try binary_to_existing_atom(BaseName, utf8) of
-                BaseClass ->
+            case beamtalk_text:to_existing_atom(BaseName) of
+                {ok, BaseClass} ->
                     case beamtalk_class_registry:whereis_class(BaseClass) of
                         undefined ->
                             nil;
@@ -857,9 +854,9 @@ resolve_metaclass_tag(Tag) ->
                                 class_mod = beamtalk_metaclass_bt,
                                 pid = Pid
                             }
-                    end
-            catch
-                error:badarg -> nil
+                    end;
+                error ->
+                    nil
             end
     end.
 
@@ -1022,11 +1019,9 @@ resolve_class_name({beamtalk_string, Name}) when is_binary(Name) ->
     %% BT-4173: a String class name arrives tagged — unwrap to bytes.
     resolve_class_name(Name);
 resolve_class_name(Name) when is_binary(Name) ->
-    try
-        {ok, binary_to_existing_atom(Name, utf8)}
-    catch
-        error:badarg ->
-            {error, make_class_not_found_error(Name)}
+    case beamtalk_text:to_existing_atom(Name) of
+        {ok, _} = Ok -> Ok;
+        error -> {error, make_class_not_found_error(Name)}
     end;
 resolve_class_name(_Other) ->
     Error0 = beamtalk_error:new(type_error, 'Beamtalk'),
@@ -1038,10 +1033,10 @@ ensure_atom(A) when is_atom(A) -> A;
 %% BT-4173: a String selector arrives tagged — unwrap to bytes.
 ensure_atom({beamtalk_string, B}) when is_binary(B) -> ensure_atom(B);
 ensure_atom(B) when is_binary(B) ->
-    try
-        binary_to_existing_atom(B, utf8)
-    catch
-        error:badarg ->
+    case beamtalk_text:to_existing_atom(B) of
+        {ok, Atom} ->
+            Atom;
+        error ->
             Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
             Err1 = beamtalk_error:with_selector(Err0, 'help:selector:'),
             {error,
@@ -1456,10 +1451,9 @@ instance_selectors(Methods) ->
             case maps:get(side, Method, undefined) of
                 instance ->
                     SelBin = maps:get(selector, Method),
-                    try
-                        {true, binary_to_existing_atom(SelBin, utf8)}
-                    catch
-                        error:badarg -> false
+                    case beamtalk_text:to_existing_atom(SelBin) of
+                        {ok, Sel} -> {true, Sel};
+                        error -> false
                     end;
                 _ ->
                     false

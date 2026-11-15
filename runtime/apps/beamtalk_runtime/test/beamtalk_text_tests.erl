@@ -5,7 +5,8 @@
 -module(beamtalk_text_tests).
 
 -moduledoc """
-EUnit tests for `beamtalk_text:unwrap/1` and `unwrap_or_raise/4` (BT-4686).
+EUnit tests for `beamtalk_text:unwrap/1`, `unwrap_or_raise/4` (BT-4686) and
+`to_existing_atom/1`.
 """.
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
@@ -69,3 +70,47 @@ unwrap_or_raise_message_sets_message_and_no_hint_test() ->
             ?assertEqual({beamtalk_string, <<"x: expects text">>}, element(5, Err)),
             ?assertEqual(undefined, element(6, Err))
     end.
+
+%%====================================================================
+%% to_existing_atom/1
+%%====================================================================
+
+to_existing_atom_binary_test() ->
+    ?assertEqual({ok, lists}, beamtalk_text:to_existing_atom(<<"lists">>)).
+
+to_existing_atom_charlist_test() ->
+    ?assertEqual({ok, lists}, beamtalk_text:to_existing_atom("lists")).
+
+to_existing_atom_tagged_string_test() ->
+    ?assertEqual({ok, lists}, beamtalk_text:to_existing_atom({beamtalk_string, <<"lists">>})).
+
+to_existing_atom_unknown_name_is_error_test() ->
+    ?assertEqual(error, beamtalk_text:to_existing_atom(<<"xyzzy_text_never_interned_1">>)),
+    ?assertEqual(error, beamtalk_text:to_existing_atom("xyzzy_text_never_interned_2")),
+    ?assertEqual(
+        error, beamtalk_text:to_existing_atom({beamtalk_string, <<"xyzzy_text_never_interned_3">>})
+    ).
+
+to_existing_atom_empty_is_error_test() ->
+    ?assertEqual(error, beamtalk_text:to_existing_atom(<<>>)),
+    ?assertEqual(error, beamtalk_text:to_existing_atom([])),
+    ?assertEqual(error, beamtalk_text:to_existing_atom({beamtalk_string, <<>>})).
+
+to_existing_atom_non_text_is_error_test() ->
+    ?assertEqual(error, beamtalk_text:to_existing_atom(lists)),
+    ?assertEqual(error, beamtalk_text:to_existing_atom(42)),
+    ?assertEqual(error, beamtalk_text:to_existing_atom({beamtalk_string, not_binary})),
+    %% malformed UTF-8 is a badarg, not a crash
+    ?assertEqual(error, beamtalk_text:to_existing_atom(<<255, 254>>)).
+
+to_existing_atom_never_creates_an_atom_test() ->
+    Name = <<"xyzzy_text_atom_flood_">>,
+    Before = erlang:system_info(atom_count),
+    lists:foreach(
+        fun(N) ->
+            Bin = <<Name/binary, (integer_to_binary(N))/binary>>,
+            error = beamtalk_text:to_existing_atom(Bin)
+        end,
+        lists:seq(1, 200)
+    ),
+    ?assert(erlang:system_info(atom_count) - Before < 50).

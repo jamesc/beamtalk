@@ -62,10 +62,10 @@ Falls through to type definition lookup when no exported function matches.
 format_function_help(Module, FunctionBin) when is_binary(FunctionBin) ->
     %% Binary name — atom may not exist yet (user typo).
     %% Try atom first, fall back to binary-only type search.
-    try binary_to_existing_atom(FunctionBin, utf8) of
-        Function -> format_function_help(Module, Function)
-    catch
-        error:badarg ->
+    case beamtalk_text:to_existing_atom(FunctionBin) of
+        {ok, Function} ->
+            format_function_help(Module, Function);
+        error ->
             format_type_by_name_or_not_found(Module, FunctionBin)
     end;
 format_function_help(Module, Function) when is_atom(Function) ->
@@ -463,10 +463,9 @@ format_specs_list(Module, Specs) ->
                     is_atom(Name) ->
                         {ok, Name};
                     is_binary(Name) ->
-                        try
-                            {ok, binary_to_existing_atom(Name, utf8)}
-                        catch
-                            error:badarg -> skip
+                        case beamtalk_text:to_existing_atom(Name) of
+                            {ok, _} = Ok -> Ok;
+                            error -> skip
                         end;
                     true ->
                         skip

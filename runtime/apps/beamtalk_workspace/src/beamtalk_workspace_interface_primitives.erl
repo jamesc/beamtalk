@@ -537,11 +537,7 @@ revert_method(ClassNameBin, SelectorBin, SideArg) when
 %% caller can reject owner-supplied junk without growing the atom table.
 -spec existing_selector_atom(binary()) -> {ok, atom()} | error.
 existing_selector_atom(SelectorBin) ->
-    try
-        {ok, binary_to_existing_atom(SelectorBin, utf8)}
-    catch
-        error:badarg -> error
-    end.
+    beamtalk_text:to_existing_atom(SelectorBin).
 
 %% Pull the `(class, selector, side)` triple out of a ChangeEntry. The argument
 %% is normally the `$beamtalk_class => ChangeEntry`-tagged map produced by the
@@ -1075,10 +1071,9 @@ class_object_for(ClassNameBin) ->
 
 -spec safe_existing_atom(binary()) -> atom() | undefined.
 safe_existing_atom(Bin) ->
-    try binary_to_existing_atom(Bin, utf8) of
-        Atom -> Atom
-    catch
-        error:badarg -> undefined
+    case beamtalk_text:to_existing_atom(Bin) of
+        {ok, Atom} -> Atom;
+        error -> undefined
     end.
 
 -spec revert_type_error(binary()) -> #beamtalk_error{}.
@@ -2028,10 +2023,9 @@ Extract the base class name from a class tag (e.g. 'Counter class' -> 'Counter')
 -spec base_class_name(atom()) -> atom().
 base_class_name(Tag) ->
     Bin = beamtalk_runtime_api:class_display_name(Tag),
-    try
-        binary_to_existing_atom(Bin, utf8)
-    catch
-        error:badarg -> Tag
+    case beamtalk_text:to_existing_atom(Bin) of
+        {ok, Atom} -> Atom;
+        error -> Tag
     end.
 
 -doc """

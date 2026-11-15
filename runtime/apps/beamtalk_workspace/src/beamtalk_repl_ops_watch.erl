@@ -48,12 +48,11 @@ invalid/unknown pid.
 -spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
     beamtalk_repl_ops:op_result().
 handle_term(<<"pid-stats">>, Params, _Msg, _SessionPid) ->
-    PidStr = binary_to_list(maps:get(<<"actor">>, Params, <<>>)),
-    case beamtalk_repl_ops_actors:validate_actor_pid(PidStr) of
-        {ok, Pid} ->
+    case beamtalk_repl_params:actor_pid(Params) of
+        {ok, Pid, _PidBin} ->
             {value, pid_stats(Pid)};
-        {error, Reason} ->
-            {error, invalid_pid_error(Reason, PidStr)}
+        {error, _} = Err ->
+            Err
     end.
 
 %%% Internal helpers
@@ -108,16 +107,6 @@ dead_stats(PidBin) ->
 -spec format_mfa(undefined | {atom(), atom(), arity()}) -> binary() | nil.
 format_mfa(Mfa) ->
     beamtalk_log_format:format_mfa_or(Mfa, nil).
-
--spec invalid_pid_error(atom(), string()) -> beamtalk_error:error().
-invalid_pid_error(Reason, PidStr) ->
-    PidBin = list_to_binary(PidStr),
-    beamtalk_repl_errors:make(
-        Reason,
-        'Actor',
-        iolist_to_binary([<<"Invalid actor PID: ">>, PidBin]),
-        <<"Use :actors to list valid actor PIDs.">>
-    ).
 
 %%====================================================================
 %% Op descriptors for dynamic describe

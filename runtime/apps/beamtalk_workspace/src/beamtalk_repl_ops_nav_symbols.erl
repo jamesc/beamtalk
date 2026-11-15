@@ -208,15 +208,10 @@ methods_for_class(ClassName) ->
 
 -spec method_row(atom(), boolean(), atom()) -> map().
 method_row(ClassName, ClassSide, Selector) ->
-    Line =
-        case beamtalk_xref:method_info(ClassName, ClassSide, Selector) of
-            #{line := L} when is_integer(L), L > 0 -> L;
-            _ -> null
-        end,
     #{
         <<"selector">> => atom_to_binary(Selector, utf8),
         <<"class_side">> => ClassSide,
-        <<"line">> => Line
+        <<"line">> => beamtalk_repl_row:method_line(ClassName, ClassSide, Selector)
     }.
 
 -spec class_header_line([map()]) -> pos_integer() | null.

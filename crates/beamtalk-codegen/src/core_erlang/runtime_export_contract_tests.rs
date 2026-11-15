@@ -274,6 +274,18 @@ fn count_args(text: &str) -> Option<usize> {
                 chars.next();
                 saw_arg = true;
             }
+            // Erlang comparison operators in the same eval strings: `==`, `=<`,
+            // `=:=`, `=/=`, `/=` and `>=` are operators, not brackets.
+            '=' if matches!(chars.peek(), Some('=' | '<' | ':' | '/')) => {
+                if matches!(chars.next(), Some(':' | '/')) && chars.peek() == Some(&'=') {
+                    chars.next();
+                }
+                saw_arg = true;
+            }
+            '/' | '>' if chars.peek() == Some(&'=') => {
+                chars.next();
+                saw_arg = true;
+            }
             '(' | '[' | '{' | '<' => {
                 saw_arg = true;
                 depth += 1;
@@ -776,6 +788,12 @@ fn reports_a_missing_function_and_a_wrong_arity() {
 
 #[test]
 fn counts_top_level_arguments_only() {
+    // Erlang comparison operators in an eval string are not brackets.
+    assert_eq!(
+        count_args("A >= B, C =< D, E =:= F, G =/= H, I /= J, K == L)"),
+        Some(6)
+    );
+    assert_eq!(count_args("A >= B)"), Some(1));
     assert_eq!(count_args(")"), Some(0));
     assert_eq!(count_args("Self)"), Some(1));
     assert_eq!(count_args("Self, [A, B], {C, D})"), Some(3));
