@@ -38,7 +38,20 @@ impl BodyKind {
     /// variable its tail reads — every kind except `do:`, `collect:` and
     /// `inject:into:`, whose accumulator is the body's own value.
     pub(in crate::core_erlang::control_flow) fn binds_predicate_var(&self) -> bool {
-        !matches!(self, Self::FoldlDo | Self::FoldlCollect | Self::FoldlInject)
+        // Exhaustive on purpose: a new `BodyKind` must decide this (it moves
+        // the `Pred` temp counter, and so the generated `.core`).
+        match self {
+            Self::FoldlDo | Self::FoldlCollect | Self::FoldlInject => false,
+            Self::FoldlFilter { .. }
+            | Self::FoldlBoolPredicate { .. }
+            | Self::FoldlDetect { .. }
+            | Self::FoldlCount
+            | Self::FoldlTakeWhile { .. }
+            | Self::FoldlDropWhile { .. }
+            | Self::FoldlPartition { .. }
+            | Self::FoldlGroupBy { .. }
+            | Self::FoldlSort { .. } => true,
+        }
     }
 
     /// Pushes this kind's accumulator tail (exactly one
