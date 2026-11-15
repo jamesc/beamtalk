@@ -1658,6 +1658,23 @@ fn test_bt4075_self_error_in_class_method_guards_class_side_send() {
 }
 
 #[test]
+fn test_bt4924_parenthesized_self_error_in_class_method_is_still_class_self() {
+    // `(self) error:` is classified by the same paren-transparent rule as
+    // `self error:` (`Expression::is_self`), so in a class method it is the
+    // guarded class-side send, never the bare instance raise.
+    let code = codegen("Object subclass: Probe\n  class boom => (self) error: \"x\"\n");
+    let body = method_body(&code, "class_boom");
+    assert_has(
+        "class-method `(self) error:` must be guarded",
+        body,
+        &[
+            "'beamtalk_class_dispatch':'class_object_understands'(",
+            "'beamtalk_class_dispatch':'class_self_send'(",
+        ],
+    );
+}
+
+#[test]
 fn test_bt4075_actor_error_on_untyped_receiver_replies_with_its_answer() {
     // A class object's class-side `error:` answers a value, so an actor
     // method ending in `obj error: msg` must reply with it (no bare
