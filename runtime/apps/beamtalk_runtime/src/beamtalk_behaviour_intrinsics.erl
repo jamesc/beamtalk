@@ -1557,7 +1557,7 @@ Recompile from sourceFile and hot-swap the BEAM module.
 
 ADR 0040 Phase 2.
 Raises an error if sourceFile is nil (stdlib / dynamic class).
-Delegates compilation to beamtalk_repl_eval:reload_class_file/1 via
+Delegates compilation to beamtalk_repl_loader:reload_class_file/1 via
 erlang:apply/3 to avoid a compile-time dep from beamtalk_runtime to
 beamtalk_workspace (follows the beamtalk_actor_registry registered-name pattern).
 """.

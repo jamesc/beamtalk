@@ -32,7 +32,7 @@ introspection; the code moved verbatim.
   and `beamtalk_selector_refactor`.
 * **Workspace layer.** The runtime application cannot depend on
   `beamtalk_workspace` or `beamtalk_compiler` at compile time (they sit
-  above it). Calls into `beamtalk_repl_eval` (`rewrite_sites/2`,
+  above it). Calls into the registered workspace callback module `beamtalk_workspace_callback_impl` (`rewrite_sites/2`,
   `validate_sites/2`, `emit_rewrite_change_entry/2`, `remove_method/4`,
   `emit_remove_change_entry/5`, `emit_extension_remove_change_entry/7`,
   `compile_method/6`, `precheck_method/4`) go through

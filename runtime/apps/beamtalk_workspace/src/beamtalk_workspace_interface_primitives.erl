@@ -247,7 +247,7 @@ reference rewrite — every existing call site still names the class
 correctly, because the class's own identity never changes).
 
 Delegates classification, span resolution, and ChangeLog bookkeeping to
-`beamtalk_repl_loader_rewrite:move_class/2` (via `beamtalk_repl_eval:move_class/2`)
+`beamtalk_repl_loader_rewrite:move_class/2`
 — see that function's doc for the full refusal table (`no_source_file` for a
 dynamic class, stdlib/dependency refusal mirroring `renameTo:`) and for why
 this never needs to reinstall or re-resolve a class object: the class's own
@@ -961,7 +961,7 @@ retire_reverted_remove_class_entry(ClassNameBin, Entry) ->
 
 -doc """
 Undo a `'rename-class'`/`'rename-method'` entry (ADR 0114):
-delegates the actual multi-site reverse-splice to `beamtalk_repl_eval:
+delegates the actual multi-site reverse-splice to `beamtalk_repl_loader_rewrite:
 revert_rename_sites/1` (see that function's own doc for the full mechanism —
 locating each site's current position, resolving its owning class, and, for
 `'rename-class'`, restoring the class's registry identity), then retires the

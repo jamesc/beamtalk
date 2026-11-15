@@ -31,17 +31,17 @@ module loading to beamtalk_repl_loader.
 
 %% ADR 0095 Phase 2 — stateless evaluate-in-context for the Inspector's
 %% value `evaluate:`. Called from beamtalk_inspector
-%% (beamtalk_runtime) via beamtalk_workspace_callback.
+%% (beamtalk_runtime) via beamtalk_workspace_callback_impl.
 -export([eval_with_self/2]).
 
 %% ADR 0082 Phase 1 — stateless live method patch backing
 %% `Behaviour compile:source:' / `tryCompile:source:'. Called via
-%% beamtalk_workspace_callback from beamtalk_class_refactor.
+%% beamtalk_workspace_callback_impl from beamtalk_class_refactor.
 -export([compile_method/4, compile_method/6, compile_method/7]).
 
 %% ADR 0105 Phase 3 — stateless pre-save advisory precheck backing
 %% `Behaviour precheckCompile:source:'. Called via
-%% beamtalk_workspace_callback from beamtalk_class_refactor.
+%% beamtalk_workspace_callback_impl from beamtalk_class_refactor.
 -export([precheck_method/4]).
 
 %% ADR 0082 revert completeness — remove a live method (the
