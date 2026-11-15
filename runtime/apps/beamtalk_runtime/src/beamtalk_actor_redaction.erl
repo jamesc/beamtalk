@@ -286,10 +286,10 @@ redact_msg(Msg, Selectors) ->
     redact_request(Msg, Selectors).
 
 -spec redact_request(term(), [atom()]) -> term().
-redact_request({'$beamtalk_wire', V, Kind, Sel, WireArgs, Ctx}, Ss) when is_atom(Sel) ->
-    {'$beamtalk_wire', V, Kind, Sel, redact_args(Sel, WireArgs, Ss), Ctx};
-redact_request({'$beamtalk_wire', V, async, Sel, WireArgs, Fut, Ctx}, Ss) when is_atom(Sel) ->
-    {'$beamtalk_wire', V, async, Sel, redact_args(Sel, WireArgs, Ss), Fut, Ctx};
+redact_request({?BT_WIRE_TAG, V, Kind, Sel, WireArgs, Ctx}, Ss) when is_atom(Sel) ->
+    {?BT_WIRE_TAG, V, Kind, Sel, redact_args(Sel, WireArgs, Ss), Ctx};
+redact_request({?BT_WIRE_TAG, V, async, Sel, WireArgs, Fut, Ctx}, Ss) when is_atom(Sel) ->
+    {?BT_WIRE_TAG, V, async, Sel, redact_args(Sel, WireArgs, Ss), Fut, Ctx};
 redact_request({cast, Sel, Args, Ctx}, Ss) when is_atom(Sel), is_list(Args) ->
     {cast, Sel, redact_args(Sel, Args, Ss), Ctx};
 redact_request({cast, Sel, Args}, Ss) when is_atom(Sel), is_list(Args) ->

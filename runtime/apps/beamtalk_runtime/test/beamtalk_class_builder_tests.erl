@@ -971,6 +971,41 @@ selector_arity_uncovered_binary_chars_test() ->
     ?assertEqual(1, beamtalk_class_builder:selector_arity(',')),
     ?assertEqual(1, beamtalk_class_builder:selector_arity('\\')).
 
+%% BT-4901: the binary-selector character set and selector shapes are shared
+%% with the compiler through `selector_shape_conformance.json`
+%% (crates/beamtalk-core/src/source_analysis/mod.rs reads the same file). Edit
+%% the JSON only: both sides pick it up.
+selector_shape_conformance_test_() ->
+    Corpus = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "selector_shape_conformance.json"
+    ]),
+    #{<<"binary_chars">> := Chars, <<"selectors">> := Selectors} = Corpus,
+    ?assertNotEqual([], Chars),
+    ?assertNotEqual([], Selectors),
+    CharTests = [
+        {"char " ++ [C], fun() ->
+            Expected =
+                case IsBinary of
+                    true -> 1;
+                    false -> 0
+                end,
+            ?assertEqual(Expected, beamtalk_class_builder:selector_arity(list_to_atom([C])))
+        end}
+     || #{<<"char">> := <<C/utf8>>, <<"binary">> := IsBinary} <- Chars
+    ],
+    SelectorTests = [
+        {binary_to_list(Sel), fun() ->
+            ?assertEqual(Arity, beamtalk_class_builder:selector_arity(binary_to_atom(Sel)))
+        end}
+     || #{<<"selector">> := Sel, <<"arity">> := Arity} <- Selectors, Arity =/= null
+    ],
+    CharTests ++ SelectorTests.
+
 %% class_method_fun_arity/2 — the single class-method arity rule.
 class_method_fun_arity_match_test() ->
     ?assertEqual(ok, beamtalk_class_builder:class_method_fun_arity(answer, fun(_Self) -> 42 end)),

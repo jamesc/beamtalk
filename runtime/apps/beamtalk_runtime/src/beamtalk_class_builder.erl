@@ -738,7 +738,13 @@ count_colons(Chars) ->
         Chars
     ).
 
--doc "Mirror of the compiler's is_binary_selector_char for selector arity.".
+-doc """
+Mirror of the compiler's `is_binary_selector_char` for selector arity.
+
+The two sets are pinned together by `selector_shape_conformance.json`
+(read by `beamtalk_class_builder_tests` and by the compiler's
+`selector_shape_conformance_tests`).
+""".
 -spec is_binary_selector_char(char()) -> boolean().
 is_binary_selector_char($+) -> true;
 is_binary_selector_char($-) -> true;
