@@ -2599,7 +2599,7 @@ do_remove_class_method(Selector, #class_state{name = ClassName} = State) ->
         {ok, Source} ->
             beamtalk_class_publish:put_method_xref(ClassName, true, Selector, Source);
         error ->
-            beamtalk_class_publish:safe_xref(fun() ->
+            beamtalk_extensions:safe_xref(fun() ->
                 beamtalk_xref:purge_method(ClassName, true, Selector)
             end)
     end,

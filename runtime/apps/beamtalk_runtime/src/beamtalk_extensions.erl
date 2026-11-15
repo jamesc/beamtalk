@@ -783,20 +783,14 @@ index_extension_xref(Class, Selector, Source) ->
 -doc """
 Run a `beamtalk_xref` gen_server call best-effort.
 
-The xref index is advisory tooling state; extension register/unregister must
-not crash if it is unavailable. Catches the `noproc`/`{noproc, _}` /
-`{normal, _}` exits raised by `gen_server:call/2` against a missing or
-restarting `beamtalk_xref`, and the `undefined` returned for a name with no
-registered pid, degrading to a no-op. Other exits/errors propagate.
+The xref index is advisory tooling state; class hot patches and extension
+register/unregister must not crash if it is unavailable. Tolerates a missing
+(`noproc`), unreachable (`nodedown`) or stopping (`normal`/`shutdown`)
+`beamtalk_xref` via `beamtalk_call_failure:tolerate_gone/3`, degrading to a
+no-op. Other exits/errors propagate. The one `safe_xref/1`; callers in other
+modules use this one.
 """.
 -spec safe_xref(fun(() -> ok)) -> ok.
 safe_xref(Fun) ->
     %% bt-catcher-audit: not-applicable-other-process - Fun is a gen_server call to beamtalk_xref
-    try Fun() of
-        ok -> ok
-    catch
-        exit:{noproc, _} -> ok;
-        exit:noproc -> ok;
-        exit:{normal, _} -> ok;
-        exit:{{nodedown, _}, _} -> ok
-    end.
+    beamtalk_call_failure:tolerate_gone(Fun, ok, #{stopping => true}).
