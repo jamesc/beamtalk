@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Module names come from one path rule (BT-4868).**
+  - Changed: test files are named `bt@{package}@test@{path}` by `beamtalk test` and the REPL alike (before, `beamtalk test` named them after the class), and the REPL now rejects a path segment outside `[A-Za-z0-9_]` the way `beamtalk build` does. A packaged workspace that loaded `my-class.bt` or `foo.v2.bt` now gets `invalid_path_segment`.
+  - Do: rename such files to letters, digits and underscores. A loose test file outside a package's `test/` is named `bt@{stem}`, so two with the same stem in different directories collide; rename one.
+
 ## 0.5.0 — 2026-11-15
 
 ### Highlights

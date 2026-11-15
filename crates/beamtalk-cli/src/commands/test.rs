@@ -1740,8 +1740,10 @@ fn discover_and_compile_tests(pipeline: &mut TestPipeline) -> Result<()> {
 /// claims, either by BEAM module name or by class name within one package.
 ///
 /// Module names are path-based (`bt@{package}@test@{path}`, BT-4868), so two
-/// distinct files never share one; the module check only guards against the
-/// same file being compiled twice. Two files in one package declaring the same
+/// files in a package never share one. Files outside any package's `test/` are
+/// named by stem alone (`bt@{stem}`), so two of those with the same stem in
+/// different directories do collide, and the module check rejects the second.
+/// Two files in one package declaring the same
 /// `TestCase` subclass still collide on the class itself (the second load
 /// would replace the first, and its tests would never run, with counts
 /// depending on discovery order — BT-4350), so that is rejected too. The same
@@ -1782,8 +1784,10 @@ fn check_duplicate_test_module(
 }
 
 /// The BEAM module name of a test file: `bt@{package}@test@{path}` for a file
-/// under its package's `test/` directory, `bt@{stem}` for any other file
-/// (outside a package, or outside `test/`).
+/// under its package's `test/` directory, `bt@{package}@{path}` for one under
+/// its `src/` (the name `beamtalk build` and the REPL give it), `bt@{stem}` for
+/// any other file (outside a package, or outside both roots). Like the REPL
+/// loader, `src/` is tried first.
 ///
 /// Delegates to `beamtalk_core`'s `module_name_for_path`, the rule `beamtalk
 /// build` and the REPL loader's compiler-port command use (ADR 0026), so a
@@ -1803,10 +1807,15 @@ fn test_file_module_name(
             .map(|name| (root, name.as_str()))
     });
     let (relative, package_name, root_kind) = match &package {
-        Some((root, name)) => match file.strip_prefix(root.join("test")) {
-            Ok(relative) => (relative, *name, ModuleRootKind::Test),
-            Err(_) => (file.as_path(), *name, ModuleRootKind::OutOfTree),
-        },
+        Some((root, name)) => {
+            if let Ok(relative) = file.strip_prefix(root.join("src")) {
+                (relative, *name, ModuleRootKind::Src)
+            } else if let Ok(relative) = file.strip_prefix(root.join("test")) {
+                (relative, *name, ModuleRootKind::Test)
+            } else {
+                (file.as_path(), *name, ModuleRootKind::OutOfTree)
+            }
+        }
         None => (file.as_path(), "", ModuleRootKind::OutOfTree),
     };
     module_name_for_path(relative, package_name, root_kind)
@@ -1845,6 +1854,14 @@ fn compile_single_test_file(
     // and the REPL.
     let test_file_package = pipeline.current_package_for(test_file);
     let module_name = test_file_module_name(test_file, &pipeline.pkg_root_to_name)?;
+    // A loose test file (`bt@{stem}`) can share a name with a fixture module;
+    // the later `.core`/`.beam` would silently overwrite the earlier one.
+    if pipeline.all_fixture_modules.contains(&module_name) {
+        miette::bail!(
+            "Test file '{test_file}' compiles to module '{module_name}', which a fixture \
+             already uses. Rename or move one of the files."
+        );
+    }
     for tc in &mut test_classes {
         tc.module_name.clone_from(&module_name);
     }
@@ -2944,6 +2961,14 @@ mod tests {
                 expected
             );
         }
+        // A file under src/ is named as `beamtalk build` and the REPL name it.
+        fs::create_dir_all(pkg_a.join("src")).unwrap();
+        let in_src = pkg_a.join("src/foo_test.bt");
+        fs::write(&in_src, "").unwrap();
+        assert_eq!(
+            test_file_module_name(&in_src, &pkg_root_to_name).unwrap(),
+            "bt@pkg_a@foo_test"
+        );
         // Same answer with one package in scope: no run-shape-dependent prefix.
         let single: HashMap<Utf8PathBuf, String> =
             [(canonical_path(&pkg_a), "pkg_a".to_string())].into();
