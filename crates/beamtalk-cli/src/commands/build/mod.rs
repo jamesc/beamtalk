@@ -166,6 +166,10 @@ pub(crate) fn prepare_options(
     let scope =
         beamtalk_package::manifest::PackageCheckerScope::for_manifest(env.full_manifest.as_ref());
     options.dependency_extensions_unknown = scope.has_package_dependencies;
+    // ADR 0070 Phase 2: a `pkg@Class` qualifier must name a declared
+    // dependency, the package itself or the stdlib. `None` (no manifest)
+    // skips the check.
+    options.known_packages.clone_from(&scope.known_packages);
     if Utf8Path::new(path).is_dir() {
         options.knowledge_scope = scope.knowledge_scope;
     }

@@ -304,7 +304,7 @@ fn compile_dependency_with_context(
     otp_specs: &OtpTypeSpecs,
 ) -> Result<(Utf8PathBuf, HashMap<String, String>)> {
     let ebin_path = BuildLayout::new(project_root).dep_ebin_dir(dep_name);
-    let options = &dependency_compile_options(options, dep_name);
+    let options = &dependency_compile_options(options, dep_name, dep_root);
 
     // Create the ebin directory
     std::fs::create_dir_all(&ebin_path)
@@ -474,12 +474,19 @@ fn compile_dependency_with_context(
 /// `InternalVerifier` warning (a compiler bug, never suppressed). The
 /// downstream `--warnings-as-errors` is capped the same way, like cargo's
 /// `--cap-lints`: a dependency's warnings never fail someone else's build.
+///
+/// Its `pkg@Class` qualifiers (ADR 0070 Phase 2, BT-4921) are checked against
+/// its own manifest's package set, never the downstream package's: `b`, which
+/// depends on `c`, may write `c@Foo` though the root does not declare `c`.
 fn dependency_compile_options(
     options: &beamtalk_core::CompilerOptions,
     dep_name: &str,
+    dep_root: &Utf8Path,
 ) -> beamtalk_core::CompilerOptions {
     beamtalk_core::CompilerOptions {
         current_package: Some(dep_name.to_owned()),
+        known_packages: beamtalk_package::manifest::package_checker_scope(Some(dep_root))
+            .known_packages,
         suppress_warnings: true,
         warnings_as_errors: false,
         ..options.clone()
