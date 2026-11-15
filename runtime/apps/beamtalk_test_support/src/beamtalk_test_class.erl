@@ -16,6 +16,7 @@ module on demand. Replaces the per-file `start_class/N`, `stop_class/1`,
     start/2, start/3,
     start_or_get/2,
     stop/1,
+    with_class/2,
     ensure_fixture_loaded/2,
     ensure_counter_loaded/0,
     stop_graceful/1
@@ -61,6 +62,23 @@ stop(Name) when is_atom(Name) ->
     end;
 stop(Pid) ->
     beamtalk_test_class_teardown:stop_class_process(Pid).
+
+-doc """
+Run `Fun()` and always stop the class process(es) afterwards (via
+`beamtalk_test_proc:stop/1`: a graceful stop that tolerates an already-dead
+class). `Pids` is one pid or a list, stopped in list order (children before
+parents). Returns `Fun()`'s value; an exception from `Fun` propagates after the
+stops. Replaces the hand-written `try Body after stop(Pid) end` wrapper.
+""".
+-spec with_class(pid() | [pid()], fun(() -> Result)) -> Result.
+with_class(Pid, Fun) when is_pid(Pid) ->
+    with_class([Pid], Fun);
+with_class(Pids, Fun) when is_list(Pids) ->
+    try
+        Fun()
+    after
+        lists:foreach(fun beamtalk_test_proc:stop/1, Pids)
+    end.
 
 -doc """
 Ensure fixture `Module` (a compiled class module, e.g. `'bt@counter'`) is
