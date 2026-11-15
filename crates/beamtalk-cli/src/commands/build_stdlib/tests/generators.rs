@@ -728,3 +728,74 @@ fn test_generate_method_list_escapes_doc_special_characters() {
     let expected = r#"doc: Some("Line one\nLine \"two\"\tend\r".into())"#;
     assert!(code.contains(expected), "Got: {code}");
 }
+
+// --- generate_app_src_file (BT-4867) ---
+
+#[test]
+fn test_generate_app_src_file_skips_write_when_unchanged() {
+    let (_temp, dir) = temp_utf8_dir();
+    generate_app_src_file(&dir, &[], &[], &[]).unwrap();
+    let dest = dir.join("beamtalk_stdlib.app.src");
+    let original_mtime = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    set_mtime(&dest, original_mtime);
+
+    generate_app_src_file(&dir, &[], &[], &[]).unwrap();
+
+    assert_eq!(
+        fs::metadata(dest.as_std_path())
+            .unwrap()
+            .modified()
+            .unwrap(),
+        original_mtime,
+        "byte-identical app.src must not be rewritten (would trigger rebar3 rebuilds)"
+    );
+}
+
+#[test]
+fn test_generate_app_src_file_rewrites_stale_content() {
+    let (_temp, dir) = temp_utf8_dir();
+    let dest = dir.join("beamtalk_stdlib.app.src");
+    fs::write(&dest, "stale").unwrap();
+
+    generate_app_src_file(&dir, &[], &[], &[]).unwrap();
+
+    assert!(
+        fs::read_to_string(&dest)
+            .unwrap()
+            .contains("{application, beamtalk_stdlib")
+    );
+}
+
+// --- runtime-only builtin list shared with Erlang (BT-4867) ---
+
+#[test]
+fn test_runtime_only_builtin_classes_are_not_generated_builtins() {
+    use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+    assert!(ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES.contains(&"Future"));
+    for name in ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES {
+        assert!(ClassHierarchy::is_builtin_class(name));
+        assert!(!ClassHierarchy::is_generated_builtin_class(name));
+    }
+}
+
+/// The checked-in Erlang header must carry exactly the Rust runtime-only list.
+#[test]
+fn test_generated_hrl_runtime_only_list_matches_rust() {
+    use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+    let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let hrl = fs::read_to_string(
+        root.join("runtime/apps/beamtalk_runtime/include/beamtalk_generated_builtins.hrl"),
+    )
+    .unwrap();
+    let expected = ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES
+        .iter()
+        .map(|n| format!("'{n}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    assert!(
+        hrl.contains(&format!(
+            "-define(BEAMTALK_RUNTIME_ONLY_BUILTIN_CLASSES, [{expected}])."
+        )),
+        "run `just build-stdlib`; header out of date with ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES"
+    );
+}

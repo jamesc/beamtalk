@@ -179,11 +179,11 @@ pub(in crate::server) fn configured_delegate_to_runtime(params: &InitializeParam
 }
 /// Returns the stdlib source directory auto-discovered from the LSP binary's sysroot.
 ///
-/// Derives the sysroot via the shared `beamtalk_sysroot` leaf crate — the
+/// Derives the sysroot via the shared `beamtalk_env` leaf crate — the
 /// same convention used by `beamtalk --print-sysroot` — then looks for
 /// `share/beamtalk/stdlib/src/` under that prefix.
 pub(in crate::server) fn sysroot_stdlib_source_dir() -> Option<PathBuf> {
-    let sysroot = beamtalk_sysroot::current_sysroot()?;
+    let sysroot = beamtalk_env::current_sysroot()?;
     let candidate = sysroot.join("share/beamtalk/stdlib/src");
     canonicalize_existing_dir(&candidate)
 }

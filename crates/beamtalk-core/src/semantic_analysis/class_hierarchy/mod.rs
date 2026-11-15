@@ -109,6 +109,10 @@ pub struct ClassHierarchy {
     updating_extensions: HashSet<(EcoString, EcoString)>,
 }
 impl ClassHierarchy {
+    /// Runtime-only built-in classes (no `.bt` source), e.g. `Future`. The one
+    /// source `beamtalk build-stdlib` emits into the Erlang generated header.
+    pub const RUNTIME_ONLY_BUILTIN_CLASSES: &'static [&'static str] =
+        builtins::RUNTIME_ONLY_BUILTIN_CLASSES;
     /// Returns true if the given class name is a built-in class.
     ///
     /// This is a fast O(1) check suitable for hot paths.

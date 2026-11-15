@@ -30,12 +30,10 @@
 //! are the keyword loop with an empty body (BT-4313), so they carry the
 //! condition's write too.
 
-mod common;
-
+use crate::common::erlc_batched_in_temp_dir;
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use beamtalk_repl::codegen::generate_repl_expressions;
-use common::erlc_batched_in_temp_dir;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Conditions that write a binding (`CMP` is the loop's comparison): a plain

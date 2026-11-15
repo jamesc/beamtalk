@@ -10,12 +10,10 @@
 //! binding, and the loop kind. Every input the Phase 0 check accepts generates
 //! with the debug verifier on (a finding panics) and compiles through `erlc`.
 
-mod common;
-
+use crate::common::erlc_batched_in_temp_dir;
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 use beamtalk_repl::codegen::generate_repl_expressions;
-use common::erlc_batched_in_temp_dir;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 const RECEIVERS: &[&str] = &[
