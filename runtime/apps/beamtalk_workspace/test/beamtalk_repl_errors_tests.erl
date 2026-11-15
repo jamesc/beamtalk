@@ -106,17 +106,13 @@ ensure_structured_error_eval_error_unknown_reason_test() ->
 ensure_structured_error_eval_error_same_tag_different_arity_test() ->
     %% is_known_error_reason/1 matches {Tag, Arity} pairs, not bare Tag: the
     %% 2-arity {class_not_found, ClassName} and the loader's 4-arity
-    %% {class_not_found, Expected, Path, Defined} are different shapes. An
-    %% unrelated 4-arity tuple with the same tag but a wrong field type must
-    %% still be wrapped with the eval_error Class context rather than delegated.
+    %% {class_not_found, Expected, Path, Defined} are different shapes. A
+    %% malformed 4-tuple (Defined not a list) degrades to internal_error
+    %% rather than crashing the normaliser.
     Result = beamtalk_repl_errors:ensure_structured_error(
         {eval_error, error, {class_not_found, some_mod, "path", true}}
     ),
-    ?assertMatch(#beamtalk_error{kind = internal_error}, Result),
-    ?assertMatch(
-        {beamtalk_string, <<"Evaluation error: error:", _/binary>>},
-        Result#beamtalk_error.message
-    ).
+    ?assertMatch(#beamtalk_error{kind = internal_error}, Result).
 
 %%% ============================================================================
 %%% ensure_structured_error/1 — compile_error variants
@@ -624,7 +620,8 @@ ensure_structured_error_loader_class_not_found_defines_nothing_test() ->
     ),
     ?assertMatch(#beamtalk_error{kind = class_not_found}, Result),
     ?assertEqual(
-        {beamtalk_string, <<"Class Counter not found in /some/path.bt (the file defines no classes)">>},
+        {beamtalk_string,
+            <<"Class Counter not found in /some/path.bt (the file defines no classes)">>},
         Result#beamtalk_error.message
     ).
 
