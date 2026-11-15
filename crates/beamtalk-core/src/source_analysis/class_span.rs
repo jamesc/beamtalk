@@ -45,7 +45,7 @@
 //! because the skeleton itself is round-trip-safe (modifier keywords, the
 //! `field:`/`state:` keyword choice, and `::` type annotations all
 //! survive a resubmit — see `class_definition_text/7`),
-//! `beamtalk_repl_loader:add_class_def_flushability/2` also uses it to mark a
+//! `beamtalk_repl_loader_changelog_entries:add_class_def_flushability/2` also uses it to mark a
 //! `'class-def'` `ChangeEntry` `flushable: true` and to compute the actual
 //! `Workspace flush` splice region. This module's own "never reaches a
 //! method" guarantee (above) is exactly what makes that splice safe: a class

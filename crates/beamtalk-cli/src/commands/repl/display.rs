@@ -42,6 +42,12 @@ pub(crate) fn format_value(value: &serde_json::Value) -> String {
     fmt::format_value(value, output_mode())
 }
 
+/// Format an eval result's value, preferring the server's `value_type` tag
+/// (BT-4912) over inspecting the rendered text.
+pub(crate) fn format_value_typed(value: &serde_json::Value, value_type: Option<&str>) -> String {
+    fmt::format_value_typed(value, value_type, output_mode())
+}
+
 /// Format an error message for REPL display.
 ///
 /// Delegates to the shared [`beamtalk_repl_protocol::format::format_diagnostic`]
