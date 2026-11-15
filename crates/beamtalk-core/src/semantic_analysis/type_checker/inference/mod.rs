@@ -34,6 +34,7 @@ use crate::semantic_analysis::type_checker::{
 use ecow::EcoString;
 
 mod assignment;
+pub(super) mod block_outer_writes;
 pub(super) mod blocks;
 mod cascade;
 mod flow;
