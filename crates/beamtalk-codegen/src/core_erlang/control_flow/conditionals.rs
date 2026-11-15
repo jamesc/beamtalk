@@ -64,6 +64,7 @@ use super::super::threaded_ir::{
     self, BindOp, FrameId, RebindFrame, RebindFrameKind, StateReadSite, ThreadedStmt,
     ThreadedValue, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
 };
+use super::super::threaded_rebind::{RebindLayout, RebindNaming};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use super::LocalWrite;
 use super::StateAccFallbackReason;
@@ -578,9 +579,7 @@ impl CoreErlangGenerator {
         };
         // Fold from the last var inward so the emitted nesting reads naturally.
         for var in threaded.iter().rev() {
-            let core_var = self
-                .lookup_var(var)
-                .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+            let core_var = self.resolve_local_core_var(var);
             chain = docvec![
                 "call 'maps':'put'(",
                 leaf::atom(self.local_scratch_key(var)),
@@ -3415,21 +3414,13 @@ impl CoreErlangGenerator {
             // mutated value.
             if let Some(mutations) = self.get_inline_block_captured_mutations(expr) {
                 let new_state_name = self.current_state_var();
-                let mut re_reads: Vec<Document<'static>> = Vec::new();
-                for var in &mutations {
-                    let core_var = self
-                        .lookup_var(var)
-                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                    re_reads.push(docvec![
-                        "let ",
-                        leaf::var(core_var),
-                        " = call 'maps':'get'(",
-                        leaf::atom(self.local_scratch_key(var)),
-                        ", ",
-                        leaf::var(new_state_name.clone()),
-                        ") in ",
-                    ]);
-                }
+                let re_reads: Vec<Document<'static>> = self.rebind_threaded_locals(
+                    &mutations,
+                    CoreErlangGenerator::local_scratch_key,
+                    &new_state_name,
+                    RebindNaming::ReuseBound,
+                    RebindLayout::Inline,
+                );
                 if !re_reads.is_empty() {
                     stmts.push(ThreadedStmt::Statement(Document::Vec(re_reads), span));
                 }
