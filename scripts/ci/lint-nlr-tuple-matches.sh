@@ -4,7 +4,8 @@
 #
 # Guard (BT-3758): the `^` non-local-return tuple shape (`{'$bt_nlr', Token,
 # Value}` / `{'$bt_nlr', Token, Value, State}`, ADR 0041) has one definition,
-# `?IS_NLR(T)` in runtime/apps/beamtalk_runtime/include/beamtalk.hrl. Runtime
+# `?IS_NLR(T)` in runtime/apps/beamtalk_runtime/include/beamtalk.hrl, built on
+# `?BT_NLR_TAG` from the generated beamtalk_sentinel_tags.hrl. Runtime
 # and stdlib Erlang sources must use `throw:Nlr:Stack when ?IS_NLR(Nlr)` (or
 # `{error, Nlr} when ?IS_NLR(Nlr)`) instead of hand-rolling `{'$bt_nlr', ...}`
 # patterns, so a future shape change cannot silently miss a call site.
@@ -27,10 +28,9 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 ALLOWLIST=(
-    # Owns ?IS_NLR itself.
-    'runtime/apps/beamtalk_runtime/include/beamtalk.hrl'
-    # Generated from codegen's `sentinel_tags.rs` (BT-4901): defines the
-    # `?BT_NLR_TAG` macro `?IS_NLR` and `?NLR` are built from.
+    # Generated from codegen's `sentinel_tags.rs` (BT-4901): the one definition
+    # of the atom, as `?BT_NLR_TAG`. `?IS_NLR` and `?NLR` in beamtalk.hrl are
+    # built from that macro, so beamtalk.hrl no longer spells the atom.
     'runtime/apps/beamtalk_runtime/include/beamtalk_sentinel_tags.hrl'
     # Distribution codec: destructures and rebuilds the tuple to walk its
     # Value field (ADR 0126 §5.1/§5.5).

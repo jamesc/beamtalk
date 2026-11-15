@@ -717,8 +717,6 @@ fn every_runtime_call_in_a_cli_eval_string_is_exported() {
 
 #[test]
 fn cli_scan_reads_bare_and_quoted_calls_and_skips_rust_paths() {
-    let dir = std::env::temp_dir();
-    let _ = dir;
     // Exercise the reader on a synthetic root.
     let root = std::env::temp_dir().join(format!("bt4901-cli-scan-{}", std::process::id()));
     let src = root.join("crates/beamtalk-cli/src");
