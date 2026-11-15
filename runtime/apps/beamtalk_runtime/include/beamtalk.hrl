@@ -73,19 +73,26 @@
 %%
 %% All Beamtalk errors use this consistent structure for better tooling
 %% and developer experience:
-%% - kind: Error category — one of:
-%%     does_not_understand | immutable_value | type_error | arity_mismatch |
-%%     future_not_awaited | timeout | instantiation_error | file_not_found |
-%%     permission_denied | io_error | class_not_found |
-%%     no_superclass | class_already_exists | internal_error | dispatch_error |
-%%     callback_failed | assertion_failed | runtime_error | erlang_exit |
-%%     erlang_throw | missing_parameter | stdlib_shadowing |
-%%     stateful_block_dispatch | pattern_mismatch |
+%% - kind: Error category — one of the kinds classified by
+%%   `beamtalk_exception_handler:kind_to_class/1` (BT-4912: a drift test,
+%%   `crates/beamtalk-codegen/tests/error_kind_drift.rs`, keeps this list,
+%%   `kind_to_class/1`, `type ExceptionKind` and the kinds Rust codegen emits
+%%   in agreement):
+%%     does_not_understand | arity_mismatch | immutable_value | runtime_error |
+%%     index_out_of_bounds | empty_collection | empty_queue | not_found |
+%%     class_not_found | no_superclass | class_already_exists |
+%%     selector_not_found | dispatch_error | callback_failed | actor_dead |
+%%     invalid_continuation | invalid_defer | future_not_awaited |
+%%     internal_error | key_error | pattern_mismatch | unknown_field |
+%%     argument_error | resource_error | process_not_found | timeout_error |
+%%     type_error | instantiation_error | erlang_exit | erlang_throw | signal |
 %%     node_down | remote_code_mismatch | not_serialisable |
-%%     shape_version_ahead | shape_migration_failed |
-%%     wire_version_unsupported | invalid_node_name | insecure_distribution
-%%       (ADR 0126 §7.1, distribution and location-transparent actors — see
-%%       `beamtalk_exception_handler:kind_to_class/1` for their classes)
+%%     shape_version_ahead | shape_migration_failed | wire_version_unsupported
+%%     | insecure_distribution | invalid_node_name | uninitialized_state_error
+%%     | stateful_block_dispatch
+%%   Any other kind (e.g. `user_error`, `file_not_found`, `io_error`,
+%%   `permission_denied`, workspace and supervisor operation errors) is valid
+%%   and classifies as plain `Error` (ADR 0015).
 %% - class: The class name where the error occurred (e.g., 'Integer')
 %% - selector: The method that failed (if applicable)
 %% - message: Human-readable explanation using user-facing names
