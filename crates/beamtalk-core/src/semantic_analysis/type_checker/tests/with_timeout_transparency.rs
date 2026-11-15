@@ -34,26 +34,6 @@ fn add_slow_db_actor(hierarchy: &mut ClassHierarchy) {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 
     let info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("SlowDb"),
-        superclass: Some(eco_string("Actor")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: eco_string("query:"),
             arity: 1,
@@ -71,11 +51,7 @@ fn add_slow_db_actor(hierarchy: &mut ClassHierarchy) {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("SlowDb", Some("Actor"))
     };
 
     hierarchy.add_from_beam_meta(vec![info]);
@@ -88,26 +64,6 @@ fn add_fake_proxy_object(hierarchy: &mut ClassHierarchy) {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 
     let info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("FakeProxy"),
-        superclass: Some(eco_string("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: eco_string("withTimeout:"),
             arity: 1,
@@ -125,11 +81,7 @@ fn add_fake_proxy_object(hierarchy: &mut ClassHierarchy) {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("FakeProxy", Some("Object"))
     };
 
     hierarchy.add_from_beam_meta(vec![info]);
@@ -279,26 +231,6 @@ fn logger_class(
 ) -> crate::semantic_analysis::class_hierarchy::ClassInfo {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
     ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string(name),
-        superclass: Some(eco_string(superclass)),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: eco_string("log:"),
             arity: 1,
@@ -316,11 +248,7 @@ fn logger_class(
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test(name, Some(superclass))
     }
 }
 
