@@ -173,7 +173,7 @@ Erlang functions can fail via `error`, `exit`, or `throw`. Erlang `error` except
 |---|---|---|
 | `error:undef` | `RuntimeError` (kind: `does_not_understand`) | Same concept as Beamtalk's "method not found" |
 | `error:badarg` | `TypeError` | Same concept as Beamtalk's type mismatch |
-| `error:function_clause` | `RuntimeError` (kind: `arity_mismatch`) | Pattern match / arity failure |
+| `error:function_clause` | `TypeError` at the target's own head, `RuntimeError` deeper in the callee (amended by BT-4866; originally `arity_mismatch`) | No clause matched the arguments; a wrong arity is an `undef` |
 | `error:badarith` | `TypeError` | Arithmetic type error |
 | `exit:Reason` | `ExitError` (subclass of `BEAMError`) | Foreign concept — BEAM process exit signal |
 | `throw:Value` | `ThrowError` (subclass of `BEAMError`) | Foreign concept — BEAM non-local return |
@@ -192,7 +192,7 @@ Error
 All exceptions include the original Erlang error in `details` for debugging:
 ```beamtalk
 > Erlang lists nth: 0 from: #(1, 2)
-ERROR: #RuntimeError
+ERROR: #TypeError  (BT-4866; originally #RuntimeError / arity_mismatch)
   Module: lists
   Function: nth/2
   Reason: function_clause
