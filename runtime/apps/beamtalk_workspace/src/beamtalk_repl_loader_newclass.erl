@@ -265,7 +265,11 @@ new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, D
 validate_target_path(TargetPath) ->
     case file:read_file_info(TargetPath) of
         {error, enoent} ->
-            case beamtalk_repl_loader_changelog_entries:classify_source_file(list_to_binary(TargetPath)) of
+            case
+                beamtalk_repl_loader_changelog_entries:classify_source_file(
+                    list_to_binary(TargetPath)
+                )
+            of
                 {flushable, AbsPath} ->
                     {ok, AbsPath};
                 {not_flushable, _Reason} ->

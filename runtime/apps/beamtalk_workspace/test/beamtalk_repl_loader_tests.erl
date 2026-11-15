@@ -526,16 +526,21 @@ is_path_inside_outside_tree_test() ->
 
 method_source_binary_prefers_method_source_test() ->
     Info = #{method_source => <<"increment => 1">>, expression => <<"Counter >> increment => 1">>},
-    ?assertEqual(<<"increment => 1">>, beamtalk_repl_loader_changelog_entries:method_source_binary(Info)).
+    ?assertEqual(
+        <<"increment => 1">>, beamtalk_repl_loader_changelog_entries:method_source_binary(Info)
+    ).
 
 method_source_binary_accepts_list_test() ->
     Info = #{method_source => "doubled => 2"},
-    ?assertEqual(<<"doubled => 2">>, beamtalk_repl_loader_changelog_entries:method_source_binary(Info)).
+    ?assertEqual(
+        <<"doubled => 2">>, beamtalk_repl_loader_changelog_entries:method_source_binary(Info)
+    ).
 
 method_source_binary_falls_back_to_expression_test() ->
     Info = #{expression => <<"Counter >> noop => self">>},
     ?assertEqual(
-        <<"Counter >> noop => self">>, beamtalk_repl_loader_changelog_entries:method_source_binary(Info)
+        <<"Counter >> noop => self">>,
+        beamtalk_repl_loader_changelog_entries:method_source_binary(Info)
     ).
 
 method_source_binary_empty_when_absent_test() ->
@@ -560,7 +565,9 @@ span_error_entry_other_error_downgrades_test() ->
     %% memory-only with a reason. The brand-new-method (`selector_not_found')
     %% case no longer routes here — it is handled by new_method_entry/3.
     Base = #{class => <<"Counter">>},
-    Entry = beamtalk_repl_loader_changelog_entries:span_error_entry(Base, <<"src/counter.bt">>, ambiguous),
+    Entry = beamtalk_repl_loader_changelog_entries:span_error_entry(
+        Base, <<"src/counter.bt">>, ambiguous
+    ),
     ?assertEqual(false, maps:get(flushable, Entry)),
     ?assertEqual(<<"span_unresolved:ambiguous">>, maps:get(not_flushable_reason, Entry)).
 
@@ -706,7 +713,10 @@ new_class_non_string_args_type_error_test() ->
 method_source_binary_falls_back_to_list_expression_test() ->
     %% No method_source key; expression is a string (list) — converted to binary.
     Info = #{expression => "Counter >> tick => self"},
-    ?assertEqual(<<"Counter >> tick => self">>, beamtalk_repl_loader_changelog_entries:method_source_binary(Info)).
+    ?assertEqual(
+        <<"Counter >> tick => self">>,
+        beamtalk_repl_loader_changelog_entries:method_source_binary(Info)
+    ).
 
 %%====================================================================
 %% Integration fixture: real compile + load + activate

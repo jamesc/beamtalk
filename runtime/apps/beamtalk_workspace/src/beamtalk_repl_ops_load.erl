@@ -544,7 +544,11 @@ save_section(ClassBin0, NewName, OldName, BeforeSelector, BeforeSide0) when
                         nil ->
                             {error, section_class_not_editable_error(ClassBin)};
                         SourceFile ->
-                            case beamtalk_repl_loader_changelog_entries:classify_source_file(SourceFile) of
+                            case
+                                beamtalk_repl_loader_changelog_entries:classify_source_file(
+                                    SourceFile
+                                )
+                            of
                                 {not_flushable, _Reason} ->
                                     {error, section_class_not_editable_error(ClassBin)};
                                 {flushable, Path} ->

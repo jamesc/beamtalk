@@ -833,7 +833,11 @@ browse_categories(ClassName) ->
             %% protocol's defining module); a single shared resolver makes
             %% that structurally impossible.
             SourceFile =
-                case beamtalk_repl_loader_changelog_entries:class_source_file(atom_to_binary(ClassName, utf8)) of
+                case
+                    beamtalk_repl_loader_changelog_entries:class_source_file(
+                        atom_to_binary(ClassName, utf8)
+                    )
+                of
                     nil -> null;
                     Path when is_binary(Path) -> Path
                 end,

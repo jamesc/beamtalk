@@ -748,7 +748,9 @@ resolution, or rewrite failure — the FFI boundary raises it.
 -spec move_class(atom(), binary()) -> ok | {error, #beamtalk_error{}}.
 move_class(ClassName, NewPathBin) when is_atom(ClassName), is_binary(NewPathBin) ->
     ClassNameBin = atom_to_binary(ClassName, utf8),
-    Classification = beamtalk_repl_loader_changelog_entries:capture_class_removal_snapshot(ClassNameBin),
+    Classification = beamtalk_repl_loader_changelog_entries:capture_class_removal_snapshot(
+        ClassNameBin
+    ),
     case move_class_ensure_movable(ClassName, Classification) of
         {error, _} = Err ->
             Err;

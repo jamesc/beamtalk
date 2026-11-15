@@ -2121,7 +2121,6 @@ do_autoflush() ->
             ok
     end.
 
-
 %% Convert a list of class info maps to a list of existing atoms.
 -spec class_name_atoms([map()]) -> [atom()].
 class_name_atoms(Classes) ->
