@@ -61,9 +61,6 @@ type MergedClassIndexes = (
 pub(crate) struct TestCaseClass {
     /// Class name (e.g., `CounterTest`).
     pub(crate) class_name: String,
-    /// Superclass name (e.g., `TestCase`).
-    #[allow(dead_code)] // populated during discovery for future diagnostic use
-    pub(crate) superclass_name: String,
     /// Module name for the compiled BEAM module (e.g., `bt@my_pkg@test@counter_test`).
     pub(crate) module_name: String,
     /// Methods whose names start with `test`.
@@ -220,7 +217,6 @@ fn test_class_in_module(
     }
     Some(TestCaseClass {
         class_name,
-        superclass_name: class.superclass_name().to_string(),
         module_name,
         test_methods,
     })
@@ -552,7 +548,7 @@ fn canonical_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
 fn discover_and_compile_doc_tests(
     source_path: &Utf8Path,
     fixtures: &FixtureCompiler<'_>,
-) -> Result<Vec<CompiledDocTestResult>> {
+) -> Result<usize> {
     let build_dir = fixtures.output_dir;
     let snapshot_only = fixtures.snapshot_only;
     let content = fs::read_to_string(source_path)
@@ -564,7 +560,7 @@ fn discover_and_compile_doc_tests(
 
     let doc_tests = super::doc_tests::extract_doc_tests(&module, &content);
     if doc_tests.is_empty() {
-        return Ok(Vec::new());
+        return Ok(0);
     }
 
     // Compile the containing source file so its classes are available to doc tests
@@ -572,7 +568,7 @@ fn discover_and_compile_doc_tests(
         .compile_fixture(source_path)
         .wrap_err_with(|| format!("Failed to compile source file for doc tests '{source_path}'"))?;
 
-    let mut results = Vec::new();
+    let mut compiled_classes = 0;
 
     for class_doc in doc_tests {
         let all_cases: Vec<&super::doc_tests::DocTestCase> =
@@ -643,28 +639,10 @@ fn discover_and_compile_doc_tests(
             .into_diagnostic()
             .wrap_err("Failed to write doc test EUnit wrapper")?;
 
-        results.push(CompiledDocTestResult {
-            display_name: format!("{}DocTest", class_doc.class_name),
-            eunit_module,
-            erl_file,
-            assertion_count: all_cases.len(),
-        });
+        compiled_classes += 1;
     }
 
-    Ok(results)
-}
-
-/// Intermediate result from compiling doc tests for a single class.
-struct CompiledDocTestResult {
-    /// Human-readable name for test output (e.g., `IntegerDocTest`).
-    display_name: String,
-    /// `EUnit` wrapper module name for this class's doc tests.
-    eunit_module: String,
-    /// Path to the generated `.erl` wrapper file.
-    #[allow(dead_code)] // TODO: used when doc tests are migrated to BUnit runner
-    erl_file: Utf8PathBuf,
-    /// Number of `// =>` assertions compiled into tests.
-    assertion_count: usize,
+    Ok(compiled_classes)
 }
 
 /// Generate an `EUnit` wrapper module for doc test assertions.
@@ -703,7 +681,6 @@ fn generate_doc_test_eunit_wrapper(
 // ──────────────────────────────────────────────────────────────────────────
 
 /// Compiled test file metadata, ready for execution.
-#[allow(dead_code)] // fields populated during discovery for future per-file reporting
 struct CompiledTest {
     /// Source file path.
     source_file: Utf8PathBuf,
@@ -711,19 +688,6 @@ struct CompiledTest {
     package: Option<String>,
     /// `TestCase` class info.
     test_class: TestCaseClass,
-}
-
-/// Compiled doc test metadata, ready for execution.
-#[allow(dead_code)] // fields populated during discovery; doc tests TODO for BUnit migration
-struct CompiledDocTest {
-    /// Source file path.
-    source_file: Utf8PathBuf,
-    /// Display name (e.g., `IntegerDocTest`).
-    display_name: String,
-    /// `EUnit` wrapper module name.
-    eunit_module: String,
-    /// Number of assertion test cases.
-    assertion_count: usize,
 }
 
 /// Shared state threaded through the test pipeline phases.
@@ -805,8 +769,9 @@ struct TestPipeline {
     all_fixture_modules: Vec<String>,
     /// Compiled `BUnit` test metadata.
     compiled_tests: Vec<CompiledTest>,
-    /// Compiled doc test metadata.
-    compiled_doc_tests: Vec<CompiledDocTest>,
+    /// Number of classes whose doc tests were compiled (the `EUnit` wrappers
+    /// are generated but not yet run; this only keeps "No tests found" honest).
+    compiled_doc_test_classes: usize,
     /// Package BEAM module names (from built packages).
     package_modules: Vec<String>,
     /// Package ebin directories (for code path).
@@ -956,7 +921,7 @@ pub fn run_tests(
     }
 
     if pipeline.compiled_tests.is_empty()
-        && pipeline.compiled_doc_tests.is_empty()
+        && pipeline.compiled_doc_test_classes == 0
         && pipeline.native_test_modules.is_empty()
     {
         println!("No tests found");
@@ -1360,7 +1325,7 @@ fn initialize_pipeline(
         precompiled_modules: HashSet::new(),
         all_fixture_modules: Vec::new(),
         compiled_tests: Vec::new(),
-        compiled_doc_tests: Vec::new(),
+        compiled_doc_test_classes: 0,
         package_modules: Vec::new(),
         package_ebin_dirs: Vec::new(),
         jobs,
@@ -1778,20 +1743,12 @@ fn compile_single_test_file(
     }
 
     // Discover doc tests in the same file
-    let doc_results = discover_and_compile_doc_tests(
+    // Doc test EUnit wrappers are still generated but not run here.
+    // TODO: Migrate doc tests to use BUnit runner directly.
+    pipeline.compiled_doc_test_classes += discover_and_compile_doc_tests(
         test_file,
         &pipeline.fixture_compiler(&file_hierarchy, test_file_package.as_deref()),
     )?;
-    for dr in doc_results {
-        // Doc test EUnit wrappers are still generated but not compiled here.
-        // TODO: Migrate doc tests to use BUnit runner directly.
-        pipeline.compiled_doc_tests.push(CompiledDocTest {
-            source_file: test_file.to_path_buf(),
-            display_name: dr.display_name,
-            eunit_module: dr.eunit_module,
-            assertion_count: dr.assertion_count,
-        });
-    }
 
     Ok(())
 }
