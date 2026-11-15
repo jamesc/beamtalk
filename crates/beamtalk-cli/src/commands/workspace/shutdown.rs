@@ -93,7 +93,8 @@ pub(super) fn wait_for_workspace_exit(host: &str, port: u16, timeout_secs: u64) 
 
 /// Force-kill a process by PID.
 ///
-/// Cross-platform: uses `libc::kill(SIGKILL)` on Unix and `TerminateProcess` on Windows.
+/// Cross-platform: `SIGKILL` on Unix and `TerminateProcess` on Windows, via
+/// `beamtalk_workspace::pid_liveness::kill_process`.
 /// Used as fallback when TCP graceful shutdown fails or times out.
 pub(super) fn force_kill_process(pid: u32) -> Result<()> {
     // PID 0 is sentinel for when PID tracking is unavailable
@@ -104,66 +105,8 @@ pub(super) fn force_kill_process(pid: u32) -> Result<()> {
         ));
     }
 
-    #[cfg(unix)]
-    {
-        let pid_i = i32::try_from(pid).map_err(|_| miette!("PID {pid} too large for platform"))?;
-        // SAFETY: kill(2) is safe to call with a valid pid and signal number.
-        let ret = unsafe { libc::kill(pid_i, libc::SIGKILL) };
-        if ret == 0 {
-            return Ok(());
-        }
-        let err = std::io::Error::last_os_error();
-        if err.raw_os_error() == Some(libc::ESRCH) {
-            // Process already exited — the goal of ensuring it is not running is achieved.
-            // This is the expected outcome when graceful shutdown succeeds just after a
-            // wait_for_workspace_exit timeout (race: BEAM exits naturally before we SIGKILL).
-            return Ok(());
-        }
-        Err(miette!("Failed to kill process {pid}: {err}"))
-    }
-
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Foundation::{CloseHandle, FALSE};
-        use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_TERMINATE, TerminateProcess,
-        };
-
-        // SAFETY: Windows API call with documented parameters.
-        let handle = unsafe { OpenProcess(PROCESS_TERMINATE, FALSE, pid) };
-        if handle.is_null() {
-            let err = std::io::Error::last_os_error();
-            // ERROR_INVALID_PARAMETER (87) means the process no longer exists.
-            if err.raw_os_error() == Some(87) {
-                return Ok(());
-            }
-            return Err(miette!(
-                "Failed to open process {pid} for termination: {err}"
-            ));
-        }
-        // SAFETY: handle is valid, obtained from OpenProcess above.
-        let ret = unsafe { TerminateProcess(handle, 1) };
-        // Capture error *before* CloseHandle, which may clobber GetLastError.
-        let term_err = if ret == FALSE {
-            Some(std::io::Error::last_os_error())
-        } else {
-            None
-        };
-        // SAFETY: handle is valid, obtained from OpenProcess above.
-        unsafe { CloseHandle(handle) };
-        if ret != FALSE {
-            Ok(())
-        } else if term_err.as_ref().and_then(std::io::Error::raw_os_error) == Some(5) {
-            // ERROR_ACCESS_DENIED (5): process exited between OpenProcess and
-            // TerminateProcess — analogous to Unix ESRCH.
-            Ok(())
-        } else {
-            Err(miette!(
-                "Failed to kill process {pid}: {}",
-                term_err.expect("term_err is Some when ret == FALSE")
-            ))
-        }
-    }
+    beamtalk_workspace::pid_liveness::kill_process(pid, None, || true)
+        .map_err(|err| miette!("Failed to kill process {pid}: {err}"))
 }
 
 /// Force-kill a process and wait for it to release its port.

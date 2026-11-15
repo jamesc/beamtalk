@@ -356,27 +356,7 @@ fn setup_json_class_side_fixture(
     // protocol-typed. (NOT named "Json" — that's a *builtin*, which
     // `add_from_beam_meta` skips, silently substituting the stdlib class.)
     let json_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "JsonEncoder".into(),
-        superclass: Some("Object".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
         is_value: true,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
         class_methods: vec![MethodInfo {
             selector: "generate:".into(),
             arity: 1,
@@ -394,10 +374,7 @@ fn setup_json_class_side_fixture(
             constant_value: None,
             answers_receiver: false,
         }],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("JsonEncoder", Some("Object"))
     };
     hierarchy.add_from_beam_meta(vec![json_info]);
 
@@ -804,26 +781,7 @@ fn setup_intersection_param_fixture() -> (
     hierarchy.register_protocol_classes(&proto_module);
 
     let zzyzx_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "Zzyzx".into(),
-        superclass: Some("Object".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
         is_value: true,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: "process:".into(),
@@ -887,11 +845,7 @@ fn setup_intersection_param_fixture() -> (
                 answers_receiver: false,
             },
         ],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Zzyzx", Some("Object"))
     };
     hierarchy.add_from_beam_meta(vec![zzyzx_info]);
 
@@ -971,26 +925,7 @@ fn test_intersection_param_conforms_to_both_no_warning() {
     let (mut hierarchy, registry) = setup_intersection_param_fixture();
 
     let report_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "Report".into(),
-        superclass: Some("Object".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
         is_value: true,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: "asString".into(),
@@ -1027,11 +962,7 @@ fn test_intersection_param_conforms_to_both_no_warning() {
                 answers_receiver: false,
             },
         ],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Report", Some("Object"))
     };
     hierarchy.add_from_beam_meta(vec![report_info]);
 
@@ -1107,32 +1038,9 @@ fn add_widget_class(hierarchy: &mut ClassHierarchy, class_side_selectors: &[&str
         .collect();
 
     let widget_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "Widget".into(),
-        superclass: Some("Object".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
         is_value: true,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
         class_methods,
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Widget", Some("Object"))
     };
     hierarchy.add_from_beam_meta(vec![widget_info]);
 }

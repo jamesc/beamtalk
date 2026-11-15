@@ -9,6 +9,7 @@ EUnit tests for `beamtalk_text:unwrap/1`, `unwrap_or_raise/4` (BT-4686) and
 `to_existing_atom/1`.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 unwrap_tagged_string_test() ->
@@ -50,6 +51,30 @@ unwrap_or_raise_undefined_hint_leaves_hint_unset_test() ->
         error:#{'$beamtalk_class' := 'TypeError', error := Inner} ->
             ?assertEqual(undefined, Inner#beamtalk_error.hint)
     end.
+
+unwrap_or_raise_message_returns_bytes_test() ->
+    ?assertEqual(
+        <<"p">>,
+        beamtalk_text:unwrap_or_raise_message({beamtalk_string, <<"p">>}, 'Beamtalk', 'x:', <<"m">>)
+    ),
+    ?assertEqual(
+        <<"p">>, beamtalk_text:unwrap_or_raise_message(<<"p">>, 'Beamtalk', 'x:', <<"m">>)
+    ).
+
+unwrap_or_raise_message_sets_message_and_no_hint_test() ->
+    ?assertBtErrorWith(
+        _,
+        _,
+        _,
+        fun(Err) ->
+            ?assertEqual(type_error, element(2, Err)),
+            ?assertEqual('Beamtalk', element(3, Err)),
+            ?assertEqual('x:', element(4, Err)),
+            ?assertEqual({beamtalk_string, <<"x: expects text">>}, element(5, Err)),
+            ?assertEqual(undefined, element(6, Err))
+        end,
+        beamtalk_text:unwrap_or_raise_message(42, 'Beamtalk', 'x:', <<"x: expects text">>)
+    ).
 
 %%====================================================================
 %% to_existing_atom/1

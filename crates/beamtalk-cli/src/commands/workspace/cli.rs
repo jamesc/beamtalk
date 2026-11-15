@@ -610,8 +610,8 @@ fn run_create_background(
     validate_network_binding(bind_addr, confirm_network)?;
 
     // Load runtime beam paths
-    let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()?;
-    let paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+    let beamtalk_cli::repl_startup::DiscoveredRuntime { paths, .. } =
+        beamtalk_cli::repl_startup::discover_beam_paths()?;
 
     // BT-3651: record the project's root package from the Rust-parsed manifest.
     let root_package: Option<String> = camino::Utf8Path::from_path(&project_root)

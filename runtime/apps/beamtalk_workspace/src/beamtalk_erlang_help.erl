@@ -99,9 +99,9 @@ available_modules() ->
                     is_list(ModName) -> list_to_binary(ModName)
                 end,
             %% Skip Beamtalk compiled modules (bt@package@Class)
-            case Bin of
-                <<"bt@", _/binary>> -> false;
-                _ -> {true, Bin}
+            case beamtalk_module_name:is_class_module(Bin) of
+                true -> false;
+                false -> {true, Bin}
             end
         end,
         All

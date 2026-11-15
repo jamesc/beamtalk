@@ -1746,6 +1746,7 @@ raised_beamtalk_error(Fun) ->
     try Fun() of
         Other -> {no_error, Other}
     catch
+        %% BT-4900: kept hand-written - value-returning helper that also accepts an unwrapped record
         error:#{error := #beamtalk_error{} = E} -> E;
         error:#beamtalk_error{} = E -> E
     end.

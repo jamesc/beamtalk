@@ -124,24 +124,3 @@ fn test_compile_native_erlang_with_deps_compile_error() {
         "Error should mention native compilation: {err_msg}"
     );
 }
-
-// ---- collect_erl_files tests ----
-
-#[test]
-fn test_collect_erl_files_filters_correctly() {
-    let temp = TempDir::new().unwrap();
-    let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-
-    fs::write(dir.join("foo.erl"), "-module(foo).").unwrap();
-    fs::write(dir.join("bar.erl"), "-module(bar).").unwrap();
-    fs::write(dir.join("readme.md"), "# Notes").unwrap();
-    fs::write(dir.join("data.json"), "{}").unwrap();
-
-    let mut files = Vec::new();
-    collect_erl_files(&dir, &mut files).unwrap();
-    files.sort();
-
-    assert_eq!(files.len(), 2);
-    assert!(files[0].as_str().ends_with("bar.erl"));
-    assert!(files[1].as_str().ends_with("foo.erl"));
-}

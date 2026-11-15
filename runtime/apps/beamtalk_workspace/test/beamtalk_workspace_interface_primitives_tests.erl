@@ -61,33 +61,26 @@ classes_returns_list_test() ->
 %%====================================================================
 
 load_type_error_for_integer_test() ->
-    try
+    ?assertBtErrorMessageContains(
+        type_error,
+        'Workspace',
+        _,
+        <<"Integer">>,
         beamtalk_workspace_interface_primitives:dispatch(
             'load:', [42], beamtalk_test_repl:fake_self(workspace, self())
-        ),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('Workspace', Err#beamtalk_error.class),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Integer">>)
-            )
-    end.
+        )
+    ).
 
 load_file_not_found_test() ->
-    try
+    ?assertBtError(
+        file_not_found,
+        'Workspace',
         beamtalk_workspace_interface_primitives:dispatch(
             'load:',
             [<<"/nonexistent/path/file.bt">>],
             beamtalk_test_repl:fake_self(workspace, self())
-        ),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(file_not_found, Err#beamtalk_error.kind),
-            ?assertEqual('Workspace', Err#beamtalk_error.class)
-    end.
+        )
+    ).
 
 %%====================================================================
 %% bind:as: / unbind: / bindings Tests
@@ -141,27 +134,21 @@ bind_and_unbind_test_() ->
                     ?assertNot(maps:is_key(toRemove, Globals))
                 end},
                 {"unbind: raises name_not_found for unknown name", fun() ->
-                    try
+                    ?assertBtError(
+                        name_not_found,
+                        'Workspace',
                         beamtalk_workspace_interface_primitives:dispatch(
                             'unbind:', [noSuchBinding], Self
-                        ),
-                        ?assert(false)
-                    catch
-                        error:#{error := Err} ->
-                            ?assertEqual(name_not_found, Err#beamtalk_error.kind),
-                            ?assertEqual('Workspace', Err#beamtalk_error.class)
-                    end
+                        )
+                    )
                 end},
                 {"bind:as: raises name_conflict for protected name Transcript", fun() ->
-                    try
+                    ?assertBtError(
+                        name_conflict,
                         beamtalk_workspace_interface_primitives:dispatch(
                             'bind:as:', [42, 'Transcript'], Self
-                        ),
-                        ?assert(false)
-                    catch
-                        error:#{error := Err} ->
-                            ?assertEqual(name_conflict, Err#beamtalk_error.kind)
-                    end
+                        )
+                    )
                 end},
                 {"bind:as: tolerates a class dying mid-call (BT-3658)", fun() ->
                     Name = 'BT3658DyingBindName',
@@ -179,15 +166,12 @@ bind_and_unbind_test_() ->
                     )
                 end},
                 {"bind:as: raises type_error for non-atom name", fun() ->
-                    try
+                    ?assertBtError(
+                        type_error,
                         beamtalk_workspace_interface_primitives:dispatch(
                             'bind:as:', [42, <<"notAnAtom">>], Self
-                        ),
-                        ?assert(false)
-                    catch
-                        error:#{error := Err} ->
-                            ?assertEqual(type_error, Err#beamtalk_error.kind)
-                    end
+                        )
+                    )
                 end}
             ]
         end}.
@@ -197,17 +181,14 @@ bind_and_unbind_test_() ->
 %%====================================================================
 
 unknown_selector_raises_does_not_understand_test() ->
-    try
+    ?assertBtError(
+        does_not_understand,
+        'Workspace',
+        unknownSelector,
         beamtalk_workspace_interface_primitives:dispatch(
             unknownSelector, [], beamtalk_test_repl:fake_self(workspace, self())
-        ),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(does_not_understand, Err#beamtalk_error.kind),
-            ?assertEqual('Workspace', Err#beamtalk_error.class),
-            ?assertEqual(unknownSelector, Err#beamtalk_error.selector)
-    end.
+        )
+    ).
 
 %%====================================================================
 %% get_user_bindings/0 Tests
@@ -317,27 +298,21 @@ get_session_bindings_includes_user_bindings_test() ->
 
 start_supervisor_type_error_for_non_class_object_test() ->
     %% Passing a non-class-object (integer) should raise type_error.
-    try
-        beamtalk_workspace_interface_primitives:startSupervisor(42),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('Workspace', Err#beamtalk_error.class),
-            ?assertEqual('startSupervisor:', Err#beamtalk_error.selector)
-    end.
+    ?assertBtError(
+        type_error,
+        'Workspace',
+        'startSupervisor:',
+        beamtalk_workspace_interface_primitives:startSupervisor(42)
+    ).
 
 stop_supervisor_type_error_for_non_class_object_test() ->
     %% Passing a non-class-object (atom) should raise type_error.
-    try
-        beamtalk_workspace_interface_primitives:stopSupervisor(notAClass),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('Workspace', Err#beamtalk_error.class),
-            ?assertEqual('stopSupervisor:', Err#beamtalk_error.selector)
-    end.
+    ?assertBtError(
+        type_error,
+        'Workspace',
+        'stopSupervisor:',
+        beamtalk_workspace_interface_primitives:stopSupervisor(notAClass)
+    ).
 
 %%====================================================================
 %% sync Tests
@@ -350,14 +325,13 @@ sync_dispatch_raises_when_no_manifest_test() ->
     OldCwd = file:get_cwd(),
     ok = file:set_cwd(EmptyDir),
     try
-        beamtalk_workspace_interface_primitives:dispatch(
-            sync, [], beamtalk_test_repl:fake_self(workspace, self())
-        ),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(file_not_found, Err#beamtalk_error.kind),
-            ?assertEqual('Workspace', Err#beamtalk_error.class)
+        ?assertBtError(
+            file_not_found,
+            'Workspace',
+            beamtalk_workspace_interface_primitives:dispatch(
+                sync, [], beamtalk_test_repl:fake_self(workspace, self())
+            )
+        )
     after
         {ok, Cwd} = OldCwd,
         file:set_cwd(Cwd),
@@ -370,12 +344,11 @@ sync_direct_raises_when_no_manifest_test() ->
     OldCwd = file:get_cwd(),
     ok = file:set_cwd(EmptyDir),
     try
-        beamtalk_workspace_interface_primitives:sync(),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(file_not_found, Err#beamtalk_error.kind),
-            ?assertEqual('Workspace', Err#beamtalk_error.class)
+        ?assertBtError(
+            file_not_found,
+            'Workspace',
+            beamtalk_workspace_interface_primitives:sync()
+        )
     after
         {ok, Cwd} = OldCwd,
         file:set_cwd(Cwd),
@@ -423,81 +396,47 @@ sync_returns_map_with_expected_keys_test() ->
 
 %% Float input → "Float" in error message
 load_type_error_for_float_test() ->
-    try
-        beamtalk_workspace_interface_primitives:load(3.14),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Float">>)
-            )
-    end.
+    ?assertBtErrorMessageContains(
+        type_error, _, _, <<"Float">>, beamtalk_workspace_interface_primitives:load(3.14)
+    ).
 
 %% Boolean input → "Boolean" in error message
 load_type_error_for_boolean_test() ->
-    try
-        beamtalk_workspace_interface_primitives:load(true),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Boolean">>)
-            )
-    end.
+    ?assertBtErrorMessageContains(
+        type_error, _, _, <<"Boolean">>, beamtalk_workspace_interface_primitives:load(true)
+    ).
 
 %% nil input → "nil" in error message
 load_type_error_for_nil_test() ->
-    try
-        beamtalk_workspace_interface_primitives:load(nil),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"nil">>)
-            )
-    end.
+    ?assertBtErrorMessageContains(
+        type_error, _, _, <<"nil">>, beamtalk_workspace_interface_primitives:load(nil)
+    ).
 
 %% Atom (non-boolean, non-nil) → "Symbol" in error message
 load_type_error_for_atom_test() ->
-    try
-        beamtalk_workspace_interface_primitives:load(myatom),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Symbol">>)
-            )
-    end.
+    ?assertBtErrorMessageContains(
+        type_error, _, _, <<"Symbol">>, beamtalk_workspace_interface_primitives:load(myatom)
+    ).
 
 %% Map input → "Dictionary" in error message
 load_type_error_for_map_test() ->
-    try
-        beamtalk_workspace_interface_primitives:load(#{key => val}),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Dictionary">>)
-            )
-    end.
+    ?assertBtErrorMessageContains(
+        type_error,
+        _,
+        _,
+        <<"Dictionary">>,
+        beamtalk_workspace_interface_primitives:load(#{key => val})
+    ).
 
 %% beamtalk_object input → "Object" in error message
 load_type_error_for_object_test() ->
-    try
-        beamtalk_workspace_interface_primitives:load(#beamtalk_object{}),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Object">>)
-            )
-    end.
+    ?assertBtErrorMessageContains(
+        type_error,
+        _,
+        _,
+        <<"Object">>,
+        beamtalk_workspace_interface_primitives:load(#beamtalk_object{})
+    ).
 
 %%====================================================================
 %% to_atom_name/1 error-path coverage via bind/2
@@ -510,57 +449,37 @@ load_type_error_for_object_test() ->
 
 %% Float name → type_error with "Float" in message
 bind_type_error_for_float_name_test() ->
-    try
-        beamtalk_workspace_interface_primitives:bind(42, 1.5),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Float">>)
-            )
-    end.
+    ?assertBtErrorMessageContains(
+        type_error, _, _, <<"Float">>, beamtalk_workspace_interface_primitives:bind(42, 1.5)
+    ).
 
 %% beamtalk_object name → type_error with "Object" in message
 %% (nil is an Erlang atom, so it passes to_atom_name/1; use a
 %%  #beamtalk_object{} record to reach the "Object" branch instead)
 bind_type_error_for_object_name_test() ->
-    try
-        beamtalk_workspace_interface_primitives:bind(42, #beamtalk_object{}),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Object">>)
-            )
-    end.
+    ?assertBtErrorMessageContains(
+        type_error,
+        _,
+        _,
+        <<"Object">>,
+        beamtalk_workspace_interface_primitives:bind(42, #beamtalk_object{})
+    ).
 
 %% List name → type_error with "List" in message
 bind_type_error_for_list_name_test() ->
-    try
-        beamtalk_workspace_interface_primitives:bind(42, [a, b]),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"List">>)
-            )
-    end.
+    ?assertBtErrorMessageContains(
+        type_error, _, _, <<"List">>, beamtalk_workspace_interface_primitives:bind(42, [a, b])
+    ).
 
 %% Map name → type_error with "Dictionary" in message
 bind_type_error_for_map_name_test() ->
-    try
-        beamtalk_workspace_interface_primitives:bind(42, #{key => val}),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Dictionary">>)
-            )
-    end.
+    ?assertBtErrorMessageContains(
+        type_error,
+        _,
+        _,
+        <<"Dictionary">>,
+        beamtalk_workspace_interface_primitives:bind(42, #{key => val})
+    ).
 
 %%====================================================================
 %% create_bindings_table/0 and ensure_bindings_table/0
@@ -762,13 +681,9 @@ resolve_name_tier2_bind_as_hit_test() ->
 %% Tier 5: a genuinely unknown name raises undefined_variable.
 resolve_name_tier5_undefined_variable_test() ->
     cleanup_ets_for(self()),
-    try
-        beamtalk_workspace_interface_primitives:resolve_name(#{}, noSuchName),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(undefined_variable, Err#beamtalk_error.kind)
-    end.
+    ?assertBtError(
+        undefined_variable, beamtalk_workspace_interface_primitives:resolve_name(#{}, noSuchName)
+    ).
 
 %% Ordering: locals shadow a bind:as: entry of the same name (tier 1 wins).
 resolve_name_locals_shadow_bind_as_test() ->
@@ -800,14 +715,11 @@ resolve_name_nil_local_is_a_hit_test() ->
 %% preserving the existing REPL "Class 'X' not found" error.
 resolve_class_reference_unknown_raises_class_not_found_test() ->
     cleanup_ets_for(self()),
-    try
-        beamtalk_workspace_interface_primitives:resolve_class_reference(#{}, 'NoSuchClassXyz'),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(class_not_found, Err#beamtalk_error.kind),
-            ?assertEqual('NoSuchClassXyz', Err#beamtalk_error.class)
-    end.
+    ?assertBtError(
+        class_not_found,
+        'NoSuchClassXyz',
+        beamtalk_workspace_interface_primitives:resolve_class_reference(#{}, 'NoSuchClassXyz')
+    ).
 
 %%====================================================================
 %% currentSession / sessions Tests (ADR 0081 Phases 5 & 7)
@@ -870,45 +782,38 @@ sessions_returns_empty_when_no_supervisor_test() ->
 %% dispatch('newClass:at:', ...) routes to newClass/2; a non-String argument
 %% raises a type_error at the FFI boundary.
 dispatch_new_class_type_error_test() ->
-    try
+    ?assertBtError(
+        type_error,
+        'Workspace',
+        'newClass:at:',
         beamtalk_workspace_interface_primitives:dispatch(
             'newClass:at:', [42, <<"src/Foo.bt">>], beamtalk_test_repl:fake_self(workspace, self())
-        ),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('Workspace', Err#beamtalk_error.class),
-            ?assertEqual('newClass:at:', Err#beamtalk_error.selector)
-    end.
+        )
+    ).
 
 %% dispatch('startSupervisor:', ...) routes to startSupervisor/1; a non-class
 %% argument raises a type_error.
 dispatch_start_supervisor_type_error_test() ->
-    try
+    ?assertBtError(
+        type_error,
+        _,
+        'startSupervisor:',
         beamtalk_workspace_interface_primitives:dispatch(
             'startSupervisor:', [42], beamtalk_test_repl:fake_self(workspace, self())
-        ),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('startSupervisor:', Err#beamtalk_error.selector)
-    end.
+        )
+    ).
 
 %% dispatch('stopSupervisor:', ...) routes to stopSupervisor/1; a non-class
 %% argument raises a type_error.
 dispatch_stop_supervisor_type_error_test() ->
-    try
+    ?assertBtError(
+        type_error,
+        _,
+        'stopSupervisor:',
         beamtalk_workspace_interface_primitives:dispatch(
             'stopSupervisor:', [notAClass], beamtalk_test_repl:fake_self(workspace, self())
-        ),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('stopSupervisor:', Err#beamtalk_error.selector)
-    end.
+        )
+    ).
 
 %%====================================================================
 %% newClass/2 validation coverage (ADR 0082 Phase 1)
@@ -920,40 +825,31 @@ dispatch_stop_supervisor_type_error_test() ->
 
 %% Non-String source → type_error naming the "source" argument.
 new_class_non_string_source_test() ->
-    try
-        beamtalk_workspace_interface_primitives:newClass(42, <<"src/Foo.bt">>),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('newClass:at:', Err#beamtalk_error.selector),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"source">>)
-            ),
-            %% value_type_name/1 reports the Integer type in the message.
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Integer">>)
-            )
-    end.
+    ?assertBtErrorWith(
+        type_error,
+        _,
+        'newClass:at:',
+        fun(Err) ->
+            ?assert(beamtalk_test_assert:contains(Err#beamtalk_error.message, <<"source">>)),
+            ?assert(beamtalk_test_assert:contains(Err#beamtalk_error.message, <<"Integer">>))
+        end,
+        beamtalk_workspace_interface_primitives:newClass(42, <<"src/Foo.bt">>)
+    ).
 
 %% String source but non-String path → type_error naming the "path" argument.
 new_class_non_string_path_test() ->
-    try
+    ?assertBtErrorWith(
+        type_error,
+        _,
+        'newClass:at:',
+        fun(Err) ->
+            ?assert(beamtalk_test_assert:contains(Err#beamtalk_error.message, <<"path">>)),
+            ?assert(beamtalk_test_assert:contains(Err#beamtalk_error.message, <<"Symbol">>))
+        end,
         beamtalk_workspace_interface_primitives:newClass(
             <<"Object subclass: Foo">>, myatom
-        ),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('newClass:at:', Err#beamtalk_error.selector),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"path">>)
-            ),
-            ?assertNotEqual(
-                nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Symbol">>)
-            )
-    end.
+        )
+    ).
 
 %%====================================================================
 %% changeLogClear / autoflush / setAutoflush / flush / changeLogRevert /

@@ -245,28 +245,31 @@ set_and_clear_test() ->
 require_workspace_raises_when_never_recorded_test() ->
     beamtalk_capability:clear(),
     ?assertEqual(none, beamtalk_capability:recorded()),
-    try
-        beamtalk_capability:require_workspace('load:'),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
+    ?assertBtErrorWith(
+        _,
+        _,
+        _,
+        fun(
+            #beamtalk_error{
+                message =
+                    {beamtalk_string,
+                        <<"Workspace>>load: needs a running workspace; none is running on this node">>}
+            } = Err
+        ) ->
+            ?assert(
+                beamtalk_test_assert:contains(
+                    Err#beamtalk_error.hint, <<"not under beamtalk test">>
+                )
+            ),
+            ?assert(
+                beamtalk_test_assert:contains(Err#beamtalk_error.hint, <<"Beamtalk classNamed:">>)
+            ),
             ?assertMatch(
                 #beamtalk_error{kind = no_workspace, class = 'Workspace', selector = 'load:'}, Err
-            ),
-            ?assertEqual(
-                {beamtalk_string,
-                    <<"Workspace>>load: needs a running workspace; none is running on this node">>},
-                Err#beamtalk_error.message
-            ),
-            ?assertNotEqual(
-                nomatch,
-                binary:match(element(2, Err#beamtalk_error.hint), <<"not under beamtalk test">>)
-            ),
-            ?assertNotEqual(
-                nomatch,
-                binary:match(element(2, Err#beamtalk_error.hint), <<"Beamtalk classNamed:">>)
             )
-    end.
+        end,
+        beamtalk_capability:require_workspace('load:')
+    ).
 
 require_workspace_names_class_test() ->
     beamtalk_capability:clear(),

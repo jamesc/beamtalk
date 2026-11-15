@@ -21,6 +21,7 @@
 "".
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 with_compiler_stopped(Fun) ->
@@ -79,53 +80,41 @@ erlang_help_dispatch_known_module_selector_binary_test() ->
 %%====================================================================
 
 erlang_help_dispatch_non_binary_module_raises_type_error_test() ->
-    try
+    ?assertBtError(
+        type_error,
+        'Beamtalk',
         beamtalk_interface:dispatch(
             'erlangHelp:', [42], beamtalk_test_repl:fake_self(beamtalk, self())
-        ),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('Beamtalk', Err#beamtalk_error.class)
-    end.
+        )
+    ).
 
 erlang_help_dispatch_unknown_module_raises_not_found_test() ->
-    try
+    ?assertBtError(
+        not_found,
         beamtalk_interface:dispatch(
             'erlangHelp:',
             [<<"no_such_module_xyz99">>],
             beamtalk_test_repl:fake_self(beamtalk, self())
-        ),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(not_found, Err#beamtalk_error.kind)
-    end.
+        )
+    ).
 
 erlang_help_selector_dispatch_non_binary_module_raises_type_error_test() ->
-    try
+    ?assertBtError(
+        type_error,
         beamtalk_interface:dispatch(
             'erlangHelp:selector:', [42, reverse], beamtalk_test_repl:fake_self(beamtalk, self())
-        ),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind)
-    end.
+        )
+    ).
 
 erlang_help_selector_dispatch_integer_selector_raises_type_error_test() ->
-    try
+    ?assertBtError(
+        type_error,
         beamtalk_interface:dispatch(
             'erlangHelp:selector:',
             [<<"lists">>, 42],
             beamtalk_test_repl:fake_self(beamtalk, self())
-        ),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind)
-    end.
+        )
+    ).
 
 %%====================================================================
 %% erlangHelp/1 direct export
@@ -137,23 +126,10 @@ erlang_help_1_known_module_test() ->
     ?assertNotEqual(nomatch, binary:match(Raw, <<"lists">>)).
 
 erlang_help_1_non_binary_raises_type_error_test() ->
-    try
-        beamtalk_interface:erlangHelp(lists),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('Beamtalk', Err#beamtalk_error.class)
-    end.
+    ?assertBtError(type_error, 'Beamtalk', beamtalk_interface:erlangHelp(lists)).
 
 erlang_help_1_unknown_module_raises_not_found_test() ->
-    try
-        beamtalk_interface:erlangHelp(<<"no_such_module_xyz99">>),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(not_found, Err#beamtalk_error.kind)
-    end.
+    ?assertBtError(not_found, beamtalk_interface:erlangHelp(<<"no_such_module_xyz99">>)).
 
 %%====================================================================
 %% erlangHelp/2 direct export
@@ -168,31 +144,13 @@ erlang_help_2_binary_selector_test() ->
     ?assertMatch({beamtalk_string, _}, Result).
 
 erlang_help_2_non_binary_module_raises_type_error_test() ->
-    try
-        beamtalk_interface:erlangHelp(42, reverse),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind)
-    end.
+    ?assertBtError(type_error, beamtalk_interface:erlangHelp(42, reverse)).
 
 erlang_help_2_integer_selector_raises_type_error_test() ->
-    try
-        beamtalk_interface:erlangHelp(<<"lists">>, 42),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind)
-    end.
+    ?assertBtError(type_error, beamtalk_interface:erlangHelp(<<"lists">>, 42)).
 
 erlang_help_2_unknown_function_raises_not_found_test() ->
-    try
-        beamtalk_interface:erlangHelp(<<"lists">>, no_such_function_xyz),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(not_found, Err#beamtalk_error.kind)
-    end.
+    ?assertBtError(not_found, beamtalk_interface:erlangHelp(<<"lists">>, no_such_function_xyz)).
 
 %%====================================================================
 %% findSendersIn/2 — compiler-unavailable degradation
@@ -216,23 +174,10 @@ find_senders_in_binary_source_binary_selector_degrades_to_empty_test() ->
     end).
 
 find_senders_in_non_binary_source_raises_type_error_test() ->
-    try
-        beamtalk_interface:findSendersIn(42, <<"sel">>),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('Beamtalk', Err#beamtalk_error.class)
-    end.
+    ?assertBtError(type_error, 'Beamtalk', beamtalk_interface:findSendersIn(42, <<"sel">>)).
 
 find_senders_in_integer_selector_raises_type_error_test() ->
-    try
-        beamtalk_interface:findSendersIn(<<"source">>, 42),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind)
-    end.
+    ?assertBtError(type_error, beamtalk_interface:findSendersIn(<<"source">>, 42)).
 
 %%====================================================================
 %% allSendsIn/1 — compiler-unavailable degradation
@@ -245,14 +190,7 @@ all_sends_in_binary_source_degrades_to_empty_test() ->
     end).
 
 all_sends_in_non_binary_raises_type_error_test() ->
-    try
-        beamtalk_interface:allSendsIn(42),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind),
-            ?assertEqual('Beamtalk', Err#beamtalk_error.class)
-    end.
+    ?assertBtError(type_error, 'Beamtalk', beamtalk_interface:allSendsIn(42)).
 
 %%====================================================================
 %% findReferencesToIn/2 — compiler-unavailable degradation
@@ -271,13 +209,7 @@ find_references_to_in_binary_class_degrades_to_empty_test() ->
     end).
 
 find_references_to_in_non_binary_source_raises_type_error_test() ->
-    try
-        beamtalk_interface:findReferencesToIn(42, <<"MyClass">>),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind)
-    end.
+    ?assertBtError(type_error, beamtalk_interface:findReferencesToIn(42, <<"MyClass">>)).
 
 %%====================================================================
 %% findFieldReadersIn/2 — compiler-unavailable degradation
@@ -296,13 +228,7 @@ find_field_readers_in_binary_field_degrades_to_empty_test() ->
     end).
 
 find_field_readers_in_non_binary_source_raises_type_error_test() ->
-    try
-        beamtalk_interface:findFieldReadersIn(42, <<"field">>),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind)
-    end.
+    ?assertBtError(type_error, beamtalk_interface:findFieldReadersIn(42, <<"field">>)).
 
 %%====================================================================
 %% findFieldWritersIn/2 — compiler-unavailable degradation
@@ -321,13 +247,7 @@ find_field_writers_in_binary_field_degrades_to_empty_test() ->
     end).
 
 find_field_writers_in_non_binary_source_raises_type_error_test() ->
-    try
-        beamtalk_interface:findFieldWritersIn(42, <<"field">>),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind)
-    end.
+    ?assertBtError(type_error, beamtalk_interface:findFieldWritersIn(42, <<"field">>)).
 
 %%====================================================================
 %% ffiSitesIn/4 — compiler-unavailable degradation
@@ -348,22 +268,10 @@ ffi_sites_in_binary_any_arity_degrades_to_empty_test() ->
     end).
 
 ffi_sites_in_non_binary_source_raises_type_error_test() ->
-    try
-        beamtalk_interface:ffiSitesIn(42, lists, reverse, 1),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind)
-    end.
+    ?assertBtError(type_error, beamtalk_interface:ffiSitesIn(42, lists, reverse, 1)).
 
 ffi_sites_in_negative_arity_raises_type_error_test() ->
-    try
-        beamtalk_interface:ffiSitesIn(<<"source">>, lists, reverse, -1),
-        ?assert(false)
-    catch
-        error:#{error := Err} ->
-            ?assertEqual(type_error, Err#beamtalk_error.kind)
-    end.
+    ?assertBtError(type_error, beamtalk_interface:ffiSitesIn(<<"source">>, lists, reverse, -1)).
 
 %%====================================================================
 %% log_compiler_diagnostics/2 — TEST export

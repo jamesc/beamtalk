@@ -92,16 +92,10 @@ named_raises_error_for_unknown_atom_test() ->
 
 named_error_includes_hint_with_loaded_packages_test() ->
     setup(),
-    try
-        beamtalk_package:named(<<"nonexistent_package_xyz">>),
-        ?assert(false)
-    catch
-        error:#{error := #beamtalk_error{hint = Hint}} ->
-            ?assertNotEqual(undefined, Hint),
-            ?assertMatch({beamtalk_string, _}, Hint),
-            %% Hint should mention loaded packages
-            ?assertMatch({match, _}, re:run(element(2, Hint), <<"stdlib">>))
-    end.
+    %% Hint should mention loaded packages
+    ?assertBtErrorHintContains(
+        _, _, _, <<"stdlib">>, beamtalk_package:named(<<"nonexistent_package_xyz">>)
+    ).
 
 %%% ============================================================================
 %%% package_name/1 tests

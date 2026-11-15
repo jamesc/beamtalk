@@ -24,23 +24,28 @@ print_string/1, deserialize_with_used/1).
 
 serialize_integer_test() ->
     Bin = beamtalk_binary:serialize(42),
-    ?assert(is_binary(Bin)).
+    ?assertEqual(erlang:term_to_binary(42), Bin),
+    ?assertEqual(42, beamtalk_binary:deserialize(Bin)).
 
 serialize_string_test() ->
     Bin = beamtalk_binary:serialize(<<"hello">>),
-    ?assert(is_binary(Bin)).
+    ?assertEqual(erlang:term_to_binary(<<"hello">>), Bin),
+    ?assertEqual(<<"hello">>, beamtalk_binary:deserialize(Bin)).
 
 serialize_list_test() ->
     Bin = beamtalk_binary:serialize([1, 2, 3]),
-    ?assert(is_binary(Bin)).
+    ?assertEqual(erlang:term_to_binary([1, 2, 3]), Bin),
+    ?assertEqual([1, 2, 3], beamtalk_binary:deserialize(Bin)).
 
 serialize_map_test() ->
     Bin = beamtalk_binary:serialize(#{key => value}),
-    ?assert(is_binary(Bin)).
+    ?assertEqual(erlang:term_to_binary(#{key => value}), Bin),
+    ?assertEqual(#{key => value}, beamtalk_binary:deserialize(Bin)).
 
 serialize_atom_test() ->
     Bin = beamtalk_binary:serialize(hello),
-    ?assert(is_binary(Bin)).
+    ?assertEqual(erlang:term_to_binary(hello), Bin),
+    ?assertEqual(hello, beamtalk_binary:deserialize(Bin)).
 
 %%% ============================================================================
 %%% deserialize:/1
@@ -107,7 +112,8 @@ round_trip_complex_test() ->
 
 serialize_alias_test() ->
     Bin = beamtalk_binary:serialize(42),
-    ?assert(is_binary(Bin)).
+    ?assertEqual(erlang:term_to_binary(42), Bin),
+    ?assertEqual(42, beamtalk_binary:deserialize(Bin)).
 
 deserialize_alias_test() ->
     Bin = erlang:term_to_binary(42),

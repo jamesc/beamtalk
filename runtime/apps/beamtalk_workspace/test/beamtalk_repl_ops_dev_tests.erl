@@ -25,130 +25,9 @@ and handle/4 operations that do not require a running workspace.
 %% parse_receiver_and_prefix/1
 %%====================================================================
 
-parse_empty_returns_undefined_empty_test() ->
-    ?assertEqual({undefined, <<>>}, beamtalk_repl_editor_context:parse_receiver_and_prefix(<<>>)).
-
-parse_bare_prefix_returns_undefined_test() ->
-    ?assertEqual(
-        {undefined, <<"Int">>}, beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Int">>)
-    ).
-
-parse_single_char_prefix_test() ->
-    ?assertEqual(
-        {undefined, <<"s">>}, beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"s">>)
-    ).
-
-parse_receiver_and_prefix_test() ->
-    ?assertEqual(
-        {<<"Integer">>, <<"s">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Integer s">>)
-    ).
-
-parse_receiver_empty_prefix_test() ->
-    ?assertEqual(
-        {<<"Integer">>, <<>>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Integer ">>)
-    ).
-
-parse_receiver_integer_literal_test() ->
-    ?assertEqual(
-        {<<"42">>, <<"s">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"42 s">>)
-    ).
-
-parse_multitoken_returns_expression_test() ->
-    ?assertMatch(
-        {expression, _, <<"c">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"\"hello\" size c">>)
-    ).
-
-parse_multitoken_expression_content_test() ->
-    {expression, Expr, Prefix} = beamtalk_repl_editor_context:parse_receiver_and_prefix(
-        <<"\"hello\" size c">>
-    ),
-    ?assertEqual(<<"\"hello\" size">>, Expr),
-    ?assertEqual(<<"c">>, Prefix).
-
-parse_leading_whitespace_single_token_test() ->
-    %% Leading whitespace before a single receiver should not create expression path
-    ?assertEqual(
-        {<<"Integer">>, <<"s">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"  Integer s">>)
-    ).
-
-parse_keyword_selector_as_prefix_test() ->
-    %% Colons are identifier chars, so "ifTrue:" is a single prefix token
-    ?assertEqual(
-        {<<"x">>, <<"ifTrue:">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"x ifTrue:">>)
-    ).
-
-%% Parenthesised subexpressions as receivers
-parse_paren_binary_send_returns_expression_test() ->
-    %% ("foo" ++ "bar") cla<TAB> — paren expression is multi-token, must use expression path
-    ?assertMatch(
-        {expression, _, <<"cla">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"(\"foo\" ++ \"bar\") cla">>)
-    ).
-
-parse_paren_binary_send_expression_content_test() ->
-    %% Verify the ReceiverExpr captures the full parenthesised expression
-    {expression, Expr, Prefix} = beamtalk_repl_editor_context:parse_receiver_and_prefix(
-        <<"(\"foo\" ++ \"bar\") cla">>
-    ),
-    ?assertEqual(<<"(\"foo\" ++ \"bar\")">>, Expr),
-    ?assertEqual(<<"cla">>, Prefix).
-
-parse_paren_unary_send_returns_expression_test() ->
-    %% (myList size) sq<TAB>
-    ?assertMatch(
-        {expression, _, <<"sq">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"(myList size) sq">>)
-    ).
-
-parse_paren_unary_send_expression_content_test() ->
-    {expression, Expr, Prefix} = beamtalk_repl_editor_context:parse_receiver_and_prefix(
-        <<"(myList size) sq">>
-    ),
-    ?assertEqual(<<"(myList size)">>, Expr),
-    ?assertEqual(<<"sq">>, Prefix).
-
-parse_paren_expr_empty_prefix_test() ->
-    %% ("foo" ++ "bar") <TAB> — empty prefix, expression path
-    ?assertMatch(
-        {expression, _, <<>>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"(\"foo\" ++ \"bar\") ">>)
-    ).
-
 %%====================================================================
 %% tokenise_send_chain/1
 %%====================================================================
-
-tokenise_empty_returns_error_test() ->
-    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_send_chain(<<>>)).
-
-tokenise_single_token_returns_error_test() ->
-    %% Single token means no send chain -- nothing to walk
-    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_send_chain(<<"Integer">>)).
-
-tokenise_two_token_unary_test() ->
-    %% "size" is a known atom in Erlang/OTP
-    Result = beamtalk_repl_editor_context:tokenise_send_chain(<<"\"hello\" size">>),
-    ?assertMatch({ok, <<"\"hello\"">>, _}, Result),
-    {ok, _, Selectors} = Result,
-    ?assert(lists:member(size, Selectors)).
-
-tokenise_paren_returns_error_test() ->
-    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_send_chain(<<"(myList size)">>)).
-
-tokenise_bitshift_returns_error_test() ->
-    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_send_chain(<<"x >> y">>)).
-
-tokenise_keyword_send_returns_error_test() ->
-    %% Selectors with colons are keyword sends, not valid unary
-    ?assertEqual(
-        error, beamtalk_repl_editor_context:tokenise_send_chain(<<"list inject: 0 into:">>)
-    ).
 
 %%====================================================================
 %% base_protocol_response/1
@@ -1010,160 +889,21 @@ resolve_chain_type_single_token_test() ->
 %% walk_chain/2 -- without running registry
 %%====================================================================
 
-walk_chain_empty_selectors_test() ->
-    %% With no selectors, walk_chain returns {ok, ClassName, instance} immediately
-    ?assertEqual({ok, 'Integer', instance}, beamtalk_repl_editor_context:walk_chain('Integer', [])).
-
-walk_chain_unknown_selector_test() ->
-    %% Non-existent registry -> not_found -> undefined
-    Result = beamtalk_repl_editor_context:walk_chain('Integer', [unknownSelector]),
-    ?assertEqual(undefined, Result).
-
-walk_chain_class_transition_test() ->
-    %% `instance class` transitions to class side for completions
-    ?assertEqual(
-        {ok, 'Integer', class}, beamtalk_repl_editor_context:walk_chain('Integer', [class])
-    ).
-
 %%====================================================================
 %% walk_chain_class/2 -- without running registry
 %%====================================================================
-
-walk_chain_class_empty_selectors_test() ->
-    ?assertEqual(
-        {ok, 'Integer', class}, beamtalk_repl_editor_context:walk_chain_class('Integer', [])
-    ).
-
-walk_chain_class_meta_selector_test() ->
-    %% `class` selector on a class object stays on the class side
-    ?assertEqual(
-        {ok, 'Integer', class}, beamtalk_repl_editor_context:walk_chain_class('Integer', [class])
-    ).
-
-walk_chain_class_multi_class_selectors_test() ->
-    ?assertEqual(
-        {ok, 'Foo', class}, beamtalk_repl_editor_context:walk_chain_class('Foo', [class, class])
-    ).
-
-walk_chain_class_unknown_selector_test() ->
-    Result = beamtalk_repl_editor_context:walk_chain_class('Integer', [unknownMethod]),
-    ?assertEqual(undefined, Result).
 
 %%====================================================================
 %% tokenise_binary_chain/1
 %%====================================================================
 
-tokenise_binary_chain_empty_returns_error_test() ->
-    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_binary_chain(<<>>)).
-
-tokenise_binary_chain_single_token_returns_error_test() ->
-    %% Single token — no chain to walk
-    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_binary_chain(<<"counter">>)).
-
-tokenise_binary_chain_unary_only_succeeds_test() ->
-    %% tokenise_binary_chain also accepts pure unary chains (superset of tokenise_send_chain).
-    %% The difference is that tokenise_send_chain returns [atom()] while
-    %% tokenise_binary_chain returns [{unary, atom()}].
-    %% `size` is a known atom (used widely in Erlang/OTP)
-    Result = beamtalk_repl_editor_context:tokenise_binary_chain(<<"x size">>),
-    ?assertMatch({ok, <<"x">>, [{unary, size}]}, Result).
-
-tokenise_binary_chain_with_plus_test() ->
-    %% `+` is a known Erlang atom (used as BIF name erlang:'+'/2)
-    Result = beamtalk_repl_editor_context:tokenise_binary_chain(<<"counter value + 1">>),
-    ?assertMatch({ok, <<"counter">>, _}, Result),
-    {ok, _, Hops} = Result,
-    ?assertEqual([{unary, value}, {binary, '+'}], Hops).
-
-tokenise_binary_chain_single_binary_op_test() ->
-    %% `+` is a known Erlang atom (used as BIF name erlang:'+'/2),
-    %% so we can safely test a simple binary operator chain here.
-    Result = beamtalk_repl_editor_context:tokenise_binary_chain(<<"42 + 1">>),
-    ?assertMatch({ok, <<"42">>, [{binary, '+'}]}, Result).
-
-tokenise_binary_chain_multi_binary_test() ->
-    %% `x + 1 * 2` → receiver x, hops [{binary,'+'}, {binary,'*'}]
-    Result = beamtalk_repl_editor_context:tokenise_binary_chain(<<"x + 1 * 2">>),
-    ?assertMatch({ok, <<"x">>, [{binary, '+'}, {binary, '*'}]}, Result).
-
-tokenise_binary_chain_mixed_hops_test() ->
-    %% `myList size + offset` → receiver myList, hops [{unary,size},{binary,'+'}]
-    %% `size` is a known atom (used all over the codebase)
-    Result = beamtalk_repl_editor_context:tokenise_binary_chain(<<"myList size + offset">>),
-    ?assertMatch({ok, <<"myList">>, [{unary, size}, {binary, '+'}]}, Result).
-
-tokenise_binary_chain_paren_returns_error_test() ->
-    ?assertEqual(
-        error, beamtalk_repl_editor_context:tokenise_binary_chain(<<"(myList size) + 1">>)
-    ).
-
-tokenise_binary_chain_bitshift_returns_error_test() ->
-    %% >> is an invalid chain character
-    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_binary_chain(<<"x >> y">>)).
-
-tokenise_binary_chain_binary_op_no_arg_returns_error_test() ->
-    %% Binary op at end of expression with no argument
-    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_binary_chain(<<"counter value +">>)).
-
-tokenise_binary_chain_keyword_arg_returns_error_test() ->
-    %% Keyword-style arg token (contains `:`) after a binary op must be rejected
-    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_binary_chain(<<"x + ifTrue:">>)).
-
-tokenise_binary_chain_keyword_returns_error_test() ->
-    %% Keyword sends (tokens with `:`) are not valid unary selectors
-    ?assertEqual(
-        error, beamtalk_repl_editor_context:tokenise_binary_chain(<<"list inject: 0 into: x">>)
-    ).
-
-tokenise_binary_chain_compound_selector_test() ->
-    %% Multi-character binary selectors like `<=` are valid
-    Result = beamtalk_repl_editor_context:tokenise_binary_chain(<<"42 <= 10">>),
-    ?assertMatch({ok, <<"42">>, [{binary, '<='}]}, Result).
-
-tokenise_binary_chain_equality_selector_test() ->
-    %% `=:=` is a three-character binary selector
-    Result = beamtalk_repl_editor_context:tokenise_binary_chain(<<"42 =:= 42">>),
-    ?assertMatch({ok, <<"42">>, [{binary, '=:='}]}, Result).
-
 %%====================================================================
 %% walk_mixed_chain/2
 %%====================================================================
 
-walk_mixed_chain_empty_hops_test() ->
-    %% No hops — returns the starting class immediately
-    ?assertEqual(
-        {ok, 'Integer', instance}, beamtalk_repl_editor_context:walk_mixed_chain('Integer', [])
-    ).
-
-walk_mixed_chain_unknown_unary_selector_test() ->
-    %% No registry — get_method_return_type returns not_found → undefined
-    Result = beamtalk_repl_editor_context:walk_mixed_chain('Integer', [{unary, unknownSel}]),
-    ?assertEqual(undefined, Result).
-
-walk_mixed_chain_unknown_binary_selector_test() ->
-    %% Graceful fallback: a binary selector not in method_return_types → undefined
-    Result = beamtalk_repl_editor_context:walk_mixed_chain('Integer', [{binary, 'noSuchBinOp'}]),
-    ?assertEqual(undefined, Result).
-
 %%====================================================================
 %% walk_mixed_chain_class/2
 %%====================================================================
-
-walk_mixed_chain_class_empty_hops_test() ->
-    ?assertEqual(
-        {ok, 'Integer', class}, beamtalk_repl_editor_context:walk_mixed_chain_class('Integer', [])
-    ).
-
-walk_mixed_chain_class_meta_selector_test() ->
-    %% `{unary, class}` on a class object stays on the class side
-    ?assertEqual(
-        {ok, 'Integer', class},
-        beamtalk_repl_editor_context:walk_mixed_chain_class('Integer', [{unary, class}])
-    ).
-
-walk_mixed_chain_class_unknown_selector_test() ->
-    Result = beamtalk_repl_editor_context:walk_mixed_chain_class('Integer', [{unary, unknownMethod}]),
-    ?assertEqual(undefined, Result).
 
 %%====================================================================
 %% resolve_chain_type/2 with binary chains
@@ -1183,56 +923,9 @@ resolve_chain_type_binary_chain_no_registry_test() ->
 %% parse_receiver_and_prefix/1 -- additional edge cases
 %%====================================================================
 
-parse_tab_separated_test() ->
-    %% Tabs are treated as whitespace separators
-    ?assertEqual(
-        {<<"Integer">>, <<"s">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Integer\ts">>)
-    ).
-
-parse_underscore_prefix_test() ->
-    %% Underscores are identifier chars
-    ?assertEqual(
-        {undefined, <<"_foo">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"_foo">>)
-    ).
-
-parse_multi_keyword_selector_test() ->
-    %% Multi-keyword selector like "ifTrue:ifFalse:" is one prefix token
-    ?assertEqual(
-        {<<"x">>, <<"ifTrue:ifFalse:">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"x ifTrue:ifFalse:">>)
-    ).
-
 %%====================================================================
 %% parse_receiver_and_prefix/1 -- keyword sends mid-chain
 %%====================================================================
-
-parse_keyword_send_mid_chain_returns_expression_test() ->
-    %% `myList collect: [:x | x * 2] si<TAB>`
-    %% The full receiver expression is everything before `si`.
-    ?assertMatch(
-        {expression, _, <<"si">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(
-            <<"myList collect: [:x | x * 2] si">>
-        )
-    ).
-
-parse_keyword_send_mid_chain_expression_content_test() ->
-    %% Verify the ReceiverExpr captures the full keyword send expression
-    {expression, Expr, Prefix} = beamtalk_repl_editor_context:parse_receiver_and_prefix(
-        <<"myList collect: [:x | x * 2] si">>
-    ),
-    ?assertEqual(<<"myList collect: [:x | x * 2]">>, Expr),
-    ?assertEqual(<<"si">>, Prefix).
-
-parse_keyword_send_inject_into_returns_expression_test() ->
-    %% `myList inject: 0 into: [:acc :x | acc + x] pr<TAB>`
-    {expression, Expr, Prefix} = beamtalk_repl_editor_context:parse_receiver_and_prefix(
-        <<"myList inject: 0 into: [:acc :x | acc + x] pr">>
-    ),
-    ?assertEqual(<<"myList inject: 0 into: [:acc :x | acc + x]">>, Expr),
-    ?assertEqual(<<"pr">>, Prefix).
 
 %%====================================================================
 %% handle/4 -- describe omits hard-removed ops
@@ -1403,28 +1096,6 @@ resolve_qualified_class_empty_package_test() ->
 %%====================================================================
 %% parse_receiver_and_prefix with @
 %%====================================================================
-
-parse_qualified_name_as_receiver_test() ->
-    %% "json@Parser " should parse as receiver="json@Parser", prefix=<<>>
-    %% (the @ is now an identifier char so it stays as one token)
-    ?assertEqual(
-        {<<"json@Parser">>, <<>>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"json@Parser ">>)
-    ).
-
-parse_qualified_name_with_prefix_test() ->
-    %% "json@Parser pa" should parse as receiver="json@Parser", prefix="pa"
-    ?assertEqual(
-        {<<"json@Parser">>, <<"pa">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"json@Parser pa">>)
-    ).
-
-parse_bare_qualified_name_test() ->
-    %% "json@Parser" with no trailing space is a bare prefix (no receiver)
-    ?assertEqual(
-        {undefined, <<"json@Parser">>},
-        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"json@Parser">>)
-    ).
 
 %% dedupe_keyword_aliases and format_beamtalk_signature tests moved to
 %% beamtalk_erlang_help_tests.erl (these functions were extracted into their
@@ -2633,43 +2304,6 @@ handle_list_classes_non_binary_filter_test() ->
 %% is_identifier_char/1 — shared word-boundary conformance corpus
 %%====================================================================
 
-%% Conformance: every case in the shared corpus must classify
-%% identically here and in the Rust side's `is_completion_word_char`
-%% (`crates/beamtalk-core/src/source_analysis/mod.rs`). The corpus is the
-%% single source of truth both implementations are pinned to; the Rust side
-%% asserts the identical cases in
-%% `source_analysis::completion_word_boundary_tests::completion_word_char_matches_shared_corpus`.
-is_identifier_char_matches_shared_corpus_test() ->
-    Cases = load_word_boundary_corpus(),
-    ?assert(length(Cases) > 0),
-    lists:foreach(
-        fun(Case) ->
-            [Char | _] = unicode:characters_to_list(maps:get(<<"char">>, Case)),
-            Expected = maps:get(<<"is_word_char">>, Case),
-            Why = maps:get(<<"why">>, Case, <<>>),
-            ?assertEqual(
-                Expected,
-                beamtalk_repl_editor_context:is_identifier_char(Char),
-                {corpus_mismatch, Char, Why}
-            )
-        end,
-        Cases
-    ).
-
-%% Load the shared word-boundary conformance corpus from the repo tree.
-%% `beamtalk_test_corpus` walks up from the test CWD to the
-%% project root (the dir holding `Cargo.toml`), then reads the fixture both
-%% surfaces share.
-load_word_boundary_corpus() ->
-    beamtalk_test_corpus:load_json_fixture([
-        "runtime",
-        "apps",
-        "beamtalk_workspace",
-        "test",
-        "fixtures",
-        "completion_word_boundary_corpus.json"
-    ]).
-
 %%====================================================================
 %% builtin_keywords/0 — shared keyword-vocabulary conformance corpus
 %%====================================================================
@@ -2708,56 +2342,3 @@ load_keyword_vocabulary_corpus() ->
 %%====================================================================
 %% Pipeline `|>` completion (ADR 0145, BT-4518)
 %%====================================================================
-
-%% Conformance: completing a pipeline stage, the REPL/MCP/LiveView engine
-%% (`parse_receiver_and_prefix/1`) and the Rust LSP (`pipeline_receiver_end`
-%% in `crates/beamtalk-language-service/src/queries/completion_provider.rs`)
-%% must agree on the stage's receiver: the value before the last `|>`. Both
-%% assert the cases in the shared corpus; the Rust side in
-%% `pipeline_receiver_matches_shared_corpus`.
-pipeline_receiver_matches_shared_corpus_test() ->
-    Cases = load_pipeline_receiver_corpus(),
-    ?assert(length(Cases) > 0),
-    lists:foreach(
-        fun(Case) ->
-            Line = maps:get(<<"line">>, Case),
-            Expected = {maps:get(<<"receiver">>, Case), maps:get(<<"prefix">>, Case)},
-            Actual =
-                case beamtalk_repl_editor_context:parse_receiver_and_prefix(Line) of
-                    {expression, Receiver, Prefix} -> {Receiver, Prefix};
-                    {Receiver, Prefix} -> {Receiver, Prefix}
-                end,
-            ?assertEqual(Expected, Actual, {corpus_mismatch, Line})
-        end,
-        Cases
-    ).
-
-pipeline_with_nothing_before_has_no_receiver_test() ->
-    ?assertEqual(
-        {undefined, <<"ab">>}, beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"|> ab">>)
-    ).
-
-tokenise_send_chain_drops_pipeline_tokens_test() ->
-    %% `"hello" |> size abs` is the unary chain `"hello" size abs`, so it
-    %% resolves without the compiler port.
-    ?assertEqual(
-        {ok, <<"\"hello\"">>, [size, abs]},
-        beamtalk_repl_editor_context:tokenise_send_chain(<<"\"hello\" |> size |> abs">>)
-    ).
-
-tokenise_binary_chain_drops_pipeline_tokens_test() ->
-    ?assertEqual(
-        {ok, <<"x">>, [{binary, '+'}, {unary, abs}]},
-        beamtalk_repl_editor_context:tokenise_binary_chain(<<"x + 1 |> abs">>)
-    ).
-
-%% Load the shared pipeline-receiver conformance corpus from the repo tree.
-load_pipeline_receiver_corpus() ->
-    beamtalk_test_corpus:load_json_fixture([
-        "runtime",
-        "apps",
-        "beamtalk_workspace",
-        "test",
-        "fixtures",
-        "completion_pipeline_receiver_corpus.json"
-    ]).

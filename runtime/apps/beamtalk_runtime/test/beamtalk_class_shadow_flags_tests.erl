@@ -1576,6 +1576,7 @@ held_then_raise(Tag, Attempt) ->
     try Attempt() of
         Other -> {unexpected, Other}
     catch
+        %% BT-4900: kept hand-written - value-returning helper with an `after` that releases the holder
         error:#{error := Err} -> Err
     after
         Holder ! release

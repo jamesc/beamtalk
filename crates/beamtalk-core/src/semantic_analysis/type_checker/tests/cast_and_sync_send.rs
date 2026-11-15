@@ -25,30 +25,12 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 
     let info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("Counter"),
-        superclass: Some(eco_string("Actor")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![eco_string("count")],
         state_types: {
             let mut m = std::collections::HashMap::new();
             m.insert(eco_string("count"), DeclaredType::parse("Integer"));
             m
         },
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: eco_string("increment"),
@@ -87,11 +69,7 @@ fn add_counter_actor(hierarchy: &mut ClassHierarchy) {
                 answers_receiver: false,
             },
         ],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Counter", Some("Actor"))
     };
 
     hierarchy.add_from_beam_meta(vec![info]);

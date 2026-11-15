@@ -22,7 +22,7 @@ is_binary/1` before calling it, so it can never hit the list/other case) and
 is pinned by a golden test instead — see `beamtalk_compiler_port_tests.erl`.
 """.
 
--export([to_binary/1, to_existing_atom/1, unwrap/1, unwrap_or_raise/4]).
+-export([to_binary/1, to_existing_atom/1, unwrap/1, unwrap_or_raise/4, unwrap_or_raise_message/4]).
 
 -doc "Normalise an atom, binary, String, list, or arbitrary term to a UTF-8 binary.".
 -spec to_binary(term()) -> binary().
@@ -92,4 +92,15 @@ unwrap_or_raise(Value, Class, Selector, Hint) ->
     case unwrap(Value) of
         {ok, Bin} -> Bin;
         error -> beamtalk_error:raise_type_error(Class, Selector, Hint)
+    end.
+
+-doc """
+As `unwrap_or_raise/4`, but the `type_error` carries `Message` as its message
+(no hint) — for call sites that author the whole message text.
+""".
+-spec unwrap_or_raise_message(term(), atom(), atom(), term()) -> binary() | no_return().
+unwrap_or_raise_message(Value, Class, Selector, Message) ->
+    case unwrap(Value) of
+        {ok, Bin} -> Bin;
+        error -> beamtalk_error:raise_type_error_message(Class, Selector, Message)
     end.

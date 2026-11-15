@@ -23,6 +23,53 @@ pub mod exit_codes {
     pub const ERROR: u8 = 2;
 }
 
+/// Run `erl -noshell -noinput -eval <eval>` to completion and return its
+/// output, failing with `what` plus the combined stdout and stderr when `erl`
+/// exits non-zero.
+///
+/// The one runner for the throwaway `erl` evals whose only success criterion
+/// is a zero exit status (release assembly, beam stripping, tarball build, ...).
+/// `what` is a gerund-free noun phrase used in both messages, e.g.
+/// `"strip release beams"` -> "Failed to run erl to strip release beams" and
+/// "strip release beams failed:\n<output>". Callers that interpret the exit
+/// status themselves (erlfmt, `generate stubs`, the `EUnit` runner) build their
+/// own command instead.
+///
+/// # Errors
+///
+/// Returns an error if `erl` cannot be spawned or exits non-zero.
+pub(crate) fn run_erl_eval(eval: &str, what: &str) -> miette::Result<std::process::Output> {
+    run_erl_eval_with_pa(std::iter::empty::<&std::path::Path>(), eval, what)
+}
+
+/// [`run_erl_eval`] with extra `-pa` directories on the code path.
+pub(crate) fn run_erl_eval_with_pa<I, P>(
+    pa_dirs: I,
+    eval: &str,
+    what: &str,
+) -> miette::Result<std::process::Output>
+where
+    I: IntoIterator<Item = P>,
+    P: AsRef<std::path::Path>,
+{
+    use miette::{IntoDiagnostic, WrapErr};
+
+    let output = beamtalk_workspace::erl_command()
+        .args(["-noshell", "-noinput"])
+        .args(beamtalk_cli::repl_startup::pa_args(pa_dirs))
+        .arg("-eval")
+        .arg(eval)
+        .output()
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to run erl to {what}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        miette::bail!("{what} failed:\n{}", format!("{stdout}{stderr}").trim_end());
+    }
+    Ok(output)
+}
+
 /// Builder for Erlang eval expressions used by the erlfmt integration.
 ///
 /// Produces structured `case` expressions with uniform error handling:

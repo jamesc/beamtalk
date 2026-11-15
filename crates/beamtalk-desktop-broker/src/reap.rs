@@ -90,8 +90,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use beamtalk_workspace::pid_liveness::is_process_alive;
 pub use beamtalk_workspace::pid_liveness::proc_start_time;
+use beamtalk_workspace::pid_liveness::{is_process_alive, kill_process};
 
 use crate::error::Result;
 
@@ -580,9 +580,8 @@ pub struct SweepReport {
     pub pid_reused_skipped: Vec<FrontRecord>,
 }
 
-/// Grace period between `SIGTERM` and a forced `SIGKILL` (Unix only —
-/// Windows' `TerminateProcess` has no graceful-signal equivalent to wait on).
-#[cfg(unix)]
+/// Grace period between `SIGTERM` and a forced `SIGKILL` (ignored on Windows —
+/// `TerminateProcess` has no graceful-signal equivalent to wait on).
 const TERMINATE_GRACE: Duration = Duration::from_millis(300);
 
 /// Sweep `dir` for orphaned fronts, killing (with a `SIGTERM` → `SIGKILL`
@@ -660,44 +659,13 @@ pub fn sweep(dir: &Path) -> Result<SweepReport> {
 /// arms re-verify via [`still_same_process`] immediately before the actual
 /// kill call, closing the window rather than just narrowing it.
 fn terminate_process(pid: u32, expected_start_time: Option<u64>) {
-    #[cfg(unix)]
-    {
-        if let Ok(pid_i) = i32::try_from(pid) {
-            // SAFETY: kill(2) with a valid pid and standard signal number.
-            unsafe { libc::kill(pid_i, libc::SIGTERM) };
-            std::thread::sleep(TERMINATE_GRACE);
-            if is_process_alive(pid) && still_same_process(pid, expected_start_time) {
-                // SAFETY: kill(2) with a valid pid and standard signal number.
-                unsafe { libc::kill(pid_i, libc::SIGKILL) };
-            }
-        }
-    }
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Foundation::{CloseHandle, FALSE};
-        use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_TERMINATE, TerminateProcess,
-        };
-        // No grace-window sleep on this path (a single forceful
-        // TerminateProcess, no graceful-signal equivalent to wait out first),
-        // so the PID-reuse window this re-check closes is inherently much
-        // smaller than the Unix arm's `TERMINATE_GRACE` — but now that
-        // `proc_start_time` is real on Windows too, re-verifying
-        // costs nothing and closes it anyway rather than merely accepting it
-        // as "small enough", matching the Unix arm's own belt-and-suspenders
-        // stance.
-        // SAFETY: Windows API call with documented parameters; handle is
-        // checked for null before use and closed afterward.
-        unsafe {
-            let handle = OpenProcess(PROCESS_TERMINATE, FALSE, pid);
-            if !handle.is_null() {
-                if still_same_process(pid, expected_start_time) {
-                    TerminateProcess(handle, 1);
-                }
-                CloseHandle(handle);
-            }
-        }
-    }
+    // Best-effort: "already gone" is a success and any other failure is not
+    // actionable in a sweep. The kill itself lives in
+    // `beamtalk_workspace::pid_liveness::kill_process`; the identity re-check
+    // runs immediately before the kill signal.
+    let _ = kill_process(pid, Some(TERMINATE_GRACE), || {
+        still_same_process(pid, expected_start_time)
+    });
 }
 
 /// Re-read `pid`'s *current* start time and check it against
@@ -706,7 +674,6 @@ fn terminate_process(pid: u32, expected_start_time: Option<u64>) {
 /// close the PID-reuse window between `classify_record`'s check and the
 /// actual kill call (see `terminate_process`'s doc comment). Available
 /// wherever `proc_start_time` returns a real value (Linux, Windows).
-#[cfg(any(unix, windows))]
 fn still_same_process(pid: u32, expected_start_time: Option<u64>) -> bool {
     start_time_matches(expected_start_time, proc_start_time(pid))
 }
@@ -714,11 +681,6 @@ fn still_same_process(pid: u32, expected_start_time: Option<u64>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    // `TERMINATE_GRACE` (crate-level import above) only exists on
-    // `cfg(unix)`; this module's own `#[cfg(windows)]` tests below need
-    // `Duration` too.
-    #[cfg(windows)]
-    use std::time::Duration;
 
     fn record(pid: u32, start_time: Option<u64>) -> FrontRecord {
         FrontRecord {

@@ -179,6 +179,7 @@ load_native_compile_failure_is_structured(#{tmp := Tmp, unique := U}) ->
         beamtalk_workspace_interface_primitives:load(list_to_binary(Path)),
         [?_assert(false)]
     catch
+        %% BT-4900: kept hand-written - builds a generator from the raised kind, not an assertion site
         error:#{error := #beamtalk_error{kind = Kind, selector = Selector}} ->
             [
                 ?_assertEqual(native_compile_failed, Kind),
