@@ -936,7 +936,10 @@ defmodule BtAttach.WorkspaceRpcTest do
     end
 
     test "change_history/0 surfaces a badrpc as unreachable" do
-      mock_rpc(%{{:beamtalk_workspace_changelog_views, :change_entries} => {:badrpc, :mock_scripted}})
+      mock_rpc(%{
+        {:beamtalk_workspace_changelog_views, :change_entries} => {:badrpc, :mock_scripted}
+      })
+
       assert Workspace.change_history() == {:error, {:unreachable, :mock_scripted}}
     end
 
