@@ -61,6 +61,12 @@ pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> 
     }
 }
 
+/// Runtime-only built-in classes: no `stdlib/src/*.bt` source, so absent from
+/// the generated set. The single source for this list: Rust checks below use
+/// it, and `beamtalk build-stdlib` emits it into `beamtalk_generated_builtins.hrl`
+/// as `?BEAMTALK_RUNTIME_ONLY_BUILTIN_CLASSES` for `beamtalk_class_metadata.erl`.
+pub const RUNTIME_ONLY_BUILTIN_CLASSES: &[&str] = &["Future"];
+
 /// Returns true if the given class name is a built-in class.
 ///
 /// This is a fast O(1) check using a static set, suitable for hot paths
@@ -69,9 +75,9 @@ pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> 
 /// Includes both generated stdlib classes (from `stdlib/src/*.bt`) and runtime-only
 /// built-ins like `Future`.
 pub(super) fn is_builtin_class(name: &str) -> bool {
-    // Future is the only runtime-only built-in (no stdlib/src/Future.bt source).
-    // All other built-ins (including Value) are in the generated set.
-    name == "Future" || generated::is_generated_builtin_class(name)
+    // Runtime-only built-ins have no .bt source; all others (including Value)
+    // are in the generated set.
+    RUNTIME_ONLY_BUILTIN_CLASSES.contains(&name) || generated::is_generated_builtin_class(name)
 }
 
 /// Returns true if the given class name has runtime shadowing protection.
@@ -82,9 +88,9 @@ pub(super) fn is_builtin_class(name: &str) -> bool {
 /// Used by `check_stdlib_name_shadowing` to warn when user code tries to
 /// define a class with a name that shadows a protected built-in.
 pub(super) fn is_runtime_protected_class(name: &str) -> bool {
-    // Future is runtime-only (not in the generated set); all other protected
+    // Runtime-only built-ins are not in the generated set; all other protected
     // classes (including Value) are covered by is_generated_builtin_class.
-    name == "Future" || generated::is_generated_builtin_class(name)
+    RUNTIME_ONLY_BUILTIN_CLASSES.contains(&name) || generated::is_generated_builtin_class(name)
 }
 
 /// Returns true if `name` is a *generated* stdlib class — one with a real
