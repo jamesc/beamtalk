@@ -161,8 +161,8 @@ Caveat: this calls `beamtalk_object_class:module_name_safe/1` rather than
 `module_name/1` because this function is reachable from inside an ADR 0109
 foreign-process block (directly, or via the unrestricted `Erlang <module>`
 FFI gateway), and an unsafe `gen_server:call` here would risk the same
-deadlock shape a prior fix here addressed. That means the `noproc`/`timeout` catch clauses
-below cannot detect a class process killed via an untrappable `kill` signal
+deadlock shape a prior fix here addressed. That means the `beamtalk_call_failure:tolerate_gone/3` fallback
+below (dead, unreachable or timed-out class process) cannot detect a class process killed via an untrappable `kill` signal
 before `terminate/2` ran — see `module_name_safe/1`'s doc for the full
 explanation.
 """.
