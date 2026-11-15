@@ -29,6 +29,9 @@ pub mod ast;
 // This module is `pub`, not `pub(crate)`: `for_each_expr_seq` is used by the
 // standalone `beamtalk-lint` crate (ADR 0117 Decision step 2).
 pub mod ast_walker;
+// `pub`: the one place the `_build/` layout is spelled; reached by the CLI,
+// compiler port, LSP, MCP and `beamtalk-project` (BT-4884).
+pub mod build_layout;
 // Test-support census query for ADR 0130 Phase 0 (BT-3703); compiled only for
 // tests and the `test` feature, so it is not a shipped surface.
 #[cfg(any(test, feature = "test"))]

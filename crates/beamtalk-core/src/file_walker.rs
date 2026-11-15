@@ -8,6 +8,7 @@
 //! Replaces the 7+ separate file-collection implementations that were scattered
 //! across the codebase with a single, builder-pattern `FileWalker`.
 
+use crate::build_layout::BUILD_DIR_NAME;
 use camino::{Utf8Path, Utf8PathBuf};
 use ignore::Match;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
@@ -198,9 +199,12 @@ impl FileWalker {
     /// stamp, which `AliasRegistry::add_pre_loaded`'s identity check cannot
     /// recognise as the same physical declaration.
     pub fn source_files() -> Self {
-        Self::new()
-            .extensions(&["bt"])
-            .exclude_dirs(&[".git", "target", "node_modules", "_build"])
+        Self::new().extensions(&["bt"]).exclude_dirs(&[
+            ".git",
+            "target",
+            "node_modules",
+            BUILD_DIR_NAME,
+        ])
     }
 
     /// Preset for collecting `.bt` test files.
@@ -213,7 +217,7 @@ impl FileWalker {
             ".git",
             "target",
             "node_modules",
-            "_build",
+            BUILD_DIR_NAME,
             "fixtures",
         ])
     }
@@ -248,7 +252,7 @@ impl FileWalker {
     pub fn preload_files(budget: usize) -> Self {
         Self::new()
             .extensions(&["bt"])
-            .exclude_dirs(&[".git", "target", "node_modules", "_build"])
+            .exclude_dirs(&[".git", "target", "node_modules", BUILD_DIR_NAME])
             .max_files(budget)
             .strict_errors(false)
     }

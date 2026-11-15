@@ -15,7 +15,7 @@
 //!
 //! This module instead reads whatever dependency checkouts are *already*
 //! present on disk — under `_build/deps/<name>/` for git dependencies (the
-//! [`crate::build_layout::BuildLayout`] convention), or at their declared
+//! [`beamtalk_core::build_layout::BuildLayout`] convention), or at their declared
 //! local path for path dependencies — exactly the state left behind by a
 //! prior `beamtalk build`. Dependencies that have never been fetched/built
 //! are silently skipped, matching the existing best-effort philosophy of
