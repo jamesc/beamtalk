@@ -63,8 +63,7 @@ pub fn build_escript(
     let boot_module = sanitize_module_name(&output_name);
 
     // Locate the runtime/stdlib beams.
-    let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
-    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+    let repl_startup::DiscoveredRuntime { paths, .. } = repl_startup::discover_beam_paths()?;
     let lib_dir = paths
         .runtime_ebin
         .parent()

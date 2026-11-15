@@ -3,7 +3,8 @@
 
 //! Shared path utilities for the Beamtalk CLI.
 
-use camino::Utf8Path;
+use beamtalk_core::file_walker::FileWalker;
+use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 
 /// Render a path string as forward-slash-separated text regardless of host OS.
@@ -83,3 +84,68 @@ pub fn has_symlink_in_chain(path: &Utf8Path, boundary: &Utf8Path) -> Result<bool
 // `normalize_path` moved to `beamtalk-project` with the dependency-graph walk
 // that uses it (BT-4611); re-exported for existing call sites.
 pub use beamtalk_project::dependency_graph::normalize_path;
+
+/// The `.erl` files directly inside `dir` (not recursive), sorted, as UTF-8
+/// paths — the one lister for a package's `native/`, `native/test/` and the
+/// stdlib's Erlang `src/` directories.
+///
+/// # Errors
+///
+/// Returns an error if `dir` does not exist or cannot be read.
+pub fn erl_files_in(dir: &Utf8Path) -> Result<Vec<Utf8PathBuf>> {
+    FileWalker::new()
+        .extensions(&["erl"])
+        .recursive(false)
+        .walk(dir)
+        .wrap_err_with(|| format!("Failed to list Erlang files in '{dir}'"))
+}
+
+/// The module names (file stems) of [`erl_files_in`], sorted.
+///
+/// # Errors
+///
+/// Same as [`erl_files_in`].
+pub fn erl_module_names_in(dir: &Utf8Path) -> Result<Vec<String>> {
+    Ok(erl_files_in(dir)?
+        .iter()
+        .filter_map(|p| p.file_stem().map(str::to_owned))
+        .collect())
+}
+
+#[cfg(test)]
+mod erl_listing_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn dir_with(files: &[&str]) -> (TempDir, Utf8PathBuf) {
+        let temp = TempDir::new().unwrap();
+        let dir = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        for f in files {
+            fs::write(dir.join(f), "").unwrap();
+        }
+        (temp, dir)
+    }
+
+    #[test]
+    fn erl_files_in_is_sorted_filters_extensions_and_is_not_recursive() {
+        let (_t, dir) = dir_with(&["foo.erl", "bar.erl", "readme.md", "data.json"]);
+        fs::create_dir(dir.join("test")).unwrap();
+        fs::write(dir.join("test/nested.erl"), "").unwrap();
+
+        let files = erl_files_in(&dir).unwrap();
+        assert_eq!(files, vec![dir.join("bar.erl"), dir.join("foo.erl")]);
+    }
+
+    #[test]
+    fn erl_module_names_in_returns_sorted_stems() {
+        let (_t, dir) = dir_with(&["zeta.erl", "alpha.erl", "notes.txt"]);
+        assert_eq!(erl_module_names_in(&dir).unwrap(), ["alpha", "zeta"]);
+    }
+
+    #[test]
+    fn erl_files_in_missing_directory_errors() {
+        let (_t, dir) = dir_with(&[]);
+        assert!(erl_files_in(&dir.join("missing")).is_err());
+    }
+}

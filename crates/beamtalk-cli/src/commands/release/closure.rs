@@ -104,8 +104,7 @@ pub fn compute_app_closure(
     pkg: &PackageManifest,
     release_cfg: &ReleaseConfig,
 ) -> Result<AppClosure> {
-    let (runtime_dir, rt_layout) = repl_startup::find_runtime_dir_with_layout()?;
-    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, rt_layout);
+    let repl_startup::DiscoveredRuntime { paths, .. } = repl_startup::discover_beam_paths()?;
 
     let mut staged = Vec::new();
 
