@@ -800,7 +800,8 @@ response_keys_fixture() ->
 
 %% One decoded response per encoder family, called at its widest arity with its
 %% optional fields populated so their keys appear. Shorter arities delegate to
-%% the widest one; a key added only to a narrower variant would not be seen.
+%% the widest one, except encode_inspect/2 and /3, which are independent bodies
+%% and are both called.
 all_encoder_responses() ->
     Msg = beamtalk_test_repl:make_msg(<<"x">>, <<"id-1">>, <<"sess-1">>),
     TJ = fun identity/1,
@@ -828,6 +829,7 @@ all_encoder_responses() ->
         beamtalk_repl_protocol:encode_actors([], Msg, TJ),
         beamtalk_repl_protocol:encode_sessions([], Msg, TJ),
         beamtalk_repl_protocol:encode_inspect(<<"state">>, Msg),
+        beamtalk_repl_protocol:encode_inspect(#{x => 1}, Msg, TJ),
         beamtalk_repl_protocol:encode_docs(<<"docs">>, Msg),
         beamtalk_repl_protocol:encode_describe(#{}, #{}, Msg),
         beamtalk_repl_protocol:encode_test_results(Results, Msg),
