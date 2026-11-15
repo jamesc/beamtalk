@@ -48,7 +48,8 @@ TestCase subclass: FfiDirectCallTest
     self assert: direct equals: proxied
     self assert: (direct at: 1) equals: #type_error
 
-  // `function_clause` from the callee becomes the proxy's `arity_mismatch`.
+  // `function_clause` at the callee's head becomes the proxy's `type_error`
+  // (BT-4866: no clause matched; it is never an `arity_mismatch`).
   testFunctionClauseMatchesProxy =>
     direct := self
       kindAndMessage: [
@@ -59,7 +60,7 @@ TestCase subclass: FfiDirectCallTest
       self proxy: #is_digit args: #(#notAnInteger)
     ]
     self assert: direct equals: proxied
-    self assert: (direct at: 1) equals: #arity_mismatch
+    self assert: (direct at: 1) equals: #type_error
 
   // The inline call really is direct: the stack recorded on the error has no
   // `beamtalk_erlang_proxy` frame, where the proxy path has one.
@@ -87,7 +88,7 @@ TestCase subclass: FfiDirectCallTest
     direct := [
       self perform: #digit: withArguments: #("7")
     ] on: Error do: [:e | {e kind, self proxyFrames: e}]
-    self assert: (direct at: 1) equals: #arity_mismatch
+    self assert: (direct at: 1) equals: #type_error
     self assert: (direct at: 2) > 0
     self assert: (self digit: 55) equals: true
 

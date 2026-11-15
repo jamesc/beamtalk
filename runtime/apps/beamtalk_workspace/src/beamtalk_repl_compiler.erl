@@ -27,10 +27,6 @@ Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
     compile_for_codegen/3,
     compile_file_for_codegen/2,
     compile_method_reload/3,
-    apply_module_name_override/2,
-    apply_source_path/2,
-    format_formatted_diagnostics/1,
-    is_internal_key/1,
     known_vars/1,
     build_class_superclass_index/0,
     build_class_module_index/0,
@@ -49,6 +45,14 @@ Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
     compile_standard_expression/3,
     compile_file_core/4,
     format_core_error/1
+]).
+
+%% Exported for tests only (BT-4903): no production caller.
+-export([
+    apply_module_name_override/2,
+    apply_source_path/2,
+    format_formatted_diagnostics/1,
+    is_internal_key/1
 ]).
 -endif.
 

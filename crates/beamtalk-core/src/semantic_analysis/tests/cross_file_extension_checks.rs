@@ -16,7 +16,7 @@ fn cross_file(class_src: &str, ext_src: &str) -> Vec<Diagnostic> {
     let ctx = AnalysisContext::default()
         .with_current_package("app")
         .with_pre_loaded_classes(declared_by("app", class_src));
-    analyse_full(&parse_module(ext_src), ctx).diagnostics
+    analyse_full(&parse_bt(ext_src), ctx).diagnostics
 }
 
 // ---- supervision policy on `MySup >> childSpecs` ----
@@ -111,7 +111,7 @@ fn same_file_extension_shadowing_internal_method_warns_once() {
             "Object subclass: Base\n  internal helper => 1\n",
         ));
     let src = "Base subclass: Sub\n  go => 2\nSub >> helper => 2\n";
-    let d = analyse_full(&parse_module(src), ctx).diagnostics;
+    let d = analyse_full(&parse_bt(src), ctx).diagnostics;
     let hits = d
         .iter()
         .filter(|d| d.message.contains("shadows internal method"))
@@ -124,7 +124,7 @@ fn same_file_child_specs_extension_warns_once() {
     let ctx = AnalysisContext::default()
         .with_pre_loaded_classes(declared_by("app", "Actor subclass: Worker\n  go => nil\n"));
     let src = "Supervisor subclass: MySup\n  go => nil\nMySup >> childSpecs => #(Worker)\n";
-    let d = analyse_full(&parse_module(src), ctx).diagnostics;
+    let d = analyse_full(&parse_bt(src), ctx).diagnostics;
     let hits = d
         .iter()
         .filter(|d| d.message.contains("no explicit `class supervisionPolicy`"))
@@ -178,7 +178,7 @@ fn nested_string_hints(d: &[Diagnostic]) -> usize {
 fn same_file_native_delegate_extension_is_hinted() {
     let src = "Object subclass: Names native: my_names\n  size => 0\n\
                Names >> has: names :: List(String) => self delegate\n";
-    let d = analyse_full(&parse_module(src), AnalysisContext::default()).diagnostics;
+    let d = analyse_full(&parse_bt(src), AnalysisContext::default()).diagnostics;
     assert_eq!(nested_string_hints(&d), 1, "{d:?}");
 }
 

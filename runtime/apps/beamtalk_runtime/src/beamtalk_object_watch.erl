@@ -99,8 +99,7 @@ so the dispatch path stops paying for it.
     subscribe/2,
     unsubscribe/2,
     is_watched/1,
-    publish_change/3,
-    watched_pids/0
+    publish_change/3
 ]).
 
 %% gen_server callbacks
@@ -112,6 +111,13 @@ so the dispatch path stops paying for it.
     terminate/2,
     code_change/3
 ]).
+
+%% Exported for tests only (BT-4903): no production caller.
+-ifdef(TEST).
+-export([
+    watched_pids/0
+]).
+-endif.
 
 %% Public set table of watched actor pids, read directly (no message) from the
 %% actor dispatch hot path. Owned by this gen_server; writes go through it.
@@ -189,7 +195,8 @@ publish_change(Pid, ActorClass, ChangedSlots) when
         Server -> gen_server:cast(Server, {publish_change, Pid, ActorClass, ChangedSlots})
     end.
 
--doc "Return the current set of watched actor pids (testing/introspection).".
+-ifdef(TEST).
+-doc "Return the current set of watched actor pids (test-only introspection).".
 -spec watched_pids() -> [pid()].
 watched_pids() ->
     try
@@ -197,6 +204,7 @@ watched_pids() ->
     catch
         error:badarg -> []
     end.
+-endif.
 
 %%% gen_server callbacks
 

@@ -118,7 +118,6 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 
 %% API — introspection (direct ETS reads)
 -export([
-    subscription_count/0,
     subscribers_of/1
 ]).
 
@@ -168,6 +167,13 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
     terminate/2,
     code_change/3
 ]).
+
+%% Exported for tests only (BT-4903): no production caller.
+-ifdef(TEST).
+-export([
+    subscription_count/0
+]).
+-endif.
 
 %% Table names
 -define(SUBS_TABLE, beamtalk_announcement_subs).
@@ -879,6 +885,7 @@ log_handler_timeout(EventClass, SubscriberPid, Timeout) ->
 %% API — introspection
 %%====================================================================
 
+-ifdef(TEST).
 -doc "Total number of live subscriptions across all classes. Direct ETS read.".
 -spec subscription_count() -> non_neg_integer().
 subscription_count() ->
@@ -886,6 +893,7 @@ subscription_count() ->
         undefined -> 0;
         _ -> ets:info(?SUBS_TABLE, size)
     end.
+-endif.
 
 -doc """
 The `SubRef`s currently subscribed to exactly `AnnouncementClass`. Direct ETS

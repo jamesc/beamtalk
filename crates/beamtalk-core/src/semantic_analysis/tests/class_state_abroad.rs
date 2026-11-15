@@ -12,7 +12,7 @@ use crate::compilation::diagnostics_policy::apply_expect_directives;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
 fn abroad(src: &str) -> Vec<Diagnostic> {
-    analyse(&parse_module(src))
+    analyse(&parse_bt(src))
         .diagnostics
         .into_iter()
         .filter(|d| d.category == Some(DiagnosticCategory::ClassStateAbroad))
@@ -545,7 +545,7 @@ Object subclass: Driver
 #[test]
 fn expect_class_state_abroad_suppresses_the_warning() {
     let src = format!("{HEADER}  class reader =>\n    @expect class_state_abroad\n    [self.n]\n");
-    let module = parse_module(&src);
+    let module = parse_bt(&src);
     let mut diags = analyse(&module).diagnostics;
     apply_expect_directives(&module, &mut diags);
     assert!(
@@ -911,7 +911,7 @@ fn abroad_in_scope(src: &str, pre_loaded: Vec<class_hierarchy::ClassInfo>) -> Ve
     let ctx = AnalysisContext::default()
         .with_current_package("app")
         .with_pre_loaded_classes(pre_loaded);
-    analyse_full(&parse_module(src), ctx)
+    analyse_full(&parse_bt(src), ctx)
         .diagnostics
         .into_iter()
         .filter(|d| d.category == Some(DiagnosticCategory::ClassStateAbroad))

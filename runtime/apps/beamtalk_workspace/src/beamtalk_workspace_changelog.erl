@@ -98,8 +98,6 @@ release nodes do not start a workspace, so this code is a no-op there.
     active_entries/0,
     flushable_pending/0,
     mark_flushed/1,
-    size/0,
-    epoch/0,
     clear/0,
     find_revert_target/2,
     find_revert_target/3,
@@ -125,17 +123,9 @@ release nodes do not start a workspace, so this code is a no-op there.
     entry_kind/1,
     known_entry_kinds/0,
     entry_side/1,
-    entry_intent/1,
-    entry_flushable/1,
-    entry_not_flushable_reason/1,
-    entry_flushed/1,
     entry_author_kind/1,
-    entry_is_orphan/1,
-    entry_is_prior_epoch/1,
     entry_source_file/1,
     entry_span/1,
-    entry_source_ref/1,
-    entry_prev_source_ref/1,
     read_source_body/1,
     read_prev_source_body/1,
     %% ADR 0114: reads a `site()`'s own ref directly, for
@@ -148,14 +138,12 @@ release nodes do not start a workspace, so this code is a no-op there.
     entry_old_selector/1,
     entry_old_path/1,
     entry_new_path/1,
-    entry_sites/1,
-    entry_candidate_sites/1
+    entry_sites/1
 ]).
 
 %% ADR 0114: shadow-detection and flushability helpers for the
 %% multi-site `'rename-class'`/`'rename-method'` kinds.
 -export([
-    target_key/1,
     shadow_key/1,
     sites_flushable/1
 ]).
@@ -170,8 +158,24 @@ release nodes do not start a workspace, so this code is a no-op there.
     code_change/3
 ]).
 
-%% Exported for tests only.
--export([read_source_file/1]).
+%% Exported for tests only (BT-4903): no production caller.
+-ifdef(TEST).
+-export([
+    size/0,
+    epoch/0,
+    entry_intent/1,
+    entry_flushable/1,
+    entry_not_flushable_reason/1,
+    entry_flushed/1,
+    entry_is_orphan/1,
+    entry_is_prior_epoch/1,
+    entry_source_ref/1,
+    entry_prev_source_ref/1,
+    entry_candidate_sites/1,
+    target_key/1,
+    read_source_file/1
+]).
+-endif.
 
 -opaque entry() :: #entry{}.
 
@@ -320,6 +324,7 @@ mark_flushed([]) ->
 mark_flushed(Seqs) when is_list(Seqs) ->
     gen_server:call(?MODULE, {mark_flushed, Seqs}).
 
+-ifdef(TEST).
 -doc """
 Total number of entries in the log (all epochs).
 
@@ -332,11 +337,14 @@ size() ->
         undefined -> 0;
         N -> N
     end.
+-endif.
 
+-ifdef(TEST).
 -doc "The epoch assigned to entries appended in this session.".
 -spec epoch() -> non_neg_integer().
 epoch() ->
     gen_server:call(?MODULE, epoch).
+-endif.
 
 -doc """
 Discard all entries from the in-memory log and truncate the on-disk metadata
@@ -683,6 +691,7 @@ shadow_key(E) ->
 %%% Per-site shadow-detection key (ADR 0114)
 %%% ----------------------------------------------------------------------------
 
+-ifdef(TEST).
 -doc """
 Per-site shadow-detection keys for `Entry` (ADR 0114).
 
@@ -715,8 +724,8 @@ conflated into a false shadow relationship purely because they share a
 file: only a genuinely repeated edit of the *same* rename at the *same*
 location collides.
 
-Exported for the future multi-site rewrite mechanism and for
-tests. Not yet wired into `survivor_seqs/1`/the `ChangeEntry` `shadowed`
+Compiled in test builds only (BT-4903): no production caller yet. Not
+yet wired into `survivor_seqs/1`/the `ChangeEntry` `shadowed`
 flag — `'rename-class'`/`'rename-method'` flush and dirty-view integration
 is out of scope here (schema only).
 """.
@@ -734,7 +743,9 @@ target_key(#entry{kind = 'rename-method'} = E) ->
     ];
 target_key(E) ->
     [shadow_key(E)].
+-endif.
 
+-ifdef(TEST).
 -spec sites_or_empty(#entry{}) -> [site() | undefined].
 sites_or_empty(#entry{sites = undefined}) -> [];
 sites_or_empty(#entry{sites = Sites}) -> Sites.
@@ -742,6 +753,7 @@ sites_or_empty(#entry{sites = Sites}) -> Sites.
 -spec site_location(site()) -> {binary() | undefined, span() | undefined}.
 site_location(#{source_file := SourceFile, span := Span}) ->
     {SourceFile, Span}.
+-endif.
 
 -doc """
 Fold per-site flushability verdicts into the single `flushable`/
@@ -852,26 +864,38 @@ entry_side(#entry{kind = instance}) -> instance;
 entry_side(#entry{kind = class}) -> class;
 entry_side(#entry{}) -> undefined.
 
+-ifdef(TEST).
 -spec entry_intent(entry()) -> intent().
 entry_intent(#entry{intent = V}) -> V.
+-endif.
 
+-ifdef(TEST).
 -spec entry_flushable(entry()) -> boolean().
 entry_flushable(#entry{flushable = V}) -> V.
+-endif.
 
+-ifdef(TEST).
 -spec entry_not_flushable_reason(entry()) -> binary() | undefined.
 entry_not_flushable_reason(#entry{not_flushable_reason = V}) -> V.
+-endif.
 
 -spec entry_author_kind(entry()) -> author_kind().
 entry_author_kind(#entry{author_kind = V}) -> V.
 
+-ifdef(TEST).
 -spec entry_is_orphan(entry()) -> boolean().
 entry_is_orphan(#entry{orphan = V}) -> V.
+-endif.
 
+-ifdef(TEST).
 -spec entry_is_prior_epoch(entry()) -> boolean().
 entry_is_prior_epoch(#entry{prior_epoch = V}) -> V.
+-endif.
 
+-ifdef(TEST).
 -spec entry_flushed(entry()) -> boolean().
 entry_flushed(#entry{flushed = V}) -> V.
+-endif.
 
 -spec entry_source_file(entry()) -> binary() | undefined.
 entry_source_file(#entry{source_file = V}) -> V.
@@ -879,11 +903,15 @@ entry_source_file(#entry{source_file = V}) -> V.
 -spec entry_span(entry()) -> span() | undefined.
 entry_span(#entry{span = V}) -> V.
 
+-ifdef(TEST).
 -spec entry_source_ref(entry()) -> binary() | undefined.
 entry_source_ref(#entry{source_ref = V}) -> V.
+-endif.
 
+-ifdef(TEST).
 -spec entry_prev_source_ref(entry()) -> binary() | undefined.
 entry_prev_source_ref(#entry{prev_source_ref = V}) -> V.
+-endif.
 
 -doc "The pre-rename class name for a `'rename-class'` entry (ADR 0114); `undefined` otherwise.".
 -spec entry_old_class(entry()) -> binary() | undefined.
@@ -910,6 +938,7 @@ definition/declaration site; a bare `undefined` element (rather than a
 -spec entry_sites(entry()) -> [site() | undefined] | undefined.
 entry_sites(#entry{sites = V}) -> V.
 
+-ifdef(TEST).
 -doc """
 The reported-but-never-rewritten candidate sender list for a
 `'rename-method'` entry (ADR 0114); `undefined` otherwise
@@ -917,6 +946,7 @@ The reported-but-never-rewritten candidate sender list for a
 """.
 -spec entry_candidate_sites(entry()) -> [candidate_site()] | undefined.
 entry_candidate_sites(#entry{candidate_sites = V}) -> V.
+-endif.
 
 -doc """
 Read the patched method body (or full new-class source) recorded for `Entry`

@@ -550,7 +550,7 @@ fn test_abstract_class_instantiation_error() {
 /// The receiver-arity errors in `src`, which defines one method.
 fn while_receiver_arity_errors(body: &str) -> usize {
     let src = format!("Object subclass: W\n  run =>\n    x := 0.\n    {body}.\n    x\n");
-    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(&src));
+    let result = analyse(&crate::test_helpers::test_support::parse_bt(&src));
     result
         .diagnostics
         .iter()
@@ -589,7 +589,7 @@ fn test_cascade_receiver_checks_see_the_cascade_target() {
     // cascaded message is sent to.
     let count = |body: &str, needle: &str| {
         let src = format!("Object subclass: W\n  run =>\n    {body}\n");
-        analyse(&crate::semantic_analysis::test_helpers::parse_module(&src))
+        analyse(&crate::test_helpers::test_support::parse_bt(&src))
             .diagnostics
             .iter()
             .filter(|d| d.message.contains(needle))
@@ -631,7 +631,7 @@ fn test_method_validators_run_on_class_side_methods() {
     // gets the same method-validator diagnostics as an instance method.
     let diags = |side: &str, body: &str, needle: &str| {
         let src = format!("Object subclass: W\n  {side}run =>\n    {body}\n");
-        analyse(&crate::semantic_analysis::test_helpers::parse_module(&src))
+        analyse(&crate::test_helpers::test_support::parse_bt(&src))
             .diagnostics
             .iter()
             .filter(|d| d.message.contains(needle))
@@ -673,7 +673,7 @@ fn test_extension_methods_get_resolution_and_validators() {
                W >> fld => x\n\
                W >> bar => #(1, 2) collect: [:a :b | a]\n\
                W >> ok: p => super printString\n";
-    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(src));
+    let result = analyse(&crate::test_helpers::test_support::parse_bt(src));
     let count = |needle: &str| {
         result
             .diagnostics
@@ -703,7 +703,7 @@ fn test_well_formed_extension_method_has_no_undefined_variable() {
     let src = "Object subclass: W\n  state: x :: Integer = 0\n  run => 1\n\n\
                W >> good => self.x + 1\n\
                W class >> make => self new\n";
-    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(src));
+    let result = analyse(&crate::test_helpers::test_support::parse_bt(src));
     assert!(
         !result
             .diagnostics
@@ -726,7 +726,7 @@ fn test_method_bodies_do_not_see_top_level_bindings() {
                y := 4.\n\
                W >> later => y\n\
                W >> builtins: p =>\n  l := p\n  l == nil\n  self == true\n  false == nil\n";
-    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(src));
+    let result = analyse(&crate::test_helpers::test_support::parse_bt(src));
     let count = |needle: &str| {
         result
             .diagnostics
@@ -747,7 +747,7 @@ fn test_method_bodies_do_not_see_top_level_bindings() {
         result.diagnostics
     );
     // Top-level code still sees its own bindings.
-    let top = analyse(&crate::semantic_analysis::test_helpers::parse_module(
+    let top = analyse(&crate::test_helpers::test_support::parse_bt(
         "x := 3.\nx + 1\n",
     ));
     assert!(

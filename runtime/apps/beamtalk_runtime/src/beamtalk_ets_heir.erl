@@ -42,7 +42,6 @@ The shared helpers — `heir_option/0`, `maybe_set_heir/1`, `ensure_table/2` and
 %% API
 -export([
     start_link/0,
-    heir_pid/0,
     heir_option/0,
     maybe_set_heir/1,
     adopt_owned_tables/0,

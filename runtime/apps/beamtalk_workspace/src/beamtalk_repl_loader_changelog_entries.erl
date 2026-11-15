@@ -37,7 +37,6 @@ fails. Each entry kind passes its own span resolver as a fun.
     %% Flushability classification, reused by the loader's own write paths
     %% and by `beamtalk_repl_ops_load` / `beamtalk_repl_ops_browse` (through
     %% the loader's exports).
-    add_class_def_flushability/2,
     class_source_file/1,
     classify_source_file/1,
     no_source_reason/1,
@@ -49,10 +48,16 @@ fails. Each entry kind passes its own span resolver as a fun.
     method_source_binary/1,
     patch_side/1,
     match_trailing_newline/2,
-    sibling_method_indent/1,
-    span_error_entry/3,
-    new_method_entry/3
+    sibling_method_indent/1
 ]).
+
+%% Exported for tests only (BT-4903): no production caller.
+-ifdef(TEST).
+-export([
+    add_class_def_flushability/2,
+    span_error_entry/3
+]).
+-endif.
 
 -include_lib("kernel/include/logger.hrl").
 
