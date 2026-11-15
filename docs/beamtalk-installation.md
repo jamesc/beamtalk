@@ -29,7 +29,7 @@ This downloads the latest release for your platform, extracts it to
 To install a specific version or custom location:
 
 ```
-curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --version v0.4.0
+curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --version v0.5.0
 curl -fsSL https://beamtalk.dev/install.sh | sh -s -- --prefix /usr/local
 ```
 

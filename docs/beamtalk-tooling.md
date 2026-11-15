@@ -372,7 +372,7 @@ beamtalk repl --node mynode  # Use a specific node name
 On startup, the REPL prints the version and a help hint:
 
 ```
-Beamtalk v0.4.0
+Beamtalk v0.5.0
 Type :help for available commands, :exit to quit.
 
 >
@@ -795,7 +795,7 @@ Logging and debug control (`logLevel`, `enableDebug:`, ...) live on `Logger`, no
 
 ```beamtalk
 > Beamtalk version
-0.4.0
+0.5.0
 
 > Beamtalk allClasses
 #(Integer, String, Array, ...)

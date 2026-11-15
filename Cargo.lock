@@ -184,18 +184,18 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "beamtalk-build"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-cerl-doc",
 ]
 
 [[package]]
 name = "beamtalk-cerl-doc"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "beamtalk-cli"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "assert_cmd",
  "base64",
@@ -241,7 +241,7 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-codegen"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-cerl-doc",
  "beamtalk-core",
@@ -255,7 +255,7 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-compiler-port"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-build",
  "beamtalk-codegen",
@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-build",
  "beamtalk-cerl-doc",
@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-desktop-broker"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "base64",
  "beamtalk-repl-protocol",
@@ -323,21 +323,21 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-desktop-shell"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-desktop-broker",
 ]
 
 [[package]]
 name = "beamtalk-etf"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "eetf",
 ]
 
 [[package]]
 name = "beamtalk-examples"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-sysroot",
  "serde",
@@ -346,7 +346,7 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-exec"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-build",
  "beamtalk-etf",
@@ -360,14 +360,14 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-home"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "dirs",
 ]
 
 [[package]]
 name = "beamtalk-language-service"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-core",
  "beamtalk-project",
@@ -382,14 +382,14 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-lint"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-core",
 ]
 
 [[package]]
 name = "beamtalk-lsp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-core",
  "beamtalk-language-service",
@@ -416,7 +416,7 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-mcp"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-core",
  "beamtalk-examples",
@@ -441,7 +441,7 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-package"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-core",
  "beamtalk-language-service",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-parity-tests"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-repl-protocol",
  "beamtalk-workspace",
@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-project"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-core",
  "beamtalk-home",
@@ -488,7 +488,7 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-repl"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-cerl-doc",
  "beamtalk-codegen",
@@ -499,7 +499,7 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-repl-protocol"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-build",
  "beamtalk-workspace",
@@ -513,18 +513,18 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-surface-drift"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "beamtalk-sysroot"
-version = "0.4.0"
+version = "0.5.0"
 
 [[package]]
 name = "beamtalk-workspace"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-home",
  "libc",
@@ -621,7 +621,7 @@ dependencies = [
 
 [[package]]
 name = "build-corpus"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-core",
  "beamtalk-examples",

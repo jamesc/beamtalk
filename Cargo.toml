@@ -61,7 +61,7 @@ strip = "debuginfo"
 
 [workspace.package]
 # Keep in sync with VERSION file at repo root
-version = "0.4.0"
+version = "0.5.0"
 authors = ["James Casey"]
 edition = "2024"
 rust-version = "1.95"

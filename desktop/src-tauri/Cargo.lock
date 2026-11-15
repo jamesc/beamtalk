@@ -285,7 +285,7 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-desktop-broker"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "base64 0.23.0",
  "beamtalk-workspace",
@@ -303,21 +303,21 @@ dependencies = [
 
 [[package]]
 name = "beamtalk-desktop-shell"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-desktop-broker",
 ]
 
 [[package]]
 name = "beamtalk-home"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "dirs 7.0.0",
 ]
 
 [[package]]
 name = "beamtalk-workspace"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "beamtalk-home",
  "libc",
