@@ -222,9 +222,9 @@ DateTime parse: "2026-07-25 14:30:00" format: "yyyy-MM-dd HH:mm:ss"
 -spec parse(binary() | beamtalk_string:t(), binary() | beamtalk_string:t()) ->
     beamtalk_result:t().
 parse(StrArg, PatternArg) ->
-    Hint = <<"Both arguments must be Strings">>,
-    Str = beamtalk_text:unwrap_or_raise(StrArg, 'DateTime', 'parse:format:', Hint),
-    Pattern = beamtalk_text:unwrap_or_raise(PatternArg, 'DateTime', 'parse:format:', Hint),
+    ArgHint = <<"Both arguments must be Strings">>,
+    Str = beamtalk_text:unwrap_or_raise(StrArg, 'DateTime', 'parse:format:', ArgHint),
+    Pattern = beamtalk_text:unwrap_or_raise(PatternArg, 'DateTime', 'parse:format:', ArgHint),
     case parse_with_pattern(Str, Pattern) of
         {ok, Y, Mo, D, H, Mi, S} ->
             beamtalk_result:from_tagged_tuple({ok, make_datetime(Y, Mo, D, H, Mi, S, 0)});
