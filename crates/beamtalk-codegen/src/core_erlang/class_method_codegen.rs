@@ -768,7 +768,7 @@ impl CoreErlangGenerator {
             VtBodyExprKind::EarlyReturn
             | VtBodyExprKind::FieldAssignment
             | VtBodyExprKind::ConditionalWithSelfFieldThreading
-            | VtBodyExprKind::BlockWithCapturedMutations(_)
+            | VtBodyExprKind::BlockWithCapturedMutations
             | VtBodyExprKind::Pure => {
                 let tmp_var = self.fresh_temp_var("seq");
                 let expr_doc = self.expression_doc(expr)?;

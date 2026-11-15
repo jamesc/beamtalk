@@ -202,25 +202,19 @@ impl CoreErlangGenerator {
                 if let Expression::Assignment { target, value, .. } = body_expr
                     && let Expression::Identifier(id) = target.as_ref()
                 {
-                    // a threading-construct RHS returns a `{value, StateAcc}`
-                    // tuple. Bind the target to element 1 and rebind the threaded locals
-                    // from the StateAcc, so both the assigned value and the mutated locals
-                    // are visible to later statements in this branch — rather than binding
-                    // the target to the raw tuple.
-                    if self.expr_yields_vt_threaded_tuple(value) {
-                        self.emit_vt_threaded_local_assignment(&id.name, value, &mut parts)?;
-                    } else {
-                        let core_var = self.resolve_local_core_var(&id.name);
-                        let val_doc = self.expression_doc(value)?;
-                        parts.push(docvec![
-                            "let ",
-                            leaf::var(core_var.clone()),
-                            " = ",
-                            val_doc,
-                            " in ",
-                        ]);
-                        self.bind_var(&id.name, &core_var);
-                    }
+                    // No assignment-RHS threading construct reaches this arm
+                    // (BT-4889 measured the former tuple-rebind branch as never
+                    // hit): the local-threading producer lowers those.
+                    let core_var = self.resolve_local_core_var(&id.name);
+                    let val_doc = self.expression_doc(value)?;
+                    parts.push(docvec![
+                        "let ",
+                        leaf::var(core_var.clone()),
+                        " = ",
+                        val_doc,
+                        " in ",
+                    ]);
+                    self.bind_var(&id.name, &core_var);
                 }
             } else if self.expr_yields_vt_threaded_tuple(body_expr) {
                 // a non-last loop / foldl list-op that mutates captured locals returns

@@ -133,7 +133,7 @@ impl CoreErlangGenerator {
                 }
                 _ => false,
             },
-            VtBodyExprKind::BlockWithCapturedMutations(_) => {
+            VtBodyExprKind::BlockWithCapturedMutations => {
                 self.is_vt_field_writing_block_value(stmt)
             }
             // BT-3821: a conditional whose arms write a field is a producer
@@ -156,7 +156,7 @@ impl CoreErlangGenerator {
     /// statements after the send read. The block's value is its last
     /// expression. Parameters are bound to the arguments in a scope of their
     /// own; a captured outer local the block writes stays rebound after it,
-    /// as in [`Self::generate_vt_block_value_open`].
+    /// as the retired open-chain lowering did.
     pub(in crate::core_erlang) fn vt_inline_block_value_producer(
         &mut self,
         expr: &Expression,
@@ -289,7 +289,7 @@ impl CoreErlangGenerator {
             other => {
                 matches!(
                     self.classify_vt_body_expr(other),
-                    VtBodyExprKind::Pure | VtBodyExprKind::BlockWithCapturedMutations(_)
+                    VtBodyExprKind::Pure | VtBodyExprKind::BlockWithCapturedMutations
                 ) && self.subexpr_has_field_write_producer(other)
             }
         }
@@ -355,8 +355,8 @@ impl CoreErlangGenerator {
         if self.is_exception_construct_with_vt_local_threading(expr) {
             return VtBodyExprKind::ExceptionConstructWithThreading;
         }
-        if let Some(mutations) = Self::inline_block_captured_mutations(expr) {
-            return VtBodyExprKind::BlockWithCapturedMutations(mutations);
+        if Self::inline_block_captured_mutations(expr).is_some() {
+            return VtBodyExprKind::BlockWithCapturedMutations;
         }
         VtBodyExprKind::Pure
     }
@@ -403,8 +403,7 @@ impl CoreErlangGenerator {
     /// (the local-threading producer's construct tuple —
     /// `lower_local_threading_construct`, ADR 0131 — in last, `^` and
     /// assignment-RHS position, [`Self::emit_vt_loop_open_extraction`]'s non-last-position
-    /// open chain, [`Self::emit_vt_threaded_local_assignment`]'s
-    /// assignment-RHS threading inside a conditional branch) AND `on:do:`/`ensure:`'s own three mirror
+    /// open chain) AND `on:do:`/`ensure:`'s own three mirror
     /// sites (BT-3506: [`Self::emit_vt_exception_tuple_unwrap_to_var`],
     /// [`Self::generate_vt_exception_construct_open`],
     /// [`Self::emit_vt_exception_assign_rhs`]) — so none of the six can
@@ -493,8 +492,7 @@ impl CoreErlangGenerator {
     ///   element 1 is the meaningful collected/folded result.
     ///
     /// Used both to unwrap such a construct as a method's last expression
-    /// ([`Self::emit_vt_last_expr`]) and to detect a threading-construct assignment RHS
-    /// ([`Self::emit_vt_threaded_local_assignment`]). All branches use the same predicates
+    /// ([`Self::emit_vt_last_expr`]) and to detect a threading-construct assignment RHS. All branches use the same predicates
     /// that route these to their `VtBodyExprKind`, so detection and the open-extraction path
     /// stay consistent.
     ///
@@ -819,16 +817,9 @@ impl CoreErlangGenerator {
                     body_parts.push(doc);
                 }
             }
-            VtBodyExprKind::BlockWithCapturedMutations(mutations) => {
-                // Non-last block value with captured mutations.
-                if is_last {
-                    self.emit_vt_last_expr(expr, index, body_parts)?;
-                } else {
-                    let doc = self.generate_vt_block_value_open(expr, mutations)?;
-                    body_parts.push(doc);
-                }
-            }
-            VtBodyExprKind::Pure => {
+            // BT-4889: a non-last `[..] value` with captured mutations is lowered by
+            // `vt_inline_block_value_producer`; the former open-chain arm was never hit.
+            VtBodyExprKind::Pure | VtBodyExprKind::BlockWithCapturedMutations => {
                 if is_last {
                     self.emit_vt_last_expr(expr, index, body_parts)?;
                 } else {
@@ -1113,100 +1104,6 @@ impl CoreErlangGenerator {
         ])
     }
 
-    /// Generate an open let-chain for a non-last `[block_withmutations] value`
-    /// in `ValueType` context. Each assignment in the block body becomes a top-level
-    /// `let Var = val in\n` so the mutation is visible to subsequent expressions.
-    fn generate_vt_block_value_open(
-        &mut self,
-        expr: &Expression,
-        mutations: &[String],
-    ) -> Result<Document<'static>> {
-        let (block, arguments) = if let Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } = expr
-        {
-            if let Expression::Block(block) = receiver.as_ref() {
-                (block, arguments.as_slice())
-            } else {
-                // Fallback: sequence as side effect
-                let tmp_var = self.fresh_temp_var("seq");
-                let doc = self.expression_doc(expr)?;
-                return Ok(docvec!["    let ", leaf::var(tmp_var), " = ", doc, " in\n",]);
-            }
-        } else {
-            let tmp_var = self.fresh_temp_var("seq");
-            let doc = self.expression_doc(expr)?;
-            return Ok(docvec!["    let ", leaf::var(tmp_var), " = ", doc, " in\n",]);
-        };
-
-        let mut parts: Vec<Document<'static>> = Vec::new();
-
-        // Use a nested scope so block parameters and block-local variables
-        // don't leak into the method scope. Only captured mutations are
-        // re-bound in the outer scope after the block finishes.
-        self.push_scope();
-
-        // Bind block parameters to arguments (for value: variants)
-        for (i, param) in block.parameters.iter().enumerate() {
-            if i < arguments.len() {
-                let arg_var = self.fresh_temp_var(&param.name);
-                let arg_doc = self.expression_doc(&arguments[i])?;
-                parts.push(docvec![
-                    "    let ",
-                    leaf::var(arg_var.clone()),
-                    " = ",
-                    arg_doc,
-                    " in\n",
-                ]);
-                self.bind_var(&param.name, &arg_var);
-            }
-        }
-
-        // Emit block body as open let-chains.
-        // Track which variables are captured mutations so we can re-bind them
-        // in the outer scope after popping the parameter scope.
-        let mut rebound_vars: Vec<(String, String)> = Vec::new();
-
-        let body = super::super::util::collect_body_exprs(&block.body);
-
-        for body_expr in &body {
-            if Self::is_local_var_assignment(body_expr) {
-                if let Expression::Assignment { target, value, .. } = body_expr
-                    && let Expression::Identifier(id) = target.as_ref()
-                {
-                    let core_var = self.resolve_local_core_var(&id.name);
-                    let val_doc = self.expression_doc(value)?;
-                    parts.push(docvec![
-                        "    let ",
-                        leaf::var(core_var.clone()),
-                        " = ",
-                        val_doc,
-                        " in\n",
-                    ]);
-                    self.bind_var(&id.name, &core_var);
-                    // Track for re-binding in outer scope
-                    if mutations.iter().any(|m| m == id.name.as_str()) {
-                        rebound_vars.push((id.name.to_string(), core_var));
-                    }
-                }
-            } else {
-                let tmp = self.fresh_temp_var("seq");
-                let doc = self.expression_doc(body_expr)?;
-                parts.push(docvec!["    let ", leaf::var(tmp), " = ", doc, " in\n",]);
-            }
-        }
-
-        // Pop the block scope, then re-bind only captured mutations in the outer scope
-        self.pop_scope();
-        for (name, core_var) in &rebound_vars {
-            self.bind_var(name, core_var);
-        }
-
-        Ok(Document::Vec(parts))
-    }
-
     /// Returns `true` if `expr` is a `do:` message send with a literal
     /// block that, in `ValueType` context, captures and mutates outer local variables.
     ///
@@ -1400,7 +1297,7 @@ impl CoreErlangGenerator {
     /// construct that yields a `{value, StateAcc}` tuple (a `whileTrue:`/`whileFalse:` or
     /// counted loop, or a `collect:`/`select:`/`reject:`/`inject:into:` foldl list-op).
     ///
-    /// Used by [`Self::emit_vt_threaded_local_assignment`] to rebind the threaded locals
+    /// Used to rebind the threaded locals
     /// after extracting them from the `StateAcc`. Returns the same set the construct's
     /// codegen packed into the `StateAcc` (`loop_threaded_locals`).
     pub(in crate::core_erlang) fn vt_construct_threaded_locals(
@@ -1421,92 +1318,6 @@ impl CoreErlangGenerator {
                 .map(|_| self.producer_threaded_locals(expr))
                 .unwrap_or_default()
         }
-    }
-
-    /// Emits a value-type local assignment whose RHS is a threading construct
-    /// returning a `{value, StateAcc}` tuple (a loop or foldl list-op).
-    ///
-    /// Binds the target variable to element 1 (the construct's logical value), then rebinds
-    /// each threaded local from the `StateAcc` map at element 2 — so both the assigned value
-    /// and the mutated locals are visible to subsequent method-body expressions. Without
-    /// this, the target would be bound to the raw `{value, StateAcc}` tuple and the threaded
-    /// locals would keep their pre-construct values.
-    ///
-    /// ADR 0131 Phase 2 (BT-3749): at the method root this is the
-    /// local-threading producer's job (`lower_root_statement_with_producer`);
-    /// the remaining callers are statements inside a conditional branch
-    /// (`build_vt_conditional_branch_value_parts` and the open-branch
-    /// builder), branch-arm frames that ADR 0131 Phase 3 (`BranchArm`)
-    /// lowers, deleting this.
-    ///
-    /// Returns the Core Erlang variable bound to the assignment target.
-    pub(in crate::core_erlang) fn emit_vt_threaded_local_assignment(
-        &mut self,
-        var_name: &str,
-        value: &Expression,
-        body_parts: &mut Vec<Document<'static>>,
-    ) -> Result<String> {
-        // ADR 0122 Decision 3: which extra trailing slot `value` carries as an
-        // explicit 3rd tuple element, when it is a Letrec-shaped construct
-        // (while/counted loop) or a field-writing `do:`/`collect:`/
-        // `inject:into:` fold (BT-3827) — see `vt_loop_threaded_families`.
-        let families = self.vt_loop_threaded_families(value);
-        let span = value.span();
-        let rhs_doc =
-            self.with_fold_self_slot_consumer(value, |this| this.expression_doc(value))?;
-        let tuple_var = self.fresh_temp_var("AssignThreaded");
-
-        // Bind the {value, StateAcc} tuple.
-        body_parts.push(docvec![
-            "    let ",
-            leaf::var(tuple_var.clone()),
-            " = ",
-            rhs_doc,
-            " in\n",
-        ]);
-        // Bind the assignment target to element 1 (the logical value).
-        let core_var = self.resolve_local_core_var(var_name);
-        body_parts.push(docvec![
-            "    let ",
-            leaf::var(core_var.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(tuple_var.clone()),
-            ") in\n",
-        ]);
-        self.bind_var(var_name, &core_var);
-
-        // Extract the StateAcc (element 2) and rebind each threaded local from it.
-        let threaded_locals = self.vt_construct_threaded_locals(value);
-        let rebind: Vec<&String> = threaded_locals
-            .iter()
-            .filter(|tl| *tl != var_name)
-            .collect();
-        if !rebind.is_empty() {
-            let state_var = self.fresh_temp_var("AssignThreadedState");
-            body_parts.push(docvec![
-                "    let ",
-                leaf::var(state_var.clone()),
-                " = call 'erlang':'element'(2, ",
-                leaf::var(tuple_var.clone()),
-                ") in\n",
-            ]);
-            body_parts.extend(self.rebind_threaded_locals(
-                rebind,
-                |_, v| Self::local_state_key(v),
-                &state_var,
-                RebindNaming::FreshBound,
-                RebindLayout::Line,
-            ));
-        }
-
-        // extract the loop's own trailing slot from element
-        // 3 and rebind it, same as the non-last-statement / last-position
-        // consumers.
-        if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
-            body_parts.push(docvec!["    ", rebind_doc, "\n"]);
-        }
-
-        Ok(core_var)
     }
 
     /// Returns `true` if `expr` is a `to:do:` / `to:by:do:` / `timesRepeat:`
