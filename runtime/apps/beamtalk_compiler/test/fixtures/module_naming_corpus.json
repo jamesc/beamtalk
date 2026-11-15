@@ -1,0 +1,14 @@
+[
+  {"name": "src root file",            "path": "counter.bt",              "package": "web", "root": "src",  "module": "bt@web@counter"},
+  {"name": "src camel-case file",      "path": "HttpResponse.bt",         "package": "web", "root": "src",  "module": "bt@web@http_response"},
+  {"name": "src subdirectory",         "path": "util/HttpResponse.bt",    "package": "web", "root": "src",  "module": "bt@web@util@http_response"},
+  {"name": "src nested directories",   "path": "a/B/c.bt",                "package": "web", "root": "src",  "module": "bt@web@a@b@c"},
+  {"name": "test file",                "path": "counter_test.bt",         "package": "web", "root": "test", "module": "bt@web@test@counter_test"},
+  {"name": "test subdirectory",        "path": "http/ProtocolTest.bt",    "package": "web", "root": "test", "module": "bt@web@test@http@protocol_test"},
+  {"name": "out of tree file",         "path": "/work/examples/MyCounter.bt", "package": "web", "root": "none", "module": "bt@my_counter"},
+  {"name": "out of tree relative",     "path": "examples/hot_counter.bt", "package": "web", "root": "none", "module": "bt@hot_counter"},
+  {"name": "src hyphenated file",      "path": "my-class.bt",             "package": "web", "root": "src",  "error": "invalid_path_segment"},
+  {"name": "src hyphenated directory", "path": "bad-dir/ok.bt",           "package": "web", "root": "src",  "error": "invalid_path_segment"},
+  {"name": "test hyphenated file",     "path": "my-test.bt",              "package": "web", "root": "test", "error": "invalid_path_segment"},
+  {"name": "out of tree hyphenated",   "path": "/work/examples/my-class.bt", "package": "web", "root": "none", "error": "invalid_path_segment"}
+]

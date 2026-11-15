@@ -174,7 +174,7 @@ pub(crate) fn handle_class_state_field_defaults(request: &Map) -> Term {
 /// `[A-Za-z0-9_]` comes back as `#{status => error, reason =>
 /// invalid_path_segment, message => <<...>>}` rather than a crash.
 pub(crate) fn handle_build_class_module_index_in_source(request: &Map) -> Term {
-    use beamtalk_core::semantic_analysis::relative_module_segments;
+    use beamtalk_core::semantic_analysis::{ModuleRootKind, module_name_for_path};
 
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
@@ -186,8 +186,12 @@ pub(crate) fn handle_build_class_module_index_in_source(request: &Map) -> Term {
         return error_response(&["Missing or invalid 'package_name' field".to_string()]);
     };
 
-    let segments = match relative_module_segments(camino::Utf8Path::new(&relative_path)) {
-        Ok(segments) => segments,
+    let module_name = match module_name_for_path(
+        camino::Utf8Path::new(&relative_path),
+        &package_name,
+        ModuleRootKind::Src,
+    ) {
+        Ok(module_name) => module_name,
         Err(err) => {
             return Term::from(Map::from([
                 (atom("status"), atom("error")),
@@ -196,7 +200,6 @@ pub(crate) fn handle_build_class_module_index_in_source(request: &Map) -> Term {
             ]));
         }
     };
-    let module_name = format!("bt@{package_name}@{}", segments.join("@"));
 
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
     let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);

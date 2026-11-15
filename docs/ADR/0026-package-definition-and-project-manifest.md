@@ -154,6 +154,15 @@ src/util/math.bt  → bt@my_counter@util@math
 
 The formula is: `bt@{package_name}@{relative_path_without_extension}` where path separators become `@`.
 
+**Test files (BT-4868).** A file under the package's `test/` directory gets a `test` segment between the package and the path, so a test can never collide with a source module of the same name:
+
+```
+test/counter_test.bt       → bt@my_counter@test@counter_test
+test/http/protocol_test.bt → bt@my_counter@test@http@protocol_test
+```
+
+The formula is `bt@{package_name}@test@{relative_path_without_extension}`, with the path relative to `test/`. A file under neither `src/` nor `test/` (`examples/`, a fixture, a loose file) is `bt@{file_stem}`. The path always names the module, never the class the file declares. This is one rule with one implementation, `module_name_for_path` in `beamtalk-core` (built on `relative_module_segments`, ADR 0119): `beamtalk build`, `beamtalk test` and the REPL loader all use it (the loader through a parse-free compiler-port command of the same name). Every path segment must contain only ASCII letters, digits and underscores, and any other segment (`my-class.bt`) is an error in all three.
+
 Subdirectories within `src/` are **namespacing only** — they do not create subpackages. The entire `src/` tree belongs to one flat package. This follows the Gleam model.
 
 **Class name uniqueness (temporary constraint):** Within a workspace, class names must be globally unique across all loaded packages. If your package and a dependency both define `Counter`, the compiler will report an error. The BEAM module names are already unique (`bt@my_app@counter` vs `bt@other_lib@counter`), but Beamtalk dispatches by class name, not module name. This is a known limitation — qualified class names (e.g., `Counting.Counter`) require a module/namespace system (future ADR, high priority once dependencies are supported). Until then, the strict compiler error keeps behavior predictable.

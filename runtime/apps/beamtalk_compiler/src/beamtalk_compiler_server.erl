@@ -66,7 +66,8 @@ to avoid temp files on disk.
     reindent_method_source/2,
     find_selector_send_spans/3,
     find_definition_selector_spans/5,
-    build_class_module_index_in_source/3
+    build_class_module_index_in_source/3,
+    module_name_for_path/3
 ]).
 
 %% gen_server callbacks
@@ -677,6 +678,24 @@ build_class_module_index_in_source(Source, RelativePath, PackageName) ->
     ).
 
 -doc """
+The module name of the source file at `Path` under `RootKind` (`src' |
+`test' | `none') in package `PackageName' — see
+`beamtalk_compiler_port:module_name_for_path/4' for the wire shape and the
+rule. Returns `{ok, ModuleName}'; a segment outside `[A-Za-z0-9_]' returns
+`{error, invalid_path_segment, Message}'; transport failures return
+`{error, port_error | noproc | timeout, Message}'.
+""".
+-spec module_name_for_path(binary(), binary(), src | test | none) ->
+    {ok, binary()} | {error, atom(), binary()}.
+module_name_for_path(Path, PackageName, RootKind) ->
+    safe_call(
+        {module_name_for_path, Path, PackageName, RootKind},
+        ?CALL_TIMEOUT_MS,
+        ?SPAN_DOWN,
+        ?SPAN_TIMEOUT
+    ).
+
+-doc """
 Field-level default-value presence for `ClassName''s `state:'/`field:'
 declarations in `Source' (ADR 0082 extension).
 
@@ -1158,6 +1177,11 @@ handle_call(
 ) ->
     Result = beamtalk_compiler_port:build_class_module_index_in_source(
         State#state.port, Source, RelativePath, PackageName
+    ),
+    {reply, Result, State};
+handle_call({module_name_for_path, Path, PackageName, RootKind}, _From, State) ->
+    Result = beamtalk_compiler_port:module_name_for_path(
+        State#state.port, Path, PackageName, RootKind
     ),
     {reply, Result, State};
 handle_call({reindent_method_source, Source, BaseIndent}, _From, State) ->

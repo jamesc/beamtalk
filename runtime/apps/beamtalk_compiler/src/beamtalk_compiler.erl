@@ -50,7 +50,8 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     reindent_method_source/2,
     find_selector_send_spans/3,
     find_definition_selector_spans/5,
-    build_class_module_index_in_source/3
+    build_class_module_index_in_source/3,
+    module_name_for_path/3
 ]).
 
 -doc """
@@ -593,6 +594,24 @@ build_class_module_index_in_source(Source, RelativePath, PackageName) ->
     beamtalk_compiler_server:build_class_module_index_in_source(
         Source, RelativePath, PackageName
     ).
+
+-doc """
+The module name of the source file at `Path` — the one path-to-module rule
+the build, `beamtalk test` and the REPL loader share (BT-4868, ADR 0026).
+
+`RootKind` says what `Path` is relative to: `src` (the package's `src/`:
+`bt@{Package}@{path}`), `test` (its `test/`: `bt@{Package}@test@{path}`) or
+`none` (a file under neither root: `bt@{stem}`, `Package` ignored). Parse-free:
+no source is read. See `beamtalk_compiler_port:module_name_for_path/4`.
+
+Returns `{ok, ModuleName}`; a segment outside `[A-Za-z0-9_]` returns
+`{error, invalid_path_segment, Message}`; transport failures return
+`{error, noproc | timeout | port_error, Message}`.
+""".
+-spec module_name_for_path(binary(), binary(), src | test | none) ->
+    {ok, binary()} | {error, atom(), binary()}.
+module_name_for_path(Path, PackageName, RootKind) ->
+    beamtalk_compiler_server:module_name_for_path(Path, PackageName, RootKind).
 
 -doc """
 Field-level default-value presence for `ClassName''s `state:'/`field:'

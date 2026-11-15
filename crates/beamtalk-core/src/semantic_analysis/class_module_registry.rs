@@ -233,6 +233,79 @@ pub fn relative_module_segments(
         .collect()
 }
 
+/// Which root a file's path is relative to when deriving its module name
+/// ([`module_name_for_path`], ADR 0026 § Test files).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleRootKind {
+    /// The path is relative to the package's `src/` directory:
+    /// `bt@{package}@{path}`.
+    Src,
+    /// The path is relative to the package's `test/` directory:
+    /// `bt@{package}@test@{path}`.
+    Test,
+    /// The file is under neither root (`examples/`, a fixture, a loose
+    /// file): `bt@{stem}` from the file name alone.
+    None,
+}
+
+impl ModuleRootKind {
+    /// Parses the wire spelling (`src` | `test` | `none`).
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "src" => Some(Self::Src),
+            "test" => Some(Self::Test),
+            "none" => Some(Self::None),
+            _ => None,
+        }
+    }
+}
+
+/// The Erlang module name of a source file: the one path-to-module rule the
+/// build, `beamtalk test` and the REPL loader share (ADR 0026, ADR 0119).
+///
+/// - [`ModuleRootKind::Src`]: `bt@{package}@{segments}` for `path` relative
+///   to `src/`.
+/// - [`ModuleRootKind::Test`]: `bt@{package}@test@{segments}` for `path`
+///   relative to `test/`.
+/// - [`ModuleRootKind::None`]: `bt@{stem}`; only the file name is used and
+///   `package` is ignored.
+///
+/// Built on [`relative_module_segments`], so an invalid segment is rejected
+/// the same way everywhere.
+///
+/// # Errors
+///
+/// Returns [`ClassModuleRegistryError::InvalidPathSegment`] if a segment
+/// contains a character other than an ASCII alphanumeric or `_`, or if the
+/// path names no file.
+pub fn module_name_for_path(
+    path: &Utf8Path,
+    package: &str,
+    root: ModuleRootKind,
+) -> Result<String, ClassModuleRegistryError> {
+    let empty = || ClassModuleRegistryError::InvalidPathSegment {
+        segment: String::new(),
+        path: path.to_string(),
+    };
+    let segments = match root {
+        ModuleRootKind::Src | ModuleRootKind::Test => relative_module_segments(path)?,
+        ModuleRootKind::None => {
+            let file_name = path.file_name().ok_or_else(empty)?;
+            relative_module_segments(Utf8Path::new(file_name))?
+        }
+    };
+    if segments.is_empty() {
+        return Err(empty());
+    }
+    let joined = segments.join("@");
+    Ok(match root {
+        ModuleRootKind::Src => format!("bt@{package}@{joined}"),
+        ModuleRootKind::Test => format!("bt@{package}@test@{joined}"),
+        ModuleRootKind::None => format!("bt@{joined}"),
+    })
+}
+
 /// Validates a stdlib class's path-derived module name against the
 /// closed-form name computed from its real, parsed class name (ADR 0119
 /// step 2).
@@ -732,6 +805,51 @@ mod tests {
             err,
             ClassModuleRegistryError::InvalidPathSegment { .. }
         ));
+    }
+
+    #[test]
+    fn module_name_for_path_covers_every_root_kind() {
+        let name = |p: &str, k| module_name_for_path(Utf8Path::new(p), "web", k);
+        assert_eq!(name("counter.bt", ModuleRootKind::Src).unwrap(), "bt@web@counter");
+        assert_eq!(
+            name("util/HttpResponse.bt", ModuleRootKind::Src).unwrap(),
+            "bt@web@util@http_response"
+        );
+        assert_eq!(name("foo.bt", ModuleRootKind::Test).unwrap(), "bt@web@test@foo");
+        assert_eq!(
+            name("sub/Foo.bt", ModuleRootKind::Test).unwrap(),
+            "bt@web@test@sub@foo"
+        );
+        assert_eq!(
+            name("/abs/examples/MyCounter.bt", ModuleRootKind::None).unwrap(),
+            "bt@my_counter"
+        );
+    }
+
+    #[test]
+    fn module_name_for_path_rejects_invalid_and_empty_paths() {
+        for (path, kind) in [
+            ("my-class.bt", ModuleRootKind::Src),
+            ("bad-dir/ok.bt", ModuleRootKind::Test),
+            ("/x/my-class.bt", ModuleRootKind::None),
+            ("", ModuleRootKind::Src),
+        ] {
+            assert!(
+                matches!(
+                    module_name_for_path(Utf8Path::new(path), "web", kind),
+                    Err(ClassModuleRegistryError::InvalidPathSegment { .. })
+                ),
+                "{path:?} {kind:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn module_root_kind_parses_wire_spelling() {
+        assert_eq!(ModuleRootKind::parse("src"), Some(ModuleRootKind::Src));
+        assert_eq!(ModuleRootKind::parse("test"), Some(ModuleRootKind::Test));
+        assert_eq!(ModuleRootKind::parse("none"), Some(ModuleRootKind::None));
+        assert_eq!(ModuleRootKind::parse("lib"), None);
     }
 
     #[test]

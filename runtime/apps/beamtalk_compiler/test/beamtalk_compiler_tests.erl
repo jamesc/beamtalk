@@ -74,6 +74,8 @@ compiler_test_() ->
             fun build_class_module_index_in_source_subdir_multi_class/0},
         {"build_class_module_index_in_source invalid path segment",
             fun build_class_module_index_in_source_invalid_path_segment/0},
+        {"module_name_for_path matches the shared module-naming corpus (BT-4868)",
+            fun module_name_for_path_matches_shared_corpus/0},
         {"command vocabulary corpus is recognized (BT-3095)",
             fun command_vocabulary_corpus_is_recognized/0}
     ]}.
@@ -546,10 +548,55 @@ assert_command_recognized(<<"build_class_module_index_in_source">>) ->
             <<"bt3095pkg">>
         )
     );
+assert_command_recognized(<<"module_name_for_path">>) ->
+    ?assertEqual(
+        {ok, <<"bt@bt4868pkg@test@sample">>},
+        beamtalk_compiler:module_name_for_path(<<"sample.bt">>, <<"bt4868pkg">>, test)
+    );
 assert_command_recognized(Command) ->
     %% A corpus entry with no dispatch clause is a test-authoring gap, not a
     %% vocabulary mismatch — fail loudly rather than silently skipping it.
     error({no_dispatch_table_entry_for_corpus_command, Command}).
+
+%%% ---------------------------------------------------------------
+%%% Module-naming conformance corpus (BT-4868)
+%%% ---------------------------------------------------------------
+
+%% Every case in the shared module-naming corpus
+%% (`fixtures/module_naming_corpus.json`) through the real compiler port. The
+%% Rust side runs the same file against the handler in
+%% `module_name_for_path_matches_shared_corpus`
+%% (`crates/beamtalk-compiler-port/src/tests/class_module_index_and_categorization.rs`),
+%% and `beamtalk_repl_loader_tests` runs it through the loader's file-path
+%% classification, so the three surfaces cannot name a file differently.
+module_name_for_path_matches_shared_corpus() ->
+    Corpus = load_module_naming_corpus(),
+    ?assert(length(Corpus) >= 10),
+    lists:foreach(
+        fun(#{<<"path">> := Path, <<"package">> := Pkg, <<"root">> := Root} = Case) ->
+            RootKind = binary_to_existing_atom(Root),
+            Result = beamtalk_compiler:module_name_for_path(Path, Pkg, RootKind),
+            case Case of
+                #{<<"module">> := Module} ->
+                    ?assertEqual({ok, Module}, Result);
+                #{<<"error">> := Reason} ->
+                    ?assertMatch({error, _, _}, Result),
+                    {error, Got, _Msg} = Result,
+                    ?assertEqual(binary_to_existing_atom(Reason), Got)
+            end
+        end,
+        Corpus
+    ).
+
+load_module_naming_corpus() ->
+    beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_compiler",
+        "test",
+        "fixtures",
+        "module_naming_corpus.json"
+    ]).
 
 %% Load the shared compiler-port command-vocabulary conformance corpus
 %% from the repo tree. `beamtalk_test_corpus` walks up

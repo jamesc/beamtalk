@@ -868,6 +868,8 @@ fn generate_doc_test_eunit_wrapper(
 struct CompiledTest {
     /// Source file path.
     source_file: Utf8PathBuf,
+    /// Owning package name, if the file is inside one.
+    package: Option<String>,
     /// `TestCase` class info.
     test_class: TestCaseClass,
 }
@@ -1735,34 +1737,69 @@ fn discover_and_compile_tests(pipeline: &mut TestPipeline) -> Result<()> {
     Ok(())
 }
 
-/// Reject a `TestCase` class whose BEAM module name is already claimed by an
-/// earlier test class in this run.
+/// Reject a `TestCase` class that an earlier test class in this run already
+/// claims, either by BEAM module name or by class name within one package.
 ///
-/// Module names derive from the class name (plus a package prefix only when
-/// several packages are in scope), so two files in one package declaring the
-/// same `TestCase` subclass compile to the same `<module>.core`/`.beam`. The
-/// later file would silently clobber the earlier one and its tests would never
-/// run, with counts depending on discovery order (BT-4350).
+/// Module names are path-based (`bt@{package}@test@{path}`, BT-4868), so two
+/// distinct files never share one; the module check only guards against the
+/// same file being compiled twice. Two files in one package declaring the same
+/// `TestCase` subclass still collide on the class itself (the second load
+/// would replace the first, and its tests would never run, with counts
+/// depending on discovery order — BT-4350), so that is rejected too. The same
+/// class name in two *different* packages is fine.
 fn check_duplicate_test_module(
     compiled_tests: &[CompiledTest],
     test_class: &TestCaseClass,
     test_file: &Utf8Path,
+    package: Option<&str>,
 ) -> Result<()> {
-    if let Some(existing) = compiled_tests
-        .iter()
-        .find(|c| c.test_class.module_name == test_class.module_name)
-    {
+    if let Some(existing) = compiled_tests.iter().find(|c| {
+        c.test_class.module_name == test_class.module_name
+            || (c.test_class.class_name == test_class.class_name
+                && c.package.as_deref() == package)
+    }) {
         miette::bail!(
-            "Duplicate test module '{}': test class '{}' in '{}' and test class '{}' in '{}' \
-             compile to the same module. Rename one of the test classes.",
-            test_class.module_name,
+            "Duplicate test class '{}': test class '{}' in '{}' and test class '{}' in '{}' \
+             collide (module '{}' / '{}'). Rename one of the test classes.",
+            test_class.class_name,
             existing.test_class.class_name,
             existing.source_file,
             test_class.class_name,
-            test_file
+            test_file,
+            existing.test_class.module_name,
+            test_class.module_name
         );
     }
     Ok(())
+}
+
+/// The BEAM module name of a test file: `bt@{package}@test@{path}` for a file
+/// under its package's `test/` directory, `bt@{stem}` for any other file
+/// (outside a package, or outside `test/`).
+///
+/// Delegates to `beamtalk_core`'s `module_name_for_path`, the rule `beamtalk
+/// build` and the REPL loader's compiler-port command use (ADR 0026), so a
+/// test file has one name everywhere. `pkg_root_to_name` is keyed by canonical
+/// package root. A path segment outside `[A-Za-z0-9_]` fails the run, as it
+/// fails `beamtalk build`.
+fn test_file_module_name(
+    test_file: &Utf8Path,
+    pkg_root_to_name: &HashMap<Utf8PathBuf, String>,
+) -> Result<String> {
+    use beamtalk_core::semantic_analysis::{ModuleRootKind, module_name_for_path};
+
+    let file = canonical_path(test_file);
+    let package = canonical_package_root(&file)
+        .and_then(|root| pkg_root_to_name.get(&root).map(|name| (root, name.as_str())));
+    let (relative, package_name, root_kind) = match &package {
+        Some((root, name)) => match file.strip_prefix(root.join("test")) {
+            Ok(relative) => (relative, *name, ModuleRootKind::Test),
+            Err(_) => (file.as_path(), *name, ModuleRootKind::None),
+        },
+        None => (file.as_path(), "", ModuleRootKind::None),
+    };
+    module_name_for_path(relative, package_name, root_kind)
+        .map_err(|e| miette::miette!("Cannot name test file '{test_file}': {e}"))
 }
 
 /// Discover, compile, and generate wrappers for a single test file.
@@ -1790,22 +1827,15 @@ fn compile_single_test_file(
     let (mut test_classes, load_files) =
         discover_test_classes_in_hierarchy(test_file, &file_super_index)?;
 
-    // When multiple packages are in scope, prefix the test module name with
-    // the owning package name to prevent `bt@smoke_test.beam` collisions
-    // between two packages that each define a class named `SmokeTest`.
-    // Single-package runs are unaffected (no prefix added when only one package
-    // is discovered), preserving backwards-compatible module names.
-    if pipeline.discovered_packages.len() > 1 {
-        let pkg_name_slug = canonical_package_root(test_file)
-            .and_then(|r| pipeline.pkg_root_to_name.get(&r))
-            .map(|n| beamtalk_codegen::core_erlang::to_module_name(n));
-
-        if let Some(ref prefix) = pkg_name_slug {
-            for tc in &mut test_classes {
-                let stem = beamtalk_codegen::core_erlang::to_module_name(&tc.class_name);
-                tc.module_name = format!("bt@{prefix}@{stem}");
-            }
-        }
+    // BT-4868: a test file's module is named from its path by the one rule the
+    // build and the REPL loader share (`bt@{package}@test@{path}`), never from
+    // the class it declares, so two files can't collide on a module name and a
+    // test file gets the same module under `beamtalk test`, `beamtalk build`
+    // and the REPL.
+    let test_file_package = pipeline.current_package_for(test_file);
+    let module_name = test_file_module_name(test_file, &pipeline.pkg_root_to_name)?;
+    for tc in &mut test_classes {
+        tc.module_name = module_name.clone();
     }
 
     // Build hierarchy once for all compilations within this test file.
@@ -1836,11 +1866,15 @@ fn compile_single_test_file(
     )?;
 
     // Compile TestCase subclasses
-    let test_file_package = pipeline.current_package_for(test_file);
     for test_class in test_classes {
         // Fail fast before writing `<module>.core`: a second file with the
         // same module name would overwrite the first's output (BT-4350).
-        check_duplicate_test_module(&pipeline.compiled_tests, &test_class, test_file)?;
+        check_duplicate_test_module(
+            &pipeline.compiled_tests,
+            &test_class,
+            test_file,
+            test_file_package.as_deref(),
+        )?;
 
         // Generate Core Erlang for the test file (BEAM compilation is batched below)
         let core_file = generate_core_file(
@@ -1860,6 +1894,7 @@ fn compile_single_test_file(
         // handles test discovery and execution directly in the Erlang runtime.
         pipeline.compiled_tests.push(CompiledTest {
             source_file: test_file.to_path_buf(),
+            package: test_file_package.clone(),
             test_class,
         });
     }
@@ -2860,44 +2895,23 @@ mod tests {
         );
     }
 
-    /// When two packages each define a class with the same name (e.g. `SmokeTest`),
-    /// the multi-package run would compile both to `bt@smoke_test.beam` in the same
-    /// temp build dir, with the second silently overwriting the first. The fix:
-    /// when `discovered_packages.len() > 1`, prefix each test module name with the
-    /// owning package name (e.g. `bt@pkg_a@smoke_test` and `bt@pkg_b@smoke_test`).
-    ///
-    /// This test verifies the renaming logic that produces those unique names.
+    /// BT-4868: a test file is named from its path, `bt@{package}@test@{path}`,
+    /// in single- and multi-package runs alike. Two packages each defining
+    /// `SmokeTest` get distinct modules (no `.beam` collision), and nested
+    /// directories are part of the name.
     #[test]
-    fn test_module_name_prefixed_for_multi_package_collision_avoidance() {
+    fn test_file_module_name_is_path_based_in_package() {
         let (_temp, dir) = temp_utf8_dir();
-
-        // Two packages, each with a SmokeTest class
         let pkg_a = dir.join("pkg_a");
         let pkg_b = dir.join("pkg_b");
-        for pkg in [&pkg_a, &pkg_b] {
-            fs::create_dir_all(pkg.join("test")).unwrap();
-        }
-        fs::write(
-            pkg_a.join("beamtalk.toml"),
-            "[package]\nname = \"pkg_a\"\nversion = \"0.1.0\"\n",
-        )
-        .unwrap();
-        fs::write(
-            pkg_b.join("beamtalk.toml"),
-            "[package]\nname = \"pkg_b\"\nversion = \"0.1.0\"\n",
-        )
-        .unwrap();
-        let file_a = pkg_a.join("test/smoke_test.bt");
-        let file_b = pkg_b.join("test/smoke_test.bt");
-        for f in [&file_a, &file_b] {
+        for (pkg, name) in [(&pkg_a, "pkg_a"), (&pkg_b, "pkg_b")] {
+            fs::create_dir_all(pkg.join("test/http")).unwrap();
             fs::write(
-                f,
-                "TestCase subclass: SmokeTest\n  testOk => self assert: true\n",
+                pkg.join("beamtalk.toml"),
+                format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
             )
             .unwrap();
         }
-
-        // Build pkg_root_to_name as the production code does (with canonicalized keys)
         let pkg_root_to_name: HashMap<Utf8PathBuf, String> = [
             (canonical_path(&pkg_a), "pkg_a".to_string()),
             (canonical_path(&pkg_b), "pkg_b".to_string()),
@@ -2905,37 +2919,68 @@ mod tests {
         .into_iter()
         .collect();
 
-        // Simulate the override applied in run_tests when len > 1
-        for (file, expected_module) in [
-            (&file_a, "bt@pkg_a@smoke_test"),
-            (&file_b, "bt@pkg_b@smoke_test"),
+        for (file, expected) in [
+            (pkg_a.join("test/smoke_test.bt"), "bt@pkg_a@test@smoke_test"),
+            (pkg_b.join("test/smoke_test.bt"), "bt@pkg_b@test@smoke_test"),
+            (
+                pkg_a.join("test/http/ProtocolTest.bt"),
+                "bt@pkg_a@test@http@protocol_test",
+            ),
         ] {
-            let (mut test_classes, _) = discover_test_classes(file).unwrap();
-            // Default (single-pkg) name
-            assert_eq!(test_classes[0].module_name, "bt@smoke_test");
-
-            // Apply multi-package prefix (mirrors run_tests logic)
-            let pkg_name_slug = canonical_package_root(file)
-                .and_then(|r| pkg_root_to_name.get(&r))
-                .map(|n| beamtalk_codegen::core_erlang::to_module_name(n));
-
-            if let Some(ref prefix) = pkg_name_slug {
-                for tc in &mut test_classes {
-                    let stem = beamtalk_codegen::core_erlang::to_module_name(&tc.class_name);
-                    tc.module_name = format!("bt@{prefix}@{stem}");
-                }
-            }
-
-            assert_eq!(test_classes[0].module_name, expected_module);
+            fs::write(&file, "").unwrap();
+            assert_eq!(
+                test_file_module_name(&file, &pkg_root_to_name).unwrap(),
+                expected
+            );
         }
+        // Same answer with one package in scope: no run-shape-dependent prefix.
+        let single: HashMap<Utf8PathBuf, String> =
+            [(canonical_path(&pkg_a), "pkg_a".to_string())].into();
+        assert_eq!(
+            test_file_module_name(&pkg_a.join("test/smoke_test.bt"), &single).unwrap(),
+            "bt@pkg_a@test@smoke_test"
+        );
+    }
+
+    /// A file outside any package, or outside its package's `test/`, is named
+    /// from its stem; an invalid segment fails the run like `beamtalk build`.
+    #[test]
+    fn test_file_module_name_outside_test_dir_and_invalid_segments() {
+        let (_temp, dir) = temp_utf8_dir();
+        fs::create_dir_all(dir.join("test")).unwrap();
+        fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"my_pkg\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let pkgs: HashMap<Utf8PathBuf, String> =
+            [(canonical_path(&dir), "my_pkg".to_string())].into();
+
+        let loose = dir.join("scratch_test.bt");
+        fs::write(&loose, "").unwrap();
+        assert_eq!(
+            test_file_module_name(&loose, &pkgs).unwrap(),
+            "bt@scratch_test"
+        );
+        assert_eq!(
+            test_file_module_name(&loose, &HashMap::new()).unwrap(),
+            "bt@scratch_test"
+        );
+
+        let bad = dir.join("test/my-test.bt");
+        fs::write(&bad, "").unwrap();
+        let err = test_file_module_name(&bad, &pkgs).expect_err("hyphen is invalid");
+        assert!(err.to_string().contains("my-test"), "{err}");
     }
 
     /// BT-4350: two files in the *same* package declaring the same `TestCase`
-    /// subclass get no package prefix, so both map to `bt@protocol_test`. The
-    /// runner must reject the second instead of letting it overwrite the first's
-    /// `.core`/`.beam`, and the error must name both files.
+    /// subclass must be rejected (the second would silently replace the
+    /// first's class and its tests would never run), naming both files. Module
+    /// names are path-based now (BT-4868), so the files get distinct modules and
+    /// it is the class name that collides; the same class in another package,
+    /// or a different class in the same package, is fine.
     #[test]
-    fn test_duplicate_test_module_name_in_scope_is_rejected() {
+    fn test_duplicate_test_class_in_scope_is_rejected() {
         let (_temp, dir) = temp_utf8_dir();
         let file_a = dir.join("test/http1/protocol_test.bt");
         let file_b = dir.join("test/websocket/protocol_test.bt");
@@ -2948,26 +2993,38 @@ mod tests {
             .unwrap();
         }
 
-        let (classes_a, _) = discover_test_classes(&file_a).unwrap();
-        let (classes_b, _) = discover_test_classes(&file_b).unwrap();
-        assert_eq!(classes_a[0].module_name, "bt@protocol_test");
-        assert_eq!(classes_b[0].module_name, "bt@protocol_test");
+        let (mut classes_a, _) = discover_test_classes(&file_a).unwrap();
+        let (mut classes_b, _) = discover_test_classes(&file_b).unwrap();
+        classes_a[0].module_name = "bt@web@test@http1@protocol_test".to_string();
+        classes_b[0].module_name = "bt@web@test@websocket@protocol_test".to_string();
 
         // First file in scope: no collision.
         let mut compiled = Vec::new();
-        check_duplicate_test_module(&compiled, &classes_a[0], &file_a).unwrap();
+        check_duplicate_test_module(&compiled, &classes_a[0], &file_a, Some("web")).unwrap();
         compiled.push(CompiledTest {
             source_file: file_a.clone(),
+            package: Some("web".to_string()),
             test_class: classes_a.into_iter().next().unwrap(),
         });
 
-        // Second file maps to the same module: error naming both files.
-        let err = check_duplicate_test_module(&compiled, &classes_b[0], &file_b)
-            .expect_err("duplicate test module name must be rejected");
+        // Second file, same class and package: error naming both files.
+        let err = check_duplicate_test_module(&compiled, &classes_b[0], &file_b, Some("web"))
+            .expect_err("duplicate test class must be rejected");
         let msg = err.to_string();
-        assert!(msg.contains("bt@protocol_test"), "{msg}");
+        assert!(msg.contains("ProtocolTest"), "{msg}");
         assert!(msg.contains(file_a.as_str()), "{msg}");
         assert!(msg.contains(file_b.as_str()), "{msg}");
+
+        // The same class name in a different package is fine.
+        check_duplicate_test_module(&compiled, &classes_b[0], &file_b, Some("other")).unwrap();
+
+        // The same module name is rejected whatever the class (same file twice).
+        let mut same_module = classes_b.remove(0);
+        same_module.class_name = "OtherTest".to_string();
+        same_module.module_name = compiled[0].test_class.module_name.clone();
+        let err = check_duplicate_test_module(&compiled, &same_module, &file_b, Some("other"))
+            .expect_err("duplicate module name must be rejected");
+        assert!(err.to_string().contains("bt@web@test@http1@protocol_test"));
 
         // A distinct class name in the same package is fine.
         let file_c = dir.join("test/http1/http1_protocol_test.bt");
@@ -2976,8 +3033,9 @@ mod tests {
             "TestCase subclass: HTTP1ProtocolTest\n  testOk => self assert: true\n",
         )
         .unwrap();
-        let (classes_c, _) = discover_test_classes(&file_c).unwrap();
-        check_duplicate_test_module(&compiled, &classes_c[0], &file_c).unwrap();
+        let (mut classes_c, _) = discover_test_classes(&file_c).unwrap();
+        classes_c[0].module_name = "bt@web@test@http1@http1_protocol_test".to_string();
+        check_duplicate_test_module(&compiled, &classes_c[0], &file_c, Some("web")).unwrap();
     }
 
     /// BT-4334: test-file compilation must declare the same checker scope as

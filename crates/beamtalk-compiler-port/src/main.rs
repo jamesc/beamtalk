@@ -34,7 +34,7 @@ use handlers::{
     handle_find_definition_selector_spans, handle_find_ffi_sites_in_source,
     handle_find_field_readers_in_source, handle_find_field_writers_in_source,
     handle_find_references_to_in_source, handle_find_selector_send_spans,
-    handle_find_senders_in_source, handle_reindent_method_source, handle_resolve_class_span,
+    handle_find_senders_in_source, handle_module_name_for_path, handle_reindent_method_source, handle_resolve_class_span,
     handle_resolve_completion_type, handle_resolve_method_span, handle_version,
 };
 use respond::error_response;
@@ -61,7 +61,7 @@ fn handle_request(request_term: &Term) -> Term {
     // symptom is a runtime "Unknown command" error wherever it's invoked.
     // A shared corpus fixture
     // (`runtime/apps/beamtalk_compiler/test/fixtures/compiler_port_command_vocabulary_corpus.json`)
-    // pins both sides to the same 19-command list end-to-end: the Rust test
+    // pins both sides to the same command list end-to-end: the Rust test
     // below dispatches each corpus command through `handle_request` and
     // checks it isn't the catch-all arm, while
     // `beamtalk_compiler_tests:command_vocabulary_corpus_is_recognized_test/0`
@@ -92,6 +92,7 @@ fn handle_request(request_term: &Term) -> Term {
         "categorize_methods" => handle_categorize_methods(map),
         "class_state_field_defaults" => handle_class_state_field_defaults(map),
         "build_class_module_index_in_source" => handle_build_class_module_index_in_source(map),
+        "module_name_for_path" => handle_module_name_for_path(map),
         _ => error_response(&[format!("Unknown command: {command}")]),
     }
 }

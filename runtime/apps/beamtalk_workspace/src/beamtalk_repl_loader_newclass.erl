@@ -155,14 +155,22 @@ new_class_compile(Source, TargetPath, AbsPath) ->
 -spec new_class_compile(string(), string(), string(), log | no_log) ->
     {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
 new_class_compile(Source, TargetPath, AbsPath, Mode) ->
-    ModuleNameOverride = beamtalk_repl_loader:compute_package_module_name(TargetPath),
     StdlibMode = beamtalk_repl_loader:is_stdlib_path(TargetPath),
     %% `compile_file/4`'s success-typing return here is a class binary or an
     %% error (the protocol-definition variant declared in its spec is produced by
     %% a different compiler entry, not this one — dialyzer confirms it can never
     %% arrive). A protocol-only source therefore surfaces as a compile error or
     %% as a class-less result that `declared_class_name([])` rejects loudly.
-    case beamtalk_repl_compiler:compile_file(Source, TargetPath, StdlibMode, ModuleNameOverride) of
+    Compiled =
+        case beamtalk_repl_loader:compute_package_module_name(TargetPath) of
+            {ok, ModuleNameOverride} ->
+                beamtalk_repl_compiler:compile_file(
+                    Source, TargetPath, StdlibMode, ModuleNameOverride
+                );
+            {error, _} = NameError ->
+                NameError
+        end,
+    case Compiled of
         {ok, Binary, ClassNames, ModuleName} ->
             new_class_validate_and_install(
                 Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, Mode

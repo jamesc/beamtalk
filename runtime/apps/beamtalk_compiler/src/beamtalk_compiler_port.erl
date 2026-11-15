@@ -35,6 +35,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     find_selector_send_spans/4,
     find_definition_selector_spans/6,
     build_class_module_index_in_source/4,
+    module_name_for_path/4,
     close/1,
     port_roundtrip/6,
     add_compile_options/2
@@ -1057,6 +1058,59 @@ handle_build_class_module_index_in_source_response(#{status := error, reason := 
     reason_error(Resp);
 handle_build_class_module_index_in_source_response(Other) ->
     unexpected_port_response("Unexpected class-module-index response", Other).
+
+-doc """
+The module name of the source file at `Path` — the REPL loader's one path
+to the shared naming rule (BT-4868).
+
+`RootKind' says what `Path' is relative to: `src' (the package's `src/`,
+giving `bt@{Package}@{path}'), `test' (its `test/`, giving
+`bt@{Package}@test@{path}'), or `none' (a file under neither root, giving
+`bt@{stem}' from the file name alone; `Package' is ignored). The port builds
+it with the same Rust function `beamtalk build' and `beamtalk test' call, so
+no second copy of the casing/validation rule lives in Erlang. No source is
+read or parsed.
+
+Returns `{ok, ModuleName}', `{error, invalid_path_segment, Message}' for a
+segment outside `[A-Za-z0-9_]', or `{error, port_error, Message}' on a
+transport failure.
+""".
+-spec module_name_for_path(port(), binary(), binary(), src | test | none) ->
+    {ok, binary()} | {error, atom(), binary()}.
+module_name_for_path(Port, Path, PackageName, RootKind) when
+    is_binary(Path),
+    is_binary(PackageName),
+    (RootKind =:= src orelse RootKind =:= test orelse RootKind =:= none)
+->
+    Request = #{
+        command => module_name_for_path,
+        path => Path,
+        package_name => PackageName,
+        root_kind => atom_to_binary(RootKind)
+    },
+    port_roundtrip(
+        Port,
+        Request,
+        module_name_for_path,
+        ?PORT_TIMEOUT_MS,
+        fun handle_module_name_for_path_response/1,
+        port
+    );
+module_name_for_path(_Port, _Path, _PackageName, _RootKind) ->
+    {error, bad_argument, <<
+        "module_name_for_path: path/package_name must be binaries and root_kind src | test | none"
+    >>}.
+
+-spec handle_module_name_for_path_response(term()) ->
+    {ok, binary()} | {error, atom(), binary()}.
+handle_module_name_for_path_response(#{status := ok, module_name := ModuleName}) when
+    is_binary(ModuleName)
+->
+    {ok, ModuleName};
+handle_module_name_for_path_response(#{status := error, reason := _} = Resp) ->
+    reason_error(Resp);
+handle_module_name_for_path_response(Other) ->
+    unexpected_port_response("Unexpected module-name-for-path response", Other).
 
 -doc """
 Re-indent a canonical (column-0) method body to `BaseIndent'.

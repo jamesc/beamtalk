@@ -347,3 +347,63 @@ fn class_state_field_defaults_missing_class_name_field_is_error() {
     };
     assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
 }
+
+// --- module_name_for_path tests (BT-4868) ---
+
+/// Conformance: the shared module-naming corpus. The Erlang side runs the same
+/// cases through the real port in `beamtalk_compiler_tests`
+/// (`module_naming_corpus_matches_rust_test`), and `beamtalk_core`'s
+/// `module_name_for_path` is what both build on.
+#[test]
+fn module_name_for_path_matches_shared_corpus() {
+    let path = beamtalk_workspace::cargo_workspace_root!()
+        .join("runtime/apps/beamtalk_compiler/test/fixtures/module_naming_corpus.json");
+    let raw = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+    let corpus: Vec<serde_json::Value> = serde_json::from_str(&raw).expect("corpus is JSON array");
+    assert!(corpus.len() >= 10, "corpus must cover src/test/none/invalid");
+
+    for case in &corpus {
+        let field = |k: &str| case[k].as_str().unwrap_or_else(|| panic!("{case}: no {k}"));
+        let request = Map::from([
+            (atom("command"), atom("module_name_for_path")),
+            (atom("path"), binary(field("path"))),
+            (atom("package_name"), binary(field("package"))),
+            (atom("root_kind"), binary(field("root"))),
+        ]);
+        let response = handle_module_name_for_path(&request);
+        let Term::Map(ref m) = response else {
+            panic!("{case}: expected map response, got {response:?}");
+        };
+        if let Some(expected) = case["module"].as_str() {
+            assert_eq!(map_get(m, "status"), Some(&atom("ok")), "{case}: {response:?}");
+            assert_eq!(
+                map_get(m, "module_name").and_then(term_to_string),
+                Some(expected.to_string()),
+                "{case}"
+            );
+        } else {
+            assert_eq!(map_get(m, "status"), Some(&atom("error")), "{case}: {response:?}");
+            assert_eq!(
+                map_get(m, "reason"),
+                Some(&atom(case["error"].as_str().unwrap())),
+                "{case}"
+            );
+        }
+    }
+}
+
+#[test]
+fn module_name_for_path_rejects_unknown_root_kind() {
+    let request = Map::from([
+        (atom("command"), atom("module_name_for_path")),
+        (atom("path"), binary("a.bt")),
+        (atom("package_name"), binary("web")),
+        (atom("root_kind"), binary("lib")),
+    ]);
+    let response = handle_module_name_for_path(&request);
+    let Term::Map(ref m) = response else {
+        panic!("Expected map response, got: {response:?}");
+    };
+    assert_ne!(map_get(m, "status"), Some(&atom("ok")), "{response:?}");
+}

@@ -361,80 +361,12 @@ compute_package_module_name_no_metadata_test() ->
     %% reload semantics: hot_counter.bt and hot_counter_v2.bt both define
     %% HotCounter → same module bt@hot_counter.
     Result = beamtalk_repl_loader:compute_package_module_name("/some/path/src/Foo.bt"),
-    ?assertEqual(undefined, Result).
+    ?assertEqual({ok, undefined}, Result).
 
 compute_package_module_name_no_metadata_camel_case_test() ->
     %% Same: no metadata → undefined (class-name-based naming).
     Result = beamtalk_repl_loader:compute_package_module_name("/some/path/MyCounter.bt"),
-    ?assertEqual(undefined, Result).
-
-%%====================================================================
-%% resolve_package_module/4
-%%====================================================================
-
-resolve_package_module_src_match_test() ->
-    %% File under ProjectRoot/src → bt@pkg@module
-    %% Use file:get_cwd() as the root so paths are drive-letter-consistent on Windows.
-    {ok, Cwd} = file:get_cwd(),
-    ProjectRoot = filename:join(Cwd, "myproject"),
-    AbsPath = filename:join([ProjectRoot, "src", "Counter.bt"]),
-    OrigPath = filename:join([ProjectRoot, "src", "Counter.bt"]),
-    Result = beamtalk_repl_loader:resolve_package_module(
-        AbsPath, ProjectRoot, <<"mypkg">>, OrigPath
-    ),
-    ?assertEqual(<<"bt@mypkg@counter">>, Result).
-
-resolve_package_module_test_match_test() ->
-    {ok, Cwd} = file:get_cwd(),
-    ProjectRoot = filename:join(Cwd, "myproject"),
-    AbsPath = filename:join([ProjectRoot, "test", "CounterTest.bt"]),
-    OrigPath = AbsPath,
-    Result = beamtalk_repl_loader:resolve_package_module(
-        AbsPath, ProjectRoot, <<"mypkg">>, OrigPath
-    ),
-    ?assertEqual(<<"bt@mypkg@test@counter_test">>, Result).
-
-resolve_package_module_no_match_test() ->
-    %% File outside src/ and test/ falls back to bt@{stem_snake_case}
-    %% Use different basenames for AbsPath and OrigPath to prove the
-    %% fallback derives from OrigPath, not AbsPath.
-    {ok, Cwd} = file:get_cwd(),
-    ProjectRoot = filename:join(Cwd, "myproject"),
-    AbsPath = filename:join([Cwd, "other", "project", "Foo.bt"]),
-    OrigPath = filename:join([Cwd, "examples", "MyCounter.bt"]),
-    Result = beamtalk_repl_loader:resolve_package_module(
-        AbsPath, ProjectRoot, <<"pkg">>, OrigPath
-    ),
-    ?assertEqual(<<"bt@my_counter">>, Result).
-
-%%====================================================================
-%% try_package_relative/3
-%%====================================================================
-
-try_package_relative_match_test() ->
-    {ok, Cwd} = file:get_cwd(),
-    ProjectRoot = filename:join(Cwd, "project"),
-    AbsPath = filename:join([ProjectRoot, "src", "collections", "array.bt"]),
-    Result = beamtalk_repl_loader:try_package_relative(AbsPath, ProjectRoot, "src"),
-    ?assertMatch({ok, _}, Result),
-    {ok, Parts} = Result,
-    ?assertEqual(iolist_to_binary(Parts), <<"collections@array">>).
-
-try_package_relative_no_match_test() ->
-    {ok, Cwd} = file:get_cwd(),
-    ProjectRoot = filename:join(Cwd, "project"),
-    AbsPath = filename:join([Cwd, "other", "src", "Foo.bt"]),
-    Result = beamtalk_repl_loader:try_package_relative(AbsPath, ProjectRoot, "src"),
-    ?assertEqual(undefined, Result).
-
-try_package_relative_simple_file_test() ->
-    {ok, Cwd} = file:get_cwd(),
-    ProjectRoot = filename:join(Cwd, "project"),
-    AbsPath = filename:join([ProjectRoot, "src", "MyClass.bt"]),
-    Result = beamtalk_repl_loader:try_package_relative(AbsPath, ProjectRoot, "src"),
-    ?assertMatch({ok, _}, Result),
-    {ok, Parts} = Result,
-    ?assertEqual(iolist_to_binary(Parts), <<"my_class">>).
+    ?assertEqual({ok, undefined}, Result).
 
 %%====================================================================
 %% maybe_add_loaded_module/2
@@ -1173,6 +1105,57 @@ t_install_method_test_dir_keeps_package(_Proj) ->
     ),
     ?assertEqual('bt@loaderpkg@test@install_spec', current_module_of('InstallSpec')).
 
+%% BT-4868: the loader asks the compiler port for a file's module name, so the
+%% shared module-naming corpus (also run against the Rust handler and the port
+%% by `beamtalk_compiler_tests`) must come out identically here. The loader only
+%% decides which root a file is under; `src` / `test` cases are placed under the
+%% project's `src/` / `test/`, `none` cases are used as the corpus's own
+%% out-of-tree path.
+t_module_naming_matches_shared_corpus(Proj) ->
+    Corpus = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_compiler",
+        "test",
+        "fixtures",
+        "module_naming_corpus.json"
+    ]),
+    ?assert(length(Corpus) >= 10),
+    lists:foreach(
+        fun(#{<<"path">> := Rel, <<"root">> := Root} = Case) ->
+            Path =
+                case Root of
+                    <<"src">> -> filename:join([Proj, "src", binary_to_list(Rel)]);
+                    <<"test">> -> filename:join([Proj, "test", binary_to_list(Rel)]);
+                    <<"none">> -> binary_to_list(Rel)
+                end,
+            Result = beamtalk_repl_loader:compute_package_module_name(Path),
+            case Case of
+                #{<<"module">> := Module0} ->
+                    %% The corpus spells the package `web`; this project's is `loaderpkg`.
+                    Module = binary:replace(Module0, <<"@web@">>, <<"@loaderpkg@">>),
+                    ?assertEqual({ok, Module}, Result);
+                #{<<"error">> := _} ->
+                    ?assertMatch({error, {compile_error, _}}, Result)
+            end
+        end,
+        Corpus
+    ).
+
+%% BT-4868: `my-class.bt` used to load (the loader passed `-` through);
+%% `beamtalk build` rejects it, so the REPL now does too.
+t_invalid_path_segment_is_load_error(Proj) ->
+    ok = filelib:ensure_path(filename:join(Proj, "src")),
+    Path = filename:join([Proj, "src", "my-class.bt"]),
+    ok = file:write_file(Path, <<"Object subclass: Bt4868Hyphen\n  value => 1\n">>),
+    try
+        ?assertMatch({error, {compile_error, _}}, beamtalk_repl_loader:reload_class_file(Path)),
+        State = beamtalk_repl_state:new(undefined, 0),
+        ?assertMatch({error, {compile_error, _}, _}, beamtalk_repl_loader:handle_load(Path, State))
+    after
+        _ = file:delete(Path)
+    end.
+
 loader_integration_test_() ->
     {setup, fun loader_setup/0, fun loader_teardown/1, fun(Proj) ->
         [
@@ -1181,6 +1164,12 @@ loader_integration_test_() ->
             %% under an explicit timeout so the untouched tests below stay
             %% on EUnit's 5 s default even under CPU saturation.
             {"warm up the compiler (BT-4472)", {timeout, 30, fun() -> t_warm_up_compiler() end}},
+            {"module naming matches the shared corpus (BT-4868)", fun() ->
+                t_module_naming_matches_shared_corpus(Proj)
+            end},
+            {"an invalid path segment is a load error (BT-4868)", fun() ->
+                t_invalid_path_segment_is_load_error(Proj)
+            end},
             {"handle_load/2 success", fun() -> t_handle_load_success(Proj) end},
             {"handle_load/3 prebuilt indexes success", fun() ->
                 t_handle_load_prebuilt_success(Proj)
