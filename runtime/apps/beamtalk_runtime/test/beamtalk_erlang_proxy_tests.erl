@@ -1312,7 +1312,7 @@ direct_call_wrong_arity_error_unchanged_test() ->
             ?assertEqual(
                 #{
                     module => lists,
-                    function => reverse,
+                    function => {beamtalk_string, <<"reverse">>},
                     expected_arities => [1, 2],
                     actual_arity => 3
                 },

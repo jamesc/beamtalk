@@ -647,7 +647,7 @@ beam_file_to_module(File) ->
 -doc "Returns true if ModName is a user-defined class module.".
 -spec is_user_class_module(string()) -> boolean().
 is_user_class_module(ModName) ->
-    beamtalk_module_name:is_user_class_module(unicode:characters_to_binary(ModName)).
+    beamtalk_module_name:is_user_class_module(ModName).
 
 -doc "Module-atom wrapper around `is_user_class_module/1`, for `lists:filter/2`.".
 -spec is_release_class_module(module()) -> boolean().

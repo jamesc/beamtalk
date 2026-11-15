@@ -786,19 +786,24 @@ validate_and_apply(Module, FunName, Args, OrigSelector) ->
     apply_with_coercion(Module, FunName, Args, OrigSelector, none, coercion_mode(Module)).
 
 -doc """
+The `function` detail of an `ErlangModule` error: the function name as a
+`String` (BT-4229), from an atom or the UTF-8 binary the caller typed.
+""".
+-spec function_detail(atom() | binary()) -> beamtalk_string:t().
+function_detail(Name) when is_atom(Name) ->
+    function_detail(atom_to_binary(Name, utf8));
+function_detail(Name) when is_binary(Name) ->
+    beamtalk_primitive:string_from_binary(Name).
+
+-doc """
 Raise `does_not_understand` for an Erlang function that does not exist.
 
 `FunName` is the name as an atom or as the UTF-8 binary typed by the caller.
-The `function` detail is always a `String` (BT-4229): the name is text, and
-both the not-in-atom-table and the not-exported paths report it identically.
+The `function` detail is always a `String` (see `function_detail/1`), on every
+`ErlangModule` error that names a function.
 """.
 -spec raise_no_such_function(atom(), atom() | binary(), non_neg_integer(), atom()) -> no_return().
 raise_no_such_function(Module, FunName, Arity, Selector) ->
-    NameBin =
-        case is_atom(FunName) of
-            true -> atom_to_binary(FunName, utf8);
-            false -> FunName
-        end,
     Error1 = beamtalk_error:new(does_not_understand, 'ErlangModule', Selector),
     Error2 = beamtalk_error:with_hint(
         Error1,
@@ -807,7 +812,7 @@ raise_no_such_function(Module, FunName, Arity, Selector) ->
     beamtalk_error:raise(
         beamtalk_error:with_details(Error2, #{
             module => Module,
-            function => beamtalk_primitive:string_from_binary(NameBin),
+            function => function_detail(FunName),
             arity => Arity
         })
     ).
@@ -844,7 +849,7 @@ raise_function_or_arity_error(Module, FunName, Arity, OrigSelector, Exports) ->
             beamtalk_error:raise(
                 beamtalk_error:with_details(Error2, #{
                     module => Module,
-                    function => FunName,
+                    function => function_detail(FunName),
                     expected_arities => lists:sort(MatchingArities),
                     actual_arity => Arity
                 })
@@ -990,7 +995,7 @@ raise_missing_target(Module, FunName, Arity, _OrigSelector, {Class, Selector}, _
     beamtalk_error:raise(
         beamtalk_error:with_details(Error2, #{
             module => Module,
-            function => FunName,
+            function => function_detail(FunName),
             arity => Arity,
             erlang_error => undef
         })

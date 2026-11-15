@@ -207,7 +207,8 @@ is_class_module_test() ->
     ?assertNot(beamtalk_module_name:is_class_module(lists)),
     ?assertNot(beamtalk_module_name:is_class_module(beamtalk_actor)),
     ?assertNot(beamtalk_module_name:is_class_module(<<"lists">>)),
-    ?assertNot(beamtalk_module_name:is_class_module("bt@x")),
+    ?assert(beamtalk_module_name:is_class_module("bt@x")),
+    ?assertNot(beamtalk_module_name:is_class_module("lists")),
     ?assertNot(beamtalk_module_name:is_class_module(42)).
 
 is_user_class_module_test() ->
@@ -219,5 +220,7 @@ is_user_class_module_test() ->
 is_user_class_module_binary_test() ->
     ?assert(beamtalk_module_name:is_user_class_module(<<"bt@pkg@list">>)),
     ?assertNot(beamtalk_module_name:is_user_class_module(<<"bt@stdlib@list">>)),
+    ?assert(beamtalk_module_name:is_user_class_module("bt@pkg@list")),
+    ?assertNot(beamtalk_module_name:is_user_class_module("bt@stdlib@list")),
     ?assertNot(beamtalk_module_name:is_user_class_module(<<"lists">>)),
     ?assertNot(beamtalk_module_name:is_user_class_module(7)).
