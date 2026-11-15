@@ -62,7 +62,7 @@ colon stripped. The colon-free functions (`'after'/2`, `every/2`, `sleep/1`,
 `(Erlang beamtalk_timer) after: ms do: block` calls `'after'/2` directly.
 """.
 
-%% Class methods (canonical colon forms — used by EUnit tests)
+%% Class methods
 -export(['after'/2, every/2, sleep/1]).
 -export(['sendAfter'/3, 'sendEvery'/3]).
 

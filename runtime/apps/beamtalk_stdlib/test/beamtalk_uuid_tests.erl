@@ -272,7 +272,7 @@ comparison_type_error_for_non_uuid_test() ->
     ).
 
 %%% ============================================================================
-%%% FFI shims — delegate to canonical colon-suffixed functions
+%%% FFI entry points — fromString/1, isValid/1
 %%% ============================================================================
 
 from_string_shim_returns_ok_result_test() ->

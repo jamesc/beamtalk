@@ -894,7 +894,7 @@ The catch boundary stays in the runtime; codegen only chooses the arity.
 same calls `'tryDo:'/1` makes, so the Tier 1 and Tier 2 paths share one
 implementation of the boundary rather than a copy across the Rust/Erlang
 line (CLAUDE.md § No duplicate implementations). Codegen, when the argument
-is a Tier 2 block literal, emits `call 'beamtalk_result':'tryDo:'(Block,
+is a Tier 2 block literal, emits `call 'beamtalk_result':'tryDo'(Block,
 StateAcc)` and treats the result as a `StateAcc`-carrying construct tuple:
 it is a §1 producer exactly like a `StateAcc`-mode loop, with no new
 `OnDoCatch` clause shape. `'tryDo:'/1` is unchanged for Tier 1 blocks and

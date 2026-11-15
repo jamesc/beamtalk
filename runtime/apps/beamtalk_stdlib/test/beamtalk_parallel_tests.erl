@@ -330,7 +330,7 @@ any_non_block_element_raises_type_error_test() ->
     ?assertBtError(type_error, beamtalk_parallel:any([fun() -> ok end, 99])).
 
 %%% ============================================================================
-%%% FFI shims — all/1, all/2, any/1 delegate to canonical colon forms
+%%% FFI entry points — all/1, all/2, any/1
 %%% ============================================================================
 
 ffi_all_shim_test() ->

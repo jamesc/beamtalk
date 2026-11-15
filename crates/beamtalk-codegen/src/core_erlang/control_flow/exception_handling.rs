@@ -842,17 +842,11 @@ impl CoreErlangGenerator {
     /// producers. `body` is the fun's `{Value, StateAcc1}` arm; `entry` the
     /// `StateAcc` variable it starts from.
     fn try_do_tier2_call(body: Document<'static>, entry: String) -> Document<'static> {
-        docvec![
-            "call ",
-            leaf::atom("beamtalk_result"),
-            ":",
-            leaf::atom("tryDo"),
-            "(fun (StateAcc) -> ",
-            body,
-            ", ",
-            leaf::var(entry),
-            ")",
-        ]
+        beamtalk_cerl_doc::form::call(
+            "beamtalk_result",
+            "tryDo",
+            [docvec!["fun (StateAcc) -> ", body], leaf::var(entry)],
+        )
     }
 
     /// [`Self::try_do_tier2_tuple_doc`] at the REPL root, whose locals live in

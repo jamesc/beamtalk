@@ -359,19 +359,17 @@ from_tuple_invalid_raises_type_error_test() ->
     end.
 
 %%% ============================================================================
-%%% FFI shims — delegate to canonical colon-suffixed functions
+%%% FFI entry points — ok/1, fromTuple/1, tryDo/1, unwrapError/1
 %%% ============================================================================
 
-ok_shim_returns_ok_result_test() ->
-    %% ok/1 is the FFI shim for 'ok:'(Value)
+ok_returns_ok_result_test() ->
     Result = beamtalk_result:ok(99),
     ?assertMatch(
         #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := 99, 'errReason' := nil},
         Result
     ).
 
-from_tuple_shim_delegates_to_from_tuple_test() ->
-    %% fromTuple/1 is the FFI shim for 'fromTuple:'(Tuple)
+from_tuple_ok_tuple_test() ->
     Result = beamtalk_result:fromTuple({ok, 7}),
     ?assertMatch(
         #{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := 7, 'errReason' := nil},

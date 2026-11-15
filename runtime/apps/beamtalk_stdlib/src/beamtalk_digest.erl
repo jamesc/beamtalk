@@ -24,7 +24,7 @@ digest — callers convert to hex/base64 via `beamtalk_binary`.
 | `hmacSha512:key:`     | HMAC-SHA512 MAC (64 bytes)                   |
 """.
 
-%% Class methods — quoted colon-suffixed names are the real implementations.
+%% Class methods
 -export([sha256/1, sha512/1, md5/1, hmacSha256/2, hmacSha512/2]).
 
 %%% ============================================================================
