@@ -459,3 +459,94 @@ fn result_and_then_block_return_type_arg_with_unresolved_method_local_param_no_w
     );
     assert_no_expects_diagnostic(&diags);
 }
+
+// BT-4862: the variance check used to stop at `Match`, collection literals,
+// string interpolation and cascade messages (a `_ => {}` arm), so a bad
+// generic argument nested there was never reported. It now runs over
+// `walk_sends`, which reaches every send.
+
+#[test]
+fn bt4862_variance_checked_inside_match_arm() {
+    let source = r#"Object subclass: Probe
+  check: n :: Integer -> Nil =>
+    l :: List(Integer) := #()
+    r := n match: [
+      1 -> (l ++ #("a", "b"));
+      _ -> l
+    ]
+    _u := r
+    nil
+"#;
+    let diags = run_with_protocols(source);
+    assert_one_expects_diagnostic(&diags, "List(Integer)", "List(String)");
+}
+
+#[test]
+fn bt4862_variance_checked_inside_list_literal() {
+    let source = r#"Object subclass: Probe
+  check -> Nil =>
+    l :: List(Integer) := #()
+    r := #((l ++ #("a", "b")))
+    _u := r
+    nil
+"#;
+    let diags = run_with_protocols(source);
+    assert_one_expects_diagnostic(&diags, "List(Integer)", "List(String)");
+}
+
+#[test]
+fn bt4862_variance_checked_inside_string_interpolation() {
+    let source = r#"Object subclass: Probe
+  check -> Nil =>
+    l :: List(Integer) := #()
+    s := "result: {l ++ #("a", "b")}"
+    _u := s
+    nil
+"#;
+    let diags = run_with_protocols(source);
+    assert_one_expects_diagnostic(&diags, "List(Integer)", "List(String)");
+}
+
+#[test]
+fn bt4862_variance_checked_on_later_cascade_message() {
+    let source = r#"Object subclass: Probe
+  check -> Nil =>
+    l :: List(Integer) := #()
+    r := l size; ++ #("a", "b")
+    _u := r
+    nil
+"#;
+    let diags = run_with_protocols(source);
+    assert_one_expects_diagnostic(&diags, "List(Integer)", "List(String)");
+}
+
+#[test]
+fn bt4862_compatible_nested_sends_no_warning() {
+    let source = r#"Object subclass: Probe
+  check -> Nil =>
+    l :: List(Integer) := #()
+    r := #((l ++ #(1, 2)))
+    s := "result: {l ++ #(3)}"
+    _u := r
+    _v := s
+    nil
+"#;
+    let diags = run_with_protocols(source);
+    assert_no_expects_diagnostic(&diags);
+}
+
+#[test]
+fn bt4862_variance_checked_inside_match_guard() {
+    let source = r#"Object subclass: Probe
+  check: n :: Integer -> Nil =>
+    l :: List(Integer) := #()
+    r := n match: [
+      x when: [(l ++ #("a", "b")) isEmpty] -> x;
+      _ -> nil
+    ]
+    _u := r
+    nil
+"#;
+    let diags = run_with_protocols(source);
+    assert_one_expects_diagnostic(&diags, "List(Integer)", "List(String)");
+}
