@@ -8,6 +8,7 @@
 //! Generates method dispatch case clauses, method body with state threading
 //! and reply tuples for actor (`gen_server`) methods.
 
+use super::super::control_flow::LocalWrite;
 use super::super::method_frame::{MethodBoundary, MethodFrame};
 use super::super::sequencing::PrecompiledScope;
 use super::super::statement_kinds::{StmtCx, StmtTail};
@@ -829,9 +830,12 @@ impl CoreErlangGenerator {
                     self.lower_reply_local_assign_tier2_block(cx, &mut stmts)
                 }
                 BodyExprKind::LocalAssignPure => self.lower_reply_local_assign_pure(cx, &mut stmts),
-                BodyExprKind::DestructureAssignment => {
-                    self.lower_reply_destructure_assignment(cx, &mut stmts)
-                }
+                BodyExprKind::DestructureAssignment => self.lower_stmt_destructure_assignment(
+                    cx,
+                    LocalWrite::Plain,
+                    &mut StmtTail::Reply,
+                    &mut stmts,
+                ),
                 BodyExprKind::SuperSend => self.lower_reply_super_send(cx, &mut stmts),
                 BodyExprKind::ErrorSend => self.lower_reply_error_send(cx, &mut stmts),
                 BodyExprKind::Tier2ValueCall => self.lower_reply_tier2_value_call(cx, &mut stmts),
@@ -1845,45 +1849,6 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    fn lower_reply_destructure_assignment(
-        &mut self,
-        cx: StmtCx<'_>,
-        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
-    ) -> Result<()> {
-        use threaded_ir::ThreadedStmt;
-        let StmtCx {
-            expr,
-            span,
-            is_last,
-            ..
-        } = cx;
-        let mut rhs_value = None;
-        if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-            // ADR 0118 phase 1b: `{a, b} := #(1, self bump)` —
-            // the RHS's state-effecting sub-expressions land in
-            // this body's IR as real `Bind`s before
-            // `generate_destructure_bindings`'s own
-            // `eval_rhs_to_temp_var` call (`expressions.rs`)
-            // compiles `value` via `expression_doc`, which
-            // substitutes the already-sequenced value.
-            let (binding_docs, rhs_var) = self.generate_destructure_bindings_sequenced(
-                pattern,
-                value,
-                threaded_ir::FrameId::ROOT,
-                stmts,
-            )?;
-            for d in binding_docs {
-                stmts.push(ThreadedStmt::Statement(d, span));
-            }
-            rhs_value = Some(rhs_var);
-        }
-        if is_last {
-            let reply = self.destructure_reply_doc(rhs_value)?;
-            stmts.push(ThreadedStmt::Statement(reply, span));
-        }
-        Ok(())
-    }
-
     fn lower_reply_super_send(
         &mut self,
         cx: StmtCx<'_>,
@@ -2188,7 +2153,10 @@ impl CoreErlangGenerator {
     /// Emit the `{'reply', Rhs, State}` close for a destructuring assignment
     /// `{a, b} := expr` in last position: it evaluates to its right-hand side,
     /// `rhs_value` the variable bound to it (BT-3889).
-    fn destructure_reply_doc(&mut self, rhs_value: Option<String>) -> Result<Document<'static>> {
+    pub(in crate::core_erlang) fn destructure_reply_doc(
+        &mut self,
+        rhs_value: Option<String>,
+    ) -> Result<Document<'static>> {
         let rhs = rhs_value.ok_or_else(|| {
             CodeGenError::Internal(
                 "destructure_reply_doc: a destructuring arm bound no right-hand side".to_string(),

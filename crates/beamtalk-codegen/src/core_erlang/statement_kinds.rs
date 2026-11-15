@@ -14,6 +14,7 @@
 //! differently, and why, are listed in the comments on the walkers' `match`
 //! arms.
 
+use super::control_flow::LocalWrite;
 use super::threaded_ir::{ThreadedStmt, ValueRef};
 use super::{CoreErlangGenerator, Result};
 use crate::core_erlang::threaded_ir::FrameId;
@@ -107,6 +108,74 @@ impl CoreErlangGenerator {
         stmts.extend(tv.prelude);
         if cx.is_last {
             self.deliver_last_value(tail, &tv.value, "SDResultVal", cx.span, stmts);
+        }
+        Ok(())
+    }
+
+    /// Deliver the variable `var`, bound by the statement itself (a local
+    /// assignment's or destructuring's right-hand side), as the last value of
+    /// the body: `{'reply', Var, State}` for a method, the arm's result for an
+    /// arm.
+    fn deliver_last_var(
+        &mut self,
+        tail: &mut StmtTail<'_>,
+        var: String,
+        span: Span,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        match tail {
+            StmtTail::Reply => {
+                let reply = self.destructure_reply_doc(Some(var))?;
+                stmts.push(ThreadedStmt::Statement(reply, span));
+            }
+            StmtTail::Arm { last_result } => **last_result = Some(ValueRef::Var(var)),
+        }
+        Ok(())
+    }
+
+    /// `BodyExprKind::DestructureAssignment`: `{a, b} := expr`.
+    ///
+    /// `local_write` is how the body writes the names it binds: the method
+    /// root binds them with the extraction's `let`s alone
+    /// ([`LocalWrite::Plain`]); an arm also writes each to its frame's slot
+    /// ([`LocalWrite::Slot`], BT-4439). A destructuring whose right-hand side
+    /// is itself a field write (`{a, b} := (self.x := ...)`, BT-3495) lowers
+    /// the write as its own real `Bind`, then destructures the assigned value.
+    pub(super) fn lower_stmt_destructure_assignment(
+        &mut self,
+        cx: StmtCx<'_>,
+        local_write: LocalWrite,
+        tail: &mut StmtTail<'_>,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            frame,
+        } = cx;
+        let Expression::DestructureAssignment { pattern, value, .. } = expr else {
+            return Ok(());
+        };
+        let write_of = |_: &str| local_write;
+        let rhs_var = if let Some(field_write) = self.local_assign_field_write(value) {
+            let field_val_var =
+                self.lower_field_assignment_bind(field_write, frame, span, stmts)?;
+            let _ = self.lower_destructure_bind_from_var(
+                pattern,
+                &field_val_var,
+                frame,
+                span,
+                stmts,
+                &write_of,
+            )?;
+            field_val_var
+        } else {
+            self.lower_destructure_bind(pattern, value, frame, span, stmts, &write_of)?
+                .0
+        };
+        if is_last {
+            self.deliver_last_var(tail, rhs_var, span, stmts)?;
         }
         Ok(())
     }

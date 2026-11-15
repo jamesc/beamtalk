@@ -2972,7 +2972,14 @@ impl CoreErlangGenerator {
                 // C5 — exempt from Bind modeling: no state version is
                 // produced or consumed, every binding is a plain local.
                 BodyExprKind::DestructureAssignment => {
-                    self.lower_arm_destructure_assignment(cx, &mut last_result, &mut stmts)?;
+                    self.lower_stmt_destructure_assignment(
+                        cx,
+                        LocalWrite::Slot,
+                        &mut StmtTail::Arm {
+                            last_result: &mut last_result,
+                        },
+                        &mut stmts,
+                    )?;
                 }
                 // C6 — self.field := <control-flow-with-mutations>.
                 // The sanctioned Gensym two-hop.
@@ -3893,60 +3900,6 @@ impl CoreErlangGenerator {
             stmts.extend(self.construct_locals_in_place(value, span));
             if is_last {
                 *last_result = Some(ValueRef::Var(val_var));
-            }
-        }
-        Ok(())
-    }
-
-    fn lower_arm_destructure_assignment(
-        &mut self,
-        cx: StmtCx<'_>,
-        last_result: &mut Option<ValueRef>,
-        stmts: &mut Vec<ThreadedStmt>,
-    ) -> Result<()> {
-        let StmtCx {
-            expr,
-            span,
-            is_last,
-            frame,
-            ..
-        } = cx;
-        if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-            // BT-3495: `{a, b} := (self.field := ...)` — the
-            // RHS is itself a field write, at any
-            // parenthesization depth (mirrors C2z's `r := (self.x
-            // := ...)` fix in `lower_local_var_assignment_bind`,
-            // for `{a, b} :=` instead of a plain local
-            // assignment). Lower the field write through its own
-            // real-`Bind` producer C1 uses, then destructure the
-            // pattern from the already-evaluated assigned value
-            // (`lower_destructure_bind_from_var`, which writes
-            // each name to the arm's slot, BT-4439).
-            if let Some(field_write) = self.local_assign_field_write(value) {
-                let field_val_var =
-                    self.lower_field_assignment_bind(field_write, frame, span, stmts)?;
-                let _ = self.lower_destructure_bind_from_var(
-                    pattern,
-                    &field_val_var,
-                    frame,
-                    span,
-                    stmts,
-                    &|_| LocalWrite::Slot,
-                )?;
-                if is_last {
-                    // BT-3889: the arm answers the right-hand side.
-                    *last_result = Some(ValueRef::Var(field_val_var));
-                }
-            } else {
-                // BT-4439: each name is written to the arm's
-                // slot, as C2 writes `name := ...`.
-                let (rhs_var, _) =
-                    self.lower_destructure_bind(pattern, value, frame, span, stmts, &|_| {
-                        LocalWrite::Slot
-                    })?;
-                if is_last {
-                    *last_result = Some(ValueRef::Var(rhs_var));
-                }
             }
         }
         Ok(())
