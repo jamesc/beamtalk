@@ -1070,7 +1070,9 @@ impl CoreErlangGenerator {
         if !beamtalk_core::ast::is_error_signal_instance_receiver(receiver) {
             return ErrorSignalReceiver::Unknown;
         }
-        if !super::super::expr_shape::is_self_identifier(receiver) {
+        // Same paren-transparent test as the shared rule above, so the two
+        // halves cannot disagree on `(self)`.
+        if !receiver.is_self() {
             // A literal: never a class object.
             return ErrorSignalReceiver::Instance;
         }

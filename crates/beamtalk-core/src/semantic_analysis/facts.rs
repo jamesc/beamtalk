@@ -14,7 +14,7 @@ use crate::ast::{
     MessageSelector, MethodKind, Module, StringSegment,
 };
 use crate::semantic_analysis::block_facts::{BlockMutationAnalysis, analyze_block};
-use crate::source_analysis::Span;
+use crate::source_analysis::{MethodSide, Span};
 use std::collections::{HashMap, HashSet};
 
 /// Re-export `BlockMutationAnalysis` as `BlockProfile` for use in this module.
@@ -445,31 +445,10 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
         facts.class_facts.insert(class.name.name.to_string(), cf);
     }
 
-    // Process class methods
-    for class in &module.classes {
-        let tagged_methods = class
-            .methods
-            .iter()
-            .map(|m| (m, false))
-            .chain(class.class_methods.iter().map(|m| (m, true)));
-        for (method, in_class_method) in tagged_methods {
-            // Detect block NLR: ^ inside a block requires the NLR throw/catch mechanism.
-            if body_has_block_nlr(&method.body) {
-                facts.methods_with_block_nlr.insert(method.span);
-            }
-
-            for stmt in &method.body {
-                collect_expression_facts(&stmt.expression, &mut facts);
-                compute_state_effects(&stmt.expression, in_class_method, &mut facts.state_effects);
-            }
-        }
-    }
-
-    // Process standalone method definitions
-    for standalone in &module.method_definitions {
-        let method = &standalone.method;
-
-        // Detect block NLR for standalone methods.
+    // Process every method: inline instance, inline class-side, then standalone
+    // (Tonel-style) definitions.
+    for (_, side, method) in module.methods_with_owner() {
+        // Detect block NLR: ^ inside a block requires the NLR throw/catch mechanism.
         if body_has_block_nlr(&method.body) {
             facts.methods_with_block_nlr.insert(method.span);
         }
@@ -478,7 +457,7 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
             collect_expression_facts(&stmt.expression, &mut facts);
             compute_state_effects(
                 &stmt.expression,
-                standalone.is_class_method,
+                side == MethodSide::Class,
                 &mut facts.state_effects,
             );
         }

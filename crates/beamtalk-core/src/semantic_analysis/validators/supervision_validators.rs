@@ -27,22 +27,14 @@ pub(crate) fn check_supervision_policy_override(
     module: &Module,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Collect all class-side supervisionPolicy method bodies to validate.
-    // Includes both inline (class.class_methods) and standalone method definitions.
-    let mut methods_to_check: Vec<&MethodDefinition> = Vec::new();
-
-    for class in &module.classes {
-        for method in &class.class_methods {
-            if method.selector.name() == "supervisionPolicy" {
-                methods_to_check.push(method);
-            }
-        }
-    }
-    for standalone in &module.method_definitions {
-        if standalone.is_class_method && standalone.method.selector.name() == "supervisionPolicy" {
-            methods_to_check.push(&standalone.method);
-        }
-    }
+    // Class-side `supervisionPolicy` bodies to validate: inline
+    // (`class.class_methods`) and standalone (`MyActor class >> ...`).
+    let methods_to_check = module
+        .methods_with_owner()
+        .filter(|(_, side, method)| {
+            *side == MethodSide::Class && method.selector.name() == "supervisionPolicy"
+        })
+        .map(|(_, _, method)| method);
 
     for method in methods_to_check {
         if method.body.len() != 1 {

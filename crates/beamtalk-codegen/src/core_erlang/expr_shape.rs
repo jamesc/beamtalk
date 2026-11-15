@@ -338,6 +338,12 @@ pub(super) fn is_own_class_reference(ctx: &ShapeCtx<'_>, expr: &Expression) -> b
 }
 
 /// Whether `expr` is the bare `self` identifier.
+///
+/// Deliberately *not* paren-transparent (unlike `Expression::is_self`): codegen
+/// compiles the canonical tree, where `ast::normalize` has already stripped
+/// parentheses around send operands, so these callers never see `(self)` as an
+/// operand. The one place that must agree with the shared front-end rule on
+/// `(self)` itself, `error_signal_receiver_kind`, calls `is_self()` directly.
 pub(super) fn is_self_identifier(expr: &Expression) -> bool {
     matches!(expr, Expression::Identifier(id) if id.name == "self")
 }
