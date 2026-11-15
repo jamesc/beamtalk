@@ -38,7 +38,7 @@ init(Capabilities) ->
     %% this callback (BT-4792); installed with the capabilities and, when the
     %% guard stops, put back as it was (`beamtalk test` registers one before
     %% any workspace runs).
-    ok = beamtalk_workspace_callback:install(beamtalk_repl_eval),
+    ok = beamtalk_workspace_callback:install(beamtalk_workspace_callback_impl),
     {ok, Capabilities}.
 
 handle_call(_Request, _From, State) ->

@@ -164,7 +164,7 @@ protocol_atoms_from_info(#{protocols := ProtocolNameBins}) ->
     lists:filtermap(
         fun(NameBin) ->
             beamtalk_repl_loader:safe_atom_result(
-                beamtalk_repl_server:safe_to_existing_atom(NameBin)
+                beamtalk_repl_errors:safe_to_existing_atom(NameBin)
             )
         end,
         ProtocolNameBins
@@ -257,7 +257,7 @@ compile_fanout_user(ClassAtom, ProtocolSources, BatchOpts) ->
     %% Present by construction: `discover_fanout_targets/1` only lists a
     %% class here after confirming `get_class_source/1` returns a value.
     Source = beamtalk_workspace_meta:get_class_source(ClassNameBin),
-    SourceFileBin = beamtalk_repl_loader:class_source_file(ClassNameBin),
+    SourceFileBin = beamtalk_repl_loader_changelog_entries:class_source_file(ClassNameBin),
     Path =
         case SourceFileBin of
             nil -> "";
@@ -572,7 +572,7 @@ arbitrary user-typed name never mints an atom.
 """.
 -spec is_protocol_name(binary()) -> boolean().
 is_protocol_name(NameBin) when is_binary(NameBin) ->
-    case beamtalk_repl_server:safe_to_existing_atom(NameBin) of
+    case beamtalk_repl_errors:safe_to_existing_atom(NameBin) of
         {ok, Name} -> beamtalk_protocol_registry:is_protocol(Name);
         {error, _} -> false
     end.
@@ -703,7 +703,7 @@ remove_protocol_provision(ProtocolBin, SelectorBin, instance) ->
     {ok, string(), string()} | {error, term()}.
 protocol_edit_target(ProtocolBin, SelectorBin, Verb) ->
     Path =
-        case beamtalk_repl_loader:class_source_file(ProtocolBin) of
+        case beamtalk_repl_loader_changelog_entries:class_source_file(ProtocolBin) of
             nil -> "";
             FileBin -> binary_to_list(FileBin)
         end,
@@ -751,7 +751,7 @@ patched_protocol_source(Source, ProtocolBin, SelectorBin, MethodSource) ->
                         Added = beamtalk_workspace_reshape:ensure_trailing_newline(Reindented),
                         <<Trimmed/binary, "\n\n", Added/binary>>;
                     _ ->
-                        beamtalk_repl_loader:splice_replace(
+                        beamtalk_workspace_span:splice(
                             SourceBin, Span, ?ENTRIES:match_trailing_newline(Reindented, PrevSource)
                         )
                 end,
@@ -836,7 +836,7 @@ apply_protocol_edit(ProtocolBin, Path, NewSource, Captures, SelectorBin) ->
 )) ->
     [{binary(), beamtalk_repl_loader_recheck:capture_outcome()}].
 protocol_user_captures(ProtocolBin, CaptureFun) ->
-    case beamtalk_repl_server:safe_to_existing_atom(ProtocolBin) of
+    case beamtalk_repl_errors:safe_to_existing_atom(ProtocolBin) of
         {ok, Protocol} ->
             {Targets, _Skipped} = discover_fanout_targets([Protocol]),
             [

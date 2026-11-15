@@ -304,7 +304,7 @@ rename_class_move_commit_refreshes_stale_source_attribute(#{proj_dir := ProjDir}
     ok = compile_project_class(OldPath, OldSource),
     %% Precondition: the freshly-compiled class's attribute matches reality —
     %% the bug only manifests once the file has moved out from under it.
-    PreSourceFile = beamtalk_repl_loader:class_source_file(<<"Foo">>),
+    PreSourceFile = beamtalk_repl_loader_changelog_entries:class_source_file(<<"Foo">>),
     {DeclStart, DeclEnd, _} = locate(OldSource, <<"Foo">>),
     DeclSite = rename_site(list_to_binary(OldPath), DeclStart, DeclEnd, <<"Bar">>, <<"Foo">>),
     {ok, _Seq} = beamtalk_workspace_changelog:append(
@@ -313,7 +313,7 @@ rename_class_move_commit_refreshes_stale_source_attribute(#{proj_dir := ProjDir}
         )
     ),
     {ok, Summary} = beamtalk_workspace_flush:flush_including_destructive(),
-    PostSourceFile = beamtalk_repl_loader:class_source_file(<<"Bar">>),
+    PostSourceFile = beamtalk_repl_loader_changelog_entries:class_source_file(<<"Bar">>),
     [
         ?_assertEqual(list_to_binary(OldPath), PreSourceFile),
         ?_assertEqual(1, maps:get(flushed, Summary)),
@@ -361,7 +361,7 @@ rename_class_sequential_rename_after_flush_succeeds(#{proj_dir := ProjDir}) ->
     %% of an opaque test-body exception, and either way `Summary2` fails the
     %% "flushed with no conflicts" assertions below.
     OldPath2 =
-        case beamtalk_repl_loader:class_source_file(<<"Bar">>) of
+        case beamtalk_repl_loader_changelog_entries:class_source_file(<<"Bar">>) of
             Bin when is_binary(Bin) -> Bin;
             _NotReloaded -> <<>>
         end,
@@ -1411,7 +1411,7 @@ flush_kinds_by_class_entry_kind(#{proj_dir := ProjDir}) ->
 %% This test constructs a synthetic flushable entry directly (bypassing the
 %% loader) so the flush layer's own `'class-def'` handling has focused
 %% coverage independent of `beamtalk_repl_loader`'s classification logic.
-%% `beamtalk_repl_loader:add_class_def_flushability/2` now also produces a
+%% `beamtalk_repl_loader_changelog_entries:add_class_def_flushability/2` now also produces a
 %% real `flushable: true` `'class-def'` entry end-to-end (once the
 %% `:def` tab's resubmitted skeleton became round-trip-safe — see that
 %% function's doc) — exercised through the loader in

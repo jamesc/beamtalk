@@ -456,7 +456,7 @@ Exactly one of two params selects the mode:
     indentation.
 
 Authorizes and resolves the write target server-side via
-`beamtalk_repl_loader:class_source_file/1` + `classify_source_file/1` — never
+`beamtalk_repl_loader_changelog_entries:class_source_file/1` + `classify_source_file/1` — never
 a client-supplied path — and rejects a class with no editable, in-project
 `.bt` file (deps/stdlib/file-less classes) the same way
 `native_module_editable_target/1` gates `save-native-source`. The write is
@@ -540,11 +540,15 @@ save_section(ClassBin0, NewName, OldName, BeforeSelector, BeforeSide0) when
                 {error, badarg} ->
                     {error, section_class_not_editable_error(ClassBin)};
                 {ok, ClassName} ->
-                    case beamtalk_repl_loader:class_source_file(ClassBin) of
+                    case beamtalk_repl_loader_changelog_entries:class_source_file(ClassBin) of
                         nil ->
                             {error, section_class_not_editable_error(ClassBin)};
                         SourceFile ->
-                            case beamtalk_repl_loader:classify_source_file(SourceFile) of
+                            case
+                                beamtalk_repl_loader_changelog_entries:classify_source_file(
+                                    SourceFile
+                                )
+                            of
                                 {not_flushable, _Reason} ->
                                     {error, section_class_not_editable_error(ClassBin)};
                                 {flushable, Path} ->

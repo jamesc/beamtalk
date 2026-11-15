@@ -437,7 +437,7 @@ validate_no_overlaps(Class, Sites, SourceSize) ->
 validate_spans(_Class, [], _Min, _Size) ->
     ok;
 validate_spans(Class, [#{start := Start, 'end' := End} = Span | Rest], Min, Size) ->
-    case Start =< End andalso End =< Size andalso Start >= Min of
+    case Start >= Min andalso beamtalk_workspace_span:valid_span(Start, End, Size) of
         true -> validate_spans(Class, Rest, End, Size);
         false -> {error, {invalid_or_overlapping_span, Class, Span}}
     end.
@@ -475,7 +475,7 @@ apply_site_splices(Source, Sites) ->
     ),
     lists:foldl(
         fun(#{span := Span, new_text := NewText}, Acc) ->
-            beamtalk_repl_loader:splice_replace(Acc, Span, NewText)
+            beamtalk_workspace_span:splice(Acc, Span, NewText)
         end,
         Source,
         RightmostFirst
@@ -673,15 +673,9 @@ installed_site(OriginalSource, #{
         class => Class,
         source_file => SourceFile,
         span => Span,
-        prev_source => slice(OriginalSource, Span),
+        prev_source => beamtalk_workspace_span:slice(OriginalSource, Span),
         source => NewText
     }.
-
--spec slice(binary(), rewrite_span()) -> binary().
-slice(Source, #{start := Start, 'end' := End}) ->
-    Len = End - Start,
-    <<_Before:Start/binary, Text:Len/binary, _After/binary>> = Source,
-    Text.
 
 %%% ----------------------------------------------------------------------------
 %%% Class move (ADR 0114 Phase 2)
@@ -748,7 +742,9 @@ resolution, or rewrite failure — the FFI boundary raises it.
 -spec move_class(atom(), binary()) -> ok | {error, #beamtalk_error{}}.
 move_class(ClassName, NewPathBin) when is_atom(ClassName), is_binary(NewPathBin) ->
     ClassNameBin = atom_to_binary(ClassName, utf8),
-    Classification = beamtalk_repl_loader:capture_class_removal_snapshot(ClassNameBin),
+    Classification = beamtalk_repl_loader_changelog_entries:capture_class_removal_snapshot(
+        ClassNameBin
+    ),
     case move_class_ensure_movable(ClassName, Classification) of
         {error, _} = Err ->
             Err;
@@ -805,7 +801,7 @@ move_class_validate_target(ClassName, OldPathBin, NewPathBin) ->
                     <<"moveClass:to: target is the class's current path; nothing to move">>
                 )};
         false ->
-            case beamtalk_repl_loader:classify_source_file(NewPathBin) of
+            case beamtalk_repl_loader_changelog_entries:classify_source_file(NewPathBin) of
                 {flushable, _AbsPath} ->
                     ok;
                 {not_flushable, _Reason} ->
@@ -1137,12 +1133,12 @@ finish_rename_class_revert(Entry) ->
         false ->
             case
                 {
-                    beamtalk_repl_server:safe_to_existing_atom(CurrentNameBin),
-                    beamtalk_repl_server:safe_to_existing_atom(OldNameBin)
+                    beamtalk_repl_errors:safe_to_existing_atom(CurrentNameBin),
+                    beamtalk_repl_errors:safe_to_existing_atom(OldNameBin)
                 }
             of
                 {{ok, CurrentName}, {ok, OldName}} ->
-                    Classification = beamtalk_repl_loader:capture_class_removal_snapshot(
+                    Classification = beamtalk_repl_loader_changelog_entries:capture_class_removal_snapshot(
                         CurrentNameBin
                     ),
                     try

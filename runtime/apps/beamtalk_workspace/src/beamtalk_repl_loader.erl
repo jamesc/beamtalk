@@ -22,20 +22,6 @@ Extracted from beamtalk_repl_eval.
     install_method/8,
     install_method/9,
     remove_method/3,
-    %% ADR 0112 Phase 3: best-effort ChangeLog append after a
-    %% successful `removeSelector:` call — see remove_method/3's doc for why
-    %% this is a separate call rather than folded into remove_method/3 itself.
-    emit_remove_change_entry/5,
-    emit_extension_remove_change_entry/7,
-    %% ADR 0114: ChangeLog append for a multi-site rewrite. The rewrite
-    %% mechanism itself lives in `beamtalk_repl_loader_rewrite` (BT-4702).
-    emit_rewrite_change_entry/2,
-    %% Best-effort snapshot + ChangeLog append for a successful
-    %% `removeFromSystem` (class removal) — see
-    %% capture_class_removal_snapshot/1's doc for why the snapshot is a
-    %% separate call taken before teardown, not folded into the append itself.
-    capture_class_removal_snapshot/1,
-    emit_remove_class_change_entry/4,
     activate_module/2,
     activate_module/3,
     activate_module/4,
@@ -53,14 +39,6 @@ Extracted from beamtalk_repl_eval.
     %% ADR 0123 §4 (BT-3538): the class-body-level sibling of
     %% precheck_method/4 — see its own doc for why the mechanism differs.
     precheck_class_shape/2,
-    %% The Cockpit section-authoring write path
-    %% (`beamtalk_repl_ops_load:save_section/5`) needs the same "which `.bt`
-    %% file backs this class, and is it inside the project (safe to write)"
-    %% resolution the ADR 0082 install hook already relies on — reused here
-    %% rather than re-derived, per the project's no-duplicate-implementations
-    %% rule.
-    class_source_file/1,
-    classify_source_file/1,
     %% Primitives that `beamtalk_repl_loader_rewrite` (BT-4702) calls into
     %% from outside this module. They stay here because the single-site
     %% install/remove paths use them too; they are exported only so the
@@ -71,7 +49,6 @@ Extracted from beamtalk_repl_eval.
     normalize_class_source_key/1,
     patch_module_target/1,
     source_path_or_empty/1,
-    splice_replace/3,
     with_ambient_protocol_sources/1,
     %% Primitives that `beamtalk_repl_loader_newclass` (BT-4702) calls into.
     %% Same reason as above: shared with the single-site paths, exported only
@@ -109,17 +86,9 @@ Extracted from beamtalk_repl_eval.
     maybe_add_loaded_module/2,
     store_file_class_sources/3,
     store_class_sources/4,
-    %% ADR 0082 Phase 1: pure helpers behind the install hook.
-    is_path_inside/2,
-    method_source_binary/1,
-    patch_side/1,
-    span_error_entry/3,
-    new_method_entry/3,
-    sibling_method_indent/1,
     %% ADR 0082 extension: class-redefinition ChangeLog entry helpers.
     snapshot_class_def_prev_sources/1,
-    emit_class_def_entries/3,
-    add_class_def_flushability/2
+    emit_class_def_entries/3
 ]).
 -endif.
 
@@ -1938,20 +1907,10 @@ reload_class_without_method(ClassNameBin, NewSourceBin) ->
     end.
 
 %% Cut the bytes `[start, end)' out of `Source', joining the surrounding text.
-%% A thin wrapper over `splice_replace/3` — removal is replacement
-%% with the empty binary.
+%% Removal is replacement with the empty binary (`beamtalk_workspace_span:splice/3`).
 -spec splice_out_span(binary(), beamtalk_repl_loader_rewrite:rewrite_span()) -> binary().
 splice_out_span(Source, Span) ->
-    splice_replace(Source, Span, <<>>).
-
-%% Replace the bytes `[start, end)' in `Source' with `NewText', joining the
-%% surrounding text. Shared leaf primitive (AGENTS.md's no-duplicate-
-%% implementations rule) behind both `splice_out_span/2` (removal — ADR 0112)
-%% and `beamtalk_repl_loader_rewrite:rewrite_sites/2`'s per-site splice (ADR 0114).
--spec splice_replace(binary(), beamtalk_repl_loader_rewrite:rewrite_span(), binary()) -> binary().
-splice_replace(Source, #{start := Start, 'end' := End}, NewText) ->
-    <<Before:Start/binary, _Old:(End - Start)/binary, After/binary>> = Source,
-    <<Before/binary, NewText/binary, After/binary>>.
+    beamtalk_workspace_span:splice(Source, Span, <<>>).
 
 %% Resolve a class's package-qualified module name + on-disk source path for a
 %% patch, by reusing the class's CURRENT loaded module (which already carries the
@@ -2145,89 +2104,15 @@ do_autoflush() ->
             ok
     end.
 
-%%% ----------------------------------------------------------------------------
-%%% ChangeLog entries — public entry points kept on this module
-%%% ----------------------------------------------------------------------------
-%%
-%% The implementations live in `beamtalk_repl_loader_changelog_entries`
-%% (BT-4683). These exports stay here because callers outside this module
-%% (`beamtalk_repl_eval`, `beamtalk_repl_ops_load`, `beamtalk_repl_ops_browse`,
-%% and `beamtalk_behaviour_intrinsics` via `erlang:apply/3`) address them on
-%% `beamtalk_repl_loader`.
-
--doc "See `beamtalk_repl_loader_changelog_entries:emit_remove_change_entry/5`.".
--spec emit_remove_change_entry(
-    binary(), atom() | binary(), instance | class, binary(), human | agent
-) -> ok.
-emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
-    ?ENTRIES:emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind).
-
--doc "See `beamtalk_repl_loader_changelog_entries:emit_extension_remove_change_entry/7`.".
--spec emit_extension_remove_change_entry(
-    binary(),
-    atom() | binary(),
-    instance | class,
-    atom() | undefined,
-    binary() | undefined,
-    binary(),
-    human | agent
-) -> ok.
-emit_extension_remove_change_entry(
-    ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
-) ->
-    ?ENTRIES:emit_extension_remove_change_entry(
-        ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
-    ).
-
--doc "See `beamtalk_repl_loader_changelog_entries:emit_rewrite_change_entry/2`.".
--spec emit_rewrite_change_entry(map(), beamtalk_repl_loader_rewrite:rewrite_result()) -> ok.
-emit_rewrite_change_entry(Spec, RewriteResult) ->
-    ?ENTRIES:emit_rewrite_change_entry(Spec, RewriteResult).
-
--doc "See `beamtalk_repl_loader_changelog_entries:capture_class_removal_snapshot/1`.".
--spec capture_class_removal_snapshot(binary()) -> map().
-capture_class_removal_snapshot(ClassNameBin) ->
-    ?ENTRIES:capture_class_removal_snapshot(ClassNameBin).
-
--doc "See `beamtalk_repl_loader_changelog_entries:emit_remove_class_change_entry/4`.".
--spec emit_remove_class_change_entry(binary(), map(), binary(), human | agent) -> ok.
-emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
-    ?ENTRIES:emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind).
-
--doc "See `beamtalk_repl_loader_changelog_entries:class_source_file/1`.".
--spec class_source_file(binary()) -> binary() | nil.
-class_source_file(ClassNameBin) ->
-    ?ENTRIES:class_source_file(ClassNameBin).
-
--doc "See `beamtalk_repl_loader_changelog_entries:classify_source_file/1`.".
--spec classify_source_file(binary()) -> {flushable, string()} | {not_flushable, binary()}.
-classify_source_file(SourceFile) ->
-    ?ENTRIES:classify_source_file(SourceFile).
-
--ifdef(TEST).
-%% Test-only entry points the loader's existing EUnit suites call on this
-%% module; the helpers themselves moved to
-%% `beamtalk_repl_loader_changelog_entries` / `beamtalk_workspace_file`.
-is_path_inside(Root, Path) -> beamtalk_workspace_file:path_inside(Root, Path).
-method_source_binary(MethodInfo) -> ?ENTRIES:method_source_binary(MethodInfo).
-patch_side(IsClassMethod) -> ?ENTRIES:patch_side(IsClassMethod).
-span_error_entry(Base, SourceFile, Reason) -> ?ENTRIES:span_error_entry(Base, SourceFile, Reason).
-new_method_entry(Base, SourceFile, DiskSource) ->
-    ?ENTRIES:new_method_entry(Base, SourceFile, DiskSource).
-sibling_method_indent(DiskSource) -> ?ENTRIES:sibling_method_indent(DiskSource).
-add_class_def_flushability(Base, ClassNameBin) ->
-    ?ENTRIES:add_class_def_flushability(Base, ClassNameBin).
--endif.
-
 %% Convert a list of class info maps to a list of existing atoms.
 -spec class_name_atoms([map()]) -> [atom()].
 class_name_atoms(Classes) ->
     lists:filtermap(
         fun
             (#{name := Name}) when is_list(Name) ->
-                safe_atom_result(beamtalk_repl_server:safe_to_existing_atom(list_to_binary(Name)));
+                safe_atom_result(beamtalk_repl_errors:safe_to_existing_atom(list_to_binary(Name)));
             (#{name := Name}) when is_binary(Name) ->
-                safe_atom_result(beamtalk_repl_server:safe_to_existing_atom(Name));
+                safe_atom_result(beamtalk_repl_errors:safe_to_existing_atom(Name));
             (_) ->
                 false
         end,

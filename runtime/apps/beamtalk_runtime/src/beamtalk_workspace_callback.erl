@@ -14,7 +14,7 @@ compile time, yet its refactoring and reload primitives (`removeSelector:`,
 the workspace's compile-and-install pipeline. This module is that seam:
 
 * **`-callback`s** declare the operations the workspace layer provides. The
-  workspace module that implements them (`beamtalk_repl_eval`) declares
+  workspace module that implements them (`beamtalk_workspace_callback_impl`) declares
   `-behaviour(beamtalk_workspace_callback)`, so the compiler checks its
   exports against this contract.
 * **Wrapper functions** (one per callback) are what runtime code calls. They

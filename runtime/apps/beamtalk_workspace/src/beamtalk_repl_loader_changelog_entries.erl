@@ -792,7 +792,7 @@ no_source_reason(ClassNameBin) ->
 %% registered. Returns `error' when the class is unknown / not loaded.
 -spec class_module(binary()) -> {ok, atom()} | error.
 class_module(ClassNameBin) ->
-    case beamtalk_repl_server:safe_to_existing_atom(ClassNameBin) of
+    case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
         {ok, ClassName} ->
             case beamtalk_class_registry:whereis_class(ClassName) of
                 Pid when is_pid(Pid) ->
@@ -1255,7 +1255,7 @@ emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
 %% no backing file (stdlib / dynamic / not loaded).
 -spec class_source_file(binary()) -> binary() | nil.
 class_source_file(ClassNameBin) ->
-    case beamtalk_repl_server:safe_to_existing_atom(ClassNameBin) of
+    case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
         {ok, ClassName} ->
             case beamtalk_class_registry:whereis_class(ClassName) of
                 Pid when is_pid(Pid) ->

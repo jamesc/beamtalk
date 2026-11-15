@@ -418,21 +418,21 @@ handle_call(clear_bindings, _From, {SessionId, State, Worker}) ->
     announce_bindings_cleared(SessionId, ClearedKeys),
     {reply, ok, {SessionId, NewState, Worker}};
 handle_call({load_file, Path}, _From, {SessionId, State, Worker}) ->
-    case beamtalk_repl_eval:handle_load(Path, State) of
+    case beamtalk_repl_loader:handle_load(Path, State) of
         {ok, LoadedModules, NewState} ->
             {reply, {ok, LoadedModules}, {SessionId, NewState, Worker}};
         {error, Reason, NewState} ->
             {reply, {error, Reason}, {SessionId, NewState, Worker}}
     end;
 handle_call({load_file, Path, PrebuiltIndexes}, _From, {SessionId, State, Worker}) ->
-    case beamtalk_repl_eval:handle_load(Path, State, PrebuiltIndexes) of
+    case beamtalk_repl_loader:handle_load(Path, State, PrebuiltIndexes) of
         {ok, LoadedModules, NewState} ->
             {reply, {ok, LoadedModules}, {SessionId, NewState, Worker}};
         {error, Reason, NewState} ->
             {reply, {error, Reason}, {SessionId, NewState, Worker}}
     end;
 handle_call({load_source, Source}, _From, {SessionId, State, Worker}) ->
-    case beamtalk_repl_eval:handle_load_source(Source, "<editor>", State) of
+    case beamtalk_repl_loader:handle_load_source(Source, "<editor>", State) of
         {ok, LoadedModules, NewState} ->
             {reply, {ok, LoadedModules}, {SessionId, NewState, Worker}};
         {error, Reason, NewState} ->

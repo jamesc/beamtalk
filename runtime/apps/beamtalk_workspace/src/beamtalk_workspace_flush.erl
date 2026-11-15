@@ -583,42 +583,32 @@ classify_kinds([Other | _], _EKs, _AKs, _Unknowns) ->
         )}.
 
 -spec classify_kind(atom()) -> entry | author | unknown.
-classify_kind(instance) -> entry;
-classify_kind(class) -> entry;
-classify_kind('new-class') -> entry;
-%% ADR 0082 extension: redefining an *existing* class's whole
-%% definition composes exactly like any other entry-kind filter.
-classify_kind('class-def') -> entry;
-%% ADR 0113 Phase 2: `flushKinds:` accepts both removal kinds too —
-%% `#'remove-method'` (Tier 1) composes exactly like any other entry-kind
-%% filter; `#'remove-class'` (Tier 2) still needs `confirmDestructive: true`
-%% (via `flush_kinds/2`) to actually apply, same as an unfiltered destructive
-%% flush — `flushKinds:` only narrows *which* entries are in scope, tiering
-%% decides whether an in-scope Tier 2 entry is applied or reported skipped.
-classify_kind('remove-method') -> entry;
-classify_kind('remove-class') -> entry;
-%% ADR 0114: `'rename-class'`/`'rename-method'`
-%% compose exactly like `'remove-class'`/`'remove-method'` — both are Tier 2
-%% (see `entry_tier/1`) and still need `confirmDestructive: true` to apply,
-%% but `flushKinds:` itself only narrows scope, same as every other kind.
-classify_kind('rename-class') -> entry;
-classify_kind('rename-method') -> entry;
-classify_kind(human) -> author;
-classify_kind(agent) -> author;
-classify_kind(_) -> unknown.
+classify_kind(human) ->
+    author;
+classify_kind(agent) ->
+    author;
+classify_kind(K) ->
+    case lists:member(K, beamtalk_workspace_kinds:persisted()) of
+        true -> entry;
+        false -> unknown
+    end.
 
 -spec unknown_kind_error([atom()]) -> #beamtalk_error{}.
 unknown_kind_error(Unknowns) ->
     Joined = lists:join(<<", ">>, [atom_to_binary(K, utf8) || K <- Unknowns]),
+    Allowed = lists:join(
+        <<", ">>, [
+            beamtalk_workspace_kinds:filter_symbol(K)
+         || K <- beamtalk_workspace_kinds:persisted()
+        ]
+    ),
     filter_error(
         iolist_to_binary([
             <<"flushKinds: unrecognised kind symbol(s): ">>,
             Joined,
-            <<
-                ". Allowed: #instance, #class, #'new-class', #'class-def', "
-                "#'remove-method', #'remove-class', #'rename-class', "
-                "#'rename-method' (entry kinds); #human, #agent (author kinds)"
-            >>
+            <<". Allowed: ">>,
+            Allowed,
+            <<" (entry kinds); #human, #agent (author kinds)">>
         ])
     ).
 
@@ -824,11 +814,11 @@ run_flush(Pending, ConfirmDestructive) ->
 
 -spec is_rename_class_entry(term()) -> boolean().
 is_rename_class_entry(E) ->
-    beamtalk_workspace_changelog:entry_kind(E) =:= 'rename-class'.
+    beamtalk_workspace_kinds:rename(beamtalk_workspace_changelog:entry_kind(E)) =:= class.
 
 -spec is_rename_method_entry(term()) -> boolean().
 is_rename_method_entry(E) ->
-    beamtalk_workspace_changelog:entry_kind(E) =:= 'rename-method'.
+    beamtalk_workspace_kinds:rename(beamtalk_workspace_changelog:entry_kind(E)) =:= method.
 
 %%% ----------------------------------------------------------------------------
 %%% Tiering (ADR 0113 Phase 2)
@@ -846,12 +836,7 @@ only applies when the caller passes `ConfirmDestructive = true`.
 """.
 -spec entry_tier(term()) -> tier1 | tier2.
 entry_tier(E) ->
-    case beamtalk_workspace_changelog:entry_kind(E) of
-        'remove-class' -> tier2;
-        'rename-class' -> tier2;
-        'rename-method' -> tier2;
-        _ -> tier1
-    end.
+    beamtalk_workspace_kinds:tier(beamtalk_workspace_changelog:entry_kind(E)).
 
 %% The `skipped` entry shape for a Tier 2 entry left pending because
 %% `ConfirmDestructive` was not given — distinct from the (currently unused,
@@ -1987,61 +1972,63 @@ resolve_site_unit(Body, {Site, OwnerEntry}) ->
     end.
 
 resolve_site_unit_2(Body, File, Start, End, PrevText, NewText, OwnerEntry) ->
-    case in_range(Body, Start, End) of
-        false ->
-            {conflict,
-                conflict_map(
-                    File,
-                    <<"span_out_of_range">>,
-                    [OwnerEntry],
-                    iolist_to_binary([
-                        <<"Recorded byte span ">>,
-                        (integer_to_binary(Start)),
-                        <<"..">>,
-                        (integer_to_binary(End)),
-                        <<" is outside the current ">>,
-                        (integer_to_binary(byte_size(Body))),
-                        <<"-byte file; the file changed externally">>
-                    ])
-                )};
-        true ->
-            Actual = binary:part(Body, Start, End - Start),
-            case Actual =:= PrevText of
+    case beamtalk_workspace_span:check_span(Body, {Start, End}, PrevText) of
+        ok ->
+            {ok, beamtalk_workspace_span:splice(Body, {Start, End}, NewText)};
+        {conflict, external_edit = Reason} ->
+            case beamtalk_workspace_span:matches_at(Body, Start, NewText) of
                 true ->
-                    {ok, splice(Body, {Start, End}, NewText)};
+                    {ok, Body};
                 false ->
-                    case already_applied_at(Body, Start, NewText) of
-                        true ->
-                            {ok, Body};
-                        false ->
-                            {conflict,
-                                conflict_map(
-                                    File,
-                                    <<"external_edit">>,
-                                    [OwnerEntry],
-                                    <<
-                                        "External edit detected: the bytes at the recorded "
-                                        "span no longer match the rewrite's recorded "
-                                        "prev_source, and do not already carry the rewritten "
-                                        "text either. Re-flush after reconciling, or use "
-                                        "`Workspace changes clear` to discard the pending "
-                                        "entries"
-                                    >>
-                                )}
-                    end
-            end
+                    {conflict,
+                        span_conflict(File, Reason, OwnerEntry, <<
+                            "the rewrite's recorded prev_source, and do not already carry "
+                            "the rewritten text either"
+                        >>)}
+            end;
+        {conflict, Reason} ->
+            {conflict, span_conflict(File, Reason, OwnerEntry, <<>>)}
     end.
 
-%% `Start` is `integer()`, not `non_neg_integer()`, because `all_units_
-%% already_applied_loop/3` calls this with an original recorded offset PLUS
-%% an accumulated shift that is mathematically always non-negative for a
-%% real site list, but not something Dialyzer can prove structurally.
--spec already_applied_at(binary(), integer(), binary()) -> boolean().
-already_applied_at(Body, Start, NewText) ->
-    NewLen = byte_size(NewText),
-    Start >= 0 andalso
-        Start + NewLen =< byte_size(Body) andalso
-        binary:part(Body, Start, NewLen) =:= NewText.
+-doc """
+Build the flush conflict for a failed `beamtalk_workspace_span:check_span/3`
+(shared by method splices and rewrite-site splices). `Expected` describes what
+the span was expected to hold, for the `external_edit` detail text (unused
+for `span_out_of_range`).
+""".
+-spec span_conflict(
+    binary() | undefined,
+    beamtalk_workspace_span:conflict_reason(),
+    term(),
+    binary()
+) -> map().
+span_conflict(File, {span_out_of_range, Start, End, Size}, Entry, _Expected) ->
+    conflict_map(
+        File,
+        <<"span_out_of_range">>,
+        [Entry],
+        iolist_to_binary([
+            <<"Recorded byte span ">>,
+            integer_to_binary(Start),
+            <<"..">>,
+            integer_to_binary(End),
+            <<" is outside the current ">>,
+            integer_to_binary(Size),
+            <<"-byte file; the file changed externally">>
+        ])
+    );
+span_conflict(File, external_edit, Entry, Expected) ->
+    conflict_map(
+        File,
+        <<"external_edit">>,
+        [Entry],
+        <<
+            "External edit detected: the bytes at the recorded span no longer match ",
+            Expected/binary,
+            ". Re-flush after reconciling, or use `Workspace changes clear` to "
+            "discard the pending entries"
+        >>
+    ).
 
 -doc """
 Verify every unit's expected new text already sits at its correct position
@@ -2109,7 +2096,7 @@ all_units_already_applied_loop(Body, [{Site, _Entry} | Rest], Shift) ->
         }
     of
         {{ok, NewText}, {ok, PrevText}} ->
-            case already_applied_at(Body, Start + Shift, NewText) of
+            case beamtalk_workspace_span:matches_at(Body, Start + Shift, NewText) of
                 true ->
                     NextShift = Shift + (byte_size(NewText) - byte_size(PrevText)),
                     all_units_already_applied_loop(Body, Rest, NextShift);
@@ -2430,44 +2417,11 @@ splice_one(Body, Entry) ->
 
 splice_with_prev(Body, Entry, Start, End, PrevBody) ->
     File = beamtalk_workspace_changelog:entry_source_file(Entry),
-    case in_range(Body, Start, End) of
-        false ->
-            {conflict,
-                conflict_map(
-                    File,
-                    <<"span_out_of_range">>,
-                    [Entry],
-                    iolist_to_binary([
-                        <<
-                            "Recorded byte span ",
-                            (integer_to_binary(Start))/binary,
-                            "..",
-                            (integer_to_binary(End))/binary,
-                            " is outside the current ",
-                            (integer_to_binary(byte_size(Body)))/binary,
-                            "-byte file; the file changed externally"
-                        >>
-                    ])
-                )};
-        true ->
-            Actual = binary:part(Body, Start, End - Start),
-            case Actual =:= PrevBody of
-                false ->
-                    {conflict,
-                        conflict_map(
-                            File,
-                            <<"external_edit">>,
-                            [Entry],
-                            <<
-                                "External edit detected: the bytes at the recorded "
-                                "span no longer match the patch's recorded prev_source. "
-                                "Re-flush after reconciling, or use `Workspace changes "
-                                "clear` to discard the pending entries"
-                            >>
-                        )};
-                true ->
-                    replacement_for(Entry, Body, Start, End, File)
-            end
+    case beamtalk_workspace_span:check_span(Body, {Start, End}, PrevBody) of
+        ok ->
+            replacement_for(Entry, Body, Start, End, File);
+        {conflict, Reason} ->
+            {conflict, span_conflict(File, Reason, Entry, <<"the patch's recorded prev_source">>)}
     end.
 
 %% The bytes to splice into `{Start, End}` once the external-edit check has
@@ -2480,7 +2434,7 @@ splice_with_prev(Body, Entry, Start, End, PrevBody) ->
 replacement_for(Entry, Body, Start, End, File) ->
     case beamtalk_workspace_changelog:entry_kind(Entry) of
         'remove-method' ->
-            {ok, splice(Body, {Start, End}, <<>>)};
+            {ok, beamtalk_workspace_span:splice(Body, {Start, End}, <<>>)};
         _ ->
             case beamtalk_workspace_changelog:read_source_body(Entry) of
                 {ok, NewSrc} ->
@@ -2490,29 +2444,19 @@ replacement_for(Entry, Body, Start, End, File) ->
                     %% compiler's canonical body to the span's base
                     %% indentation via `reindent_method_source`). The splice
                     %% is a verbatim byte replacement; no reshaping here.
-                    {ok, splice(Body, {Start, End}, NewSrc)};
+                    {ok, beamtalk_workspace_span:splice(Body, {Start, End}, NewSrc)};
                 {error, Reason} ->
                     {error, source_body_error(File, Reason)}
             end
     end.
 
--spec in_range(binary(), non_neg_integer(), non_neg_integer()) -> boolean().
-in_range(Bin, Start, End) ->
-    is_integer(Start) andalso
-        is_integer(End) andalso
-        Start >= 0 andalso
-        End >= Start andalso
-        End =< byte_size(Bin).
-
 -doc """
 Splice `Replacement` into `Body` at the byte range `{Start, End}` (half-open).
-Pure helper exported for tests.
+Delegates to `beamtalk_workspace_span:splice/3`; kept exported for tests.
 """.
 -spec splice(binary(), {non_neg_integer(), non_neg_integer()}, binary()) -> binary().
-splice(Body, {Start, End}, Replacement) ->
-    Before = binary:part(Body, 0, Start),
-    After = binary:part(Body, End, byte_size(Body) - End),
-    <<Before/binary, Replacement/binary, After/binary>>.
+splice(Body, Span, Replacement) ->
+    beamtalk_workspace_span:splice(Body, Span, Replacement).
 
 %% Append a method body (which itself may or may not end in a newline) after a
 %% blank-line separator. Used for `selector_not_found` entries — a brand-new
@@ -2697,7 +2641,7 @@ maybe_reload_renamed_class_source(_Prepared) ->
 -spec reload_renamed_class_source(binary(), binary()) -> ok.
 reload_renamed_class_source(NewPath, NewClassBin) ->
     ExpectedClassName =
-        case beamtalk_repl_server:safe_to_existing_atom(NewClassBin) of
+        case beamtalk_repl_errors:safe_to_existing_atom(NewClassBin) of
             {ok, Atom} -> Atom;
             {error, _} -> undefined
         end,

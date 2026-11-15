@@ -88,13 +88,13 @@ do_eval_no_compiler_error_test() ->
 
 handle_load_file_not_found_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
-    Result = beamtalk_repl_eval:handle_load("/nonexistent/file.bt", State),
+    Result = beamtalk_repl_loader:handle_load("/nonexistent/file.bt", State),
     ?assertMatch({error, {file_not_found, _}, _}, Result).
 
 handle_load_directory_test() ->
     %% Loading a directory should fail
     State = beamtalk_repl_state:new(undefined, 0),
-    Result = beamtalk_repl_eval:handle_load(beamtalk_test_fs:base_dir(), State),
+    Result = beamtalk_repl_loader:handle_load(beamtalk_test_fs:base_dir(), State),
     %% Should get read_error since it's a directory
     ?assertMatch({error, {read_error, _}, _}, Result).
 
@@ -213,7 +213,7 @@ rebuild_bindings_from_steps_empty_steps_test() ->
 handle_load_read_error_directory_test() ->
     %% Already covered by handle_load_directory_test, but let's be explicit
     State = beamtalk_repl_state:new(undefined, 0),
-    Result = beamtalk_repl_eval:handle_load(".", State),
+    Result = beamtalk_repl_loader:handle_load(".", State),
     %% Loading current directory should fail with read_error
     ?assertMatch({error, {read_error, _}, _}, Result).
 
@@ -228,7 +228,7 @@ handle_load_compile_error_test() ->
     ok = file:write_file(TempFile, <<"invalid beamtalk syntax @@@ ###">>),
 
     State = beamtalk_repl_state:new(undefined, 0),
-    Result = beamtalk_repl_eval:handle_load(TempFile, State),
+    Result = beamtalk_repl_loader:handle_load(TempFile, State),
 
     %% Clean up - ensure it's deleted even if assertion fails
     ok = file:delete(TempFile),
@@ -607,7 +607,7 @@ handle_load_empty_file_test() ->
     ),
     ok = file:write_file(TempFile, <<>>),
     State = beamtalk_repl_state:new(undefined, 0),
-    Result = beamtalk_repl_eval:handle_load(TempFile, State),
+    Result = beamtalk_repl_loader:handle_load(TempFile, State),
     file:delete(TempFile),
     %% Should fail with compile error
     case Result of
@@ -713,7 +713,7 @@ handle_load_valid_file_no_compiler_test() ->
     ),
     ok = file:write_file(TempFile, <<"Object subclass: MyTest [\n]\n">>),
     State = beamtalk_repl_state:new(undefined, 0),
-    Result = beamtalk_repl_eval:handle_load(TempFile, State),
+    Result = beamtalk_repl_loader:handle_load(TempFile, State),
     file:delete(TempFile),
     case Result of
         {error, {compile_error, _}, _} -> ok;
@@ -1498,7 +1498,7 @@ io_capture_stdin_no_subscriber_test() ->
 
 reload_class_file_not_found_test() ->
     %% Non-existent file returns file_not_found
-    Result = beamtalk_repl_eval:reload_class_file("/nonexistent/file.bt", 'SomeClass'),
+    Result = beamtalk_repl_loader:reload_class_file("/nonexistent/file.bt", 'SomeClass'),
     ?assertEqual({error, {file_not_found, "/nonexistent/file.bt"}}, Result).
 
 reload_class_file_no_compiler_test() ->
@@ -1510,7 +1510,7 @@ reload_class_file_no_compiler_test() ->
         io_lib:format("test_reload_~s.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<"Actor subclass: TestActor [\n]\n">>),
-    Result = beamtalk_repl_eval:reload_class_file(TempFile, 'TestActor'),
+    Result = beamtalk_repl_loader:reload_class_file(TempFile, 'TestActor'),
     file:delete(TempFile),
     %% Compiler not started — should fail gracefully
     case Result of
@@ -2339,22 +2339,22 @@ do_show_codegen_with_binding() ->
 
 reload_class_file_arity1() ->
     %% reload_class_file/1 (no expected class name) delegates to the loader.
-    Result = beamtalk_repl_eval:reload_class_file("/nonexistent/reload1.bt"),
+    Result = beamtalk_repl_loader:reload_class_file("/nonexistent/reload1.bt"),
     ?assertEqual({error, {file_not_found, "/nonexistent/reload1.bt"}}, Result).
 
 handle_load3_missing() ->
     %% handle_load/3 with prebuilt indexes delegates to beamtalk_repl_loader.
-    Result = beamtalk_repl_eval:handle_load("/nonexistent/load3.bt", state0(), #{}),
+    Result = beamtalk_repl_loader:handle_load("/nonexistent/load3.bt", state0(), #{}),
     ?assertMatch({error, {file_not_found, _}, _}, Result).
 
 handle_load_source3_invalid() ->
     %% handle_load_source/3 delegates to the loader; invalid source fails to compile.
-    Result = beamtalk_repl_eval:handle_load_source(<<"+++ not valid">>, "inline-label", state0()),
+    Result = beamtalk_repl_loader:handle_load_source(<<"+++ not valid">>, "inline-label", state0()),
     ?assertMatch({error, _, _}, Result).
 
 new_class_invalid() ->
     %% new_class/2 delegates to the loader; an invalid target path is rejected.
-    Result = beamtalk_repl_eval:new_class(
+    Result = beamtalk_repl_loader_newclass:new_class(
         <<"Actor subclass: NewClsInvalid\n  v => 1">>, <<"/nonexistent/dir/x.bt">>
     ),
     ?assertMatch({error, _}, Result).
@@ -2668,7 +2668,7 @@ remove_class_unknown() ->
 %%====================================================================
 
 move_class_delegates() ->
-    Result = beamtalk_repl_eval:move_class('EvalNoSuchMoveCls', <<"new/path.bt">>),
+    Result = beamtalk_repl_loader_rewrite:move_class('EvalNoSuchMoveCls', <<"new/path.bt">>),
     ?assertMatch({error, _}, Result).
 
 revert_remove_class_delegates() ->
@@ -2677,7 +2677,7 @@ revert_remove_class_delegates() ->
     %% happily creates the class fresh (mirroring what a genuine `changes
     %% revert:` of a `'remove-class'` entry does). Clean the class back up
     %% so it does not linger for later tests in the shared EUnit node.
-    Result = beamtalk_repl_eval:revert_remove_class(
+    Result = beamtalk_repl_loader_newclass:revert_remove_class(
         <<"Actor subclass: EvalRevertRemoveClassCls\n  v => 1">>,
         <<"eval_revert_remove_class_cls.bt">>
     ),
@@ -2685,16 +2685,16 @@ revert_remove_class_delegates() ->
     beamtalk_repl_eval:remove_class(<<"EvalRevertRemoveClassCls">>).
 
 rewrite_sites_delegates() ->
-    Result = beamtalk_repl_eval:rewrite_sites(undefined, []),
+    Result = beamtalk_repl_loader_rewrite:rewrite_sites(undefined, []),
     ?assertMatch({error, _}, Result).
 
 validate_sites_delegates() ->
-    Result = beamtalk_repl_eval:validate_sites(undefined, []),
+    Result = beamtalk_repl_loader_rewrite:validate_sites(undefined, []),
     ?assertMatch({error, _}, Result).
 
 emit_remove_change_entry_delegates() ->
     %% Best-effort append; returns ok even when there is nothing to record.
-    Result = beamtalk_repl_eval:emit_remove_change_entry(
+    Result = beamtalk_repl_loader_changelog_entries:emit_remove_change_entry(
         <<"__bt3337_never_a_class__">>, foo, instance, <<"repl">>, human
     ),
     ?assertEqual(ok, Result).

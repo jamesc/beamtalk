@@ -1710,7 +1710,7 @@ defmodule BtAttach.Workspace do
   `flush/0`.
 
   Like `save_method/3`, this calls the runtime install chokepoint directly —
-  `beamtalk_repl_eval:new_class/2`, which returns the same clean term contract
+  `beamtalk_repl_loader_newclass:new_class/2`, which returns the same clean term contract
   (`{ok, ClassObjects} | {error, Reason}`) rather than the raising FFI surface
   (`beamtalk_workspace_interface_primitives:newClass/2`). `source` is the class
   definition (e.g. `"Object subclass: Greeter"`), `path` the in-project target
@@ -1725,7 +1725,7 @@ defmodule BtAttach.Workspace do
       workspace is gone
   """
   def new_class(source, path) when is_binary(source) and is_binary(path) do
-    case rpc(:beamtalk_repl_eval, :new_class, [source, path]) do
+    case rpc(:beamtalk_repl_loader_newclass, :new_class, [source, path]) do
       {:ok, _class_objects} ->
         {:ok, path}
 

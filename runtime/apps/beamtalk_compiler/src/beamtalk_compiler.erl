@@ -455,7 +455,7 @@ Also backs an actual `Workspace flush' splice: once the `:def' tab's
 resubmitted skeleton (`beamtalk_repl_ops_browse:class_definition_text/7')
 became round-trip-safe — carrying modifier keywords, the `field:'/`state:'
 keyword choice, and `::' type annotations — a byte-accurate span was most of
-what flush needed, so `beamtalk_repl_loader:add_class_def_flushability/2' now
+what flush needed, so `beamtalk_repl_loader_changelog_entries:add_class_def_flushability/2' now
 resolves this span and marks a `'class-def'' entry `flushable: true' when it
 resolves (subject also to `class_state_field_defaults/2''s sibling check
 below, which this span alone cannot guarantee — reflection cannot recover a
@@ -625,7 +625,7 @@ never the default-value *expression text* — so the skeleton always renders
 `default => null' for a field even when the on-disk declaration has one. A
 `'class-def'' entry that spliced such a skeleton into a byte-accurate disk
 span would still silently delete that field's default.
-`beamtalk_repl_loader:add_class_def_flushability/2' calls this function
+`beamtalk_repl_loader_changelog_entries:add_class_def_flushability/2' calls this function
 against BOTH the on-disk source and the candidate replacement text and
 refuses to flush when a field with a default on disk has none in the
 candidate.
