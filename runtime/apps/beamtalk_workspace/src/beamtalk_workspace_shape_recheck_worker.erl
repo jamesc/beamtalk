@@ -9,7 +9,7 @@
 -moduledoc """
 Single-worker queue for ADR 0105 Phase 2's shape re-check.
 
-`beamtalk_repl_loader:activate_module/3` fires on *every* ordinary
+`beamtalk_repl_loader_activate:activate_module/3` fires on *every* ordinary
 class-body install — far more often than the method-signature path's
 `maybe_trigger_recheck/4`, which only runs on an explicit `>>` patch or
 removal (see that function's doc). Running its shape re-check

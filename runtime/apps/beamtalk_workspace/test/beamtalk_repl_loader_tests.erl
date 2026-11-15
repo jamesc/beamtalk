@@ -16,63 +16,67 @@
 %%====================================================================
 
 is_stdlib_path_relative_test() ->
-    ?assert(beamtalk_repl_loader:is_stdlib_path("stdlib/src/integer.bt")).
+    ?assert(beamtalk_repl_loader_support:is_stdlib_path("stdlib/src/integer.bt")).
 
 is_stdlib_path_relative_nested_test() ->
-    ?assert(beamtalk_repl_loader:is_stdlib_path("stdlib/src/collections/array.bt")).
+    ?assert(beamtalk_repl_loader_support:is_stdlib_path("stdlib/src/collections/array.bt")).
 
 is_stdlib_path_absolute_test() ->
-    ?assert(beamtalk_repl_loader:is_stdlib_path("/workspace/project/stdlib/src/integer.bt")).
+    ?assert(
+        beamtalk_repl_loader_support:is_stdlib_path("/workspace/project/stdlib/src/integer.bt")
+    ).
 
 is_stdlib_path_not_stdlib_src_test() ->
-    ?assertNot(beamtalk_repl_loader:is_stdlib_path("src/MyClass.bt")).
+    ?assertNot(beamtalk_repl_loader_support:is_stdlib_path("src/MyClass.bt")).
 
 is_stdlib_path_absolute_not_stdlib_test() ->
-    ?assertNot(beamtalk_repl_loader:is_stdlib_path("/workspace/project/src/MyClass.bt")).
+    ?assertNot(beamtalk_repl_loader_support:is_stdlib_path("/workspace/project/src/MyClass.bt")).
 
 is_stdlib_path_no_trailing_slash_test() ->
-    ?assertNot(beamtalk_repl_loader:is_stdlib_path("stdlib/src")).
+    ?assertNot(beamtalk_repl_loader_support:is_stdlib_path("stdlib/src")).
 
 is_stdlib_path_wrong_subdir_test() ->
-    ?assertNot(beamtalk_repl_loader:is_stdlib_path("stdlib/srcs/integer.bt")).
+    ?assertNot(beamtalk_repl_loader_support:is_stdlib_path("stdlib/srcs/integer.bt")).
 
 is_stdlib_path_empty_test() ->
-    ?assertNot(beamtalk_repl_loader:is_stdlib_path("")).
+    ?assertNot(beamtalk_repl_loader_support:is_stdlib_path("")).
 
 is_stdlib_path_deep_absolute_test() ->
-    ?assert(beamtalk_repl_loader:is_stdlib_path("/home/user/beamtalk/stdlib/src/string.bt")).
+    ?assert(
+        beamtalk_repl_loader_support:is_stdlib_path("/home/user/beamtalk/stdlib/src/string.bt")
+    ).
 
 %%====================================================================
 %% to_snake_case/1
 %%====================================================================
 
 to_snake_case_empty_test() ->
-    ?assertEqual([], beamtalk_repl_loader:to_snake_case([])).
+    ?assertEqual([], beamtalk_repl_loader_support:to_snake_case([])).
 
 to_snake_case_lowercase_test() ->
-    ?assertEqual("counter", beamtalk_repl_loader:to_snake_case("counter")).
+    ?assertEqual("counter", beamtalk_repl_loader_support:to_snake_case("counter")).
 
 to_snake_case_uppercase_first_test() ->
-    ?assertEqual("counter", beamtalk_repl_loader:to_snake_case("Counter")).
+    ?assertEqual("counter", beamtalk_repl_loader_support:to_snake_case("Counter")).
 
 to_snake_case_two_words_test() ->
-    ?assertEqual("scheme_symbol", beamtalk_repl_loader:to_snake_case("SchemeSymbol")).
+    ?assertEqual("scheme_symbol", beamtalk_repl_loader_support:to_snake_case("SchemeSymbol")).
 
 to_snake_case_three_words_test() ->
-    ?assertEqual("my_counter_actor", beamtalk_repl_loader:to_snake_case("MyCounterActor")).
+    ?assertEqual("my_counter_actor", beamtalk_repl_loader_support:to_snake_case("MyCounterActor")).
 
 to_snake_case_acronym_no_underscore_test() ->
     %% Consecutive uppercase → no underscore inserted within them
-    ?assertEqual("httprouter", beamtalk_repl_loader:to_snake_case("HTTPRouter")).
+    ?assertEqual("httprouter", beamtalk_repl_loader_support:to_snake_case("HTTPRouter")).
 
 to_snake_case_already_snake_test() ->
-    ?assertEqual("already_snake", beamtalk_repl_loader:to_snake_case("already_snake")).
+    ?assertEqual("already_snake", beamtalk_repl_loader_support:to_snake_case("already_snake")).
 
 to_snake_case_with_digits_test() ->
-    ?assertEqual("app2", beamtalk_repl_loader:to_snake_case("App2")).
+    ?assertEqual("app2", beamtalk_repl_loader_support:to_snake_case("App2")).
 
 to_snake_case_all_uppercase_test() ->
-    ?assertEqual("abc", beamtalk_repl_loader:to_snake_case("ABC")).
+    ?assertEqual("abc", beamtalk_repl_loader_support:to_snake_case("ABC")).
 
 %%====================================================================
 %% verify_class_present/3
@@ -80,38 +84,41 @@ to_snake_case_all_uppercase_test() ->
 
 verify_class_present_undefined_test() ->
     ?assertEqual(
-        ok, beamtalk_repl_loader:verify_class_present(undefined, [#{name => "Foo"}], "/path.bt")
+        ok,
+        beamtalk_repl_loader_reload:verify_class_present(undefined, [#{name => "Foo"}], "/path.bt")
     ).
 
 verify_class_present_found_test() ->
     Classes = [#{name => "Counter"}, #{name => "Timer"}],
-    ?assertEqual(ok, beamtalk_repl_loader:verify_class_present('Counter', Classes, "/path.bt")).
+    ?assertEqual(
+        ok, beamtalk_repl_loader_reload:verify_class_present('Counter', Classes, "/path.bt")
+    ).
 
 verify_class_present_not_found_test() ->
     Classes = [#{name => "OtherClass"}],
-    Result = beamtalk_repl_loader:verify_class_present('Counter', Classes, "/path.bt"),
+    Result = beamtalk_repl_loader_reload:verify_class_present('Counter', Classes, "/path.bt"),
     ?assertEqual({error, {class_not_found, 'Counter', "/path.bt", ["OtherClass"]}}, Result).
 
 verify_class_present_empty_list_test() ->
-    Result = beamtalk_repl_loader:verify_class_present('Foo', [], "/path.bt"),
+    Result = beamtalk_repl_loader_reload:verify_class_present('Foo', [], "/path.bt"),
     ?assertEqual({error, {class_not_found, 'Foo', "/path.bt", []}}, Result).
 
 verify_class_present_multiple_classes_test() ->
     Classes = [#{name => "A"}, #{name => "B"}, #{name => "C"}],
-    ?assertEqual(ok, beamtalk_repl_loader:verify_class_present('B', Classes, "/path.bt")).
+    ?assertEqual(ok, beamtalk_repl_loader_reload:verify_class_present('B', Classes, "/path.bt")).
 
 %%====================================================================
 %% normalize_class_source_key/1
 %%====================================================================
 
 normalize_class_source_key_binary_test() ->
-    ?assertEqual(<<"Foo">>, beamtalk_repl_loader:normalize_class_source_key(<<"Foo">>)).
+    ?assertEqual(<<"Foo">>, beamtalk_repl_loader_support:normalize_class_source_key(<<"Foo">>)).
 
 normalize_class_source_key_atom_test() ->
-    ?assertEqual(<<"counter">>, beamtalk_repl_loader:normalize_class_source_key(counter)).
+    ?assertEqual(<<"counter">>, beamtalk_repl_loader_support:normalize_class_source_key(counter)).
 
 normalize_class_source_key_list_test() ->
-    ?assertEqual(<<"Counter">>, beamtalk_repl_loader:normalize_class_source_key("Counter")).
+    ?assertEqual(<<"Counter">>, beamtalk_repl_loader_support:normalize_class_source_key("Counter")).
 
 %%====================================================================
 %% extract_trailing_info/1
@@ -137,31 +144,33 @@ extract_trailing_info_with_trailing_test() ->
 
 resolve_class_name_binary_existing_test() ->
     %% 'lists' is a known atom
-    Result = beamtalk_repl_loader:resolve_class_name(#{name => <<"lists">>}),
+    Result = beamtalk_repl_loader_activate:resolve_class_name(#{name => <<"lists">>}),
     ?assertEqual(lists, Result).
 
 resolve_class_name_binary_unknown_test() ->
-    Result = beamtalk_repl_loader:resolve_class_name(#{name => <<"xyzzy_nonexistent_class_99991">>}),
+    Result = beamtalk_repl_loader_activate:resolve_class_name(#{
+        name => <<"xyzzy_nonexistent_class_99991">>
+    }),
     ?assertEqual(undefined, Result).
 
 resolve_class_name_atom_test() ->
-    Result = beamtalk_repl_loader:resolve_class_name(#{name => lists}),
+    Result = beamtalk_repl_loader_activate:resolve_class_name(#{name => lists}),
     ?assertEqual(lists, Result).
 
 resolve_class_name_list_existing_test() ->
-    Result = beamtalk_repl_loader:resolve_class_name(#{name => "lists"}),
+    Result = beamtalk_repl_loader_activate:resolve_class_name(#{name => "lists"}),
     ?assertEqual(lists, Result).
 
 resolve_class_name_list_unknown_test() ->
-    Result = beamtalk_repl_loader:resolve_class_name(#{name => "xyzzy_nonexistent_9999"}),
+    Result = beamtalk_repl_loader_activate:resolve_class_name(#{name => "xyzzy_nonexistent_9999"}),
     ?assertEqual(undefined, Result).
 
 resolve_class_name_no_name_key_test() ->
-    Result = beamtalk_repl_loader:resolve_class_name(#{}),
+    Result = beamtalk_repl_loader_activate:resolve_class_name(#{}),
     ?assertEqual(undefined, Result).
 
 resolve_class_name_undefined_name_test() ->
-    Result = beamtalk_repl_loader:resolve_class_name(#{name => undefined}),
+    Result = beamtalk_repl_loader_activate:resolve_class_name(#{name => undefined}),
     ?assertEqual(undefined, Result).
 
 %%====================================================================
@@ -169,11 +178,12 @@ resolve_class_name_undefined_name_test() ->
 %%====================================================================
 
 existing_atom_or_undefined_known_test() ->
-    ?assertEqual(lists, beamtalk_repl_loader:existing_atom_or_undefined(<<"lists">>)).
+    ?assertEqual(lists, beamtalk_repl_loader_activate:existing_atom_or_undefined(<<"lists">>)).
 
 existing_atom_or_undefined_unknown_test() ->
     ?assertEqual(
-        undefined, beamtalk_repl_loader:existing_atom_or_undefined(<<"xyzzy_nonexistent_atom_111">>)
+        undefined,
+        beamtalk_repl_loader_activate:existing_atom_or_undefined(<<"xyzzy_nonexistent_atom_111">>)
     ).
 
 %%====================================================================
@@ -181,11 +191,12 @@ existing_atom_or_undefined_unknown_test() ->
 %%====================================================================
 
 existing_atom_or_undefined_list_known_test() ->
-    ?assertEqual(lists, beamtalk_repl_loader:existing_atom_or_undefined("lists")).
+    ?assertEqual(lists, beamtalk_repl_loader_activate:existing_atom_or_undefined("lists")).
 
 existing_atom_or_undefined_list_unknown_test() ->
     ?assertEqual(
-        undefined, beamtalk_repl_loader:existing_atom_or_undefined("xyzzy_nonexistent_atom_222")
+        undefined,
+        beamtalk_repl_loader_activate:existing_atom_or_undefined("xyzzy_nonexistent_atom_222")
     ).
 
 %%====================================================================
@@ -193,10 +204,10 @@ existing_atom_or_undefined_list_unknown_test() ->
 %%====================================================================
 
 safe_atom_result_ok_test() ->
-    ?assertEqual({true, lists}, beamtalk_repl_loader:safe_atom_result({ok, lists})).
+    ?assertEqual({true, lists}, beamtalk_repl_loader_support:safe_atom_result({ok, lists})).
 
 safe_atom_result_error_test() ->
-    ?assertEqual(false, beamtalk_repl_loader:safe_atom_result({error, badarg})).
+    ?assertEqual(false, beamtalk_repl_loader_support:safe_atom_result({error, badarg})).
 
 %%====================================================================
 %% register_classes/2
@@ -204,37 +215,37 @@ safe_atom_result_error_test() ->
 
 register_classes_no_function_exported_test() ->
     %% lists module has no register_class/0 → ok
-    ?assertEqual(ok, beamtalk_repl_loader:register_classes([], lists)).
+    ?assertEqual(ok, beamtalk_repl_loader_activate:register_classes([], lists)).
 
 register_classes_empty_classes_test() ->
-    ?assertEqual(ok, beamtalk_repl_loader:register_classes([], some_nonexistent_module)).
+    ?assertEqual(ok, beamtalk_repl_loader_activate:register_classes([], some_nonexistent_module)).
 
 %%====================================================================
 %% trigger_hot_reload/2
 %%====================================================================
 
 trigger_hot_reload_empty_test() ->
-    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, [])).
+    ?assertEqual(ok, beamtalk_repl_loader_activate:trigger_hot_reload(some_module, [])).
 
 trigger_hot_reload_unknown_class_binary_test() ->
     Classes = [#{name => <<"xyzzy_nonexistent_class_88881">>}],
-    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader_activate:trigger_hot_reload(some_module, Classes)).
 
 trigger_hot_reload_unknown_class_list_test() ->
     Classes = [#{name => "xyzzy_nonexistent_class_88882"}],
-    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader_activate:trigger_hot_reload(some_module, Classes)).
 
 trigger_hot_reload_unknown_class_atom_test() ->
     Classes = [#{name => xyzzy_nonexistent_class_88883}],
-    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader_activate:trigger_hot_reload(some_module, Classes)).
 
 trigger_hot_reload_undefined_name_test() ->
     Classes = [#{name => undefined}],
-    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader_activate:trigger_hot_reload(some_module, Classes)).
 
 trigger_hot_reload_no_name_key_test() ->
     Classes = [#{}],
-    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader_activate:trigger_hot_reload(some_module, Classes)).
 
 trigger_hot_reload_multiple_classes_test() ->
     Classes = [
@@ -242,7 +253,7 @@ trigger_hot_reload_multiple_classes_test() ->
         #{name => "xyzzy_class_b_1"},
         #{}
     ],
-    ?assertEqual(ok, beamtalk_repl_loader:trigger_hot_reload(some_module, Classes)).
+    ?assertEqual(ok, beamtalk_repl_loader_activate:trigger_hot_reload(some_module, Classes)).
 
 %%====================================================================
 %% activate_module/2
@@ -250,7 +261,7 @@ trigger_hot_reload_multiple_classes_test() ->
 
 activate_module_existing_module_test() ->
     %% lists has no register_class/0, no hot reload needed — should complete ok
-    ?assertEqual(ok, beamtalk_repl_loader:activate_module(lists, [])).
+    ?assertEqual(ok, beamtalk_repl_loader_activate:activate_module(lists, [])).
 
 %%====================================================================
 %% handle_load/2 — error paths
@@ -328,19 +339,19 @@ handle_load_source_compile_error_test() ->
 reload_class_file_not_found_test() ->
     ?assertEqual(
         {error, {file_not_found, "/nonexistent/x.bt"}},
-        beamtalk_repl_loader:reload_class_file("/nonexistent/x.bt")
+        beamtalk_repl_loader_reload:reload_class_file("/nonexistent/x.bt")
     ).
 
 reload_class_file_2_not_found_test() ->
     ?assertEqual(
         {error, {file_not_found, "/nonexistent/x.bt"}},
-        beamtalk_repl_loader:reload_class_file("/nonexistent/x.bt", 'MyClass')
+        beamtalk_repl_loader_reload:reload_class_file("/nonexistent/x.bt", 'MyClass')
     ).
 
 reload_class_file_directory_test() ->
     ?assertMatch(
         {error, {read_error, _}},
-        beamtalk_repl_loader:reload_class_file(beamtalk_test_fs:base_dir())
+        beamtalk_repl_loader_reload:reload_class_file(beamtalk_test_fs:base_dir())
     ).
 
 reload_class_file_compile_error_test() ->
@@ -349,7 +360,7 @@ reload_class_file_compile_error_test() ->
         beamtalk_test_fs:base_dir(), io_lib:format("loader_reload_~s.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<"invalid @@@ syntax">>),
-    Result = beamtalk_repl_loader:reload_class_file(TempFile),
+    Result = beamtalk_repl_loader_reload:reload_class_file(TempFile),
     file:delete(TempFile),
     ?assertMatch({error, _}, Result).
 
@@ -362,17 +373,17 @@ compute_package_module_name_no_metadata_test() ->
     %% derives the module name from the class name.  This preserves hot
     %% reload semantics: hot_counter.bt and hot_counter_v2.bt both define
     %% HotCounter → same module bt@hot_counter.
-    Result = beamtalk_repl_loader:compute_package_module_name("/some/path/src/Foo.bt"),
+    Result = beamtalk_repl_loader_reload:compute_package_module_name("/some/path/src/Foo.bt"),
     ?assertEqual({ok, undefined}, Result).
 
 compute_package_module_name_empty_path_test() ->
     %% A class with no backing file passes "" (protocol fan-out); it must not be
     %% named after the cwd. Holds with or without package metadata.
-    ?assertEqual({ok, undefined}, beamtalk_repl_loader:compute_package_module_name("")).
+    ?assertEqual({ok, undefined}, beamtalk_repl_loader_reload:compute_package_module_name("")).
 
 compute_package_module_name_no_metadata_camel_case_test() ->
     %% Same: no metadata → undefined (class-name-based naming).
-    Result = beamtalk_repl_loader:compute_package_module_name("/some/path/MyCounter.bt"),
+    Result = beamtalk_repl_loader_reload:compute_package_module_name("/some/path/MyCounter.bt"),
     ?assertEqual({ok, undefined}, Result).
 
 %%====================================================================
@@ -381,13 +392,13 @@ compute_package_module_name_no_metadata_camel_case_test() ->
 
 maybe_add_loaded_module_not_present_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
-    NewState = beamtalk_repl_loader:maybe_add_loaded_module(lists, State),
+    NewState = beamtalk_repl_loader_support:maybe_add_loaded_module(lists, State),
     ?assert(lists:member(lists, beamtalk_repl_state:get_loaded_modules(NewState))).
 
 maybe_add_loaded_module_already_present_test() ->
     State0 = beamtalk_repl_state:new(undefined, 0),
-    State1 = beamtalk_repl_loader:maybe_add_loaded_module(lists, State0),
-    State2 = beamtalk_repl_loader:maybe_add_loaded_module(lists, State1),
+    State1 = beamtalk_repl_loader_support:maybe_add_loaded_module(lists, State0),
+    State2 = beamtalk_repl_loader_support:maybe_add_loaded_module(lists, State1),
     %% Should appear exactly once
     Modules = beamtalk_repl_state:get_loaded_modules(State2),
     ?assertEqual(1, length([M || M <- Modules, M =:= lists])).
@@ -774,7 +785,7 @@ t_install_method_keeps_package_and_source(_Proj) ->
     ?assertEqual('bt@loaderpkg@install_pkg', Mod0),
     ?assert(is_binary(beamtalk_reflection:source_file_from_module(Mod0))),
     %% Patch a new method via the structured install path.
-    Result = beamtalk_repl_loader:install_method(
+    Result = beamtalk_repl_loader_methods:install_method(
         <<"InstallPkg">>,
         <<"doubled">>,
         <<"doubled -> Integer =>\n  self.v * 2">>,
@@ -812,7 +823,7 @@ t_install_method_preserves_comments(_Proj) ->
         >>,
     ?assertMatch(
         {ok, _, _, _, _},
-        beamtalk_repl_loader:install_method(
+        beamtalk_repl_loader_methods:install_method(
             <<"InstallDoc">>, <<"bumped">>, MethodSrc, durable, <<"test">>, human, [], State1
         )
     ),
@@ -826,7 +837,7 @@ t_install_method_preserves_comments(_Proj) ->
     %% no per-save erosion of the doc block.
     ?assertMatch(
         {ok, _, _, _, _},
-        beamtalk_repl_loader:install_method(
+        beamtalk_repl_loader_methods:install_method(
             <<"InstallDoc">>, <<"bumped">>, Src1, durable, <<"test">>, human, [], State1
         )
     ),
@@ -853,7 +864,7 @@ t_install_method_records_signature(_Proj) ->
     {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
     ?assertMatch(
         {ok, _, _, _, _},
-        beamtalk_repl_loader:install_method(
+        beamtalk_repl_loader_methods:install_method(
             <<"SignatureCapture">>,
             <<"describe:">>,
             <<"describe: n :: Integer -> String =>\n  \"x\"">>,
@@ -886,7 +897,7 @@ t_install_method_chains_signature_generations(_Proj) ->
     {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
     ?assertMatch(
         {ok, _, _, _, _},
-        beamtalk_repl_loader:install_method(
+        beamtalk_repl_loader_methods:install_method(
             <<"SignatureChain">>,
             <<"getValue">>,
             <<"getValue -> Integer =>\n  self.v">>,
@@ -903,7 +914,7 @@ t_install_method_chains_signature_generations(_Proj) ->
     ?assertEqual(#{return_type => <<"Integer">>, param_types => []}, Gen1),
     ?assertMatch(
         {ok, _, _, _, _},
-        beamtalk_repl_loader:install_method(
+        beamtalk_repl_loader_methods:install_method(
             <<"SignatureChain">>,
             <<"getValue">>,
             <<"getValue -> String =>\n  \"x\"">>,
@@ -997,7 +1008,7 @@ t_install_method_accumulation_preserves_siblings(_Proj) ->
     %% Patch methodOne (with a leading banner), then patch methodTwo.
     ?assertMatch(
         {ok, _, _, _, _},
-        beamtalk_repl_loader:install_method(
+        beamtalk_repl_loader_methods:install_method(
             <<"InstallAccum">>,
             <<"methodOne">>,
             <<"// --- one ---\n/// Doc for one (edited).\nmethodOne -> Integer =>\n  self.v + 10">>,
@@ -1010,7 +1021,7 @@ t_install_method_accumulation_preserves_siblings(_Proj) ->
     ),
     ?assertMatch(
         {ok, _, _, _, _},
-        beamtalk_repl_loader:install_method(
+        beamtalk_repl_loader_methods:install_method(
             <<"InstallAccum">>,
             <<"methodTwo">>,
             <<"methodTwo -> Integer =>\n  self.v + 20">>,
@@ -1079,7 +1090,7 @@ t_install_method_test_dir_keeps_package(_Proj) ->
     ?assertEqual('bt@loaderpkg@test@install_spec', current_module_of('InstallSpec')),
     ?assertMatch(
         {ok, _, _, _, _},
-        beamtalk_repl_loader:install_method(
+        beamtalk_repl_loader_methods:install_method(
             <<"InstallSpec">>,
             <<"doubled">>,
             <<"doubled -> Integer =>\n  self.v * 2">>,
@@ -1116,7 +1127,7 @@ t_module_naming_matches_shared_corpus(Proj) ->
                     <<"test">> -> filename:join([Proj, "test", binary_to_list(Rel)]);
                     <<"none">> -> binary_to_list(Rel)
                 end,
-            Result = beamtalk_repl_loader:compute_package_module_name(Path),
+            Result = beamtalk_repl_loader_reload:compute_package_module_name(Path),
             case Case of
                 #{<<"module">> := Module0} ->
                     %% The corpus spells the package `web`; this project's is `loaderpkg`.
@@ -1136,7 +1147,9 @@ t_invalid_path_segment_is_load_error(Proj) ->
     Path = filename:join([Proj, "src", "my-class.bt"]),
     ok = file:write_file(Path, <<"Object subclass: Bt4868Hyphen\n  value => 1\n">>),
     try
-        ?assertMatch({error, {compile_error, _}}, beamtalk_repl_loader:reload_class_file(Path)),
+        ?assertMatch(
+            {error, {compile_error, _}}, beamtalk_repl_loader_reload:reload_class_file(Path)
+        ),
         State = beamtalk_repl_state:new(undefined, 0),
         ?assertMatch({error, {compile_error, _}, _}, beamtalk_repl_loader:handle_load(Path, State))
     after
@@ -1242,7 +1255,7 @@ loader_integration_test_() ->
                 t_protocol_reload_refuses_stdlib(Proj)
             end},
             %% BT-4420: these two tests run under an explicit 30 s timeout.
-            %% Each calls `meck:new(beamtalk_repl_loader, [passthrough])`,
+            %% Each calls `meck:new(beamtalk_repl_loader_reload, [passthrough])`,
             %% which recompiles the 7.2k-line loader (about 1 s), then does
             %% four real compiles plus a fan-out reload and rollback through
             %% the meck proxy: 3-4.5 s on an idle machine. Under CPU load
@@ -1364,18 +1377,18 @@ t_load_class_module_success(Proj) ->
 
 t_reload_class_file_success(Proj) ->
     Path = write_bt(Proj, "LoaderReload.bt", <<"Object subclass: LoaderReload\n  v => 7\n">>),
-    Result = beamtalk_repl_loader:reload_class_file(Path),
+    Result = beamtalk_repl_loader_reload:reload_class_file(Path),
     ?assertMatch({ok, [#{name := "LoaderReload"}]}, Result).
 
 t_reload_class_file_2_match(Proj) ->
     Path = write_bt(Proj, "LoaderRl2.bt", <<"Object subclass: LoaderRl2\n  v => 1\n">>),
-    Result = beamtalk_repl_loader:reload_class_file(Path, 'LoaderRl2'),
+    Result = beamtalk_repl_loader_reload:reload_class_file(Path, 'LoaderRl2'),
     ?assertMatch({ok, [#{name := "LoaderRl2"}]}, Result).
 
 t_reload_class_file_2_mismatch(Proj) ->
     Path = write_bt(Proj, "LoaderRl3.bt", <<"Object subclass: LoaderRl3\n  v => 1\n">>),
     %% Expected class name does not appear in the compiled class list → error.
-    Result = beamtalk_repl_loader:reload_class_file(Path, 'NotThere'),
+    Result = beamtalk_repl_loader_reload:reload_class_file(Path, 'NotThere'),
     ?assertMatch({error, {class_not_found, 'NotThere', _, ["LoaderRl3"]}}, Result).
 
 t_reload_method_definition_success(Proj) ->
@@ -1503,14 +1516,14 @@ t_compute_package_module_name(_Proj) ->
     %% package-qualified module name bt@loaderpkg@widget.
     Proj = live_project_dir(),
     Path = filename:join([Proj, "src", "Widget.bt"]),
-    Result = beamtalk_repl_loader:compute_package_module_name(Path),
+    Result = beamtalk_repl_loader_reload:compute_package_module_name(Path),
     ?assertEqual({ok, <<"bt@loaderpkg@widget">>}, Result).
 
 t_compute_package_module_name_test_dir(_Proj) ->
     %% A file under test/ resolves to bt@loaderpkg@test@<module>.
     Proj = live_project_dir(),
     Path = filename:join([Proj, "test", "WidgetTest.bt"]),
-    Result = beamtalk_repl_loader:compute_package_module_name(Path),
+    Result = beamtalk_repl_loader_reload:compute_package_module_name(Path),
     ?assertEqual({ok, <<"bt@loaderpkg@test@widget_test">>}, Result).
 
 t_compute_package_module_name_outside_subdirs(_Proj) ->
@@ -1518,7 +1531,7 @@ t_compute_package_module_name_outside_subdirs(_Proj) ->
     %% bt@<stem> form (the port's `none` root).
     Proj = live_project_dir(),
     Path = filename:join([Proj, "Widget.bt"]),
-    Result = beamtalk_repl_loader:compute_package_module_name(Path),
+    Result = beamtalk_repl_loader_reload:compute_package_module_name(Path),
     ?assertEqual({ok, <<"bt@widget">>}, Result).
 
 t_compute_package_module_name_fixture(_Proj) ->
@@ -1526,17 +1539,19 @@ t_compute_package_module_name_fixture(_Proj) ->
     %% names it (BT-4868), not bt@loaderpkg@test@fixtures@helper.
     Proj = live_project_dir(),
     Path = filename:join([Proj, "test", "fixtures", "Helper.bt"]),
-    ?assertEqual({ok, <<"bt@helper">>}, beamtalk_repl_loader:compute_package_module_name(Path)),
+    ?assertEqual(
+        {ok, <<"bt@helper">>}, beamtalk_repl_loader_reload:compute_package_module_name(Path)
+    ),
     %% ...at any depth, as `beamtalk test test/http1` finds test/http1/fixtures/.
     Nested = filename:join([Proj, "test", "http1", "fixtures", "Helper.bt"]),
     ?assertEqual(
-        {ok, <<"bt@helper">>}, beamtalk_repl_loader:compute_package_module_name(Nested)
+        {ok, <<"bt@helper">>}, beamtalk_repl_loader_reload:compute_package_module_name(Nested)
     ),
     %% A test file merely named fixtures.bt is not in a fixtures directory.
     NotDir = filename:join([Proj, "test", "fixtures.bt"]),
     ?assertEqual(
         {ok, <<"bt@loaderpkg@test@fixtures">>},
-        beamtalk_repl_loader:compute_package_module_name(NotDir)
+        beamtalk_repl_loader_reload:compute_package_module_name(NotDir)
     ).
 
 t_new_class_agent_author(_Proj) ->
@@ -1607,7 +1622,7 @@ t_reload_class_file_protocol(Proj) ->
     Path = write_bt(
         Proj, "ReloadProto.bt", <<"Protocol define: ReloadProto\n  ping -> Boolean\n">>
     ),
-    Result = beamtalk_repl_loader:reload_class_file(Path),
+    Result = beamtalk_repl_loader_reload:reload_class_file(Path),
     ?assertMatch({ok, [#{name := "ReloadProto"}]}, Result).
 
 %% ADR 0127 §11 / BT-3593: editing a protocol file and reloading it
@@ -1642,7 +1657,7 @@ t_protocol_reload_fanout_reaches_user(Proj) ->
         ProtoPath, "Protocol define: " ++ ProtoName ++ "\n  greet -> String => \"hi\"\n"
     ),
 
-    Result = beamtalk_repl_loader:reload_class_file(ProtoPath),
+    Result = beamtalk_repl_loader_reload:reload_class_file(ProtoPath),
     ?assertMatch({ok, _}, Result),
     {ok, ReloadedClasses} = Result,
     ReloadedNames = [Name || #{name := Name} <- ReloadedClasses],
@@ -1684,7 +1699,7 @@ t_protocol_reload_fanout_carries_project_batch(Proj) ->
     Batch = #{project_batch => <<"bt4394-", (list_to_binary(N))/binary>>},
     meck:new(beamtalk_repl_compiler, [passthrough]),
     try
-        Result = beamtalk_repl_loader:reload_class_file(ProtoPath, undefined, Batch),
+        Result = beamtalk_repl_loader_reload:reload_class_file(ProtoPath, undefined, Batch),
         ?assertMatch({ok, _}, Result),
         {ok, ReloadedClasses} = Result,
         ?assert(lists:member(UserName, [Name || #{name := Name} <- ReloadedClasses])),
@@ -1736,7 +1751,7 @@ t_protocol_reload_rejected_names_failing_user(Proj) ->
             "\n  shout -> String\n\n  greet -> String => \"hello\"\n"
     ),
 
-    Result = beamtalk_repl_loader:reload_class_file(ProtoPath),
+    Result = beamtalk_repl_loader_reload:reload_class_file(ProtoPath),
     ?assertMatch({error, _}, Result),
     {error, Err} = Result,
     ?assert(is_record(Err, beamtalk_error)),
@@ -1777,7 +1792,7 @@ t_protocol_reload_skips_user_without_tracked_source(Proj) ->
     ok = file:write_file(
         ProtoPath, "Protocol define: " ++ ProtoName ++ "\n  greet -> String => \"hi\"\n"
     ),
-    Result = beamtalk_repl_loader:reload_class_file(ProtoPath),
+    Result = beamtalk_repl_loader_reload:reload_class_file(ProtoPath),
     ?assertMatch({ok, _}, Result),
     {ok, ReloadedClasses} = Result,
     ReloadedNames = [Name || #{name := Name} <- ReloadedClasses],
@@ -1802,7 +1817,7 @@ t_protocol_reload_refuses_stdlib(Proj) ->
     ok = file:write_file(
         ProtoPath, "Protocol define: " ++ ProtoName ++ "\n  greet -> String => \"hi\"\n"
     ),
-    Result = beamtalk_repl_loader:reload_class_file(ProtoPath),
+    Result = beamtalk_repl_loader_reload:reload_class_file(ProtoPath),
     ?assertMatch({error, _}, Result),
     {error, Err} = Result,
     ?assert(is_record(Err, beamtalk_error)),
@@ -1871,8 +1886,8 @@ t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj) ->
     FooBefore = stored_method_source(MultiAtom, foo),
     ?assert(binary:match(FooBefore, <<"old">>) =/= nomatch),
 
-    meck:new(beamtalk_repl_loader, [passthrough]),
-    meck:expect(beamtalk_repl_loader, install_reload_result, fun(Compiled, LoadPath) ->
+    meck:new(beamtalk_repl_loader_reload, [passthrough]),
+    meck:expect(beamtalk_repl_loader_reload, install_reload_result, fun(Compiled, LoadPath) ->
         case filename:basename(LoadPath) of
             SimpleFile -> {error, {injected_fault, install_anomaly}};
             _ -> meck:passthrough([Compiled, LoadPath])
@@ -1882,7 +1897,7 @@ t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj) ->
         ok = file:write_file(
             P1Path, "Protocol define: " ++ P1Name ++ "\n  foo -> String => \"new\"\n"
         ),
-        Result = beamtalk_repl_loader:reload_class_file(P1Path),
+        Result = beamtalk_repl_loader_reload:reload_class_file(P1Path),
         ?assertMatch({error, _}, Result),
 
         %% The rollback recompile must succeed even though Multi `uses:` TWO
@@ -1892,7 +1907,7 @@ t_protocol_reload_rollback_merges_ambient_protocol_sources(Proj) ->
         FooAfter = stored_method_source(MultiAtom, foo),
         ?assertEqual(FooBefore, FooAfter)
     after
-        meck:unload(beamtalk_repl_loader)
+        meck:unload(beamtalk_repl_loader_reload)
     end.
 
 %% BT-3773: `install_reload_result/2` now returns a bare `#beamtalk_error{}`
@@ -1925,8 +1940,8 @@ t_protocol_reload_fanout_bare_structured_error(Proj) ->
     AbiError = beamtalk_error:with_hint(
         beamtalk_error:new(abi_mismatch, UAtom), <<"Recompile with the current compiler.">>
     ),
-    meck:new(beamtalk_repl_loader, [passthrough]),
-    meck:expect(beamtalk_repl_loader, install_reload_result, fun(Compiled, LoadPath) ->
+    meck:new(beamtalk_repl_loader_reload, [passthrough]),
+    meck:expect(beamtalk_repl_loader_reload, install_reload_result, fun(Compiled, LoadPath) ->
         case filename:basename(LoadPath) of
             UFile -> {error, AbiError};
             _ -> meck:passthrough([Compiled, LoadPath])
@@ -1936,13 +1951,13 @@ t_protocol_reload_fanout_bare_structured_error(Proj) ->
         ok = file:write_file(
             PPath, "Protocol define: " ++ PName ++ "\n  foo -> String => \"new\"\n"
         ),
-        Result = beamtalk_repl_loader:reload_class_file(PPath),
+        Result = beamtalk_repl_loader_reload:reload_class_file(PPath),
         ?assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result),
         {error, #beamtalk_error{message = Msg}} = Result,
         ?assert(binary:match(element(2, Msg), <<"abi_mismatch">>) =/= nomatch),
         ?assertEqual(FooBefore, stored_method_source(UAtom, foo))
     after
-        meck:unload(beamtalk_repl_loader)
+        meck:unload(beamtalk_repl_loader_reload)
     end.
 
 t_new_class_multiple_classes(_Proj) ->
@@ -2026,7 +2041,7 @@ t_new_method_appends_indented(_Proj) ->
     %% `bumped' does not exist on disk → selector_not_found → new_method_entry/3.
     %% The structured install path carries a real method body (unlike the bare
     %% `>>' path), so the reshaped, appended source is non-empty.
-    {ok, _, _, _, _} = beamtalk_repl_loader:install_method(
+    {ok, _, _, _, _} = beamtalk_repl_loader_methods:install_method(
         <<"IndentAppend">>,
         <<"bumped">>,
         <<"bumped -> Integer =>\n  self.v + 1">>,

@@ -528,9 +528,9 @@ find_ffi_sites_in_source_with_arity_test() ->
     with_port(fun(Port) ->
         {ok, Lines} =
             beamtalk_compiler_port:find_ffi_sites_in_source(
-                Port, <<"(Erlang lists) reverse: x">>, lists, reverse, 1
+                Port, <<"rev: x => (Erlang lists) reverse: x">>, lists, reverse, 1
             ),
-        ?assert(is_list(Lines))
+        ?assertEqual([1], Lines)
     end).
 
 %% `any' arity omits the field entirely (the BaseRequest branch) and must match
@@ -539,9 +539,9 @@ find_ffi_sites_in_source_any_arity_test() ->
     with_port(fun(Port) ->
         {ok, Lines} =
             beamtalk_compiler_port:find_ffi_sites_in_source(
-                Port, <<"(Erlang lists) reverse: x">>, <<"lists">>, <<"reverse">>, any
+                Port, <<"rev: x => (Erlang lists) reverse: x">>, <<"lists">>, <<"reverse">>, any
             ),
-        ?assert(is_list(Lines))
+        ?assertEqual([1], Lines)
     end).
 
 find_ffi_sites_in_source_invalid_arity_test() ->

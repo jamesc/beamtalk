@@ -104,7 +104,7 @@ init_is_idempotent_test() ->
 %% ADR 0130 §3 (BT-3708): a 3-arity class-side extension fun is the old
 %% actor-context shape and is refused at registration, naming the selector.
 register_class_side_three_arity_refused_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+    {foreach, fun setup/0, fun cleanup/1, [
         fun() ->
             Tag = beamtalk_class_registry:class_object_tag('BT3708Ext'),
             Old = fun(_Args, _Self, State) -> {ok, State} end,
@@ -138,11 +138,7 @@ register_class_side_three_arity_refused_test_() ->
             ?assertEqual(
                 ok, beamtalk_extensions:register('BT3708Ext', inst, Old, mylib)
             )
-        end
-    end}.
-
-register_new_extension_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X * 2 end,
 
@@ -150,11 +146,7 @@ register_new_extension_test_() ->
 
             %% Verify it's stored
             ?assertEqual({ok, Fun, mylib}, beamtalk_extensions:lookup('Integer', 'double'))
-        end
-    end}.
-
-register_updates_same_owner_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun1 = fun([], X) -> X * 2 end,
             Fun2 = fun([], X) -> X * 3 end,
@@ -164,11 +156,7 @@ register_updates_same_owner_test_() ->
 
             %% Should use latest function from same owner
             ?assertEqual({ok, Fun2, mylib}, beamtalk_extensions:lookup('Integer', 'multiply'))
-        end
-    end}.
-
-register_conflict_different_owner_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun1 = fun([], X) -> X * 2 end,
             Fun2 = fun([], X) -> X * 10 end,
@@ -192,11 +180,7 @@ register_conflict_different_owner_test_() ->
                     Conflicts
                 )
             )
-        end
-    end}.
-
-register_multiple_methods_on_same_class_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun1 = fun([], X) -> X end,
             Fun2 = fun([], X) -> X end,
@@ -210,11 +194,7 @@ register_multiple_methods_on_same_class_test_() ->
             ?assertEqual({ok, Fun1, mylib}, beamtalk_extensions:lookup('String', 'json')),
             ?assertEqual({ok, Fun2, mylib}, beamtalk_extensions:lookup('String', 'trim')),
             ?assertEqual({ok, Fun3, mylib}, beamtalk_extensions:lookup('String', 'camelize'))
-        end
-    end}.
-
-register_same_method_on_different_classes_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
 
@@ -226,64 +206,38 @@ register_same_method_on_different_classes_test_() ->
             ?assertEqual({ok, Fun, stdlib}, beamtalk_extensions:lookup('Integer', 'asString')),
             ?assertEqual({ok, Fun, stdlib}, beamtalk_extensions:lookup('Float', 'asString')),
             ?assertEqual({ok, Fun, stdlib}, beamtalk_extensions:lookup('Boolean', 'asString'))
-        end
-    end}.
-
-%%% ============================================================================
-%%% Lookup tests
-%%% ============================================================================
-
-lookup_existing_extension_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
+        %%% ============================================================================
+        %%% Lookup tests
+        %%% ============================================================================
         fun() ->
             Fun = fun([], X) -> X + 1 end,
             beamtalk_extensions:register('Integer', 'succ', Fun, stdlib),
 
             ?assertEqual({ok, Fun, stdlib}, beamtalk_extensions:lookup('Integer', 'succ'))
-        end
-    end}.
-
-lookup_nonexistent_extension_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             ?assertEqual(not_found, beamtalk_extensions:lookup('Integer', 'unknownMethod'))
-        end
-    end}.
-
-lookup_wrong_class_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             beamtalk_extensions:register('Integer', 'method', Fun, mylib),
 
             %% Method exists on Integer, but not on String
             ?assertEqual(not_found, beamtalk_extensions:lookup('String', 'method'))
-        end
-    end}.
-
-%%% ============================================================================
-%%% list/1 tests
-%%% ============================================================================
-
-list_empty_class_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
+        %%% ============================================================================
+        %%% list/1 tests
+        %%% ============================================================================
         fun() ->
             ?assertEqual([], beamtalk_extensions:list('Integer'))
-        end
-    end}.
-
-list_single_extension_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             beamtalk_extensions:register('String', 'json', Fun, mylib),
 
             ?assertEqual([{json, mylib}], beamtalk_extensions:list('String'))
-        end
-    end}.
-
-list_multiple_extensions_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             beamtalk_extensions:register('String', 'json', Fun, mylib),
@@ -295,11 +249,7 @@ list_multiple_extensions_test_() ->
             ?assert(lists:member({json, mylib}, List)),
             ?assert(lists:member({trim, stdlib}, List)),
             ?assert(lists:member({camelize, mylib}, List))
-        end
-    end}.
-
-list_does_not_include_other_classes_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             beamtalk_extensions:register('String', 'method1', Fun, mylib),
@@ -308,32 +258,19 @@ list_does_not_include_other_classes_test_() ->
 
             StringList = beamtalk_extensions:list('String'),
             ?assertEqual([{method1, mylib}], StringList)
-        end
-    end}.
-
-%%% ============================================================================
-%%% has/2 tests
-%%% ============================================================================
-
-has_existing_extension_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
+        %%% ============================================================================
+        %%% has/2 tests
+        %%% ============================================================================
         fun() ->
             Fun = fun([], X) -> X end,
             beamtalk_extensions:register('Integer', 'double', Fun, mylib),
 
             ?assert(beamtalk_extensions:has('Integer', 'double'))
-        end
-    end}.
-
-has_nonexistent_extension_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             ?assertNot(beamtalk_extensions:has('Integer', 'unknownMethod'))
-        end
-    end}.
-
-has_after_overwrite_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun1 = fun([], X) -> X end,
             Fun2 = fun([], X) -> X * 2 end,
@@ -343,22 +280,13 @@ has_after_overwrite_test_() ->
 
             %% Should still exist after conflict
             ?assert(beamtalk_extensions:has('String', 'json'))
-        end
-    end}.
-
-%%% ============================================================================
-%%% conflicts/0 tests
-%%% ============================================================================
-
-conflicts_empty_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
+        %%% ============================================================================
+        %%% conflicts/0 tests
+        %%% ============================================================================
         fun() ->
             ?assertEqual([], beamtalk_extensions:conflicts())
-        end
-    end}.
-
-conflicts_no_conflict_same_owner_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun1 = fun([], X) -> X end,
             Fun2 = fun([], X) -> X * 2 end,
@@ -368,11 +296,7 @@ conflicts_no_conflict_same_owner_test_() ->
 
             %% No conflict - same owner
             ?assertEqual([], beamtalk_extensions:conflicts())
-        end
-    end}.
-
-conflicts_with_different_owners_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun1 = fun([], X) -> X end,
             Fun2 = fun([], X) -> X * 2 end,
@@ -386,11 +310,7 @@ conflicts_with_different_owners_test_() ->
             [{'String', json, Owners}] = Conflicts,
             ?assert(lists:member(mylib, Owners)),
             ?assert(lists:member(otherlib, Owners))
-        end
-    end}.
-
-conflicts_multiple_methods_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
 
@@ -424,11 +344,7 @@ conflicts_multiple_methods_test_() ->
                     Conflicts
                 )
             )
-        end
-    end}.
-
-conflicts_three_way_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
 
@@ -444,16 +360,11 @@ conflicts_three_way_test_() ->
             ?assert(lists:member(lib1, Owners)),
             ?assert(lists:member(lib2, Owners)),
             ?assert(lists:member(lib3, Owners))
-        end
-    end}.
-
-%%% ============================================================================
-%%% Source tracking tests (register/5, getSource/2,
-%%% listAllWithSource/0)
-%%% ============================================================================
-
-register_with_source_stores_source_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
+        %%% ============================================================================
+        %%% Source tracking tests (register/5, getSource/2,
+        %%% listAllWithSource/0)
+        %%% ============================================================================
         fun() ->
             Fun = fun([], X) -> X * 2 end,
             Source = <<"double => self * 2">>,
@@ -475,11 +386,7 @@ register_with_source_stores_source_test_() ->
                 {ok, {beamtalk_string, Source}},
                 beamtalk_extensions:getSource('Integer', 'double')
             )
-        end
-    end}.
-
-register_arity4_does_not_store_source_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
 
@@ -495,11 +402,7 @@ register_arity4_does_not_store_source_test_() ->
                 not_found,
                 beamtalk_extensions:getSource('Integer', 'noop')
             )
-        end
-    end}.
-
-register_with_undefined_source_skips_source_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
 
@@ -514,21 +417,13 @@ register_with_undefined_source_skips_source_test_() ->
                 not_found,
                 beamtalk_extensions:getSource('Integer', 'noop2')
             )
-        end
-    end}.
-
-get_source_missing_extension_returns_not_found_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             ?assertEqual(
                 not_found,
                 beamtalk_extensions:getSource('NotARegisteredClass', 'noSuchSelector')
             )
-        end
-    end}.
-
-list_all_with_source_returns_only_register5_entries_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             Src1 = <<"double => self * 2">>,
@@ -548,7 +443,7 @@ list_all_with_source_returns_only_register5_entries_test_() ->
             ?assert(lists:member({'Integer', double, {beamtalk_string, Src1}}, Listed)),
             ?assert(lists:member({'String', trim, {beamtalk_string, Src2}}, Listed))
         end
-    end}.
+    ]}.
 
 list_all_with_source_handles_uninitialised_table_test() ->
     %% Delete the sources table to simulate the early bootstrap window —
@@ -568,7 +463,7 @@ list_all_with_source_handles_uninitialised_table_test() ->
     end.
 
 register_with_source_updates_source_on_reregister_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+    {foreach, fun setup/0, fun cleanup/1, [
         fun() ->
             Fun = fun([], X) -> X end,
             Src1 = <<"original source">>,
@@ -581,11 +476,7 @@ register_with_source_updates_source_on_reregister_test_() ->
             ?assertEqual(
                 {ok, {beamtalk_string, Src2}}, beamtalk_extensions:getSource('Integer', 'go')
             )
-        end
-    end}.
-
-register_arity4_clears_stale_source_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             Src = <<"original body for register/5">>,
@@ -609,11 +500,7 @@ register_arity4_clears_stale_source_test_() ->
             ?assertNot(
                 lists:any(fun({_C, S, _Src}) -> S =:= 'flip' end, Listed)
             )
-        end
-    end}.
-
-register_with_undefined_clears_stale_source_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             Src = <<"original body">>,
@@ -628,7 +515,7 @@ register_with_undefined_clears_stale_source_test_() ->
             beamtalk_extensions:register('Integer', 'spin', Fun, mylib, undefined),
             ?assertEqual(not_found, beamtalk_extensions:getSource('Integer', 'spin'))
         end
-    end}.
+    ]}.
 
 get_source_handles_uninitialised_table_test() ->
     %% Mirrors list_all_with_source_handles_uninitialised_table_test —
@@ -654,25 +541,17 @@ get_source_handles_uninitialised_table_test() ->
 %%% ============================================================================
 
 extenders_of_empty_table_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+    {foreach, fun setup/0, fun cleanup/1, [
         fun() ->
             %% No extensions registered — must return [] not an error.
             ?assertEqual([], beamtalk_extensions:extenders_of('Integer'))
-        end
-    end}.
-
-extenders_of_single_extender_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X * 2 end,
             beamtalk_extensions:register('Integer', 'double', Fun, mylib),
 
             ?assertEqual([mylib], beamtalk_extensions:extenders_of('Integer'))
-        end
-    end}.
-
-extenders_of_multiple_extenders_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             beamtalk_extensions:register('Integer', 'double', Fun, mylib),
@@ -685,11 +564,7 @@ extenders_of_multiple_extenders_test_() ->
             ?assert(lists:member(mylib, Result)),
             ?assert(lists:member(stdlib, Result)),
             ?assert(lists:member(otherlib, Result))
-        end
-    end}.
-
-extenders_of_deduplicates_same_owner_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             %% Same owner registers multiple methods on the same class.
@@ -699,11 +574,7 @@ extenders_of_deduplicates_same_owner_test_() ->
 
             %% Owner should appear only once despite multiple methods.
             ?assertEqual([mylib], beamtalk_extensions:extenders_of('Integer'))
-        end
-    end}.
-
-extenders_of_does_not_include_other_class_owners_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             beamtalk_extensions:register('String', 'json', Fun, lib1),
@@ -712,44 +583,27 @@ extenders_of_does_not_include_other_class_owners_test_() ->
 
             %% Query for String should only return lib1, not lib2 or lib3.
             ?assertEqual([lib1], beamtalk_extensions:extenders_of('String'))
-        end
-    end}.
-
-extenders_of_no_match_returns_empty_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             beamtalk_extensions:register('Integer', 'double', Fun, mylib),
 
             %% Asking about a class with no extensions returns [].
             ?assertEqual([], beamtalk_extensions:extenders_of('Float'))
-        end
-    end}.
-
-%%% ============================================================================
-%%% extensions_by/1 tests
-%%% ============================================================================
-
-extensions_by_empty_table_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
+        %%% ============================================================================
+        %%% extensions_by/1 tests
+        %%% ============================================================================
         fun() ->
             %% No extensions registered — must return [] not an error.
             ?assertEqual([], beamtalk_extensions:extensions_by(mylib))
-        end
-    end}.
-
-extensions_by_single_extension_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X * 2 end,
             beamtalk_extensions:register('Integer', 'double', Fun, mylib),
 
             ?assertEqual([{'Integer', double}], beamtalk_extensions:extensions_by(mylib))
-        end
-    end}.
-
-extensions_by_multiple_targets_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             beamtalk_extensions:register('Integer', 'double', Fun, mylib),
@@ -762,11 +616,7 @@ extensions_by_multiple_targets_test_() ->
             ?assert(lists:member({'Integer', double}, Result)),
             ?assert(lists:member({'String', json}, Result)),
             ?assert(lists:member({'Float', ceil}, Result))
-        end
-    end}.
-
-extensions_by_excludes_other_owners_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             beamtalk_extensions:register('Integer', 'double', Fun, mylib),
@@ -779,26 +629,17 @@ extensions_by_excludes_other_owners_test_() ->
             ?assert(lists:member({'Integer', double}, Result)),
             ?assert(lists:member({'Float', ceil}, Result)),
             ?assertNot(lists:member({'String', json}, Result))
-        end
-    end}.
-
-extensions_by_no_match_returns_empty_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
         fun() ->
             Fun = fun([], X) -> X end,
             beamtalk_extensions:register('Integer', 'double', Fun, mylib),
 
             %% Unknown owner has no extensions.
             ?assertEqual([], beamtalk_extensions:extensions_by(unknown_owner))
-        end
-    end}.
-
-%%% ============================================================================
-%%% Symmetric round-trip tests
-%%% ============================================================================
-
-extenders_of_extensions_by_round_trip_test_() ->
-    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        end,
+        %%% ============================================================================
+        %%% Symmetric round-trip tests
+        %%% ============================================================================
         fun() ->
             Fun = fun([], X) -> X end,
             %% lib1 extends Integer and String.
@@ -838,7 +679,7 @@ extenders_of_extensions_by_round_trip_test_() ->
                 IntExtenders
             )
         end
-    end}.
+    ]}.
 
 %%% ============================================================================
 %%% ADR 0087 Phase 4: xref index hooks for extension lifecycle
@@ -873,385 +714,309 @@ compiler_walker_available() ->
         end.
 
 register5_indexes_sends_in_xref_test_() ->
-    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
-        [
-            ?_test(begin
-                %% A sourced extension (register/5) is parsed and indexed: the
-                %% method becomes an implementor, and its sends are visible.
-                Fun = fun(_Args, _Self) -> ok end,
-                Source = <<"shout => self asString asUppercase">>,
-                ok = beamtalk_extensions:register('String', 'shout', Fun, mylib, Source),
+    {foreach, fun xref_setup/0, fun xref_cleanup/1, [
+        ?_test(begin
+            %% A sourced extension (register/5) is parsed and indexed: the
+            %% method becomes an implementor, and its sends are visible.
+            Fun = fun(_Args, _Self) -> ok end,
+            Source = <<"shout => self asString asUppercase">>,
+            ok = beamtalk_extensions:register('String', 'shout', Fun, mylib, Source),
 
-                ?assertEqual(
-                    [{'String', false}], beamtalk_xref:implementors_of('shout')
-                ),
-                Info = beamtalk_xref:method_info('String', false, 'shout'),
-                ?assertEqual(indexed, maps:get(source_status, Info)),
-                ?assertEqual(extension, maps:get(provenance, Info)),
+            ?assertEqual(
+                [{'String', false}], beamtalk_xref:implementors_of('shout')
+            ),
+            Info = beamtalk_xref:method_info('String', false, 'shout'),
+            ?assertEqual(indexed, maps:get(source_status, Info)),
+            ?assertEqual(extension, maps:get(provenance, Info)),
 
-                %% `asUppercase` is sent by the extension body — visible only when
-                %% the compiler AST walker is available (a bare EUnit node without
-                %% the compiler port degrades to empty sends, but the indexed
-                %% method row above is always recorded).
-                case compiler_walker_available() of
-                    false ->
-                        ok;
-                    true ->
-                        UpperSites = beamtalk_xref:senders_of('asUppercase'),
-                        ?assert(
-                            lists:any(
-                                fun(S) ->
-                                    maps:get(owner, S) =:= 'String' andalso
-                                        maps:get(method, S) =:= 'shout'
-                                end,
-                                UpperSites
-                            )
+            %% `asUppercase` is sent by the extension body — visible only when
+            %% the compiler AST walker is available (a bare EUnit node without
+            %% the compiler port degrades to empty sends, but the indexed
+            %% method row above is always recorded).
+            case compiler_walker_available() of
+                false ->
+                    ok;
+                true ->
+                    UpperSites = beamtalk_xref:senders_of('asUppercase'),
+                    ?assert(
+                        lists:any(
+                            fun(S) ->
+                                maps:get(owner, S) =:= 'String' andalso
+                                    maps:get(method, S) =:= 'shout'
+                            end,
+                            UpperSites
                         )
-                end
-            end)
-        ]
-    end}.
+                    )
+            end
+        end),
+        ?_test(begin
+            %% A sourceless extension (register/4) is recorded as an
+            %% unindexed_runtime_fun marker: present as an implementor, but
+            %% with no scannable sends.
+            Fun = fun(_Args, _Self) -> ok end,
+            ok = beamtalk_extensions:register('Integer', 'doubled', Fun, mylib),
 
-register4_marks_unindexed_runtime_fun_test_() ->
-    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
-        [
-            ?_test(begin
-                %% A sourceless extension (register/4) is recorded as an
-                %% unindexed_runtime_fun marker: present as an implementor, but
-                %% with no scannable sends.
-                Fun = fun(_Args, _Self) -> ok end,
-                ok = beamtalk_extensions:register('Integer', 'doubled', Fun, mylib),
+            ?assertEqual(
+                [{'Integer', false}], beamtalk_xref:implementors_of('doubled')
+            ),
+            Info = beamtalk_xref:method_info('Integer', false, 'doubled'),
+            ?assertEqual(unindexed_runtime_fun, maps:get(source_status, Info)),
+            ?assertEqual(extension, maps:get(provenance, Info)),
 
-                ?assertEqual(
-                    [{'Integer', false}], beamtalk_xref:implementors_of('doubled')
-                ),
-                Info = beamtalk_xref:method_info('Integer', false, 'doubled'),
-                ?assertEqual(unindexed_runtime_fun, maps:get(source_status, Info)),
-                ?assertEqual(extension, maps:get(provenance, Info)),
+            %% ADR 0087 Phase 6: the unindexed_runtime_fun row is
+            %% DEFINED-here — distinct from an absent row, which reports
+            %% `undefined`. A query can tell "defined, sends not analysable"
+            %% apart from "no such method".
+            ?assertNotEqual(
+                undefined, beamtalk_xref:method_info('Integer', false, 'doubled')
+            ),
+            ?assertEqual(
+                undefined, beamtalk_xref:method_info('Integer', false, 'noSuchSelector')
+            ),
+            ?assertEqual([], beamtalk_xref:implementors_of('noSuchSelector'))
+        end),
+        ?_test(begin
+            %% Register two extensions on the same class, then unregister one
+            %% — only its rows are purged; the sibling stays.
+            Fun = fun(_Args, _Self) -> ok end,
+            ok = beamtalk_extensions:register(
+                'String', 'shout', Fun, mylib, <<"shout => self asUppercase">>
+            ),
+            ok = beamtalk_extensions:register(
+                'String', 'whisper', Fun, mylib, <<"whisper => self asLowercase">>
+            ),
+            ?assertEqual([{'String', false}], beamtalk_xref:implementors_of('shout')),
+            ?assertEqual([{'String', false}], beamtalk_xref:implementors_of('whisper')),
 
-                %% ADR 0087 Phase 6: the unindexed_runtime_fun row is
-                %% DEFINED-here — distinct from an absent row, which reports
-                %% `undefined`. A query can tell "defined, sends not analysable"
-                %% apart from "no such method".
-                ?assertNotEqual(
-                    undefined, beamtalk_xref:method_info('Integer', false, 'doubled')
-                ),
-                ?assertEqual(
-                    undefined, beamtalk_xref:method_info('Integer', false, 'noSuchSelector')
-                ),
-                ?assertEqual([], beamtalk_xref:implementors_of('noSuchSelector'))
-            end)
-        ]
-    end}.
+            ok = beamtalk_extensions:unregister('String', 'shout'),
 
-unregister_purges_xref_rows_test_() ->
-    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Register two extensions on the same class, then unregister one
-                %% — only its rows are purged; the sibling stays.
-                Fun = fun(_Args, _Self) -> ok end,
-                ok = beamtalk_extensions:register(
-                    'String', 'shout', Fun, mylib, <<"shout => self asUppercase">>
-                ),
-                ok = beamtalk_extensions:register(
-                    'String', 'whisper', Fun, mylib, <<"whisper => self asLowercase">>
-                ),
-                ?assertEqual([{'String', false}], beamtalk_xref:implementors_of('shout')),
-                ?assertEqual([{'String', false}], beamtalk_xref:implementors_of('whisper')),
+            %% `shout` gone from dispatch, sources, and xref.
+            ?assertEqual(not_found, beamtalk_extensions:lookup('String', 'shout')),
+            ?assertEqual(not_found, beamtalk_extensions:getSource('String', 'shout')),
+            ?assertEqual([], beamtalk_xref:implementors_of('shout')),
+            ?assertEqual([], beamtalk_xref:senders_of('asUppercase')),
 
-                ok = beamtalk_extensions:unregister('String', 'shout'),
+            %% Sibling `whisper` untouched — its method row survives the
+            %% narrow purge regardless of compiler availability.
+            ?assertEqual([{'String', false}], beamtalk_xref:implementors_of('whisper')),
+            case compiler_walker_available() of
+                false ->
+                    ok;
+                true ->
+                    ?assertEqual(1, length(beamtalk_xref:senders_of('asLowercase')))
+            end
+        end),
+        ?_test(begin
+            %% Unregistering an extension that was never registered is a
+            %% harmless no-op.
+            ?assertEqual(ok, beamtalk_extensions:unregister('String', 'nope'))
+        end),
+        %%% ============================================================================
+        %%% unregister/3 — class-side extension removal + conflict cleanup
+        %%% ============================================================================
+        ?_test(begin
+            %% A class-side extension is registered under the metaclass
+            %% tag (ADR 0066's established convention — mirrors
+            %% how codegen emits `Target class >> sel` registrations).
+            InstanceClass = 'BT3185Meta',
+            ClassSideTag = beamtalk_class_registry:class_object_tag(InstanceClass),
+            Fun = fun(_Args, _Self) -> ok end,
+            ok = beamtalk_extensions:register(
+                ClassSideTag, 'make', Fun, mylib, <<"make => self new">>
+            ),
+            ?assertEqual(
+                [{ClassSideTag, false}], beamtalk_xref:implementors_of('make')
+            ),
+            ?assert(beamtalk_extensions:has(ClassSideTag, 'make')),
 
-                %% `shout` gone from dispatch, sources, and xref.
-                ?assertEqual(not_found, beamtalk_extensions:lookup('String', 'shout')),
-                ?assertEqual(not_found, beamtalk_extensions:getSource('String', 'shout')),
-                ?assertEqual([], beamtalk_xref:implementors_of('shout')),
-                ?assertEqual([], beamtalk_xref:senders_of('asUppercase')),
+            %% unregister/3 is given the *bare* class name plus
+            %% ClassSide = true — it must resolve the class-side ETS key
+            %% itself via class_object_tag/1, exactly like purge_class/1's
+            %% documented convention, and purge the xref row that was
+            %% actually written under the tag.
+            ok = beamtalk_extensions:unregister(InstanceClass, 'make', true),
 
-                %% Sibling `whisper` untouched — its method row survives the
-                %% narrow purge regardless of compiler availability.
-                ?assertEqual([{'String', false}], beamtalk_xref:implementors_of('whisper')),
-                case compiler_walker_available() of
-                    false ->
-                        ok;
-                    true ->
-                        ?assertEqual(1, length(beamtalk_xref:senders_of('asLowercase')))
-                end
-            end)
-        ]
-    end}.
+            ?assertNot(beamtalk_extensions:has(ClassSideTag, 'make')),
+            ?assertEqual(not_found, beamtalk_extensions:lookup(ClassSideTag, 'make')),
+            ?assertEqual(not_found, beamtalk_extensions:getSource(ClassSideTag, 'make')),
+            ?assertEqual([], beamtalk_xref:implementors_of('make'))
+        end),
+        ?_test(begin
+            %% Instance-side and class-side extensions of the same
+            %% selector on the same class name are stored under separate
+            %% ETS keys — removing one must not touch the other.
+            InstanceClass = 'BT3185Sided',
+            ClassSideTag = beamtalk_class_registry:class_object_tag(InstanceClass),
+            Fun = fun(_Args, _Self) -> ok end,
+            ok = beamtalk_extensions:register(InstanceClass, 'twin', Fun, mylib),
+            ok = beamtalk_extensions:register(ClassSideTag, 'twin', Fun, mylib),
 
-unregister_unknown_is_noop_test_() ->
-    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Unregistering an extension that was never registered is a
-                %% harmless no-op.
-                ?assertEqual(ok, beamtalk_extensions:unregister('String', 'nope'))
-            end)
-        ]
-    end}.
+            ok = beamtalk_extensions:unregister(InstanceClass, 'twin', true),
 
-%%% ============================================================================
-%%% unregister/3 — class-side extension removal + conflict cleanup
-%%% ============================================================================
+            ?assertNot(beamtalk_extensions:has(ClassSideTag, 'twin')),
+            ?assert(beamtalk_extensions:has(InstanceClass, 'twin'))
+        end),
+        ?_test(begin
+            %% Existing instance-side unregister/2 behavior is unchanged
+            %% — it is exactly unregister/3 with ClassSide = false.
+            Fun = fun(_Args, _Self) -> ok end,
+            ok = beamtalk_extensions:register(
+                'BT3185Plain', 'greet', Fun, mylib, <<"greet => self">>
+            ),
+            ?assert(beamtalk_extensions:has('BT3185Plain', 'greet')),
 
-unregister3_class_side_purges_correct_xref_rows_test_() ->
-    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
-        [
-            ?_test(begin
-                %% A class-side extension is registered under the metaclass
-                %% tag (ADR 0066's established convention — mirrors
-                %% how codegen emits `Target class >> sel` registrations).
-                InstanceClass = 'BT3185Meta',
-                ClassSideTag = beamtalk_class_registry:class_object_tag(InstanceClass),
-                Fun = fun(_Args, _Self) -> ok end,
-                ok = beamtalk_extensions:register(
-                    ClassSideTag, 'make', Fun, mylib, <<"make => self new">>
-                ),
-                ?assertEqual(
-                    [{ClassSideTag, false}], beamtalk_xref:implementors_of('make')
-                ),
-                ?assert(beamtalk_extensions:has(ClassSideTag, 'make')),
+            ok = beamtalk_extensions:unregister('BT3185Plain', 'greet'),
 
-                %% unregister/3 is given the *bare* class name plus
-                %% ClassSide = true — it must resolve the class-side ETS key
-                %% itself via class_object_tag/1, exactly like purge_class/1's
-                %% documented convention, and purge the xref row that was
-                %% actually written under the tag.
-                ok = beamtalk_extensions:unregister(InstanceClass, 'make', true),
+            ?assertNot(beamtalk_extensions:has('BT3185Plain', 'greet')),
+            ?assertEqual([], beamtalk_xref:implementors_of('greet'))
+        end),
+        ?_test(begin
+            ?assertEqual(
+                ok, beamtalk_extensions:unregister('BT3185NeverRegistered', 'nope', true)
+            )
+        end),
+        ?_test(begin
+            Fun1 = fun(_Args, _Self) -> ok end,
+            Fun2 = fun(_Args, _Self) -> ok end,
 
-                ?assertNot(beamtalk_extensions:has(ClassSideTag, 'make')),
-                ?assertEqual(not_found, beamtalk_extensions:lookup(ClassSideTag, 'make')),
-                ?assertEqual(not_found, beamtalk_extensions:getSource(ClassSideTag, 'make')),
-                ?assertEqual([], beamtalk_xref:implementors_of('make'))
-            end)
-        ]
-    end}.
+            %% Two different owners register the same selector — records a
+            %% conflict. A sibling contested selector on the same class
+            %% must survive the removal below untouched.
+            ok = beamtalk_extensions:register('BT3185Conflict', 'shared', Fun1, lib1),
+            ok = beamtalk_extensions:register('BT3185Conflict', 'shared', Fun2, lib2),
+            ok = beamtalk_extensions:register('BT3185Conflict', 'other', Fun1, lib1),
+            ok = beamtalk_extensions:register('BT3185Conflict', 'other', Fun2, lib2),
 
-unregister3_class_side_does_not_touch_instance_side_test_() ->
-    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Instance-side and class-side extensions of the same
-                %% selector on the same class name are stored under separate
-                %% ETS keys — removing one must not touch the other.
-                InstanceClass = 'BT3185Sided',
-                ClassSideTag = beamtalk_class_registry:class_object_tag(InstanceClass),
-                Fun = fun(_Args, _Self) -> ok end,
-                ok = beamtalk_extensions:register(InstanceClass, 'twin', Fun, mylib),
-                ok = beamtalk_extensions:register(ClassSideTag, 'twin', Fun, mylib),
-
-                ok = beamtalk_extensions:unregister(InstanceClass, 'twin', true),
-
-                ?assertNot(beamtalk_extensions:has(ClassSideTag, 'twin')),
-                ?assert(beamtalk_extensions:has(InstanceClass, 'twin'))
-            end)
-        ]
-    end}.
-
-unregister3_false_matches_unregister2_test_() ->
-    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
-        [
-            ?_test(begin
-                %% Existing instance-side unregister/2 behavior is unchanged
-                %% — it is exactly unregister/3 with ClassSide = false.
-                Fun = fun(_Args, _Self) -> ok end,
-                ok = beamtalk_extensions:register(
-                    'BT3185Plain', 'greet', Fun, mylib, <<"greet => self">>
-                ),
-                ?assert(beamtalk_extensions:has('BT3185Plain', 'greet')),
-
-                ok = beamtalk_extensions:unregister('BT3185Plain', 'greet'),
-
-                ?assertNot(beamtalk_extensions:has('BT3185Plain', 'greet')),
-                ?assertEqual([], beamtalk_xref:implementors_of('greet'))
-            end)
-        ]
-    end}.
-
-unregister3_unknown_class_side_is_noop_test_() ->
-    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
-        [
-            ?_test(begin
-                ?assertEqual(
-                    ok, beamtalk_extensions:unregister('BT3185NeverRegistered', 'nope', true)
+            Conflicts = beamtalk_extensions:conflicts(),
+            ?assert(
+                lists:any(
+                    fun
+                        ({'BT3185Conflict', S, _}) -> S =:= shared;
+                        (_) -> false
+                    end,
+                    Conflicts
                 )
-            end)
-        ]
-    end}.
-
-unregister_clears_conflict_history_for_removed_selector_test_() ->
-    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
-        [
-            ?_test(begin
-                Fun1 = fun(_Args, _Self) -> ok end,
-                Fun2 = fun(_Args, _Self) -> ok end,
-
-                %% Two different owners register the same selector — records a
-                %% conflict. A sibling contested selector on the same class
-                %% must survive the removal below untouched.
-                ok = beamtalk_extensions:register('BT3185Conflict', 'shared', Fun1, lib1),
-                ok = beamtalk_extensions:register('BT3185Conflict', 'shared', Fun2, lib2),
-                ok = beamtalk_extensions:register('BT3185Conflict', 'other', Fun1, lib1),
-                ok = beamtalk_extensions:register('BT3185Conflict', 'other', Fun2, lib2),
-
-                Conflicts = beamtalk_extensions:conflicts(),
-                ?assert(
-                    lists:any(
-                        fun
-                            ({'BT3185Conflict', S, _}) -> S =:= shared;
-                            (_) -> false
-                        end,
-                        Conflicts
-                    )
-                ),
-                ?assert(
-                    lists:any(
-                        fun
-                            ({'BT3185Conflict', S, _}) -> S =:= other;
-                            (_) -> false
-                        end,
-                        Conflicts
-                    )
-                ),
-
-                %% Removing the contested `shared` extension clears its own
-                %% conflict-history row — previously only purge_class/1's
-                %% whole-class sweep did this, leaving conflicts/0 surfacing a
-                %% method that no longer exists.
-                ok = beamtalk_extensions:unregister('BT3185Conflict', 'shared'),
-
-                AfterConflicts = beamtalk_extensions:conflicts(),
-                ?assertNot(
-                    lists:any(
-                        fun
-                            ({'BT3185Conflict', S, _}) -> S =:= shared;
-                            (_) -> false
-                        end,
-                        AfterConflicts
-                    )
-                ),
-                %% The sibling `other` conflict is untouched.
-                ?assert(
-                    lists:any(
-                        fun
-                            ({'BT3185Conflict', S, _}) -> S =:= other;
-                            (_) -> false
-                        end,
-                        AfterConflicts
-                    )
+            ),
+            ?assert(
+                lists:any(
+                    fun
+                        ({'BT3185Conflict', S, _}) -> S =:= other;
+                        (_) -> false
+                    end,
+                    Conflicts
                 )
-            end)
-        ]
-    end}.
+            ),
 
-unregister3_clears_conflict_history_for_class_side_selector_test_() ->
-    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
-        [
-            ?_test(begin
-                InstanceClass = 'BT3185ClassConflict',
-                ClassSideTag = beamtalk_class_registry:class_object_tag(InstanceClass),
-                Fun1 = fun(_Args, _Self) -> ok end,
-                Fun2 = fun(_Args, _Self) -> ok end,
+            %% Removing the contested `shared` extension clears its own
+            %% conflict-history row — previously only purge_class/1's
+            %% whole-class sweep did this, leaving conflicts/0 surfacing a
+            %% method that no longer exists.
+            ok = beamtalk_extensions:unregister('BT3185Conflict', 'shared'),
 
-                ok = beamtalk_extensions:register(ClassSideTag, 'build', Fun1, lib1),
-                ok = beamtalk_extensions:register(ClassSideTag, 'build', Fun2, lib2),
-
-                Conflicts = beamtalk_extensions:conflicts(),
-                ?assert(
-                    lists:any(
-                        fun
-                            ({C, S, _}) -> C =:= ClassSideTag andalso S =:= build;
-                            (_) -> false
-                        end,
-                        Conflicts
-                    )
-                ),
-
-                ok = beamtalk_extensions:unregister(InstanceClass, 'build', true),
-
-                AfterConflicts = beamtalk_extensions:conflicts(),
-                ?assertNot(
-                    lists:any(
-                        fun
-                            ({C, S, _}) -> C =:= ClassSideTag andalso S =:= build;
-                            (_) -> false
-                        end,
-                        AfterConflicts
-                    )
+            AfterConflicts = beamtalk_extensions:conflicts(),
+            ?assertNot(
+                lists:any(
+                    fun
+                        ({'BT3185Conflict', S, _}) -> S =:= shared;
+                        (_) -> false
+                    end,
+                    AfterConflicts
                 )
-            end)
-        ]
-    end}.
+            ),
+            %% The sibling `other` conflict is untouched.
+            ?assert(
+                lists:any(
+                    fun
+                        ({'BT3185Conflict', S, _}) -> S =:= other;
+                        (_) -> false
+                    end,
+                    AfterConflicts
+                )
+            )
+        end),
+        ?_test(begin
+            InstanceClass = 'BT3185ClassConflict',
+            ClassSideTag = beamtalk_class_registry:class_object_tag(InstanceClass),
+            Fun1 = fun(_Args, _Self) -> ok end,
+            Fun2 = fun(_Args, _Self) -> ok end,
 
-%%% ============================================================================
-%%% purge_class/1 — full purge on class removal
-%%% ============================================================================
+            ok = beamtalk_extensions:register(ClassSideTag, 'build', Fun1, lib1),
+            ok = beamtalk_extensions:register(ClassSideTag, 'build', Fun2, lib2),
 
-purge_class_removes_every_extension_and_xref_row_test_() ->
-    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
-        [
-            ?_test(begin
-                Fun = fun(_Args, _Self) -> ok end,
-                %% Two extensions on the target class, plus a sibling class's
-                %% extension that must survive the purge untouched.
-                ok = beamtalk_extensions:register(
-                    'BT3105Target', 'shout', Fun, mylib, <<"shout => self asUppercase">>
-                ),
-                ok = beamtalk_extensions:register('BT3105Target', 'whisper', Fun, mylib),
-                ok = beamtalk_extensions:register('BT3105Sibling', 'greet', Fun, mylib),
+            Conflicts = beamtalk_extensions:conflicts(),
+            ?assert(
+                lists:any(
+                    fun
+                        ({C, S, _}) -> C =:= ClassSideTag andalso S =:= build;
+                        (_) -> false
+                    end,
+                    Conflicts
+                )
+            ),
 
-                ?assert(beamtalk_extensions:has('BT3105Target', 'shout')),
-                ?assert(beamtalk_extensions:has('BT3105Target', 'whisper')),
-                ?assertEqual(
-                    [{'BT3105Target', false}], beamtalk_xref:implementors_of('shout')
-                ),
+            ok = beamtalk_extensions:unregister(InstanceClass, 'build', true),
 
-                ok = beamtalk_extensions:purge_class('BT3105Target'),
+            AfterConflicts = beamtalk_extensions:conflicts(),
+            ?assertNot(
+                lists:any(
+                    fun
+                        ({C, S, _}) -> C =:= ClassSideTag andalso S =:= build;
+                        (_) -> false
+                    end,
+                    AfterConflicts
+                )
+            )
+        end),
+        %%% ============================================================================
+        %%% purge_class/1 — full purge on class removal
+        %%% ============================================================================
+        ?_test(begin
+            Fun = fun(_Args, _Self) -> ok end,
+            %% Two extensions on the target class, plus a sibling class's
+            %% extension that must survive the purge untouched.
+            ok = beamtalk_extensions:register(
+                'BT3105Target', 'shout', Fun, mylib, <<"shout => self asUppercase">>
+            ),
+            ok = beamtalk_extensions:register('BT3105Target', 'whisper', Fun, mylib),
+            ok = beamtalk_extensions:register('BT3105Sibling', 'greet', Fun, mylib),
 
-                %% Both extensions on the target are gone from every table.
-                ?assertNot(beamtalk_extensions:has('BT3105Target', 'shout')),
-                ?assertNot(beamtalk_extensions:has('BT3105Target', 'whisper')),
-                ?assertEqual(not_found, beamtalk_extensions:lookup('BT3105Target', 'shout')),
-                ?assertEqual(not_found, beamtalk_extensions:getSource('BT3105Target', 'shout')),
-                ?assertEqual([], beamtalk_xref:implementors_of('shout')),
-                ?assertEqual([], beamtalk_extensions:list('BT3105Target')),
+            ?assert(beamtalk_extensions:has('BT3105Target', 'shout')),
+            ?assert(beamtalk_extensions:has('BT3105Target', 'whisper')),
+            ?assertEqual(
+                [{'BT3105Target', false}], beamtalk_xref:implementors_of('shout')
+            ),
 
-                %% Sibling class untouched.
-                ?assert(beamtalk_extensions:has('BT3105Sibling', 'greet'))
-            end)
-        ]
-    end}.
+            ok = beamtalk_extensions:purge_class('BT3105Target'),
 
-purge_class_is_noop_for_class_with_no_extensions_test_() ->
-    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
-        [
-            ?_test(begin
-                ?assertEqual(ok, beamtalk_extensions:purge_class('BT3105NeverRegistered'))
-            end)
-        ]
-    end}.
+            %% Both extensions on the target are gone from every table.
+            ?assertNot(beamtalk_extensions:has('BT3105Target', 'shout')),
+            ?assertNot(beamtalk_extensions:has('BT3105Target', 'whisper')),
+            ?assertEqual(not_found, beamtalk_extensions:lookup('BT3105Target', 'shout')),
+            ?assertEqual(not_found, beamtalk_extensions:getSource('BT3105Target', 'shout')),
+            ?assertEqual([], beamtalk_xref:implementors_of('shout')),
+            ?assertEqual([], beamtalk_extensions:list('BT3105Target')),
 
-purge_class_purges_class_side_extensions_separately_test_() ->
-    {setup, fun xref_setup/0, fun xref_cleanup/1, fun(_) ->
-        [
-            ?_test(begin
-                Fun = fun(_Args, _Self) -> ok end,
-                InstanceClass = 'BT3105Meta',
-                ClassSideTag = beamtalk_class_registry:class_object_tag(InstanceClass),
-                ok = beamtalk_extensions:register(InstanceClass, 'greet', Fun, mylib),
-                ok = beamtalk_extensions:register(ClassSideTag, 'make', Fun, mylib),
+            %% Sibling class untouched.
+            ?assert(beamtalk_extensions:has('BT3105Sibling', 'greet'))
+        end),
+        ?_test(begin
+            ?assertEqual(ok, beamtalk_extensions:purge_class('BT3105NeverRegistered'))
+        end),
+        ?_test(begin
+            Fun = fun(_Args, _Self) -> ok end,
+            InstanceClass = 'BT3105Meta',
+            ClassSideTag = beamtalk_class_registry:class_object_tag(InstanceClass),
+            ok = beamtalk_extensions:register(InstanceClass, 'greet', Fun, mylib),
+            ok = beamtalk_extensions:register(ClassSideTag, 'make', Fun, mylib),
 
-                %% Purging only the instance-side key leaves the class-side
-                %% extension untouched — the two are stored under separate
-                %% ETS keys.
-                ok = beamtalk_extensions:purge_class(InstanceClass),
-                ?assertNot(beamtalk_extensions:has(InstanceClass, 'greet')),
-                ?assert(beamtalk_extensions:has(ClassSideTag, 'make')),
+            %% Purging only the instance-side key leaves the class-side
+            %% extension untouched — the two are stored under separate
+            %% ETS keys.
+            ok = beamtalk_extensions:purge_class(InstanceClass),
+            ?assertNot(beamtalk_extensions:has(InstanceClass, 'greet')),
+            ?assert(beamtalk_extensions:has(ClassSideTag, 'make')),
 
-                ok = beamtalk_extensions:purge_class(ClassSideTag),
-                ?assertNot(beamtalk_extensions:has(ClassSideTag, 'make'))
-            end)
-        ]
-    end}.
+            ok = beamtalk_extensions:purge_class(ClassSideTag),
+            ?assertNot(beamtalk_extensions:has(ClassSideTag, 'make'))
+        end)
+    ]}.

@@ -15,8 +15,8 @@ use crate::semantic_analysis::string_utils::edit_distance;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
+use super::super::diagnostic_facts::ClassObjectType;
 use super::super::type_resolver;
-use super::super::types::ClassObjectType;
 use super::super::well_known::WellKnownClass;
 use super::super::{InferredType, TypeChecker, TypeEnv};
 

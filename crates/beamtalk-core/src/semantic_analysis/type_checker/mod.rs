@@ -54,6 +54,7 @@ thread_local! {
 }
 
 mod binary_string_compare;
+mod diagnostic_facts;
 mod env_key;
 mod exhaustiveness;
 mod inference;
@@ -75,6 +76,7 @@ mod shape_keyed;
 pub mod sendability;
 #[cfg(test)]
 mod tests;
+mod type_algebra;
 mod type_resolver;
 mod types;
 mod validation;
@@ -646,7 +648,7 @@ pub struct TypeChecker {
     /// BT-4636: `(local, type the block left it with)` pairs collected while
     /// [`Self::defer_block_widening`] is set.
     pub(in crate::semantic_analysis::type_checker) deferred_block_widenings:
-        Vec<inference::blocks::BlockWriteWidening>,
+        Vec<inference::block_outer_writes::BlockWriteWidening>,
 }
 
 impl TypeChecker {

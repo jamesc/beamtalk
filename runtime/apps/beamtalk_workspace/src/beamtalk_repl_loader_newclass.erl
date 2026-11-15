@@ -14,10 +14,11 @@ ChangeLog entry (`new_class/2`), plus `revert_remove_class/2`, which reinstalls
 a removed class through the same compile+install chokepoint (ADR 0113).
 
 Extracted from `beamtalk_repl_loader` (BT-4702). It is a client of the loader's
-load/activate primitives (`load_class_binary/4`, `activate_module/4`,
-`maybe_autoflush/1`, …), which stay in `beamtalk_repl_loader` because the
-single-site install paths share them; the loader makes no calls into this
-module.
+load/activate primitives (`load_class_binary/4` in
+`beamtalk_repl_loader_support`, `activate_module/4` in
+`beamtalk_repl_loader_activate`, `maybe_autoflush/1` in
+`beamtalk_repl_loader_methods`, …), which the single-site install paths share;
+the loader makes no calls into this module.
 """.
 
 -export([
@@ -41,9 +42,7 @@ module.
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
-%% ChangeLog entry construction lives in its own module (BT-4683).
--define(ENTRIES, beamtalk_repl_loader_changelog_entries).
+-include("beamtalk_repl_loader.hrl").
 
 %%% ----------------------------------------------------------------------------
 %%% New-class creation (ADR 0082 Phase 1)
@@ -155,14 +154,14 @@ new_class_compile(Source, TargetPath, AbsPath) ->
 -spec new_class_compile(string(), string(), string(), log | no_log) ->
     {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
 new_class_compile(Source, TargetPath, AbsPath, Mode) ->
-    StdlibMode = beamtalk_repl_loader:is_stdlib_path(TargetPath),
+    StdlibMode = beamtalk_repl_loader_support:is_stdlib_path(TargetPath),
     %% `compile_file/4`'s success-typing return here is a class binary or an
     %% error (the protocol-definition variant declared in its spec is produced by
     %% a different compiler entry, not this one — dialyzer confirms it can never
     %% arrive). A protocol-only source therefore surfaces as a compile error or
     %% as a class-less result that `declared_class_name([])` rejects loudly.
     Compiled =
-        case beamtalk_repl_loader:compute_package_module_name(TargetPath) of
+        case beamtalk_repl_loader_reload:compute_package_module_name(TargetPath) of
             {ok, ModuleNameOverride} ->
                 beamtalk_repl_compiler:compile_file(
                     Source, TargetPath, StdlibMode, ModuleNameOverride
@@ -218,9 +217,9 @@ new_class_validate_and_install(Source, TargetPath, AbsPath, Binary, ClassNames, 
 ) -> {ok, [#beamtalk_object{}]} | {error, #beamtalk_error{}}.
 new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, DeclaredName, Mode) ->
     %% ADR 0107 Phase A: see load_class_binary/4's doc.
-    case beamtalk_repl_loader:load_class_binary(ModuleName, AbsPath, Binary, ClassNames) of
+    case beamtalk_repl_loader_support:load_class_binary(ModuleName, AbsPath, Binary, ClassNames) of
         {ok, NewlyNonLeafSuperclasses} ->
-            beamtalk_repl_loader:activate_module(
+            beamtalk_repl_loader_activate:activate_module(
                 ModuleName, ClassNames, AbsPath, NewlyNonLeafSuperclasses
             ),
             %% Record class source so subsequent `>>` / compile:source: patches
@@ -228,7 +227,7 @@ new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, D
             lists:foreach(
                 fun(#{name := Name}) ->
                     beamtalk_workspace_meta:set_class_source(
-                        beamtalk_repl_loader:normalize_class_source_key(Name), Source
+                        beamtalk_repl_loader_support:normalize_class_source_key(Name), Source
                     )
                 end,
                 ClassNames
@@ -242,13 +241,13 @@ new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, D
                     %% (they are durable + flushable by construction). See the
                     %% analogous comment in load_recompiled_method/7 for the
                     %% failure semantics.
-                    beamtalk_repl_loader:maybe_autoflush(durable);
+                    beamtalk_repl_loader_methods:maybe_autoflush(durable);
                 no_log ->
                     ok
             end,
             {ok, loaded_class_objects(ClassNames)};
         {error, LoadReason} ->
-            ClassAtoms = beamtalk_repl_loader:class_name_atoms(ClassNames),
+            ClassAtoms = beamtalk_repl_loader_support:class_name_atoms(ClassNames),
             case beamtalk_runtime_api:drain_pending_load_errors_by_names(ClassAtoms) of
                 [{_ClassName, StructuredError} | _] ->
                     {error, StructuredError};
@@ -317,7 +316,7 @@ loud error. Pure — exported for tests.
 """.
 -spec declared_class_name([map()]) -> {ok, binary()} | {error, #beamtalk_error{}}.
 declared_class_name([#{name := Name}]) ->
-    {ok, beamtalk_repl_loader:normalize_class_source_key(Name)};
+    {ok, beamtalk_repl_loader_support:normalize_class_source_key(Name)};
 declared_class_name([]) ->
     {error,
         new_class_error(
@@ -326,7 +325,10 @@ declared_class_name([]) ->
             undefined
         )};
 declared_class_name(ClassNames) when length(ClassNames) > 1 ->
-    Names = [beamtalk_repl_loader:normalize_class_source_key(N) || #{name := N} <- ClassNames],
+    Names = [
+        beamtalk_repl_loader_support:normalize_class_source_key(N)
+     || #{name := N} <- ClassNames
+    ],
     {error,
         new_class_error(
             multiple_classes_declared,
@@ -359,8 +361,8 @@ validate_new_class(DeclaredName, TargetPath, Loaded) ->
     Expected = list_to_binary(BaseName),
     %% Accept either an exact match (Greeter.bt) or a snake_case match
     %% (greeter.bt) — both map to the same module name as the class.
-    DeclaredSnake = beamtalk_repl_loader:to_snake_case(binary_to_list(DeclaredName)),
-    BaseSnake = beamtalk_repl_loader:to_snake_case(BaseName),
+    DeclaredSnake = beamtalk_repl_loader_support:to_snake_case(binary_to_list(DeclaredName)),
+    BaseSnake = beamtalk_repl_loader_support:to_snake_case(BaseName),
     Matches = (DeclaredName =:= Expected) orelse (DeclaredSnake =:= BaseSnake),
     case Matches of
         false ->

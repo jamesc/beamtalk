@@ -1310,7 +1310,7 @@ define_project_class(Tmp, ClassNameBin, Methods) ->
         <<"Actor subclass: ">>, ClassNameBin, <<"\n">>, Methods
     ]),
     ok = file:write_file(Path, Source),
-    {ok, _ClassNames} = beamtalk_repl_loader:reload_class_file(Path),
+    {ok, _ClassNames} = beamtalk_repl_loader_reload:reload_class_file(Path),
     %% Record the class source in workspace_meta so live patches resolve their
     %% span (the stateful REPL load path does this; the stateless reload does not).
     ok = beamtalk_workspace_meta:set_class_source(ClassNameBin, binary_to_list(Source)),
@@ -1415,7 +1415,7 @@ define_stdlib_class(Tmp, ClassNameBin, Methods) ->
         <<"Object subclass: ">>, ClassNameBin, <<"\n">>, Methods
     ]),
     ok = file:write_file(Path, Source),
-    {ok, _ClassNames} = beamtalk_repl_loader:reload_class_file(Path),
+    {ok, _ClassNames} = beamtalk_repl_loader_reload:reload_class_file(Path),
     ok = beamtalk_workspace_meta:set_class_source(ClassNameBin, binary_to_list(Source)),
     ClassAtom = binary_to_atom(ClassNameBin, utf8),
     Pid = wait_for_class(ClassAtom, 50),

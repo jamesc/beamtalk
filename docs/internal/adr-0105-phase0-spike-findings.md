@@ -80,7 +80,7 @@ but misses inferred signatures.
 - **REPL `>>` path** → `beamtalk_object_class:put_method/4` gen_server call →
   clears (1a). This is the path the ADR's caveat describes.
 - **IDE-save / `compile:source:` / MCP `save_method` path** →
-  `beamtalk_repl_loader:install_method` → `compile_method_reload` → **full class
+  `beamtalk_repl_loader_methods:install_method` → `compile_method_reload` → **full class
   recompile** → `code:load_binary` + `register_class/0`
   (`beamtalk_repl_loader.erl:751-824, 933-986`). This path does **not** go through
   `object_class:put_method`; it reloads a freshly compiled module whose

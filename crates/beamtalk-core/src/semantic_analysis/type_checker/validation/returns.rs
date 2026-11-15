@@ -13,8 +13,8 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 use ecow::EcoString;
 
+use super::super::diagnostic_facts::ClassObjectType;
 use super::super::type_resolver;
-use super::super::types::ClassObjectType;
 use super::super::{DynamicReason, InferredType, TypeChecker};
 
 impl TypeChecker {
