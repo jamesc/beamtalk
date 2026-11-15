@@ -86,43 +86,52 @@ native_handle_call_clause_lines_test() ->
         "handle_call(Msg, _From, State) ->\n",
         "    {reply, {error, unknown}, State}.\n"
     ]),
-    Clauses = beamtalk_repl_ops_browse:handle_call_clause_lines(Content),
+    Clauses = beamtalk_repl_ops_browse_native:handle_call_clause_lines(Content),
     Pairs = [{maps:get(<<"selector">>, C), maps:get(<<"line">>, C)} || C <- Clauses],
     %% Only the two concrete selectors, at their real lines (1-based).
     ?assertEqual([{<<"writeLine:">>, 4}, {<<"readLine">>, 6}], Pairs).
 
 native_clause_lines_null_content_is_empty_test() ->
-    ?assertEqual([], beamtalk_repl_ops_browse:handle_call_clause_lines(null)).
+    ?assertEqual([], beamtalk_repl_ops_browse_native:handle_call_clause_lines(null)).
 
 native_clause_selector_skips_generic_clauses_test() ->
     ?assertEqual(
         none,
-        beamtalk_repl_ops_browse:clause_selector(
+        beamtalk_repl_ops_browse_native:clause_selector(
             <<"handle_call({Selector, Args, Ctx}, From, State) ->">>
         )
     ),
     ?assertEqual(
-        none, beamtalk_repl_ops_browse:clause_selector(<<"handle_call(Msg, _From, State) ->">>)
+        none,
+        beamtalk_repl_ops_browse_native:clause_selector(<<"handle_call(Msg, _From, State) ->">>)
     ),
     ?assertEqual(
         {ok, <<"readLine">>},
-        beamtalk_repl_ops_browse:clause_selector(<<"handle_call({readLine, []}, From, S) ->">>)
+        beamtalk_repl_ops_browse_native:clause_selector(
+            <<"handle_call({readLine, []}, From, S) ->">>
+        )
     ),
     %% An indented clause head still matches (anchored to optional leading
     %% whitespace).
     ?assertEqual(
         {ok, <<"readLine">>},
-        beamtalk_repl_ops_browse:clause_selector(<<"    handle_call({readLine, []}, F, S) ->">>)
+        beamtalk_repl_ops_browse_native:clause_selector(
+            <<"    handle_call({readLine, []}, F, S) ->">>
+        )
     ),
     %% A `handle_call` mention mid-line is NOT a clause head: a comment or an
     %% assignment must not produce a spurious clause row.
     ?assertEqual(
         none,
-        beamtalk_repl_ops_browse:clause_selector(<<"%% see handle_call({readLine, []}, ...)">>)
+        beamtalk_repl_ops_browse_native:clause_selector(
+            <<"%% see handle_call({readLine, []}, ...)">>
+        )
     ),
     ?assertEqual(
         none,
-        beamtalk_repl_ops_browse:clause_selector(<<"    R = handle_call({readLine, []}, F, S),">>)
+        beamtalk_repl_ops_browse_native:clause_selector(
+            <<"    R = handle_call({readLine, []}, F, S),">>
+        )
     ).
 
 %% Conformance: every case in the shared corpus must resolve the same
@@ -144,7 +153,7 @@ clause_selector_corpus_test() ->
             Why = maps:get(<<"why">>, Case, <<>>),
             ?assertEqual(
                 Expected,
-                beamtalk_repl_ops_browse:clause_selector(Line),
+                beamtalk_repl_ops_browse_native:clause_selector(Line),
                 {corpus_mismatch, Line, Why}
             )
         end,
@@ -177,14 +186,14 @@ native_delegate_exported_marker_test() ->
         {'dispatch_writeLine:', 2},
         {'__beamtalk_meta', 0}
     ],
-    ?assert(beamtalk_repl_ops_browse:delegate_exported(Exports, readLine)),
-    ?assert(beamtalk_repl_ops_browse:delegate_exported(Exports, 'writeLine:')),
+    ?assert(beamtalk_repl_ops_browse_native:delegate_exported(Exports, readLine)),
+    ?assert(beamtalk_repl_ops_browse_native:delegate_exported(Exports, 'writeLine:')),
     %% A non-delegate selector (no dispatch export) is not a delegate.
-    ?assertNot(beamtalk_repl_ops_browse:delegate_exported(Exports, 'open:args:')),
+    ?assertNot(beamtalk_repl_ops_browse_native:delegate_exported(Exports, 'open:args:')),
     %% Exact match, not prefix: `readLine` must not be matched by a `readLine:`
     %% query (or vice versa).
-    ?assertNot(beamtalk_repl_ops_browse:delegate_exported(Exports, 'readLine:')),
-    ?assertNot(beamtalk_repl_ops_browse:delegate_exported([], readLine)).
+    ?assertNot(beamtalk_repl_ops_browse_native:delegate_exported(Exports, 'readLine:')),
+    ?assertNot(beamtalk_repl_ops_browse_native:delegate_exported([], readLine)).
 
 %%====================================================================
 %% delegate_callers_of_native_module/1
@@ -197,23 +206,23 @@ self_delegate_selectors_extracts_dispatch_exports_test() ->
     Exports = beamtalk_test_native_facade:module_info(exports),
     ?assertEqual(
         [increment, 'incrementBy:'],
-        beamtalk_repl_ops_browse:self_delegate_selectors(Exports)
+        beamtalk_repl_ops_browse_native:self_delegate_selectors(Exports)
     ).
 
 %% A bare exports list: the prefix must be an exact `dispatch_` head, and the
 %% stripped remainder must already be an interned selector atom — an unknown one
 %% is skipped rather than growing the atom table.
 self_delegate_selectors_filters_non_dispatch_test() ->
-    ?assertEqual([], beamtalk_repl_ops_browse:self_delegate_selectors([])),
+    ?assertEqual([], beamtalk_repl_ops_browse_native:self_delegate_selectors([])),
     %% `dispatcher`/`dispatch` share a prefix but are not `dispatch_<x>`.
     ?assertEqual(
         [],
-        beamtalk_repl_ops_browse:self_delegate_selectors([{dispatcher, 0}, {dispatch, 1}])
+        beamtalk_repl_ops_browse_native:self_delegate_selectors([{dispatcher, 0}, {dispatch, 1}])
     ),
     %% `dispatch_` + an atom that is not interned as a selector → skipped.
     ?assertEqual(
         [],
-        beamtalk_repl_ops_browse:self_delegate_selectors([
+        beamtalk_repl_ops_browse_native:self_delegate_selectors([
             {'dispatch_totallyUninternedSelectorXyz', 1}
         ])
     ).
@@ -283,7 +292,7 @@ delegate_cleanup(#{class := {Name, Pid, Owned}}) ->
 delegate_tests(#{class_name := ClassName}) ->
     [
         {"lists the class's self delegate methods, anchored at their header lines", fun() ->
-            Rows = beamtalk_repl_ops_browse:delegate_callers_of_native_module(
+            Rows = beamtalk_repl_ops_browse_native:delegate_callers_of_native_module(
                 bt_test_native_backing
             ),
             MyRows = [R || R <- Rows, maps:get(owner, R) =:= ClassName],
@@ -303,7 +312,7 @@ delegate_tests(#{class_name := ClassName}) ->
         {"a module that backs no loaded class yields the empty state", fun() ->
             ?assertEqual(
                 [],
-                beamtalk_repl_ops_browse:delegate_callers_of_native_module(
+                beamtalk_repl_ops_browse_native:delegate_callers_of_native_module(
                     bt_no_such_native_backing_module_xyz
                 )
             )
@@ -311,7 +320,9 @@ delegate_tests(#{class_name := ClassName}) ->
         {"the `none` backing-module sentinel is guarded (never matches)", fun() ->
             %% `none` is `meta_backing_module/1`'s "no backing module" answer, so a
             %% `module=none` query must NOT match classes that report no backing.
-            ?assertEqual([], beamtalk_repl_ops_browse:delegate_callers_of_native_module(none))
+            ?assertEqual(
+                [], beamtalk_repl_ops_browse_native:delegate_callers_of_native_module(none)
+            )
         end}
     ].
 
@@ -336,7 +347,7 @@ delegate_tests(#{class_name := ClassName}) ->
 real_stdlib_delegate_callers_test_() ->
     {setup, fun real_stdlib_setup/0, fun(_) -> ok end, [
         {"Subprocess (a real native: class) reports its self delegate methods", fun() ->
-            Rows = beamtalk_repl_ops_browse:delegate_callers_of_native_module(
+            Rows = beamtalk_repl_ops_browse_native:delegate_callers_of_native_module(
                 beamtalk_subprocess
             ),
             SubprocessRows = [R || R <- Rows, maps:get(owner, R) =:= 'Subprocess'],
@@ -650,18 +661,18 @@ type_aliases_surfaces_types_only_package_test() ->
 
 %% alias_visible/2 — pure seeding-boundary decision.
 alias_visible_internal_project_is_visible_test() ->
-    ?assert(beamtalk_repl_ops_browse:alias_visible(#{internal => true}, <<"project">>)).
+    ?assert(beamtalk_repl_ops_browse_aliases:alias_visible(#{internal => true}, <<"project">>)).
 
 alias_visible_internal_non_project_is_hidden_test() ->
     ?assertNot(
-        beamtalk_repl_ops_browse:alias_visible(#{internal => true}, <<"dependency">>)
+        beamtalk_repl_ops_browse_aliases:alias_visible(#{internal => true}, <<"dependency">>)
     ),
-    ?assertNot(beamtalk_repl_ops_browse:alias_visible(#{internal => true}, <<"stdlib">>)).
+    ?assertNot(beamtalk_repl_ops_browse_aliases:alias_visible(#{internal => true}, <<"stdlib">>)).
 
 alias_visible_public_always_visible_test() ->
-    ?assert(beamtalk_repl_ops_browse:alias_visible(#{internal => false}, <<"project">>)),
-    ?assert(beamtalk_repl_ops_browse:alias_visible(#{internal => false}, <<"dependency">>)),
-    ?assert(beamtalk_repl_ops_browse:alias_visible(#{internal => false}, <<"stdlib">>)).
+    ?assert(beamtalk_repl_ops_browse_aliases:alias_visible(#{internal => false}, <<"project">>)),
+    ?assert(beamtalk_repl_ops_browse_aliases:alias_visible(#{internal => false}, <<"dependency">>)),
+    ?assert(beamtalk_repl_ops_browse_aliases:alias_visible(#{internal => false}, <<"stdlib">>)).
 
 %% alias_row/3 — field normalisation from the `.app`-file's atom/string shapes
 %% (`file:consult`-parsed terms, never binaries — see `alias_field_binary/1`'s
@@ -674,7 +685,7 @@ alias_row_normalises_app_file_shapes_test() ->
         source_file => "src/json.bt",
         internal => false
     },
-    Row = beamtalk_repl_ops_browse:alias_row(Entry, <<"my_app">>, <<"project">>),
+    Row = beamtalk_repl_ops_browse_aliases:alias_row(Entry, <<"my_app">>, <<"project">>),
     ?assertEqual(<<"JsonKey">>, maps:get(<<"name">>, Row)),
     ?assertEqual(<<"String">>, maps:get(<<"expansion">>, Row)),
     ?assertEqual(<<"A doc comment.">>, maps:get(<<"doc">>, Row)),
@@ -691,7 +702,7 @@ alias_row_undefined_doc_is_null_test() ->
         source_file => "src/nodoc.bt",
         internal => true
     },
-    Row = beamtalk_repl_ops_browse:alias_row(Entry, <<"my_app">>, <<"project">>),
+    Row = beamtalk_repl_ops_browse_aliases:alias_row(Entry, <<"my_app">>, <<"project">>),
     ?assertEqual(null, maps:get(<<"doc">>, Row)).
 
 %%====================================================================
@@ -922,31 +933,33 @@ alias_source_project_rejects_dotdot_traversal_test() ->
     end).
 
 safe_relative_path_rejects_absolute_test() ->
-    ?assertNot(beamtalk_repl_ops_browse:safe_relative_path(<<"/etc/hosts">>)).
+    ?assertNot(beamtalk_repl_ops_browse_aliases:safe_relative_path(<<"/etc/hosts">>)).
 
 safe_relative_path_rejects_dotdot_test() ->
-    ?assertNot(beamtalk_repl_ops_browse:safe_relative_path(<<"../../etc/hosts">>)),
-    ?assertNot(beamtalk_repl_ops_browse:safe_relative_path(<<"src/../../etc/hosts">>)).
+    ?assertNot(beamtalk_repl_ops_browse_aliases:safe_relative_path(<<"../../etc/hosts">>)),
+    ?assertNot(beamtalk_repl_ops_browse_aliases:safe_relative_path(<<"src/../../etc/hosts">>)).
 
 safe_relative_path_accepts_plain_relative_test() ->
-    ?assert(beamtalk_repl_ops_browse:safe_relative_path(<<"src/restart_strategy.bt">>)).
+    ?assert(beamtalk_repl_ops_browse_aliases:safe_relative_path(<<"src/restart_strategy.bt">>)).
 
 validate_alias_missing_name_is_error_test() ->
     ?assertEqual(
         {error, <<"`name` (non-empty string) is required">>},
-        beamtalk_repl_ops_browse:validate_alias(#{})
+        beamtalk_repl_ops_browse_aliases:validate_alias(#{})
     ).
 
 validate_alias_blank_package_is_ignored_test() ->
     ?assertEqual(
         {ok, {<<"Foo">>, undefined}},
-        beamtalk_repl_ops_browse:validate_alias(#{<<"name">> => <<"Foo">>, <<"package">> => <<>>})
+        beamtalk_repl_ops_browse_aliases:validate_alias(#{
+            <<"name">> => <<"Foo">>, <<"package">> => <<>>
+        })
     ).
 
 validate_alias_with_package_test() ->
     ?assertEqual(
         {ok, {<<"Foo">>, <<"bar">>}},
-        beamtalk_repl_ops_browse:validate_alias(#{
+        beamtalk_repl_ops_browse_aliases:validate_alias(#{
             <<"name">> => <<"Foo">>, <<"package">> => <<"bar">>
         })
     ).
@@ -2276,11 +2289,11 @@ source_origin_stdlib_module_test() ->
     %% A stdlib module classifies as stdlib regardless of its source file.
     ?assertEqual(
         <<"stdlib">>,
-        beamtalk_repl_ops_browse:source_origin_of('bt@stdlib@OrderedCollection', null)
+        beamtalk_repl_ops_browse_origin:source_origin_of('bt@stdlib@OrderedCollection', null)
     ),
     ?assertEqual(
         <<"stdlib">>,
-        beamtalk_repl_ops_browse:source_origin_of(
+        beamtalk_repl_ops_browse_origin:source_origin_of(
             'bt@stdlib@OrderedCollection', <<"stdlib/src/ordered_collection.bt">>
         )
     ).
@@ -2290,7 +2303,7 @@ source_origin_null_source_is_project_test() ->
     %% classified `project` — the bare classification, no package packing.
     ?assertEqual(
         <<"project">>,
-        beamtalk_repl_ops_browse:source_origin_of('bt@myapp@Counter', null)
+        beamtalk_repl_ops_browse_origin:source_origin_of('bt@myapp@Counter', null)
     ).
 
 %% package_of/2 derives the package name for ALL origins, orthogonal to the
@@ -2299,21 +2312,21 @@ package_of_stdlib_test() ->
     %% Stdlib classes report the package "stdlib".
     ?assertEqual(
         <<"stdlib">>,
-        beamtalk_repl_ops_browse:package_of('bt@stdlib@OrderedCollection', <<"stdlib">>)
+        beamtalk_repl_ops_browse_origin:package_of('bt@stdlib@OrderedCollection', <<"stdlib">>)
     ).
 
 package_of_project_package_module_test() ->
     %% A project class whose module atom encodes its package reports that package.
     ?assertEqual(
         <<"myapp">>,
-        beamtalk_repl_ops_browse:package_of('bt@myapp@Counter', <<"project">>)
+        beamtalk_repl_ops_browse_origin:package_of('bt@myapp@Counter', <<"project">>)
     ).
 
 package_of_dependency_package_module_test() ->
     %% A dependency class reports its package from the module atom.
     ?assertEqual(
         <<"cowboy">>,
-        beamtalk_repl_ops_browse:package_of('bt@cowboy@Listener', <<"dependency">>)
+        beamtalk_repl_ops_browse_origin:package_of('bt@cowboy@Listener', <<"dependency">>)
     ).
 
 package_of_dependency_unknown_is_null_test() ->
@@ -2321,7 +2334,7 @@ package_of_dependency_unknown_is_null_test() ->
     %% (never the old "dependency:unknown" packing).
     ?assertEqual(
         null,
-        beamtalk_repl_ops_browse:package_of(some_native_mod, <<"dependency">>)
+        beamtalk_repl_ops_browse_origin:package_of(some_native_mod, <<"dependency">>)
     ).
 
 package_of_project_no_segment_falls_back_test() ->
@@ -2329,16 +2342,16 @@ package_of_project_no_segment_falls_back_test() ->
     %% workspace package name — null here since no workspace_meta is running.
     ?assertEqual(
         null,
-        beamtalk_repl_ops_browse:package_of(plain_project_mod, <<"project">>)
+        beamtalk_repl_ops_browse_origin:package_of(plain_project_mod, <<"project">>)
     ).
 
 package_of_dependency_uses_module_package_test() ->
     ?assertEqual(
-        <<"http">>, beamtalk_repl_ops_browse:package_of('bt@http@Server', <<"dependency">>)
+        <<"http">>, beamtalk_repl_ops_browse_origin:package_of('bt@http@Server', <<"dependency">>)
     ),
-    ?assertEqual(null, beamtalk_repl_ops_browse:package_of(no_at_signs, <<"dependency">>)),
+    ?assertEqual(null, beamtalk_repl_ops_browse_origin:package_of(no_at_signs, <<"dependency">>)),
     %% A two-part bt@name module carries no package.
-    ?assertEqual(null, beamtalk_repl_ops_browse:package_of('bt@counter', <<"dependency">>)).
+    ?assertEqual(null, beamtalk_repl_ops_browse_origin:package_of('bt@counter', <<"dependency">>)).
 
 %%====================================================================
 %% Package-based source_origin classification
@@ -2351,14 +2364,14 @@ package_of_dependency_uses_module_package_test() ->
 source_origin_no_meta_packaged_null_source_is_project_test() ->
     ?assertEqual(
         <<"project">>,
-        beamtalk_repl_ops_browse:source_origin_of('bt@cowboy@Listener', null)
+        beamtalk_repl_ops_browse_origin:source_origin_of('bt@cowboy@Listener', null)
     ).
 
 %% No package segment + null source + no meta => project (path fallback).
 source_origin_no_segment_null_source_is_project_test() ->
     ?assertEqual(
         <<"project">>,
-        beamtalk_repl_ops_browse:source_origin_of(plain_mod, null)
+        beamtalk_repl_ops_browse_origin:source_origin_of(plain_mod, null)
     ).
 
 %% Stdlib still wins first, even with a project package configured.
@@ -2366,7 +2379,7 @@ source_origin_with_meta_stdlib_wins_test() ->
     with_project_package(<<"myapp">>, fun() ->
         ?assertEqual(
             <<"stdlib">>,
-            beamtalk_repl_ops_browse:source_origin_of('bt@stdlib@OrderedCollection', null)
+            beamtalk_repl_ops_browse_origin:source_origin_of('bt@stdlib@OrderedCollection', null)
         )
     end).
 
@@ -2376,12 +2389,12 @@ source_origin_with_meta_project_package_is_project_test() ->
     with_project_package(<<"myapp">>, fun() ->
         ?assertEqual(
             <<"project">>,
-            beamtalk_repl_ops_browse:source_origin_of('bt@myapp@Counter', null)
+            beamtalk_repl_ops_browse_origin:source_origin_of('bt@myapp@Counter', null)
         ),
         %% Even a source resolving under the project tree stays `project`.
         ?assertEqual(
             <<"project">>,
-            beamtalk_repl_ops_browse:source_origin_of(
+            beamtalk_repl_ops_browse_origin:source_origin_of(
                 'bt@myapp@Counter', <<"src/counter.bt">>
             )
         )
@@ -2394,12 +2407,12 @@ source_origin_with_meta_dependency_package_is_dependency_test() ->
     with_project_package(<<"myapp">>, fun() ->
         ?assertEqual(
             <<"dependency">>,
-            beamtalk_repl_ops_browse:source_origin_of('bt@http@Server', null)
+            beamtalk_repl_ops_browse_origin:source_origin_of('bt@http@Server', null)
         ),
         %% Dep source nested under the project root still classifies as a dep.
         ?assertEqual(
             <<"dependency">>,
-            beamtalk_repl_ops_browse:source_origin_of(
+            beamtalk_repl_ops_browse_origin:source_origin_of(
                 'bt@http@Server', <<"_build/deps/http/src/server.bt">>
             )
         )
@@ -2414,13 +2427,13 @@ source_origin_meta_without_project_path_falls_back_to_path_test() ->
     with_started_meta(#{}, fun() ->
         ?assertEqual(
             <<"project">>,
-            beamtalk_repl_ops_browse:source_origin_of(
+            beamtalk_repl_ops_browse_origin:source_origin_of(
                 'bt@http@Server', <<"/elsewhere/http/server.bt">>
             )
         ),
         ?assertEqual(
             <<"project">>,
-            beamtalk_repl_ops_browse:source_origin_of('bt@http@Server', null)
+            beamtalk_repl_ops_browse_origin:source_origin_of('bt@http@Server', null)
         )
     end).
 
@@ -2538,10 +2551,10 @@ state_slots_dead_pid_degrades_to_empty_list_test() ->
 %%====================================================================
 
 alias_field_binary_string_test() ->
-    ?assertEqual(<<"Integer">>, beamtalk_repl_ops_browse:alias_field_binary("Integer")).
+    ?assertEqual(<<"Integer">>, beamtalk_repl_ops_browse_aliases:alias_field_binary("Integer")).
 
 alias_field_binary_unrecognised_shape_is_empty_test() ->
-    ?assertEqual(<<>>, beamtalk_repl_ops_browse:alias_field_binary(42)).
+    ?assertEqual(<<>>, beamtalk_repl_ops_browse_aliases:alias_field_binary(42)).
 
 alias_row_normalises_string_shaped_fields_test() ->
     %% `alias_row/3` reuses `alias_field_binary/1` for every text field —
@@ -2555,7 +2568,7 @@ alias_row_normalises_string_shaped_fields_test() ->
         source_file => "src/direction.bt",
         internal => false
     },
-    Row = beamtalk_repl_ops_browse:alias_row(Entry, <<"mypkg">>, <<"project">>),
+    Row = beamtalk_repl_ops_browse_aliases:alias_row(Entry, <<"mypkg">>, <<"project">>),
     ?assertEqual(<<"#north | #south">>, maps:get(<<"expansion">>, Row)),
     ?assertEqual(<<"A direction.">>, maps:get(<<"doc">>, Row)),
     ?assertEqual(<<"src/direction.bt">>, maps:get(<<"source_file">>, Row)).
@@ -2567,11 +2580,11 @@ alias_row_normalises_string_shaped_fields_test() ->
 %%====================================================================
 
 delegate_callers_of_native_module_none_is_empty_test() ->
-    ?assertEqual([], beamtalk_repl_ops_browse:delegate_callers_of_native_module(none)).
+    ?assertEqual([], beamtalk_repl_ops_browse_native:delegate_callers_of_native_module(none)).
 
 delegate_callers_of_native_module_unbacked_module_is_empty_test() ->
     %% A real, loaded module that backs no class at all.
-    ?assertEqual([], beamtalk_repl_ops_browse:delegate_callers_of_native_module(lists)).
+    ?assertEqual([], beamtalk_repl_ops_browse_native:delegate_callers_of_native_module(lists)).
 
 %%====================================================================
 %% native_module_editable_target/1: a module with no
@@ -2580,5 +2593,5 @@ delegate_callers_of_native_module_unbacked_module_is_empty_test() ->
 
 native_module_editable_target_no_source_is_not_editable_test() ->
     ?assertEqual(
-        {error, not_editable}, beamtalk_repl_ops_browse:native_module_editable_target(erlang)
+        {error, not_editable}, beamtalk_repl_ops_browse_native:native_module_editable_target(erlang)
     ).

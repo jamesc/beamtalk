@@ -931,17 +931,20 @@ defmodule BtAttach.WorkspaceRpcTest do
         }
       ]
 
-      mock_rpc(%{{:beamtalk_workspace_changelog, :change_entries} => entries})
+      mock_rpc(%{{:beamtalk_workspace_changelog_views, :change_entries} => entries})
       assert [%{selector: "increment"}] = Workspace.change_history()
     end
 
     test "change_history/0 surfaces a badrpc as unreachable" do
-      mock_rpc(%{{:beamtalk_workspace_changelog, :change_entries} => {:badrpc, :mock_scripted}})
+      mock_rpc(%{
+        {:beamtalk_workspace_changelog_views, :change_entries} => {:badrpc, :mock_scripted}
+      })
+
       assert Workspace.change_history() == {:error, {:unreachable, :mock_scripted}}
     end
 
     test "change_history/0 degrades an unrecognised reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_workspace_changelog, :change_entries} => :odd})
+      mock_rpc(%{{:beamtalk_workspace_changelog_views, :change_entries} => :odd})
       assert Workspace.change_history() == {:error, {:unexpected_reply, :odd}}
     end
 

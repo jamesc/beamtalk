@@ -1080,7 +1080,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # aliases resolve against the workspace's own project root server-side,
   # while stdlib/dependency aliases have no live path cache to resolve
   # against and degrade to `content: nil`, never an error (see
-  # `beamtalk_repl_ops_browse:browse_alias_source/2`'s doc). `editable` is
+  # `beamtalk_repl_ops_browse_aliases:browse_alias_source/2`'s doc). `editable` is
   # always `false` — there is no save op for alias source.
   defp load_alias_view(socket, name, package) do
     base = %{

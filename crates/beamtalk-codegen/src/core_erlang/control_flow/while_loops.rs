@@ -32,6 +32,7 @@ use super::super::threaded_ir::{
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use super::family_slots::append_family_slots;
+use super::loop_scope::{DirectParamsKind, DirectParamsLoopScope};
 use super::{LocalWrite, ThreadingPlan};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -1037,113 +1038,82 @@ impl CoreErlangGenerator {
         // a method parameter's own gensym'd `Args`-pattern binding).
         let initial_direct_args = plan.initial_direct_args(self);
 
-        // BT-3562: also captured BEFORE `generate_letrec_body_ir` resets
-        // `state_version`/starts rendering `in_loop_body` as `StateAcc*` —
-        // this direct-params loop's `letrec` fun binds no `StateAcc`
-        // accumulator parameter at all (only `param_names` above), but a
-        // bare mid-body field READ (`self.field` with no matching write —
-        // `select_direct_params` guarantees no field WRITE occurs in this
-        // body) still needs some name for the actor's state map. The
-        // pre-loop name is still a real, lexically-in-scope variable from
-        // the loop's own `letrec` closure, and stays correct for every
-        // iteration since nothing here ever mutates it. See
-        // `LoopMode::direct_params_outer_state_var`'s doc comment.
-        //
-        // Reuses the OUTER loop's own already-captured variable when this
-        // loop is itself nested inside another non-hybrid direct-params
-        // loop, rather than re-deriving one via the raw `current_state_var()`
-        // — by this point `in_loop_body` is already `true` (set by the
-        // outer loop's own `with_branch_context`), so a fresh derivation
-        // would produce a bogus `StateAcc*` name one level deeper, since
-        // neither loop's `letrec` fun ever binds a real `StateAcc`
-        // parameter. `current_field_read_state_var()` cannot be used
-        // directly here: it reads `direct_params_outer_state_var` itself,
-        // which `.take()` just cleared to `None` — read the outer value
-        // via `prev_direct_params_outer_state_var` instead, before it's
-        // overwritten below.
-        let prev_direct_params_outer_state_var =
-            self.loop_mode.direct_params_outer_state_var.take();
-        self.loop_mode.direct_params_outer_state_var = Some(
-            prev_direct_params_outer_state_var
-                .clone()
-                .unwrap_or_else(|| self.current_state_var()),
-        );
-
         let cond_var = self.fresh_temp_var("CondFun");
-
-        // BT-4121: the guarded-operator marker spans the condition and body
-        // lowering. `prestore_state` is the loop-entry `State` the
-        // pre-store captures when the marker asks for the bracket.
-        let prestore_state = self.state_var_to_store();
-        self.push_guarded_op_loop(body, Some(condition));
-        self.push_scope();
-        // Register var bindings — no unpack docs in direct-params mode
-        // (structurally guaranteed by `generate_unpack_at_iteration_start`'s
-        // own `if !use_direct_params && !use_hybrid_params` guard).
-        plan.generate_unpack_at_iteration_start(self);
-
-        // The condition closure captures the current vars from scope.
-        // We pass only the params (not StateAcc) since there is no StateAcc.
-        let cond_entry_self = self.self_version();
-        let cond_writes = self.loop_condition_written_locals(condition);
-        let (cond_body_doc, cond_exit_self) = self.generate_loop_condition_body(condition)?;
-        let condition_families =
-            Self::condition_families(cond_entry_self, cond_exit_self, cond_writes);
-        let condition_stmt = ThreadedStmt::Statement(
-            docvec![
-                "let ",
-                leaf::var(cond_var.clone()),
-                " = fun (",
-                param_list_doc(),
-                ") -> ",
-                cond_body_doc,
-                " in ",
-            ],
-            condition.span(),
-        );
-        // BT-4366: the condition apply carries the send's line itself.
-        let condition_value = ValueRef::Doc(self.annotate_current_send_call(docvec![
-            "apply ",
-            leaf::var(cond_var),
-            " (",
-            param_list_doc(),
-            ")",
-        ]));
-
         let case_arm = if negate {
             "<'false'> when 'true' -> "
         } else {
             "<'true'> when 'true' -> "
         };
-
-        let (body_stmts, frame) = self.generate_letrec_body_ir(body, plan)?;
-        self.loop_mode.direct_params_outer_state_var = prev_direct_params_outer_state_var;
-
-        // BT-4121: check out the marker (nil pre-store unless the loop
-        // brackets with a `State` in scope).
-        let (guarded_op_bracket, prestore) = self.checkout_guarded_op_loop_docs(
-            self.pop_guarded_op_loop(),
-            false,
-            body.span,
-            &prestore_state,
-        );
-
-        // Build exit StateAcc using the CURRENT iteration's param names.
-        let exit_stateacc = plan.generate_exit_stateacc(&param_names, self, guarded_op_bracket);
-
-        self.pop_scope();
-
         let exit_atom = if negate {
             "<'true'> when 'true' -> "
         } else {
             "<'false'> when 'true' -> "
         };
-        let exit_arm = docvec![
-            exit_atom,
-            exit_stateacc,
-            self.case_clause_fallback("_CondBad"),
-            " end "
-        ];
+
+        // BT-3562: the shared bracket captures the pre-loop `State` name for
+        // a bare mid-body field read (see `loop_scope`'s module docs).
+        let scope = DirectParamsLoopScope {
+            kind: DirectParamsKind::Direct,
+            plan,
+            body,
+            condition: Some(condition),
+            counter_param: None,
+        };
+        let outcome = self.with_direct_params_loop_scope(
+            &scope,
+            |this| {
+                // The condition closure captures the current vars from scope.
+                // We pass only the params (not StateAcc) since there is no StateAcc.
+                let cond_entry_self = this.self_version();
+                let cond_writes = this.loop_condition_written_locals(condition);
+                let (cond_body_doc, cond_exit_self) =
+                    this.generate_loop_condition_body(condition)?;
+                let condition_families =
+                    Self::condition_families(cond_entry_self, cond_exit_self, cond_writes);
+                let condition_stmt = ThreadedStmt::Statement(
+                    docvec![
+                        "let ",
+                        leaf::var(cond_var.clone()),
+                        " = fun (",
+                        param_list_doc(),
+                        ") -> ",
+                        cond_body_doc,
+                        " in ",
+                    ],
+                    condition.span(),
+                );
+                // BT-4366: the condition apply carries the send's line itself.
+                let condition_value = ValueRef::Doc(this.annotate_current_send_call(docvec![
+                    "apply ",
+                    leaf::var(cond_var.clone()),
+                    " (",
+                    param_list_doc(),
+                    ")",
+                ]));
+                let (body_stmts, frame) = this.generate_letrec_body_ir(body, plan)?;
+                Ok((
+                    condition_stmt,
+                    condition_families,
+                    condition_value,
+                    body_stmts,
+                    frame,
+                ))
+            },
+            // Build exit StateAcc using the CURRENT iteration's param names.
+            |this, guarded_op_bracket| {
+                let exit_stateacc =
+                    plan.generate_exit_stateacc(&param_names, this, guarded_op_bracket);
+                docvec![
+                    exit_atom,
+                    exit_stateacc,
+                    this.case_clause_fallback("_CondBad"),
+                    " end "
+                ]
+            },
+        )?;
+        let (condition_stmt, condition_families, condition_value, body_stmts, frame) =
+            outcome.lowered;
+        let (exit_arm, prestore) = (outcome.exit_stateacc, outcome.prestore);
 
         let produces: Vec<VersionedVar> = plan
             .threaded_locals
@@ -1240,79 +1210,83 @@ impl CoreErlangGenerator {
         // inside the loop and at the outer call site.
         let initial_local_args = plan.initial_direct_args(self);
 
-        // BT-4121: the guarded-operator marker spans the condition and body
-        // lowering. A hybrid loop cannot bracket (its parameters advance
-        // past the entry `State`), so the checkout below only reports loud
-        // when the mode selection missed an operator (it routes hybrid
-        // bodies with one to `StateAcc`, so this never fires).
-        self.push_guarded_op_loop(body, Some(condition));
-        self.push_scope();
-        // Register var bindings — no unpack docs in hybrid mode (structurally
-        // guaranteed by `generate_unpack_at_iteration_start`'s own
-        // `if !use_direct_params && !use_hybrid_params` guard).
-        plan.generate_unpack_at_iteration_start(self);
-
-        let cond_entry_self = self.self_version();
-        let cond_writes = self.loop_condition_written_locals(condition);
-        let (cond_body_doc, cond_exit_self) =
-            self.generate_hybrid_condition(condition, plan, &all_field_params)?;
-        let condition_families =
-            Self::condition_families(cond_entry_self, cond_exit_self, cond_writes);
-        let condition_stmt = ThreadedStmt::Statement(
-            docvec![
-                "let ",
-                leaf::var(cond_var.clone()),
-                " = fun (",
-                param_list_doc(),
-                ") -> ",
-                cond_body_doc,
-                " in ",
-            ],
-            condition.span(),
-        );
-        // BT-4366: the condition apply carries the send's line itself.
-        let condition_value = ValueRef::Doc(self.annotate_current_send_call(docvec![
-            "apply ",
-            leaf::var(cond_var),
-            " (",
-            param_list_doc(),
-            ")",
-        ]));
-
         let case_arm = if negate {
             "<'false'> when 'true' -> "
         } else {
             "<'true'> when 'true' -> "
         };
-
-        let (body_stmts, frame) =
-            self.generate_letrec_hybrid_body_ir(body, plan, &all_field_params)?;
-
-        // BT-4121: check out the marker (loud when the mode selection
-        // missed a guarded operator; a hybrid loop never brackets).
-        // BT-4523: and report a `^` lowered in it (`NlrThrowInHybridLoop`).
-        let nlr_errors = self.checkout_hybrid_loop(body.span);
-
-        let exit_stateacc = plan.generate_exit_stateacc_full_extract(
-            &local_param_names,
-            &mutated_param_names,
-            &initial_state,
-            self,
-        );
-
-        self.pop_scope();
-
         let exit_atom = if negate {
             "<'true'> when 'true' -> "
         } else {
             "<'false'> when 'true' -> "
         };
-        let exit_arm = docvec![
-            exit_atom,
-            exit_stateacc,
-            self.case_clause_fallback("_CondBad"),
-            " end "
-        ];
+
+        // A hybrid loop cannot bracket (its parameters advance past the entry
+        // `State`): the shared bracket's checkout only reports loud.
+        let scope = DirectParamsLoopScope {
+            kind: DirectParamsKind::Hybrid,
+            plan,
+            body,
+            condition: Some(condition),
+            counter_param: None,
+        };
+        let outcome = self.with_direct_params_loop_scope(
+            &scope,
+            |this| {
+                let cond_entry_self = this.self_version();
+                let cond_writes = this.loop_condition_written_locals(condition);
+                let (cond_body_doc, cond_exit_self) =
+                    this.generate_hybrid_condition(condition, plan, &all_field_params)?;
+                let condition_families =
+                    Self::condition_families(cond_entry_self, cond_exit_self, cond_writes);
+                let condition_stmt = ThreadedStmt::Statement(
+                    docvec![
+                        "let ",
+                        leaf::var(cond_var.clone()),
+                        " = fun (",
+                        param_list_doc(),
+                        ") -> ",
+                        cond_body_doc,
+                        " in ",
+                    ],
+                    condition.span(),
+                );
+                // BT-4366: the condition apply carries the send's line itself.
+                let condition_value = ValueRef::Doc(this.annotate_current_send_call(docvec![
+                    "apply ",
+                    leaf::var(cond_var.clone()),
+                    " (",
+                    param_list_doc(),
+                    ")",
+                ]));
+                let (body_stmts, frame) =
+                    this.generate_letrec_hybrid_body_ir(body, plan, &all_field_params)?;
+                Ok((
+                    condition_stmt,
+                    condition_families,
+                    condition_value,
+                    body_stmts,
+                    frame,
+                ))
+            },
+            |this, _bracket| {
+                let exit_stateacc = plan.generate_exit_stateacc_full_extract(
+                    &local_param_names,
+                    &mutated_param_names,
+                    &initial_state,
+                    this,
+                );
+                docvec![
+                    exit_atom,
+                    exit_stateacc,
+                    this.case_clause_fallback("_CondBad"),
+                    " end "
+                ]
+            },
+        )?;
+        let (condition_stmt, condition_families, condition_value, body_stmts, frame) =
+            outcome.lowered;
+        let (exit_arm, nlr_errors) = (outcome.exit_stateacc, outcome.nlr_errors);
 
         let produces: Vec<VersionedVar> =
             plan.threaded_locals

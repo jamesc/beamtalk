@@ -327,7 +327,7 @@ adversarial review before this shipped.
 
 With the skeleton itself fixed, this function now resolves the real on-disk
 span (`beamtalk_compiler:resolve_class_span/2` — the same resolver
-`beamtalk_workspace_changelog:disk_class_body/2` already used read-only for
+`beamtalk_workspace_changelog_views:disk_class_body/2` already used read-only for
 the CHANGES-dock diff) and marks the entry flushable when it resolves — the
 same span-resolve-or-downgrade shape `add_flushability/4` uses for a method
 patch, just resolved at whole-class (header + state) granularity rather than

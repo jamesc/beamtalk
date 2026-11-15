@@ -111,7 +111,8 @@ find_senders_in_returns_list_test() ->
     %% the error path via log_compiler_diagnostics/2 directly (above).
     %% This test confirms the happy-path return is still a list.
     Result = beamtalk_interface:findSendersIn(<<"x + 1">>, <<"ifTrue:">>),
-    ?assert(is_list(Result)).
+    %% `x + 1` has no `ifTrue:` send, so [] is exact with the compiler up or down.
+    ?assertEqual([], Result).
 
 %%% ============================================================================
 %%% findReferencesToIn/2 — still returns a list (happy path)
@@ -121,7 +122,8 @@ find_references_to_in_returns_list_test() ->
     %% As above: the happy path returns a list. The error-path is tested via
     %% log_compiler_diagnostics/2 directly.
     Result = beamtalk_interface:findReferencesToIn(<<"x + 1">>, 'Integer'),
-    ?assert(is_list(Result)).
+    %% No `Integer` reference in the source: [] with the compiler up or down.
+    ?assertEqual([], Result).
 
 %%% ============================================================================
 %%% Navigation FFI type-error and degrade-to-[] paths
@@ -136,6 +138,8 @@ find_senders_in_rejects_bad_args_test() ->
 
 all_sends_in_returns_list_test() ->
     Result = beamtalk_interface:allSendsIn(<<"x foo: 1">>),
+    %% BT-4908: left as a type check on purpose. The exact value depends on whether
+    %% the compiler port is up ([] when down, one `foo:` send when up).
     ?assert(is_list(Result)).
 
 all_sends_in_rejects_bad_args_test() ->
@@ -146,22 +150,22 @@ find_references_to_in_rejects_bad_args_test() ->
 
 find_field_readers_in_returns_list_test() ->
     Result = beamtalk_interface:findFieldReadersIn(<<"x + 1">>, count),
-    ?assert(is_list(Result)).
+    ?assertEqual([], Result).
 
 find_field_writers_in_returns_list_test() ->
     Result = beamtalk_interface:findFieldWritersIn(<<"x + 1">>, count),
-    ?assert(is_list(Result)).
+    ?assertEqual([], Result).
 
 find_field_access_rejects_bad_args_test() ->
     ?assertBtError(type_error, beamtalk_interface:findFieldReadersIn(not_a_binary, count)).
 
 ffi_sites_in_returns_list_test() ->
     Result = beamtalk_interface:ffiSitesIn(<<"x + 1">>, <<"lists">>, <<"reverse">>, any),
-    ?assert(is_list(Result)).
+    ?assertEqual([], Result).
 
 ffi_sites_in_integer_arity_test() ->
     Result = beamtalk_interface:ffiSitesIn(<<"x + 1">>, lists, reverse, 1),
-    ?assert(is_list(Result)).
+    ?assertEqual([], Result).
 
 ffi_sites_in_rejects_bad_args_test() ->
     ?assertBtError(

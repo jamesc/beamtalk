@@ -60,7 +60,7 @@
 //! answers are the `BUnit` cells of `stdlib/test/actor_closure_cell_test.bt`
 //! (`ClosureCellEnsure`).
 
-use super::{assert_compiles_through_erlc, erlc_available};
+use super::{assert_compiles_through_erlc, erlc_available, erlc_rejected_rows};
 use crate::core_erlang::fault::{Fault, with as with_fault};
 use crate::core_erlang::{
     CodeGenContext, CodeGenError, CodegenOptions, CoreErlangGenerator, generate_module,
@@ -532,6 +532,7 @@ fn ensure_relay_corpus_compiles_and_relays() {
         }
     }
     if erlc_available() {
+        let mut scope_rows = Vec::new();
         for &scope in SCOPES.iter().filter(|&&scope| scope != Scope::Repl) {
             let (header, _) = scope.class();
             let methods: Vec<String> = compiled
@@ -542,16 +543,13 @@ fn ensure_relay_corpus_compiles_and_relays() {
                 .collect();
             let src = format!("{header}\n{}", methods.join("\n"));
             match compile_catching_panics(&src) {
-                Ok(code) => {
-                    if catch_unwind(AssertUnwindSafe(|| {
-                        assert_compiles_through_erlc("test", &code);
-                    }))
-                    .is_err()
-                    {
-                        failures.push(format!("{scope:?}: erlc rejected the module"));
-                    }
-                }
+                Ok(code) => scope_rows.push((format!("{scope:?}"), code)),
                 Err(why) => failures.push(format!("{scope:?} (batch): {why}")),
+            }
+        }
+        if let Err((rejected, _)) = erlc_rejected_rows(&scope_rows) {
+            for i in rejected {
+                failures.push(format!("{}: erlc rejected the module", scope_rows[i].0));
             }
         }
     }
@@ -895,6 +893,7 @@ fn nested_ensure_source(thrower: Thrower, depth: u32) -> String {
 #[test]
 fn ensure_relay_corpus_nested_cleanup_grows_as_three_to_the_depth() {
     let mut failures = Vec::new();
+    let mut erlc_rows = Vec::new();
     for &thrower in THROWERS {
         for depth in 1..=4 {
             let src = nested_ensure_source(thrower, depth);
@@ -918,17 +917,14 @@ fn ensure_relay_corpus_nested_cleanup_grows_as_three_to_the_depth() {
                     "{thrower:?}, depth {depth}: no relay sharing a foreign clause\n{code}"
                 ));
             }
-            if depth == 3
-                && erlc_available()
-                && catch_unwind(AssertUnwindSafe(|| {
-                    assert_compiles_through_erlc("test", &code);
-                }))
-                .is_err()
-            {
-                failures.push(format!(
-                    "{thrower:?}, depth {depth}: erlc rejected the module"
-                ));
+            if depth == 3 {
+                erlc_rows.push((format!("{thrower:?}, depth {depth}"), code));
             }
+        }
+    }
+    if let Err((rejected, _)) = erlc_rejected_rows(&erlc_rows) {
+        for i in rejected {
+            failures.push(format!("{}: erlc rejected the module", erlc_rows[i].0));
         }
     }
     assert!(

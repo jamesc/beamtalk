@@ -173,7 +173,7 @@ class_to_row(Pid, Scope) ->
                 {true, #{
                     <<"name">> => atom_to_binary(Name, utf8),
                     <<"source_file">> => SourceFile,
-                    <<"source_origin">> => beamtalk_repl_ops_browse:source_origin_of(
+                    <<"source_origin">> => beamtalk_repl_ops_browse_origin:source_origin_of(
                         ModName, SourceFile
                     ),
                     <<"line">> => ClassLine,

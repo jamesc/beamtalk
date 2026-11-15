@@ -16,6 +16,7 @@ use super::super::method_frame::{MethodBoundary, MethodFrame};
 use super::super::threaded_ir::{
     FrameId, ThreadedStmt, ThreadedValue, TokenId, ValueRef, VersionPrefix,
 };
+use super::super::threaded_rebind::{RebindLayout, RebindNaming};
 use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, concat, join, leaf};
@@ -214,9 +215,7 @@ impl CoreErlangGenerator {
             if let Some((name, rhs)) = local_target {
                 let tv = self.threaded_expression(rhs, frame)?;
                 prelude.extend(tv.prelude);
-                let core_var = self
-                    .lookup_var(name)
-                    .map_or_else(|| Self::to_core_erlang_var(name), String::clone);
+                let core_var = self.resolve_local_core_var(name);
                 let rhs_doc = self.threaded_value_doc(&tv.value);
                 prelude.push(ThreadedStmt::Statement(
                     docvec!["let ", leaf::var(core_var.clone()), " = ", rhs_doc, " in "],
@@ -696,9 +695,7 @@ impl CoreErlangGenerator {
                         && let Expression::Identifier(id) = target.as_ref()
                     {
                         let var_name = &id.name;
-                        let core_var = self
-                            .lookup_var(var_name)
-                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                        let core_var = self.resolve_local_core_var(var_name);
                         let val_doc = self.expression_doc(value)?;
                         self.bind_var(var_name, &core_var);
                         body_parts.push(docvec![
@@ -1179,9 +1176,7 @@ impl CoreErlangGenerator {
                 if let Expression::Assignment { target, value, .. } = body_expr
                     && let Expression::Identifier(id) = target.as_ref()
                 {
-                    let core_var = self
-                        .lookup_var(&id.name)
-                        .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                    let core_var = self.resolve_local_core_var(&id.name);
                     let val_doc = self.expression_doc(value)?;
                     parts.push(docvec![
                         "    let ",
@@ -1385,20 +1380,13 @@ impl CoreErlangGenerator {
             ]);
 
             // Extract each threaded local from the state map
-            for var_name in threaded_locals {
-                let core_var = self.fresh_var(var_name);
-                let key = Self::local_state_key(var_name);
-                parts.push(docvec![
-                    "    let ",
-                    leaf::var(core_var.clone()),
-                    " = call 'maps':'get'(",
-                    leaf::atom(key),
-                    ", ",
-                    leaf::var(state_var.clone()),
-                    ") in\n",
-                ]);
-                self.bind_var(var_name, &core_var);
-            }
+            parts.extend(self.rebind_threaded_locals(
+                threaded_locals,
+                |_, v| Self::local_state_key(v),
+                &state_var,
+                RebindNaming::FreshBound,
+                RebindLayout::Line,
+            ));
         }
 
         if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, families, span) {
@@ -1477,9 +1465,7 @@ impl CoreErlangGenerator {
             " in\n",
         ]);
         // Bind the assignment target to element 1 (the logical value).
-        let core_var = self
-            .lookup_var(var_name)
-            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+        let core_var = self.resolve_local_core_var(var_name);
         body_parts.push(docvec![
             "    let ",
             leaf::var(core_var.clone()),
@@ -1504,20 +1490,13 @@ impl CoreErlangGenerator {
                 leaf::var(tuple_var.clone()),
                 ") in\n",
             ]);
-            for tl in rebind {
-                let tl_core = self.fresh_var(tl);
-                let key = Self::local_state_key(tl);
-                body_parts.push(docvec![
-                    "    let ",
-                    leaf::var(tl_core.clone()),
-                    " = call 'maps':'get'(",
-                    leaf::atom(key),
-                    ", ",
-                    leaf::var(state_var.clone()),
-                    ") in\n",
-                ]);
-                self.bind_var(tl, &tl_core);
-            }
+            body_parts.extend(self.rebind_threaded_locals(
+                rebind,
+                |_, v| Self::local_state_key(v),
+                &state_var,
+                RebindNaming::FreshBound,
+                RebindLayout::Line,
+            ));
         }
 
         // extract the loop's own trailing slot from element
@@ -1803,10 +1782,7 @@ impl CoreErlangGenerator {
         let mut current = init_map_var;
         for var_name in &threaded_locals {
             let packed_var = self.fresh_temp_var("Packed");
-            let core_var = self
-                .lookup_var(var_name)
-                .cloned()
-                .unwrap_or_else(|| Self::to_core_erlang_var(var_name));
+            let core_var = self.resolve_local_core_var(var_name);
             let key = Self::local_state_key(var_name);
             pack_docs.push(docvec![
                 "let ",
@@ -1900,22 +1876,15 @@ impl CoreErlangGenerator {
         if let Some(s) = &slots {
             post_docs.push(s.unwrap_result(&fold_result));
         }
-        for var_name in &threaded_locals {
-            let core_var = Self::to_core_erlang_var(var_name);
-            // Update the scope so subsequent method-body expressions look up
-            // this Erlang variable name.
-            self.bind_var(var_name, &core_var);
-            let key = Self::local_state_key(var_name);
-            post_docs.push(docvec![
-                "let ",
-                leaf::var(core_var),
-                " = call 'maps':'get'(",
-                leaf::atom(key),
-                ", ",
-                leaf::var(fold_result.clone()),
-                ") in ",
-            ]);
-        }
+        // Binding the canonical names updates the scope so subsequent
+        // method-body expressions look up these Erlang variables.
+        post_docs.extend(self.rebind_threaded_locals(
+            &threaded_locals,
+            |_, v| Self::local_state_key(v),
+            &fold_result,
+            RebindNaming::Canonical,
+            RebindLayout::Inline,
+        ));
         // BT-3827: the open chain's `Self` is the fold's final one.
         if let Some(s) = &slots {
             for out in s.out_vars() {

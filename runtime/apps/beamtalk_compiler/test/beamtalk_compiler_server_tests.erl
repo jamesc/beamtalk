@@ -967,18 +967,18 @@ api_compile_expression_opts() ->
     Options = #{class_module_index => #{<<"Counter">> => <<"bt@app@counter">>}},
     {ok, Core, _, _} =
         beamtalk_compiler_server:compile_expression(<<"1 + 2">>, <<"m">>, [], Options),
-    ?assert(is_binary(Core)).
+    ?assert(binary:match(Core, <<"'erlang':'+'">>) =/= nomatch).
 
 api_compile_trace() ->
     {ok, Core, [], _} =
         beamtalk_compiler_server:compile_expression_trace(<<"1 + 2">>, <<"m">>, []),
-    ?assert(is_binary(Core)).
+    ?assert(binary:match(Core, <<"'erlang':'+'">>) =/= nomatch).
 
 api_compile_trace_opts() ->
     Options = #{class_hierarchy => #{'Counter' => #{superclass => 'Object'}}},
     {ok, Core, _, _} =
         beamtalk_compiler_server:compile_expression_trace(<<"1 + 2">>, <<"m">>, [], Options),
-    ?assert(is_binary(Core)).
+    ?assert(binary:match(Core, <<"'erlang':'+'">>) =/= nomatch).
 
 api_compile() ->
     Source = <<"Object subclass: TmpServerC\n\n  foo => 1\n">>,
@@ -1103,6 +1103,9 @@ api_find_ffi_sites() ->
         beamtalk_compiler_server:find_ffi_sites_in_source(
             <<"(Erlang lists) reverse: x">>, lists, reverse, any
         ),
+    %% BT-4908: asserting `[1]` failed (got `[]`) with the compiler port up, although
+    %% beamtalk_compiler_port_tests documents this source as an FFI call site. Left as a
+    %% type check pending investigation; see the BT-4908 comments.
     ?assert(is_list(Lines)).
 
 api_resolve_method_span() ->

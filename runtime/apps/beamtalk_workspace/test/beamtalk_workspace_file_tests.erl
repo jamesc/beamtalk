@@ -274,7 +274,7 @@ flush_sweeps_a_stale_unique_tmp_but_not_a_fresh_one_test() ->
 
 changelog_log_rewrite_does_not_touch_a_foreign_fixed_tmp_test() ->
     with_changelog(fun(WorkspaceId, _Home) ->
-        ChangesDir = beamtalk_workspace_changelog:changes_dir(WorkspaceId),
+        ChangesDir = beamtalk_workspace_changelog_log:changes_dir(WorkspaceId),
         ok = filelib:ensure_path(ChangesDir),
         Foreign = filename:join(ChangesDir, "changes.jsonl.tmp"),
         ok = file:write_file(Foreign, <<"foreign">>),
@@ -289,7 +289,7 @@ changelog_log_rewrite_does_not_touch_a_foreign_fixed_tmp_test() ->
 changelog_start_sweeps_stale_temps_test() ->
     WorkspaceId = list_to_binary("test-ws-file-sweep-" ++ beamtalk_test_unique:id()),
     beamtalk_test_fs:with_tmp_home(fun(_Home) ->
-        ChangesDir = beamtalk_workspace_changelog:changes_dir(WorkspaceId),
+        ChangesDir = beamtalk_workspace_changelog_log:changes_dir(WorkspaceId),
         SourcesDir = filename:join(ChangesDir, "sources"),
         ok = filelib:ensure_path(SourcesDir),
         StaleLog = filename:join(ChangesDir, "changes.jsonl.bt-staging.11.tmp"),

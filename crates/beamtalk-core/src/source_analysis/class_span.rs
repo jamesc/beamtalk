@@ -41,7 +41,7 @@
 //! test `excludes_a_method_that_precedes_a_later_state_declaration`.
 //!
 //! This span backs the CHANGES-dock diff
-//! (`beamtalk_workspace_changelog:disk_class_body/2`, read-only) and,
+//! (`beamtalk_workspace_changelog_views:disk_class_body/2`, read-only) and,
 //! because the skeleton itself is round-trip-safe (modifier keywords, the
 //! `field:`/`state:` keyword choice, and `::` type annotations all
 //! survive a resubmit — see `class_definition_text/7`),

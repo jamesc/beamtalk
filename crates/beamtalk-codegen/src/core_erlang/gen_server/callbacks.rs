@@ -154,6 +154,39 @@ fn clean_state_binding(
     docvec!["let ", leaf::var(dest), " = ", value, " in"]
 }
 
+/// The Core Erlang variable names of one pdict install / uninstall bracket
+/// around a `safe_dispatch` (BT-4888): the `State` the install replaced, the
+/// uninstall's result, and the call-stack erase's result. The re-entrant
+/// self-send brackets use one fixed set; each `handle_continue` chain entry
+/// needs its own, because its brackets nest in one function body.
+struct PdictVars {
+    old: String,
+    restore: String,
+    clear: String,
+}
+
+impl PdictVars {
+    /// The single bracket of a `handle_call` / `handle_cast` / continuation
+    /// dispatch.
+    fn reentrant() -> Self {
+        Self {
+            old: "_OldState".to_string(),
+            restore: "_RestoreOk".to_string(),
+            clear: "_ClearStack".to_string(),
+        }
+    }
+
+    /// The bracket around chain entry `idx`'s `initialize` in
+    /// `generate_handle_continue`.
+    fn chain_step(idx: &str) -> Self {
+        Self {
+            old: format!("_OldPdict{idx}"),
+            restore: format!("_RestorePdict{idx}"),
+            clear: format!("_ClearStack{idx}"),
+        }
+    }
+}
+
 impl CoreErlangGenerator {
     /// Generates the `init/1` callback for `gen_server`.
     ///
@@ -1272,22 +1305,10 @@ impl CoreErlangGenerator {
                 let err_class_name_var = format!("_InitErrClass{idx}");
                 let err_class_name_var2 = format!("_InitErrClass{idx}b");
 
-                let old_state_var = format!("_OldPdict{idx}");
-                let restore_ok_var = format!("_RestorePdict{idx}");
-                let clear_stack_var = format!("_ClearStack{idx}");
+                let pdict = PdictVars::chain_step(&idx);
 
                 inner = docvec![
-                    line(),
-                    docvec![
-                        "let ",
-                        leaf::var(old_state_var.clone()),
-                        " = ",
-                        actor_state_call(
-                            actor_state_helper::INSTALL,
-                            [leaf::var(in_state_var.clone())],
-                        ),
-                        " in",
-                    ],
+                    Self::pdict_stash_preamble(&pdict, &in_state_var),
                     line(),
                     docvec![
                         "let ",
@@ -1298,25 +1319,7 @@ impl CoreErlangGenerator {
                         leaf::var(in_state_var),
                         ") in",
                     ],
-                    line(),
-                    docvec![
-                        "let ",
-                        leaf::var(restore_ok_var.clone()),
-                        " = ",
-                        actor_state_call(
-                            actor_state_helper::UNINSTALL,
-                            [leaf::var(old_state_var.clone())],
-                        ),
-                        " in",
-                    ],
-                    line(),
-                    docvec![
-                        "let ",
-                        leaf::var(clear_stack_var),
-                        " = call 'erlang':'erase'(",
-                        leaf::atom(sentinel_tags::CALL_STACK),
-                        ") in",
-                    ],
+                    Self::pdict_restore_epilogue(&pdict),
                     line(),
                     "case ",
                     leaf::var(result_var),
@@ -1631,15 +1634,18 @@ impl CoreErlangGenerator {
     }
 
     /// Generates the pdict stash preamble for re-entrant self-sends.
-    /// Returns `let _OldState = ... in let _PutOk = ... in` — caller appends
-    /// the dispatch body and must call `pdict_restore_epilogue()` after.
-    fn pdict_stash_preamble() -> Document<'static> {
+    /// Returns `let <old> = ... in` (a leading line break, then the install
+    /// of `state_var`) — the caller appends the dispatch body and must call
+    /// [`Self::pdict_restore_epilogue`] with the same `vars` after.
+    fn pdict_stash_preamble(vars: &PdictVars, state_var: &str) -> Document<'static> {
         docvec![
             line(),
-            "let _OldState = ",
+            "let ",
+            leaf::var(vars.old.clone()),
+            " = ",
             actor_state_call(
                 actor_state_helper::INSTALL,
-                [leaf::var("State".to_string())],
+                [leaf::var(state_var.to_string())],
             ),
             " in",
         ]
@@ -1647,17 +1653,18 @@ impl CoreErlangGenerator {
 
     /// Generates the pdict restore epilogue. Must follow the dispatch
     /// result binding (e.g., `let _DispatchResult = ... in`).
-    fn pdict_restore_epilogue() -> Document<'static> {
+    fn pdict_restore_epilogue(vars: &PdictVars) -> Document<'static> {
         docvec![
             line(),
-            "let _RestoreOk = ",
-            actor_state_call(
-                actor_state_helper::UNINSTALL,
-                [leaf::var("_OldState".to_string())],
-            ),
+            "let ",
+            leaf::var(vars.restore.clone()),
+            " = ",
+            actor_state_call(actor_state_helper::UNINSTALL, [leaf::var(vars.old.clone())],),
             " in",
             line(),
-            "let _ClearStack = call 'erlang':'erase'(",
+            "let ",
+            leaf::var(vars.clear.clone()),
+            " = call 'erlang':'erase'(",
             leaf::atom(sentinel_tags::CALL_STACK),
             ") in",
         ]
@@ -1673,7 +1680,7 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         docvec![
             // Stash State for re-entrant self-sends
-            Self::pdict_stash_preamble(),
+            Self::pdict_stash_preamble(&PdictVars::reentrant(), "State"),
             line(),
             // safe_dispatch turns a raise into an {error, ...} value; the
             // error arms below re-raise it after the pdict is restored
@@ -1683,7 +1690,7 @@ impl CoreErlangGenerator {
                 ":'safe_dispatch'(CastSelector, CastArgs, State) in"
             ],
             // Restore pdict
-            Self::pdict_restore_epilogue(),
+            Self::pdict_restore_epilogue(&PdictVars::reentrant()),
             line(),
             "case _CastDispatchResult of",
             nest(
@@ -2036,7 +2043,7 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         docvec![
             // Stash State for re-entrant self-sends
-            Self::pdict_stash_preamble(),
+            Self::pdict_stash_preamble(&PdictVars::reentrant(), "State"),
             line(),
             // BT-4090: expose the caller's `From` to `self deferReply`
             "let _CallFromInstalled = call 'beamtalk_actor':'install_call_from'(From) in",
@@ -2048,7 +2055,7 @@ impl CoreErlangGenerator {
                 ":'safe_dispatch'(Selector, Args, State) in"
             ],
             // Restore pdict
-            Self::pdict_restore_epilogue(),
+            Self::pdict_restore_epilogue(&PdictVars::reentrant()),
             line(),
             // BT-4090: remove the `From` cell; `true` when the method deferred
             // its reply. Only the success arm acts on it — error arms reply
@@ -2278,7 +2285,7 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         docvec![
             // Stash State for re-entrant self-sends
-            Self::pdict_stash_preamble(),
+            Self::pdict_stash_preamble(&PdictVars::reentrant(), "State"),
             line(),
             docvec![
                 "let _InfoDispatchResult = call ",
@@ -2289,7 +2296,7 @@ impl CoreErlangGenerator {
                 args,
                 ", State) in",
             ],
-            Self::pdict_restore_epilogue(),
+            Self::pdict_restore_epilogue(&PdictVars::reentrant()),
             line(),
             "case _InfoDispatchResult of",
             nest(

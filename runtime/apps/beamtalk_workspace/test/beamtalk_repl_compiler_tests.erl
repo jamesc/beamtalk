@@ -141,11 +141,11 @@ format_core_error_atom_test() ->
 
 format_core_error_tuple_test() ->
     Result = beamtalk_repl_compiler:format_core_error({error, some_reason}),
-    ?assert(is_binary(Result)).
+    ?assertEqual(<<"Core Erlang compile error: {error,some_reason}">>, Result).
 
 format_core_error_string_test() ->
     Result = beamtalk_repl_compiler:format_core_error("something went wrong"),
-    ?assert(is_binary(Result)).
+    ?assertEqual(<<"Core Erlang compile error: \"something went wrong\"">>, Result).
 
 %%====================================================================
 %% apply_module_name_override/2
@@ -267,7 +267,9 @@ compile_expression_via_port_with_bindings_test() ->
 
 compile_expression_via_port_error_message_test() ->
     {error, Msg} = beamtalk_repl_compiler:compile_expression_via_port("1", m, #{}),
-    ?assert(is_binary(Msg)).
+    ?assertEqual(
+        <<"Compiler not available. Ensure beamtalk_compiler application is started.">>, Msg
+    ).
 
 %%====================================================================
 %% compile_file_via_port/4 — error paths (no compiler running)

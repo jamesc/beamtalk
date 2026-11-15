@@ -36,9 +36,9 @@ pub(crate) use beamtalk_core::test_helpers::test_support::bare;
 
 /// Asserts that the given Core Erlang source compiles successfully through `erlc`.
 ///
-/// Uses `tempfile::tempdir()` for an isolated temp directory per invocation,
-/// avoiding filename collisions when tests run in parallel. The temp dir and
-/// all its contents are automatically cleaned up on drop.
+/// A one-row [`assert_all_compile_through_erlc`]: an isolated temp directory
+/// per invocation, so parallel tests never collide, removed afterwards. Use the
+/// batch form when compiling several rows in a loop.
 ///
 /// If `erlc` is not found in PATH, prints a skip notice and returns without
 /// failing.
@@ -59,37 +59,115 @@ pub(crate) use beamtalk_core::test_helpers::test_support::bare;
 /// Panics if `erlc` exits with a non-zero status, including the full Core
 /// Erlang source in the panic message to aid debugging.
 pub(crate) fn assert_compiles_through_erlc(module_name: &str, core_erlang: &str) {
-    use std::fs;
-    use std::process::Command;
+    assert_all_compile_through_erlc(&[(module_name, core_erlang)]);
+}
 
-    let tmp_dir = tempfile::tempdir().expect("failed to create temp dir for erlc test");
-    let core_file = tmp_dir.path().join(format!("{module_name}.core"));
-    fs::write(&core_file, core_erlang).expect("should write core erlang file");
+/// Compiles every `(row name, Core Erlang)` pair through `erlc +from_core` in
+/// one batched invocation (BT-4886), instead of one tempdir + `erlc` spawn per
+/// row, and panics if any row is rejected.
+///
+/// The panic names each rejected row (its name is the `.core` file name `erlc`
+/// reports against) and includes that row's generated Core Erlang. Skips, like
+/// [`assert_compiles_through_erlc`], when `erlc` is not installed.
+///
+/// # Panics
+///
+/// Panics if `erlc` rejects any row.
+pub(crate) fn assert_all_compile_through_erlc<N: AsRef<str>, C: AsRef<str>>(rows: &[(N, C)]) {
+    if let Err((rejected, output)) = erlc_rejected_rows(rows) {
+        let shown: Vec<String> = rejected
+            .iter()
+            .map(|&i| {
+                format!(
+                    "--- row '{}' ---\n{}",
+                    rows[i].0.as_ref(),
+                    rows[i].1.as_ref()
+                )
+            })
+            .collect();
+        panic!(
+            "erlc compilation failed for {} of {} row(s):\n{output}\n\nGenerated Core Erlang of the rejected row(s):\n{}",
+            rejected.len(),
+            rows.len(),
+            shown.join("\n")
+        );
+    }
+}
 
-    let output = Command::new("erlc")
-        .arg("+from_core")
-        .arg("-o")
-        .arg(tmp_dir.path())
-        .arg(&core_file)
-        .output();
-
-    match output {
-        Ok(output) => {
-            assert!(
-                output.status.success(),
-                "erlc compilation failed for module '{module_name}':\nstdout: {}\nstderr: {}\n\nGenerated Core Erlang:\n{core_erlang}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr),
-            );
+/// The non-panicking core of [`assert_all_compile_through_erlc`], for callers
+/// that classify rejected rows themselves rather than failing on the first
+/// (BT-4886): one batched `erlc` run over `rows`, `Ok(())` when every row
+/// compiles or `erlc` is not installed, otherwise `Err((indices of the
+/// rejected rows, erlc's combined output))`.
+///
+/// On a batch failure each row is recompiled alone to find exactly which are
+/// rejected; if none fails alone every row is reported, so a failure is never
+/// silently narrowed to nothing.
+pub(crate) fn erlc_rejected_rows<N: AsRef<str>, C: AsRef<str>>(
+    rows: &[(N, C)],
+) -> std::result::Result<(), (Vec<usize>, String)> {
+    use beamtalk_core::test_helpers::test_support::{ERLC_BATCH, erlc_batched_in_temp_dir};
+    if rows.is_empty() {
+        return Ok(());
+    }
+    if !erlc_available() {
+        println!("Skipping erlc compilation test - erlc not in PATH");
+        return Ok(());
+    }
+    // Index-prefix and sanitise the file name so row labels with spaces or
+    // punctuation (or duplicates) still map to distinct files.
+    let modules: Vec<(String, String)> = rows
+        .iter()
+        .enumerate()
+        .map(|(i, (name, code))| {
+            let safe: String = name
+                .as_ref()
+                .chars()
+                .take(40) // the `row{i}_` prefix keeps it unique; stay under path limits
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect();
+            // `erlc +from_core` requires the file stem to equal the module
+            // name, and rows commonly share one (`test`), so each row gets its
+            // own directory; the path in `erlc`'s output then names the row.
+            let module = code
+                .as_ref()
+                .split_once("module '")
+                .and_then(|(_, rest)| rest.split_once('\''))
+                .map_or("test", |(name, _)| name);
+            (format!("row{i}_{safe}/{module}"), code.as_ref().to_string())
+        })
+        .collect();
+    let Err(batch) = erlc_batched_in_temp_dir("codegen_erlc_rows", &modules) else {
+        return Ok(());
+    };
+    // `erlc` stops at the first failing file of an invocation and prints
+    // warnings for files that compile, so its batch output cannot say which
+    // rows are rejected. Recompile one row at a time (the failing path only)
+    // for the exact list.
+    let mut rejected = Vec::new();
+    let mut output = String::new();
+    // Only the chunks (of `ERLC_BATCH`) that fail need the row-by-row pass.
+    for (c, chunk) in modules.chunks(ERLC_BATCH).enumerate() {
+        if erlc_batched_in_temp_dir("codegen_erlc_chunk", chunk).is_ok() {
+            continue;
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            println!("Skipping erlc compilation test for '{module_name}' - erlc not in PATH");
-        }
-        Err(e) => {
-            panic!("failed to invoke erlc for module '{module_name}': {e}");
+        for (j, module) in chunk.iter().enumerate() {
+            if let Err(why) =
+                erlc_batched_in_temp_dir("codegen_erlc_row", std::slice::from_ref(module))
+            {
+                rejected.push(c * ERLC_BATCH + j);
+                output.push_str(&why);
+                output.push('\n');
+            }
         }
     }
-    // tmp_dir is dropped here, auto-cleaning .core and .beam files
+    if rejected.is_empty() {
+        // The batch failed but no row fails alone (e.g. a spawn failure):
+        // never narrow a failure to nothing.
+        rejected = (0..rows.len()).collect();
+        output = format!("the batched erlc run failed, but every row compiles alone:\n{batch}");
+    }
+    Err((rejected, output))
 }
 
 /// Whether `erlc` can be invoked. [`assert_compiles_through_erlc`] silently passes without
@@ -423,3 +501,18 @@ mod verifier_surfacing;
 mod while_condition_binding_corpus;
 mod while_condition_carrier_corpus;
 mod while_condition_class_method;
+
+#[test]
+fn erlc_rejected_rows_names_exactly_the_bad_rows() {
+    if !erlc_available() {
+        return;
+    }
+    let good = "module 'm' [] attributes []\nend\n";
+    let bad = "module 'm' [] attributes []\n'f'/0 = fun () -> Unbound\nend\n";
+    // A good row after the first bad one is never reached by a batched
+    // `erlc` (it stops at the first failure), and the rows share a module name.
+    let rows = [("a", good), ("b", bad), ("c", good), ("d", bad)];
+    let (rejected, _) = erlc_rejected_rows(&rows).expect_err("rows b and d are invalid");
+    assert_eq!(rejected, vec![1, 3]);
+    assert!(erlc_rejected_rows(&[("a", good), ("c", good)]).is_ok());
+}

@@ -838,7 +838,7 @@ pub fn check_native_delegate<'a>(
 /// concrete selector.
 ///
 /// This is the Rust mirror of the runtime's
-/// `beamtalk_repl_ops_browse:clause_selector/1`. Both implementations are pinned
+/// `beamtalk_repl_ops_browse_native:clause_selector/1`. Both implementations are pinned
 /// to the shared conformance corpus at
 /// `runtime/apps/beamtalk_workspace/test/fixtures/handle_call_clause_corpus.json`
 /// so the LSP's go-to-implementation and the System Browser's
@@ -902,7 +902,7 @@ pub fn clause_selector(line: &str) -> Option<&str> {
 /// (e.g. a delegate that replies from `handle_info`, or source unavailable).
 ///
 /// Scans line-by-line via [`clause_selector`], mirroring the runtime's
-/// `beamtalk_repl_ops_browse:handle_call_clause_lines/1` +
+/// `beamtalk_repl_ops_browse_native:handle_call_clause_lines/1` +
 /// `selected_clause/2`. The first matching clause wins (clause order is dispatch
 /// order in Erlang).
 #[must_use]
@@ -1910,7 +1910,7 @@ mod tests {
     }
 
     // `handle_call` clause-selector resolution shared between the LSP
-    // (this module) and the runtime (`beamtalk_repl_ops_browse:clause_selector/1`).
+    // (this module) and the runtime (`beamtalk_repl_ops_browse_native:clause_selector/1`).
 
     #[test]
     fn clause_selector_quoted_keyword() {

@@ -22,206 +22,245 @@ typed Object subclass: Repro
     )
 }
 
-fn assert_clean(body: &str) {
+fn assert_clean(name: &str, body: &str) {
     let diags = type_dnu_diags(&method(body));
     assert!(
         diags.is_empty(),
-        "expected no diagnostics for:\n{body}\ngot: {diags:#?}"
+        "[{name}] expected no diagnostics for:\n{body}\ngot: {diags:#?}"
     );
 }
 
-fn assert_rejected(body: &str) {
+fn assert_rejected(name: &str, body: &str) {
     let diags = type_dnu_diags(&method(body));
     assert!(
         !diags.is_empty(),
-        "expected a diagnostic for:\n{body}\ngot none"
+        "[{name}] expected a diagnostic for:\n{body}\ngot none"
     );
 }
 
-// --- mixed chains that must narrow ---------------------------------------
+// --- BT-4908: the narrowing cases, as tables ------------------------------
+//
+// Each row is (case name, method body); the name appears in the failure message.
 
-#[test]
-fn unknown_and_not_nil_if_true() {
-    assert_clean("    (p and: [x notNil]) ifTrue: [^self need: x]\n    0");
-}
-
-#[test]
-fn not_nil_and_unknown_if_true() {
-    assert_clean("    (x notNil and: [p]) ifTrue: [^self need: x]\n    0");
-}
-
-#[test]
-fn not_nil_and_unknown_if_true_if_false() {
-    assert_clean("    (x notNil and: [p]) ifTrue: [self need: x] ifFalse: [0]");
-}
-
-#[test]
-fn is_nil_or_unknown_if_false() {
-    assert_clean("    (x isNil or: [p]) ifFalse: [^self need: x]\n    0");
-}
-
-#[test]
-fn is_nil_or_unknown_early_return() {
-    assert_clean("    (x isNil or: [p]) ifTrue: [^0]\n    self need: x");
-}
-
-#[test]
-fn not_nil_and_unknown_early_return_on_false() {
-    assert_clean("    (x notNil and: [p]) ifFalse: [^0]\n    self need: x");
-}
-
-#[test]
-fn nested_and_with_unknown_tail() {
-    assert_clean("    (x notNil and: [y notNil and: [p]]) ifTrue: [^self need: x and: y]\n    0");
-}
-
-#[test]
-fn nested_and_with_unknown_middle() {
-    assert_clean("    (x notNil and: [p and: [y notNil]]) ifTrue: [^self need: x and: y]\n    0");
-}
-
-#[test]
-fn nil_and_kind_of() {
-    assert_clean("    (x notNil and: [k isKindOf: Integer]) ifTrue: [^self need: x and: k]\n    0");
-}
-
-#[test]
-fn kind_of_in_a_compound_chain() {
-    assert_clean(
+/// Chains that must narrow (and `not`-swapped forms): no diagnostics.
+const CLEAN: &[(&str, &str)] = &[
+    (
+        "unknown_and_not_nil_if_true",
+        "    (p and: [x notNil]) ifTrue: [^self need: x]\n    0",
+    ),
+    (
+        "not_nil_and_unknown_if_true",
+        "    (x notNil and: [p]) ifTrue: [^self need: x]\n    0",
+    ),
+    (
+        "not_nil_and_unknown_if_true_if_false",
+        "    (x notNil and: [p]) ifTrue: [self need: x] ifFalse: [0]",
+    ),
+    (
+        "is_nil_or_unknown_if_false",
+        "    (x isNil or: [p]) ifFalse: [^self need: x]\n    0",
+    ),
+    (
+        "is_nil_or_unknown_early_return",
+        "    (x isNil or: [p]) ifTrue: [^0]\n    self need: x",
+    ),
+    (
+        "not_nil_and_unknown_early_return_on_false",
+        "    (x notNil and: [p]) ifFalse: [^0]\n    self need: x",
+    ),
+    (
+        "nested_and_with_unknown_tail",
+        "    (x notNil and: [y notNil and: [p]]) ifTrue: [^self need: x and: y]\n    0",
+    ),
+    (
+        "nested_and_with_unknown_middle",
+        "    (x notNil and: [p and: [y notNil]]) ifTrue: [^self need: x and: y]\n    0",
+    ),
+    (
+        "nil_and_kind_of",
+        "    (x notNil and: [k isKindOf: Integer]) ifTrue: [^self need: x and: k]\n    0",
+    ),
+    (
+        "kind_of_in_a_compound_chain",
         "    ((k isKindOf: Integer) and: [k isKindOf: Integer]) ifTrue: [^self need: k]\n    0",
-    );
-}
-
-#[test]
-fn kind_of_with_unknown_and() {
-    assert_clean("    ((k isKindOf: Integer) and: [p]) ifTrue: [^self need: k]\n    0");
-}
-
-#[test]
-fn kind_of_or_early_return() {
-    assert_clean("    ((k isKindOf: String) or: [p]) ifFalse: [^self need: k]\n    0");
-}
-
-#[test]
-fn and_block_sees_unknown_prefix_facts() {
+    ),
+    (
+        "kind_of_with_unknown_and",
+        "    ((k isKindOf: Integer) and: [p]) ifTrue: [^self need: k]\n    0",
+    ),
+    (
+        "kind_of_or_early_return",
+        "    ((k isKindOf: String) or: [p]) ifFalse: [^self need: k]\n    0",
+    ),
     // The second test is checked under the first one's facts.
-    assert_clean("    (x notNil and: [p and: [x > 0]]) ifTrue: [^x]\n    0");
-}
-
-#[test]
-fn and_or_block_argument_narrowing() {
+    (
+        "and_block_sees_unknown_prefix_facts",
+        "    (x notNil and: [p and: [x > 0]]) ifTrue: [^x]\n    0",
+    ),
     // `or:` block runs when the receiver is false: x is non-nil there.
-    assert_clean("    (x isNil or: [x > 0]) ifTrue: [^0]\n    x");
-}
-
-#[test]
-fn and_block_with_mixed_receiver() {
-    assert_clean("    ((p and: [x notNil]) and: [x > 0]) ifTrue: [^x]\n    0");
-}
-
-#[test]
-fn pure_chains_still_narrow() {
-    assert_clean("    (x isNil or: [y isNil]) ifTrue: [^0]\n    self need: x and: y");
-    assert_clean("    (x notNil and: [y notNil]) ifFalse: [^0]\n    self need: x and: y");
-}
-
-#[test]
-fn disjunction_of_tests_joins_facts() {
+    (
+        "and_or_block_argument_narrowing",
+        "    (x isNil or: [x > 0]) ifTrue: [^0]\n    x",
+    ),
+    (
+        "and_block_with_mixed_receiver",
+        "    ((p and: [x notNil]) and: [x > 0]) ifTrue: [^x]\n    0",
+    ),
+    (
+        "pure_chains_still_narrow#1",
+        "    (x isNil or: [y isNil]) ifTrue: [^0]\n    self need: x and: y",
+    ),
+    (
+        "pure_chains_still_narrow#2",
+        "    (x notNil and: [y notNil]) ifFalse: [^0]\n    self need: x and: y",
+    ),
     // Both branches of the `or:` prove `x` non-nil.
-    assert_clean(
+    (
+        "disjunction_of_tests_joins_facts",
         "    ((x notNil and: [p]) or: [x notNil and: [y notNil]]) ifTrue: [^self need: x]\n    0",
-    );
-}
-
-#[test]
-fn unknown_or_is_nil_if_false() {
+    ),
     // `or:` is false only when both sides are: `x isNil` is false.
-    assert_clean("    (p or: [x isNil]) ifFalse: [^self need: x]\n    0");
-}
+    (
+        "unknown_or_is_nil_if_false",
+        "    (p or: [x isNil]) ifFalse: [^self need: x]\n    0",
+    ),
+    (
+        "diverging_false_arm_narrows_by_true_facts",
+        "    (x notNil and: [p]) ifTrue: [0] ifFalse: [^0]\n    self need: x",
+    ),
+    (
+        "unrelated_rhs_assignment_keeps_the_left_facts",
+        "    l := x\n    m := 0\n    (l notNil and: [m := 1. true]) ifTrue: [^self need: l]\n    0",
+    ),
+    (
+        "not_is_nil_if_true",
+        "    x isNil not ifTrue: [^self need: x]\n    0",
+    ),
+    (
+        "not_not_nil_early_return",
+        "    x notNil not ifTrue: [^0]\n    self need: x",
+    ),
+    (
+        "not_kind_of_early_return",
+        "    (k isKindOf: Integer) not ifTrue: [^0]\n    self need: k",
+    ),
+    (
+        "not_of_disjunction_narrows_both",
+        "    (x isNil or: [y isNil]) not ifTrue: [^self need: x and: y]\n    0",
+    ),
+    (
+        "not_composes_inside_and_or#1",
+        "    (x isNil not and: [p]) ifTrue: [^self need: x]\n    0",
+    ),
+    (
+        "not_composes_inside_and_or#2",
+        "    (p and: [x isNil not]) ifTrue: [^self need: x]\n    0",
+    ),
+    (
+        "not_composes_inside_and_or#3",
+        "    (x notNil not or: [p]) ifTrue: [^0]\n    self need: x",
+    ),
+    (
+        "not_composes_inside_and_or#4",
+        "    (x isNil not and: [x > 0]) ifTrue: [^x]\n    0",
+    ),
+    (
+        "double_not_cancels#1",
+        "    x notNil not not ifTrue: [^self need: x]\n    0",
+    ),
+];
 
-// --- negative controls: must stay rejected -------------------------------
-
-#[test]
-fn or_with_unknown_head_does_not_narrow_true() {
-    assert_rejected("    (p or: [x notNil]) ifTrue: [^self need: x]\n    0");
-}
-
-#[test]
-fn not_nil_or_unknown_does_not_narrow_true() {
-    assert_rejected("    (x notNil or: [p]) ifTrue: [^self need: x]\n    0");
-}
-
-#[test]
-fn is_nil_and_unknown_does_not_narrow_false() {
-    assert_rejected("    (x isNil and: [p]) ifFalse: [^self need: x]\n    0");
-}
-
-#[test]
-fn and_does_not_narrow_false_branch() {
-    assert_rejected("    (p and: [x notNil]) ifFalse: [^self need: x]\n    0");
-}
-
-#[test]
-fn and_does_not_narrow_false_when_only_one_side_narrows() {
-    assert_rejected("    (p and: [x isNil]) ifFalse: [^self need: x]\n    0");
-}
-
-#[test]
-fn disjunction_with_one_unnarrowed_side_does_not_narrow() {
-    assert_rejected("    ((x notNil and: [p]) or: [p]) ifTrue: [^self need: x]\n    0");
-}
-
-#[test]
-fn early_return_on_unknown_and_does_not_narrow() {
+/// Negative controls: each must stay rejected.
+const REJECTED: &[(&str, &str)] = &[
+    (
+        "or_with_unknown_head_does_not_narrow_true",
+        "    (p or: [x notNil]) ifTrue: [^self need: x]\n    0",
+    ),
+    (
+        "not_nil_or_unknown_does_not_narrow_true",
+        "    (x notNil or: [p]) ifTrue: [^self need: x]\n    0",
+    ),
+    (
+        "is_nil_and_unknown_does_not_narrow_false",
+        "    (x isNil and: [p]) ifFalse: [^self need: x]\n    0",
+    ),
+    (
+        "and_does_not_narrow_false_branch",
+        "    (p and: [x notNil]) ifFalse: [^self need: x]\n    0",
+    ),
+    (
+        "and_does_not_narrow_false_when_only_one_side_narrows",
+        "    (p and: [x isNil]) ifFalse: [^self need: x]\n    0",
+    ),
+    (
+        "disjunction_with_one_unnarrowed_side_does_not_narrow",
+        "    ((x notNil and: [p]) or: [p]) ifTrue: [^self need: x]\n    0",
+    ),
     // Falling through `(p and: [x notNil]) ifTrue: [^0]` proves nothing.
-    assert_rejected("    (p and: [x notNil]) ifTrue: [^0]\n    self need: x");
-}
-
-#[test]
-fn multi_statement_block_contributes_nothing() {
+    (
+        "early_return_on_unknown_and_does_not_narrow",
+        "    (p and: [x notNil]) ifTrue: [^0]\n    self need: x",
+    ),
     // The first statement could reassign the tested local; the block is not
     // understood, so nothing is proven.
-    assert_rejected("    l := x\n    (p and: [l := nil. l notNil]) ifTrue: [^self need: l]\n    0");
-}
-
-#[test]
-fn diverging_false_arm_narrows_by_true_facts() {
-    assert_clean("    (x notNil and: [p]) ifTrue: [0] ifFalse: [^0]\n    self need: x");
-}
-
-#[test]
-fn narrowing_does_not_escape_the_block() {
-    assert_rejected("    (p and: [x notNil]) ifTrue: [0]\n    self need: x");
-}
-
-// --- a right-hand argument that invalidates the left side's facts --------
-
-#[test]
-fn rhs_block_reassigning_a_tested_local_voids_and_facts() {
-    assert_rejected(
+    (
+        "multi_statement_block_contributes_nothing",
+        "    l := x\n    (p and: [l := nil. l notNil]) ifTrue: [^self need: l]\n    0",
+    ),
+    (
+        "narrowing_does_not_escape_the_block",
+        "    (p and: [x notNil]) ifTrue: [0]\n    self need: x",
+    ),
+    (
+        "rhs_block_reassigning_a_tested_local_voids_and_facts",
         "    l := x\n    (l notNil and: [l := nil. true]) ifTrue: [^self need: l]\n    0",
-    );
-}
-
-#[test]
-fn rhs_single_expression_reassignment_voids_and_facts() {
-    assert_rejected(
+    ),
+    (
+        "rhs_single_expression_reassignment_voids_and_facts",
         "    l := x\n    (l notNil and: [(l := nil) isNil]) ifTrue: [^self need: l]\n    0",
-    );
-}
-
-#[test]
-fn rhs_block_reassigning_a_tested_local_voids_or_post_guard_facts() {
-    assert_rejected(
+    ),
+    (
+        "rhs_block_reassigning_a_tested_local_voids_or_post_guard_facts",
         "    l := x\n    (l isNil or: [l := nil. false]) ifTrue: [^0]\n    self need: l",
-    );
+    ),
+    (
+        "double_not_cancels#2",
+        "    x isNil not not ifTrue: [^self need: x]\n    0",
+    ),
+    (
+        "not_negative_controls_stay_rejected#1",
+        "    x notNil not ifTrue: [^self need: x]\n    0",
+    ),
+    (
+        "not_negative_controls_stay_rejected#2",
+        "    p not ifTrue: [^self need: x]\n    0",
+    ),
+    (
+        "not_negative_controls_stay_rejected#3",
+        "    (x isNil not and: [p]) ifFalse: [^self need: x]\n    0",
+    ),
+    (
+        "not_negative_controls_stay_rejected#4",
+        "    (k isKindOf: Integer) not ifFalse: [^0]\n    self need: k",
+    ),
+    (
+        "not_keeps_reassignment_guard",
+        "    l := x\n    (l isNil not and: [l := nil. true]) ifTrue: [^self need: l]\n    0",
+    ),
+];
+
+#[test]
+fn mixed_chains_narrow() {
+    for (name, body) in CLEAN {
+        assert_clean(name, body);
+    }
 }
 
 #[test]
-fn unrelated_rhs_assignment_keeps_the_left_facts() {
-    assert_clean(
-        "    l := x\n    m := 0\n    (l notNil and: [m := 1. true]) ifTrue: [^self need: l]\n    0",
-    );
+fn negative_controls_stay_rejected() {
+    for (name, body) in REJECTED {
+        assert_rejected(name, body);
+    }
 }
 
 fn assert_field_leak(diags: &[Diagnostic]) {
@@ -293,55 +332,4 @@ fn rhs_running_a_negation_typed_value_voids_field_facts() {
         "  run: cb :: Object -> Integer =>\n    (cb isKindOf: Number) ifFalse: [(self.f notNil and: [cb value]) ifTrue: [^self need: self.f]]\n    0",
     );
     assert_field_leak(&diags);
-}
-
-// --- BT-4711: `not` swaps a condition's true and false facts -------------
-
-#[test]
-fn not_is_nil_if_true() {
-    assert_clean("    x isNil not ifTrue: [^self need: x]\n    0");
-}
-
-#[test]
-fn not_not_nil_early_return() {
-    assert_clean("    x notNil not ifTrue: [^0]\n    self need: x");
-}
-
-#[test]
-fn not_kind_of_early_return() {
-    assert_clean("    (k isKindOf: Integer) not ifTrue: [^0]\n    self need: k");
-}
-
-#[test]
-fn not_of_disjunction_narrows_both() {
-    assert_clean("    (x isNil or: [y isNil]) not ifTrue: [^self need: x and: y]\n    0");
-}
-
-#[test]
-fn not_composes_inside_and_or() {
-    assert_clean("    (x isNil not and: [p]) ifTrue: [^self need: x]\n    0");
-    assert_clean("    (p and: [x isNil not]) ifTrue: [^self need: x]\n    0");
-    assert_clean("    (x notNil not or: [p]) ifTrue: [^0]\n    self need: x");
-    assert_clean("    (x isNil not and: [x > 0]) ifTrue: [^x]\n    0");
-}
-
-#[test]
-fn double_not_cancels() {
-    assert_clean("    x notNil not not ifTrue: [^self need: x]\n    0");
-    assert_rejected("    x isNil not not ifTrue: [^self need: x]\n    0");
-}
-
-#[test]
-fn not_negative_controls_stay_rejected() {
-    assert_rejected("    x notNil not ifTrue: [^self need: x]\n    0");
-    assert_rejected("    p not ifTrue: [^self need: x]\n    0");
-    assert_rejected("    (x isNil not and: [p]) ifFalse: [^self need: x]\n    0");
-    assert_rejected("    (k isKindOf: Integer) not ifFalse: [^0]\n    self need: k");
-}
-
-#[test]
-fn not_keeps_reassignment_guard() {
-    assert_rejected(
-        "    l := x\n    (l isNil not and: [l := nil. true]) ifTrue: [^self need: l]\n    0",
-    );
 }

@@ -13,6 +13,7 @@ use super::super::threaded_ir::{
     ClassMethodDefect, FoldAccShape, FoldCarry, FrameId, RebindFrame, RebindFrameKind,
     StateAccFallbackReason, ThreadingMode, VerifyError, VersionPrefix, VersionedVar,
 };
+use super::super::threaded_rebind::RebindNaming;
 use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
 use super::analysis::ThreadedFamilies;
 use super::family_slots::FoldFamilySlots;
@@ -1215,10 +1216,7 @@ impl ThreadingPlan {
         };
         for var_name in &self.threaded_locals {
             let packed_var = generator.fresh_temp_var("Packed");
-            let core_var = generator
-                .lookup_var(var_name)
-                .cloned()
-                .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(var_name));
+            let core_var = generator.resolve_local_core_var(var_name);
             let key = self.state_key(var_name);
             pack_docs.push(docvec![
                 "let ",
@@ -1262,16 +1260,16 @@ impl ThreadingPlan {
     ) -> Vec<Document<'static>> {
         let mut docs = Vec::new();
         for var_name in locals {
-            let core_var = CoreErlangGenerator::to_core_erlang_var(var_name);
-            generator.bind_var(var_name, &core_var);
+            let core_var = generator.rebind_local_name(var_name, RebindNaming::Canonical);
             if !self.use_direct_params && !self.use_hybrid_params {
-                let key = self.state_key(var_name);
                 docs.push(docvec![
-                    "let ",
-                    leaf::var(core_var),
-                    " = call 'maps':'get'(",
-                    leaf::atom(key),
-                    ", StateAcc) in ",
+                    CoreErlangGenerator::state_get_let_doc(
+                        core_var,
+                        self.state_key(var_name),
+                        "StateAcc",
+                        None,
+                    ),
+                    " in ",
                 ]);
             }
         }
@@ -1336,12 +1334,7 @@ impl ThreadingPlan {
     pub fn initial_direct_args(&self, generator: &CoreErlangGenerator) -> Vec<String> {
         self.threaded_locals
             .iter()
-            .map(|v| {
-                generator
-                    .lookup_var(v)
-                    .cloned()
-                    .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(v))
-            })
+            .map(|v| generator.resolve_local_core_var(v))
             .collect()
     }
 
@@ -1520,19 +1513,14 @@ impl ThreadingPlan {
     ) -> Document<'static> {
         let mut docs: Vec<Document<'static>> = Vec::new();
         for var_name in &self.threaded_locals {
-            let core_var = generator
-                .lookup_var(var_name)
-                .cloned()
-                .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(var_name));
-            let key = self.state_key(var_name);
             docs.push(docvec![
-                "let ",
-                leaf::var(core_var),
-                " = call 'maps':'get'(",
-                leaf::atom(key),
-                ", ",
-                leaf::var(final_state_var.to_string()),
-                ") in ",
+                CoreErlangGenerator::state_get_let_doc(
+                    generator.resolve_local_core_var(var_name),
+                    self.state_key(var_name),
+                    final_state_var,
+                    None,
+                ),
+                " in ",
             ]);
         }
         Document::Vec(docs)
@@ -1546,14 +1534,9 @@ impl ThreadingPlan {
     /// Returns `Document::Nil` when `threaded_locals` is empty.
     pub fn current_vars_doc(&self, generator: &CoreErlangGenerator) -> Document<'static> {
         join(
-            self.threaded_locals.iter().map(|v| {
-                leaf::var(
-                    generator
-                        .lookup_var(v)
-                        .cloned()
-                        .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(v)),
-                )
-            }),
+            self.threaded_locals
+                .iter()
+                .map(|v| leaf::var(generator.resolve_local_core_var(v))),
             &Document::Str(", "),
         )
     }
@@ -1608,10 +1591,7 @@ impl ThreadingPlan {
     ) -> Document<'static> {
         let mut docs: Vec<Document<'static>> = Vec::new();
         for (i, var_name) in self.threaded_locals.iter().enumerate() {
-            let core_var = generator
-                .lookup_var(var_name)
-                .cloned()
-                .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(var_name));
+            let core_var = generator.resolve_local_core_var(var_name);
             if self.fold_acc_shape == FoldAccShape::Bare {
                 docs.push(docvec![
                     "let ",
@@ -1713,10 +1693,7 @@ impl ThreadingPlan {
             self.initial_state_var.clone()
         };
         for var_name in &self.threaded_locals {
-            let core_var = generator
-                .lookup_var(var_name)
-                .cloned()
-                .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(var_name));
+            let core_var = generator.resolve_local_core_var(var_name);
             let key = self.state_key(var_name);
             let pack_var = generator.fresh_temp_var("PkSt");
             docs.push(docvec![

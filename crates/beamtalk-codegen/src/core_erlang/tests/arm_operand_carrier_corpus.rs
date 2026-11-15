@@ -586,10 +586,16 @@ fn every_fold_body_operand_corpus_program_compiles_clean_and_unpacks_its_carrier
     );
     assert!(clean >= 1000, "only {clean} corpus programs compiled clean");
     println!("{clean} lowered");
-    for methods in per_outer.into_iter().filter(|m| !m.is_empty()) {
-        let src = format!("{FOLD_BODY_HEADER}{}", methods.join(""));
-        super::assert_compiles_through_erlc("test", &codegen(&src));
-    }
+    let rows: Vec<(String, String)> = per_outer
+        .into_iter()
+        .filter(|m| !m.is_empty())
+        .enumerate()
+        .map(|(i, methods)| {
+            let src = format!("{FOLD_BODY_HEADER}{}", methods.join(""));
+            (format!("outer{i}"), codegen(&src))
+        })
+        .collect();
+    super::assert_all_compile_through_erlc(&rows);
 }
 
 /// With the BT-4287 sites withheld, every cell under a fold frame reports
@@ -955,10 +961,15 @@ fn check_unsequenced_partition(part: usize) -> usize {
         "{} cells: {lowered} lowered as producers, {cell_frames} compiled no carrier",
         cells.len()
     );
-    for methods in per_outer.into_values() {
-        let src = format!("{FOLD_BODY_HEADER}{}", methods.join(""));
-        super::assert_compiles_through_erlc("test", &codegen(&src));
-    }
+    let rows: Vec<(String, String)> = per_outer
+        .into_values()
+        .enumerate()
+        .map(|(i, methods)| {
+            let src = format!("{FOLD_BODY_HEADER}{}", methods.join(""));
+            (format!("outer{i}"), codegen(&src))
+        })
+        .collect();
+    super::assert_all_compile_through_erlc(&rows);
     lowered
 }
 

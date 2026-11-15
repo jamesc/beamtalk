@@ -613,6 +613,18 @@ impl CoreErlangGenerator {
         self.var_context.lookup(name)
     }
 
+    /// The Core Erlang variable currently bound to the Beamtalk local `name`,
+    /// or the canonical [`Self::to_core_erlang_var`] spelling when `name` is
+    /// not bound (BT-4888).
+    ///
+    /// This is the one spelling of the "reuse the bound name, else fall back
+    /// to the bare canonical name" idiom — read-only, never binds.
+    pub(in crate::core_erlang) fn resolve_local_core_var(&self, name: &str) -> String {
+        self.lookup_var(name)
+            .cloned()
+            .unwrap_or_else(|| Self::to_core_erlang_var(name))
+    }
+
     /// Hides `name` in the current scope (until the scope is popped or `name`
     /// is bound again), answering the Core Erlang variable it was bound to.
     pub(in crate::core_erlang) fn hide_var(&mut self, name: &str) -> Option<String> {

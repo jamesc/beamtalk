@@ -93,9 +93,7 @@ impl CoreErlangGenerator {
         if self.local_assign_field_write(value).is_some() {
             return Ok(None);
         }
-        let core_var = self
-            .lookup_var(&id.name)
-            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+        let core_var = self.resolve_local_core_var(&id.name);
         // ADR 0118 phase 5b: a class-method self-send on the RHS
         // (`x := self bump`), at any nesting depth, threads as a real
         // prelude via `threaded_expression` — spliced ahead of this

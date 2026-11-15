@@ -40,7 +40,7 @@
 //! block literal sees it bare, and these rows report with the fix off like
 //! their unparenthesised twins.
 
-use super::assert_compiles_through_erlc;
+use super::{assert_all_compile_through_erlc, assert_compiles_through_erlc};
 use crate::core_erlang::fault::{self, Fault};
 use crate::core_erlang::primitive_bindings::PrimitiveBindingTable;
 use crate::core_erlang::synced_call::{
@@ -359,13 +359,11 @@ fn with_fix_off<T>(f: impl FnOnce() -> T) -> T {
 #[test]
 fn nlr_closure_call_corpus_is_clean() {
     let mut failures = Vec::new();
+    let mut rows = Vec::new();
     for (name, src, _) in corpus() {
-        if std::panic::catch_unwind(|| {
-            assert_compiles_through_erlc("test", &compile_with_probe_bindings(&src));
-        })
-        .is_err()
-        {
-            failures.push(format!("{name}:\n{src}"));
+        match std::panic::catch_unwind(|| compile_with_probe_bindings(&src)) {
+            Ok(code) => rows.push((name, code)),
+            Err(_) => failures.push(format!("{name}:\n{src}")),
         }
     }
     assert!(
@@ -374,6 +372,7 @@ fn nlr_closure_call_corpus_is_clean() {
         failures.len(),
         failures.join("\n\n")
     );
+    assert_all_compile_through_erlc(&rows);
 }
 
 /// With the fix off, every shape whose call stored nothing before it reports

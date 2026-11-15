@@ -1207,7 +1207,7 @@ key, or a non-atom / `undefined` / `none` value).
 Single authority for this guard: the write side
 (`beamtalk_object_class:init/1` and `apply_class_info/2`, which already hold
 the class's `Meta` map) and the read side
-(`beamtalk_repl_ops_browse:delegate_rows_for_class_name/2`, which re-derives
+(`beamtalk_repl_ops_browse_native:delegate_rows_for_class_name/2`, which re-derives
 one class's backing module for its per-class isolation check) both call this
 instead of each re-implementing the same three-way guard.
 """.
@@ -1226,7 +1226,7 @@ native-backed class (ADR 0056), maintained by the class lifecycle:
 `record_backing_module_entry/3` (called from `beamtalk_object_class:init/1`
 and `apply_class_info/2`) and `forget_backing_module_entries/2` (called from
 `terminate/2`, guarded on the pid exactly like `forget_loaded_class/2`). It
-exists so `beamtalk_repl_ops_browse:delegate_callers_of_native_module/1` (the
+exists so `beamtalk_repl_ops_browse_native:delegate_callers_of_native_module/1` (the
 LiveView "Callers" op on a native module) can resolve the delegating classes
 with a single ETS `lookup/2` keyed by the native module, instead of walking
 every loaded class via `all_classes/0` and probing `erlang:function_exported/3`

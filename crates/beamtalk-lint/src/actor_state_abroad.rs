@@ -894,6 +894,189 @@ Actor subclass: Counter
         abroad(&format!("{HEADER}{body}"))
     }
 
+    // ---- BT-4908: quiet cases as tables ----------------------------------
+
+    /// Cases that must produce no diagnostics: method bodies appended to `Counter` via [`only`]. Rows are `(name, source)`.
+    const QUIET_METHOD_BODIES: &[(&str, &str)] = &[
+        ("fork_no_actor_state_quiet", "  kick => [1 + 1] fork\n"),
+        (
+            "timer_cast_to_self_quiet",
+            "  startWell => Timer after: 100 do: [self bump!]\n",
+        ),
+        (
+            "timer_block_touching_no_field_quiet",
+            "  start: logger =>\n    Timer after: 100 do: [logger info: \"tick\"]\n",
+        ),
+        (
+            "reflective_fieldat_immutable_field_quiet",
+            "  startTag => Timer after: 1 do: [(self fieldAt: #tag) printNl]\n",
+        ),
+        (
+            "reflective_cast_to_self_quiet",
+            "  startCast => Timer after: 1 do: [self fieldAt: #n put: 1!]\n",
+        ),
+        // `Parallel` blocks until its workers finish, so the capture is live.
+        (
+            "parallel_read_quiet",
+            "  fanPeek => Parallel all: #([self.n printNl]) timeout: 50\n",
+        ),
+        // Typed as the enclosing class itself: it may hold `self`.
+        (
+            "own_class_typed_receiver_quiet",
+            "  pokeSelf: other :: Counter => other run: [self.n := 0]\n",
+        ),
+        // `spawnAs:` answers `Result(Self, Error)`, not an actor.
+        (
+            "named_spawn_result_quiet",
+            "  named =>\n    a := Worker spawnAs: #w\n    a run: [self.n := 1]\n",
+        ),
+        // A parameter may or may not hold another actor; the lint only judges
+        // statically known actors.
+        (
+            "actor_param_receiver_quiet",
+            "  pokeVia: other => other run: [self.n := 0]\n",
+        ),
+        (
+            "direct_called_class_method_quiet",
+            "  viaSealed => SealedLib each: [self.n := 1]\n",
+        ),
+        // ADR 0142 §1 (BT-4301): a class with no class variables in its chain
+        // runs its class methods in the caller, `class sealed` or not.
+        (
+            "open_stateless_class_method_quiet",
+            "  viaOpen => OpenLib each: [self.n := 1]\n",
+        ),
+        (
+            "self_send_stays_home",
+            "  addTwice =>\n    self twice: [self.n := self.n + 1]\n    self.n\n",
+        ),
+        (
+            "cast_to_self_stays_home",
+            "  saveLater => self keep: [self.n := 1]!\n",
+        ),
+        (
+            "inlined_control_flow_stays_home",
+            "  sum: items =>\n    items do: [:i | self.n := self.n + i]\n    self.n\n",
+        ),
+        // `field:` data cannot change, so the capture is always current.
+        (
+            "immutable_field_read_quiet",
+            "  startTag => Timer after: 1 do: [self.tag printNl]\n",
+        ),
+        // A `super` send in the block is a documented miss: away-`super`
+        // runs the superclass method against the capture and needs its own
+        // message.
+        (
+            "super_send_quiet",
+            "  startSuper => Timer after: 1 do: [super tick]\n",
+        ),
+        // An instance send on an unknown receiver: the lint judges sends by
+        // receiver. The block touches state; the shape is the miss.
+        (
+            "parallel_collect_quiet",
+            "  collectP: xs => xs parallelCollect: [:x | self.n + x]\n",
+        ),
+        // A block nested in a `spawnWith:` argument map is not inspected.
+        (
+            "spawnwith_map_block_quiet",
+            "  spawnCb => Worker spawnWith: #{#cb => [self.n := 1]}\n",
+        ),
+        // Stored in a field and run later in the actor's own process: home.
+        (
+            "stored_block_in_own_actor_quiet",
+            "  arm => self.onTick := [self.n := self.n + 10]\n",
+        ),
+    ];
+
+    #[test]
+    fn quiet_method_bodies_produce_no_diagnostics() {
+        for (name, src) in QUIET_METHOD_BODIES {
+            let d = only(src);
+            assert!(d.is_empty(), "[{name}] {d:?}");
+        }
+    }
+
+    /// Cases that must produce no diagnostics: whole programs run through [`abroad`]. Rows are `(name, source)`.
+    const QUIET_PROGRAMS: &[(&str, &str)] = &[
+        (
+            "inherited_stateless_class_method_quiet",
+            "Object subclass: Lib
+  class each: aBlock => aBlock value
+
+Lib subclass: Kid
+  kidHelper => nil
+
+Actor subclass: Counter
+  state: n = 0
+
+  viaKid => Kid each: [self.n := 1]
+",
+        ),
+        (
+            "self_class_direct_called_quiet",
+            "sealed Actor subclass: SealedCounter
+  state: n = 0
+
+  class sealed each: aBlock => aBlock value
+
+  viaSelf => self class each: [self.n := 1]
+",
+        ),
+        (
+            "inherited_immutable_field_read_quiet",
+            "Actor subclass: Base
+  field: tag = #c
+
+Base subclass: Child
+  state: n = 0
+
+  startTag => Timer after: 1 do: [self.tag printNl]
+",
+        ),
+        (
+            "untyped_field_receiver_quiet",
+            "Actor subclass: Runner
+  run: aBlock => aBlock value
+
+Actor subclass: Counter
+  state: n = 0
+  state: helper = nil
+
+  pokeHelper => self.helper run: [self.n := 1]
+",
+        ),
+        (
+            "value_class_unchecked",
+            "Value subclass: Point
+  field: x = 0
+
+  peek => Timer after: 1 do: [self.x printNl]
+",
+        ),
+        (
+            "plain_object_unchecked",
+            "Object subclass: Datum
+  state: n = 0
+
+  poke => Timer after: 1 do: [self.n := 1]
+",
+        ),
+        // A standalone definition for a class the hierarchy does not know
+        // resolves non-actor and is skipped.
+        (
+            "standalone_unknown_class_quiet",
+            "Ghost >> m => Timer after: 1 do: [self.n := 1]\n",
+        ),
+    ];
+
+    #[test]
+    fn quiet_programs_produce_no_diagnostics() {
+        for (name, src) in QUIET_PROGRAMS {
+            let d = abroad(src);
+            assert!(d.is_empty(), "[{name}] {d:?}");
+        }
+    }
+
     // ---- Shape A': Block fork (BT-4198) ------------------------------------
 
     #[test]
@@ -923,12 +1106,6 @@ Actor subclass: Counter
             "{}",
             d[0].message
         );
-    }
-
-    #[test]
-    fn fork_no_actor_state_quiet() {
-        let d = only("  kick => [1 + 1] fork\n");
-        assert!(d.is_empty(), "{d:?}");
     }
 
     // ---- Shape A: Timer ----------------------------------------------------
@@ -1046,18 +1223,6 @@ Actor subclass: Counter
             "hint should name the alias: {:?}",
             d[0].hint
         );
-    }
-
-    #[test]
-    fn timer_cast_to_self_quiet() {
-        let d = only("  startWell => Timer after: 100 do: [self bump!]\n");
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn timer_block_touching_no_field_quiet() {
-        let d = only("  start: logger =>\n    Timer after: 100 do: [logger info: \"tick\"]\n");
-        assert!(d.is_empty(), "{d:?}");
     }
 
     #[test]
@@ -1276,12 +1441,6 @@ Actor subclass: Counter
     }
 
     #[test]
-    fn reflective_fieldat_immutable_field_quiet() {
-        let d = only("  startTag => Timer after: 1 do: [(self fieldAt: #tag) printNl]\n");
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
     fn direct_and_reflective_reads_combined() {
         one_with(
             "  startBoth => Timer after: 1 do: [self.n printNl. (self fieldAt: #onTick) printNl]\n",
@@ -1323,12 +1482,6 @@ Actor subclass: Counter
             "  startBoth => Timer after: 1 do: [(self fieldAt: #n) printNl. self bump]\n",
             &["reads the values captured at creation"],
         );
-    }
-
-    #[test]
-    fn reflective_cast_to_self_quiet() {
-        let d = only("  startCast => Timer after: 1 do: [self fieldAt: #n put: 1!]\n");
-        assert!(d.is_empty(), "{d:?}");
     }
 
     #[test]
@@ -1405,13 +1558,6 @@ Actor subclass: Counter
             "{}",
             d[0].message
         );
-    }
-
-    #[test]
-    fn parallel_read_quiet() {
-        // `Parallel` blocks until its workers finish, so the capture is live.
-        let d = only("  fanPeek => Parallel all: #([self.n printNl]) timeout: 50\n");
-        assert!(d.is_empty(), "{d:?}");
     }
 
     // ---- Shape B: another actor --------------------------------------------
@@ -1514,20 +1660,6 @@ Actor subclass: Counter
     }
 
     #[test]
-    fn own_class_typed_receiver_quiet() {
-        // Typed as the enclosing class itself: it may hold `self`.
-        let d = only("  pokeSelf: other :: Counter => other run: [self.n := 0]\n");
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn named_spawn_result_quiet() {
-        // `spawnAs:` answers `Result(Self, Error)`, not an actor.
-        let d = only("  named =>\n    a := Worker spawnAs: #w\n    a run: [self.n := 1]\n");
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
     fn actor_nested_self_send_warns() {
         let d =
             only("  fanRun =>\n    r := Runner spawn\n    r run: [items do: [:i | self bump]]\n");
@@ -1569,14 +1701,6 @@ Actor subclass: Counter
             "cascade hint must be generic: {:?}",
             d[0].hint
         );
-    }
-
-    #[test]
-    fn actor_param_receiver_quiet() {
-        // A parameter may or may not hold another actor; the lint only judges
-        // statically known actors.
-        let d = only("  pokeVia: other => other run: [self.n := 0]\n");
-        assert!(d.is_empty(), "{d:?}");
     }
 
     #[test]
@@ -1687,20 +1811,6 @@ Actor subclass: Counter
         );
     }
 
-    #[test]
-    fn direct_called_class_method_quiet() {
-        let d = only("  viaSealed => SealedLib each: [self.n := 1]\n");
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn open_stateless_class_method_quiet() {
-        // ADR 0142 §1 (BT-4301): a class with no class variables in its chain
-        // runs its class methods in the caller, `class sealed` or not.
-        let d = only("  viaOpen => OpenLib each: [self.n := 1]\n");
-        assert!(d.is_empty(), "{d:?}");
-    }
-
     /// `body` appended to `Counter`, linted against this module's hierarchy
     /// with `shadowed` declared by more than one package in scope.
     fn only_with_shadowed(body: &str, shadowed: &[&str]) -> Vec<Diagnostic> {
@@ -1756,24 +1866,6 @@ Actor subclass: Counter
     }
 
     #[test]
-    fn inherited_stateless_class_method_quiet() {
-        let d = abroad(
-            "Object subclass: Lib
-  class each: aBlock => aBlock value
-
-Lib subclass: Kid
-  kidHelper => nil
-
-Actor subclass: Counter
-  state: n = 0
-
-  viaKid => Kid each: [self.n := 1]
-",
-        );
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
     fn self_class_receiver_warns() {
         let d = only("  viaSelfClass => self class each: [self.n := 1]\n");
         assert_eq!(d.len(), 1, "{d:?}");
@@ -1795,61 +1887,7 @@ Actor subclass: Counter
         );
     }
 
-    #[test]
-    fn self_class_direct_called_quiet() {
-        let d = abroad(
-            "sealed Actor subclass: SealedCounter
-  state: n = 0
-
-  class sealed each: aBlock => aBlock value
-
-  viaSelf => self class each: [self.n := 1]
-",
-        );
-        assert!(d.is_empty(), "{d:?}");
-    }
-
     // ---- staying home stays quiet ------------------------------------------
-
-    #[test]
-    fn self_send_stays_home() {
-        let d = only("  addTwice =>\n    self twice: [self.n := self.n + 1]\n    self.n\n");
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn cast_to_self_stays_home() {
-        let d = only("  saveLater => self keep: [self.n := 1]!\n");
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn inlined_control_flow_stays_home() {
-        let d = only("  sum: items =>\n    items do: [:i | self.n := self.n + i]\n    self.n\n");
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn immutable_field_read_quiet() {
-        // `field:` data cannot change, so the capture is always current.
-        let d = only("  startTag => Timer after: 1 do: [self.tag printNl]\n");
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn inherited_immutable_field_read_quiet() {
-        let d = abroad(
-            "Actor subclass: Base
-  field: tag = #c
-
-Base subclass: Child
-  state: n = 0
-
-  startTag => Timer after: 1 do: [self.tag printNl]
-",
-        );
-        assert!(d.is_empty(), "{d:?}");
-    }
 
     #[test]
     fn same_module_subclass_warns() {
@@ -1869,77 +1907,6 @@ Base subclass: Sub
             "{}",
             d[0].message
         );
-    }
-
-    #[test]
-    fn super_send_quiet() {
-        // A `super` send in the block is a documented miss: away-`super`
-        // runs the superclass method against the capture and needs its own
-        // message.
-        let d = only("  startSuper => Timer after: 1 do: [super tick]\n");
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn parallel_collect_quiet() {
-        // An instance send on an unknown receiver: the lint judges sends by
-        // receiver. The block touches state; the shape is the miss.
-        let d = only("  collectP: xs => xs parallelCollect: [:x | self.n + x]\n");
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn untyped_field_receiver_quiet() {
-        let d = abroad(
-            "Actor subclass: Runner
-  run: aBlock => aBlock value
-
-Actor subclass: Counter
-  state: n = 0
-  state: helper = nil
-
-  pokeHelper => self.helper run: [self.n := 1]
-",
-        );
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn spawnwith_map_block_quiet() {
-        // A block nested in a `spawnWith:` argument map is not inspected.
-        let d = only("  spawnCb => Worker spawnWith: #{#cb => [self.n := 1]}\n");
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn value_class_unchecked() {
-        let d = abroad(
-            "Value subclass: Point
-  field: x = 0
-
-  peek => Timer after: 1 do: [self.x printNl]
-",
-        );
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn plain_object_unchecked() {
-        let d = abroad(
-            "Object subclass: Datum
-  state: n = 0
-
-  poke => Timer after: 1 do: [self.n := 1]
-",
-        );
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn stored_block_in_own_actor_quiet() {
-        // Stored in a field and run later in the actor's own process: home.
-        let d = only("  arm => self.onTick := [self.n := self.n + 10]\n");
-        assert!(d.is_empty(), "{d:?}");
     }
 
     // ---- standalone definitions --------------------------------------------
@@ -1962,14 +1929,6 @@ Actor subclass: Counter
         let d = abroad(&format!(
             "{HEADER}Lib >> helper => Timer after: 1 do: [self.n := 1]\n"
         ));
-        assert!(d.is_empty(), "{d:?}");
-    }
-
-    #[test]
-    fn standalone_unknown_class_quiet() {
-        // A standalone definition for a class the hierarchy does not know
-        // resolves non-actor and is skipped.
-        let d = abroad("Ghost >> m => Timer after: 1 do: [self.n := 1]\n");
         assert!(d.is_empty(), "{d:?}");
     }
 
