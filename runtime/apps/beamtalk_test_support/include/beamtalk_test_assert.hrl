@@ -132,7 +132,8 @@
         catch
             error:#{
                 '$beamtalk_class' := _,
-                error := #beamtalk_error{kind = Kind, class = Class, selector = Selector} = __BtRaised
+                error := #beamtalk_error{kind = Kind, class = Class, selector = Selector} =
+                    __BtRaised
             } ->
                 (Check)(__BtRaised)
         end

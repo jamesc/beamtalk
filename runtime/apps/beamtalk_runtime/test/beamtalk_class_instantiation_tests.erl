@@ -309,6 +309,7 @@ static_route_error(Class, Selector) ->
     try resolve_spawn(Class, Selector, actor) of
         Module -> error({expected_raise, Module})
     catch
+        %% BT-4900: kept hand-written - value-returning helper (hands the error back to the caller)
         error:#{error := #beamtalk_error{} = Error} -> Error
     end.
 

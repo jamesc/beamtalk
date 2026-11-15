@@ -17,6 +17,7 @@ Tests the Phase 2 dispatch/3 interface for Beamtalk primitives:
 - unknown selectors (does_not_understand)
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%====================================================================
@@ -321,27 +322,21 @@ help_test_() ->
                 ?assertNotEqual(nomatch, binary:match(Text, <<"Counter">>))
             end},
             {"unknown class raises class_not_found", fun() ->
-                try
+                ?assertBtError(
+                    class_not_found,
+                    'Beamtalk',
                     beamtalk_interface:dispatch(
                         'help:', ['NoSuchClassABC'], beamtalk_test_repl:fake_self(beamtalk, self())
-                    ),
-                    ?assert(false)
-                catch
-                    error:#{error := Err} ->
-                        ?assertEqual(class_not_found, Err#beamtalk_error.kind),
-                        ?assertEqual('Beamtalk', Err#beamtalk_error.class)
-                end
+                    )
+                )
             end},
             {"invalid argument raises type_error", fun() ->
-                try
+                ?assertBtError(
+                    type_error,
                     beamtalk_interface:dispatch(
                         'help:', [42], beamtalk_test_repl:fake_self(beamtalk, self())
-                    ),
-                    ?assert(false)
-                catch
-                    error:#{error := Err} ->
-                        ?assertEqual(type_error, Err#beamtalk_error.kind)
-                end
+                    )
+                )
             end}
         ]
     end}.
@@ -362,30 +357,24 @@ help_selector_test_() ->
                 ?assertNotEqual(nomatch, binary:match(Text, <<"increment">>))
             end},
             {"unknown selector raises does_not_understand", fun() ->
-                try
+                ?assertBtError(
+                    does_not_understand,
                     beamtalk_interface:dispatch(
                         'help:selector:',
                         ['Counter', noSuchMethod],
                         beamtalk_test_repl:fake_self(beamtalk, self())
-                    ),
-                    ?assert(false)
-                catch
-                    error:#{error := Err} ->
-                        ?assertEqual(does_not_understand, Err#beamtalk_error.kind)
-                end
+                    )
+                )
             end},
             {"unknown class raises class_not_found", fun() ->
-                try
+                ?assertBtError(
+                    class_not_found,
                     beamtalk_interface:dispatch(
                         'help:selector:',
                         ['NoSuchClass', foo],
                         beamtalk_test_repl:fake_self(beamtalk, self())
-                    ),
-                    ?assert(false)
-                catch
-                    error:#{error := Err} ->
-                        ?assertEqual(class_not_found, Err#beamtalk_error.kind)
-                end
+                    )
+                )
             end}
         ]
     end}.
@@ -434,17 +423,14 @@ unknown_selector_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             {"unknown selector raises does_not_understand", fun() ->
-                try
+                ?assertBtError(
+                    does_not_understand,
+                    'Beamtalk',
+                    unknownSelector,
                     beamtalk_interface:dispatch(
                         unknownSelector, [], beamtalk_test_repl:fake_self(beamtalk, self())
-                    ),
-                    ?assert(false)
-                catch
-                    error:#{error := Err} ->
-                        ?assertEqual(does_not_understand, Err#beamtalk_error.kind),
-                        ?assertEqual('Beamtalk', Err#beamtalk_error.class),
-                        ?assertEqual(unknownSelector, Err#beamtalk_error.selector)
-                end
+                    )
+                )
             end}
         ]
     end}.

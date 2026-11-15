@@ -45,12 +45,7 @@ with_declared(Fun) ->
     end.
 
 raised_error(Fun) ->
-    try
-        Fun(),
-        no_error
-    catch
-        error:#{error := #beamtalk_error{} = E} -> E
-    end.
+    beamtalk_test_assert:raised_error(Fun).
 
 raised_kind(Fun) ->
     case raised_error(Fun) of

@@ -430,12 +430,7 @@ compat_sync_send_preserves_class_test_() ->
 compat_sync_send_case(Selector, Class, Kind) ->
     {ok, Actor} = test_compat_error_actor:start_link(),
     try
-        beamtalk_actor:sync_send(Actor, Selector, []),
-        ?assert(false, "Expected error to be raised")
-    catch
-        error:#{error := Inner, '$beamtalk_class' := RaisedClass} ->
-            ?assertEqual(Class, RaisedClass),
-            ?assertEqual(Kind, Inner#beamtalk_error.kind)
+        ?assertBtErrorTagged(Class, Kind, _, _, beamtalk_actor:sync_send(Actor, Selector, []))
     after
         gen_server:stop(Actor)
     end.
@@ -4788,6 +4783,7 @@ continuation_error_kind(Fun) ->
     try Fun() of
         Other -> {no_error, Other}
     catch
+        %% BT-4900: kept hand-written - value-returning kind helper ({no_error, V} on success)
         error:#{error := #beamtalk_error{kind = Kind}} -> Kind
     end.
 
