@@ -38,7 +38,7 @@ with_counter(Name, Fun) ->
     catch
         _:_ -> ok
     end),
-    Counter = beamtalk_atomic_counter:'new:'(Name),
+    Counter = beamtalk_atomic_counter:new(Name),
     try
         Fun(Counter)
     after
@@ -59,7 +59,7 @@ new_returns_counter_map_test() ->
     catch
         _:_ -> ok
     end),
-    C = beamtalk_atomic_counter:'new:'(bt_ac_test_new),
+    C = beamtalk_atomic_counter:new(bt_ac_test_new),
     ?assertMatch(#{'$beamtalk_class' := 'AtomicCounter', table := bt_ac_test_new}, C),
     ets:delete(bt_ac_test_new).
 
@@ -69,7 +69,7 @@ new_starts_at_zero_test() ->
     catch
         _:_ -> ok
     end),
-    C = beamtalk_atomic_counter:'new:'(bt_ac_test_zero),
+    C = beamtalk_atomic_counter:new(bt_ac_test_zero),
     try
         ?assertEqual(0, beamtalk_atomic_counter:value(C))
     after
@@ -89,14 +89,14 @@ new_already_exists_test() ->
     ets:new(bt_ac_test_dup, [set, named_table, public]),
     try
         ?assertBtError(
-            already_exists, 'AtomicCounter', beamtalk_atomic_counter:'new:'(bt_ac_test_dup)
+            already_exists, 'AtomicCounter', beamtalk_atomic_counter:new(bt_ac_test_dup)
         )
     after
         ets:delete(bt_ac_test_dup)
     end.
 
 new_type_error_not_atom_test() ->
-    ?assertBtError(type_error, 'AtomicCounter', beamtalk_atomic_counter:'new:'(<<"not_an_atom">>)).
+    ?assertBtError(type_error, 'AtomicCounter', beamtalk_atomic_counter:new(<<"not_an_atom">>)).
 
 %%% ============================================================================
 %%% named:/1
@@ -108,9 +108,9 @@ named_success_test() ->
     catch
         _:_ -> ok
     end),
-    _C = beamtalk_atomic_counter:'new:'(bt_ac_test_named),
+    _C = beamtalk_atomic_counter:new(bt_ac_test_named),
     try
-        C2 = beamtalk_atomic_counter:'named:'(bt_ac_test_named),
+        C2 = beamtalk_atomic_counter:named(bt_ac_test_named),
         ?assertMatch(#{'$beamtalk_class' := 'AtomicCounter', table := bt_ac_test_named}, C2)
     after
         (try
@@ -122,12 +122,12 @@ named_success_test() ->
 
 named_not_found_test() ->
     ?assertBtError(
-        not_found, 'AtomicCounter', beamtalk_atomic_counter:'named:'(bt_ac_test_no_such_xyz)
+        not_found, 'AtomicCounter', beamtalk_atomic_counter:named(bt_ac_test_no_such_xyz)
     ).
 
 named_type_error_test() ->
     ?assertBtError(
-        type_error, 'AtomicCounter', beamtalk_atomic_counter:'named:'(<<"not_an_atom">>)
+        type_error, 'AtomicCounter', beamtalk_atomic_counter:named(<<"not_an_atom">>)
     ).
 
 %%% ============================================================================
@@ -259,7 +259,7 @@ delete_destroys_table_test() ->
     catch
         _:_ -> ok
     end),
-    C = beamtalk_atomic_counter:'new:'(bt_ac_test_delete),
+    C = beamtalk_atomic_counter:new(bt_ac_test_delete),
     ?assertEqual(nil, beamtalk_atomic_counter:delete(C)),
     ?assertEqual(undefined, ets:whereis(bt_ac_test_delete)).
 
@@ -272,7 +272,7 @@ delete_stale_counter_test() ->
     catch
         _:_ -> ok
     end),
-    C = beamtalk_atomic_counter:'new:'(bt_ac_test_delete_stale),
+    C = beamtalk_atomic_counter:new(bt_ac_test_delete_stale),
     beamtalk_atomic_counter:delete(C),
     %% Second delete: table is gone — must raise stale_counter, not permission_error.
     ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:delete(C)).
@@ -297,7 +297,7 @@ ffi_named_shim_success_test() ->
     catch
         _:_ -> ok
     end),
-    _C = beamtalk_atomic_counter:'new:'(bt_ac_test_ffi_named),
+    _C = beamtalk_atomic_counter:new(bt_ac_test_ffi_named),
     try
         C2 = beamtalk_atomic_counter:named(bt_ac_test_ffi_named),
         ?assertMatch(#{'$beamtalk_class' := 'AtomicCounter', table := bt_ac_test_ffi_named}, C2)
@@ -322,7 +322,7 @@ stale_counter_increment_test() ->
     catch
         _:_ -> ok
     end),
-    C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_incr),
+    C = beamtalk_atomic_counter:new(bt_ac_test_stale_incr),
     beamtalk_atomic_counter:delete(C),
     ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:increment(C)).
 
@@ -332,7 +332,7 @@ stale_counter_value_test() ->
     catch
         _:_ -> ok
     end),
-    C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_value),
+    C = beamtalk_atomic_counter:new(bt_ac_test_stale_value),
     ets:delete(bt_ac_test_stale_value),
     ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:value(C)).
 
@@ -342,7 +342,7 @@ stale_counter_decrement_test() ->
     catch
         _:_ -> ok
     end),
-    C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_decr),
+    C = beamtalk_atomic_counter:new(bt_ac_test_stale_decr),
     beamtalk_atomic_counter:delete(C),
     ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:decrement(C)).
 
@@ -352,7 +352,7 @@ stale_counter_incrementBy_test() ->
     catch
         _:_ -> ok
     end),
-    C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_incrby),
+    C = beamtalk_atomic_counter:new(bt_ac_test_stale_incrby),
     beamtalk_atomic_counter:delete(C),
     ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:incrementBy(C, 1)).
 
@@ -362,7 +362,7 @@ stale_counter_decrementBy_test() ->
     catch
         _:_ -> ok
     end),
-    C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_decrby),
+    C = beamtalk_atomic_counter:new(bt_ac_test_stale_decrby),
     beamtalk_atomic_counter:delete(C),
     ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:decrementBy(C, 1)).
 
@@ -372,7 +372,7 @@ stale_counter_reset_test() ->
     catch
         _:_ -> ok
     end),
-    C = beamtalk_atomic_counter:'new:'(bt_ac_test_stale_reset),
+    C = beamtalk_atomic_counter:new(bt_ac_test_stale_reset),
     beamtalk_atomic_counter:delete(C),
     ?assertBtError(stale_counter, 'AtomicCounter', beamtalk_atomic_counter:reset(C)).
 
@@ -391,7 +391,7 @@ concurrent_increment_test() ->
     catch
         _:_ -> ok
     end),
-    C = beamtalk_atomic_counter:'new:'(bt_ac_test_concurrent),
+    C = beamtalk_atomic_counter:new(bt_ac_test_concurrent),
     try
         Parent = self(),
         Pids = [

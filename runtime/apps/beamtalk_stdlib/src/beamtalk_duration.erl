@@ -31,17 +31,17 @@ Float alternative was rejected so deadline arithmetic stays exact.
 
 ## FFI Shims
 
-`beamtalk_erlang_proxy:direct_call/4` derives the Erlang function name from
-the first keyword of the Beamtalk selector. Operator selectors (`+`, `<`, …)
+`beamtalk_erlang_proxy:native_call` names the Erlang function with
+`selector_to_function/1`: the first keyword of the Beamtalk selector. Operator selectors (`+`, `<`, …)
 are not valid Erlang function names, so the Beamtalk operators dispatch
 through named shims (`add`, `subtract`, `multiply`, `lt`, `gt`, `lte`,
 `gte`). The equality operators have no shim — codegen lowers them to the
 Erlang BIFs without dispatching (ADR 0002).
 """.
 
-%% Class methods (canonical colon forms)
--export(['milliseconds:'/1, 'seconds:'/1, 'minutes:'/1, 'hours:'/1, 'days:'/1]).
--export(['fromString:'/1]).
+%% Class methods
+-export([milliseconds/1, seconds/1, minutes/1, hours/1, days/1]).
+-export([fromString/1]).
 
 %% Instance methods
 -export(['asMilliseconds'/1, 'asSeconds'/1, 'asMinutes'/1, 'asHours'/1, 'totalDays'/1]).
@@ -50,8 +50,8 @@ Erlang BIFs without dispatching (ADR 0002).
 -export(['+'/2, '-'/2, '*'/2]).
 -export(['<'/2, '>'/2, '=<'/2, '>='/2, '=:='/2, '/='/2, '<='/2]).
 
-%% FFI shims for (Erlang beamtalk_duration) dispatch
--export([milliseconds/1, seconds/1, minutes/1, hours/1, days/1, fromString/1]).
+%% Entry points for (Erlang beamtalk_duration) dispatch
+
 -export([add/2, subtract/2, multiply/2]).
 -export([lt/2, gt/2, lte/2, gte/2]).
 
@@ -71,24 +71,24 @@ Erlang BIFs without dispatching (ADR 0002).
 %%% ============================================================================
 
 -doc "Construct a Duration from milliseconds (Integer, or Float rounded).".
--spec 'milliseconds:'(number()) -> t().
-'milliseconds:'(N) -> from_scaled(N, 1, 'milliseconds:').
+-spec milliseconds(number()) -> t().
+milliseconds(N) -> from_scaled(N, 1, 'milliseconds:').
 
 -doc "Construct a Duration from seconds (Integer, or Float rounded to ms).".
--spec 'seconds:'(number()) -> t().
-'seconds:'(N) -> from_scaled(N, ?MS_PER_SECOND, 'seconds:').
+-spec seconds(number()) -> t().
+seconds(N) -> from_scaled(N, ?MS_PER_SECOND, 'seconds:').
 
 -doc "Construct a Duration from minutes (Integer, or Float rounded to ms).".
--spec 'minutes:'(number()) -> t().
-'minutes:'(N) -> from_scaled(N, ?MS_PER_MINUTE, 'minutes:').
+-spec minutes(number()) -> t().
+minutes(N) -> from_scaled(N, ?MS_PER_MINUTE, 'minutes:').
 
 -doc "Construct a Duration from hours (Integer, or Float rounded to ms).".
--spec 'hours:'(number()) -> t().
-'hours:'(N) -> from_scaled(N, ?MS_PER_HOUR, 'hours:').
+-spec hours(number()) -> t().
+hours(N) -> from_scaled(N, ?MS_PER_HOUR, 'hours:').
 
 -doc "Construct a Duration from days (Integer, or Float rounded to ms).".
--spec 'days:'(number()) -> t().
-'days:'(N) -> from_scaled(N, ?MS_PER_DAY, 'days:').
+-spec days(number()) -> t().
+days(N) -> from_scaled(N, ?MS_PER_DAY, 'days:').
 
 -doc """
 Parse an ISO 8601 duration string, e.g. `PT1H30M`, `P1DT2H`, `PT0.250S`.
@@ -98,11 +98,11 @@ are not supported (calendar-dependent). Fractional seconds are supported
 up to millisecond precision, but require a leading digit before the
 decimal point (`PT0.5S`, not `PT.5S`).
 """.
--spec 'fromString:'(binary() | beamtalk_string:t()) -> t().
+-spec fromString(binary() | beamtalk_string:t()) -> t().
 %% BT-4173: strings arrive tagged from Beamtalk — unwrap to bytes.
-'fromString:'({beamtalk_string, Str}) when is_binary(Str) ->
-    'fromString:'(Str);
-'fromString:'(Str) when is_binary(Str) ->
+fromString({beamtalk_string, Str}) when is_binary(Str) ->
+    fromString(Str);
+fromString(Str) when is_binary(Str) ->
     case parse_iso8601(Str) of
         {ok, Ms} ->
             make_duration(Ms);
@@ -113,7 +113,7 @@ decimal point (`PT0.5S`, not `PT.5S`).
                 <<"Expected ISO 8601 duration format, e.g. PT1H30M15S or P1DT2H">>
             )
     end;
-'fromString:'(_) ->
+fromString(_) ->
     beamtalk_error:raise_type_error('Duration', 'fromString:', <<"Argument must be a String">>).
 
 %%% ============================================================================
@@ -283,30 +283,6 @@ Zero components are omitted; negative durations get a leading `-`.
 %%% ============================================================================
 %%% FFI Shims — (Erlang beamtalk_duration) dispatch
 %%% ============================================================================
-
--doc "FFI shim: `(Erlang beamtalk_duration) milliseconds: n`".
--spec milliseconds(number()) -> t().
-milliseconds(N) -> 'milliseconds:'(N).
-
--doc "FFI shim: `(Erlang beamtalk_duration) seconds: n`".
--spec seconds(number()) -> t().
-seconds(N) -> 'seconds:'(N).
-
--doc "FFI shim: `(Erlang beamtalk_duration) minutes: n`".
--spec minutes(number()) -> t().
-minutes(N) -> 'minutes:'(N).
-
--doc "FFI shim: `(Erlang beamtalk_duration) hours: n`".
--spec hours(number()) -> t().
-hours(N) -> 'hours:'(N).
-
--doc "FFI shim: `(Erlang beamtalk_duration) days: n`".
--spec days(number()) -> t().
-days(N) -> 'days:'(N).
-
--doc "FFI shim: `(Erlang beamtalk_duration) fromString: str`".
--spec fromString(binary()) -> t().
-fromString(Str) -> 'fromString:'(Str).
 
 %% `add:with:` → strips to `add`, arity 2
 -spec add(t(), t()) -> t().

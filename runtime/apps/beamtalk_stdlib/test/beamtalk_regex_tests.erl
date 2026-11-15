@@ -21,7 +21,7 @@ and error paths.
 %%% ============================================================================
 
 make_regex(Pattern) ->
-    R = beamtalk_regex:'from:'(Pattern),
+    R = beamtalk_regex:from(Pattern),
     maps:get('okValue', R).
 
 %%% ============================================================================
@@ -29,7 +29,7 @@ make_regex(Pattern) ->
 %%% ============================================================================
 
 from_valid_test() ->
-    R = beamtalk_regex:'from:'(<<"[0-9]+">>),
+    R = beamtalk_regex:from(<<"[0-9]+">>),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
     Regex = maps:get('okValue', R),
     ?assertEqual('Regex', maps:get('$beamtalk_class', Regex)),
@@ -37,36 +37,36 @@ from_valid_test() ->
     ?assert(maps:is_key(compiled, Regex)).
 
 from_empty_pattern_test() ->
-    R = beamtalk_regex:'from:'(<<"">>),
+    R = beamtalk_regex:from(<<"">>),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
     ?assertEqual({beamtalk_string, <<"">>}, maps:get(source, maps:get('okValue', R))).
 
 from_invalid_pattern_test() ->
-    R = beamtalk_regex:'from:'(<<"[unclosed">>),
+    R = beamtalk_regex:from(<<"[unclosed">>),
     ?assertBtResultObjError(regex_error, R).
 
 from_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_regex:'from:'(not_a_string)).
+    ?assertBtError(type_error, beamtalk_regex:from(not_a_string)).
 
 %%% ============================================================================
 %%% from:options:/2 — Constructor with options
 %%% ============================================================================
 
 from_options_caseless_test() ->
-    R = beamtalk_regex:'from:options:'(<<"hello">>, [caseless]),
+    R = beamtalk_regex:from(<<"hello">>, [caseless]),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
     ?assertEqual({beamtalk_string, <<"hello">>}, maps:get(source, maps:get('okValue', R))).
 
 from_options_multiline_test() ->
-    R = beamtalk_regex:'from:options:'(<<"^foo">>, [multiline]),
+    R = beamtalk_regex:from(<<"^foo">>, [multiline]),
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R),
     ?assert(maps:is_key(compiled, maps:get('okValue', R))).
 
 from_options_unknown_option_test() ->
-    ?assertBtError(regex_error, beamtalk_regex:'from:options:'(<<"foo">>, [unknown_opt])).
+    ?assertBtError(regex_error, beamtalk_regex:from(<<"foo">>, [unknown_opt])).
 
 from_options_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_regex:'from:options:'(42, [caseless])).
+    ?assertBtError(type_error, beamtalk_regex:from(42, [caseless])).
 
 %%% ============================================================================
 %%% RegexOption conformance (BT-4381)
@@ -92,14 +92,14 @@ regex_option_erlang_type_matches_runtime_test() ->
 every_valid_option_compiles_test() ->
     lists:foreach(
         fun(Opt) ->
-            R = beamtalk_regex:'from:options:'(<<"a">>, [Opt]),
+            R = beamtalk_regex:from(<<"a">>, [Opt]),
             ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true}, R)
         end,
         beamtalk_regex:valid_options()
     ).
 
 unknown_option_hint_lists_valid_options_test() ->
-    try beamtalk_regex:'from:options:'(<<"a">>, [bogus]) of
+    try beamtalk_regex:from(<<"a">>, [bogus]) of
         _ -> ?assert(false)
     catch
         error:#{error := #beamtalk_error{kind = regex_error, hint = {beamtalk_string, Hint}}} ->

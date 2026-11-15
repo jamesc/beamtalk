@@ -1359,7 +1359,7 @@ fn a_try_do_assigned_in_an_actor_fold_body_keeps_the_phase0_error() {
 
 #[test]
 fn try_do_with_a_block_that_writes_no_local_is_not_a_construct_that_threads() {
-    // The block is Tier 1 and reaches `'tryDo:'/1`: nothing to thread, nothing
+    // The block is Tier 1 and reaches `tryDo/1`: nothing to thread, nothing
     // to reject, in a position that would reject a writing one.
     let src = in_class("CvA ap: [Result tryDo: [1]]\nt");
     assert!(adr0131_diagnostics(&src).is_empty());

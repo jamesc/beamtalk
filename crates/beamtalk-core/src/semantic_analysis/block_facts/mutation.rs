@@ -1019,7 +1019,7 @@ fn is_inline_propagating_selector(selector_name: &str) -> bool {
 
 /// ADR 0131 Phase 4 (BT-3750): whether `receiver selector_name:` is
 /// `Result tryDo:`, the only `tryDo:` that compiles to
-/// `beamtalk_result:'tryDo:'/2` and so threads its block's writes. The one
+/// `beamtalk_result:tryDo/2` and so threads its block's writes. The one
 /// receiver-aware check [`exception_arm_blocks`](super::exception_arm_blocks) and every analysis that
 /// treats the block as inline read; a `tryDo:` sent to any other receiver is
 /// an ordinary send whose block is a closure.

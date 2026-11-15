@@ -70,11 +70,8 @@ and returns `nil`. Interactive console I/O is a `beamtalk run` / packaged-script
 story; inside the REPL prefer `Transcript`.
 """.
 
--export(['print:'/1, 'printLine:'/1, 'error:'/1, 'errorLine:'/1]).
--export([flush/0, readLine/0, 'readLine:'/1]).
-%% FFI shims: the Erlang proxy strips the trailing colon from keyword
-%% selectors before dispatch, so `print:` arrives as `print`, etc.
--export([print/1, printLine/1, error/1, errorLine/1, readLine/1]).
+-export([print/1, printLine/1, error/1, errorLine/1]).
+-export([flush/0, readLine/0, readLine/1]).
 
 -ifdef(TEST).
 %% Expose pure internal helpers for EUnit testing.
@@ -86,23 +83,23 @@ story; inside the REPL prefer `Transcript`.
 %%% ============================================================================
 
 -doc "Write a value to stdout with no trailing newline. Returns nil.".
--spec 'print:'(term()) -> 'nil'.
-'print:'(Value) ->
+-spec print(term()) -> 'nil'.
+print(Value) ->
     write(standard_io, render(Value), 'print:').
 
 -doc "Write a value to stdout followed by a newline. Returns nil.".
--spec 'printLine:'(term()) -> 'nil'.
-'printLine:'(Value) ->
+-spec printLine(term()) -> 'nil'.
+printLine(Value) ->
     write(standard_io, [render(Value), $\n], 'printLine:').
 
 -doc "Write a value to stderr with no trailing newline. Returns nil.".
--spec 'error:'(term()) -> 'nil'.
-'error:'(Value) ->
+-spec error(term()) -> 'nil'.
+error(Value) ->
     write(standard_error, render(Value), 'error:').
 
 -doc "Write a value to stderr followed by a newline. Returns nil.".
--spec 'errorLine:'(term()) -> 'nil'.
-'errorLine:'(Value) ->
+-spec errorLine(term()) -> 'nil'.
+errorLine(Value) ->
     write(standard_error, [render(Value), $\n], 'errorLine:').
 
 -doc """
@@ -138,33 +135,9 @@ Write a prompt to stdout (no newline), then read one line from stdin.
 
 Same return contract as `readLine`.
 """.
--spec 'readLine:'(term()) -> binary() | 'nil'.
-'readLine:'(Prompt) ->
-    read(render(Prompt), 'readLine:').
-
-%%% ============================================================================
-%%% FFI shims (proxy strips the trailing colon before dispatch)
-%%% ============================================================================
-
--doc "FFI shim for `(Erlang beamtalk_console) print:`.".
--spec print(term()) -> 'nil'.
-print(Value) -> 'print:'(Value).
-
--doc "FFI shim for `(Erlang beamtalk_console) printLine:`.".
--spec printLine(term()) -> 'nil'.
-printLine(Value) -> 'printLine:'(Value).
-
--doc "FFI shim for `(Erlang beamtalk_console) error:`.".
--spec error(term()) -> 'nil'.
-error(Value) -> 'error:'(Value).
-
--doc "FFI shim for `(Erlang beamtalk_console) errorLine:`.".
--spec errorLine(term()) -> 'nil'.
-errorLine(Value) -> 'errorLine:'(Value).
-
--doc "FFI shim for `(Erlang beamtalk_console) readLine:`.".
 -spec readLine(term()) -> binary() | 'nil'.
-readLine(Prompt) -> 'readLine:'(Prompt).
+readLine(Prompt) ->
+    read(render(Prompt), 'readLine:').
 
 %%% ============================================================================
 %%% Internal helpers

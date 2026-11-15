@@ -20,7 +20,7 @@ Implemented (2026-11-01)
 | 3a | [BT-3738](https://linear.app/beamtalk/issue/BT-3738) | Conditional families from context; conditionals as producers (operand sites in the REPL); their arms as `BranchArm` frames in methods | M | [#4279](https://github.com/jamesc/beamtalk/pull/4279) |
 | 3b | [BT-3817](https://linear.app/beamtalk/issue/BT-3817) | `on:do:`/`ensure:` as producers; delete the remaining write-back paths; `match:` | M | [#4285](https://github.com/jamesc/beamtalk/pull/4285) |
 | 3c | [BT-3822](https://linear.app/beamtalk/issue/BT-3822) | Conditionals as producers at loop/fold body statements; delete `direct_params_list_op_result`; flip `stLoopArm` | M | [#4293](https://github.com/jamesc/beamtalk/pull/4293) |
-| 4 | [BT-3750](https://linear.app/beamtalk/issue/BT-3750) | `beamtalk_result:'tryDo:'/2` + conformance fixture; codegen arity choice | S | [#4289](https://github.com/jamesc/beamtalk/pull/4289) |
+| 4 | [BT-3750](https://linear.app/beamtalk/issue/BT-3750) | `beamtalk_result:tryDo/2` + conformance fixture; codegen arity choice | S | [#4289](https://github.com/jamesc/beamtalk/pull/4289) |
 | 5a | [BT-3751](https://linear.app/beamtalk/issue/BT-3751) | Enable `local_touch`; flip every pin (the allow-set diagnostic is kept: 552 of 733 measured statement shapes still drop writes with it bypassed; see BT-3841) | S | [#4299](https://github.com/jamesc/beamtalk/pull/4299) |
 | 5b | [BT-3752](https://linear.app/beamtalk/issue/BT-3752) | Docs, build-time measurement, known limitations | S | this PR |
 | follow-up | [BT-3910](https://linear.app/beamtalk/issue/BT-3910) (spec: [BT-3860](https://linear.app/beamtalk/issue/BT-3860)) | A local assignment in value position is a producer (§1, §1a, §2 `CarrierSlot::Whole`, §4 `UnthreadedLocalAssignment`); retire the BT-3864 `ValuePositionLocalAssignment` stopgap; `^t := e` is legal, with the `dead_returned_assignment` lint | M | this PR |
@@ -142,7 +142,7 @@ Two related failures share the cause:
   `tryDo: expected a zero-arity block, got: Block/1` in every context, in every
   position, including as a plain statement. The block is compiled as a Tier 2
   `fun (StateAcc) -> {V, StateAcc1}` and passed to the native
-  `beamtalk_result:'tryDo:'/1`, which only accepts arity 0. (The BT-3718
+  `beamtalk_result:tryDo/1`, which only accepts arity 0. (The BT-3718
   fix made the codegen accept the block. It did not make the runtime call it.)
 - **A Tier 2 block passed to any non-intrinsic send outside an actor
   instance method** (`CvA ap: [t := t + 1. 1]` where `class ap: b => b value`)
@@ -874,12 +874,12 @@ The catch boundary stays in the runtime; codegen only chooses the arity.
 `beamtalk_result` gains one clause:
 
 ```erlang
-%% ADR 0131: the Tier 2 twin of 'tryDo:'/1. `Block` is fun(StateAcc) ->
+%% ADR 0131: the Tier 2 twin of 'tryDo'/1. `Block` is fun(StateAcc) ->
 %% {Value, StateAcc1}. A raise inside the block discards its local writes
 %% (the StateAcc the caller passed in is returned) exactly as it discards
 %% its class-variable writes (protect/1), and as on:do: does.
--spec 'tryDo:'(fun((map()) -> {term(), map()}), map()) -> {t(), map()}.
-'tryDo:'(Block, StateAcc) when is_function(Block, 1) ->
+-spec 'tryDo'(fun((map()) -> {term(), map()}), map()) -> {t(), map()}.
+'tryDo'(Block, StateAcc) when is_function(Block, 1) ->
     try beamtalk_class_vars:protect(fun() -> Block(StateAcc) end) of
         {Value, StateAcc1} -> {from_tagged_tuple({ok, Value}), StateAcc1}
     catch
@@ -891,13 +891,13 @@ The catch boundary stays in the runtime; codegen only chooses the arity.
 ```
 
 `protect/1`, `?IS_NLR`, `ensure_wrapped` and `from_tagged_tuple` are the
-same calls `'tryDo:'/1` makes, so the Tier 1 and Tier 2 paths share one
+same calls `'tryDo'/1` makes, so the Tier 1 and Tier 2 paths share one
 implementation of the boundary rather than a copy across the Rust/Erlang
 line (CLAUDE.md § No duplicate implementations). Codegen, when the argument
-is a Tier 2 block literal, emits `call 'beamtalk_result':'tryDo:'(Block,
+is a Tier 2 block literal, emits `call 'beamtalk_result':'tryDo'(Block,
 StateAcc)` and treats the result as a `StateAcc`-carrying construct tuple:
 it is a §1 producer exactly like a `StateAcc`-mode loop, with no new
-`OnDoCatch` clause shape. `'tryDo:'/1` is unchanged for Tier 1 blocks and
+`OnDoCatch` clause shape. `'tryDo'/1` is unchanged for Tier 1 blocks and
 dynamic sends. A runtime ↔ codegen conformance fixture (a `.bt` that
 exercises both arities and asserts identical `Result`s, class-variable
 state and local state on the raising and non-raising paths) is the
@@ -916,7 +916,7 @@ This answers each objection that removed the AST lowering from PR #4187:
 The arity choice keys on the **selector and a literal block argument that
 writes an outer local**. *Implementation note (BT-3750):* the producer also
 requires the receiver to be the `Result` class reference, because the
-emitted call is `beamtalk_result:'tryDo:'/2` itself: a `tryDo:` sent to any
+emitted call is `beamtalk_result:tryDo/2` itself: a `tryDo:` sent to any
 other receiver (a user class that happens to answer `tryDo:`, a variable)
 keeps its dynamic send, and its writing block is a §6 / Phase 0 compile
 error instead of a Tier 2 fun reaching a callee that cannot return the
@@ -924,7 +924,7 @@ write. The block is lowered as a `BranchArm` frame over the fun's `StateAcc`
 parameter, with the same rule as a conditional arm
 (`conditional_arms_lower_as_producer`), so a loop, fold, conditional or
 `on:do:` inside it rebinds its locals into that frame. In the REPL the fun
-runs over the bindings map itself, so `'tryDo:'/2` answers the `{Value,
+runs over the bindings map itself, so `'tryDo'/2` answers the `{Value,
 Bindings}` tuple the REPL assembler unpacks.
 
 ### 6. A Tier 2 block with no return channel is a compile error
@@ -1253,7 +1253,7 @@ moved. Rejected: the per-position approach has had its chance.
 | 1 | `threaded_locals_of` in `threading_analysis.rs` over `semantic_analysis` block facts, replacing `get_control_flow_threaded_vars`/`compute_threaded_locals_for_loop`/`conditional_threaded_locals` (transitive closure, REPL-aware). IR: `ConstructTuple`, `LocalRebind`, `DiscardLocals`, `MethodBody`, `BranchArm` nodes; `ThreadedLocalDropped`, `LocalRebindModeMismatch`, `LocalReadAfterSiblingRebind`, `ScopeKind::ValueType`. Verifier unit tests on hand-built IR for each, failing before phase 2. The §1a sequencing amendment. | Unit tests. `just verify-threaded-ir` clean. Byte-identical `.core` (phase 1 adds nodes but no producer). |
 | 2 | `local_threading_producer` for loops, list-ops, `do:`, lookup selectors and (actor-only) opaque folds, with the §2 per-local lowering rule. Delete the assign-RHS and loop-body rebind paths for them. | o4, s1, s2, s9, corpus `do`/`fold`/`while`/… with `local_touch`. `.core` diffs limited to the listed set. |
 | 3 | Conditionals and `match:` families from context (§3). `on:do:`/`ensure:` as producers. Delete `lower_nested_vt_do` write-back and `rebind_threaded_vars_from_state`. **This is BT-3738.** | o1–o3, o5–o13, s7 in all contexts. |
-| 4 | `beamtalk_result:'tryDo:'/2` and its conformance fixture; codegen arity choice (§5). | `tryDo:` probes. `local_touch` + `try_do` corpus. |
+| 4 | `beamtalk_result:tryDo/2` and its conformance fixture; codegen arity choice (§5). | `tryDo:` probes. `local_touch` + `try_do` corpus. |
 | 5 | Close-out: `local_touch` into `Shapes::ENABLED`, un-`#[ignore]` both properties, `CV_CORPUS_CASES=500` green, remove Phase 0's allow-set diagnostic (*amended: retained, see Implementation Tracking § Remaining work at close-out; BT-3841*), flip every `PIN-BUG`, docs (`beamtalk-language-features.md` "What Works and What Doesn't" and the protected-region rule, `docs/agents/expanded.md` § State-Threading Codegen, `debugging.md` verifier table), build-time measurement. | CI. |
 
 Phases 2 and 3 land **with** the §2 per-local rule and the §1a sequencing
