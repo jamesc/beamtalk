@@ -20,7 +20,7 @@
 //! `erlc`-valid with the gate on, and with the gate off
 //! (`Fault::HybridAdmitsNlr`) every shape that lowers hybrid reports.
 
-use super::assert_compiles_through_erlc;
+use super::assert_all_compile_through_erlc;
 use super::codegen;
 use crate::core_erlang::fault::{self, Fault};
 
@@ -139,16 +139,14 @@ fn with_hybrid_admits_nlr<T>(f: impl FnOnce() -> T) -> T {
 #[test]
 fn nlr_in_a_field_writing_loop_corpus_is_clean_in_every_mode() {
     let mut failures = Vec::new();
+    let mut rows = Vec::new();
     for (name, src) in corpus() {
-        match std::panic::catch_unwind(|| {
-            let code = codegen(&src);
-            assert_compiles_through_erlc("test", &code);
-            code
-        }) {
+        match std::panic::catch_unwind(|| codegen(&src)) {
             Ok(code) => {
                 if code.contains("NField") {
                     failures.push(format!("{name}: lowered hybrid around a `^`:\n{src}"));
                 }
+                rows.push((name, code));
             }
             Err(_) => failures.push(format!("{name}: fails verified codegen:\n{src}")),
         }
@@ -159,6 +157,7 @@ fn nlr_in_a_field_writing_loop_corpus_is_clean_in_every_mode() {
         failures.len(),
         failures.join("\n\n")
     );
+    assert_all_compile_through_erlc(&rows);
 }
 
 /// With mode selection's `^` exclusion off, every shape that lowers hybrid

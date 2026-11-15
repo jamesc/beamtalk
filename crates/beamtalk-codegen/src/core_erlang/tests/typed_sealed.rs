@@ -528,6 +528,7 @@ fn builtin_typed_params_send_direct_to_the_fixture_module() {
             "bt@stdlib@tuple",
         ),
     ];
+    let mut rows = Vec::new();
     for (ty, guard, module) in cases {
         let code = builtin_typed_send(ty);
         assert!(
@@ -542,8 +543,9 @@ fn builtin_typed_params_send_direct_to_the_fixture_module() {
             code.contains("beamtalk_message_dispatch':'send'("),
             "{ty} guard miss should fall back to the dynamic send. Got:\n{code}"
         );
-        super::assert_compiles_through_erlc("test", &code);
+        rows.push((ty, code));
     }
+    super::assert_all_compile_through_erlc(&rows);
 }
 
 #[test]

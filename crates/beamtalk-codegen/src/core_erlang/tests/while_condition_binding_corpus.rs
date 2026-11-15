@@ -281,7 +281,8 @@ const HELPERS: &str = "  done => false
 #[test]
 fn compiled_condition_value_position_writes_compile() {
     let mut failures = Vec::new();
-    let mut compiled = 0;
+    // (row label, source, Core Erlang) for every row the verifier accepted.
+    let mut rows: Vec<(String, String, String)> = Vec::new();
     for (name, header, has_field) in COMPILED_CONTEXTS {
         for (c, (cond, writes_field)) in COMPILED_CONDITIONS.iter().enumerate() {
             if *writes_field && !has_field {
@@ -294,16 +295,10 @@ fn compiled_condition_value_position_writes_compile() {
                     );
                     match super::verifier_report(&src, None) {
                         None => {
-                            let ok = catch_unwind(AssertUnwindSafe(|| {
-                                assert_compiles_through_erlc("test", &codegen(&src));
-                            }))
-                            .is_ok();
-                            if ok {
-                                compiled += 1;
-                            } else {
-                                failures.push(format!(
-                                    "{name} cond{c} body{b} {selector}: erlc\n{src}"
-                                ));
+                            let label = format!("{name} cond{c} body{b} {selector}");
+                            match catch_unwind(AssertUnwindSafe(|| codegen(&src))) {
+                                Ok(code) => rows.push((label, src, code)),
+                                Err(_) => failures.push(format!("{label}: erlc\n{src}")),
                             }
                         }
                         Some(r)
@@ -316,6 +311,18 @@ fn compiled_condition_value_position_writes_compile() {
                     }
                 }
             }
+        }
+    }
+    // One batched `erlc` run over every accepted row; a rejected row is a failure.
+    let erlc_rows: Vec<(&str, &str)> = rows
+        .iter()
+        .map(|(l, _, c)| (l.as_str(), c.as_str()))
+        .collect();
+    let mut compiled = rows.len();
+    if let Err((rejected, _)) = super::erlc_rejected_rows(&erlc_rows) {
+        compiled -= rejected.len();
+        for i in rejected {
+            failures.push(format!("{}: erlc\n{}", rows[i].0, rows[i].1));
         }
     }
     assert!(

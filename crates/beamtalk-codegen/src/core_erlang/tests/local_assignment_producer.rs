@@ -20,7 +20,10 @@
 //! `stdlib/test/adr0131nested_assign_value_position_test.bt`. The corpus proof
 //! is `value_position_assignment_agreement.rs`.
 
-use super::{assert_compiles_through_erlc, codegen, erlc_available, verifier_report};
+use super::{
+    assert_all_compile_through_erlc, assert_compiles_through_erlc, codegen, erlc_available,
+    verifier_report,
+};
 use crate::core_erlang::fault::Fault;
 
 /// The BT-3860 repro table: a row name and a body.
@@ -92,18 +95,18 @@ fn sources(body: &str) -> [(&'static str, String); 3] {
 
 #[test]
 fn every_repro_row_compiles_through_the_verifier_and_erlc() {
+    let mut rows = Vec::new();
     for (row, body) in ROWS {
         for (context, src) in sources(body) {
             let code = codegen(&src);
-            if erlc_available() {
-                assert_compiles_through_erlc("test", &code);
-            }
             assert!(
                 code.contains("_Assigned"),
                 "{row} ({context}): no producer carrier in\n{code}"
             );
+            rows.push((format!("{row} ({context})"), code));
         }
     }
+    assert_all_compile_through_erlc(&rows);
 }
 
 #[test]

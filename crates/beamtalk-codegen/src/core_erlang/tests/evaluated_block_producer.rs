@@ -24,7 +24,10 @@
 //! position and enclosing shape is `field_assignment_value_position.rs`
 //! (`EXPRS`).
 
-use super::{assert_compiles_through_erlc, codegen, erlc_available, verifier_report};
+use super::{
+    assert_all_compile_through_erlc, assert_compiles_through_erlc, codegen, erlc_available,
+    verifier_report,
+};
 use crate::core_erlang::fault::Fault;
 
 /// The BT-3982 repro table: a row name and an actor method body.
@@ -101,13 +104,15 @@ fn source(body: &str) -> String {
 
 #[test]
 fn every_repro_row_compiles_through_the_verifier_and_erlc() {
+    let mut rows = Vec::new();
     for (row, body) in ROWS {
         let src = source(body);
         assert_eq!(verifier_report(&src, None), None, "{row}\n{src}");
         if erlc_available() {
-            assert_compiles_through_erlc("test", &codegen(&src));
+            rows.push((*row, codegen(&src)));
         }
     }
+    assert_all_compile_through_erlc(&rows);
 }
 
 #[test]
@@ -147,6 +152,7 @@ fn a_value_type_loop_assigning_an_evaluated_block_keeps_direct_params() {
 /// and the field write reaches the next statement.
 #[test]
 fn a_statement_evaluated_block_threads_state_to_the_next_statement() {
+    let mut rows = Vec::new();
     for body in [
         "[:y | self.count := y] value: 5\nself.count",
         "r := [:y | self.count := y] value: 5\nr + self.count",
@@ -157,7 +163,8 @@ fn a_statement_evaluated_block_threads_state_to_the_next_statement() {
         let src = source(body);
         assert_eq!(verifier_report(&src, None), None, "{src}");
         if erlc_available() {
-            assert_compiles_through_erlc("test", &codegen(&src));
+            rows.push((body, codegen(&src)));
         }
     }
+    assert_all_compile_through_erlc(&rows);
 }
