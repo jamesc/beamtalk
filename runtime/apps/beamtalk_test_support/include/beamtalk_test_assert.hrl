@@ -70,6 +70,75 @@
     )
 ).
 
+%% As `?assertBtError/4`, and the error's `message` must also match Message
+%% (a pattern, usually `{beamtalk_string, <<"...">>}`).
+-define(assertBtErrorMessage(Kind, Class, Selector, Message, Expr),
+    ?assertError(
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{
+                kind = Kind, class = Class, selector = Selector, message = Message
+            }
+        },
+        Expr
+    )
+).
+
+%% As `?assertBtError/4`, and the error record must match the whole
+%% `#beamtalk_error{}` Pattern (use when several of message/hint/details are
+%% asserted together).
+-define(assertBtErrorMatch(Pattern, Expr),
+    ?assertError(#{'$beamtalk_class' := _, error := Pattern}, Expr)
+).
+
+%% As `?assertBtError/4`, and Needle (a binary) must occur in the error's
+%% `message` / `hint` text.
+-define(assertBtErrorMessageContains(Kind, Class, Selector, Needle, Expr),
+    ?assertBtErrorWith(
+        Kind,
+        Class,
+        Selector,
+        fun(__BtErr) ->
+            ?assert(beamtalk_test_assert:contains(__BtErr#beamtalk_error.message, Needle))
+        end,
+        Expr
+    )
+).
+-define(assertBtErrorHintContains(Kind, Class, Selector, Needle, Expr),
+    ?assertBtErrorWith(
+        Kind,
+        Class,
+        Selector,
+        fun(__BtErr) ->
+            ?assert(beamtalk_test_assert:contains(__BtErr#beamtalk_error.hint, Needle))
+        end,
+        Expr
+    )
+).
+
+%% As `?assertBtError/4`, then calls Check (a fun taking the
+%% `#beamtalk_error{}`) for assertions a pattern cannot express (substring
+%% checks, `is_list/1` guards, ...). Kind/Class/Selector are patterns; use `_`
+%% for wildcards. If Expr does not raise, the test fails.
+-define(assertBtErrorWith(Kind, Class, Selector, Check, Expr),
+    (fun() ->
+        try Expr of
+            __BtValue ->
+                erlang:error(
+                    {assertBtError_no_exception, [
+                        {module, ?MODULE}, {line, ?LINE}, {value, __BtValue}
+                    ]}
+                )
+        catch
+            error:#{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{kind = Kind, class = Class, selector = Selector} = __BtRaised
+            } ->
+                (Check)(__BtRaised)
+        end
+    end)()
+).
+
 %% Expr returns a Beamtalk `Result` object that is an error
 %% (`isOk := false`) whose `errReason` is a wrapped Exception
 %% `#{'$beamtalk_class' := _, error := #beamtalk_error{kind, class, selector}}`.
