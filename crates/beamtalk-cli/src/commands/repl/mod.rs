@@ -381,8 +381,8 @@ pub fn run(
         // Workspace mode: start or connect to detached node
 
         // Use the same runtime paths as foreground mode
-        let (runtime_dir, layout) = beamtalk_cli::repl_startup::find_runtime_dir_with_layout()?;
-        let paths = beamtalk_cli::repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+        let beamtalk_cli::repl_startup::DiscoveredRuntime { paths, .. } =
+            beamtalk_cli::repl_startup::discover_beam_paths()?;
 
         // Warn if stdlib is not compiled (directory may exist without .beam files)
         if !beamtalk_cli::repl_startup::has_beam_files(&paths.stdlib_ebin) {

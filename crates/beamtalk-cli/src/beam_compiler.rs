@@ -526,24 +526,7 @@ pub fn discover_native_modules(project_root: &Utf8Path) -> Result<Vec<String>> {
         return Ok(Vec::new());
     }
 
-    let entries = std::fs::read_dir(&native_dir)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to read native directory '{native_dir}'"))?;
-
-    let mut module_names = Vec::new();
-    for entry in entries {
-        let entry = entry.into_diagnostic()?;
-        let path = entry.path();
-        if path.is_file()
-            && path.extension().is_some_and(|ext| ext == "erl")
-            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-        {
-            module_names.push(stem.to_string());
-        }
-    }
-
-    module_names.sort();
-    Ok(module_names)
+    beamtalk_cli::path_util::erl_module_names_in(&native_dir)
 }
 
 /// Checks if escript is available in the system PATH.
