@@ -3,7 +3,7 @@
 
 // E2E tests for `Workspace changes` and the ChangeLog collection protocol
 // (ADR 0082 Phase 1, BT-2284). These require E2E because the live FFI path
-// (`Workspace changes` -> beamtalk_workspace_changelog:changeLog/0) only
+// (`Workspace changes` -> beamtalk_workspace_changelog_views:changeLog/0) only
 // resolves in the running workspace; BUnit covers the exact-value collection
 // protocol against directly-constructed objects.
 //

@@ -470,7 +470,7 @@ fn add_keyword_completions(
     hierarchy: &ClassHierarchy,
 ) {
     // This static list and the live REPL/MCP completion engine's
-    // `builtin_keywords/0` (`beamtalk_repl_ops_dev.erl`) are two engines that
+    // `builtin_keywords/0` (`beamtalk_repl_ops_dev_complete.erl`) are two engines that
     // cannot literally share code (Rust vs. Erlang) but should offer the same
     // control-flow vocabulary — a keyword missing from one and not the other
     // is a completion gap on whichever surface is missing it. This list's

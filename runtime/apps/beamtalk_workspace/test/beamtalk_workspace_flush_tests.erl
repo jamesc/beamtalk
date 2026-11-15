@@ -1600,7 +1600,7 @@ missing_source_body_is_hard_error(#{workspace_id := WsId, proj_dir := ProjDir}) 
         )
     ),
     %% Delete the recorded source body so read_source_body/1 fails with enoent.
-    ChangesDir = beamtalk_workspace_changelog:changes_dir(WsId),
+    ChangesDir = beamtalk_workspace_changelog_log:changes_dir(WsId),
     SourceBody = filename:join([ChangesDir, "sources", source_ref_name(Seq, "-source.bt")]),
     ok = file:delete(SourceBody),
     Result = beamtalk_workspace_flush:flush(),
@@ -1627,7 +1627,7 @@ missing_prev_source_body_is_hard_error(#{workspace_id := WsId, proj_dir := ProjD
         )
     ),
     %% Delete the recorded prev body so read_prev_source_body/1 fails.
-    ChangesDir = beamtalk_workspace_changelog:changes_dir(WsId),
+    ChangesDir = beamtalk_workspace_changelog_log:changes_dir(WsId),
     PrevBody = filename:join([ChangesDir, "sources", source_ref_name(Seq, "-prev.bt")]),
     ok = file:delete(PrevBody),
     Result = beamtalk_workspace_flush:flush(),
@@ -2103,7 +2103,7 @@ flush_shadow_key_agrees_with_changelog(#{proj_dir := ProjDir}) ->
     {_, Shadowed} = beamtalk_workspace_flush:shadow_duplicates(
         beamtalk_workspace_changelog:entries()
     ),
-    Views = beamtalk_workspace_changelog:change_entries(),
+    Views = beamtalk_workspace_changelog_views:change_entries(),
     ViewShadowed = [V || V <- Views, maps:get(shadowed, V) =:= true],
     [?_assertEqual([], Shadowed), ?_assertEqual([], ViewShadowed)].
 
@@ -3425,7 +3425,8 @@ resolve_new_path_prefers_recorded_value() ->
         ),
         [Entry] = beamtalk_workspace_changelog:flushable_pending(),
         ?assertEqual(
-            <<"/proj/src/somewhere_else.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry)
+            <<"/proj/src/somewhere_else.bt">>,
+            beamtalk_workspace_flush_rename:resolve_new_path(Entry)
         )
     after
         stop(Pid),
@@ -3451,7 +3452,7 @@ resolve_new_path_derives_exact_style_from_old_path() ->
         {ok, _} = beamtalk_workspace_changelog:append(Input),
         [Entry] = beamtalk_workspace_changelog:flushable_pending(),
         ?assertEqual(
-            <<"/proj/src/Accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry)
+            <<"/proj/src/Accumulator.bt">>, beamtalk_workspace_flush_rename:resolve_new_path(Entry)
         )
     after
         stop(Pid),
@@ -3475,7 +3476,7 @@ resolve_new_path_derives_snake_case_style_from_old_path() ->
         {ok, _} = beamtalk_workspace_changelog:append(Input),
         [Entry] = beamtalk_workspace_changelog:flushable_pending(),
         ?assertEqual(
-            <<"/proj/src/accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry)
+            <<"/proj/src/accumulator.bt">>, beamtalk_workspace_flush_rename:resolve_new_path(Entry)
         )
     after
         stop(Pid),
@@ -3503,7 +3504,8 @@ resolve_new_path_preserves_drive_letter_case() ->
         {ok, _} = beamtalk_workspace_changelog:append(Input),
         [Entry] = beamtalk_workspace_changelog:flushable_pending(),
         ?assertEqual(
-            <<"C:/proj/src/Accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry)
+            <<"C:/proj/src/Accumulator.bt">>,
+            beamtalk_workspace_flush_rename:resolve_new_path(Entry)
         )
     after
         stop(Pid),
@@ -3534,7 +3536,8 @@ resolve_new_path_preserves_backslash_separators() ->
         {ok, _} = beamtalk_workspace_changelog:append(Input),
         [Entry] = beamtalk_workspace_changelog:flushable_pending(),
         ?assertEqual(
-            <<"C:\\proj\\src/Accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry)
+            <<"C:\\proj\\src/Accumulator.bt">>,
+            beamtalk_workspace_flush_rename:resolve_new_path(Entry)
         )
     after
         stop(Pid),
@@ -3557,7 +3560,7 @@ resolve_new_path_derives_path_with_no_directory() ->
         ),
         {ok, _} = beamtalk_workspace_changelog:append(Input),
         [Entry] = beamtalk_workspace_changelog:flushable_pending(),
-        ?assertEqual(<<"Accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry))
+        ?assertEqual(<<"Accumulator.bt">>, beamtalk_workspace_flush_rename:resolve_new_path(Entry))
     after
         stop(Pid),
         beamtalk_test_fs:restore_home(OldHome),
@@ -3579,7 +3582,7 @@ resolve_new_path_derives_path_at_filesystem_root() ->
         ),
         {ok, _} = beamtalk_workspace_changelog:append(Input),
         [Entry] = beamtalk_workspace_changelog:flushable_pending(),
-        ?assertEqual(<<"/Accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry))
+        ?assertEqual(<<"/Accumulator.bt">>, beamtalk_workspace_flush_rename:resolve_new_path(Entry))
     after
         stop(Pid),
         beamtalk_test_fs:restore_home(OldHome),

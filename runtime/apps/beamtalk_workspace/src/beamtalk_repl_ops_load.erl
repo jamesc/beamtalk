@@ -192,7 +192,7 @@ save_native_source(ModuleBin, Source) when is_binary(ModuleBin), is_binary(Sourc
         {error, badarg} ->
             {error, native_not_editable_error(ModuleBin)};
         {ok, Module} ->
-            case beamtalk_repl_ops_browse:native_module_editable_target(Module) of
+            case beamtalk_repl_ops_browse_native:native_module_editable_target(Module) of
                 {error, not_editable} ->
                     {error, native_not_editable_error(ModuleBin)};
                 {ok, ErlPath} ->

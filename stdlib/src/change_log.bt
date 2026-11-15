@@ -138,9 +138,9 @@ sealed typed Value subclass: ChangeLog
   /// ```
   dirtyMethods -> Dictionary(Symbol, Set(Symbol)) =>
     // FFI returns a Dictionary `#{ClassSymbol => Set(selectorSymbol)}`
-    // (beamtalk_workspace_changelog:dirtyMethods/0), matching the declared
+    // (beamtalk_workspace_changelog_views:dirtyMethods/0), matching the declared
     // return type.
-    (Erlang beamtalk_workspace_changelog) dirtyMethods
+    (Erlang beamtalk_workspace_changelog_views) dirtyMethods
 
   // === Mutating ===
 

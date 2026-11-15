@@ -130,7 +130,7 @@ defmodule BtAttach.WorkspaceTest do
 
   describe "pending_rows/1 — collapse the Changes pane to one row per method (BT-2574)" do
     # A change-entry value map as it arrives over distribution from
-    # `beamtalk_workspace_changelog:change_entries/0` (atom keys; className /
+    # `beamtalk_workspace_changelog_views:change_entries/0` (atom keys; className /
     # selector / kind as atoms; derived `active` + `shadowed` booleans).
     defp entry(seq, selector, opts) do
       %{

@@ -44,7 +44,7 @@ pub struct ClassMetadata {
 /// reflect on later. This struct is the *only* durable record of a package's
 /// alias declarations once compiled; it is written into the `.app` file's
 /// `{env, [{type_aliases, [...]}]}` list so the `browse-type-aliases`
-/// term-op (`beamtalk_repl_ops_browse:browse_type_aliases/0`) can read it
+/// term-op (`beamtalk_repl_ops_browse_aliases:browse_type_aliases/0`) can read it
 /// back via `application:get_env/2`, mirroring how `browse-native-modules`
 /// reads the `native_modules` env key.
 ///
