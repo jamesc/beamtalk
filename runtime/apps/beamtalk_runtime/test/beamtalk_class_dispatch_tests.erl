@@ -18,7 +18,7 @@ Test groups:
    4. unwrap_class_call/1 — ok and error paths
    5. undef classification — module_not_loaded vs method_not_found
    6. class_send/3 — undefined class, unknown selector, new/spawn
-   7. class_name_from_pid/1 — via registered/unregistered processes
+   7. self_class_name/0 — via dictionary/unregistered processes
    8. find_class_method_in_ancestors — chain traversal, depth limits
    9. metaclass_send — local and not_found paths
   10. undef classification extended — local vs inherited hint variants
@@ -37,9 +37,6 @@ Test groups:
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
-
-%% Logger handler callback for the BT-4115 relay-logging tests.
--export([log/2]).
 
 %% Selector used in undef-classification tests.
 -define(TEST_SELECTOR, bt999_dispatch_test_method).
@@ -808,52 +805,42 @@ test_class_send_ignores_dead_entry_group_leader() ->
     end.
 
 %%% ============================================================================
-%%% 7. class_name_from_pid — via registered/unregistered processes
+%%% 7. self_class_name — the class named in self-instantiation errors
 %%%
-%%% class_name_from_pid/1 is private but reachable via the self-instantiation
-%%% error path: class_send(self(), spawn, []) when ClassPid =:= self() and the
-%%% process dictionary has no beamtalk_class_name key calls
-%%% handle_self_instantiation_error → class_name_from_pid(self()).
+%%% The self-instantiation error path (class_send(self(), spawn, []) when the
+%%% process dictionary has no usable class metadata) names the class from the
+%%% process dictionary's beamtalk_class_name, or `unknown`. A registered process
+%%% name is NOT consulted (class_name_from_pid/1 used to parse it; BT-4892).
 %%% ============================================================================
 
-class_name_from_pid_test_() ->
+self_class_name_test_() ->
     {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
         [
-            {"beamtalk_class_ prefix extracted as class name",
-                fun test_class_name_from_registered_pid/0},
+            {"dictionary class name is used", fun test_class_name_from_dictionary/0},
             {"unregistered process yields unknown class name",
                 fun test_class_name_from_unregistered_pid/0},
-            {"wrong-prefix registered process yields unknown class name",
-                fun test_class_name_from_wrong_prefix/0}
+            {"registered name is not parsed for the class name",
+                fun test_class_name_ignores_registered_name/0}
         ]
     end}.
 
-%% Process registered as beamtalk_class_<ClassName>: class_name_from_pid/1
-%% strips the prefix and returns <ClassName> as the class atom.
-test_class_name_from_registered_pid() ->
-    ClassName = 'BT1085NameTestPid',
-    % elp:fixme W0023 intentional atom creation
-    RegName = list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)),
-    register(RegName, self()),
+%% beamtalk_class_name in the process dictionary, but no module: the
+%% self-instantiation fallback error names that class.
+test_class_name_from_dictionary() ->
+    ClassName = 'BT4892DictNameTestClass',
+    put(beamtalk_class_name, ClassName),
     try
-        %% Trigger the self-instantiation error path:
-        %%   class_send(self(), spawn, []) → handle_self_instantiation →
-        %%   handle_self_instantiation_error → class_name_from_pid(self()).
-        %% Process dict has no beamtalk_class_name so error path fires.
-        %% class_name_from_pid reads registered_name, strips prefix, returns ClassName.
         ?assertBtError(
             instantiation_error, ClassName, beamtalk_class_dispatch:class_send(self(), spawn, [])
         )
     after
-        unregister(RegName)
+        erase(beamtalk_class_name)
     end.
 
-%% An anonymous (unregistered) process: class_name_from_pid/1 returns `unknown`.
+%% An anonymous (unregistered) process with an empty process dictionary:
+%% the class name is `unknown`.
 test_class_name_from_unregistered_pid() ->
     Parent = self(),
-    %% Spawn a fresh, completely unregistered process.  Its process dict is
-    %% empty so handle_self_instantiation_error fires, and class_name_from_pid
-    %% finds no registered_name → returns `unknown`.
     spawn(fun() ->
         try
             beamtalk_class_dispatch:class_send(self(), spawn, [])
@@ -869,10 +856,10 @@ test_class_name_from_unregistered_pid() ->
         ?assert(false)
     end.
 
-%% Process registered under a non-beamtalk_class_ prefix: class_name_from_pid/1
-%% sees a registered name but the prefix does not match, so it returns `unknown`.
-test_class_name_from_wrong_prefix() ->
-    RegName = bt1085_test_process_wrong_prefix,
+%% A process registered as beamtalk_class_<Name> but with no dictionary
+%% metadata is `unknown`: the registered name is no longer parsed.
+test_class_name_ignores_registered_name() ->
+    RegName = beamtalk_class_BT4892RegisteredOnly,
     register(RegName, self()),
     try
         ?assertBtError(
@@ -1759,10 +1746,8 @@ class_send_self_instantiation_error_test_() ->
                 {beamtalk_class_module, {put, some_fake_module}},
                 {beamtalk_class_is_abstract, {put, not_a_boolean}}
             ]},
-            %% class_name_from_pid/1 handles registered names that don't start with
-            %% "beamtalk_class_" and returns 'unknown'; exercised indirectly through
-            %% handle_self_instantiation_error with no process-dict metadata and no
-            %% matching registered name for the current process.
+            %% No process-dict class name: handle_self_instantiation_error names
+            %% the class `unknown`.
             {"unregistered process, no metadata", 'new', [], Absent}
         ]
     ].
@@ -3163,11 +3148,6 @@ class_send_not_found_fallthrough_does_not_message_stalled_class_test_() ->
 %%% relay does not carry.
 %%% ----------------------------------------------------------------------------
 
-%% Logger handler callback for the relay-logging test below.
-log(LogEvent, #{config := #{parent := Parent}}) ->
-    Parent ! {bt4115_log_event, LogEvent},
-    ok.
-
 relayed_class_method_raise_log_level_test_() ->
     {setup, fun setup_runtime/0, fun teardown_runtime/1, fun(_) ->
         [
@@ -3205,42 +3185,29 @@ test_relayed_dnu_logged_at_error() ->
 %% Start a one-method class, run Body against it with every log level captured,
 %% and answer the "Class method ~p:~p failed" events it produced.
 relay_log_events(ClassName, Selector, Body) ->
-    OldLevel = maps:get(level, logger:get_primary_config()),
-    ok = logger:set_primary_config(level, all),
-    HandlerId = bt4115_relay_log_handler,
-    ok = logger:add_handler(HandlerId, ?MODULE, #{
-        config => #{parent => self()}, level => all
-    }),
-    {ok, Pid} = beamtalk_object_class:start_link(ClassName, #{
-        superclass => none,
-        module => beamtalk_class_dispatch_test_helper,
-        class_methods => #{Selector => <<>>},
-        class_state => #{}
-    }),
-    try
-        Body(Pid),
-        %% The handler runs in the class process, before its reply reaches us,
-        %% so every event is already in the mailbox.
-        drain_relay_events([])
-    after
-        logger:remove_handler(HandlerId),
-        logger:set_primary_config(level, OldLevel),
-        (try
-            gen_server:stop(Pid, normal, 5000)
-        catch
-            _:_ -> ok
-        end)
-    end.
-
-drain_relay_events(Acc) ->
-    receive
-        {bt4115_log_event, #{msg := {"Class method ~p:~p failed", _}} = Event} ->
-            drain_relay_events([Event | Acc]);
-        {bt4115_log_event, _} ->
-            drain_relay_events(Acc)
-    after 0 ->
-        lists:reverse(Acc)
-    end.
+    beamtalk_test_log:with_capture(all, fun() ->
+        {ok, Pid} = beamtalk_object_class:start_link(ClassName, #{
+            superclass => none,
+            module => beamtalk_class_dispatch_test_helper,
+            class_methods => #{Selector => <<>>},
+            class_state => #{}
+        }),
+        try
+            Body(Pid),
+            %% The handler runs in the class process, before its reply reaches us,
+            %% so every event is already in the mailbox.
+            [
+                Event
+             || #{msg := {"Class method ~p:~p failed", _}} = Event <- beamtalk_test_log:drain()
+            ]
+        after
+            (try
+                gen_server:stop(Pid, normal, 5000)
+            catch
+                _:_ -> ok
+            end)
+        end
+    end).
 
 assert_relay_logged_at_debug_only(Events) ->
     ?assertMatch([#{level := debug}], Events).

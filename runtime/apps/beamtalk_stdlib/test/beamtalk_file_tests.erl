@@ -2231,13 +2231,6 @@ stop_and_wait(Pid) ->
     after 5000 -> error(timeout)
     end.
 
-wait_dead(Pid) ->
-    Mon = monitor(process, Pid),
-    receive
-        {'DOWN', Mon, process, Pid, _} -> ok
-    after 5000 -> error({still_alive, Pid})
-    end.
-
 %% The registry reclaims asynchronously on 'DOWN'; poll briefly for the entry.
 wait_unlisted(Path) ->
     try
@@ -2283,7 +2276,7 @@ open_mode_direct_call_plain_process_owns_handle_test() ->
             ?assertEqual(Caller, open_mode_owner_of(Path)),
             ?assert(is_process_alive(Fd)),
             stop_and_wait(Caller),
-            wait_dead(Fd),
+            beamtalk_test_wait:dead(Fd),
             wait_unlisted(Path)
         after
             file:delete(Path)
@@ -2301,7 +2294,7 @@ open_mode_dispatched_call_caller_owns_handle_test() ->
             {ClassProc, Fd} = open_in([{beamtalk_dispatch_caller_pid, Caller}], Path),
             ?assertEqual(Caller, open_mode_owner_of(Path)),
             stop_and_wait(Caller),
-            wait_dead(Fd),
+            beamtalk_test_wait:dead(Fd),
             wait_unlisted(Path),
             ?assert(is_process_alive(ClassProc)),
             stop_and_wait(ClassProc)
@@ -2324,7 +2317,7 @@ open_mode_direct_call_session_outlives_worker_test() ->
             ?assert(is_process_alive(Fd)),
             ?assertEqual(Session, open_mode_owner_of(Path)),
             stop_and_wait(Session),
-            wait_dead(Fd),
+            beamtalk_test_wait:dead(Fd),
             wait_unlisted(Path)
         after
             file:delete(Path)
@@ -2347,7 +2340,7 @@ open_mode_dispatched_call_session_wins_test() ->
             stop_and_wait(ClassProc),
             ?assert(is_process_alive(Fd)),
             stop_and_wait(Session),
-            wait_dead(Fd),
+            beamtalk_test_wait:dead(Fd),
             wait_unlisted(Path)
         after
             file:delete(Path)
@@ -2372,7 +2365,7 @@ open_mode_close_releases_holder_test() ->
             [Holder] = [P || P <- MonitoredBy, is_pid(P)],
             ?assertNotEqual(Worker, Holder),
             beamtalk_file_handle:close_handle(Handle),
-            wait_dead(Holder),
+            beamtalk_test_wait:dead(Holder),
             stop_and_wait(Worker),
             stop_and_wait(Session)
         after

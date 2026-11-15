@@ -903,18 +903,14 @@ walk_class_side(Selector, StartName, ClassName, Extensions) ->
                 end
         end
     end,
-    case beamtalk_hierarchy:walk_ancestors(StartName, StepFun, ?MAX_HIERARCHY_DEPTH) of
-        {found, Found} ->
-            Found;
-        not_found ->
-            not_found;
-        {max_depth_exceeded, CycleAncestor} ->
-            ?LOG_WARNING(
-                "find_class_side_method: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, CycleAncestor, ClassName],
-                #{domain => [beamtalk, runtime]}
-            ),
-            not_found
+    case
+        beamtalk_hierarchy:walk_or_warn(
+            StartName, StepFun, find_class_side_method, #{start => ClassName}
+        )
+    of
+        {found, Found} -> Found;
+        not_found -> not_found;
+        {cycle, _} -> not_found
     end.
 
 %% The class-side extension registered for `Selector` under the metaclass tag
@@ -2211,8 +2207,7 @@ each class's class-side extensions (BT-4307).
 
 Uses the ETS hierarchy and class-methods tables only (no `gen_server:call`),
 so it is safe from inside a class's own `handle_call`. The walk itself (depth
-guard, cycle warning, advance-to-superclass) is
-`beamtalk_hierarchy:walk_ancestors/3`.
+guard, advance-to-superclass) is `beamtalk_hierarchy:walk_or_warn/4`.
 """.
 -spec find_class_method_from_class(selector(), class_name()) ->
     {ok, class_name(), atom()} | not_found.
@@ -2605,11 +2600,7 @@ handle_metaclass_self_call('spawnAs:', [Name]) ->
 handle_metaclass_self_call('spawnWith:as:', [InitArgs, Name]) ->
     handle_metaclass_self_named_spawn('spawnWith:as:', InitArgs, Name);
 handle_metaclass_self_call(Selector, _Args) ->
-    ClassName =
-        case get(beamtalk_class_name) of
-            undefined -> class_name_from_pid(self());
-            CN -> CN
-        end,
+    ClassName = self_class_name(),
     Error0 = beamtalk_error:new(dispatch_error, ClassName, Selector),
     Error1 = beamtalk_error:with_hint(
         Error0,
@@ -2660,12 +2651,12 @@ handle_metaclass_self_named_spawn(Selector, InitArgs, Name) ->
 -doc """
 Fallback error when process dictionary metadata is missing.
 
-Preserves the original selector and attempts to extract the class name from
-the process's registered name for diagnostic purposes.
+Preserves the original selector and names the class from the process
+dictionary (`self_class_name/0`) for diagnostic purposes.
 """.
 -spec handle_self_instantiation_error(atom()) -> no_return().
 handle_self_instantiation_error(Selector) ->
-    ClassName = class_name_from_pid(self()),
+    ClassName = self_class_name(),
     Error0 = beamtalk_error:new(instantiation_error, ClassName, Selector),
     Error1 = beamtalk_error:with_hint(
         Error0,
@@ -2678,30 +2669,15 @@ handle_self_instantiation_error(Selector) ->
     beamtalk_error:raise(Error1).
 
 -doc """
-Extract the Beamtalk class name from a class gen_server pid's registered name.
-
-Class processes are registered as 'beamtalk_class_<ClassName>'. This strips
-that prefix to recover the class name for use in error messages.
+The class name for diagnostics raised from a class process: the one its
+`init/1` stored in the process dictionary, or `unknown` for a process that
+never initialised as a class.
 """.
--spec class_name_from_pid(pid()) -> atom().
-class_name_from_pid(ClassPid) ->
-    case erlang:process_info(ClassPid, registered_name) of
-        {registered_name, RegName} ->
-            RegStr = atom_to_list(RegName),
-            Prefix = "beamtalk_class_",
-            case lists:prefix(Prefix, RegStr) of
-                true ->
-                    Suffix = lists:nthtail(length(Prefix), RegStr),
-                    try
-                        list_to_existing_atom(Suffix)
-                    catch
-                        error:badarg -> unknown
-                    end;
-                false ->
-                    unknown
-            end;
-        _ ->
-            unknown
+-spec self_class_name() -> atom().
+self_class_name() ->
+    case get(beamtalk_class_name) of
+        undefined -> unknown;
+        ClassName -> ClassName
     end.
 
 %%% ============================================================================

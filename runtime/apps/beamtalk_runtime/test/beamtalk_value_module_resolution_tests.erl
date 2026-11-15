@@ -55,8 +55,7 @@ setup() ->
 cleanup(_) ->
     lists:foreach(
         fun(M) ->
-            code:purge(M),
-            code:delete(M)
+            beamtalk_test_module:unload(M)
         end,
         [?MOD, ?MOD2]
     ).
@@ -279,8 +278,7 @@ purged_module_is_rederived() ->
     Self = #{'$beamtalk_class' => ?CLASS, x => 7},
     try
         ?assertEqual(7, beamtalk_primitive:send(Self, getX, [])),
-        code:purge(?MOD),
-        true = code:delete(?MOD),
+        beamtalk_test_module:unload(?MOD),
         code:purge(?MOD),
         ?assertNot(erlang:module_loaded(?MOD)),
         ?assertBtError(does_not_understand, _, getX, beamtalk_primitive:send(Self, getX, [])),
@@ -517,8 +515,7 @@ memo_of_purged_module_is_rederived() ->
         ?assertEqual({value, ?CLASS, ?MOD}, beamtalk_primitive:tagged_map_dispatch(Self)),
         Gen = beamtalk_class_derived_cache:generation(),
         ?assertEqual({Gen, {value, ?MOD}}, memo(?CLASS)),
-        code:purge(?MOD),
-        true = code:delete(?MOD),
+        beamtalk_test_module:unload(?MOD),
         code:purge(?MOD),
         ?assertEqual(Gen, beamtalk_class_derived_cache:generation()),
         ?assertBtError(does_not_understand, _, getX, beamtalk_primitive:send(Self, getX, [])),

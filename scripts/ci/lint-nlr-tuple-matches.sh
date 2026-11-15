@@ -4,13 +4,15 @@
 #
 # Guard (BT-3758): the `^` non-local-return tuple shape (`{'$bt_nlr', Token,
 # Value}` / `{'$bt_nlr', Token, Value, State}`, ADR 0041) has one definition,
-# `?IS_NLR(T)` in runtime/apps/beamtalk_runtime/include/beamtalk.hrl. Runtime
+# `?IS_NLR(T)` in runtime/apps/beamtalk_runtime/include/beamtalk.hrl, built on
+# `?BT_NLR_TAG` from the generated beamtalk_sentinel_tags.hrl. Both spellings
+# (the quoted atom and the macro) count as hand-rolling. Runtime
 # and stdlib Erlang sources must use `throw:Nlr:Stack when ?IS_NLR(Nlr)` (or
 # `{error, Nlr} when ?IS_NLR(Nlr)`) instead of hand-rolling `{'$bt_nlr', ...}`
 # patterns, so a future shape change cannot silently miss a call site.
 #
 # Scans tracked `.erl`/`.hrl` files under runtime/apps/*/src and
-# runtime/apps/*/include for any use of the quoted atom `'$bt_nlr'` (a tuple
+# runtime/apps/*/include for any use of the quoted atom `'$bt_nlr'` or `?BT_NLR_TAG` (a tuple
 # pattern on one or several lines, or a hand-rolled `element(1, T) =:=` check).
 # Prose is ignored: a hit that follows a `%` on the same line (an Erlang
 # comment), and the elided `{'$bt_nlr', ...}` form used in `-doc` text.
@@ -27,14 +29,17 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
 ALLOWLIST=(
-    # Owns ?IS_NLR itself.
+    # Generated from codegen's `sentinel_tags.rs` (BT-4901): the one definition
+    # of the atom, as `?BT_NLR_TAG`.
+    'runtime/apps/beamtalk_runtime/include/beamtalk_sentinel_tags.hrl'
+    # Owns ?IS_NLR / ?NLR: builds the tuple shape from ?BT_NLR_TAG.
     'runtime/apps/beamtalk_runtime/include/beamtalk.hrl'
     # Distribution codec: destructures and rebuilds the tuple to walk its
     # Value field (ADR 0126 §5.1/§5.5).
     'runtime/apps/beamtalk_runtime/src/beamtalk_wire.erl'
 )
 
-ATOM="'\\\$bt_nlr'"
+ATOM="('\\\$bt_nlr'|\?BT_NLR_TAG)"
 ELIDED="\{$ATOM, \.\.\.\}"
 
 excludes=()

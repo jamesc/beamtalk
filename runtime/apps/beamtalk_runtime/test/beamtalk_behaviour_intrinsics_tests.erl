@@ -2698,21 +2698,10 @@ load_meta_module(ModAtom, MetaMap0) ->
     %% A module exporting `__beamtalk_meta/0` is inside the ADR 0130 class_var_abi
     %% load gate, so the fixture declares the current value like a compiled class.
     MetaMap = MetaMap0#{class_var_abi => beamtalk_class_var_abi:abi()},
-    MetaAbstract = erl_parse:abstract(MetaMap, [{line, 3}]),
-    Forms = [
-        {attribute, 1, module, ModAtom},
-        {attribute, 2, export, [{'__beamtalk_meta', 0}]},
-        {function, 3, '__beamtalk_meta', 0, [{clause, 3, [], [], [MetaAbstract]}]}
-    ],
-    {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
-    {module, ModAtom} = code:load_binary(ModAtom, atom_to_list(ModAtom) ++ ".erl", Bin),
-    ModAtom.
+    beamtalk_test_module:meta_module(ModAtom, MetaMap).
 
 purge_meta_module(ModAtom) ->
-    _ = code:purge(ModAtom),
-    _ = code:delete(ModAtom),
-    _ = code:purge(ModAtom),
-    ok.
+    beamtalk_test_module:unload(ModAtom).
 
 %% Minimal stub for beamtalk_actor_registry used by stop_class_actors_with_registry.
 stub_registry_loop(ClassName, ActorPid) ->

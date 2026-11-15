@@ -1154,23 +1154,14 @@ test_declared_fields_ignore_stale_meta() ->
         ?assertBtErrorDetails(unknown_field, _, _, #{key := y}, check_new(Class, #{y => 1}))
     after
         delete_classes([Class]),
-        _ = code:purge(Module),
-        _ = code:delete(Module),
-        _ = code:purge(Module)
+        beamtalk_test_module:unload(Module)
     end.
 
 %% Load a throwaway module whose `__beamtalk_meta/0` declares `Fields`.
 load_meta_module(Module, Fields) ->
-    Forms = [
-        {attribute, 1, module, Module},
-        {attribute, 2, export, [{'__beamtalk_meta', 0}]},
-        {function, 3, '__beamtalk_meta', 0, [
-            {clause, 3, [], [], [erl_parse:abstract(#{fields => Fields}, 3)]}
-        ]}
-    ],
-    {ok, Module, Bin} = compile:forms(Forms),
-    {module, Module} = code:load_binary(Module, atom_to_list(Module) ++ ".erl", Bin),
-    ok.
+    ok = beamtalk_test_module:load(
+        Module, beamtalk_test_module:meta_forms(Module, #{fields => Fields})
+    ).
 
 %% A module-less metadata row whose only declared names are its published
 %% instance variables (the builder-class shape `own_declared_fields/1` reads).

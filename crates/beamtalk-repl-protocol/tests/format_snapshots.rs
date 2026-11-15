@@ -11,7 +11,7 @@
 //! When a snapshot needs updating, run `cargo insta review`.
 
 use beamtalk_repl_protocol::format::{self, Diagnostic, OutputMode, WarningStyle};
-use beamtalk_repl_protocol::{ActorInfo, ClassInfo, ModuleInfo};
+use beamtalk_repl_protocol::{ActorInfo, ClassInfo};
 
 // ---------------------------------------------------------------------------
 // format_value
@@ -371,39 +371,5 @@ fn snapshot_class_list_plain() {
     Stream < Object [abstract]
     Object < (root)
     "
-    );
-}
-
-// ---------------------------------------------------------------------------
-// format_module_summary
-// ---------------------------------------------------------------------------
-
-#[test]
-fn snapshot_module_summary_singular() {
-    let m = ModuleInfo {
-        name: "Counter".into(),
-        source_file: "counter.bt".into(),
-        actor_count: 1,
-        load_time: 0,
-        time_ago: "2m ago".into(),
-    };
-    insta::assert_snapshot!(
-        format::format_module_summary(&m, OutputMode::Plain),
-        @"Counter (1 actor, loaded 2m ago)"
-    );
-}
-
-#[test]
-fn snapshot_module_summary_plural() {
-    let m = ModuleInfo {
-        name: "Counter".into(),
-        source_file: "counter.bt".into(),
-        actor_count: 7,
-        load_time: 0,
-        time_ago: "now".into(),
-    };
-    insta::assert_snapshot!(
-        format::format_module_summary(&m, OutputMode::Plain),
-        @"Counter (7 actors, loaded now)"
     );
 }

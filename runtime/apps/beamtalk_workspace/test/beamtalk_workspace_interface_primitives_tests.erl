@@ -25,10 +25,6 @@ Tests the Phase 2 dispatch/3 interface for Workspace primitives:
 %% Fixtures
 %%====================================================================
 
-%% Construct a fake Self tuple with the given pid at element 4.
-fake_self(Pid) ->
-    {beamtalk_object, 'Workspace', 'bt@stdlib@workspace', Pid}.
-
 tmp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 %% Create a unique empty directory under tmp_dir().
@@ -38,17 +34,6 @@ make_empty_tmp_dir(Prefix) ->
     ),
     ok = filelib:ensure_dir(filename:join(Dir, "dummy")),
     Dir.
-
-%% Cross-platform recursive directory removal using pure Erlang.
-rm_rf(Dir) ->
-    case filelib:is_dir(Dir) of
-        true ->
-            {ok, Entries} = file:list_dir(Dir),
-            lists:foreach(fun(E) -> rm_rf(filename:join(Dir, E)) end, Entries),
-            file:del_dir(Dir);
-        false ->
-            file:delete(Dir)
-    end.
 
 %% Clean up all ETS entries in the bindings table.
 %% ETS keys are now just atoms (no pid component).
@@ -66,7 +51,9 @@ cleanup_ets_for(_Pid) ->
 %%====================================================================
 
 classes_returns_list_test() ->
-    Result = beamtalk_workspace_interface_primitives:dispatch(classes, [], fake_self(self())),
+    Result = beamtalk_workspace_interface_primitives:dispatch(
+        classes, [], beamtalk_test_repl:fake_self(workspace, self())
+    ),
     ?assert(is_list(Result)).
 
 %%====================================================================
@@ -76,7 +63,7 @@ classes_returns_list_test() ->
 load_type_error_for_integer_test() ->
     try
         beamtalk_workspace_interface_primitives:dispatch(
-            'load:', [42], fake_self(self())
+            'load:', [42], beamtalk_test_repl:fake_self(workspace, self())
         ),
         ?assert(false)
     catch
@@ -91,7 +78,9 @@ load_type_error_for_integer_test() ->
 load_file_not_found_test() ->
     try
         beamtalk_workspace_interface_primitives:dispatch(
-            'load:', [<<"/nonexistent/path/file.bt">>], fake_self(self())
+            'load:',
+            [<<"/nonexistent/path/file.bt">>],
+            beamtalk_test_repl:fake_self(workspace, self())
         ),
         ?assert(false)
     catch
@@ -119,7 +108,7 @@ bind_and_unbind_test_() ->
             Proxy ! stop
         end,
         fun(Proxy) ->
-            Self = fake_self(Proxy),
+            Self = beamtalk_test_repl:fake_self(workspace, Proxy),
             [
                 {"bind:as: stores value under atom name", fun() ->
                     Result = beamtalk_workspace_interface_primitives:dispatch(
@@ -210,7 +199,7 @@ bind_and_unbind_test_() ->
 unknown_selector_raises_does_not_understand_test() ->
     try
         beamtalk_workspace_interface_primitives:dispatch(
-            unknownSelector, [], fake_self(self())
+            unknownSelector, [], beamtalk_test_repl:fake_self(workspace, self())
         ),
         ?assert(false)
     catch
@@ -237,7 +226,7 @@ get_user_bindings_returns_empty_when_no_workspace_registered_test() ->
     ?assertEqual(#{}, Result).
 
 get_user_bindings_returns_bound_values_test() ->
-    Self = fake_self(self()),
+    Self = beamtalk_test_repl:fake_self(workspace, self()),
     %% Register beamtalk_workspace_meta as the workspace-up sentinel
     (try
         unregister(beamtalk_workspace_meta)
@@ -305,7 +294,7 @@ get_session_bindings_includes_user_bindings_test() ->
         _:_ -> ok
     end),
     register(beamtalk_workspace_meta, self()),
-    Self = fake_self(self()),
+    Self = beamtalk_test_repl:fake_self(workspace, self()),
     try
         beamtalk_workspace_interface_primitives:dispatch(
             'bind:as:', [<<"hello">>, sessionVar], Self
@@ -361,7 +350,9 @@ sync_dispatch_raises_when_no_manifest_test() ->
     OldCwd = file:get_cwd(),
     ok = file:set_cwd(EmptyDir),
     try
-        beamtalk_workspace_interface_primitives:dispatch(sync, [], fake_self(self())),
+        beamtalk_workspace_interface_primitives:dispatch(
+            sync, [], beamtalk_test_repl:fake_self(workspace, self())
+        ),
         ?assert(false)
     catch
         error:#{error := Err} ->
@@ -370,7 +361,7 @@ sync_dispatch_raises_when_no_manifest_test() ->
     after
         {ok, Cwd} = OldCwd,
         file:set_cwd(Cwd),
-        rm_rf(EmptyDir)
+        beamtalk_test_fs:rm_rf(EmptyDir)
     end.
 
 sync_direct_raises_when_no_manifest_test() ->
@@ -388,7 +379,7 @@ sync_direct_raises_when_no_manifest_test() ->
     after
         {ok, Cwd} = OldCwd,
         file:set_cwd(Cwd),
-        rm_rf(EmptyDir)
+        beamtalk_test_fs:rm_rf(EmptyDir)
     end.
 
 sync_returns_map_with_expected_keys_test() ->
@@ -419,7 +410,7 @@ sync_returns_map_with_expected_keys_test() ->
     after
         {ok, Cwd} = OldCwd,
         file:set_cwd(Cwd),
-        rm_rf(TmpDir)
+        beamtalk_test_fs:rm_rf(TmpDir)
     end.
 
 %%====================================================================
@@ -830,7 +821,9 @@ current_session_returns_nil_outside_eval_test() ->
     ?assertEqual(nil, beamtalk_workspace_interface_primitives:currentSession()),
     ?assertEqual(
         nil,
-        beamtalk_workspace_interface_primitives:dispatch(currentSession, [], fake_self(self()))
+        beamtalk_workspace_interface_primitives:dispatch(
+            currentSession, [], beamtalk_test_repl:fake_self(workspace, self())
+        )
     ).
 
 %% currentSession delegates to beamtalk_session_primitives:current/0, so a
@@ -859,7 +852,9 @@ sessions_returns_empty_when_no_supervisor_test() ->
     ?assertEqual([], beamtalk_workspace_interface_primitives:sessions()),
     ?assertEqual(
         [],
-        beamtalk_workspace_interface_primitives:dispatch(sessions, [], fake_self(self()))
+        beamtalk_workspace_interface_primitives:dispatch(
+            sessions, [], beamtalk_test_repl:fake_self(workspace, self())
+        )
     ).
 
 %%====================================================================
@@ -877,7 +872,7 @@ sessions_returns_empty_when_no_supervisor_test() ->
 dispatch_new_class_type_error_test() ->
     try
         beamtalk_workspace_interface_primitives:dispatch(
-            'newClass:at:', [42, <<"src/Foo.bt">>], fake_self(self())
+            'newClass:at:', [42, <<"src/Foo.bt">>], beamtalk_test_repl:fake_self(workspace, self())
         ),
         ?assert(false)
     catch
@@ -892,7 +887,7 @@ dispatch_new_class_type_error_test() ->
 dispatch_start_supervisor_type_error_test() ->
     try
         beamtalk_workspace_interface_primitives:dispatch(
-            'startSupervisor:', [42], fake_self(self())
+            'startSupervisor:', [42], beamtalk_test_repl:fake_self(workspace, self())
         ),
         ?assert(false)
     catch
@@ -906,7 +901,7 @@ dispatch_start_supervisor_type_error_test() ->
 dispatch_stop_supervisor_type_error_test() ->
     try
         beamtalk_workspace_interface_primitives:dispatch(
-            'stopSupervisor:', [notAClass], fake_self(self())
+            'stopSupervisor:', [notAClass], beamtalk_test_repl:fake_self(workspace, self())
         ),
         ?assert(false)
     catch
@@ -1010,7 +1005,7 @@ autoflush_roundtrips_through_meta(_Ctx) ->
 %% dispatch('autoflush:', [Bool]) routes to setAutoflush/1 and returns the value.
 set_autoflush_via_dispatch(_Ctx) ->
     Result = beamtalk_workspace_interface_primitives:dispatch(
-        'autoflush:', [true], fake_self(self())
+        'autoflush:', [true], beamtalk_test_repl:fake_self(workspace, self())
     ),
     [?_assertEqual(true, Result)].
 
@@ -1019,7 +1014,7 @@ set_autoflush_via_dispatch(_Ctx) ->
 autoflush_via_dispatch(_Ctx) ->
     ok = beamtalk_workspace_meta:set_setting(autoflush, false),
     Result = beamtalk_workspace_interface_primitives:dispatch(
-        autoflush, [], fake_self(self())
+        autoflush, [], beamtalk_test_repl:fake_self(workspace, self())
     ),
     [?_assertEqual(false, Result)].
 
@@ -1037,7 +1032,7 @@ flush_empty_log_returns_summary(_Ctx) ->
 %% dispatch(flush, []) routes to flush/0 and returns the same summary map.
 flush_via_dispatch_returns_summary(_Ctx) ->
     Summary = beamtalk_workspace_interface_primitives:dispatch(
-        flush, [], fake_self(self())
+        flush, [], beamtalk_test_repl:fake_self(workspace, self())
     ),
     [
         ?_assert(is_map(Summary)),
@@ -1048,7 +1043,7 @@ flush_via_dispatch_returns_summary(_Ctx) ->
 %% empty log returns an empty FlushResult summary.
 flush_filter_via_dispatch(_Ctx) ->
     Summary = beamtalk_workspace_interface_primitives:dispatch(
-        'flush:', ['new-class'], fake_self(self())
+        'flush:', ['new-class'], beamtalk_test_repl:fake_self(workspace, self())
     ),
     [
         ?_assert(is_map(Summary)),
@@ -1059,7 +1054,9 @@ flush_filter_via_dispatch(_Ctx) ->
 %% Over an empty log the summary has flushed=0.
 flush_confirm_destructive_via_dispatch(_Ctx) ->
     Summary = beamtalk_workspace_interface_primitives:dispatch(
-        'flush:confirmDestructive:', ['new-class', false], fake_self(self())
+        'flush:confirmDestructive:',
+        ['new-class', false],
+        beamtalk_test_repl:fake_self(workspace, self())
     ),
     [
         ?_assert(is_map(Summary)),
@@ -1070,7 +1067,7 @@ flush_confirm_destructive_via_dispatch(_Ctx) ->
 %% Over an empty log the summary has flushed=0.
 flush_including_destructive_via_dispatch(_Ctx) ->
     Summary = beamtalk_workspace_interface_primitives:dispatch(
-        flushIncludingDestructive, [], fake_self(self())
+        flushIncludingDestructive, [], beamtalk_test_repl:fake_self(workspace, self())
     ),
     [
         ?_assert(is_map(Summary)),
@@ -1081,7 +1078,7 @@ flush_including_destructive_via_dispatch(_Ctx) ->
 %% With no live class sources the result is the empty-findings map.
 recheck_image_via_dispatch(_Ctx) ->
     Result = beamtalk_workspace_interface_primitives:dispatch(
-        recheckImage, [], fake_self(self())
+        recheckImage, [], beamtalk_test_repl:fake_self(workspace, self())
     ),
     [
         ?_assert(is_map(Result)),
@@ -1168,26 +1165,10 @@ setup_changelog_ws() ->
 cleanup_changelog_ws(#{
     clog_pid := ClogPid, meta_pid := MetaPid, tmp_home := Tmp, old_home := OldHome
 }) ->
-    stop_proc(MetaPid),
-    stop_proc(ClogPid),
+    beamtalk_test_proc:shutdown(MetaPid),
+    beamtalk_test_proc:shutdown(ClogPid),
     beamtalk_test_fs:restore_home(OldHome),
     _ = file:del_dir_r(Tmp),
-    ok.
-
-stop_proc(Pid) when is_pid(Pid) ->
-    case is_process_alive(Pid) of
-        true ->
-            Ref = monitor(process, Pid),
-            unlink(Pid),
-            exit(Pid, shutdown),
-            receive
-                {'DOWN', Ref, process, Pid, _} -> ok
-            after 5000 -> ok
-            end;
-        false ->
-            ok
-    end;
-stop_proc(_) ->
     ok.
 
 %%====================================================================
@@ -1226,7 +1207,7 @@ dependencies_with_package_name_returns_map_test() ->
         %% dependencies → empty map (but via the populated branch).
         ?assertEqual(#{}, Result)
     after
-        stop_proc(MetaPid),
+        beamtalk_test_proc:shutdown(MetaPid),
         case OldRoot of
             {ok, RV} -> application:set_env(beamtalk_runtime, root_package, RV);
             undefined -> application:unset_env(beamtalk_runtime, root_package)

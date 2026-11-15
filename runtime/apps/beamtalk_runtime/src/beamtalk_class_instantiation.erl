@@ -416,7 +416,7 @@ current, so that read would answer the old `fields` (see
 declared_fields(Class, BaseState) ->
     case
         beamtalk_class_derived_cache:fetch({declared_fields, Class}, fun() ->
-            case declared_fields_walk(Class, [], 0) of
+            case declared_fields_walk(Class) of
                 {ok, _} = Walked -> {cache, Walked};
                 not_found -> {nocache, not_found}
             end
@@ -428,39 +428,47 @@ declared_fields(Class, BaseState) ->
             maps:keys(BaseState) -- beamtalk_tagged_map:internal_fields()
     end.
 
--spec declared_fields_walk(class_name(), [term()], non_neg_integer()) ->
-    {ok, [term()]} | not_found.
-declared_fields_walk(_Class, _Acc, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    not_found;
-declared_fields_walk(Class, Acc, Depth) ->
-    case own_declared_fields(Class) of
-        {ok, Names} ->
-            Acc2 = Names ++ Acc,
-            case beamtalk_class_metadata:lookup_superclass(Class) of
-                {ok, none} ->
-                    {ok, Acc2};
-                {ok, Super} ->
-                    declared_fields_walk(Super, Acc2, Depth + 1);
-                not_found ->
-                    not_found
-            end;
-        not_found when
-            Class =:= 'Actor';
-            Class =:= 'Object';
-            Class =:= 'Value';
-            Class =:= 'ProtoObject'
-        ->
-            %% Stateless roots (verified: no `state:` in their stdlib
-            %% sources) whose stdlib module simply hasn't loaded yet — e.g.
-            %% eunit suites spawning fixtures without booting stdlib:
-            %% contribute nothing and terminate. Their ancestors are roots
-            %% or `none`, equally stateless, so ending here loses no names.
-            %% (A missing NON-root level still aborts the whole walk to the
-            %% state-keys fallback — skipping it would fail closed on that
-            %% level's inherited keys.)
-            {ok, Acc};
-        not_found ->
-            not_found
+%% The superclass-chain walk behind `declared_fields/2`: ride the names
+%% accumulated so far inside the walked node (`{Class, Acc}`, the walker's
+%% documented accumulator pattern). A cycle answers `not_found`, so the caller
+%% falls back to the state keys. Deliberately `walk_ancestors/3`, not
+%% `walk_or_warn/4`: `declared_fields/2` does not cache `not_found`, so a
+%% warning would repeat on every `new:`/`spawnWith:` of a cyclic class (the
+%% walk was silent before this was a shared walker, too).
+-spec declared_fields_walk(class_name()) -> {ok, [term()]} | not_found.
+declared_fields_walk(Class) ->
+    StepFun = fun({Level, Acc}, _Depth) ->
+        case own_declared_fields(Level) of
+            {ok, Names} ->
+                Acc2 = Names ++ Acc,
+                case beamtalk_class_metadata:lookup_superclass(Level) of
+                    {ok, none} -> {found, {ok, Acc2}};
+                    {ok, Super} -> {next, {Super, Acc2}};
+                    not_found -> not_found
+                end;
+            not_found when
+                Level =:= 'Actor';
+                Level =:= 'Object';
+                Level =:= 'Value';
+                Level =:= 'ProtoObject'
+            ->
+                %% Stateless roots (verified: no `state:` in their stdlib
+                %% sources) whose stdlib module simply hasn't loaded yet — e.g.
+                %% eunit suites spawning fixtures without booting stdlib:
+                %% contribute nothing and terminate. Their ancestors are roots
+                %% or `none`, equally stateless, so ending here loses no names.
+                %% (A missing NON-root level still aborts the whole walk to the
+                %% state-keys fallback — skipping it would fail closed on that
+                %% level's inherited keys.)
+                {found, {ok, Acc}};
+            not_found ->
+                not_found
+        end
+    end,
+    case beamtalk_hierarchy:walk_ancestors({Class, []}, StepFun, ?MAX_HIERARCHY_DEPTH) of
+        {found, Walked} -> Walked;
+        not_found -> not_found;
+        {max_depth_exceeded, _} -> not_found
     end.
 
 %% One level's own declared names. The published instance variables are the
@@ -533,40 +541,44 @@ inherited_field_defaults(ClassName) ->
             {ok, S} -> S;
             _ -> none
         end,
-    collect_ancestor_defaults(SuperName, #{}, 0).
+    collect_ancestor_defaults(SuperName).
 
--spec collect_ancestor_defaults(class_name() | none, map(), non_neg_integer()) -> map().
-collect_ancestor_defaults(none, Acc, _Depth) ->
-    Acc;
-collect_ancestor_defaults(Name, Acc, Depth) when Depth > ?MAX_HIERARCHY_DEPTH ->
-    ?LOG_WARNING(
-        "collect_ancestor_defaults: max hierarchy depth ~p exceeded at ~p — possible cycle",
-        [?MAX_HIERARCHY_DEPTH, Name],
-        #{domain => [beamtalk, runtime]}
-    ),
-    Acc;
-collect_ancestor_defaults(Name, Acc, Depth) ->
-    Module =
-        case beamtalk_class_metadata:lookup_module(Name) of
-            {ok, M} -> M;
-            _ -> Name
-        end,
-    AncestorDefaults =
-        case is_module_loaded_with_new(Name, Module) of
-            true ->
-                ancestor_compiled_defaults(Module);
-            false ->
-                ancestor_builder_defaults(Name)
-        end,
-    %% Closer ancestors shadow farther ones: keep what we already have (Acc),
-    %% only filling in fields the ancestor introduces.
-    NextAcc = maps:merge(AncestorDefaults, Acc),
-    Super =
+%% Fold each ancestor's default field values into one map, nearest ancestor
+%% first, by riding the accumulator inside the walked node (`{Name, Acc}`).
+%% A cycle answers the defaults gathered so far (and warns, via
+%% `walk_or_warn/4`).
+-spec collect_ancestor_defaults(class_name() | none) -> map().
+collect_ancestor_defaults(none) ->
+    #{};
+collect_ancestor_defaults(Start) ->
+    StepFun = fun({Name, Acc}, _Depth) ->
+        Module =
+            case beamtalk_class_metadata:lookup_module(Name) of
+                {ok, M} -> M;
+                _ -> Name
+            end,
+        AncestorDefaults =
+            case is_module_loaded_with_new(Name, Module) of
+                true ->
+                    ancestor_compiled_defaults(Module);
+                false ->
+                    ancestor_builder_defaults(Name)
+            end,
+        %% Closer ancestors shadow farther ones: keep what we already have (Acc),
+        %% only filling in fields the ancestor introduces.
+        NextAcc = maps:merge(AncestorDefaults, Acc),
         case beamtalk_class_metadata:lookup_superclass(Name) of
-            {ok, S} -> S;
-            _ -> none
-        end,
-    collect_ancestor_defaults(Super, NextAcc, Depth + 1).
+            {ok, none} -> {found, NextAcc};
+            {ok, Super} -> {next, {Super, NextAcc}};
+            _ -> {found, NextAcc}
+        end
+    end,
+    Ctx = #{node_name => fun({Name, _Acc}) -> Name end},
+    case beamtalk_hierarchy:walk_or_warn({Start, #{}}, StepFun, collect_ancestor_defaults, Ctx) of
+        {found, Defaults} -> Defaults;
+        {cycle, {_CycleName, Partial}} -> Partial;
+        not_found -> #{}
+    end.
 
 -doc "Read a compiled ancestor's default field values from its `new/0` map.".
 -spec ancestor_compiled_defaults(atom()) -> map().

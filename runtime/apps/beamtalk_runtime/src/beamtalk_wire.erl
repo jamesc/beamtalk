@@ -320,17 +320,17 @@ encode_actor_pid(Pid) ->
 
 -spec encode_nlr(tuple(), [term()], non_neg_integer()) ->
     {ok, tuple()} | {error, #beamtalk_error{}}.
-encode_nlr({'$bt_nlr', Token, Value}, Path, Depth) ->
+encode_nlr({?BT_NLR_TAG, Token, Value}, Path, Depth) ->
     case encode_at(Value, [nlr_value | Path], Depth + 1) of
-        {ok, EncValue} -> {ok, {'$bt_nlr', Token, EncValue}};
+        {ok, EncValue} -> {ok, {?BT_NLR_TAG, Token, EncValue}};
         {error, _} = Err -> Err
     end;
-encode_nlr({'$bt_nlr', Token, Value, State}, Path, Depth) ->
+encode_nlr({?BT_NLR_TAG, Token, Value, State}, Path, Depth) ->
     %% Value is walked; State (the defining method's actor state) and Token
     %% are passed raw — State returns to the node that owns it (ADR 0126
     %% §5.1/§5.5).
     case encode_at(Value, [nlr_value | Path], Depth + 1) of
-        {ok, EncValue} -> {ok, {'$bt_nlr', Token, EncValue, State}};
+        {ok, EncValue} -> {ok, {?BT_NLR_TAG, Token, EncValue, State}};
         {error, _} = Err -> Err
     end.
 
@@ -473,14 +473,14 @@ decode_class_ref(ClassName) ->
 
 -spec decode_nlr(tuple(), [term()], non_neg_integer()) ->
     {ok, tuple()} | {error, #beamtalk_error{}}.
-decode_nlr({'$bt_nlr', Token, Value}, Path, Depth) ->
+decode_nlr({?BT_NLR_TAG, Token, Value}, Path, Depth) ->
     case decode_at(Value, [nlr_value | Path], Depth + 1) of
-        {ok, DecValue} -> {ok, {'$bt_nlr', Token, DecValue}};
+        {ok, DecValue} -> {ok, {?BT_NLR_TAG, Token, DecValue}};
         {error, _} = Err -> Err
     end;
-decode_nlr({'$bt_nlr', Token, Value, State}, Path, Depth) ->
+decode_nlr({?BT_NLR_TAG, Token, Value, State}, Path, Depth) ->
     case decode_at(Value, [nlr_value | Path], Depth + 1) of
-        {ok, DecValue} -> {ok, {'$bt_nlr', Token, DecValue, State}};
+        {ok, DecValue} -> {ok, {?BT_NLR_TAG, Token, DecValue, State}};
         {error, _} = Err -> Err
     end.
 

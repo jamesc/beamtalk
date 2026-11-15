@@ -238,9 +238,7 @@ mock_otel_ctx_test_() ->
         end,
         fun(_) ->
             %% Unload mock module
-            code:purge(otel_ctx),
-            code:delete(otel_ctx),
-            code:purge(otel_ctx),
+            beamtalk_test_module:unload(otel_ctx),
             ok
         end,
         [

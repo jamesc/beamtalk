@@ -52,9 +52,7 @@ teardown(_) ->
     ),
     lists:foreach(
         fun(Mod) ->
-            code:purge(Mod),
-            code:delete(Mod),
-            code:purge(Mod)
+            beamtalk_test_module:unload(Mod)
         end,
         ['bt@bt3773_stale_abi', 'bt3773_real_module']
     ),
@@ -90,9 +88,7 @@ badfile_binary() ->
     ).
 
 compile_source(Source) ->
-    {ok, Tokens, _} = erl_scan:string(Source),
-    Forms = beamtalk_test_erl_forms:split_forms(Tokens),
-    {ok, _Mod, Binary} = compile:forms(Forms, [binary, return_errors]),
+    {_Mod, Binary} = beamtalk_test_module:compile(Source),
     Binary.
 
 abi_error(ClassName) ->

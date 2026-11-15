@@ -197,8 +197,8 @@ case_setup() ->
     }.
 
 case_teardown(#{clog_pid := ClogPid, meta_pid := MetaPid, tmp := Tmp, old_home := OldHome}) ->
-    stop_proc(MetaPid),
-    stop_proc(ClogPid),
+    beamtalk_test_proc:shutdown(MetaPid),
+    beamtalk_test_proc:shutdown(ClogPid),
     beamtalk_test_fs:restore_home(OldHome),
     _ = file:del_dir_r(Tmp),
     ok.
@@ -1430,21 +1430,5 @@ wait_for_class(ClassAtom, N) ->
 stop_existing(Name) ->
     case whereis(Name) of
         undefined -> ok;
-        Pid -> stop_proc(Pid)
+        Pid -> beamtalk_test_proc:shutdown(Pid)
     end.
-
-stop_proc(Pid) when is_pid(Pid) ->
-    case is_process_alive(Pid) of
-        true ->
-            Ref = monitor(process, Pid),
-            unlink(Pid),
-            exit(Pid, shutdown),
-            receive
-                {'DOWN', Ref, process, Pid, _} -> ok
-            after 5000 -> ok
-            end;
-        false ->
-            ok
-    end;
-stop_proc(_) ->
-    ok.

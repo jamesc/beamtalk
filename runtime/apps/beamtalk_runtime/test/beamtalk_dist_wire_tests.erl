@@ -268,8 +268,7 @@ restore_meta_stub({OrigModule, Selectors, Superclass, IsAbstract}) ->
         'ShapeChainCart', OrigModule, Selectors, Superclass, IsAbstract
     ),
     StubMod = bt_3601_shape_chain_cart_meta_stub,
-    code:purge(StubMod),
-    code:delete(StubMod),
+    beamtalk_test_module:unload(StubMod),
     ok.
 
 migrate_forward_through_wire(PeerNode) ->
@@ -320,8 +319,7 @@ remote_code_mismatch_undef(PeerNode) ->
             beamtalk_actor:sync_send(RemotePid, 'invokeBlockWith:', [Fun])
         )
     after
-        code:delete(ModName),
-        code:purge(ModName),
+        beamtalk_test_module:unload(ModName),
         rpc:call(PeerNode, gen_server, stop, [RemotePid])
     end.
 
@@ -344,8 +342,7 @@ remote_code_mismatch_badfun(PeerNode) ->
             beamtalk_actor:sync_send(RemotePid, 'invokeBlockWith:', [Fun])
         )
     after
-        code:delete(ModName),
-        code:purge(ModName),
+        beamtalk_test_module:unload(ModName),
         rpc:call(PeerNode, code, delete, [ModName]),
         rpc:call(PeerNode, code, purge, [ModName]),
         rpc:call(PeerNode, gen_server, stop, [RemotePid])

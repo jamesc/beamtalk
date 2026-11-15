@@ -317,15 +317,7 @@ teardown(_) ->
 %% `field_kinds => FieldKinds` — the B5b metadata `unassigned_late_fields/2`
 %% reads. `ModAtom` must be unique per test (a live, loaded Erlang module).
 register_class_with_field_kinds(ClassName, ModAtom, FieldKinds) ->
-    Meta = #{field_kinds => FieldKinds},
-    MetaAbstract = erl_parse:abstract(Meta, [{line, 3}]),
-    Forms = [
-        {attribute, 1, module, ModAtom},
-        {attribute, 2, export, [{'__beamtalk_meta', 0}]},
-        {function, 3, '__beamtalk_meta', 0, [{clause, 3, [], [], [MetaAbstract]}]}
-    ],
-    {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
-    {module, Mod} = code:load_binary(Mod, atom_to_list(ModAtom) ++ ".erl", Bin),
+    Mod = beamtalk_test_module:meta_module(ModAtom, #{field_kinds => FieldKinds}),
     ClassInfo = #{
         name => ClassName,
         module => Mod,

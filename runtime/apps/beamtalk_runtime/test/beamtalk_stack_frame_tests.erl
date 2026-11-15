@@ -574,15 +574,10 @@ register_class(Name, Module) ->
     }).
 
 load_empty_module(Module) ->
-    {ok, Module, Bin} = compile:forms([{attribute, 1, module, Module}], [binary]),
-    {module, Module} = code:load_binary(Module, atom_to_list(Module) ++ ".beam", Bin),
-    ok.
+    beamtalk_test_module:load(Module, [{attribute, 1, module, Module}]).
 
 unload_module(Module) ->
-    code:purge(Module),
-    code:delete(Module),
-    code:purge(Module),
-    ok.
+    beamtalk_test_module:unload(Module).
 
 %%% ===================================================================
 %%% Frame visibility (BT-4818)
@@ -663,26 +658,7 @@ visibility_runtime_internal_hidden_test() ->
 
 %% Compile and load a module from source text, for frames that need a real module.
 load_module(Name, Source) ->
-    {ok, Tokens, _} = erl_scan:string(Source),
-    Forms = [
-        begin
-            {ok, F} = erl_parse:parse_form(T),
-            F
-        end
-     || T <- split_forms(Tokens)
-    ],
-    {ok, Name, Bin} = compile:forms(Forms),
-    {module, Name} = code:load_binary(Name, "bt4818.erl", Bin),
-    ok.
-
-split_forms(Tokens) ->
-    split_forms(Tokens, [], []).
-split_forms([], [], Acc) ->
-    lists:reverse(Acc);
-split_forms([{dot, _} = D | Rest], Cur, Acc) ->
-    split_forms(Rest, [], [lists:reverse([D | Cur]) | Acc]);
-split_forms([T | Rest], Cur, Acc) ->
-    split_forms(Rest, [T | Cur], Acc).
+    beamtalk_test_module:load(Name, Source).
 
 %% Generated callbacks of a Beamtalk actor module are hidden, by name and arity;
 %% its methods and blocks are not. A value class's own `init`/`terminate`
@@ -1028,17 +1004,7 @@ lookup_method_line_test() ->
     ?assertEqual(not_found, beamtalk_stack_frame:lookup_method_line({}, 5)).
 
 load_module_from_source(Module, Source) ->
-    {ok, Tokens, _} = erl_scan:string(Source),
-    Forms = [
-        begin
-            {ok, F} = erl_parse:parse_form(Form),
-            F
-        end
-     || Form <- split_forms(Tokens)
-    ],
-    {ok, Module, Bin} = compile:forms(Forms, [binary]),
-    {module, Module} = code:load_binary(Module, atom_to_list(Module) ++ ".beam", Bin),
-    ok.
+    beamtalk_test_module:load(Module, Source).
 
 %% BT-4835: the one definition of the notice behind `beamtalk test` and `beamtalk run`.
 %% The Rust `render_run_error_frames` prints the same text from the same fixture.

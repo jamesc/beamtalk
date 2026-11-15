@@ -11,7 +11,7 @@ construction and cross-reference table reset. Replaces the per-file
 `make_msg/3` and `clear_xref/0` copies.
 """.
 
--export([make_msg/3, clear_xref/0]).
+-export([make_msg/3, clear_xref/0, ensure_xref/0, assert_error_response/1, fake_self/2]).
 
 -doc "Build a REPL `protocol_msg` with no params.".
 -spec make_msg(binary(), binary(), binary() | undefined) -> tuple().
@@ -42,3 +42,37 @@ clear_xref() ->
             end,
             ok
     end.
+
+-doc """
+Make sure a `beamtalk_xref` server is running (starting an unsupervised one if
+the supervised one is absent) and empty its tables. The `setup` half of the
+xref-backed suites; pair with `clear_xref/0` in cleanup.
+""".
+-spec ensure_xref() -> ok.
+ensure_xref() ->
+    case whereis(beamtalk_xref) of
+        undefined -> {ok, _} = beamtalk_xref:start_link();
+        _ -> ok
+    end,
+    clear_xref().
+
+-doc """
+Decode a JSON-encoded REPL response, assert it is a `done`/`error` response with
+a binary `error` field, and return the decoded map.
+""".
+-spec assert_error_response(iodata()) -> map().
+assert_error_response(Response) ->
+    Decoded = json:decode(iolist_to_binary(Response)),
+    #{<<"status">> := [<<"done">>, <<"error">>], <<"error">> := Error} = Decoded,
+    true = is_binary(Error),
+    Decoded.
+
+-doc """
+A `beamtalk_object` tuple standing in for the `self` of a stdlib singleton
+(`workspace` or `beamtalk`) whose process is `Pid`.
+""".
+-spec fake_self(workspace | beamtalk, pid()) -> tuple().
+fake_self(workspace, Pid) ->
+    {beamtalk_object, 'Workspace', 'bt@stdlib@workspace', Pid};
+fake_self(beamtalk, Pid) ->
+    {beamtalk_object, 'Beamtalk class', 'bt@stdlib@beamtalk', Pid}.

@@ -123,3 +123,83 @@ class_start_stop_wait_test() ->
     after
         Teardown()
     end.
+
+%% BT-4899: throwaway-module loader.
+
+module_load_source_and_unload_test() ->
+    Name = beamtalk_test_unique:atom("bt4899_src"),
+    Src = io_lib:format("-module(~p).\n-export([f/0]).\nf() -> ok.\n", [Name]),
+    ok = beamtalk_test_module:load(Name, Src),
+    ?assertEqual(ok, Name:f()),
+    ok = beamtalk_test_module:unload(Name),
+    ?assertNot(erlang:module_loaded(Name)),
+    %% Idempotent.
+    ?assertEqual(ok, beamtalk_test_module:unload(Name)).
+
+module_with_module_unloads_after_fun_raises_test() ->
+    Name = beamtalk_test_unique:atom("bt4899_with"),
+    Forms = [{attribute, 1, module, Name}],
+    ?assertEqual(ok, beamtalk_test_module:with_module(Name, Forms, fun() -> ok end)),
+    ?assertNot(erlang:module_loaded(Name)),
+    ?assertError(
+        boom,
+        beamtalk_test_module:with_module(Name, Forms, fun() ->
+            ?assert(erlang:module_loaded(Name)),
+            error(boom)
+        end)
+    ),
+    ?assertNot(erlang:module_loaded(Name)).
+
+module_meta_module_test() ->
+    Name = beamtalk_test_unique:atom("bt4899_meta"),
+    Meta = #{class => 'Foo', fields => [a, b]},
+    Name = beamtalk_test_module:meta_module(Name, Meta),
+    try
+        ?assertEqual(Meta, Name:'__beamtalk_meta'())
+    after
+        beamtalk_test_module:unload(Name)
+    end.
+
+%% BT-4899: log capture.
+
+log_capture_awaits_matching_event_test() ->
+    beamtalk_test_log:with_capture(error, fun() ->
+        logger:error("bt4899 first"),
+        logger:error("bt4899 second"),
+        {ok, Event} = beamtalk_test_log:await(
+            fun
+                (#{msg := {string, Msg}}) -> lists:prefix("bt4899 sec", Msg);
+                (_) -> false
+            end,
+            1000
+        ),
+        ?assertMatch(#{level := error}, Event),
+        ?assertEqual(
+            timeout, beamtalk_test_log:await(fun(#{msg := {string, "nope"}}) -> true end, 20)
+        )
+    end).
+
+log_capture_restores_level_and_handler_test() ->
+    #{level := Before} = logger:get_primary_config(),
+    HandlersBefore = logger:get_handler_ids(),
+    ?assertError(
+        boom, beamtalk_test_log:with_capture(all, fun() -> error(boom) end)
+    ),
+    ?assertEqual(Before, maps:get(level, logger:get_primary_config())),
+    ?assertEqual(HandlersBefore, logger:get_handler_ids()).
+
+%% BT-4899: process / repl helpers.
+
+proc_dead_pid_and_shutdown_test() ->
+    Dead = beamtalk_test_proc:dead_pid(),
+    ?assertNot(is_process_alive(Dead)),
+    Pid = beamtalk_test_proc:spawn_idle(),
+    ?assertEqual(ok, beamtalk_test_proc:shutdown(Pid)),
+    ?assertNot(is_process_alive(Pid)),
+    ?assertEqual(ok, beamtalk_test_proc:shutdown(Dead)).
+
+repl_assert_error_response_test() ->
+    Json = iolist_to_binary(
+        json:encode(#{<<"status">> => [<<"done">>, <<"error">>], <<"error">> => <<"x">>})
+    ),
+    ?assertMatch(#{<<"error">> := <<"x">>}, beamtalk_test_repl:assert_error_response(Json)).
