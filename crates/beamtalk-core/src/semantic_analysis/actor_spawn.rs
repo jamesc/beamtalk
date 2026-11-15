@@ -66,7 +66,7 @@ pub fn actor_locals(hierarchy: &ClassHierarchy, body: &[ExpressionStatement]) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantic_analysis::test_helpers::parse_module;
+    use crate::test_helpers::test_support::parse_bt;
 
     /// The actor locals of `Driver probe`, whose body is `body`.
     fn locals(body: &str) -> HashSet<String> {
@@ -74,7 +74,7 @@ mod tests {
             "Actor subclass: Worker\n  run => 1\n\nObject subclass: Plain\n  run => 1\n\n\
              Object subclass: Driver\n  class probe =>\n{body}"
         );
-        let mut module = parse_module(&src);
+        let mut module = parse_bt(&src);
         crate::ast::normalize::peel_operand_parens(&mut module);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.expect("hierarchy builds");
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn only_spawn_and_spawn_with_answer_an_actor() {
-        let module = parse_module("Actor subclass: Worker\n  run => 1\n\nWorker spawn\n");
+        let module = parse_bt("Actor subclass: Worker\n  run => 1\n\nWorker spawn\n");
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.expect("hierarchy builds");
         let Expression::MessageSend { receiver, .. } = &module.expressions[0].expression else {

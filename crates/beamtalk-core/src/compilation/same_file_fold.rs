@@ -104,17 +104,11 @@ pub fn is_same_file_extension(module: &Module, class_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::{lex_with_eof, parse};
-
-    fn parse_module(src: &str) -> Module {
-        let (module, diags) = parse(lex_with_eof(src));
-        assert!(diags.is_empty(), "parse diagnostics: {diags:?}");
-        module
-    }
+    use crate::test_helpers::test_support::parse_ok;
 
     #[test]
     fn folds_instance_and_class_side() {
-        let mut m = parse_module(
+        let mut m = parse_ok(
             "Object subclass: Foo\n  foo => 1\n\nFoo >> bar => 2\nFoo class >> make => 3\n",
         );
         assert_eq!(m.method_definitions.len(), 2);
@@ -127,7 +121,7 @@ mod tests {
 
     #[test]
     fn leaves_foreign_extensions() {
-        let mut m = parse_module("Object subclass: Foo\n  foo => 1\n\nString >> shout => 2\n");
+        let mut m = parse_ok("Object subclass: Foo\n  foo => 1\n\nString >> shout => 2\n");
         let diags = fold_same_file_extensions(&mut m);
         assert!(diags.is_empty());
         assert_eq!(m.method_definitions.len(), 1);
@@ -136,14 +130,14 @@ mod tests {
 
     #[test]
     fn duplicate_selector_is_appended_not_replaced() {
-        let mut m = parse_module("Object subclass: Foo\n  foo => 1\n\nFoo >> foo => 2\n");
+        let mut m = parse_ok("Object subclass: Foo\n  foo => 1\n\nFoo >> foo => 2\n");
         fold_same_file_extensions(&mut m);
         assert_eq!(m.classes[0].methods.len(), 2);
     }
 
     #[test]
     fn instance_extension_on_native_actor_is_an_error() {
-        let mut m = parse_module(
+        let mut m = parse_ok(
             "Actor subclass: Svc native: svc_backing\n  ping => self delegate\n\nSvc >> extra => 1\n",
         );
         let diags = fold_same_file_extensions(&mut m);
@@ -153,7 +147,7 @@ mod tests {
 
     #[test]
     fn class_extension_on_native_actor_folds() {
-        let mut m = parse_module(
+        let mut m = parse_ok(
             "Actor subclass: Svc native: svc_backing\n  ping => self delegate\n\nSvc class >> make => 1\n",
         );
         let diags = fold_same_file_extensions(&mut m);

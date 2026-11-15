@@ -132,14 +132,7 @@ fn push_multiline_range(ranges: &mut Vec<Span>, span: Span, source: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use beamtalk_core::source_analysis::{lex_with_eof, parse};
-
-    fn parse_module(source: &str) -> Module {
-        let tokens = lex_with_eof(source);
-        let (module, diags) = parse(tokens);
-        assert!(diags.is_empty(), "fixture should parse cleanly: {diags:?}");
-        module
-    }
+    use beamtalk_core::test_helpers::test_support::parse_ok;
 
     #[test]
     fn class_with_no_dividers_and_single_line_members_gets_only_the_class_body_range() {
@@ -149,7 +142,7 @@ mod tests {
         // so it must be the one range this returns (indentation folding
         // would offer exactly this fold at column 0).
         let source = "Object subclass: Counter\n  foo => 1\n  bar => 2\n";
-        let module = parse_module(source);
+        let module = parse_ok(source);
         let ranges = compute_folding_ranges(&module, source);
         assert_eq!(ranges.len(), 1);
         assert_eq!(ranges[0], module.classes[0].span);
@@ -169,7 +162,7 @@ Object subclass: Counter
   bar =>
     2
 ";
-        let module = parse_module(source);
+        let module = parse_ok(source);
         let ranges = compute_folding_ranges(&module, source);
         let class = &module.classes[0];
         assert_eq!(
@@ -202,7 +195,7 @@ Object subclass: Counter
   // === Beta ===
   baz => 3
 ";
-        let module = parse_module(source);
+        let module = parse_ok(source);
         let ranges = compute_folding_ranges(&module, source);
         let class = &module.classes[0];
 
@@ -233,7 +226,7 @@ Object subclass: Counter
   // === Section ===
   bar => 2
 ";
-        let module = parse_module(source);
+        let module = parse_ok(source);
         let ranges = compute_folding_ranges(&module, source);
         assert_eq!(ranges.len(), 2);
         let divider_range = ranges
@@ -254,7 +247,7 @@ Object subclass: Counter
   bar => 2
   baz => 3
 ";
-        let module = parse_module(source);
+        let module = parse_ok(source);
         let folding_ranges = compute_folding_ranges(&module, source);
         let symbols =
             crate::queries::document_symbols_provider::compute_document_symbols(&module, source);
@@ -281,7 +274,7 @@ Object subclass: B
   // === Other ===
   bar => 2
 ";
-        let module = parse_module(source);
+        let module = parse_ok(source);
         let ranges = compute_folding_ranges(&module, source);
         // One divider range + one class-body range per class.
         assert_eq!(ranges.len(), 4);
@@ -308,7 +301,7 @@ Object subclass: Counter
   // === Beta ===
   state: x = 0
 ";
-        let module = parse_module(source);
+        let module = parse_ok(source);
         let ranges = compute_folding_ranges(&module, source);
         assert_eq!(
             ranges,
@@ -323,7 +316,7 @@ Object subclass: Counter
         // to collapse — mirrors indentation folding, which never offers a
         // fold for a single-line block.
         let source = "Object subclass: Counter\n  foo => 1\n";
-        let module = parse_module(source);
+        let module = parse_ok(source);
         let ranges = compute_folding_ranges(&module, source);
         // The class body ("Object subclass: Counter" through "foo => 1") is
         // still two lines, so it alone survives.
@@ -338,7 +331,7 @@ Object subclass: Counter
   class new =>
     Counter new
 ";
-        let module = parse_module(source);
+        let module = parse_ok(source);
         let ranges = compute_folding_ranges(&module, source);
         let class = &module.classes[0];
         assert!(ranges.contains(&class.class_methods[0].span));
@@ -353,8 +346,8 @@ Object subclass: Counter
   baz => 3
 ";
         let crlf_source = lf_source.replace('\n', "\r\n");
-        let lf_module = parse_module(lf_source);
-        let crlf_module = parse_module(&crlf_source);
+        let lf_module = parse_ok(lf_source);
+        let crlf_module = parse_ok(&crlf_source);
 
         let lf_ranges = compute_folding_ranges(&lf_module, lf_source);
         let crlf_ranges = compute_folding_ranges(&crlf_module, &crlf_source);
@@ -369,8 +362,7 @@ Object subclass: Counter
     #[test]
     fn folded_extensions_never_stretch_class_or_category_ranges() {
         let source = "Object subclass: Counter\n  // === Core ===\n  value =>\n    1\n\nCounter >> double =>\n  self value * 2\n";
-        let (mut module, diags) = parse(lex_with_eof(source));
-        assert!(diags.is_empty(), "{diags:?}");
+        let mut module = parse_ok(source);
         let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
         let class_span = module.classes[0].span;
         let ranges = compute_folding_ranges(&module, source);
