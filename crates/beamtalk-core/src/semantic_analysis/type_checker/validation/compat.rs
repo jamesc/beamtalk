@@ -20,9 +20,9 @@ use crate::semantic_analysis::string_utils::{
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
+use super::super::diagnostic_facts::{ClassObjectType, MetatypeNonconformance};
 use super::super::shape_assignability::declared_type_has_shape;
 use super::super::type_resolver;
-use super::super::types::{ClassObjectType, MetatypeNonconformance};
 use super::super::well_known::WellKnownClass;
 use super::super::{InferredType, TypeChecker};
 

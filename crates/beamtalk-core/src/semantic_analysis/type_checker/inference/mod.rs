@@ -25,8 +25,8 @@
 
 use crate::ast::{Expression, ExpressionStatement, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::type_checker::diagnostic_facts::DynamicInTypedClass;
 use crate::semantic_analysis::type_checker::type_resolver;
-use crate::semantic_analysis::type_checker::types::DynamicInTypedClass;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
     DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv,

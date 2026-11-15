@@ -13,8 +13,8 @@ use crate::semantic_analysis::protocol_registry::{ProtocolRegistry, ReturnTypeMi
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
+use super::super::diagnostic_facts::ClassObjectType;
 use super::super::type_resolver;
-use super::super::types::ClassObjectType;
 use super::super::{InferredType, TypeChecker};
 
 /// Outcome of walking a `Union`-typed argument's members against one
