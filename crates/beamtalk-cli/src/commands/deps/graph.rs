@@ -276,10 +276,11 @@ fn locked_subtree(
         }
     }
     while let Some((name, dir)) = stack.pop() {
-        if !seen.insert(name) {
+        if !seen.insert(name.clone()) {
             continue;
         }
         let Ok(manifest) = manifest::parse_manifest_full(&dir.join("beamtalk.toml")) else {
+            debug!(dep = %name, %dir, "No readable manifest in checkout; not following its dependencies");
             continue;
         };
         for (dep_name, spec) in &manifest.dependencies {
