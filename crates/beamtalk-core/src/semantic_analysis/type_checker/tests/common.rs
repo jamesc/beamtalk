@@ -140,15 +140,14 @@ pub(super) fn check(module: &Module, hierarchy: &ClassHierarchy) -> TypeChecker 
 }
 
 /// Like [`diags`], but the source must parse without any non-lint diagnostic
-/// (lints are tolerated, unlike [`return_types_and_diags`], which requires an
-/// empty parse-diagnostic list).
+/// (lints are tolerated; see [`parse_and_build`]).
 pub(super) fn diags_parse_ok(source: &str) -> Vec<Diagnostic> {
     let (module, hierarchy) = parse_and_build(source);
     check(&module, &hierarchy).take_diagnostics()
 }
 
 /// Inferred method return types and diagnostics for `source`, which must parse
-/// without any diagnostic.
+/// without any non-lint diagnostic (see [`parse_and_build`]).
 pub(super) fn return_types_and_diags(
     source: &str,
 ) -> (
