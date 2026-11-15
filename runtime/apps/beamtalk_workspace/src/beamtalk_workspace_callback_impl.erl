@@ -4,7 +4,7 @@
 -module(beamtalk_workspace_callback_impl).
 -behaviour(beamtalk_workspace_callback).
 
-%%% **DDD Context:** Runtime Context
+%%% **DDD Context:** REPL Session Context
 
 -moduledoc """
 The workspace's implementation of `beamtalk_workspace_callback` (BT-4895).

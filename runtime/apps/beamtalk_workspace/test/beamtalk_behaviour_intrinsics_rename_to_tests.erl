@@ -378,7 +378,7 @@ rename_to_revert_after_flush_is_unsupported(_Fixture) ->
 %% validate the reference-site rewrite FIRST (`beamtalk_repl_eval:
 %% validate_sites/2`, non-mutating), commit the registry-identity move
 %% second (`beamtalk_object_class:rename/2`), and only then perform the
-%% real rewrite (`beamtalk_repl_eval:rewrite_sites/2`) — see
+%% real rewrite (`beamtalk_repl_loader_rewrite:rewrite_sites/2`) — see
 %% `beamtalk_behaviour_intrinsics:do_rename_and_rewrite/7`'s own doc.
 %% Round 3's fix moved the identity move before the rewrite (closing the
 %% original gap: committing the rewrite first, then discovering the
