@@ -205,6 +205,13 @@ impl TypeChecker {
             // typed-annotation check here — `is_typed` above only feeds
             // `typed_class_context` (the Dynamic-in-typed-class warning) for
             // this call site, not `check_typed_method_annotations`.
+            // `check_native_delegate_nested_string_params` is not run either,
+            // on purpose (BT-4923): a same-file extension is folded into the
+            // class body (so the inline loop above reports it), and a
+            // cross-file one is compiled as a foreign extension fun whose
+            // `self delegate` is a plain send, not a call through the
+            // class's backing module, so the "reach <module>:<fun>/n as
+            // tagged Strings" hint would be false.
             // `check_override_param_compatibility` is likewise never run for
             // standalone definitions. `check_override_return_compatibility`
             // is: protocol conformance leaves inherited-widening mismatches to

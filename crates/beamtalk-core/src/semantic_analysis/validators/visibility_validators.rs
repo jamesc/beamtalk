@@ -1102,6 +1102,42 @@ pub fn check_internal_method_shadow(
             );
         }
     }
+
+    // Standalone `Sub >> helper` / `Sub class >> helper` (BT-4923). The class
+    // may be declared in another file, so its superclass comes from the
+    // hierarchy rather than from `module.classes`.
+    for standalone in &module.method_definitions {
+        let class_name = &standalone.class_name.name;
+        let Some(superclass_name) = hierarchy
+            .get_class(class_name)
+            .and_then(|info| info.superclass.as_ref())
+        else {
+            continue;
+        };
+        if !hierarchy.has_class(superclass_name) {
+            continue;
+        }
+        let method = &standalone.method;
+        if standalone.is_class_method {
+            check_shadow_for_method_class_side(
+                class_name,
+                superclass_name,
+                &method.selector.name(),
+                method.span,
+                hierarchy,
+                diagnostics,
+            );
+        } else {
+            check_shadow_for_method(
+                class_name,
+                superclass_name,
+                &method.selector.name(),
+                method.span,
+                hierarchy,
+                diagnostics,
+            );
+        }
+    }
 }
 
 /// Helper: check if an instance method shadows a superclass internal method.
