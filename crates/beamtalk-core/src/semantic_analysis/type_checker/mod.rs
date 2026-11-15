@@ -54,6 +54,7 @@ thread_local! {
 }
 
 mod binary_string_compare;
+mod diagnostic_facts;
 mod env_key;
 mod exhaustiveness;
 mod inference;
@@ -72,7 +73,6 @@ mod shape_keyed;
 // `pub`, not `pub(crate)` (ADR 0117 Decision step 5) —
 // `hover_tier_label` is reached by `beamtalk-language-service`'s
 // `queries::hover_provider` from the standalone crate.
-mod diagnostic_facts;
 pub mod sendability;
 #[cfg(test)]
 mod tests;
