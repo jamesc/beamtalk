@@ -62,7 +62,7 @@ mod walker;
 use crate::ast::{ExpressionStatement, Module, WellKnownSelector};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::type_checker::TypeMap;
-use crate::source_analysis::Diagnostic;
+use crate::source_analysis::{Diagnostic, MethodSide};
 use ecow::EcoString;
 
 use self::ensure_nlr::report_nlr_out_of_ensure;
@@ -94,31 +94,14 @@ pub(crate) fn check_local_threading(
             ValueType
         }
     };
-    for class in &module.classes {
-        let class_name = class.name.name.as_str();
-        let context = instance_context(class_name);
-        for method in &class.methods {
-            check_method(context, method, &facts(class_name, false), diagnostics);
-        }
-        for method in &class.class_methods {
-            check_method(Class, method, &facts(class_name, true), diagnostics);
-        }
-    }
-    for standalone in &module.method_definitions {
-        let context = if standalone.is_class_method {
+    for (class_name, side, method) in module.methods_with_owner() {
+        let class_side = side == MethodSide::Class;
+        let context = if class_side {
             Class
         } else {
-            instance_context(standalone.class_name.name.as_str())
+            instance_context(class_name)
         };
-        check_method(
-            context,
-            &standalone.method,
-            &facts(
-                standalone.class_name.name.as_str(),
-                standalone.is_class_method,
-            ),
-            diagnostics,
-        );
+        check_method(context, method, &facts(class_name, class_side), diagnostics);
     }
     if !module.expressions.is_empty() {
         let known: Vec<EcoString> = known_vars.iter().map(|v| EcoString::from(*v)).collect();
