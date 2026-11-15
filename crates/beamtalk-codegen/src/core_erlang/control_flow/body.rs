@@ -908,139 +908,43 @@ impl CoreErlangGenerator {
         // `Document` text as before, tagged with what it carries.
         let epilogue_span = body.span;
 
-        if let BodyKind::FoldlFilter { item_var, negate } = kind
-            && let Some(pv) = &pred_var
-        {
-            self.lower_foldl_epilogue_filter(
-                item_var,
-                *negate,
-                EpilogueCx {
-                    pv,
-                    plan,
-                    has_mutations: flags.has_mutations,
-                    span: epilogue_span,
-                },
-                &mut stmts,
-            );
-        }
-
-        if let BodyKind::FoldlBoolPredicate { is_all } = kind
-            && let Some(pv) = &pred_var
-        {
-            self.lower_foldl_epilogue_bool_predicate(
-                *is_all,
-                EpilogueCx {
-                    pv,
-                    plan,
-                    has_mutations: flags.has_mutations,
-                    span: epilogue_span,
-                },
-                &mut stmts,
-            );
-        }
-
-        if let BodyKind::FoldlDetect { item_var } = kind
-            && let Some(pv) = &pred_var
-        {
-            self.lower_foldl_epilogue_detect(
-                item_var,
-                EpilogueCx {
-                    pv,
-                    plan,
-                    has_mutations: flags.has_mutations,
-                    span: epilogue_span,
-                },
-                &mut stmts,
-            );
-        }
-
-        if matches!(kind, BodyKind::FoldlCount)
-            && let Some(pv) = &pred_var
-        {
-            self.lower_foldl_epilogue_count(
-                EpilogueCx {
-                    pv,
-                    plan,
-                    has_mutations: flags.has_mutations,
-                    span: epilogue_span,
-                },
-                &mut stmts,
-            );
-        }
-
-        if let BodyKind::FoldlTakeWhile { item_var } = kind
-            && let Some(pv) = &pred_var
-        {
-            self.lower_foldl_epilogue_take_while(
-                item_var,
-                EpilogueCx {
-                    pv,
-                    plan,
-                    has_mutations: flags.has_mutations,
-                    span: epilogue_span,
-                },
-                &mut stmts,
-            );
-        }
-
-        if let BodyKind::FoldlDropWhile { item_var } = kind
-            && let Some(pv) = &pred_var
-        {
-            self.lower_foldl_epilogue_drop_while(
-                item_var,
-                EpilogueCx {
-                    pv,
-                    plan,
-                    has_mutations: flags.has_mutations,
-                    span: epilogue_span,
-                },
-                &mut stmts,
-            );
-        }
-
-        if let BodyKind::FoldlPartition { item_var } = kind
-            && let Some(pv) = &pred_var
-        {
-            self.lower_foldl_epilogue_partition(
-                item_var,
-                EpilogueCx {
-                    pv,
-                    plan,
-                    has_mutations: flags.has_mutations,
-                    span: epilogue_span,
-                },
-                &mut stmts,
-            );
-        }
-
-        if let BodyKind::FoldlGroupBy { item_var } = kind
-            && let Some(pv) = &pred_var
-        {
-            self.lower_foldl_epilogue_group_by(
-                item_var,
-                EpilogueCx {
-                    pv,
-                    plan,
-                    has_mutations: flags.has_mutations,
-                    span: epilogue_span,
-                },
-                &mut stmts,
-            );
-        }
-
-        if let BodyKind::FoldlSort { state_key_var } = kind
-            && let Some(pv) = &pred_var
-        {
-            self.lower_foldl_epilogue_sort(
-                state_key_var,
-                EpilogueCx {
-                    pv,
-                    plan,
-                    has_mutations: flags.has_mutations,
-                    span: epilogue_span,
-                },
-                &mut stmts,
-            );
+        // At most one epilogue applies: `kind` is one `BodyKind`, and every
+        // epilogue reads the predicate variable the statements bound.
+        if let Some(pv) = &pred_var {
+            let cx = EpilogueCx {
+                pv,
+                plan,
+                has_mutations: flags.has_mutations,
+                span: epilogue_span,
+            };
+            match kind {
+                BodyKind::FoldlFilter { item_var, negate } => {
+                    self.lower_foldl_epilogue_filter(item_var, *negate, cx, &mut stmts);
+                }
+                BodyKind::FoldlBoolPredicate { is_all } => {
+                    self.lower_foldl_epilogue_bool_predicate(*is_all, cx, &mut stmts);
+                }
+                BodyKind::FoldlDetect { item_var } => {
+                    self.lower_foldl_epilogue_detect(item_var, cx, &mut stmts);
+                }
+                BodyKind::FoldlCount => self.lower_foldl_epilogue_count(cx, &mut stmts),
+                BodyKind::FoldlTakeWhile { item_var } => {
+                    self.lower_foldl_epilogue_take_while(item_var, cx, &mut stmts);
+                }
+                BodyKind::FoldlDropWhile { item_var } => {
+                    self.lower_foldl_epilogue_drop_while(item_var, cx, &mut stmts);
+                }
+                BodyKind::FoldlPartition { item_var } => {
+                    self.lower_foldl_epilogue_partition(item_var, cx, &mut stmts);
+                }
+                BodyKind::FoldlGroupBy { item_var } => {
+                    self.lower_foldl_epilogue_group_by(item_var, cx, &mut stmts);
+                }
+                BodyKind::FoldlSort { state_key_var } => {
+                    self.lower_foldl_epilogue_sort(state_key_var, cx, &mut stmts);
+                }
+                _ => {}
+            }
         }
 
         self.verify_frame_producer_sites(&stmts, &producer_sites, &filtered_body);
