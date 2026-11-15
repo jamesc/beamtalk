@@ -754,7 +754,7 @@ patched_protocol_source(Source, ProtocolBin, SelectorBin, MethodSource) ->
                         Added = beamtalk_workspace_reshape:ensure_trailing_newline(Reindented),
                         <<Trimmed/binary, "\n\n", Added/binary>>;
                     _ ->
-                        beamtalk_repl_loader:splice_replace(
+                        beamtalk_workspace_span:splice(
                             SourceBin, Span, ?ENTRIES:match_trailing_newline(Reindented, PrevSource)
                         )
                 end,

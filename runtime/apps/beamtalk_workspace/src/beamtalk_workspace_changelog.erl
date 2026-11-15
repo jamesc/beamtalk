@@ -195,16 +195,7 @@ release nodes do not start a workspace, so this code is a no-op there.
 %% `'rename-method'` are ADR 0114's `renameTo:`/`renameSelector:to:` kinds
 %% — the first two kinds whose rewrite spans a *set* of files
 %% (`sites`/`candidate_sites`) rather than one, see those fields' docs below.
--type kind() ::
-    instance
-    | class
-    | 'new-class'
-    | 'class-def'
-    | 'remove-method'
-    | 'remove-class'
-    | 'rename-class'
-    | 'rename-method'
-    | unknown.
+-type kind() :: beamtalk_workspace_kinds:kind().
 %% ADR 0112: which method table a `'remove-method'` entry targets. Stored
 %% explicitly only for that kind — legacy `instance`/`class`-kind patch
 %% entries derive their side from `kind` itself (`entry_side/1`), so the field
@@ -1282,17 +1273,7 @@ other's expected values — both are pinned to the shared file.
 """.
 -spec known_entry_kinds() -> [kind()].
 known_entry_kinds() ->
-    [
-        instance,
-        class,
-        'new-class',
-        'class-def',
-        'remove-method',
-        'remove-class',
-        'rename-class',
-        'rename-method',
-        unknown
-    ].
+    beamtalk_workspace_kinds:all().
 
 -doc """
 The side (`instance` | `class`) a method-shaped entry targets, or `undefined`
@@ -1778,25 +1759,12 @@ is_orphan(#entry{source_file = SourceFile, span = Span, prev_source_ref = PrevRe
     PrevPath = filename:join(SourcesDir, binary_to_list(PrevRef)),
     case {file:read_file(binary_to_list(SourceFile)), file:read_file(PrevPath)} of
         {{ok, DiskBin}, {ok, PrevBin}} ->
-            not span_matches(DiskBin, Span, PrevBin);
+            not beamtalk_workspace_span:matches_span(DiskBin, Span, PrevBin);
         _ ->
             %% Source file or recorded prev body unreadable → treat as orphaned:
             %% the patch can no longer be safely reconciled against disk.
             true
     end.
-
-%% The recorded prev_source must still be byte-identical to the bytes currently
-%% occupying the recorded span in the on-disk file. If the span is out of range
-%% or the bytes differ, the disk advanced under us — orphan.
--spec span_matches(binary(), span() | undefined, binary()) -> boolean().
-span_matches(_DiskBin, undefined, _PrevBin) ->
-    false;
-span_matches(DiskBin, #{start := Start, 'end' := End}, PrevBin) when
-    is_integer(Start), is_integer(End), End >= Start, End =< byte_size(DiskBin)
-->
-    binary:part(DiskBin, Start, End - Start) =:= PrevBin;
-span_matches(_DiskBin, _Span, _PrevBin) ->
-    false.
 
 -spec parse_log(binary()) -> [#entry{}].
 parse_log(Bin) ->
@@ -2098,7 +2066,7 @@ entry_to_json(#entry{} = E) ->
         <<"epoch">> => E#entry.epoch,
         <<"class">> => E#entry.class,
         <<"selector">> => null_or(E#entry.selector),
-        <<"kind">> => atom_to_binary(E#entry.kind, utf8),
+        <<"kind">> => beamtalk_workspace_kinds:wire_name(E#entry.kind),
         %% ADR 0112: `undefined` for every legacy `instance`/`class`-kind entry
         %% (side is derived from `kind` for those, never persisted — additive
         %% field, ADR 0112 § ChangeLog interaction) — only a `'remove-method'`
@@ -2173,25 +2141,14 @@ entry_from_json(Line) ->
 %% `unknown` keeps the entry; it is excluded from the active view via prior_epoch
 %% on restart regardless.
 -spec decode_kind(binary()) -> kind().
-decode_kind(<<"instance">>) ->
-    instance;
-decode_kind(<<"class">>) ->
-    class;
-decode_kind(<<"new-class">>) ->
-    'new-class';
-decode_kind(<<"class-def">>) ->
-    'class-def';
-decode_kind(<<"remove-method">>) ->
-    'remove-method';
-decode_kind(<<"remove-class">>) ->
-    'remove-class';
-decode_kind(<<"rename-class">>) ->
-    'rename-class';
-decode_kind(<<"rename-method">>) ->
-    'rename-method';
-decode_kind(Other) ->
-    log_unknown_enum(kind, Other),
-    unknown.
+decode_kind(Wire) ->
+    case beamtalk_workspace_kinds:decode(Wire) of
+        {ok, Kind} ->
+            Kind;
+        error ->
+            log_unknown_enum(kind, Wire),
+            unknown
+    end.
 
 -spec decode_intent(binary()) -> intent().
 decode_intent(<<"durable">>) ->

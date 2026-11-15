@@ -437,7 +437,7 @@ validate_no_overlaps(Class, Sites, SourceSize) ->
 validate_spans(_Class, [], _Min, _Size) ->
     ok;
 validate_spans(Class, [#{start := Start, 'end' := End} = Span | Rest], Min, Size) ->
-    case Start =< End andalso End =< Size andalso Start >= Min of
+    case Start >= Min andalso beamtalk_workspace_span:valid_span(Start, End, Size) of
         true -> validate_spans(Class, Rest, End, Size);
         false -> {error, {invalid_or_overlapping_span, Class, Span}}
     end.
@@ -475,7 +475,7 @@ apply_site_splices(Source, Sites) ->
     ),
     lists:foldl(
         fun(#{span := Span, new_text := NewText}, Acc) ->
-            beamtalk_repl_loader:splice_replace(Acc, Span, NewText)
+            beamtalk_workspace_span:splice(Acc, Span, NewText)
         end,
         Source,
         RightmostFirst
@@ -673,15 +673,9 @@ installed_site(OriginalSource, #{
         class => Class,
         source_file => SourceFile,
         span => Span,
-        prev_source => slice(OriginalSource, Span),
+        prev_source => beamtalk_workspace_span:slice(OriginalSource, Span),
         source => NewText
     }.
-
--spec slice(binary(), rewrite_span()) -> binary().
-slice(Source, #{start := Start, 'end' := End}) ->
-    Len = End - Start,
-    <<_Before:Start/binary, Text:Len/binary, _After/binary>> = Source,
-    Text.
 
 %%% ----------------------------------------------------------------------------
 %%% Class move (ADR 0114 Phase 2)
