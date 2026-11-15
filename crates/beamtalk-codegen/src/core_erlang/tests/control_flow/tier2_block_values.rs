@@ -155,13 +155,7 @@ fn test_bt2797_same_method_tier2_local_var_threads_state_correctly() {
     // outer method's State and unpack the tuple — not naively `apply Fun
     // (Arg)` (which would compile but badarity-crash at runtime).
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | outerCount := outerCount + x. self.total := self.total + outerCount]\n    outerCount := 0\n    blk value: item\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("should compile (BT-2797)");
+    let code = codegen(src);
 
     // Structural checks (not hardcoded fresh-variable counter values, which
     // shift whenever unrelated codegen changes the counter sequence before
@@ -203,13 +197,7 @@ fn test_bt2808_cascade_on_tier2_local_var_compiles_and_threads_state() {
     // the `FieldAssignmentInUnsupportedBlock` compile-time diagnostic even
     // though the pattern is exactly as safe as a single `blk value: item`.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | self.total := self.total + x]\n    blk value: item; value: item\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("cascade of safe value: sends on a stored block must compile (BT-2808)");
+    let code = codegen(src);
 
     // ADR 0137: `blk` writes only a field, so it is an ordinary closure over the
     // actor's state, not a Tier 2 block: it writes the cell, and each of the two
@@ -364,13 +352,7 @@ fn test_bt2797_no_regression_pure_block_value_fast_path() {
     // block receiver is intercepted earlier and takes the plain
     // generate_block_value_call path regardless.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run =>\n    [42] value\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("should compile");
+    let code = codegen(src);
 
     assert!(
         !code.contains("is_function"),
@@ -387,13 +369,7 @@ fn test_bt2797_no_regression_pure_local_var_block_value_fast_path() {
     // self.field-scoped runtime-discrimination path,
     // and never the Tier 2 stateful protocol.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run: item =>\n    blk := [:x | x + 1]\n    blk value: item\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("should compile");
+    let code = codegen(src);
 
     assert!(
         !code.contains("StateAcc"),
@@ -409,13 +385,7 @@ fn test_bt2803_no_regression_pure_block_value_with_arguments_fast_path() {
     // try_generate_block_value_with_arguments_keyword's literal-block fast
     // path applies Args directly via erlang:apply, no runtime check at all.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run =>\n    [:x :y | x + y] valueWithArguments: #(3, 4)\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("should compile");
+    let code = codegen(src);
 
     assert!(
         !code.contains("is_function"),
@@ -435,13 +405,7 @@ fn test_bt2803_no_regression_pure_local_var_value_with_arguments_fast_path() {
     // (generate_block_value_with_arguments_call) — never the Tier 2 runtime-
     // discriminated path, and never the stateful protocol.
     let src = "Actor subclass: Ctr\n  state: total = 0\n\n  run =>\n    blk := [:x | x + 1]\n    blk valueWithArguments: #(5)\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("should compile");
+    let code = codegen(src);
 
     assert!(
         !code.contains("StateAcc"),
@@ -476,13 +440,7 @@ fn test_bt2814_local_var_tier2_value_call_in_argument_position_unpacks_result() 
     // the former stdlib/test/tier2stored_block_matrix_test.bt, removed by BT-3922 for the runtime
     // end-to-end check).
     let src = "Actor subclass: Ctr\n  state: dummy = 0\n\n  run: x =>\n    r := 0\n    blk := [:n | r := r + n]\n    10 + (blk value: x)\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("should compile (BT-2814)");
+    let code = codegen(src);
 
     // ADR 0116: the right operand (`blk value: x`) is not statically
     // numeric, so this call site let-binds it to `_BinRight<N>` before
@@ -520,13 +478,7 @@ fn test_bt2815_named_local_var_captured_mutation_rebinds_after_call() {
     // check only (see the former stdlib/test/tier2stored_block_matrix_test.bt, removed by BT-3922 for the
     // runtime end-to-end check).
     let src = "Actor subclass: Ctr\n  state: dummy = 0\n\n  run =>\n    outer := 0\n    blk := [:n | outer := outer + n]\n    blk value: 5\n    outer\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("should compile (BT-2815)");
+    let code = codegen(src);
 
     assert!(
         regex::Regex::new(
@@ -548,13 +500,7 @@ fn test_bt2815_named_local_var_cascade_captured_mutation_rebinds_after_call() {
     // must also rebind the caller's `outer` var from the cascade's final
     // NewState, not just the single-send case above.
     let src = "Actor subclass: Ctr\n  state: dummy = 0\n\n  run =>\n    outer := 0\n    blk := [:n | outer := outer + n]\n    blk value: 4; value: 4\n    outer\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    )
-    .expect("should compile (BT-2815)");
+    let code = codegen(src);
 
     assert!(
         regex::Regex::new(

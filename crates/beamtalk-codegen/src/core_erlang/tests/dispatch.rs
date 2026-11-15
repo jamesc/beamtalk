@@ -2220,12 +2220,7 @@ fn test_cast_send_in_actor_method_compiles() {
     // `counter increment!` as a statement in an actor method compiles
     // to Core Erlang that calls beamtalk_message_dispatch:cast/3.
     let src = "Actor subclass: Sender\n  state: target = nil\n\n  fire =>\n    target increment!\n    \"done\"\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("sender")).expect("codegen should succeed");
-
-    eprintln!("Generated code for cast send in actor method:\n{code}");
+    let code = codegen_named(src, "sender");
 
     assert_has(
         "Should generate beamtalk_message_dispatch:cast/3 for cast send.",
