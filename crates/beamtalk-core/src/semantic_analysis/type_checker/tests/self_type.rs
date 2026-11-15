@@ -584,13 +584,16 @@ Value subclass: Driver
         .expect("probe has at least one statement")
         .expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("self", InferredType::known("Driver"));
     // `pool` is a FakeWorkerPool instance (no receiver type args; the
     // binding of C flows from superclass_type_args on FakeWorkerPool).
-    env.set_local("pool", InferredType::known("FakeWorkerPool"));
-    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        expr,
+        &hierarchy,
+        &[
+            ("self", InferredType::known("Driver")),
+            ("pool", InferredType::known("FakeWorkerPool")),
+        ],
+    );
 
     match &ty {
         InferredType::Known {

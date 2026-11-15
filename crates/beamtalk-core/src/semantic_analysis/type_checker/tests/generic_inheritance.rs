@@ -106,22 +106,17 @@ fn generic_inheritance_inherited_method_returns_substituted_type() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_collection_hierarchy(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "arr",
-        InferredType::Known {
-            class_name: eco_string("GenArray"),
-            type_args: vec![InferredType::known("Integer")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
-    let result_ty = checker.infer_expr(
+    let result_ty = infer_with_locals(
         &msg_send(var("arr"), MessageSelector::Unary("first".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "arr",
+            InferredType::Known {
+                class_name: eco_string("GenArray"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
 
     assert_eq!(
@@ -137,22 +132,17 @@ fn generic_inheritance_non_generic_return_unchanged() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_collection_hierarchy(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "arr",
-        InferredType::Known {
-            class_name: eco_string("GenArray"),
-            type_args: vec![InferredType::known("Integer")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
-    let result_ty = checker.infer_expr(
+    let result_ty = infer_with_locals(
         &msg_send(var("arr"), MessageSelector::Unary("size".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "arr",
+            InferredType::Known {
+                class_name: eco_string("GenArray"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
 
     assert_eq!(
@@ -198,27 +188,22 @@ fn generic_inheritance_self_type_carries_type_args() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_collection_hierarchy(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "arr",
-        InferredType::Known {
-            class_name: eco_string("GenArray"),
-            type_args: vec![InferredType::known("Integer")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
     // select: returns Self — should be GenArray(Integer) not GenCollection(Integer)
-    let result_ty = checker.infer_expr(
+    let result_ty = infer_with_locals(
         &msg_send(
             var("arr"),
             MessageSelector::Keyword(vec![KeywordPart::new("select:", span())]),
             vec![var("block")],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "arr",
+            InferredType::Known {
+                class_name: eco_string("GenArray"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
 
     match &result_ty {
@@ -261,23 +246,18 @@ fn generic_inheritance_multi_level_composition() {
     };
     hierarchy.add_from_beam_meta(vec![sorted_info]);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "sa",
-        InferredType::Known {
-            class_name: eco_string("SortedArray"),
-            type_args: vec![InferredType::known("String")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
     // `first` is defined on GenCollection — 2 levels up
-    let result_ty = checker.infer_expr(
+    let result_ty = infer_with_locals(
         &msg_send(var("sa"), MessageSelector::Unary("first".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "sa",
+            InferredType::Known {
+                class_name: eco_string("SortedArray"),
+                type_args: vec![InferredType::known("String")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
 
     assert_eq!(
@@ -293,26 +273,21 @@ fn generic_inheritance_own_method_uses_direct_substitution() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_result_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "r",
-        InferredType::Known {
-            class_name: eco_string("GenResult"),
-            type_args: vec![
-                InferredType::known("Integer"),
-                InferredType::known("IOError"),
-            ],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
     // unwrap is defined on GenResult itself — should still work
-    let result_ty = checker.infer_expr(
+    let result_ty = infer_with_locals(
         &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
 
     assert_eq!(
@@ -361,11 +336,9 @@ fn type_param_bounds_conforming_type_no_warning() {
     };
     registry.register_module(&proto_module, &hierarchy);
 
-    let mut checker = TypeChecker::new();
-    checker.check_type_param_bounds(
-        &"BoundedLogger".into(),
+    let checker = check_bounds(
+        "BoundedLogger",
         &[InferredType::known("Integer")],
-        span(),
         &hierarchy,
         &registry,
     );
@@ -414,11 +387,9 @@ fn type_param_bounds_non_conforming_type_warns() {
     };
     registry.register_module(&proto_module, &hierarchy);
 
-    let mut checker = TypeChecker::new();
-    checker.check_type_param_bounds(
-        &"BoundedLogger".into(),
+    let checker = check_bounds(
+        "BoundedLogger",
         &[InferredType::known("Integer")],
-        span(),
         &hierarchy,
         &registry,
     );
@@ -444,14 +415,12 @@ fn type_param_bounds_unbounded_param_no_check() {
     add_generic_result_class(&mut hierarchy);
 
     let registry = ProtocolRegistry::new();
-    let mut checker = TypeChecker::new();
-    checker.check_type_param_bounds(
-        &"GenResult".into(),
+    let checker = check_bounds(
+        "GenResult",
         &[
             InferredType::known("Integer"),
             InferredType::known("String"),
         ],
-        span(),
         &hierarchy,
         &registry,
     );
@@ -475,11 +444,9 @@ fn type_param_bounds_dynamic_skipped() {
     }]);
 
     let registry = ProtocolRegistry::new();
-    let mut checker = TypeChecker::new();
-    checker.check_type_param_bounds(
-        &"BoundedLogger".into(),
+    let checker = check_bounds(
+        "BoundedLogger",
         &[InferredType::Dynamic(DynamicReason::Unknown)],
-        span(),
         &hierarchy,
         &registry,
     );

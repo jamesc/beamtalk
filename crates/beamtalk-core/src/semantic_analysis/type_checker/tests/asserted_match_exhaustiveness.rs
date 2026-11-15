@@ -61,12 +61,11 @@ fn compass_type() -> InferredType {
 /// silently or reports exactly one `Error`).
 fn asserted_diagnostics(scrutinee_ty: InferredType, arms: Vec<MatchArm>) -> Vec<Diagnostic> {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    env.set_local("compass", scrutinee_ty);
+
     let expr = asserted_match_expr(var("compass"), arms);
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    checker.diagnostics().to_vec()
+
+    let (_, diags) = infer_with_diags(&expr, &hierarchy, &[("compass", scrutinee_ty)]);
+    diags.to_vec()
 }
 
 /// Runs inference over the equivalent *advisory* `match:` (same scrutinee

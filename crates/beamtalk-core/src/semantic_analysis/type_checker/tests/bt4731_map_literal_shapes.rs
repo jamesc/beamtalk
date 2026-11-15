@@ -22,11 +22,9 @@ fn map(pairs: Vec<MapPair>) -> Expression {
     }
 }
 
+// Binds the built-in hierarchy; the shared `infer` takes one explicitly.
 fn infer(expr: &Expression) -> InferredType {
-    let mut checker = TypeChecker::new();
-    let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    checker.infer_expr(expr, &hierarchy, &mut env, false)
+    super::common::infer(expr, &ClassHierarchy::with_builtins())
 }
 
 fn field(key: &str, value: InferredType) -> ShapeFieldType {

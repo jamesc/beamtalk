@@ -103,14 +103,13 @@ fn infer_expr_assignment_tracks_type() {
 #[test]
 fn infer_expr_block_returns_block_type() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let block = Expression::Block(Block::new(
         vec![BlockParameter::new("x", span())],
         vec![ExpressionStatement::bare(int_lit(1))],
         span(),
     ));
-    let ty = checker.infer_expr(&block, &hierarchy, &mut env, false);
+    let ty = infer(&block, &hierarchy);
     // BT-4102: the block type now carries its param and body-return types.
     assert_eq!(
         ty,
@@ -128,13 +127,12 @@ fn infer_expr_block_returns_block_type() {
 #[test]
 fn infer_expr_map_literal() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let expr = Expression::MapLiteral {
         pairs: vec![],
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer(&expr, &hierarchy);
     // empty map literal carries no key/value info → Dictionary(Dynamic, Dynamic).
     assert_eq!(
         ty,
@@ -151,13 +149,12 @@ fn infer_expr_map_literal() {
 #[test]
 fn infer_expr_array_literal() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let expr = Expression::ArrayLiteral {
         elements: vec![int_lit(1), int_lit(2)],
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer(&expr, &hierarchy);
     // homogeneous Integer elements → Array(Integer).
     assert_eq!(
         ty,
@@ -168,14 +165,13 @@ fn infer_expr_array_literal() {
 #[test]
 fn infer_expr_list_literal() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let expr = Expression::ListLiteral {
         elements: vec![int_lit(1)],
         tail: None,
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer(&expr, &hierarchy);
     // homogeneous Integer elements → List(Integer).
     assert_eq!(
         ty,
@@ -187,13 +183,12 @@ fn infer_expr_list_literal() {
 fn infer_expr_array_literal_heterogeneous_joins_to_union() {
     // mixed element types join into a union element type.
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let expr = Expression::ArrayLiteral {
         elements: vec![int_lit(1), str_lit("a")],
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer(&expr, &hierarchy);
     assert_eq!(
         ty,
         InferredType::known_with_args(
@@ -207,13 +202,12 @@ fn infer_expr_array_literal_heterogeneous_joins_to_union() {
 fn infer_expr_array_literal_empty_is_dynamic_element() {
     // an empty literal carries no element info → Array(Dynamic).
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let expr = Expression::ArrayLiteral {
         elements: vec![],
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer(&expr, &hierarchy);
     assert_eq!(
         ty,
         InferredType::known_with_args("Array", vec![InferredType::Dynamic(DynamicReason::Unknown)])
@@ -224,13 +218,12 @@ fn infer_expr_array_literal_empty_is_dynamic_element() {
 fn infer_expr_tuple_literal_is_positional() {
     // ADR 0136: `{#a, 1}` keeps one type per position — Tuple(#a, Integer).
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let expr = Expression::TupleLiteral {
         elements: vec![symbol_lit("a"), int_lit(1)],
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer(&expr, &hierarchy);
     assert_eq!(
         ty,
         InferredType::known_with_args(
@@ -243,13 +236,12 @@ fn infer_expr_tuple_literal_is_positional() {
 #[test]
 fn infer_expr_empty_tuple_literal_is_bare_tuple() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let expr = Expression::TupleLiteral {
         elements: vec![],
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer(&expr, &hierarchy);
     assert_eq!(ty, InferredType::known("Tuple"));
 }
 
@@ -283,18 +275,20 @@ fn infer_expr_list_literal_folds_typed_tail_element() {
     // a `List(Integer)` tail contributes its `Integer` element to
     // the join, so `[1 | someIntList]` stays `List(Integer)`.
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "rest",
-        InferredType::known_with_args("List", vec![InferredType::known("Integer")]),
-    );
+
     let expr = Expression::ListLiteral {
         elements: vec![int_lit(1)],
         tail: Some(Box::new(var("rest"))),
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[(
+            "rest",
+            InferredType::known_with_args("List", vec![InferredType::known("Integer")]),
+        )],
+    );
     assert_eq!(
         ty,
         InferredType::known_with_args("List", vec![InferredType::known("Integer")])
@@ -308,18 +302,20 @@ fn infer_expr_list_literal_array_tail_widens_to_dynamic() {
     // `Dynamic` into the join collapses the element to `Dynamic`, giving
     // `List(Dynamic)` rather than a false `List(Integer)`.
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "rest",
-        InferredType::known_with_args("Array", vec![InferredType::known("Integer")]),
-    );
+
     let expr = Expression::ListLiteral {
         elements: vec![int_lit(1)],
         tail: Some(Box::new(var("rest"))),
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let (ty, diags) = infer_with_diags(
+        &expr,
+        &hierarchy,
+        &[(
+            "rest",
+            InferredType::known_with_args("Array", vec![InferredType::known("Integer")]),
+        )],
+    );
     assert_eq!(
         ty,
         InferredType::known_with_args("List", vec![InferredType::Dynamic(DynamicReason::Unknown)])
@@ -327,20 +323,20 @@ fn infer_expr_list_literal_array_tail_widens_to_dynamic() {
     // the silent widening is now also surfaced as a diagnostic so
     // the user sees the likely improper-list bug.
     assert_eq!(
-        checker.diagnostics().len(),
+        diags.len(),
         1,
         "Array cons tail should emit one improper-list diagnostic, got: {:?}",
-        checker.diagnostics()
+        diags
     );
     assert!(
-        checker.diagnostics()[0].message.contains("improper list"),
+        diags[0].message.contains("improper list"),
         "Diagnostic should mention improper list, got: {:?}",
-        checker.diagnostics()[0]
+        diags[0]
     );
     assert!(
-        checker.diagnostics()[0].message.contains("Array"),
+        diags[0].message.contains("Array"),
         "Diagnostic should name the offending Array tail, got: {:?}",
-        checker.diagnostics()[0]
+        diags[0]
     );
 }
 
@@ -348,22 +344,24 @@ fn infer_expr_list_literal_array_tail_widens_to_dynamic() {
 fn infer_expr_list_literal_list_tail_no_diagnostic() {
     // a proper `List(T)` cons tail is valid — no diagnostic.
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "rest",
-        InferredType::known_with_args("List", vec![InferredType::known("Integer")]),
-    );
+
     let expr = Expression::ListLiteral {
         elements: vec![int_lit(1)],
         tail: Some(Box::new(var("rest"))),
         span: span(),
     };
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let (_, diags) = infer_with_diags(
+        &expr,
+        &hierarchy,
+        &[(
+            "rest",
+            InferredType::known_with_args("List", vec![InferredType::known("Integer")]),
+        )],
+    );
     assert!(
-        checker.diagnostics().is_empty(),
+        diags.is_empty(),
         "List cons tail is proper — no diagnostic expected, got: {:?}",
-        checker.diagnostics()
+        diags
     );
 }
 
@@ -372,19 +370,21 @@ fn infer_expr_list_literal_dynamic_tail_no_diagnostic() {
     // a `Dynamic` tail (e.g. unannotated param) is too uncertain to
     // flag — staying silent avoids false-positive noise.
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("rest", InferredType::Dynamic(DynamicReason::Unknown));
+
     let expr = Expression::ListLiteral {
         elements: vec![int_lit(1)],
         tail: Some(Box::new(var("rest"))),
         span: span(),
     };
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let (_, diags) = infer_with_diags(
+        &expr,
+        &hierarchy,
+        &[("rest", InferredType::Dynamic(DynamicReason::Unknown))],
+    );
     assert!(
-        checker.diagnostics().is_empty(),
+        diags.is_empty(),
         "Dynamic cons tail should not be flagged, got: {:?}",
-        checker.diagnostics()
+        diags
     );
 }
 
@@ -393,29 +393,30 @@ fn infer_expr_list_literal_non_collection_tail_warns() {
     // any known non-List tail (e.g. an Integer) would form an
     // improper list, so it is flagged too — not just Array.
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("rest", InferredType::known("Integer"));
+
     let expr = Expression::ListLiteral {
         elements: vec![int_lit(1)],
         tail: Some(Box::new(var("rest"))),
         span: span(),
     };
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let (_, diags) = infer_with_diags(
+        &expr,
+        &hierarchy,
+        &[("rest", InferredType::known("Integer"))],
+    );
     assert_eq!(
-        checker.diagnostics().len(),
+        diags.len(),
         1,
         "Integer cons tail should emit one improper-list diagnostic, got: {:?}",
-        checker.diagnostics()
+        diags
     );
-    assert!(checker.diagnostics()[0].message.contains("Integer"));
+    assert!(diags[0].message.contains("Integer"));
 }
 
 #[test]
 fn infer_expr_string_interpolation() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let expr = Expression::StringInterpolation {
         segments: vec![
             crate::ast::StringSegment::Literal("hello ".into()),
@@ -423,41 +424,38 @@ fn infer_expr_string_interpolation() {
         ],
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer(&expr, &hierarchy);
     assert_eq!(ty, InferredType::known("String"));
 }
 
 #[test]
 fn infer_expr_return_propagates_value_type() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let expr = Expression::Return {
         value: Box::new(str_lit("done")),
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer(&expr, &hierarchy);
     assert_eq!(ty, InferredType::known("String"));
 }
 
 #[test]
 fn infer_expr_parenthesized_unwraps() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let expr = Expression::Parenthesized {
         expression: Box::new(int_lit(7)),
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer(&expr, &hierarchy);
     assert_eq!(ty, InferredType::known("Integer"));
 }
 
 #[test]
 fn infer_expr_primitive_is_dynamic() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let expr = Expression::Primitive {
         name: "add".into(),
         is_quoted: false,
@@ -466,22 +464,21 @@ fn infer_expr_primitive_is_dynamic() {
         no_user_code: false,
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer(&expr, &hierarchy);
     assert_eq!(ty, InferredType::Dynamic(DynamicReason::Unknown));
 }
 
 #[test]
 fn infer_expr_match_is_dynamic() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let expr = Expression::Match {
         value: Box::new(int_lit(1)),
         arms: vec![],
         exhaustive: false,
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer(&expr, &hierarchy);
     assert_eq!(ty, InferredType::Dynamic(DynamicReason::Unknown));
 }
 
@@ -493,9 +490,6 @@ fn infer_expr_match_is_dynamic() {
 #[test]
 fn infer_expr_match_nil_arm_narrows_scrutinee_to_undefined_object() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["String", "Nil"]));
 
     // x match: [nil -> x; _ -> 0]
     let expr = Expression::Match {
@@ -507,7 +501,11 @@ fn infer_expr_match_nil_arm_narrows_scrutinee_to_undefined_object() {
         exhaustive: false,
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[("x", InferredType::simple_union(&["String", "Nil"]))],
+    );
     // Arm types: [UndefinedObject (nil arm's `x`), Integer (wildcard arm)]
     assert_eq!(
         ty,
@@ -523,9 +521,6 @@ fn infer_expr_match_nil_arm_narrows_scrutinee_to_undefined_object() {
 #[test]
 fn infer_expr_match_unguarded_nil_arm_narrows_subsequent_arms() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["String", "Nil"]));
 
     // x match: [nil -> 0; y -> x]  -- second arm's body reads `x`, which
     // should be narrowed to non-nil (`String`) after the unguarded nil arm.
@@ -542,7 +537,11 @@ fn infer_expr_match_unguarded_nil_arm_narrows_subsequent_arms() {
         exhaustive: false,
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[("x", InferredType::simple_union(&["String", "Nil"]))],
+    );
     // Arm types: [Integer (nil arm), String (narrowed `x` in 2nd arm)]
     assert_eq!(
         ty,
@@ -558,9 +557,6 @@ fn infer_expr_match_unguarded_nil_arm_narrows_subsequent_arms() {
 #[test]
 fn infer_expr_match_guarded_nil_arm_does_not_narrow_subsequent_arms() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["String", "Nil"]));
 
     let expr = Expression::Match {
         value: Box::new(var("x")),
@@ -575,7 +571,11 @@ fn infer_expr_match_guarded_nil_arm_does_not_narrow_subsequent_arms() {
         exhaustive: false,
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[("x", InferredType::simple_union(&["String", "Nil"]))],
+    );
     // Second arm still sees `x` as `String | Nil` (unchanged residual).
     assert_eq!(
         ty,
@@ -594,9 +594,6 @@ fn infer_expr_match_guarded_nil_arm_does_not_narrow_subsequent_arms() {
 #[test]
 fn infer_expr_match_type_arm_narrows_binding_to_class() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
 
     // x match: [s :: String -> s; n :: Integer -> n]
     let expr = Expression::Match {
@@ -624,7 +621,11 @@ fn infer_expr_match_type_arm_narrows_binding_to_class() {
         exhaustive: false,
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[("x", InferredType::simple_union(&["String", "Integer"]))],
+    );
     // Each arm's body is the narrowed binding, not the original union.
     assert_eq!(
         ty,
@@ -642,9 +643,6 @@ fn infer_expr_match_type_arm_narrows_binding_to_class() {
 #[test]
 fn infer_expr_match_unguarded_type_arm_narrows_subsequent_arms() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
 
     // x match: [s :: String -> 0; y -> x]  -- second arm's body reads
     // `x` (the scrutinee, not `s`), which should be narrowed to
@@ -670,7 +668,11 @@ fn infer_expr_match_unguarded_type_arm_narrows_subsequent_arms() {
         exhaustive: false,
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[("x", InferredType::simple_union(&["String", "Integer"]))],
+    );
     assert_eq!(
         ty,
         InferredType::union_of(&[
@@ -686,9 +688,6 @@ fn infer_expr_match_unguarded_type_arm_narrows_subsequent_arms() {
 #[test]
 fn infer_expr_match_guarded_type_arm_does_not_narrow_subsequent_arms() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
 
     let expr = Expression::Match {
         value: Box::new(var("x")),
@@ -712,7 +711,11 @@ fn infer_expr_match_guarded_type_arm_does_not_narrow_subsequent_arms() {
         exhaustive: false,
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[("x", InferredType::simple_union(&["String", "Integer"]))],
+    );
     // Second arm still sees `x` as `String | Integer` (unchanged residual).
     assert_eq!(
         ty,
@@ -826,9 +829,8 @@ fn binary_construction_type_of(source: &str) -> InferredType {
         "{source}: {expr:?}"
     );
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    checker.infer_expr(expr, &hierarchy, &mut env, false)
+
+    infer(expr, &hierarchy)
 }
 
 #[test]

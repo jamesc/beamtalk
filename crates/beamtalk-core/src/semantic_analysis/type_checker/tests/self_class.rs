@@ -48,10 +48,7 @@ fn infer_with_self_meta(
     class_name: &str,
     hierarchy: &ClassHierarchy,
 ) -> InferredType {
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("self", InferredType::meta(class_name));
-    checker.infer_expr(expr, hierarchy, &mut env, false)
+    infer_with_locals(expr, hierarchy, &[("self", InferredType::meta(class_name))])
 }
 
 /// Infer the type of `recv class <selector>` style send where `recv` is a local
@@ -62,10 +59,7 @@ fn infer_send_on_local(
     send: &Expression,
     hierarchy: &ClassHierarchy,
 ) -> InferredType {
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(local, local_ty);
-    checker.infer_expr(send, hierarchy, &mut env, false)
+    infer_with_locals(send, hierarchy, &[(local, local_ty)])
 }
 
 // ---------------------------------------------------------------------------
@@ -955,14 +949,13 @@ fn syntactic_class_literal_new_still_works() {
     // (it dispatches via the `Expression::ClassReference` receiver arm, not the
     // type-driven Meta path). `Integer new` infers an Integer instance.
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     let new_send = msg_send(
         class_ref("Integer"),
         MessageSelector::Unary("new".into()),
         vec![],
     );
-    let ty = checker.infer_expr(&new_send, &hierarchy, &mut env, false);
+    let ty = infer(&new_send, &hierarchy);
     assert_eq!(
         ty.as_known().map(EcoString::as_str),
         Some("Integer"),

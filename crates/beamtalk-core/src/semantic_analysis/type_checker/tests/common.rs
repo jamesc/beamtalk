@@ -216,6 +216,176 @@ pub(super) fn infer_with_locals(
     checker.infer_expr(expr, hierarchy, &mut env, false)
 }
 
+/// Like [`infer_with_locals`], but also hands back the diagnostics the
+/// checker emitted while inferring `expr`.
+pub(super) fn infer_with_diags(
+    expr: &Expression,
+    hierarchy: &ClassHierarchy,
+    locals: &[(&str, InferredType)],
+) -> (InferredType, Vec<Diagnostic>) {
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    for (name, ty) in locals {
+        env.set_local(*name, ty.clone());
+    }
+    let ty = checker.infer_expr(expr, hierarchy, &mut env, false);
+    (ty, checker.take_diagnostics())
+}
+
+/// A type checker and the environment it infers in, for the tests that run
+/// several inference steps against one shared environment (assignments bind
+/// locals that later steps read) or inspect the environment afterwards.
+///
+/// The single-step cases are [`infer`], [`infer_with_locals`] and
+/// [`infer_with_diags`].
+pub(super) struct InferSession {
+    pub(super) checker: TypeChecker,
+    pub(super) env: TypeEnv,
+}
+
+impl InferSession {
+    /// A session with a fresh checker and an empty environment.
+    pub(super) fn new() -> Self {
+        Self {
+            checker: TypeChecker::new(),
+            env: TypeEnv::new(),
+        }
+    }
+
+    /// Infers `expr` in the session's environment.
+    pub(super) fn infer(&mut self, expr: &Expression, hierarchy: &ClassHierarchy) -> InferredType {
+        self.checker
+            .infer_expr(expr, hierarchy, &mut self.env, false)
+    }
+}
+
+/// Runs `check_argument_types` for an instance-side send of `selector` to
+/// `class_name` with no argument expressions or receiver type arguments, and
+/// hands back the checker.
+pub(super) fn check_args(
+    class_name: &str,
+    selector: &str,
+    arg_types: &[InferredType],
+    hierarchy: &ClassHierarchy,
+) -> TypeChecker {
+    let mut checker = TypeChecker::new();
+    checker.check_argument_types(
+        &class_name.into(),
+        selector,
+        arg_types,
+        span(),
+        hierarchy,
+        false,
+        None,
+        None,
+        &[],
+    );
+    checker
+}
+
+/// [`check_args`] with the argument expressions in hand, for the checks that
+/// look at the expression itself (class literals).
+pub(super) fn check_args_with_exprs(
+    class_name: &str,
+    selector: &str,
+    arg_types: &[InferredType],
+    arg_exprs: &[Expression],
+    hierarchy: &ClassHierarchy,
+) -> TypeChecker {
+    let mut checker = TypeChecker::new();
+    checker.check_argument_types(
+        &class_name.into(),
+        selector,
+        arg_types,
+        span(),
+        hierarchy,
+        false,
+        Some(arg_exprs),
+        None,
+        &[],
+    );
+    checker
+}
+
+/// Runs `check_return_type` for `method` in `class_name` and hands back the
+/// checker.
+pub(super) fn check_return(
+    method: &MethodDefinition,
+    body_type: &InferredType,
+    class_name: &str,
+    hierarchy: &ClassHierarchy,
+) -> TypeChecker {
+    let mut checker = TypeChecker::new();
+    checker.check_return_type(method, body_type, &class_name.into(), hierarchy);
+    checker
+}
+
+/// Runs `check_ffi_argument_types` for `module_name:function_name` and hands
+/// back the checker.
+pub(super) fn check_ffi_args(
+    module_name: &str,
+    function_name: &str,
+    sig: &crate::semantic_analysis::type_checker::native_type_registry::FunctionSignature,
+    arg_types: &[InferredType],
+    hierarchy: &ClassHierarchy,
+) -> TypeChecker {
+    let mut checker = TypeChecker::new();
+    checker.check_ffi_argument_types(
+        module_name,
+        function_name,
+        sig,
+        arg_types,
+        span(),
+        hierarchy,
+    );
+    checker
+}
+
+/// Runs `check_type_param_bounds` for `class_name<type_args>` and hands back
+/// the checker.
+pub(super) fn check_bounds(
+    class_name: &str,
+    type_args: &[InferredType],
+    hierarchy: &ClassHierarchy,
+    protocols: &ProtocolRegistry,
+) -> TypeChecker {
+    let mut checker = TypeChecker::new();
+    checker.check_type_param_bounds(&class_name.into(), type_args, span(), hierarchy, protocols);
+    checker
+}
+
+/// Source to the diagnostics of `check_module_with_protocols` against an empty
+/// protocol registry, with the user's classes merged onto the built-ins.
+pub(super) fn run_with_protocols(source: &str) -> Vec<Diagnostic> {
+    let module = parse_source(source);
+    let mut hierarchy = ClassHierarchy::with_builtins();
+    let user_hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    hierarchy.merge(&user_hierarchy);
+
+    let mut checker = check_with_protocols(
+        &module,
+        &hierarchy,
+        &crate::semantic_analysis::protocol_registry::ProtocolRegistry::new(),
+    );
+    checker.take_diagnostics()
+}
+
+/// A hierarchy holding one `typed Object subclass: <class_name>`.
+pub(super) fn typed_class_hierarchy(class_name: &str) -> ClassHierarchy {
+    let source = format!("typed Object subclass: {class_name}\n");
+    let module = parse_source(&source);
+    ClassHierarchy::build(&module).0.unwrap()
+}
+
+/// The return-type mismatch diagnostics `checker` has collected.
+pub(super) fn type_mismatch_diagnostics(checker: &TypeChecker) -> Vec<&Diagnostic> {
+    checker
+        .diagnostics()
+        .iter()
+        .filter(|d| d.message.contains("declares return type"))
+        .collect()
+}
+
 /// [`diags_with_expect`] keeping only `Type` diagnostics.
 pub(super) fn type_diags(source: &str) -> Vec<Diagnostic> {
     diags_with_expect(source)

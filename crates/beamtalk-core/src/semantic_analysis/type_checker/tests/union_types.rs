@@ -914,9 +914,7 @@ fn bt3076_union_member_class_of_unregistered_class_still_contributes() {
     };
 
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["UnionA", "UnionB"]));
+
     let module_expr = Module::new(
         vec![ExpressionStatement::bare(msg_send(
             Expression::Identifier(ident("x")),
@@ -925,11 +923,10 @@ fn bt3076_union_member_class_of_unregistered_class_still_contributes() {
         ))],
         span(),
     );
-    let ty = checker.infer_expr(
+    let ty = infer_with_locals(
         &module_expr.expressions[0].expression,
         &hierarchy,
-        &mut env,
-        false,
+        &[("x", InferredType::simple_union(&["UnionA", "UnionB"]))],
     );
     assert_eq!(
         ty,

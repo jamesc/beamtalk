@@ -539,15 +539,16 @@ Object subclass: Box(T)
     let stmt = wrapped.body.last().expect("wrapped has at least one stmt");
     let expr = &stmt.expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
     // Mirror what `check_module` does: seed `self` with the receiver type
     // produced by the centralised helper.
-    env.set_local(
-        "self",
-        super::super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
+    let ty = infer_with_locals(
+        expr,
+        &hierarchy,
+        &[(
+            "self",
+            super::super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
+        )],
     );
-    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
     match &ty {
         InferredType::Known { class_name, .. } => assert_eq!(
@@ -592,13 +593,14 @@ Object subclass: Pair(K, V)
     let stmt = rewrap.body.last().expect("rewrap has at least one stmt");
     let expr = &stmt.expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "self",
-        super::super::type_resolver::receiver_type_for_class(&"Pair".into(), &hierarchy),
+    let ty = infer_with_locals(
+        expr,
+        &hierarchy,
+        &[(
+            "self",
+            super::super::type_resolver::receiver_type_for_class(&"Pair".into(), &hierarchy),
+        )],
     );
-    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
     match &ty {
         InferredType::Known { class_name, .. } => assert_eq!(
@@ -648,13 +650,14 @@ Base(R) subclass: Sub(R)
     let stmt = borrow.body.last().expect("borrow has at least one stmt");
     let expr = &stmt.expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "self",
-        super::super::type_resolver::receiver_type_for_class(&"Sub".into(), &hierarchy),
+    let ty = infer_with_locals(
+        expr,
+        &hierarchy,
+        &[(
+            "self",
+            super::super::type_resolver::receiver_type_for_class(&"Sub".into(), &hierarchy),
+        )],
     );
-    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
     match &ty {
         InferredType::Known { class_name, .. } => assert_eq!(
@@ -700,13 +703,14 @@ Base(Integer) subclass: IntBase
     let stmt = borrow.body.last().expect("borrow has at least one stmt");
     let expr = &stmt.expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "self",
-        super::super::type_resolver::receiver_type_for_class(&"IntBase".into(), &hierarchy),
+    let ty = infer_with_locals(
+        expr,
+        &hierarchy,
+        &[(
+            "self",
+            super::super::type_resolver::receiver_type_for_class(&"IntBase".into(), &hierarchy),
+        )],
     );
-    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
     match &ty {
         InferredType::Known { class_name, .. } => assert_eq!(
@@ -756,13 +760,14 @@ Object subclass: Box(T)
         .expect("metatype has at least one stmt");
     let expr = &stmt.expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "self",
-        super::super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
+    let ty = infer_with_locals(
+        expr,
+        &hierarchy,
+        &[(
+            "self",
+            super::super::type_resolver::receiver_type_for_class(&"Box".into(), &hierarchy),
+        )],
     );
-    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
 
     // `self class` on `Box(T)` resolves through `class -> Self class`
     // (Object>>class) to the metatype-of-Box (ADR 0083). The metatype is

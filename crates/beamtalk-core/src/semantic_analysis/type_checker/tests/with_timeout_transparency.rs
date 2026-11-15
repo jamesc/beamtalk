@@ -103,11 +103,11 @@ fn with_timeout_infers_receiver_type() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_slow_db_actor(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("db", InferredType::known("SlowDb"));
-
-    let ty = checker.infer_expr(&with_timeout(var("db"), 30000), &hierarchy, &mut env, false);
+    let (ty, diags) = infer_with_diags(
+        &with_timeout(var("db"), 30000),
+        &hierarchy,
+        &[("db", InferredType::known("SlowDb"))],
+    );
 
     assert_eq!(
         ty,
@@ -116,7 +116,7 @@ fn with_timeout_infers_receiver_type() {
          not the opaque TimeoutProxy"
     );
     assert!(
-        checker.take_diagnostics().is_empty(),
+        diags.is_empty(),
         "a well-typed withTimeout: send must not emit diagnostics"
     );
 }
@@ -264,11 +264,12 @@ fn logg_send(recv: &str) -> Expression {
 /// Infer `logg_send(recv)` against `hierarchy` with `recv :: class_name` and
 /// return the emitted diagnostics.
 fn dnu_diags_for(hierarchy: &ClassHierarchy, recv: &str, class_name: &str) -> Vec<Diagnostic> {
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(recv, InferredType::known(class_name));
-    checker.infer_expr(&logg_send(recv), hierarchy, &mut env, false);
-    checker.take_diagnostics()
+    let (_, diags) = infer_with_diags(
+        &logg_send(recv),
+        hierarchy,
+        &[(recv, InferredType::known(class_name))],
+    );
+    diags
 }
 
 /// AC #3: an unknown selector on a statically-known actor class gets the same

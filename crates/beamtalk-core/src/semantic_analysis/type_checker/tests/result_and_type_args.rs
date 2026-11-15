@@ -602,32 +602,28 @@ fn union_dnu_partial_missing_emits_hint() {
 #[test]
 fn generic_list_flatten_returns_unparameterized_list() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
 
     // Variable typed as List(List(Integer)) — a nested list
-    env.set_local(
-        "nested",
-        InferredType::Known {
-            class_name: eco_string("List"),
-            type_args: vec![InferredType::Known {
-                class_name: eco_string("List"),
-                type_args: vec![InferredType::known("Integer")],
-                provenance: TypeProvenance::Inferred(span()),
-            }],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
 
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(
             var("nested"),
             MessageSelector::Unary("flatten".into()),
             vec![],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "nested",
+            InferredType::Known {
+                class_name: eco_string("List"),
+                type_args: vec![InferredType::Known {
+                    class_name: eco_string("List"),
+                    type_args: vec![InferredType::known("Integer")],
+                    provenance: TypeProvenance::Inferred(span()),
+                }],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
     assert_eq!(
         result.as_known().map(EcoString::as_str),
@@ -640,17 +636,6 @@ fn generic_list_flatten_returns_unparameterized_list() {
 #[test]
 fn generic_list_partition_returns_dictionary() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-
-    env.set_local(
-        "nums",
-        InferredType::Known {
-            class_name: eco_string("List"),
-            type_args: vec![InferredType::known("Integer")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
 
     let block = Expression::Block(Block::new(
         vec![crate::ast::BlockParameter::new("x", span())],
@@ -662,15 +647,21 @@ fn generic_list_partition_returns_dictionary() {
         span(),
     ));
 
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(
             var("nums"),
             MessageSelector::Keyword(vec![KeywordPart::new("partition:", span())]),
             vec![block],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "nums",
+            InferredType::Known {
+                class_name: eco_string("List"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
     assert_eq!(
         result.as_known().map(EcoString::as_str),

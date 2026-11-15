@@ -135,18 +135,7 @@ fn unary_hierarchy() -> ClassHierarchy {
 
 fn assert_unary_cell(cell: &str, arg_ty: InferredType) {
     let hierarchy = unary_hierarchy();
-    let mut checker = TypeChecker::new();
-    checker.check_argument_types(
-        &eco_string("Thing"),
-        "probe",
-        &[arg_ty],
-        span(),
-        &hierarchy,
-        false,
-        None,
-        None,
-        &[],
-    );
+    let checker = check_args("Thing", "probe", &[arg_ty], &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "[{cell}] a 0-param (unary) method must never produce an argument-type \
@@ -611,8 +600,7 @@ fn ffi_sig(param_type: InferredType) -> FunctionSignature {
 fn run_ffi(param_type: InferredType, arg_type: InferredType) -> Vec<Diagnostic> {
     let sig = ffi_sig(param_type);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_ffi_argument_types("mymod", "fun", &sig, &[arg_type], span(), &hierarchy);
+    let checker = check_ffi_args("mymod", "fun", &sig, &[arg_type], &hierarchy);
     checker.diagnostics().to_vec()
 }
 
