@@ -24,17 +24,7 @@ use super::*;
 use beamtalk_core::semantic_analysis::{
     AnalysisContext, analyse_full, lower_analysed_module_for_codegen,
 };
-
-fn parse_fixture(src: &str) -> beamtalk_core::ast::Module {
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-    let errors: Vec<_> = diagnostics
-        .iter()
-        .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "fixture failed to parse: {errors:?}");
-    module
-}
+use beamtalk_core::test_helpers::test_support::parse_ok;
 
 /// Self-sufficient path, Value user: `generate_module` with no analysis
 /// handed off must still emit the flattened `describe` function.
@@ -46,7 +36,7 @@ fn self_sufficient_codegen_emits_a_flattened_provision_for_a_value_user() {
         "Value subclass: Report\n",
         "  uses: Describable\n",
     );
-    let module = parse_fixture(src);
+    let module = parse_ok(src);
     let code = generate_module(&module, CodegenOptions::new("report"))
         .expect("codegen should succeed for a flattened Value class");
     assert!(
@@ -67,7 +57,7 @@ fn self_sufficient_codegen_emits_a_flattened_provision_for_an_actor_user() {
         "Actor subclass: Greeter\n",
         "  uses: Greetable\n",
     );
-    let module = parse_fixture(src);
+    let module = parse_ok(src);
     let code = generate_module(&module, CodegenOptions::new("greeter"))
         .expect("codegen should succeed for a flattened Actor class");
     assert!(
@@ -96,7 +86,7 @@ fn self_sufficient_codegen_threads_state_correctly_inside_a_flattened_provision_
         "  uses: Bumpable\n",
         "  state: count = 0\n",
     );
-    let module = parse_fixture(src);
+    let module = parse_ok(src);
     let code = generate_module(&module, CodegenOptions::new("widget"))
         .expect("codegen should succeed for a flattened provision with a stateful loop");
     assert!(
@@ -123,7 +113,7 @@ fn self_sufficient_codegen_threads_state_correctly_inside_a_flattened_provision_
 
 /// Parses a protocol file and returns its provision-bearing protocol.
 fn parse_protocol_file(src: &str) -> beamtalk_core::ast::ProtocolDefinition {
-    parse_fixture(src)
+    parse_ok(src)
         .protocols
         .into_iter()
         .find(|p| !p.provided_methods.is_empty())
@@ -165,7 +155,7 @@ fn generate_cross_file_at(
     with_protocol_source: bool,
 ) -> String {
     let protocol = parse_protocol_file(protocol_src);
-    let mut module = parse_fixture(user_src);
+    let mut module = parse_ok(user_src);
     let analysis = analyse_full(
         &module,
         AnalysisContext::default().with_pre_loaded_protocol_defs(vec![protocol.clone()]),
@@ -209,7 +199,7 @@ fn generate_cross_file_at(
 #[test]
 fn handed_off_analysis_pipeline_emits_a_flattened_cross_file_provision() {
     let protocol = parse_protocol_file(DESCRIBABLE_FILE);
-    let mut module = parse_fixture(REPORT_FILE);
+    let mut module = parse_ok(REPORT_FILE);
     let analysis = analyse_full(
         &module,
         AnalysisContext::default().with_pre_loaded_protocol_defs(vec![protocol]),
@@ -331,7 +321,7 @@ fn same_file_protocol_provision_keeps_its_file_and_gets_a_method_lines_row() {
         "  uses: Greetable\n",
         "  bump => 1\n",
     );
-    let module = parse_fixture(SRC);
+    let module = parse_ok(SRC);
     let code = generate_module(
         &module,
         CodegenOptions::new("greeter")
@@ -406,7 +396,7 @@ fn stdlib_resolved_provision_maps_through_the_stdlib_file() {
         "  field: level :: Integer = 0\n",
         "  < other :: Rank -> Boolean => self.level < other level\n",
     );
-    let mut module = parse_fixture(RANK);
+    let mut module = parse_ok(RANK);
     let analysis = analyse_full(&module, AnalysisContext::default());
     assert!(
         analysis
@@ -452,11 +442,11 @@ fn dependency_package_provision_maps_to_its_file_and_compiles_beside_a_same_name
     // Class infos of the other files: the user package's own `Parser` (a
     // sibling file, no class-side `parse:`) listed first so it holds the bare
     // name in the hierarchy, and json's.
-    let mut classes = ClassHierarchy::extract_class_infos(&parse_fixture(
+    let mut classes = ClassHierarchy::extract_class_infos(&parse_ok(
         "Object subclass: Parser\n  size -> Integer => 0\n",
     ));
     ClassHierarchy::stamp_package_on_infos(&mut classes, "app");
-    let mut dep_classes = ClassHierarchy::extract_class_infos(&parse_fixture(
+    let mut dep_classes = ClassHierarchy::extract_class_infos(&parse_ok(
         "Object subclass: Parser\n  class parse: text :: String -> Integer => 1\n",
     ));
     ClassHierarchy::stamp_package_on_infos(&mut dep_classes, "json");
@@ -473,7 +463,7 @@ fn dependency_package_provision_maps_to_its_file_and_compiles_beside_a_same_name
     .collect();
 
     let user_src = "Object subclass: Job\n  uses: Runs\n";
-    let mut module = parse_fixture(user_src);
+    let mut module = parse_ok(user_src);
     let options = beamtalk_core::CompilerOptions {
         current_package: Some("app".into()),
         ..Default::default()
@@ -533,7 +523,7 @@ fn subclass_override_of_a_flattened_provision_is_reached_from_inherited_self_sen
         "Base subclass: Override\n",
         "  describe -> String => \"overridden\"\n",
     );
-    let module = parse_fixture(src);
+    let module = parse_ok(src);
     let code =
         generate_module(&module, CodegenOptions::new("override")).expect("codegen should succeed");
 
@@ -571,7 +561,7 @@ fn protocol_registration_bakes_provided_methods_key() {
         "  < other :: Self -> Boolean\n",
         "  > other :: Self -> Boolean => other < self\n",
     );
-    let module = parse_fixture(src);
+    let module = parse_ok(src);
     let code = generate_module(&module, CodegenOptions::new("bt3594_reg_comparable"))
         .expect("codegen should succeed");
     assert!(
@@ -587,7 +577,7 @@ fn protocol_registration_bakes_provided_methods_key() {
 #[test]
 fn self_sufficient_codegen_surfaces_expand_module_diagnostics() {
     let src = concat!("Value subclass: Report\n", "  uses: NoSuchProtocol\n");
-    let module = parse_fixture(src);
+    let module = parse_ok(src);
     let generated =
         crate::core_erlang::generate_module_with_warnings(&module, CodegenOptions::new("report"))
             .expect("codegen should still succeed");
@@ -612,7 +602,7 @@ fn self_sufficient_codegen_infers_return_type_and_origin_for_flattened_provision
         "Value subclass: Oracle\n",
         "  uses: Answerable\n",
     );
-    let module = parse_fixture(src);
+    let module = parse_ok(src);
     let code =
         generate_module(&module, CodegenOptions::new("oracle")).expect("codegen should succeed");
     assert!(
@@ -642,7 +632,7 @@ fn stdlib_protocol_provisions_are_recorded_in_the_class_meta() {
         "  elements -> List(Integer) => self.items\n",
         "  isEmpty -> Boolean => true\n",
     );
-    let mut module = parse_fixture(BAG);
+    let mut module = parse_ok(BAG);
     let analysis = analyse_full(&module, AnalysisContext::default());
     lower_analysed_module_for_codegen(&mut module, &analysis);
     let code = generate_module(
@@ -691,7 +681,7 @@ fn package_local_protocol_provisions_are_not_recorded_as_stdlib() {
         "a carried package-local protocol's provisions are not the stdlib's, got:\n{code}"
     );
     let plain = generate_module(
-        &parse_fixture("Value subclass: Plain\n  size -> Integer => 0\n"),
+        &parse_ok("Value subclass: Plain\n  size -> Integer => 0\n"),
         CodegenOptions::new("plain"),
     )
     .expect("codegen should succeed");
@@ -717,7 +707,7 @@ fn defining_any_overridable_collection_selector_sets_the_override_flag() {
             selector.to_string()
         };
         let src = format!("Value subclass: Bag\n  field: n :: Integer = 0\n  {signature} => nil\n");
-        let mut module = parse_fixture(&src);
+        let mut module = parse_ok(&src);
         let analysis = analyse_full(&module, AnalysisContext::default());
         lower_analysed_module_for_codegen(&mut module, &analysis);
         let code = generate_module(
@@ -754,7 +744,7 @@ fn defining_a_species_construction_message_sets_only_the_species_flag() {
     }));
     assert!(sources.len() >= 2);
     for src in sources {
-        let mut module = parse_fixture(&src);
+        let mut module = parse_ok(&src);
         let analysis = analyse_full(&module, AnalysisContext::default());
         lower_analysed_module_for_codegen(&mut module, &analysis);
         let code = generate_module(
@@ -790,7 +780,7 @@ fn do_other_methods_and_stdlib_provisions_do_not_set_the_override_flag() {
             "  elements -> List(Integer) => self.items\n",
         ),
     ] {
-        let mut module = parse_fixture(src);
+        let mut module = parse_ok(src);
         let analysis = analyse_full(&module, AnalysisContext::default());
         lower_analysed_module_for_codegen(&mut module, &analysis);
         let code = generate_module(
