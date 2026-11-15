@@ -137,9 +137,9 @@ pub(crate) fn erlc_rejected_rows<N: AsRef<str>, C: AsRef<str>>(
             (format!("row{i}_{safe}/{module}"), code.as_ref().to_string())
         })
         .collect();
-    if erlc_batched_in_temp_dir("codegen_erlc_rows", &modules).is_ok() {
+    let Err(batch) = erlc_batched_in_temp_dir("codegen_erlc_rows", &modules) else {
         return Ok(());
-    }
+    };
     // `erlc` stops at the first failing file of an invocation and prints
     // warnings for files that compile, so its batch output cannot say which
     // rows are rejected. Recompile one row at a time (the failing path only)
@@ -151,13 +151,14 @@ pub(crate) fn erlc_rejected_rows<N: AsRef<str>, C: AsRef<str>>(
         {
             rejected.push(i);
             output.push_str(&why);
+            output.push('\n');
         }
     }
     if rejected.is_empty() {
         // The batch failed but no row fails alone (e.g. a spawn failure):
         // never narrow a failure to nothing.
         rejected = (0..rows.len()).collect();
-        output = "the batched erlc run failed, but every row compiles alone".to_string();
+        output = format!("the batched erlc run failed, but every row compiles alone:\n{batch}");
     }
     Err((rejected, output))
 }
