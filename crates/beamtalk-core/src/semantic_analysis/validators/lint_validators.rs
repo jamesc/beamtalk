@@ -758,13 +758,13 @@ fn is_local_holding_accounted_for_value(
     last_expr: &Expression,
     reported: &[Diagnostic],
 ) -> bool {
+    if last_expr.is_self() {
+        return false;
+    }
     let Expression::Identifier(id) = last_expr else {
         return false;
     };
     let name = id.name.as_str();
-    if name == "self" {
-        return false;
-    }
     let assigns_name = |e: &Expression| {
         matches!(
             e,
