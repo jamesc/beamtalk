@@ -1098,6 +1098,13 @@ handle_build_class_module_index_in_source_response(
     #{status := ok, module_name := ModuleName, classes := Classes}
 ) when is_binary(ModuleName), is_list(Classes) ->
     {ok, ModuleName, Classes};
+handle_build_class_module_index_in_source_response(#{status := error, reason := Reason} = Resp) when
+    Reason =:= invalid_path_segment; Reason =:= reserved_test_directory
+->
+    % Named here so the atom exists in this VM: `binary_to_term(.., [safe])`
+    % in `port_roundtrip/6` refuses a response carrying an atom it has never
+    % seen.
+    reason_error(Resp);
 handle_build_class_module_index_in_source_response(#{status := error, reason := _} = Resp) ->
     reason_error(Resp);
 handle_build_class_module_index_in_source_response(Other) ->
@@ -1116,7 +1123,7 @@ no second copy of the casing/validation rule lives in Erlang. No source is
 read or parsed.
 
 Returns `{ok, ModuleName}', `{error, invalid_path_segment, Message}' for a
-segment outside `[A-Za-z0-9_]', or `{error, port_error, Message}' on a
+segment outside `[A-Za-z0-9_]' or `{error, reserved_test_directory, Message}' for a `src/test/` path, or `{error, port_error, Message}' on a
 transport failure.
 """.
 -spec module_name_for_path(port(), binary(), binary(), src | test | none) ->
@@ -1151,6 +1158,13 @@ handle_module_name_for_path_response(#{status := ok, module_name := ModuleName})
     is_binary(ModuleName)
 ->
     {ok, ModuleName};
+handle_module_name_for_path_response(#{status := error, reason := Reason} = Resp) when
+    Reason =:= invalid_path_segment; Reason =:= reserved_test_directory
+->
+    % Named here so the atom exists in this VM: `binary_to_term(.., [safe])`
+    % in `port_roundtrip/6` refuses a response carrying an atom it has never
+    % seen.
+    reason_error(Resp);
 handle_module_name_for_path_response(#{status := error, reason := _} = Resp) ->
     reason_error(Resp);
 handle_module_name_for_path_response(Other) ->

@@ -2226,18 +2226,25 @@ module_root_and_relative_path(AbsPath, ProjectRoot) ->
         {ok, Rel} ->
             {src, Rel};
         undefined ->
-            %% `beamtalk test` names a package fixture (test/fixtures/) by its
-            %% stem, like any out-of-tree file, so the loader does too.
-            case relative_below(AbsPath, ProjectRoot, "test/fixtures") of
-                {ok, _} ->
-                    {none, AbsPath};
+            case relative_below(AbsPath, ProjectRoot, "test") of
+                {ok, Rel} ->
+                    %% `beamtalk test` names a fixture (any file in a directory
+                    %% named `fixtures` under test/) by its stem, like any
+                    %% out-of-tree file, so the loader does too.
+                    case in_fixtures_dir(Rel) of
+                        true -> {none, AbsPath};
+                        false -> {test, Rel}
+                    end;
                 undefined ->
-                    case relative_below(AbsPath, ProjectRoot, "test") of
-                        {ok, Rel} -> {test, Rel};
-                        undefined -> {none, AbsPath}
-                    end
+                    {none, AbsPath}
             end
     end.
+
+%% Whether a `/`-joined path relative to `test/` has a directory named `fixtures`
+%% (the directory `beamtalk test` treats as fixtures), at any depth.
+-spec in_fixtures_dir(string()) -> boolean().
+in_fixtures_dir(Rel) ->
+    lists:member("fixtures", lists:droplast(string:split(Rel, "/", all))).
 
 -spec relative_below(string(), string(), string()) -> {ok, string()} | undefined.
 relative_below(AbsPath, ProjectRoot, SubDir) ->

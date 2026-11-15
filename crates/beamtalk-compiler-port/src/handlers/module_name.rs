@@ -3,7 +3,9 @@
 
 //! `module_name_for_path`: the parse-free path-to-module-name command.
 
-use beamtalk_core::semantic_analysis::{ModuleRootKind, module_name_for_path};
+use beamtalk_core::semantic_analysis::{
+    ClassModuleRegistryError, ModuleRootKind, module_name_for_path,
+};
 use beamtalk_etf::{atom, binary_from_str as binary, map_get, term_to_string};
 use eetf::{Map, Term};
 
@@ -24,8 +26,10 @@ use crate::respond::error_response;
 /// - `root_kind` (binary): `src` | `test` | `none`
 ///
 /// Response: `#{status => ok, module_name => <<"bt@web@test@foo">>}`, or
-/// `#{status => error, reason => invalid_path_segment, message => ...}` for a
-/// segment outside `[A-Za-z0-9_]`.
+/// `#{status => error, reason => Reason, message => ...}` otherwise, with
+/// `Reason` from [`path_naming_error_response`]: `invalid_path_segment` for a
+/// segment outside `[A-Za-z0-9_]`, `reserved_test_directory` for a `src/test/`
+/// path.
 pub(crate) fn handle_module_name_for_path(request: &Map) -> Term {
     let Some(path) = map_get(request, "path").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'path' field".to_string()]);
@@ -47,10 +51,23 @@ pub(crate) fn handle_module_name_for_path(request: &Map) -> Term {
             (atom("status"), atom("ok")),
             (atom("module_name"), binary(&module_name)),
         ])),
-        Err(err) => Term::from(Map::from([
-            (atom("status"), atom("error")),
-            (atom("reason"), atom("invalid_path_segment")),
-            (atom("message"), binary(&err.to_string())),
-        ])),
+        Err(err) => path_naming_error_response(&err),
     }
+}
+
+/// The structured error response for a path the naming rule rejects. The one
+/// mapping from [`ClassModuleRegistryError`] to the wire `reason` atom, shared
+/// by every command that names a path: `invalid_path_segment` for a segment
+/// outside `[A-Za-z0-9_]`, `reserved_test_directory` for a directory named
+/// `test` directly under `src/`.
+pub(crate) fn path_naming_error_response(err: &ClassModuleRegistryError) -> Term {
+    let reason = match err {
+        ClassModuleRegistryError::ReservedTestDirectory { .. } => "reserved_test_directory",
+        _ => "invalid_path_segment",
+    };
+    Term::from(Map::from([
+        (atom("status"), atom("error")),
+        (atom("reason"), atom(reason)),
+        (atom("message"), binary(&err.to_string())),
+    ]))
 }

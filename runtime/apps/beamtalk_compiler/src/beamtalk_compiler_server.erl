@@ -665,7 +665,7 @@ full wire shape. Backs the REPL/workspace cold-load fallback for
 `class_module_index' (ADR 0050,
 `beamtalk_workspace_project_sync:build_source_class_module_index/2'). Returns
 `{ok, ModuleName, ClassNames}' on success; a bad `relative_path' returns
-`{error, invalid_path_segment, Message}'; transport failures return
+`{error, invalid_path_segment | reserved_test_directory, Message}'; transport failures return
 `{error, port_error | noproc | timeout, Message}'.
 """.
 -spec build_class_module_index_in_source(binary(), binary(), binary()) ->
@@ -683,7 +683,7 @@ The module name of the source file at `Path` under `RootKind` (`src' |
 `test' | `none') in package `PackageName' — see
 `beamtalk_compiler_port:module_name_for_path/4' for the wire shape and the
 rule. Returns `{ok, ModuleName}'; a segment outside `[A-Za-z0-9_]' returns
-`{error, invalid_path_segment, Message}'; transport failures return
+`{error, invalid_path_segment | reserved_test_directory, Message}'; transport failures return
 `{error, port_error | noproc | timeout, Message}'.
 """.
 -spec module_name_for_path(binary(), binary(), src | test | none) ->

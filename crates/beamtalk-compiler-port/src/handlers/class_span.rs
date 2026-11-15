@@ -172,7 +172,8 @@ pub(crate) fn handle_class_state_field_defaults(request: &Map) -> Term {
 /// `relative_path` is expected to always be a real project file under
 /// `src/` (never client-supplied), but a segment outside
 /// `[A-Za-z0-9_]` comes back as `#{status => error, reason =>
-/// invalid_path_segment, message => <<...>>}` rather than a crash.
+/// invalid_path_segment, message => <<...>>}` (`reserved_test_directory` for a
+/// `src/test/` path) rather than a crash.
 pub(crate) fn handle_build_class_module_index_in_source(request: &Map) -> Term {
     use beamtalk_core::semantic_analysis::{ModuleRootKind, module_name_for_path};
 
@@ -192,13 +193,7 @@ pub(crate) fn handle_build_class_module_index_in_source(request: &Map) -> Term {
         ModuleRootKind::Src,
     ) {
         Ok(module_name) => module_name,
-        Err(err) => {
-            return Term::from(Map::from([
-                (atom("status"), atom("error")),
-                (atom("reason"), atom("invalid_path_segment")),
-                (atom("message"), binary(&err.to_string())),
-            ]));
-        }
+        Err(err) => return super::module_name::path_naming_error_response(&err),
     };
 
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);

@@ -1554,7 +1554,18 @@ t_compute_package_module_name_fixture(_Proj) ->
     %% names it (BT-4868), not bt@loaderpkg@test@fixtures@helper.
     Proj = live_project_dir(),
     Path = filename:join([Proj, "test", "fixtures", "Helper.bt"]),
-    ?assertEqual({ok, <<"bt@helper">>}, beamtalk_repl_loader:compute_package_module_name(Path)).
+    ?assertEqual({ok, <<"bt@helper">>}, beamtalk_repl_loader:compute_package_module_name(Path)),
+    %% ...at any depth, as `beamtalk test test/http1` finds test/http1/fixtures/.
+    Nested = filename:join([Proj, "test", "http1", "fixtures", "Helper.bt"]),
+    ?assertEqual(
+        {ok, <<"bt@helper">>}, beamtalk_repl_loader:compute_package_module_name(Nested)
+    ),
+    %% A test file merely named fixtures.bt is not in a fixtures directory.
+    NotDir = filename:join([Proj, "test", "fixtures.bt"]),
+    ?assertEqual(
+        {ok, <<"bt@loaderpkg@test@fixtures">>},
+        beamtalk_repl_loader:compute_package_module_name(NotDir)
+    ).
 
 t_new_class_agent_author(_Proj) ->
     %% When the submission boundary stamps $beamtalk_author / $beamtalk_author_kind

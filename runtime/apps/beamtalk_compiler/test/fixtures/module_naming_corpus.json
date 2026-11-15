@@ -9,7 +9,7 @@
   {"name": "out of tree relative",     "path": "examples/hot_counter.bt", "package": "web", "root": "none", "module": "bt@hot_counter"},
   {"name": "src hyphenated file",      "path": "my-class.bt",             "package": "web", "root": "src",  "error": "invalid_path_segment"},
   {"name": "src hyphenated directory", "path": "bad-dir/ok.bt",           "package": "web", "root": "src",  "error": "invalid_path_segment"},
-  {"name": "src test directory collides with test root", "path": "test/foo.bt", "package": "web", "root": "src", "error": "invalid_path_segment"},
+  {"name": "src test directory collides with test root", "path": "test/foo.bt", "package": "web", "root": "src", "error": "reserved_test_directory"},
   {"name": "test hyphenated file",     "path": "my-test.bt",              "package": "web", "root": "test", "error": "invalid_path_segment"},
   {"name": "out of tree hyphenated",   "path": "/work/examples/my-class.bt", "package": "web", "root": "none", "error": "invalid_path_segment"}
 ]

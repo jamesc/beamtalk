@@ -3039,6 +3039,10 @@ mod tests {
             fixture_module_name(Utf8Path::new("fixtures/MyHelper.bt")).unwrap(),
             "bt@my_helper"
         );
+        assert_eq!(
+            fixture_module_name(Utf8Path::new("test/http1/fixtures/Helper.bt")).unwrap(),
+            "bt@helper"
+        );
         let err = fixture_module_name(Utf8Path::new("fixtures/my-helper.bt"))
             .expect_err("hyphen is not a valid module-name character");
         assert!(err.to_string().contains("my-helper"), "{err}");

@@ -587,7 +587,7 @@ module_name_for_path_matches_shared_corpus() ->
                 #{<<"error">> := Reason} ->
                     ?assertMatch({error, _, _}, Result),
                     {error, Got, _Msg} = Result,
-                    ?assertEqual(binary_to_existing_atom(Reason), Got)
+                    ?assertEqual(binary_to_atom(Reason), Got)
             end
         end,
         Corpus

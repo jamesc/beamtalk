@@ -586,7 +586,7 @@ snake-casing.
 
 Returns `{ok, ModuleName, ClassNames}` on success. Resolution failures (a
 `relative_path` segment outside `[A-Za-z0-9_]`) return
-`{error, invalid_path_segment, Message}`; transport failures return
+`{error, invalid_path_segment | reserved_test_directory, Message}`; transport failures return
 `{error, noproc | timeout | port_error, Message}`.
 """.
 -spec build_class_module_index_in_source(binary(), binary(), binary()) ->
@@ -606,7 +606,7 @@ the build, `beamtalk test` and the REPL loader share (BT-4868, ADR 0026).
 no source is read. See `beamtalk_compiler_port:module_name_for_path/4`.
 
 Returns `{ok, ModuleName}`; a segment outside `[A-Za-z0-9_]` returns
-`{error, invalid_path_segment, Message}`; transport failures return
+`{error, invalid_path_segment | reserved_test_directory, Message}`; transport failures return
 `{error, noproc | timeout | port_error, Message}`.
 """.
 -spec module_name_for_path(binary(), binary(), src | test | none) ->
