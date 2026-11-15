@@ -1076,3 +1076,33 @@ fn run_lint_structured_broken_stub_file_reports_without_failing() {
     assert!(!result.fails(false), "{result:?}");
     assert!(!result.fails(true), "{result:?}");
 }
+
+/// ADR 0070 Phase 2 (BT-4921): MCP `lint` shares `beamtalk lint`'s package
+/// scope, so an undeclared `pkg@Class` qualifier is reported and the
+/// package's own name and the stdlib are accepted.
+#[test]
+fn run_lint_structured_reports_unknown_package_qualifier() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::write(
+        dir.join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("src").join("qualified.bt"),
+        "Object subclass: Qualified\n  own => app@Qualified\n  base => stdlib@Object\n  other => nosuchpkg@Widget\n",
+    )
+    .unwrap();
+
+    let result = run_lint_structured(dir.to_str().unwrap());
+    let unknown: Vec<_> = result
+        .errors
+        .iter()
+        .chain(result.warnings.iter())
+        .filter(|d| d.message.contains("Unknown package"))
+        .collect();
+    assert_eq!(unknown.len(), 1, "only nosuchpkg is unknown: {result:?}");
+    assert!(unknown[0].message.contains("nosuchpkg"), "{unknown:?}");
+}

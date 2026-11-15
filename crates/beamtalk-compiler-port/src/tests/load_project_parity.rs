@@ -1124,3 +1124,57 @@ fn dependency_merge_order_follows_build_compilation_order() {
         "zzdep's Clash = Integer must win (build order), got: {response:?}"
     );
 }
+
+/// ADR 0070 Phase 2 (BT-4921): a `pkg@Class` qualifier in a project file must
+/// name a declared dependency, the package itself or the stdlib; the REPL's
+/// `load_project` (this `compile` path) rejects an unknown one like `build`.
+#[test]
+fn compile_file_rejects_unknown_package_qualifier() {
+    let (dir, _state_path) = write_parity_project();
+    let path = dir.path().join("src/parity_qualified.bt");
+    let source = "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Value subclass: ParityQualified\n\
+         \x20 make => nosuchpkg@Widget new\n";
+    fs::write(&path, source).expect("fixture parity_qualified.bt");
+
+    let response = handle_compile(&load_like_compile_request(source, &path));
+    let messages = error_diagnostic_messages(&response);
+    assert!(
+        messages
+            .iter()
+            .any(|msg| msg.contains("Unknown package 'nosuchpkg'")),
+        "an undeclared package qualifier must be an error: {messages:?}"
+    );
+}
+
+#[test]
+fn compile_file_accepts_declared_current_and_stdlib_package_qualifiers() {
+    let (dir, _state_path) = write_parity_project();
+    for qualified in [
+        "fakedep@DepTypes",
+        "parityproj@ParityConfig",
+        "stdlib@Object",
+    ] {
+        let path = dir.path().join("src/parity_qualified.bt");
+        let source = format!(
+            "// Copyright 2026 James Casey\n\
+             // SPDX-License-Identifier: Apache-2.0\n\
+             \n\
+             Value subclass: ParityQualified\n\
+             \x20 make => {qualified}\n"
+        );
+        fs::write(&path, &source).expect("fixture parity_qualified.bt");
+
+        let response = handle_compile(&load_like_compile_request(&source, &path));
+        let Term::Map(ref m) = response else {
+            panic!("Expected map response: {response:?}");
+        };
+        assert_eq!(
+            map_get(m, "status"),
+            Some(&atom("ok")),
+            "{qualified} names a known package and must compile: {response:?}"
+        );
+    }
+}

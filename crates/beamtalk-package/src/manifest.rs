@@ -582,6 +582,11 @@ pub struct PackageCheckerScope {
     /// The package name, for E0401/E0402 visibility checks; `None` outside a
     /// package or when the manifest does not parse.
     pub package_name: Option<String>,
+    /// The package names a `pkg@Class` qualifier may name (ADR 0070 Phase 2):
+    /// see [`beamtalk_core::semantic_analysis::known_qualifier_packages`].
+    /// `None` outside a package or when the manifest does not parse, which
+    /// skips the check.
+    pub known_packages: Option<std::collections::HashSet<String>>,
 }
 
 impl PackageCheckerScope {
@@ -592,6 +597,7 @@ impl PackageCheckerScope {
             knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope::ModuleOnly,
             has_package_dependencies: false,
             package_name: None,
+            known_packages: None,
         }
     }
 
@@ -603,6 +609,10 @@ impl PackageCheckerScope {
             knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
             has_package_dependencies: !manifest.dependencies.is_empty(),
             package_name: Some(manifest.package.name.clone()),
+            known_packages: Some(beamtalk_core::semantic_analysis::known_qualifier_packages(
+                Some(&manifest.package.name),
+                manifest.dependencies.keys().map(String::as_str),
+            )),
         })
     }
 
@@ -630,6 +640,7 @@ impl PackageCheckerScope {
                         beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
                     has_package_dependencies: true,
                     package_name: None,
+                    known_packages: None,
                 }
             }
         }

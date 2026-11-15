@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Behaviour change: an unknown `pkg@Class` package qualifier is now a compile error (BT-4921).**
+  - Changed: in a package, a `pkg@Class` reference (or `pkg@Class subclass:` / `pkg@Class >> sel`) whose `pkg` is not a dependency declared in `[dependencies]`, the package itself or `stdlib` now fails `beamtalk build`, `check`, `test` and `load_project` with "Unknown package 'pkg' in qualified reference …" (and `beamtalk lint` and MCP `lint` report it). ADR 0070 required this from the start, but the check had no caller. Single files and directories with no `beamtalk.toml` have no package set and are not checked, and the language server does not check yet (it has no view of the manifest's dependencies). The stdlib, the in-repo examples and the in-repo packages build clean; downstream packages outside this repo were not scanned.
+  - Do: add the package to `[dependencies]` in `beamtalk.toml`, or drop the qualifier. A transitive dependency must now be declared directly to be named in a qualifier.
 - **Behaviour change: E0402 now applies to extension methods (BT-4923).**
   - Changed: a standalone `Foo >> sel` or `Foo class >> sel` method whose parameter or return type names an `internal` class of the current package is now a hard error (E0402, "Internal class 'X' appears in public signature of 'Foo >> sel'"), the same as for a method written in the class body. This includes an extension in a different file than `Foo`, and an extension on another package's public class. An `internal` extension method that satisfies a public protocol requirement is the same error. Before, these compiled silently. Extensions marked `internal`, and extensions on an `internal` class, are still exempt. The stdlib and the in-repo examples build clean; downstream packages were not scanned.
   - Do: make the class public, change the signature, or mark the extension method `internal` (`Foo >> internal sel => …`).

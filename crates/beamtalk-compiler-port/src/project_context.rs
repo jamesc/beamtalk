@@ -668,9 +668,22 @@ fn resolve_project_context(root: PathBuf, batch: Option<&str>) -> Option<FilePro
         ),
     };
 
+    // ADR 0070 Phase 2: a `pkg@Class` qualifier must name a declared
+    // dependency, a resolved one, the package itself or the stdlib. A
+    // manifest with no `[package] name` has no package to validate for.
+    let known_packages = (!package_name.is_empty()).then(|| {
+        beamtalk_core::semantic_analysis::known_qualifier_packages(
+            Some(&package_name),
+            declared_dependency_names_from_manifest_toml(&manifest)
+                .iter()
+                .map(String::as_str)
+                .chain(dep_roots.iter().map(|(_, name)| name.as_str())),
+        )
+    });
     let context = FileProjectContext {
         diagnostics_table,
         analysis_project: ProjectAnalysisContext {
+            known_packages,
             package_name: (!package_name.is_empty()).then_some(package_name),
             native_type_registry: registry,
             known_erlang_modules,

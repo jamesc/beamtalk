@@ -479,6 +479,7 @@ impl<'a> AnalysisContext<'a> {
         self.dependency_extensions_unknown = options.dependency_extensions_unknown;
         self.known_erlang_modules
             .clone_from(&options.known_erlang_modules);
+        self.known_packages.clone_from(&options.known_packages);
         self
     }
 
@@ -538,8 +539,9 @@ impl<'a> AnalysisContext<'a> {
     /// Known package names for package-qualifier validation (ADR 0070 Phase
     /// 2). Unknown package qualifiers produce compile errors.
     ///
-    /// No production caller sets this yet, so the check is off everywhere;
-    /// BT-4921 decides whether to wire it into `build`/`lint` or remove it.
+    /// Build the set with [`known_qualifier_packages`]. Production callers
+    /// reach it through [`crate::CompilerOptions::known_packages`] and
+    /// [`ProjectAnalysisContext::known_packages`].
     #[allow(clippy::implicit_hasher)] // concrete HashSet is simpler for callers
     #[must_use]
     pub fn with_known_packages(
@@ -611,6 +613,29 @@ impl<'a> AnalysisContext<'a> {
     }
 }
 
+/// The package names a `pkg@Class` qualifier may name (ADR 0070 Phase 2),
+/// for the package `current_package` whose manifest declares
+/// `dependencies`: those dependencies, the package itself (a package may
+/// qualify its own classes) and the stdlib, which every package depends on
+/// implicitly.
+///
+/// The one rule every compile path shares (`build`, `check`, `lint`, `test`,
+/// the compiler port behind the REPL, the LSP). Callers with no package
+/// (single files, an unreadable manifest) pass no set at all, which skips
+/// the check.
+#[must_use]
+pub fn known_qualifier_packages<'n>(
+    current_package: Option<&'n str>,
+    dependencies: impl IntoIterator<Item = &'n str>,
+) -> std::collections::HashSet<String> {
+    dependencies
+        .into_iter()
+        .chain(current_package)
+        .chain(std::iter::once(stdlib_protocols::STDLIB_PACKAGE))
+        .map(str::to_owned)
+        .collect()
+}
+
 /// Project-scoped analysis context a file-based caller assembles from the
 /// compiled file's own package (BT-4322).
 ///
@@ -627,6 +652,9 @@ impl<'a> AnalysisContext<'a> {
 /// callers with no project on disk (REPL expressions, editor diagnostics).
 #[derive(Debug, Clone, Default)]
 pub struct ProjectAnalysisContext {
+    /// Package names a `pkg@Class` qualifier may name, applied as
+    /// [`AnalysisContext::known_packages`]; `None` skips the check.
+    pub known_packages: Option<std::collections::HashSet<String>>,
     /// The compiled file's package name (`[package] name`), applied as
     /// [`AnalysisContext::current_package`].
     pub package_name: Option<String>,

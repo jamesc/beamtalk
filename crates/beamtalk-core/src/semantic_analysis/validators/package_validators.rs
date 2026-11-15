@@ -15,12 +15,14 @@ use std::collections::HashSet;
 
 /// Validates all package qualifiers in the module against known dependencies.
 ///
-/// Emits an error for each package qualifier that doesn't match any declared
-/// dependency. The `known_packages` set should contain the package names from
-/// the `[dependencies]` section of `beamtalk.toml`.
+/// Emits an error for each package qualifier that doesn't match a known
+/// package. Build the `known_packages` set with
+/// [`known_qualifier_packages`](crate::semantic_analysis::known_qualifier_packages):
+/// the `[dependencies]` of `beamtalk.toml`, the package itself and the stdlib.
 ///
-/// If `known_packages` is empty, validation is skipped — this handles the
-/// common case where no package system is in use (REPL, single-file scripts).
+/// If `known_packages` is empty, validation is skipped. Callers with no
+/// package at all (single-file scripts, a manifest-less directory) pass no
+/// set, so the check never runs for them.
 pub fn check_package_qualifiers(
     module: &Module,
     known_packages: &HashSet<String>,
@@ -552,5 +554,20 @@ mod tests {
                 .any(|d| d.message.contains("Unknown package 'xml'")),
             "Expected unknown package error in destructure assignment value, got: {diags:?}"
         );
+    }
+
+    #[test]
+    fn known_qualifier_packages_has_dependencies_current_package_and_stdlib() {
+        let known =
+            crate::semantic_analysis::known_qualifier_packages(Some("app"), ["json", "http"]);
+        let expected: HashSet<String> = ["json", "http", "app", "stdlib"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        assert_eq!(known, expected);
+
+        // No package: still the stdlib, so the set is never empty.
+        let known = crate::semantic_analysis::known_qualifier_packages(None, std::iter::empty());
+        assert_eq!(known, HashSet::from(["stdlib".to_string()]));
     }
 }
