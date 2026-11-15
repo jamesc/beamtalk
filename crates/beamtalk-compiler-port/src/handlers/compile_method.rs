@@ -55,9 +55,9 @@ fn resolve_method_source(method_source: String, selector: Option<&str>) -> Resol
         Some(selector) if !filter_error_diagnostics(&diagnostics).is_empty() => {
             // The header was written iff the parser recovered a method for the
             // requested selector from the original text.
-            !method
+            method
                 .as_ref()
-                .is_some_and(|m| m.selector.name() == selector)
+                .is_none_or(|m| m.selector.name() != selector)
         }
         _ => false,
     };
