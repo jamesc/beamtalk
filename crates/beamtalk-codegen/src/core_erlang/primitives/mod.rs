@@ -332,59 +332,93 @@ fn owned_params(params: &[&str]) -> Vec<String> {
 /// Table driver (BT-4875): each row is `(name, selector, params, expected)`
 /// and asserts `gen(selector, params)` renders exactly `expected`. `name` is
 /// the former one-assert test's name, so a failing row is as easy to find as
-/// a failing test was; the failure message leads with it.
+/// a failing test was. Every row runs; all mismatches are reported together.
 #[cfg(test)]
 pub(crate) fn assert_bif_table(generate: BifGen, rows: &[(&str, &str, &[&str], &str)]) {
-    for (name, selector, params, expected) in rows {
-        let actual = doc_to_string(generate(selector, &owned_params(params)));
-        assert_eq!(
-            actual.as_deref(),
-            Some(*expected),
-            "[{name}] {selector} {params:?}"
-        );
-    }
+    let failures: Vec<String> = rows
+        .iter()
+        .filter_map(|(name, selector, params, expected)| {
+            let actual = doc_to_string(generate(selector, &owned_params(params)));
+            (actual.as_deref() != Some(*expected)).then(|| {
+                format!("[{name}] {selector} {params:?}\n  expected: {expected:?}\n  actual:   {actual:?}")
+            })
+        })
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "{} row(s) failed:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 /// Table driver for selectors the generator must decline (`None`):
 /// rows are `(name, selector, params)`.
 #[cfg(test)]
 pub(crate) fn assert_bif_none_table(generate: BifGen, rows: &[(&str, &str, &[&str])]) {
-    for (name, selector, params) in rows {
-        let actual = doc_to_string(generate(selector, &owned_params(params)));
-        assert_eq!(actual, None, "[{name}] {selector} {params:?}");
-    }
+    let failures: Vec<String> = rows
+        .iter()
+        .filter_map(|(name, selector, params)| {
+            let actual = doc_to_string(generate(selector, &owned_params(params)));
+            actual.map(|a| {
+                format!("[{name}] {selector} {params:?}\n  expected: None\n  actual:   {a:?}")
+            })
+        })
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "{} row(s) failed:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 /// Like [`assert_bif_table`] for [`generate_primitive_bif`], which also
 /// dispatches on class: rows are `(name, class, selector, params, expected)`.
 #[cfg(test)]
 pub(crate) fn assert_primitive_bif_table(rows: &[(&str, &str, &str, &[&str], &str)]) {
-    for (name, class, selector, params, expected) in rows {
-        let actual = doc_to_string(generate_primitive_bif(
-            class,
-            selector,
-            &owned_params(params),
-        ));
-        assert_eq!(
-            actual.as_deref(),
-            Some(*expected),
-            "[{name}] {class}>>{selector} {params:?}"
-        );
-    }
+    let failures: Vec<String> = rows
+        .iter()
+        .filter_map(|(name, class, selector, params, expected)| {
+            let actual = doc_to_string(generate_primitive_bif(class, selector, &owned_params(params)));
+            (actual.as_deref() != Some(*expected)).then(|| {
+                format!("[{name}] {class}>>{selector} {params:?}\n  expected: {expected:?}\n  actual:   {actual:?}")
+            })
+        })
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "{} row(s) failed:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 /// Like [`assert_bif_none_table`] for [`generate_primitive_bif`]:
 /// rows are `(name, class, selector, params)`.
 #[cfg(test)]
 pub(crate) fn assert_primitive_bif_none_table(rows: &[(&str, &str, &str, &[&str])]) {
-    for (name, class, selector, params) in rows {
-        let actual = doc_to_string(generate_primitive_bif(
-            class,
-            selector,
-            &owned_params(params),
-        ));
-        assert_eq!(actual, None, "[{name}] {class}>>{selector} {params:?}");
-    }
+    let failures: Vec<String> = rows
+        .iter()
+        .filter_map(|(name, class, selector, params)| {
+            let actual = doc_to_string(generate_primitive_bif(
+                class,
+                selector,
+                &owned_params(params),
+            ));
+            actual.map(|a| {
+                format!(
+                    "[{name}] {class}>>{selector} {params:?}\n  expected: None\n  actual:   {a:?}"
+                )
+            })
+        })
+        .collect();
+    assert!(
+        failures.is_empty(),
+        "{} row(s) failed:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }
 
 #[cfg(test)]
