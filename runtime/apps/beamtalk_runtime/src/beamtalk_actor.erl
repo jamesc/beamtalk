@@ -426,6 +426,8 @@ handle_getValue([], State) ->
 %% and any supervisor child MFA recorded by an earlier release name this module,
 %% so a mixed-version cluster keeps working
 %% (see the moduledocs of `beamtalk_actor_registry` / `_remote` / `_ffi`).
+%% The `spawnAs`/`spawnAsGlobal` delegates first shipped in v0.5.0 and are to be
+%% removed once the next release after 0.5.0 has shipped (BT-4903).
 -export([
     'spawnAs'/2,
     'spawnAs'/3,
@@ -4654,6 +4656,10 @@ object_fallback(Selector, Args, Self, State, ClassName) ->
 %%% stdlib-shim code moved to. Kept under this module's name for at least one
 %%% release: they are `erpc` targets, OTP supervisor child MFAs, or the resolve
 %%% function registered with `global`, or an MFA recorded by an earlier release.
+%%%
+%%% Removal date for `spawnAs/2,3` and `spawnAsGlobal/2,3` (BT-4903): they first
+%%% shipped in v0.5.0 (15 Nov 2026), and are to be removed once the next release
+%%% after 0.5.0 has shipped.
 
 'spawnAs'(A1, A2) -> beamtalk_actor_registry:'spawnAs'(A1, A2).
 'spawnAs'(A1, A2, A3) -> beamtalk_actor_registry:'spawnAs'(A1, A2, A3).
