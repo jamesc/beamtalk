@@ -192,7 +192,7 @@ Error
 All exceptions include the original Erlang error in `details` for debugging:
 ```beamtalk
 > Erlang lists nth: 0 from: #(1, 2)
-ERROR: #RuntimeError  (BT-4866: now a type_error)
+ERROR: #TypeError  (BT-4866; originally #RuntimeError / arity_mismatch)
   Module: lists
   Function: nth/2
   Reason: function_clause

@@ -41,7 +41,7 @@ write_then_fc([Bin]) when is_binary(Bin) ->
 fc_sizes([]) -> [];
 fc_sizes([B | T]) when is_binary(B) -> [byte_size(B) | fc_sizes(T)].
 
-%% The `function_clause` is raised one call down, in `fc_sizes/1`'s sibling.
+%% Tail-calls `fc_sizes/1`: the `function_clause` is raised there, one call down.
 fc_wrap(L) -> fc_sizes(L).
 
 %% Counts its calls in the process dictionary, then fails one call down.
@@ -2630,3 +2630,12 @@ function_clause_retry_discards_first_attempt_class_var_writes_test() ->
         ),
         ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a))
     end).
+
+function_clause_in_recursive_call_to_target_is_reported_at_head_test() ->
+    %% Pins the documented best-effort rule: `fc_sizes([<<"a">>, 1])` fails in the
+    %% recursive `fc_sizes([1])`, whose own MFA is on top, so it reads as a head
+    %% mismatch (`type_error`) although the arguments passed matched a clause.
+    ?assertBtError(
+        type_error,
+        beamtalk_erlang_proxy:direct_call(?MODULE, fc_sizes, [[<<"a">>, 1]], stock)
+    ).
