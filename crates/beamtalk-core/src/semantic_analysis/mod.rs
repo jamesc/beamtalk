@@ -535,6 +535,21 @@ impl<'a> AnalysisContext<'a> {
         self
     }
 
+    /// Known package names for package-qualifier validation (ADR 0070 Phase
+    /// 2). Unknown package qualifiers produce compile errors.
+    ///
+    /// No production caller sets this yet, so the check is off everywhere;
+    /// BT-4921 decides whether to wire it into `build`/`lint` or remove it.
+    #[allow(clippy::implicit_hasher)] // concrete HashSet is simpler for callers
+    #[must_use]
+    pub fn with_known_packages(
+        mut self,
+        known_packages: std::collections::HashSet<String>,
+    ) -> Self {
+        self.known_packages = Some(known_packages);
+        self
+    }
+
     /// Native type registry for FFI call inference (ADR 0075). When `Some`,
     /// FFI calls (`Erlang <module> <function>:`) get return type inference
     /// and keyword mismatch warnings from the registry.
