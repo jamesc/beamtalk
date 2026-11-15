@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4919: a destructuring assignment whose right-hand side is itself a field
+// write, `{a, b} := (self.pair := {x, y})`, in an actor method body. The
+// assignment evaluates to the written value, so `a` and `b` are its parts and
+// the field holds the whole tuple.
+
+Actor subclass: Bt4919DestructureFieldWriteActor
+  state: pair = nil
+  state: count :: Integer = 0
+
+  // Non-last position: the destructured names are used afterwards.
+  sumWritten: x and: y =>
+    {a, b} := (self.pair := {x, y})
+    self.count := self.count + 1
+    a + b
+
+  // Last position: the method answers the assigned value (the tuple).
+  writeLast: x and: y => {_a, _b} := (self.pair := {x, y})
+
+  // Inside a conditional arm: the arm lowers the field write as its own `Bind`.
+  sumInArm: flag and: x and: y =>
+    flag
+      ifTrue: [
+        {a, b} := (self.pair := {x, y})
+        a + b
+      ]
+      ifFalse: [0]
+
+  pair => self.pair
+
+  count => self.count

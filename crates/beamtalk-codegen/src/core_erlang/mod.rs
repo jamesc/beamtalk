@@ -162,6 +162,7 @@ pub mod selector_mangler;
 pub mod sentinel_tags;
 mod sequencing;
 mod spec_codegen;
+mod statement_kinds;
 mod supervisor_codegen;
 mod synced_call;
 mod threaded_expr;
