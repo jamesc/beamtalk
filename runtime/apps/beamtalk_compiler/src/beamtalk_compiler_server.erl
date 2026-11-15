@@ -56,7 +56,8 @@ to avoid temp files on disk.
     reindent_method_source/2,
     find_selector_send_spans/3,
     find_definition_selector_spans/5,
-    build_class_module_index_in_source/3
+    build_class_module_index_in_source/3,
+    scan_source_dependencies/1
 ]).
 
 %% gen_server callbacks
@@ -720,6 +721,22 @@ build_class_module_index_in_source(Source, RelativePath, PackageName) ->
     end.
 
 -doc """
+Class declarations and native-module references in `Source', parsed with the
+real grammar (BT-4861) — see `beamtalk_compiler_port:scan_source_dependencies/2'.
+""".
+-spec scan_source_dependencies(binary()) ->
+    {ok, #{classes := [map()], native_refs := [binary()]}} | {error, atom(), binary()}.
+scan_source_dependencies(Source) ->
+    try
+        gen_server:call(?MODULE, {scan_source_dependencies, Source}, 30000)
+    catch
+        exit:{noproc, _} ->
+            {error, noproc, <<"Compiler server is not available">>};
+        exit:{timeout, _} ->
+            {error, timeout, <<"Compiler server timed out">>}
+    end.
+
+-doc """
 Field-level default-value presence for `ClassName''s `state:'/`field:'
 declarations in `Source' (ADR 0082 extension).
 
@@ -1252,6 +1269,9 @@ handle_call(
     Result = beamtalk_compiler_port:build_class_module_index_in_source(
         State#state.port, Source, RelativePath, PackageName
     ),
+    {reply, Result, State};
+handle_call({scan_source_dependencies, Source}, _From, State) ->
+    Result = beamtalk_compiler_port:scan_source_dependencies(State#state.port, Source),
     {reply, Result, State};
 handle_call({reindent_method_source, Source, BaseIndent}, _From, State) ->
     Result = beamtalk_compiler_port:reindent_method_source(

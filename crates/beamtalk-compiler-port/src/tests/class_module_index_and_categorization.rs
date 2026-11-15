@@ -347,3 +347,73 @@ fn class_state_field_defaults_missing_class_name_field_is_error() {
     };
     assert_eq!(map_get(m, "status"), Some(&atom("error")), "{response:?}");
 }
+
+// --- scan_source_dependencies tests (BT-4861) ---
+
+fn scan_source_dependencies(source: &str) -> Map {
+    let request = Map::from([
+        (atom("command"), atom("scan_source_dependencies")),
+        (atom("source"), binary(source)),
+    ]);
+    let response = handle_scan_source_dependencies(&request);
+    let Term::Map(m) = response else {
+        panic!("Expected map response, got: {response:?}");
+    };
+    assert_eq!(map_get(&m, "status"), Some(&atom("ok")), "{m:?}");
+    m
+}
+
+fn scan_class_pairs(m: &Map) -> Vec<(String, Option<String>)> {
+    let Some(Term::List(list)) = map_get(m, "classes") else {
+        panic!("missing classes: {m:?}");
+    };
+    list.elements
+        .iter()
+        .map(|t| {
+            let Term::Map(c) = t else {
+                panic!("class entry not a map: {t:?}");
+            };
+            (
+                map_get(c, "name").and_then(term_to_string).unwrap(),
+                map_get(c, "superclass").and_then(term_to_string),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn scan_source_dependencies_ignores_doc_comment_and_finds_all_classes() {
+    let m = scan_source_dependencies(
+        "/// Example:\n/// Actor subclass: MyDelegate\nObject subclass: Base\n\nBase subclass: Derived\n",
+    );
+    assert_eq!(
+        scan_class_pairs(&m),
+        vec![
+            ("Base".to_string(), Some("Object".to_string())),
+            ("Derived".to_string(), Some("Base".to_string())),
+        ]
+    );
+}
+
+#[test]
+fn scan_source_dependencies_package_qualified_superclass_is_omitted() {
+    let m = scan_source_dependencies("json@Parser subclass: Lenient\n");
+    assert_eq!(scan_class_pairs(&m), vec![("Lenient".to_string(), None)]);
+}
+
+#[test]
+fn scan_source_dependencies_native_refs_skip_comments_and_strings() {
+    let m = scan_source_dependencies(
+        "// (Erlang commented_out) native: also_commented\n\
+         Object subclass: Foo native: real_backing\n  \
+         bar => (Erlang lists) reverse: #(1)\n  \
+         baz => 'Erlang in_string'\n  \
+         qux => 'native: in_string'\n  \
+         dup => Erlang lists sort: #(2)\n",
+    );
+    assert_eq!(
+        map_get(&m, "native_refs").and_then(term_to_string_list),
+        Some(vec!["lists".to_string(), "real_backing".to_string()]),
+        "{m:?}"
+    );
+}

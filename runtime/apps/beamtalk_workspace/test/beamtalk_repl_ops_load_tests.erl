@@ -8,7 +8,7 @@
 -moduledoc """
 EUnit tests for beamtalk_repl_ops_load module.
 
-Tests the load-project helpers: find_bt_files, extract_bt_class_info,
+Tests the load-project helpers: find_bt_files, extract_bt_class_infos,
 sort_bt_files_by_deps, and structured_file_errors. These are pure
 filesystem/parsing functions that do not require a running REPL workspace.
 """.
@@ -83,51 +83,74 @@ find_bt_files_finds_bt_files_test() ->
     end.
 
 %%====================================================================
-%% extract_bt_class_info/1
+%% extract_bt_class_infos/1 (BT-4861: real parser, not a regex)
 %%====================================================================
 
-extract_bt_class_info_simple_test() ->
+extract_bt_class_infos_simple_test() ->
+    ensure_compiler_started(),
     Dir = make_temp_dir(),
     try
         Path = write_temp_file(
             Dir, "counter.bt", <<"Object subclass: Counter\n  state: count = 0\n">>
         ),
         ?assertEqual(
-            {<<"Counter">>, <<"Object">>},
-            beamtalk_workspace_project_sync:extract_bt_class_info(Path)
+            [{<<"Counter">>, <<"Object">>}],
+            beamtalk_workspace_project_sync:extract_bt_class_infos(Path)
         )
     after
         rm_temp_dir(Dir)
     end.
 
-extract_bt_class_info_subclass_test() ->
-    Dir = make_temp_dir(),
-    try
-        Path = write_temp_file(Dir, "special.bt", <<"Counter subclass: SpecialCounter\n">>),
-        ?assertEqual(
-            {<<"SpecialCounter">>, <<"Counter">>},
-            beamtalk_workspace_project_sync:extract_bt_class_info(Path)
-        )
-    after
-        rm_temp_dir(Dir)
-    end.
-
-extract_bt_class_info_no_class_test() ->
+extract_bt_class_infos_no_class_test() ->
+    ensure_compiler_started(),
     Dir = make_temp_dir(),
     try
         Path = write_temp_file(Dir, "empty.bt", <<"// just a comment\n">>),
+        ?assertEqual([], beamtalk_workspace_project_sync:extract_bt_class_infos(Path))
+    after
+        rm_temp_dir(Dir)
+    end.
+
+extract_bt_class_infos_missing_file_test() ->
+    ?assertEqual([], beamtalk_workspace_project_sync:extract_bt_class_infos("/no/such/file.bt")).
+
+%% A `X subclass: Y' example in a doc comment above the real header must not
+%% be mistaken for the declaration (stdlib/src/reactive_subprocess.bt shape).
+extract_bt_class_infos_ignores_doc_comment_test() ->
+    ensure_compiler_started(),
+    Dir = make_temp_dir(),
+    try
+        Path = write_temp_file(
+            Dir,
+            "reactive.bt",
+            <<
+                "/// Example:\n"
+                "///   Actor subclass: MyDelegate\n"
+                "typed Actor subclass: Reactive\n"
+            >>
+        ),
         ?assertEqual(
-            {undefined, undefined}, beamtalk_workspace_project_sync:extract_bt_class_info(Path)
+            [{<<"Reactive">>, <<"Actor">>}],
+            beamtalk_workspace_project_sync:extract_bt_class_infos(Path)
         )
     after
         rm_temp_dir(Dir)
     end.
 
-extract_bt_class_info_missing_file_test() ->
-    ?assertEqual(
-        {undefined, undefined},
-        beamtalk_workspace_project_sync:extract_bt_class_info("/no/such/file.bt")
-    ).
+extract_bt_class_infos_multiple_classes_test() ->
+    ensure_compiler_started(),
+    Dir = make_temp_dir(),
+    try
+        Path = write_temp_file(
+            Dir, "two.bt", <<"Object subclass: One\n\nOne subclass: Two\n">>
+        ),
+        ?assertEqual(
+            [{<<"One">>, <<"Object">>}, {<<"Two">>, <<"One">>}],
+            beamtalk_workspace_project_sync:extract_bt_class_infos(Path)
+        )
+    after
+        rm_temp_dir(Dir)
+    end.
 
 %%====================================================================
 %% sort_bt_files_by_deps/1
@@ -137,6 +160,7 @@ sort_bt_files_empty_test() ->
     ?assertEqual([], beamtalk_workspace_project_sync:sort_bt_files_by_deps([])).
 
 sort_bt_files_superclass_before_subclass_test() ->
+    ensure_compiler_started(),
     Dir = make_temp_dir(),
     try
         PathA = write_temp_file(Dir, "a.bt", <<"Object subclass: A">>),
@@ -149,6 +173,7 @@ sort_bt_files_superclass_before_subclass_test() ->
     end.
 
 sort_bt_files_independent_files_stable_test() ->
+    ensure_compiler_started(),
     Dir = make_temp_dir(),
     try
         %% Both files declare a direct Object subclass (superclass is outside the project).
@@ -157,6 +182,63 @@ sort_bt_files_independent_files_stable_test() ->
         PathB = write_temp_file(Dir, "b.bt", <<"Object subclass: B">>),
         Sorted = beamtalk_workspace_project_sync:sort_bt_files_by_deps([PathA, PathB]),
         ?assertEqual([PathA, PathB], Sorted)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%% BT-4861 regression: the doc comment's `Actor subclass: MyDelegate' used to
+%% be read as the file's header, so `late.bt' (a subclass of Base) was seen as
+%% a subclass of the unrelated Actor and loaded before `base.bt'.
+sort_bt_files_ignores_doc_comment_header_test() ->
+    ensure_compiler_started(),
+    Dir = make_temp_dir(),
+    try
+        PathLate = write_temp_file(
+            Dir,
+            "late.bt",
+            <<
+                "/// Usage:\n"
+                "///   Actor subclass: MyDelegate\n"
+                "Base subclass: Late\n"
+            >>
+        ),
+        PathBase = write_temp_file(Dir, "base.bt", <<"Object subclass: Base">>),
+        ?assertEqual(
+            [PathBase, PathLate],
+            beamtalk_workspace_project_sync:sort_bt_files_by_deps([PathLate, PathBase])
+        )
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%% BT-4861 regression: only the first class in a file used to be registered, so
+%% a dependency on the file's second class was invisible to the sort.
+sort_bt_files_multiple_classes_per_file_test() ->
+    ensure_compiler_started(),
+    Dir = make_temp_dir(),
+    try
+        PathUser = write_temp_file(Dir, "user.bt", <<"Beta subclass: User">>),
+        PathPair = write_temp_file(
+            Dir, "pair.bt", <<"Object subclass: Alpha\n\nAlpha subclass: Beta\n">>
+        ),
+        ?assertEqual(
+            [PathPair, PathUser],
+            beamtalk_workspace_project_sync:sort_bt_files_by_deps([PathUser, PathPair])
+        )
+    after
+        rm_temp_dir(Dir)
+    end.
+
+sort_bt_files_cycle_keeps_original_order_test() ->
+    ensure_compiler_started(),
+    Dir = make_temp_dir(),
+    try
+        PathA = write_temp_file(Dir, "a.bt", <<"B subclass: A">>),
+        PathB = write_temp_file(Dir, "b.bt", <<"A subclass: B">>),
+        ?assertEqual(
+            [PathA, PathB],
+            beamtalk_workspace_project_sync:sort_bt_files_by_deps([PathA, PathB])
+        )
     after
         rm_temp_dir(Dir)
     end.
@@ -606,6 +688,7 @@ compile_native_erl_files_multiple_test() ->
 %%====================================================================
 
 extract_native_refs_native_annotation_test() ->
+    ensure_compiler_started(),
     Dir = make_temp_dir(),
     try
         Path = write_temp_file(
@@ -623,6 +706,7 @@ extract_native_refs_native_annotation_test() ->
     end.
 
 extract_native_refs_ffi_reference_test() ->
+    ensure_compiler_started(),
     Dir = make_temp_dir(),
     try
         Path = write_temp_file(
@@ -642,6 +726,7 @@ extract_native_refs_ffi_reference_test() ->
     end.
 
 extract_native_refs_both_native_and_ffi_test() ->
+    ensure_compiler_started(),
     Dir = make_temp_dir(),
     try
         Path = write_temp_file(
@@ -659,6 +744,7 @@ extract_native_refs_both_native_and_ffi_test() ->
     end.
 
 extract_native_refs_no_refs_test() ->
+    ensure_compiler_started(),
     Dir = make_temp_dir(),
     try
         Path = write_temp_file(
@@ -672,6 +758,27 @@ extract_native_refs_no_refs_test() ->
         ),
         Refs = beamtalk_workspace_project_sync:extract_native_refs(Path),
         ?assertEqual([], Refs)
+    after
+        rm_temp_dir(Dir)
+    end.
+
+%% BT-4861 regression: `native:' / `(Erlang m)' text inside comments and string
+%% literals is not a reference.
+extract_native_refs_ignores_comments_and_strings_test() ->
+    ensure_compiler_started(),
+    Dir = make_temp_dir(),
+    try
+        Path = write_temp_file(
+            Dir,
+            "tricky.bt",
+            <<
+                "// Stays inline (Erlang commented_out) rather than native: commented_native\n"
+                "Object subclass: Tricky\n"
+                "  doc => 'see (Erlang in_string) and native: in_string_native'\n"
+                "  real => (Erlang lists) reverse: #(1, 2)\n"
+            >>
+        ),
+        ?assertEqual([<<"lists">>], beamtalk_workspace_project_sync:extract_native_refs(Path))
     after
         rm_temp_dir(Dir)
     end.

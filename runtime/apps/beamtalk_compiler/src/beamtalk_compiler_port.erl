@@ -35,6 +35,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     find_selector_send_spans/4,
     find_definition_selector_spans/6,
     build_class_module_index_in_source/4,
+    scan_source_dependencies/2,
     close/1
 ]).
 
@@ -1431,6 +1432,79 @@ handle_class_state_field_defaults_response(#{status := error, reason := Reason} 
     {error, Reason, Message};
 handle_class_state_field_defaults_response(Other) ->
     ?LOG_ERROR("Unexpected class-state-field-defaults response", #{
+        domain => [beamtalk, runtime], response => Other
+    }),
+    {error, port_error, <<"Unexpected compiler response">>}.
+
+-doc """
+Parse `Source' with the real grammar and report what the load-project
+ordering and native-module dependency scan need (BT-4861): every declared
+class with its (unqualified) superclass, and every Erlang module the file
+references via a `native: module' class header or an `Erlang module' FFI
+receiver. Unlike the whole-file regexes this replaces, nothing inside a `///'
+doc comment or a string literal is reported, and a file declaring several
+classes reports all of them.
+
+Returns `{ok, #{classes := [#{name := binary(), superclass => binary()}],
+native_refs := [binary()]}}'. `superclass' is absent for a root class and for
+a package-qualified superclass. Transport failures return
+`{error, port_error, Message}'.
+""".
+-spec scan_source_dependencies(port(), binary()) ->
+    {ok, #{classes := [map()], native_refs := [binary()]}} | {error, atom(), binary()}.
+scan_source_dependencies(Port, Source) when is_binary(Source) ->
+    Request = #{command => scan_source_dependencies, source => Source},
+    RequestBin = term_to_binary(Request),
+    try port_command(Port, RequestBin) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> handle_scan_source_dependencies_response(Response)
+                    catch
+                        error:badarg ->
+                            ?LOG_ERROR("Compiler port decode error (scan source dependencies)", #{
+                                domain => [beamtalk, runtime], port => Port
+                            }),
+                            {error, port_error, <<"Compiler port response is malformed">>}
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited during scan-source-dependencies query", #{
+                        domain => [beamtalk, runtime], status => Status
+                    }),
+                    {error, port_error, <<"Compiler port exited unexpectedly">>}
+            after 30000 ->
+                ?LOG_ERROR("Compiler port timeout (scan source dependencies)", #{
+                    domain => [beamtalk, runtime], port => Port
+                }),
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                {error, port_error, <<"Compiler port timed out">>}
+            end
+    catch
+        error:badarg ->
+            ?LOG_ERROR("Compiler port not available (scan source dependencies)", #{
+                domain => [beamtalk, runtime], port => Port
+            }),
+            {error, port_error, <<"Compiler port is not available">>}
+    end;
+scan_source_dependencies(_Port, _Source) ->
+    {error, bad_argument, <<"scan_source_dependencies: source must be a binary">>}.
+
+-spec handle_scan_source_dependencies_response(term()) ->
+    {ok, #{classes := [map()], native_refs := [binary()]}} | {error, atom(), binary()}.
+handle_scan_source_dependencies_response(
+    #{status := ok, classes := Classes, native_refs := NativeRefs}
+) when is_list(Classes), is_list(NativeRefs) ->
+    {ok, #{classes => Classes, native_refs => NativeRefs}};
+handle_scan_source_dependencies_response(#{status := error, reason := Reason} = Resp) ->
+    Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
+    {error, Reason, Message};
+handle_scan_source_dependencies_response(Other) ->
+    ?LOG_ERROR("Unexpected scan-source-dependencies response", #{
         domain => [beamtalk, runtime], response => Other
     }),
     {error, port_error, <<"Unexpected compiler response">>}.

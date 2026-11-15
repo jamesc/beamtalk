@@ -48,7 +48,7 @@ Extracted from beamtalk_repl_ops_load (BT-4706).
     native_generated_include_dir/1,
     build_source_class_module_index/2,
     relative_bt_path/2,
-    extract_bt_class_info/1,
+    extract_bt_class_infos/1,
     sort_bt_files_by_deps/1,
     structured_file_errors/2,
     format_collision_warning/3,
@@ -936,24 +936,56 @@ safe_module_atom(_) ->
     false.
 
 -doc """
-Extract the declared class name and superclass from a .bt source file.
-Returns {ClassName, SuperClass} as binaries, or {undefined, undefined}.
+Parse a .bt source file with the compiler port's real grammar and report its
+class declarations and native-module references (BT-4861).
+
+Replaces whole-file regexes that matched inside `///` doc comments and string
+literals and saw only one class per file. Best-effort: an unreadable file or a
+compiler-port failure is logged (the latter) and yields no information, so
+load-project falls back to original file order for that file rather than
+failing.
 """.
--spec extract_bt_class_info(string()) -> {binary() | undefined, binary() | undefined}.
-extract_bt_class_info(Path) ->
+-spec scan_bt_file(string()) ->
+    {ok, #{classes := [map()], native_refs := [binary()]}} | error.
+scan_bt_file(Path) ->
     case file:read_file(Path) of
-        {ok, Bin} ->
-            case re:run(Bin, <<"(\\w+)\\s+subclass:\\s+(\\w+)">>, [{capture, [1, 2], binary}]) of
-                {match, [Super, Class]} -> {Class, Super};
-                nomatch -> {undefined, undefined}
+        {ok, Source} ->
+            case beamtalk_compiler:scan_source_dependencies(Source) of
+                {ok, _} = Ok ->
+                    Ok;
+                {error, Reason, Message} ->
+                    ?LOG_WARNING(
+                        "scan-source-dependencies: could not scan ~s (~p): ~s",
+                        [Path, Reason, Message],
+                        #{domain => [beamtalk, runtime]}
+                    ),
+                    error
             end;
         {error, _} ->
-            {undefined, undefined}
+            error
+    end.
+
+-doc """
+Every class declared in a .bt source file, in source order, as
+`{ClassName, SuperClass | undefined}` binaries. `SuperClass` is `undefined`
+for a root class or a package-qualified superclass. Returns `[]` for a file
+with no class, an unreadable file, or when the compiler port is unavailable.
+""".
+-spec extract_bt_class_infos(string()) -> [{binary(), binary() | undefined}].
+extract_bt_class_infos(Path) ->
+    case scan_bt_file(Path) of
+        {ok, #{classes := Classes}} ->
+            [{maps:get(name, C), maps:get(superclass, C, undefined)} || C <- Classes];
+        error ->
+            []
     end.
 
 -doc """
 Sort .bt files in topological dependency order (superclass before subclass).
-Files whose superclass is not in the project set come first.
+A file declaring several classes is ordered after every other project file
+that defines a superclass of any of its classes; a superclass declared in the
+same file never counts as a dependency. Files whose superclasses are not in the
+project set come first, and independent files keep their original order.
 """.
 -spec sort_bt_files_by_deps([string()]) -> [string()].
 sort_bt_files_by_deps([]) ->
@@ -961,42 +993,55 @@ sort_bt_files_by_deps([]) ->
 sort_bt_files_by_deps(Files) ->
     Infos = lists:map(
         fun(Path) ->
-            {Class, Super} = extract_bt_class_info(Path),
-            #{path => Path, class => Class, super => Super}
+            Decls = extract_bt_class_infos(Path),
+            Defined = [C || {C, _} <- Decls],
+            Needs = lists:usort([S || {_, S} <- Decls, S =/= undefined, not lists:member(S, Defined)]),
+            #{path => Path, defined => Defined, needs => Needs}
         end,
         Files
     ),
-    ProjectClasses = sets:from_list([
-        C
-     || #{class := C} <- Infos, C =/= undefined
-    ]),
-    {Ready, Pending} = lists:partition(
-        fun(#{super := Super}) ->
-            Super =:= undefined orelse not sets:is_element(Super, ProjectClasses)
-        end,
-        Infos
-    ),
-    topo_sort_loop(Ready, Pending, []).
+    ProjectClasses = sets:from_list([C || #{defined := Defined} <- Infos, C <- Defined]),
+    topo_sort_loop(Infos, ProjectClasses, sets:new(), []).
 
--spec topo_sort_loop([map()], [map()], [string()]) -> [string()].
-topo_sort_loop([], [], Acc) ->
+-spec topo_sort_loop([map()], sets:set(binary()), sets:set(binary()), [string()]) ->
+    [string()].
+topo_sort_loop([], _ProjectClasses, _Loaded, Acc) ->
     lists:reverse(Acc);
-topo_sort_loop([], Pending, Acc) ->
-    %% Unresolved entries remain (likely a cycle or unparseable class declaration).
-    %% Warn and append them in original order so load proceeds best-effort.
-    ?LOG_WARNING(
-        "load-project: ~B file(s) have unresolved superclass dependencies "
-        "(possible cycle or missing class declaration); loading in original order",
-        [length(Pending)],
-        #{domain => [beamtalk, runtime]}
-    ),
-    lists:reverse(Acc, [maps:get(path, I) || I <- Pending]);
-topo_sort_loop([#{path := Path, class := Class} | Ready], Pending, Acc) ->
-    {NowReady, StillPending} = lists:partition(
-        fun(#{super := Super}) -> Super =:= Class end,
-        Pending
-    ),
-    topo_sort_loop(Ready ++ NowReady, StillPending, [Path | Acc]).
+topo_sort_loop(Pending, ProjectClasses, Loaded, Acc) ->
+    IsReady = fun(#{needs := Needs}) ->
+        lists:all(
+            fun(S) ->
+                not sets:is_element(S, ProjectClasses) orelse sets:is_element(S, Loaded)
+            end,
+            Needs
+        )
+    end,
+    case lists:partition(IsReady, Pending) of
+        {[], _} ->
+            %% Unresolved entries remain (likely a cycle or an unparseable class declaration).
+            %% Warn and append them in original order so load proceeds best-effort.
+            ?LOG_WARNING(
+                "load-project: ~B file(s) have unresolved superclass dependencies "
+                "(possible cycle or missing class declaration); loading in original order",
+                [length(Pending)],
+                #{domain => [beamtalk, runtime]}
+            ),
+            lists:reverse(Acc, [maps:get(path, I) || I <- Pending]);
+        {Ready, StillPending} ->
+            Loaded1 = lists:foldl(
+                fun(#{defined := Defined}, L) ->
+                    lists:foldl(fun sets:add_element/2, L, Defined)
+                end,
+                Loaded,
+                Ready
+            ),
+            topo_sort_loop(
+                StillPending,
+                ProjectClasses,
+                Loaded1,
+                lists:reverse([maps:get(path, I) || I <- Ready], Acc)
+            )
+    end.
 
 -doc """
 Load files one by one, accumulating class maps and per-file error maps.
@@ -1221,39 +1266,17 @@ module_to_class_name_map() ->
 
 -doc """
 Extract native module references from a .bt source file.
-Returns a deduplicated list of Erlang module name binaries referenced via:
+Returns a sorted, deduplicated list of Erlang module name binaries referenced via:
   - `native: module_name` annotation in the class header
   - `(Erlang module_name)` FFI calls in method bodies
+Taken from the parsed AST, so occurrences inside comments and string literals
+are not references (BT-4861).
 """.
 -spec extract_native_refs(string()) -> [binary()].
 extract_native_refs(Path) ->
-    case file:read_file(Path) of
-        {ok, Bin} ->
-            NativeRefs =
-                case
-                    re:run(
-                        Bin,
-                        <<"(?:native:\\s+(\\w+))">>,
-                        [{capture, [1], binary}, global]
-                    )
-                of
-                    {match, Matches} -> [M || [M] <- Matches];
-                    nomatch -> []
-                end,
-            FfiRefs =
-                case
-                    re:run(
-                        Bin,
-                        <<"\\(Erlang\\s+(\\w+)\\)">>,
-                        [{capture, [1], binary}, global]
-                    )
-                of
-                    {match, FfiMatches} -> [M || [M] <- FfiMatches];
-                    nomatch -> []
-                end,
-            lists:usort(NativeRefs ++ FfiRefs);
-        {error, _} ->
-            []
+    case scan_bt_file(Path) of
+        {ok, #{native_refs := Refs}} -> lists:usort(Refs);
+        error -> []
     end.
 
 -doc """
