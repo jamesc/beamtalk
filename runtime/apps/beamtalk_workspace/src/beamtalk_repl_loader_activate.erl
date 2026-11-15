@@ -24,7 +24,7 @@ Module activation for the loader: loading a compiled class module into the class
 -export([
     resolve_class_name/1,
     existing_atom_or_undefined/1,
-    %% No production caller (BT-4903).
+    %% No cross-module production caller (BT-4903).
     register_classes/2,
     trigger_hot_reload/2
 ]).
