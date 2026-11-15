@@ -71,7 +71,7 @@ existing_atom_empty_name_is_unknown_test() ->
 actor_pid_invalid_string_test() ->
     {error, #beamtalk_error{kind = invalid_pid, class = 'Actor', message = Msg}} =
         beamtalk_repl_params:actor_pid(#{<<"actor">> => <<"not-a-pid">>}),
-    ?assertEqual(<<"Invalid actor PID: not-a-pid">>, Msg).
+    ?assertEqual({beamtalk_string, <<"Invalid actor PID: not-a-pid">>}, Msg).
 
 actor_pid_missing_param_is_invalid_pid_test() ->
     {error, #beamtalk_error{kind = invalid_pid}} = beamtalk_repl_params:actor_pid(#{}).
@@ -81,7 +81,7 @@ actor_pid_unknown_actor_test() ->
     beamtalk_test_actor_registry:without_registry(fun() ->
         {error, #beamtalk_error{kind = unknown_actor, hint = Hint}} =
             beamtalk_repl_params:actor_pid(#{<<"actor">> => PidBin}),
-        ?assertEqual(<<"Use :actors to list valid actor PIDs.">>, Hint)
+        ?assertEqual({beamtalk_string, <<"Use :actors to list valid actor PIDs.">>}, Hint)
     end).
 
 validate_actor_pid_invalid_test() ->
