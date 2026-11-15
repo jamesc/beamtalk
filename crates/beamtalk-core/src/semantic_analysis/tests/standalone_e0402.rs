@@ -173,3 +173,25 @@ fn standalone_internal_method_satisfying_a_public_protocol_is_an_error() {
         hits[0].message
     );
 }
+
+#[test]
+fn standalone_internal_class_method_satisfying_a_public_protocol_is_an_error() {
+    let ctx = AnalysisContext::default()
+        .with_current_package("app")
+        .with_pre_loaded_classes(declared_by("app", PARSER));
+    let src = "Protocol define: Making\n  class make -> Integer\n\
+               Parser class >> internal make -> Integer => 1\n";
+    let d = analyse_full(&parse_module(src), ctx).diagnostics;
+    let hits: Vec<_> = d
+        .iter()
+        .filter(|d| d.message.contains("satisfies public protocol"))
+        .collect();
+    assert_eq!(hits.len(), 1, "{d:?}");
+    assert!(
+        hits[0]
+            .message
+            .contains("Internal class method 'make' on 'Parser'"),
+        "{}",
+        hits[0].message
+    );
+}
