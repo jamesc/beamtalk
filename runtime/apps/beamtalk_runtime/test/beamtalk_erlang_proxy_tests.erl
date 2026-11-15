@@ -27,7 +27,15 @@ error wrapping, and printString formatting.
 -export([bt4153_ok_stub/0, bt4153_charlist_stub/0]).
 %% BT-4866 fixtures: callees that pattern-match on binaries and so raise
 %% `function_clause` for a tagged String, at their own head or further down.
--export([fc_sizes/1, fc_wrap/1, fc_counted/1, fc_counted_inner/1]).
+-export([fc_sizes/1, fc_wrap/1, fc_counted/1, fc_counted_inner/1, write_then_fc/1]).
+
+%% The first attempt writes class variable `a`, then fails one call down; the
+%% unwrapped retry reports the value of `a` it sees.
+write_then_fc([{beamtalk_string, _}]) ->
+    beamtalk_class_vars:put(retry_self_obj(), a, 99),
+    fc_sizes([not_a_binary]);
+write_then_fc([Bin]) when is_binary(Bin) ->
+    beamtalk_class_vars:get(retry_self_obj(), a).
 
 %% Pattern-matches on a list of binaries: its own head fails on a tagged String.
 fc_sizes([]) -> [];
@@ -2605,3 +2613,20 @@ function_clause_retries_only_when_a_nested_string_exists_test() ->
         2, beamtalk_erlang_proxy:direct_call(?MODULE, fc_counted, [[fc_tagged(<<"ab">>)]], stock)
     ),
     ?assertEqual(2, erlang:get(fc_calls)).
+
+function_clause_retry_discards_first_attempt_class_var_writes_test() ->
+    %% BT-3728 for the BT-4866 retry: a fresh attempt, so `a := 99` from the
+    %% failed first attempt is neither visible to it nor kept.
+    beamtalk_class_vars_test_support:with_home('ProxyRetryTestClass', #{a => 1}, fun() ->
+        ?assertEqual(
+            1,
+            beamtalk_erlang_proxy:native_call(
+                ?MODULE,
+                write_then_fc,
+                [[fc_tagged(<<"x">>)]],
+                {'Stream', 'take:'},
+                stock
+            )
+        ),
+        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a))
+    end).
