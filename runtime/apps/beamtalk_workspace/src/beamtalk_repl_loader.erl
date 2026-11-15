@@ -18,6 +18,7 @@ Extracted from beamtalk_repl_eval.
     handle_load/3,
     handle_load_source/3,
     load_class_module/3,
+    load_protocol_module/3,
     reload_method_definition/4,
     install_method/8,
     install_method/9,

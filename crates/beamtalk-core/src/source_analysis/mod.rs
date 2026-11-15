@@ -328,6 +328,40 @@ mod naming_tests {
         assert!(!is_valid_selector("has space"));
         assert!(!is_valid_selector("bad!char"));
     }
+
+    /// BT-4917: the Erlang run-entry selector check
+    /// (`beamtalk_repl_eval:is_valid_run_entry_selector/1`) stays in Erlang
+    /// because release nodes may have no compiler (ADR 0125). A shared corpus
+    /// (`runtime/apps/beamtalk_workspace/test/fixtures/run_entry_selector_corpus.json`)
+    /// pins it against this rule: `rust_valid` is this function's verdict, and
+    /// every run-entry selector must also be a valid selector. The Erlang side
+    /// asserts `run_entry` in
+    /// `beamtalk_repl_eval_tests:run_entry_selector_matches_shared_corpus_test/0`.
+    #[test]
+    fn run_entry_selector_matches_shared_corpus() {
+        let path = beamtalk_workspace::cargo_workspace_root!()
+            .join("runtime/apps/beamtalk_workspace/test/fixtures/run_entry_selector_corpus.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let sel = case["selector"].as_str().expect("selector is a string");
+            let run_entry = case["run_entry"].as_bool().expect("run_entry is a bool");
+            let rust_valid = case["rust_valid"].as_bool().expect("rust_valid is a bool");
+            let why = case["why"].as_str().unwrap_or("");
+            assert_eq!(
+                is_valid_selector(sel),
+                rust_valid,
+                "is_valid_selector({sel:?}) drifted from corpus ({why})"
+            );
+            assert!(
+                !run_entry || rust_valid,
+                "run-entry selector {sel:?} must be a valid selector ({why})"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
