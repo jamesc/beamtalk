@@ -58,8 +58,8 @@
 //! Callers treat "no sites found" identically to "could not parse".
 
 use super::selector_span;
-use beamtalk_core::ast::{BinarySegment, Expression, MessageSelector, Pattern, StringSegment};
-use beamtalk_core::ast_walker::walk_pattern;
+use beamtalk_core::ast::MessageSelector;
+use beamtalk_core::ast_walker::walk_sends;
 use beamtalk_core::semantic_analysis::validators::{erlang_arity, erlang_function_name};
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
@@ -110,9 +110,26 @@ pub fn find_ffi_sites_in_source(
 
     beamtalk_core::ast_walker::for_each_expr_seq(&parsed, |seq| {
         for stmt in seq {
-            collect_ffi_sites(&stmt.expression, &target, &wrapped, &mut wrapped_lines);
+            // No enclosing-scope state is needed: `walk_sends` pairs every
+            // send, a cascade's later messages included, with the receiver it
+            // is actually sent to (the cascade's shared receiver), which is
+            // all the FFI match reads.
+            walk_sends(&stmt.expression, &mut |send| {
+                record_ffi_match(
+                    beamtalk_core::ffi_receiver::erlang_module_of_receiver(send.receiver),
+                    send.selector,
+                    send.arguments.len(),
+                    send.span,
+                    &target,
+                    &wrapped,
+                    &mut wrapped_lines,
+                );
+            });
         }
     });
+    // `walk_sends` reports a cascade's messages together, ahead of the sends
+    // nested in their receiver and arguments; restore source order.
+    wrapped_lines.sort_unstable();
 
     // Translate from wrapped-source line numbers back to input-source space.
     wrapped_lines
@@ -121,7 +138,7 @@ pub fn find_ffi_sites_in_source(
         .collect()
 }
 
-/// The Erlang function the walker is matching against.
+/// The Erlang function the query is matching against.
 struct FfiTarget<'a> {
     /// Erlang module name (e.g. `lists`).
     module: &'a str,
@@ -144,8 +161,7 @@ fn ffi_site_line(selector: &MessageSelector, fallback: Span, source: &str) -> u3
 /// Record a call site if `module` + `selector` (+ arity) match `target`.
 ///
 /// `module` is the resolved Erlang module of the receiver (`None` when the
-/// receiver is not an FFI proxy). Shared by the `MessageSend` and `Cascade`
-/// arms so both match identically.
+/// receiver is not an FFI proxy).
 #[allow(clippy::too_many_arguments)]
 fn record_ffi_match(
     module: Option<&str>,
@@ -170,157 +186,6 @@ fn record_ffi_match(
     if target.arity.is_none_or(|wanted| wanted == arity) {
         lines.push(ffi_site_line(selector, span, source));
     }
-}
-
-/// Recursively collect line numbers of FFI call sites matching `target`.
-// Exhaustive recursive AST walker: one arm per `Expression` variant, so the
-// length is inherent (mirrors `collect_access_lines` in the sibling queries).
-#[allow(clippy::too_many_lines)]
-fn collect_ffi_sites(expr: &Expression, target: &FfiTarget, source: &str, lines: &mut Vec<u32>) {
-    match expr {
-        Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            span,
-            ..
-        } => {
-            // Check whether this send is itself a matching FFI call.
-            record_ffi_match(
-                beamtalk_core::ffi_receiver::erlang_module_of_receiver(receiver),
-                selector,
-                arguments.len(),
-                *span,
-                target,
-                source,
-                lines,
-            );
-            // Recurse into the receiver and arguments so nested FFI calls (and
-            // FFI calls inside argument expressions) are still found.
-            collect_ffi_sites(receiver, target, source, lines);
-            for arg in arguments {
-                collect_ffi_sites(arg, target, source, lines);
-            }
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            // The first message is part of `receiver` (parsed as a full send),
-            // caught by recursing into it below. The remaining cascade messages
-            // are sent to the SAME receiver as the first message — i.e. that
-            // first send's own receiver (e.g. `(Erlang lists)` in
-            // `(Erlang lists) reverse: xs; sort: ys`), so resolve the shared
-            // module from there and match each cascade message against it.
-            collect_ffi_sites(receiver, target, source, lines);
-            let shared_module = match receiver.unwrap_parens() {
-                Expression::MessageSend {
-                    receiver: inner, ..
-                } => beamtalk_core::ffi_receiver::erlang_module_of_receiver(inner),
-                other => beamtalk_core::ffi_receiver::erlang_module_of_receiver(other),
-            };
-            for msg in messages {
-                record_ffi_match(
-                    shared_module,
-                    &msg.selector,
-                    msg.arguments.len(),
-                    msg.span,
-                    target,
-                    source,
-                    lines,
-                );
-                for arg in &msg.arguments {
-                    collect_ffi_sites(arg, target, source, lines);
-                }
-            }
-        }
-        Expression::Assignment {
-            target: t, value, ..
-        } => {
-            collect_ffi_sites(t, target, source, lines);
-            collect_ffi_sites(value, target, source, lines);
-        }
-        Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
-            collect_ffi_sites(value, target, source, lines);
-        }
-        Expression::Block(block) => {
-            for stmt in &block.body {
-                collect_ffi_sites(&stmt.expression, target, source, lines);
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            collect_ffi_sites(expression, target, source, lines);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            collect_ffi_sites(receiver, target, source, lines);
-        }
-        Expression::Match { value, arms, .. } => {
-            collect_ffi_sites(value, target, source, lines);
-            for arm in arms {
-                collect_pattern_ffi_sites(&arm.pattern, target, source, lines);
-                if let Some(guard) = &arm.guard {
-                    collect_ffi_sites(guard, target, source, lines);
-                }
-                collect_ffi_sites(&arm.body, target, source, lines);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for segment in segments {
-                if let StringSegment::Interpolation(inner) = segment {
-                    collect_ffi_sites(inner, target, source, lines);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                collect_ffi_sites(inner, target, source, lines);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for element in elements {
-                collect_ffi_sites(element, target, source, lines);
-            }
-            if let Some(tail_expr) = tail {
-                collect_ffi_sites(tail_expr, target, source, lines);
-            }
-        }
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for element in elements {
-                collect_ffi_sites(element, target, source, lines);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                collect_ffi_sites(&pair.key, target, source, lines);
-                collect_ffi_sites(&pair.value, target, source, lines);
-            }
-        }
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::ClassReference { .. }
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. }
-        | Expression::Error { .. } => {}
-    }
-}
-
-/// Recursively collect FFI call sites inside a [`Pattern`].
-///
-/// Patterns carry no FFI calls today — the only expression slot is a
-/// `BinarySegment::size`, which the parser restricts to an integer literal or a
-/// bare identifier. The walker is defensive (mirroring the sibling queries): it
-/// traverses container patterns and the binary-segment size expression so
-/// loosening the parser later does not silently regress this query.
-fn collect_pattern_ffi_sites(
-    pattern: &Pattern,
-    target: &FfiTarget,
-    source: &str,
-    lines: &mut Vec<u32>,
-) {
-    walk_pattern(pattern, &mut |expr| {
-        collect_ffi_sites(expr, target, source, lines);
-    });
 }
 
 #[cfg(test)]

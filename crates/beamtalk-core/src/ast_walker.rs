@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Compilation
 //!
-//! Provides three functions used by lint and validator passes:
+//! Provides the functions used by lint, validator and language-service passes:
 //!
 //! - [`for_each_expr_seq`] — iterate every top-level statement sequence in a module
 //!   (module-level expressions, method bodies, standalone method bodies).
@@ -14,6 +14,13 @@
 //!   calling a visitor closure on every node.
 //!
 //! - [`walk_module`] — convenience: pre-order walk of **all** expressions in a module.
+//!
+//! - [`for_each_child`] / [`children_in_source_order`] — an expression's direct
+//!   children, the one enumeration [`walk_expression`] runs on; [`CursorBound`]
+//!   names the span-end rule for cursor queries that descend through them.
+//!
+//! - [`walk_expression_and_patterns`] — [`walk_expression`] that also reports
+//!   match-arm patterns, for passes that look for names a pattern carries.
 //!
 //! - [`walk_sends`] / [`walk_expression_and_sends`] / [`cascade_sends`] — every
 //!   message send with cascades expanded, each cascade message paired with the
@@ -121,84 +128,86 @@ where
     F: FnMut(&Expression),
 {
     f(expr);
+    for_each_child(expr, &mut |child| walk_expression(child, f));
+}
+
+/// Calls `f` on each direct child expression of `expr`, in source order.
+///
+/// The one place that knows which sub-expressions each [`Expression`] variant
+/// holds: [`walk_expression`] recurses through it, and
+/// [`children_in_source_order`] collects it. A new variant is added here once.
+/// Match-arm patterns are not expressions and are not reported (see
+/// [`walk_expression_and_patterns`]); a `Block`'s children are its statements'
+/// expressions, and a `Cascade`'s are its receiver, then the arguments of each
+/// later message.
+pub fn for_each_child<'a>(expr: &'a Expression, f: &mut dyn FnMut(&'a Expression)) {
     match expr {
         Expression::MessageSend {
             receiver,
             arguments,
             ..
         } => {
-            walk_expression(receiver, f);
-            for arg in arguments {
-                walk_expression(arg, f);
-            }
+            f(receiver);
+            arguments.iter().for_each(f);
         }
         Expression::Block(block) => {
             for stmt in &block.body {
-                walk_expression(&stmt.expression, f);
+                f(&stmt.expression);
             }
         }
         Expression::Assignment { target, value, .. } => {
-            walk_expression(target, f);
-            walk_expression(value, f);
+            f(target);
+            f(value);
         }
         Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-            walk_expression(value, f);
+            f(value);
         }
         Expression::Cascade {
             receiver, messages, ..
         } => {
-            walk_expression(receiver, f);
+            f(receiver);
             for msg in messages {
-                for arg in &msg.arguments {
-                    walk_expression(arg, f);
-                }
+                msg.arguments.iter().for_each(&mut *f);
             }
         }
-        Expression::Parenthesized { expression, .. } => {
-            walk_expression(expression, f);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            walk_expression(receiver, f);
-        }
+        Expression::Parenthesized { expression, .. } => f(expression),
+        Expression::FieldAccess { receiver, .. } => f(receiver),
         Expression::Match { value, arms, .. } => {
-            walk_expression(value, f);
+            f(value);
             for arm in arms {
                 if let Some(guard) = &arm.guard {
-                    walk_expression(guard, f);
+                    f(guard);
                 }
-                walk_expression(&arm.body, f);
+                f(&arm.body);
             }
         }
         Expression::MapLiteral { pairs, .. } => {
             for pair in pairs {
-                walk_expression(&pair.key, f);
-                walk_expression(&pair.value, f);
+                f(&pair.key);
+                f(&pair.value);
             }
         }
         Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                walk_expression(elem, f);
-            }
+            elements.iter().for_each(&mut *f);
             if let Some(t) = tail {
-                walk_expression(t, f);
+                f(t);
             }
         }
         Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for elem in elements {
-                walk_expression(elem, f);
-            }
+            elements.iter().for_each(f);
         }
         Expression::StringInterpolation { segments, .. } => {
             for seg in segments {
                 if let StringSegment::Interpolation(e) = seg {
-                    walk_expression(e, f);
+                    f(e);
                 }
             }
         }
         Expression::BinaryConstruction { segments, .. } => {
-            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                walk_expression(e, f);
-            }
+            segments
+                .iter()
+                .flat_map(BinarySegment::sub_expressions)
+                .for_each(f);
         }
         // Leaf nodes — nothing to recurse into.
         Expression::Literal(..)
@@ -212,13 +221,65 @@ where
     }
 }
 
+/// The direct child expressions of `expr`, in source order (see
+/// [`for_each_child`]).
+///
+/// For cursor queries: "descend into the child that holds the offset" is
+/// `children_in_source_order(expr).into_iter().find_map(|child| ...)`, with the
+/// child's own span test deciding whether it holds the offset
+/// ([`CursorBound`]).
+#[must_use]
+pub fn children_in_source_order(expr: &Expression) -> Vec<&Expression> {
+    let mut children = Vec::new();
+    for_each_child(expr, &mut |child| children.push(child));
+    children
+}
+
+/// How a cursor query decides that a byte offset is inside a [`Span`].
+///
+/// An editor cursor sits *between* characters, so a cursor "on" a token is
+/// ambiguous at the token's end. Providers differ on purpose, so each names the
+/// rule it wants:
+///
+/// - hover and go-to-definition ask what is *under* the cursor: [`Self::Within`];
+/// - signature help keeps the call open while the cursor touches its last
+///   character: [`Self::Touching`];
+/// - completion looks at the expression the cursor has just typed past, which
+///   includes the one trailing space: [`Self::Trailing`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CursorBound {
+    /// `start <= offset < end`: the offset is on one of the span's characters.
+    Within,
+    /// `start <= offset <= end`: the offset may also sit just after the span.
+    Touching,
+    /// `start <= offset <= end + 1`: as `Touching`, plus one character past
+    /// the span (the space after a finished token).
+    Trailing,
+}
+
+impl CursorBound {
+    /// Whether `offset` is inside `span` under this rule.
+    #[must_use]
+    pub fn contains(self, span: Span, offset: u32) -> bool {
+        if offset < span.start() {
+            return false;
+        }
+        match self {
+            Self::Within => offset < span.end(),
+            Self::Touching => offset <= span.end(),
+            Self::Trailing => offset <= span.end().saturating_add(1),
+        }
+    }
+}
+
 /// Recursively walks an expression tree in pre-order, calling `f` on every
 /// node with a mutable reference — the write counterpart of
 /// [`walk_expression`], for passes that rewrite nodes in place (e.g.
 /// `trait_expansion`'s body-local type-annotation substitution).
 ///
-/// Kept in exact variant-for-variant lockstep with [`walk_expression`] — a
-/// new `Expression` variant must be added to both, or a pass relying on
+/// Kept in exact variant-for-variant lockstep with [`for_each_child`] (the
+/// one child enumeration [`walk_expression`] runs on) — a new `Expression`
+/// variant must be added to both, or a pass relying on
 /// either silently stops seeing it (AGENTS.md's no-duplicate-implementations
 /// rule: this is the one walk both the read-only and mutating passes share,
 /// not two independently-maintained traversals).
@@ -376,6 +437,98 @@ where
         Pattern::Constructor { keywords, .. } => {
             for (_selector, inner) in keywords {
                 walk_pattern(inner, f);
+            }
+        }
+        Pattern::Wildcard(..)
+        | Pattern::Literal(..)
+        | Pattern::Variable(..)
+        | Pattern::Nil(..)
+        | Pattern::Type { .. } => {}
+    }
+}
+
+// ── Expression + pattern walker ──────────────────────────────────────────────
+
+/// One node of [`walk_expression_and_patterns`]: an expression or a pattern.
+#[derive(Debug, Clone, Copy)]
+pub enum WalkNode<'a> {
+    /// An expression node, exactly as [`walk_expression`] visits it.
+    Expr(&'a Expression),
+    /// A match-arm pattern node (the arm's pattern and every nested pattern).
+    Pattern(&'a Pattern),
+}
+
+/// [`walk_expression`] that also visits the patterns of every `Match` arm.
+///
+/// [`walk_expression`] reports expressions only, so a pass that looks for
+/// something a pattern carries (the class name of a `Result ok: v` constructor
+/// pattern, a `v :: Integer` type pattern) cannot see it. This reports each arm's
+/// pattern, then every pattern nested in it, as a [`WalkNode::Pattern`] in
+/// pre-order, and walks the size expression of a binary-pattern segment as an
+/// ordinary expression subtree.
+///
+/// A `Match`'s patterns are reported right after the `Match` node itself and
+/// before its scrutinee is walked, so the pre-order is *not* source order: a
+/// pass whose output order matters sorts what it collects.
+pub fn walk_expression_and_patterns<F>(expr: &Expression, f: &mut F)
+where
+    F: FnMut(WalkNode<'_>),
+{
+    walk_expression(expr, &mut |e| {
+        f(WalkNode::Expr(e));
+        if let Expression::Match { arms, .. } = e {
+            for arm in arms {
+                walk_pattern_nodes(&arm.pattern, f);
+            }
+        }
+    });
+}
+
+/// Pre-order walk of `pattern` and every pattern nested in it, for
+/// [`walk_expression_and_patterns`].
+fn walk_pattern_nodes<F>(pattern: &Pattern, f: &mut F)
+where
+    F: FnMut(WalkNode<'_>),
+{
+    f(WalkNode::Pattern(pattern));
+    match pattern {
+        Pattern::Binary { segments, .. } => {
+            for segment in segments {
+                walk_pattern_nodes(&segment.value, f);
+                if let Some(size) = &segment.size {
+                    walk_expression_and_patterns(size, f);
+                }
+            }
+        }
+        Pattern::Tuple { elements, .. } => {
+            for element in elements {
+                walk_pattern_nodes(element, f);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for element in elements {
+                walk_pattern_nodes(element, f);
+            }
+            if let Some(rest_pattern) = rest {
+                walk_pattern_nodes(rest_pattern, f);
+            }
+        }
+        Pattern::List { elements, tail, .. } => {
+            for element in elements {
+                walk_pattern_nodes(element, f);
+            }
+            if let Some(tail_pattern) = tail {
+                walk_pattern_nodes(tail_pattern, f);
+            }
+        }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                walk_pattern_nodes(&pair.value, f);
+            }
+        }
+        Pattern::Constructor { keywords, .. } => {
+            for (_selector, inner) in keywords {
+                walk_pattern_nodes(inner, f);
             }
         }
         Pattern::Wildcard(..)
@@ -977,5 +1130,87 @@ mod tests {
             panic!("expected the block's sole statement to be a typed Assignment");
         };
         assert!(matches!(ty, crate::ast::TypeAnnotation::Simple(id) if id.name == "Replaced"));
+    }
+
+    // ── walk_expression_and_patterns ─────────────────────────────────────
+
+    #[test]
+    fn walk_expression_and_patterns_reports_constructor_patterns_in_a_tuple() {
+        // `Result` and `Wrapper` appear only inside a match-arm tuple pattern,
+        // which `walk_expression` alone never reports.
+        let module = parse_bt(
+            "Object subclass: C\n  f: x =>\n    x match: [\n      {Result ok: v, Wrapper value: w} -> v;\n      _ -> nil]\n",
+        );
+        let mut classes = Vec::new();
+        let mut exprs = 0;
+        for_each_expr_seq(&module, |seq| {
+            for stmt in seq {
+                walk_expression_and_patterns(&stmt.expression, &mut |node| match node {
+                    WalkNode::Expr(_) => exprs += 1,
+                    WalkNode::Pattern(Pattern::Constructor { class, .. }) => {
+                        classes.push(class.name.to_string());
+                    }
+                    WalkNode::Pattern(_) => {}
+                });
+            }
+        });
+        assert_eq!(classes, ["Result", "Wrapper"]);
+        assert!(exprs > 0, "expression nodes are still reported");
+    }
+
+    // ── children_in_source_order / CursorBound ────────────────────────────
+
+    #[test]
+    fn children_are_in_source_order_for_the_variants_a_cursor_descends_through() {
+        // Receiver, then arguments.
+        let send = first_module_expr("a foo: b bar: c\n");
+        let names: Vec<_> = children_in_source_order(&send)
+            .iter()
+            .map(|c| matches!(c, Expression::Identifier(id) if ["a", "b", "c"].contains(&id.name.as_str())))
+            .collect();
+        assert_eq!(names, [true, true, true]);
+
+        // A list literal: elements, then the tail; a leaf has no children.
+        let list = first_module_expr("#(1, 2)\n");
+        assert_eq!(children_in_source_order(&list).len(), 2);
+        let leaf = first_module_expr("42\n");
+        assert!(children_in_source_order(&leaf).is_empty());
+    }
+
+    #[test]
+    fn children_agree_with_walk_expression_node_count() {
+        // `walk_expression` is built on `for_each_child`, so the two never drift:
+        // every node but the root is some node's child.
+        let expr = first_module_expr("x := (a foo: [ :y | y bar ] baz: #{1 => 2}) qux\n");
+        let mut via_children = 0;
+        let mut stack = vec![&expr];
+        while let Some(e) = stack.pop() {
+            via_children += 1;
+            stack.extend(children_in_source_order(e));
+        }
+        assert_eq!(via_children, count_visits(&expr));
+    }
+
+    #[test]
+    fn cursor_bound_names_the_cursor_at_end_of_token_rule() {
+        let span = Span::new(10, 15);
+        // On the token.
+        for bound in [
+            CursorBound::Within,
+            CursorBound::Touching,
+            CursorBound::Trailing,
+        ] {
+            assert!(bound.contains(span, 10), "{bound:?} start");
+            assert!(bound.contains(span, 14), "{bound:?} last char");
+            assert!(!bound.contains(span, 9), "{bound:?} before");
+        }
+        // Just after the last character (cursor at the end of the token).
+        assert!(!CursorBound::Within.contains(span, 15));
+        assert!(CursorBound::Touching.contains(span, 15));
+        assert!(CursorBound::Trailing.contains(span, 15));
+        // One further (the space after the token).
+        assert!(!CursorBound::Touching.contains(span, 16));
+        assert!(CursorBound::Trailing.contains(span, 16));
+        assert!(!CursorBound::Trailing.contains(span, 17));
     }
 }

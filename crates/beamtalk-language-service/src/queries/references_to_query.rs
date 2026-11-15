@@ -40,7 +40,8 @@
 
 pub use beamtalk_core::method_source_walker::{ReferenceHit, find_all_references_in_source};
 
-use beamtalk_core::ast::{BinarySegment, Expression, Pattern, StringSegment, TypeAnnotation};
+use beamtalk_core::ast::{Expression, Pattern, TypeAnnotation};
+use beamtalk_core::ast_walker::{WalkNode, walk_expression_and_patterns};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
 const PREFIX_LINES: u32 = 1;
@@ -101,6 +102,10 @@ pub fn find_references_to_in_source(method_source: &str, class_name: &str) -> Ve
         }
     }
 
+    // The module is walked class methods first, then top-level expressions, and
+    // a match arm's patterns are reported ahead of its scrutinee; restore source
+    // order.
+    wrapped_lines.sort_unstable();
     wrapped_lines
         .into_iter()
         .filter(|&line| line > PREFIX_LINES)
@@ -108,174 +113,30 @@ pub fn find_references_to_in_source(method_source: &str, class_name: &str) -> Ve
         .collect()
 }
 
-/// Recursively collect line numbers of class references matching `class_name`.
+/// Collect line numbers of class references matching `class_name` in `expr`.
+///
+/// A closure over [`walk_expression_and_patterns`]: a `ClassReference`
+/// expression, a `Constructor` pattern's class (e.g. `Result ok: v`) and a
+/// `Type` pattern's class are the leaf cases.
 fn collect_reference_lines(
     expr: &Expression,
     class_name: &str,
     source: &str,
     lines: &mut Vec<u32>,
 ) {
-    match expr {
-        Expression::ClassReference { name, span, .. } => {
+    walk_expression_and_patterns(expr, &mut |node| match node {
+        WalkNode::Expr(Expression::ClassReference { name, span, .. }) => {
             if name.name.as_str() == class_name {
                 lines.push(span.line_number(source));
             }
         }
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            collect_reference_lines(receiver, class_name, source, lines);
-            for arg in arguments {
-                collect_reference_lines(arg, class_name, source, lines);
-            }
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            collect_reference_lines(receiver, class_name, source, lines);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    collect_reference_lines(arg, class_name, source, lines);
-                }
-            }
-        }
-        Expression::Assignment { target, value, .. } => {
-            collect_reference_lines(target, class_name, source, lines);
-            collect_reference_lines(value, class_name, source, lines);
-        }
-        Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
-            collect_reference_lines(value, class_name, source, lines);
-        }
-        Expression::Block(block) => {
-            for stmt in &block.body {
-                collect_reference_lines(&stmt.expression, class_name, source, lines);
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            collect_reference_lines(expression, class_name, source, lines);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            collect_reference_lines(receiver, class_name, source, lines);
-        }
-        Expression::Match { value, arms, .. } => {
-            collect_reference_lines(value, class_name, source, lines);
-            for arm in arms {
-                collect_pattern_reference_lines(&arm.pattern, class_name, source, lines);
-                if let Some(guard) = &arm.guard {
-                    collect_reference_lines(guard, class_name, source, lines);
-                }
-                collect_reference_lines(&arm.body, class_name, source, lines);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for segment in segments {
-                if let StringSegment::Interpolation(inner) = segment {
-                    collect_reference_lines(inner, class_name, source, lines);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                collect_reference_lines(inner, class_name, source, lines);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for element in elements {
-                collect_reference_lines(element, class_name, source, lines);
-            }
-            if let Some(tail_expr) = tail {
-                collect_reference_lines(tail_expr, class_name, source, lines);
-            }
-        }
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for element in elements {
-                collect_reference_lines(element, class_name, source, lines);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                collect_reference_lines(&pair.key, class_name, source, lines);
-                collect_reference_lines(&pair.value, class_name, source, lines);
-            }
-        }
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. }
-        | Expression::Error { .. } => {}
-    }
-}
-
-/// Recursively collect line numbers of class references inside a [`Pattern`].
-///
-/// `Constructor` patterns carry an explicit class name (e.g. `Result ok: v`);
-/// container patterns recurse into their nested patterns so a class mentioned
-/// only inside a nested constructor (e.g. `Result ok: (Wrapper value: v)`) is
-/// still reported. `BinarySegment::size` is a full expression and is walked
-/// via `collect_reference_lines`.
-fn collect_pattern_reference_lines(
-    pattern: &Pattern,
-    class_name: &str,
-    source: &str,
-    lines: &mut Vec<u32>,
-) {
-    match pattern {
-        Pattern::Constructor {
-            class, keywords, ..
-        } => {
-            if class.name.as_str() == class_name {
-                lines.push(class.span.line_number(source));
-            }
-            for (_selector, inner) in keywords {
-                collect_pattern_reference_lines(inner, class_name, source, lines);
-            }
-        }
-        Pattern::Tuple { elements, .. } => {
-            for element in elements {
-                collect_pattern_reference_lines(element, class_name, source, lines);
-            }
-        }
-        Pattern::Array { elements, rest, .. } => {
-            for element in elements {
-                collect_pattern_reference_lines(element, class_name, source, lines);
-            }
-            if let Some(rest_pattern) = rest {
-                collect_pattern_reference_lines(rest_pattern, class_name, source, lines);
-            }
-        }
-        Pattern::List { elements, tail, .. } => {
-            for element in elements {
-                collect_pattern_reference_lines(element, class_name, source, lines);
-            }
-            if let Some(tail_pattern) = tail {
-                collect_pattern_reference_lines(tail_pattern, class_name, source, lines);
-            }
-        }
-        Pattern::Map { pairs, .. } => {
-            for pair in pairs {
-                collect_pattern_reference_lines(&pair.value, class_name, source, lines);
-            }
-        }
-        Pattern::Binary { segments, .. } => {
-            for segment in segments {
-                collect_pattern_reference_lines(&segment.value, class_name, source, lines);
-                if let Some(size) = &segment.size {
-                    collect_reference_lines(size, class_name, source, lines);
-                }
-            }
-        }
-        Pattern::Type { class, .. } => {
+        WalkNode::Pattern(Pattern::Constructor { class, .. } | Pattern::Type { class, .. }) => {
             if class.name.as_str() == class_name {
                 lines.push(class.span.line_number(source));
             }
         }
-        Pattern::Wildcard(..) | Pattern::Literal(..) | Pattern::Variable(..) | Pattern::Nil(..) => {
-        }
-    }
+        WalkNode::Expr(_) | WalkNode::Pattern(_) => {}
+    });
 }
 
 /// Collect class references inside a [`TypeAnnotation`]. Class names appear as
