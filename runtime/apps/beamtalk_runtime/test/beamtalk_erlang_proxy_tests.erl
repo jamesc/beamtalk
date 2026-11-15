@@ -1335,7 +1335,11 @@ direct_call_missing_function_error_unchanged_test() ->
                 Inner#beamtalk_error.hint
             ),
             ?assertEqual(
-                #{module => lists, function => {beamtalk_string, <<"nonexistent_xyz">>}, arity => 1},
+                #{
+                    module => lists,
+                    function => {beamtalk_string, <<"nonexistent_xyz">>},
+                    arity => 1
+                },
                 Inner#beamtalk_error.details
             )
     end.
@@ -1416,7 +1420,11 @@ backtrace_depth_zero_keeps_ffi_errors_test() ->
             error:#{error := Inline} ->
                 ?assertEqual(does_not_understand, Inline#beamtalk_error.kind),
                 ?assertEqual(
-                    #{module => lists, function => {beamtalk_string, <<"nonexistent_xyz">>}, arity => 1},
+                    #{
+                        module => lists,
+                        function => {beamtalk_string, <<"nonexistent_xyz">>},
+                        arity => 1
+                    },
                     Inline#beamtalk_error.details
                 )
         end,
@@ -1472,7 +1480,11 @@ dispatch_call_args_errors_unchanged_test() ->
             ?assertEqual(does_not_understand, Missing#beamtalk_error.kind),
             ?assertEqual('call:args:', Missing#beamtalk_error.selector),
             ?assertEqual(
-                #{module => lists, function => {beamtalk_string, <<"nonexistent_xyz">>}, arity => 1},
+                #{
+                    module => lists,
+                    function => {beamtalk_string, <<"nonexistent_xyz">>},
+                    arity => 1
+                },
                 Missing#beamtalk_error.details
             )
     end.

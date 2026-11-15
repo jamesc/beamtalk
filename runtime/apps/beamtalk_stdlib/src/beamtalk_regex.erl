@@ -150,7 +150,8 @@ matches_regex_options(Str, Pattern, Options) ->
     Hint = <<"Receiver must be a String, pattern a String, options a List">>,
     Bin = beamtalk_text:unwrap_or_raise(Str, 'String', 'matchesRegex:options:', Hint),
     PatternBin = beamtalk_text:unwrap_or_raise(Pattern, 'String', 'matchesRegex:options:', Hint),
-    is_list(Options) orelse beamtalk_error:raise_type_error('String', 'matchesRegex:options:', Hint),
+    is_list(Options) orelse
+        beamtalk_error:raise_type_error('String', 'matchesRegex:options:', Hint),
     CompileOpts = translate_options(Options),
     ErlOpts = [{capture, none} | CompileOpts],
     try

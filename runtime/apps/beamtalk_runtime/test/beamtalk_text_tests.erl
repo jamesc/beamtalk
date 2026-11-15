@@ -56,7 +56,9 @@ unwrap_or_raise_message_returns_bytes_test() ->
         <<"p">>,
         beamtalk_text:unwrap_or_raise_message({beamtalk_string, <<"p">>}, 'Beamtalk', 'x:', <<"m">>)
     ),
-    ?assertEqual(<<"p">>, beamtalk_text:unwrap_or_raise_message(<<"p">>, 'Beamtalk', 'x:', <<"m">>)).
+    ?assertEqual(
+        <<"p">>, beamtalk_text:unwrap_or_raise_message(<<"p">>, 'Beamtalk', 'x:', <<"m">>)
+    ).
 
 unwrap_or_raise_message_sets_message_and_no_hint_test() ->
     try

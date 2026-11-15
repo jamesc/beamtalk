@@ -228,8 +228,8 @@ is_class_module(<<"bt@", _/binary>>) ->
 is_class_module(_) ->
     false.
 
--doc "Whether a module atom (or module-name binary) is a user-defined class module
-(`bt@` but not `bt@stdlib@`).".
+-doc "Whether a module atom (or module-name binary) is a user-defined class module\n"
+"(`bt@` but not `bt@stdlib@`).".
 -spec is_user_class_module(term()) -> boolean().
 is_user_class_module(Module) when is_atom(Module) ->
     is_user_class_module(atom_to_binary(Module, utf8));
