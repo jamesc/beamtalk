@@ -551,6 +551,23 @@ pub(super) fn method_info(
     }
 }
 
+/// An `Object` subclass `name` with one primary instance method `selector`
+/// taking a single `param_type` parameter and answering `return_type`.
+pub(super) fn class_with_method(
+    name: &str,
+    selector: &str,
+    param_type: &str,
+    return_type: &str,
+) -> crate::semantic_analysis::class_hierarchy::ClassInfo {
+    crate::semantic_analysis::class_hierarchy::ClassInfo {
+        methods: vec![MethodInfo {
+            defined_in: name.into(),
+            ..method_info(selector, vec![Some(param_type)], Some(return_type))
+        }],
+        ..crate::semantic_analysis::class_hierarchy::ClassInfo::test(name, Some("Object"))
+    }
+}
+
 /// Build a `GenResult(T, E)` class in the hierarchy for generic tests.
 ///
 /// Uses `GenResult` instead of `Result` to avoid collision with the

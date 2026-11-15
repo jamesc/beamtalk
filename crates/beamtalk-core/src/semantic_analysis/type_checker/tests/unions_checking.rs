@@ -11,12 +11,11 @@ use super::common::*;
 #[test]
 fn union_arg_all_compatible_no_warning() {
     // Union(Integer | Float) passed to param expecting Number → all compatible → no warning
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
-    hierarchy.add_from_beam_meta(vec![ClassInfo::class_with_method(
+    hierarchy.add_from_beam_meta(vec![class_with_method(
         "Calculator",
         "compute:",
-        Some("Number"),
+        "Number",
         "Number",
     )]);
 
@@ -42,12 +41,11 @@ fn union_arg_all_compatible_no_warning() {
 #[test]
 fn union_arg_none_compatible_warns() {
     // Union(String | Symbol) passed to param expecting Integer → none compatible → warning
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
-    hierarchy.add_from_beam_meta(vec![ClassInfo::class_with_method(
+    hierarchy.add_from_beam_meta(vec![class_with_method(
         "Calculator",
         "compute:",
-        Some("Integer"),
+        "Integer",
         "Integer",
     )]);
 
@@ -79,12 +77,11 @@ fn union_arg_none_compatible_warns() {
 #[test]
 fn union_arg_mixed_compatible_hints() {
     // Union(Integer | String) passed to param expecting Number → Integer matches, String doesn't → hint
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
-    hierarchy.add_from_beam_meta(vec![ClassInfo::class_with_method(
+    hierarchy.add_from_beam_meta(vec![class_with_method(
         "Calculator",
         "compute:",
-        Some("Number"),
+        "Number",
         "Number",
     )]);
 
@@ -116,12 +113,11 @@ fn union_arg_mixed_compatible_hints() {
 #[test]
 fn union_arg_dynamic_still_skips() {
     // Dynamic arg should still skip (no regression)
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
-    hierarchy.add_from_beam_meta(vec![ClassInfo::class_with_method(
+    hierarchy.add_from_beam_meta(vec![class_with_method(
         "Calculator",
         "compute:",
-        Some("Integer"),
+        "Integer",
         "Integer",
     )]);
 
@@ -157,7 +153,6 @@ fn union_arg_dynamic_still_skips() {
 fn test_hierarchy_with_class_literal_arg(
     param_type: &str,
 ) -> crate::semantic_analysis::class_hierarchy::ClassHierarchy {
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![
         ClassInfo {
@@ -600,7 +595,6 @@ fn union_protocol_none_conform_warns() {
 fn union_protocol_mixed_conformance_hints() {
     // Build a protocol "HasSortKey" requiring sortKey.
     // Integer has sortKey (we register it), String does not → hint.
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
     // Add sortKey to Integer so it conforms
     hierarchy.add_from_beam_meta(vec![ClassInfo {
@@ -677,7 +671,6 @@ fn union_protocol_mixed_conformance_hints() {
 #[test]
 fn union_type_param_bounds_all_conform_no_warning() {
     // Logger(T :: Printable) where T = Integer | String → both conform → no warning
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         type_params: vec!["T".into()],
@@ -728,7 +721,6 @@ fn union_type_param_bounds_all_conform_no_warning() {
 #[test]
 fn union_type_param_bounds_none_conform_warns() {
     // Logger(T :: HasSortKey) where T = Integer | String → neither conforms → warning
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         type_params: vec!["T".into()],
@@ -790,7 +782,6 @@ fn union_type_param_bounds_none_conform_warns() {
 #[allow(clippy::too_many_lines)] // large ClassInfo fixture literal
 fn union_type_param_bounds_mixed_conformance_hints() {
     // Logger(T :: HasSortKey) where T = SortableInt | String → SortableInt conforms, String doesn't → hint
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![
         ClassInfo {
@@ -1566,7 +1557,6 @@ fn is_type_compatible_mismatched_type_args_rejected() {
 /// must name the offending parameterized member, not bare `Array`).
 #[test]
 fn union_arg_parameterized_member_mismatch_warns() {
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         methods: vec![MethodInfo {
@@ -1629,7 +1619,6 @@ fn union_arg_parameterized_member_mismatch_warns() {
 /// is compatible.
 #[test]
 fn union_arg_parameterized_members_all_match_no_warning() {
-    use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         methods: vec![MethodInfo {

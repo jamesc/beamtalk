@@ -511,43 +511,6 @@ impl ClassInfo {
         }
     }
 
-    /// Test fixture: an `Object` subclass `name` with one primary instance
-    /// method `selector` whose single parameter has type `param_type` and
-    /// whose return type is `return_type` (both parsed as declared types).
-    /// The arity is taken from the selector (`compute:` is 1, `size` is 0;
-    /// pass `None` for `param_type` on a unary selector).
-    #[cfg(any(test, feature = "test"))]
-    #[must_use]
-    pub fn class_with_method(
-        name: &str,
-        selector: &str,
-        param_type: Option<&str>,
-        return_type: &str,
-    ) -> Self {
-        Self {
-            methods: vec![MethodInfo {
-                selector: selector.into(),
-                arity: usize::from(param_type.is_some()),
-                kind: MethodKind::Primary,
-                defined_in: name.into(),
-                is_sealed: false,
-                is_internal: false,
-                spawns_block: false,
-                return_type: Some(DeclaredType::parse(return_type)),
-                param_types: param_type
-                    .map(|t| Some(DeclaredType::parse(t)))
-                    .into_iter()
-                    .collect(),
-                doc: None,
-                origin: None,
-                primitive: None,
-                constant_value: None,
-                answers_receiver: false,
-            }],
-            ..Self::test(name, Some("Object"))
-        }
-    }
-
     /// Whether this entry is a superclass-index stub inserted by
     /// `ClassHierarchy::add_external_superclasses`: it carries only a name and
     /// a superclass, so its class variables and method surface are unknown,
