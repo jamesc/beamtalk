@@ -2226,9 +2226,16 @@ module_root_and_relative_path(AbsPath, ProjectRoot) ->
         {ok, Rel} ->
             {src, Rel};
         undefined ->
-            case relative_below(AbsPath, ProjectRoot, "test") of
-                {ok, Rel} -> {test, Rel};
-                undefined -> {none, AbsPath}
+            %% `beamtalk test` names a package fixture (test/fixtures/) by its
+            %% stem, like any out-of-tree file, so the loader does too.
+            case relative_below(AbsPath, ProjectRoot, "test/fixtures") of
+                {ok, _} ->
+                    {none, AbsPath};
+                undefined ->
+                    case relative_below(AbsPath, ProjectRoot, "test") of
+                        {ok, Rel} -> {test, Rel};
+                        undefined -> {none, AbsPath}
+                    end
             end
     end.
 

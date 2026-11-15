@@ -171,6 +171,17 @@ pub enum ClassModuleRegistryError {
         /// The full path it was found in.
         path: String,
     },
+    /// A file under a package's `src/test/` directory would get the module
+    /// name `bt@{package}@test@{path}`, the name `test/{path}` has, so one
+    /// would silently replace the other at load time.
+    #[error(
+        "source path '{path}' is in a directory named 'test' under src/: its module name \
+         would collide with the package's test/ modules (rename the directory)"
+    )]
+    ReservedTestDirectory {
+        /// The full path it was found in.
+        path: String,
+    },
     /// A stdlib class's path-derived module name (from its file stem)
     /// disagrees with the closed-form name computed from its real, parsed
     /// class name — the shape of a bug where a file is renamed without
@@ -278,7 +289,8 @@ impl ModuleRootKind {
 ///
 /// Returns [`ClassModuleRegistryError::InvalidPathSegment`] if a segment
 /// contains a character other than an ASCII alphanumeric or `_`, or if the
-/// path names no file.
+/// path names no file, and [`ClassModuleRegistryError::ReservedTestDirectory`]
+/// for a [`ModuleRootKind::Src`] path inside a directory named `test`.
 pub fn module_name_for_path(
     path: &Utf8Path,
     package: &str,
@@ -297,6 +309,11 @@ pub fn module_name_for_path(
     };
     if segments.is_empty() {
         return Err(empty());
+    }
+    if root == ModuleRootKind::Src && segments.len() > 1 && segments[0] == "test" {
+        return Err(ClassModuleRegistryError::ReservedTestDirectory {
+            path: path.to_string(),
+        });
     }
     let joined = segments.join("@");
     Ok(match root {
@@ -848,6 +865,24 @@ mod tests {
                 "{path:?} {kind:?} should be rejected"
             );
         }
+    }
+
+    #[test]
+    fn module_name_for_path_rejects_test_directory_under_src() {
+        let src = |p: &str| module_name_for_path(Utf8Path::new(p), "web", ModuleRootKind::Src);
+        assert!(matches!(
+            src("test/foo.bt"),
+            Err(ClassModuleRegistryError::ReservedTestDirectory { .. })
+        ));
+        // A file named test.bt, or a deeper `test` directory, cannot collide.
+        assert_eq!(src("test.bt").unwrap(), "bt@web@test");
+        assert_eq!(src("util/test/foo.bt").unwrap(), "bt@web@util@test@foo");
+        // The same path under the test root is the normal case.
+        assert_eq!(
+            module_name_for_path(Utf8Path::new("test/foo.bt"), "web", ModuleRootKind::Test)
+                .unwrap(),
+            "bt@web@test@test@foo"
+        );
     }
 
     #[test]

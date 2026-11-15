@@ -1179,6 +1179,9 @@ loader_integration_test_() ->
             %% under an explicit timeout so the untouched tests below stay
             %% on EUnit's 5 s default even under CPU saturation.
             {"warm up the compiler (BT-4472)", {timeout, 30, fun() -> t_warm_up_compiler() end}},
+            {"compute_package_module_name fixture dir (BT-4868)", fun() ->
+                t_compute_package_module_name_fixture(Proj)
+            end},
             {"module naming matches the shared corpus (BT-4868)", fun() ->
                 t_module_naming_matches_shared_corpus(Proj)
             end},
@@ -1545,6 +1548,13 @@ t_compute_package_module_name_outside_subdirs(_Proj) ->
     Path = filename:join([Proj, "Widget.bt"]),
     Result = beamtalk_repl_loader:compute_package_module_name(Path),
     ?assertEqual({ok, <<"bt@widget">>}, Result).
+
+t_compute_package_module_name_fixture(_Proj) ->
+    %% A package fixture (test/fixtures/) is named by its stem, as `beamtalk test`
+    %% names it (BT-4868), not bt@loaderpkg@test@fixtures@helper.
+    Proj = live_project_dir(),
+    Path = filename:join([Proj, "test", "fixtures", "Helper.bt"]),
+    ?assertEqual({ok, <<"bt@helper">>}, beamtalk_repl_loader:compute_package_module_name(Path)).
 
 t_new_class_agent_author(_Proj) ->
     %% When the submission boundary stamps $beamtalk_author / $beamtalk_author_kind
