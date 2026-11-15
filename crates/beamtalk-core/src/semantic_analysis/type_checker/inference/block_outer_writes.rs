@@ -1,8 +1,9 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Narrowing bookkeeping for blocks that diverge or write outer locals
-//! (split from `blocks.rs`).
+//! Narrowing bookkeeping for blocks that diverge or write outer locals, plus
+//! block-literal parameter typing and `value:`-argument checks (split from
+//! `blocks.rs`).
 //!
 //! **DDD Context:** Semantic Analysis
 
