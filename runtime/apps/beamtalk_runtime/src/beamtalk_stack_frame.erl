@@ -874,10 +874,11 @@ make_relative(File) ->
     relative_to(File, Cwd, os:type() =:= {win32, nt}).
 
 -doc """
-Render `File` relative to `Cwd` with `/` separators, falling back to the
-basename when `File` is not under `Cwd` (BT-4839). `Windows` selects Windows
-path rules: `\` and `/` both separate components and components compare
-case-insensitively (`d:` vs `D:`), so a file under the cwd is recognised
+Render an absolute `File` relative to `Cwd` with `/` separators (a relative
+`File` is returned unchanged), falling back to the basename when `File` is not
+under `Cwd` (BT-4839). `Windows` selects Windows path rules: `\` and `/` both
+separate components, a verbatim `\\?\` prefix is ignored, and components
+compare case-insensitively (`d:` vs `D:`), so a file under the cwd is recognised
 whichever way the compiler and `file:get_cwd/0` spelled the path. The rules
 are a parameter so the Windows behaviour is testable on any OS.
 """.
@@ -904,20 +905,25 @@ relative_to(File, Cwd, Windows) ->
     end.
 
 -spec path_is_absolute(string(), boolean()) -> boolean().
-path_is_absolute([C, $: | _], true) when
-    (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z)
-->
-    true;
-path_is_absolute([S | _], true) when S =:= $/; S =:= $\  ->
-    true;
-path_is_absolute(_, true) ->
-    false;
+path_is_absolute(File, true) ->
+    case strip_verbatim(File) of
+        [C, $: | _] when (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z) -> true;
+        [S | _] when S =:= $/; S =:= $\\ -> true;
+        _ -> false
+    end;
 path_is_absolute(File, false) ->
     filename:pathtype(File) =/= relative.
 
+%% Rust's `canonicalize` records Windows paths in verbatim form
+%% (`\\?\C:\...`); the prefix carries no path component.
+-spec strip_verbatim(string()) -> string().
+strip_verbatim("\\\\?\\" ++ Rest) -> Rest;
+strip_verbatim("//?/" ++ Rest) -> Rest;
+strip_verbatim(Path) -> Path.
+
 -spec path_components(string(), boolean()) -> [string()].
 path_components(Path, true) ->
-    string:tokens(Path, "/\\");
+    string:tokens(strip_verbatim(Path), "/\\");
 path_components(Path, false) ->
     filename:split(Path).
 

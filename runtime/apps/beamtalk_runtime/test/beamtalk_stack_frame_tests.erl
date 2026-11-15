@@ -1072,6 +1072,19 @@ relative_to_windows_test_() ->
             ?_assertEqual("Main.bt", R("D:\\other\\src\\Main.bt"))},
         {"sibling sharing a name prefix is not under cwd",
             ?_assertEqual("Main.bt", R("D:\\a\\proj2\\Main.bt"))},
+        {"verbatim (\\\\?\\) file under plain cwd",
+            ?_assertEqual("src/Main.bt", R("\\\\?\\D:\\a\\proj\\src\\Main.bt"))},
+        {"verbatim cwd and file",
+            ?_assertEqual(
+                "src/Main.bt",
+                beamtalk_stack_frame:relative_to(
+                    "\\\\?\\C:\\Users\\r\\Temp\\.tmpX\\src\\Main.bt",
+                    "C:\\Users\\r\\Temp\\.tmpX",
+                    true
+                )
+            )},
+        {"root-relative backslash path is absolute",
+            ?_assertEqual("Main.bt", R("\\other\\Main.bt"))},
         {"relative path unchanged", ?_assertEqual("src\\Main.bt", R("src\\Main.bt"))}
     ].
 
