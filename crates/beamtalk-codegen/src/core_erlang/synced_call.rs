@@ -1652,9 +1652,7 @@ impl CoreErlangGenerator {
         mutations
             .iter()
             .map(|var| {
-                let core_var = self
-                    .lookup_var(var)
-                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                let core_var = self.resolve_local_core_var(var);
                 (core_var, Self::local_state_key(var))
             })
             .collect()

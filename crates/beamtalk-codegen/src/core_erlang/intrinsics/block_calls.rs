@@ -1588,9 +1588,7 @@ impl CoreErlangGenerator {
                     if let Expression::Assignment { target, value, .. } = expr
                         && let Expression::Identifier(id) = target.as_ref()
                     {
-                        let core_var = self
-                            .lookup_var(&id.name)
-                            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                        let core_var = self.resolve_local_core_var(&id.name);
                         let val_doc = self.expression_doc(value)?;
                         if is_last {
                             // Last assignment: bind AND return the new value

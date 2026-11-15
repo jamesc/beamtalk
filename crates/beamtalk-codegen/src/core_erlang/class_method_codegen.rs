@@ -636,9 +636,7 @@ impl CoreErlangGenerator {
             ));
             return Ok(Some(tmp_var));
         };
-        let core_var = self
-            .lookup_var(var_name)
-            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+        let core_var = self.resolve_local_core_var(var_name);
         let tv = if direct {
             self.threaded_construct_value(value, FrameId::ROOT)?
                 .ok_or_else(|| {
@@ -787,9 +785,7 @@ impl CoreErlangGenerator {
             && let Expression::Identifier(id) = target.as_ref()
         {
             let var_name = &id.name;
-            let core_var = self
-                .lookup_var(var_name)
-                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+            let core_var = self.resolve_local_core_var(var_name);
             let val_doc = self.expression_doc(value)?;
             self.bind_var(var_name, &core_var);
             return Ok(docvec!["let ", leaf::var(core_var), " = ", val_doc, " in ",]);

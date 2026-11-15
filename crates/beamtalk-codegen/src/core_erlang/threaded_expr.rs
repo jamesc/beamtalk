@@ -474,9 +474,7 @@ impl CoreErlangGenerator {
                     .to_string(),
             ));
         }
-        let core_var = self
-            .lookup_var(var_name)
-            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+        let core_var = self.resolve_local_core_var(var_name);
         let value_doc = self.expression_doc(value)?;
         stmts.push(ThreadedStmt::Statement(
             docvec![

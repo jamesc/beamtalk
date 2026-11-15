@@ -48,6 +48,7 @@ mod local_assign;
 pub(in crate::core_erlang) use local_assign::LocalWrite;
 mod lookups;
 mod loop_mode;
+mod loop_scope;
 mod plan;
 mod util;
 mod while_loops;

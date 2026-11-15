@@ -25,6 +25,8 @@ mod basic_ops;
 mod enumeration_ops;
 mod filter_ops;
 pub(in crate::core_erlang::control_flow) mod fold_driver;
+mod fold_epilogue;
+pub(in crate::core_erlang::control_flow) use fold_epilogue::EpilogueCx;
 mod search_ops;
 mod transform_ops;
 
