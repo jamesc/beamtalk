@@ -31,6 +31,24 @@ TestCase subclass: Bt4919LastFieldWriteTest
     self assert: a last equals: 8
     self assert: a other equals: 9
 
+  testLastPositionFoldKeepsFieldChangedDuringTheSend =>
+    a := Bt4919LastFieldWriteActor spawn
+    self assert: (a foldLast: #(1, 2, 3)) equals: 6
+    self assert: a last equals: 6
+    self assert: a other equals: 3
+
+  testLastPositionSelfSendKeepsFieldChangedDuringTheSend =>
+    a := Bt4919LastFieldWriteActor spawn
+    self assert: a selfSendLast equals: 3
+    self assert: a last equals: 3
+    self assert: a other equals: 10
+
+  testLastPositionBlockKeepsFieldChangedDuringTheSend =>
+    a := Bt4919LastFieldWriteActor spawn
+    self assert: a blockLast equals: 7
+    self assert: a last equals: 7
+    self assert: a other equals: 1
+
   testClassMethodLoopThreadsLocal =>
     self assert: (Bt4919ClassMethodThreadingClass loopSum: 4) equals: 10
 

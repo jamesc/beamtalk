@@ -16,6 +16,31 @@ Actor subclass: Bt4919LastFieldWriteActor
     self.other := self.last + 1
     self.other
 
+  // The right-hand side's own user code changes ANOTHER field during the
+  // send: a fold block, a self-send, and a block passed to a self-send.
+  foldLast: items =>
+    self.last := items
+      inject: 0
+      into: [:a :e |
+        self.other := self.other + 1
+        a + e
+      ]
+
+  selfSendLast => self.last := self bump
+
+  blockLast =>
+    self.last := self
+      apply: [
+        self.other := self.other + 1
+        7
+      ]
+
+  bump =>
+    self.other := self.other + 10
+    3
+
+  apply: aBlock => aBlock value
+
   last => self.last
 
   other => self.other

@@ -685,9 +685,7 @@ impl CoreErlangGenerator {
     /// call production ran before this migration (byte-identity: only the
     /// container changed, from `Vec<Document>` to `Vec<ThreadedStmt>`).
     /// Field writes are real `Bind`s (`lower_field_assignment_bind`,
-    /// `lower_stmt_self_field_at_put`); version steps hidden inside a
-    /// remaining shared multi-module helper stay inside their `Statement`s —
-    /// see `verify_body_with_opaque_version_gaps`'s backfill accounting.
+    /// `lower_stmt_self_field_at_put`, `lower_stmt_self_clear_field`).
     ///
     /// Classification happens exactly once per statement (`classify_body_expr`),
     /// interleaved with lowering: just before a statement is lowered, so the
