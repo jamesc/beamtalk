@@ -32,6 +32,7 @@ verification that BEAM can invoke the Rust compiler via a port.
     categorize_methods/3,
     class_state_field_defaults/3,
     reindent_method_source/3,
+    complete_method_source/3,
     find_selector_send_spans/4,
     find_definition_selector_spans/6,
     build_class_module_index_in_source/4,
@@ -65,7 +66,9 @@ verification that BEAM can invoke the Rust compiler via a port.
 %% message, plus its hint as a separate field when it has one. Never folded
 %% into one string here — each REPL surface renders the hint itself.
 -type warning() :: #{message := binary(), hint => binary()}.
--export_type([warning/0]).
+-type expression_info() ::
+    #{assigned_var := binary() | none} | #{step_assignments := [binary() | none]}.
+-export_type([warning/0, expression_info/0]).
 
 -type transport_failure() :: malformed | exited | timeout | unavailable.
 -type shape() :: diag | port | unknown | fun((transport_failure()) -> term()).
@@ -193,7 +196,7 @@ open(BinaryPath) ->
 Compile a REPL expression through the port.
 
 Sends an ETF-encoded request and receives an ETF-encoded response.
-Returns `{ok, CoreErlang, Warnings}' on success,
+Returns `{ok, CoreErlang, Warnings, ExprInfo}' on success,
 `{ok, class_definition, ClassInfo}' for inline class definitions,
 `{ok, method_definition, MethodInfo}' for standalone method definitions,
 `{ok, protocol_definition, ProtocolInfo}' for protocol definitions,
@@ -201,7 +204,7 @@ or `{error, Diagnostics}' on failure, where each diagnostic is a map with
 `message', `line' (1-based), and optionally `hint'.
 """.
 -spec compile_expression(port(), binary(), binary(), [binary()]) ->
-    {ok, binary(), [warning()]}
+    {ok, binary(), [warning()], expression_info()}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
@@ -225,7 +228,7 @@ inline class definitions correctly resolve inherited types and module names
 from already-loaded files.
 """.
 -spec compile_expression(port(), binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [warning()]}
+    {ok, binary(), [warning()], expression_info()}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
@@ -288,13 +291,13 @@ Same request format as `compile_expression/4' but sends the
 `{Result, FinalState}'.
 """.
 -spec compile_expression_trace(port(), binary(), binary(), [binary()]) ->
-    {ok, binary(), [warning()]} | {error, [map()]}.
+    {ok, binary(), [warning()], expression_info()} | {error, [map()]}.
 compile_expression_trace(Port, Source, ModuleName, KnownVars) ->
     compile_expression_trace(Port, Source, ModuleName, KnownVars, #{}).
 
 -doc "Compile in trace mode with optional compilation options.".
 -spec compile_expression_trace(port(), binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [warning()]} | {error, [map()]}.
+    {ok, binary(), [warning()], expression_info()} | {error, [map()]}.
 compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
     Request0 = #{
         command => compile_expression_trace,
@@ -1196,6 +1199,30 @@ reindent_method_source(Port, Source, BaseIndent) when
 reindent_method_source(_Port, _Source, _BaseIndent) ->
     {error, bad_argument, <<"reindent_method_source: source and base_indent must be binary">>}.
 
+-doc """
+The complete method definition for `Source' patching `Selector' (BT-4911).
+
+`Source' is a full definition (returned unchanged) or a bare method body, in
+which case the compiler synthesises the `Selector => ' header in front of it
+(after any leading comments). The same rule `compile_method' applies, exposed
+for callers that splice the definition into a file themselves rather than
+compiling it. Pure text transform: parse problems are not reported here.
+""".
+-spec complete_method_source(port(), binary(), binary()) ->
+    {ok, binary()} | {error, port_error | bad_argument, binary()}.
+complete_method_source(Port, Source, Selector) when is_binary(Source), is_binary(Selector) ->
+    Request = #{command => complete_method_source, source => Source, selector => Selector},
+    port_roundtrip(
+        Port,
+        Request,
+        complete_method_source,
+        ?REINDENT_TIMEOUT_MS,
+        fun handle_reindent_response/1,
+        port
+    );
+complete_method_source(_Port, _Source, _Selector) ->
+    {error, bad_argument, <<"complete_method_source: source and selector must be binary">>}.
+
 -spec handle_reindent_response(map()) -> {ok, binary()} | {error, port_error, binary()}.
 handle_reindent_response(#{status := ok, source := Source}) when is_binary(Source) ->
     {ok, Source};
@@ -1234,7 +1261,7 @@ responses (ADR 0108 Phase 8). Diagnostics in error responses are maps with
 `message', `line', and optional `hint'.
 """.
 -spec handle_response(map()) ->
-    {ok, binary(), [warning()]}
+    {ok, binary(), [warning()], expression_info()}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
@@ -1345,13 +1372,25 @@ handle_response(#{
         doc_comment => DocComment,
         warnings => Warnings
     }};
-handle_response(#{status := ok, core_erlang := CoreErlang, warnings := Warnings}) ->
+handle_response(#{status := ok, core_erlang := CoreErlang, warnings := Warnings} = Response) ->
     PrettyCore = maybe_pretty_core(CoreErlang),
-    {ok, PrettyCore, Warnings};
+    {ok, PrettyCore, Warnings, expression_info(Response)};
 handle_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_response(Other) ->
     unexpected_diag_response("Unexpected compiler response", Other).
+
+%% BT-4911: what the compiler learned about the source's top-level statements,
+%% so the workspace never re-parses it. `assigned_var' (`compile_expression')
+%% is the binary name of the variable a single `name := ...' statement assigns,
+%% or `none'; `step_assignments' (`compile_expression_trace') is one such entry
+%% per trace step. A response from an older port binary that omits the keys
+%% decodes as "no assignment".
+-spec expression_info(map()) -> expression_info().
+expression_info(#{step_assignments := Steps}) when is_list(Steps) ->
+    #{step_assignments => Steps};
+expression_info(Response) ->
+    #{assigned_var => maps:get(assigned_var, Response, none)}.
 
 -doc """
 Handle ETF response from a resolve_completion_type request.

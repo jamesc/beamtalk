@@ -304,7 +304,7 @@ fn collect_coverage_files(source_path: &Utf8Path, path: &str) -> Result<Vec<Utf8
     let excluded_prefixes: Vec<Utf8PathBuf> = [
         "deps",
         "test",
-        "_build",
+        beamtalk_core::build_layout::BUILD_DIR_NAME,
         "stdlib",
         "bootstrap-test",
         "stubs",
@@ -404,7 +404,13 @@ mod tests {
     #[test]
     fn collect_excludes_standard_non_project_dirs() {
         let dir = TempDir::new().unwrap();
-        for excluded in &["deps", "test", "_build", "stdlib", "bootstrap-test"] {
+        for excluded in &[
+            "deps",
+            "test",
+            beamtalk_core::build_layout::BUILD_DIR_NAME,
+            "stdlib",
+            "bootstrap-test",
+        ] {
             let d = dir.path().join(excluded);
             fs::create_dir_all(&d).unwrap();
             fs::write(d.join("something.bt"), "// excluded").unwrap();

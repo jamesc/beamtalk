@@ -14,7 +14,7 @@ use rmcp::{
 
 use crate::server::lint::{compute_diagnostic_summary, run_lint_structured};
 use crate::server::params::{DiagnosticSummaryParams, LintParams};
-use crate::server::{BeamtalkMcp, ToolTimer};
+use crate::server::{BeamtalkMcp, InternalErr, ToolTimer};
 
 #[tool_router(router = diagnostics_tool_router, vis = "pub(crate)")]
 impl BeamtalkMcp {
@@ -26,14 +26,14 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<LintParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("lint");
+        let mut timer = ToolTimer::start_quiet("lint");
         let path = params.path.unwrap_or_else(|| ".".to_string());
         let warnings_as_errors = params.warnings_as_errors.unwrap_or(false);
         tracing::debug!(tool = "lint", path = %path, warnings_as_errors, "tool invoked");
         // Run blocking I/O and CPU-bound parsing off the Tokio worker thread.
         let result = tokio::task::spawn_blocking(move || run_lint_structured(&path))
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+            .internal_err()?;
         let has_errors = result.fails(warnings_as_errors);
         let text = serde_json::to_string_pretty(&result).unwrap_or_else(|_| format!("{result:?}"));
         let structured = serde_json::to_value(&result).ok();
@@ -58,13 +58,13 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<DiagnosticSummaryParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("diagnostic_summary");
+        let mut timer = ToolTimer::start_quiet("diagnostic_summary");
         let path = params.path.unwrap_or_else(|| ".".to_string());
         tracing::debug!(tool = "diagnostic_summary", path = %path, "tool invoked");
 
         let result = tokio::task::spawn_blocking(move || compute_diagnostic_summary(&path))
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))?;
+            .internal_err()?;
 
         let text = serde_json::to_string_pretty(&result).unwrap_or_else(|_| format!("{result:?}"));
         let structured = serde_json::to_value(&result).ok();

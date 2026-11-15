@@ -23,82 +23,23 @@ focused on the publish/clearing behaviour this layer adds.
 
 -include_lib("eunit/include/eunit.hrl").
 
+-define(PREFIX, <<"LoaderReCheck">>).
+
+loader_recheck_setup() ->
+    beamtalk_test_recheck_fixtures:setup(fixture_opts()).
+
+loader_recheck_teardown(_) ->
+    beamtalk_test_recheck_fixtures:teardown(fixture_opts()).
+
+fixture_opts() ->
+    #{
+        workspace_id => <<"loader_recheck_test_ws">>,
+        restart => [beamtalk_workspace_findings_store]
+    }.
+
 %%====================================================================
 %% Integration fixture: real compiler port + xref + workspace_meta + store
 %%====================================================================
-
-loader_recheck_setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
-    application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
-    %% `mode => run` for the same test-isolation reason
-    %% `beamtalk_recheck_tests:recheck_setup/0` uses it — see that module's
-    %% comment for the disk-persistence gotcha this avoids.
-    {ok, _} = beamtalk_workspace_meta:start_link(#{
-        workspace_id => <<"loader_recheck_test_ws">>,
-        project_path => undefined,
-        created_at => erlang:system_time(second),
-        mode => run
-    }),
-    beamtalk_test_repl:clear_xref(),
-    beamtalk_compiler_server:clear_classes(),
-    case whereis(beamtalk_workspace_findings_store) of
-        undefined -> ok;
-        FindingsPid -> gen_server:stop(FindingsPid)
-    end,
-    {ok, _} = beamtalk_workspace_findings_store:start_link(),
-    %% `beamtalk_repl_subscriptions:subscribe_bus/2` is a no-op (silently
-    %% skipped, by design — see its doc) when the SystemAnnouncer bus isn't
-    %% running yet; `system_announce/2` only starts it on demand at the
-    %% *first announce*, which would be too late for a subscription made
-    %% beforehand. Ensure it's up here so every test's own subscribe (see
-    %% `subscribe_self_to_reload_check/0` — deliberately called from EACH
-    %% test body, not here: an eunit `{setup, ...}` fixture's `Start`
-    %% function is not guaranteed to run in the same process as the test
-    %% body it brackets, and a `self()`-keyed subscription is only useful
-    %% if subscriber and receiver are the same process) actually registers.
-    ok = beamtalk_announcements:ensure_started(),
-    ok.
-
-%% Subscribe *this* process (the test body's own pid) to the `reload_check`
-%% stream. Must be called from inside each `?_test(...)` body — see
-%% `loader_recheck_setup/0`'s comment for why it can't live in `Setup`.
-subscribe_self_to_reload_check() ->
-    ok = beamtalk_repl_subscriptions:subscribe(reload_check, self()).
-
-loader_recheck_teardown(_) ->
-    beamtalk_repl_subscriptions:unsubscribe(reload_check, self()),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
-    case whereis(beamtalk_workspace_findings_store) of
-        undefined -> ok;
-        FindingsPid -> gen_server:stop(FindingsPid)
-    end,
-    beamtalk_test_repl:clear_xref(),
-    _ = application:stop(beamtalk_compiler),
-    ok.
-
-%% Wait (up to ~2s) for a 'ReloadCheckCompleted' announcement to reach this
-%% process's mailbox, decoding it into a plain map for easy assertions.
-%% Announcements are async (`beamtalk_announcements:system_announce/2`
-%% dispatches via the async veneer path), so a test that triggers a recheck
-%% must not assert on the mailbox immediately.
-receive_reload_check_announcement() ->
-    receive
-        {beamtalk_announcement, _SubRef, 'ReloadCheckCompleted', _Handler, Event} ->
-            Event
-    after 2000 ->
-        error(timeout_waiting_for_reload_check_announcement)
-    end.
 
 %% Fail loudly if an announcement arrives when the test expects none —
 %% distinguishes "nothing happened" from "something happened but we didn't
@@ -116,25 +57,6 @@ assert_no_reload_check_announcement() ->
 %% Fixtures: LoaderReCheckCounter (changed class) / LoaderReCheckDashboard (caller)
 %%====================================================================
 
-dashboard_xref() ->
-    [
-        #{
-            class_side => false,
-            selector => 'refresh:',
-            line => 2,
-            sends => [#{selector => size, line => 2, recv_kind => other}],
-            references => [#{class => 'LoaderReCheckCounter', line => 2}],
-            source_status => indexed,
-            provenance => class_body
-        }
-    ].
-
-dashboard_source() ->
-    <<
-        "Object subclass: LoaderReCheckDashboard\n"
-        "  refresh: c :: LoaderReCheckCounter -> Integer => (c size) + 1\n"
-    >>.
-
 counter_hierarchy(ReturnType) ->
     #{
         superclass => 'Object',
@@ -149,9 +71,11 @@ install_fixture(ReturnType) ->
     beamtalk_compiler_server:register_class(
         'LoaderReCheckCounter', counter_hierarchy(ReturnType)
     ),
-    ok = beamtalk_xref:register_class('LoaderReCheckDashboard', dashboard_xref()),
+    ok = beamtalk_xref:register_class(
+        'LoaderReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
+    ),
     ok = beamtalk_workspace_meta:set_class_source(
-        <<"LoaderReCheckDashboard">>, dashboard_source()
+        <<"LoaderReCheckDashboard">>, beamtalk_test_recheck_fixtures:dashboard_source(?PREFIX)
     ).
 
 %%====================================================================
@@ -163,7 +87,7 @@ reload_fixes_reload_clears_a_fixed_finding_test_() ->
         {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
                     %% Reload A: Counter>>size now returns String — Dashboard's
                     %% `(c size) + 1` goes stale.
                     install_fixture('String'),
@@ -179,7 +103,7 @@ reload_fixes_reload_clears_a_fixed_finding_test_() ->
                     ),
                     ?assertEqual(1, length(FindingsAfterA)),
 
-                    EventA = receive_reload_check_announcement(),
+                    EventA = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
                     ?assertEqual(<<"LoaderReCheckCounter">>, maps:get(changedClass, EventA)),
                     ?assert(
                         lists:member(<<"LoaderReCheckDashboard">>, maps:get(checkedOwners, EventA))
@@ -204,7 +128,7 @@ reload_fixes_reload_clears_a_fixed_finding_test_() ->
                     ),
                     ?assertEqual([], FindingsAfterB),
 
-                    EventB = receive_reload_check_announcement(),
+                    EventB = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
                     ?assertEqual(
                         [<<"LoaderReCheckDashboard">>], maps:get(checkedOwners, EventB)
                     ),
@@ -230,7 +154,7 @@ different_changed_class_origin_survives_test_() ->
         {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
                     %% Simulate an earlier, unrelated reload of
                     %% LoaderReCheckWidget having already flagged Dashboard.
                     WidgetFinding = #{
@@ -258,7 +182,7 @@ different_changed_class_origin_survives_test_() ->
                         instance,
                         {captured, undefined, signature_change}
                     ),
-                    _ = receive_reload_check_announcement(),
+                    _ = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
 
                     %% Dashboard must now show BOTH findings — Counter's
                     %% reload must not have discarded Widget's.
@@ -277,7 +201,7 @@ different_changed_class_origin_survives_test_() ->
                         instance,
                         {captured, 'String', signature_change}
                     ),
-                    _ = receive_reload_check_announcement(),
+                    _ = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
 
                     ?assertEqual(
                         [WidgetFinding],
@@ -296,7 +220,7 @@ supersession_replaces_not_accumulates_test_() ->
         {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
                     install_fixture('String'),
 
                     ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
@@ -305,7 +229,7 @@ supersession_replaces_not_accumulates_test_() ->
                         instance,
                         {captured, undefined, signature_change}
                     ),
-                    _ = receive_reload_check_announcement(),
+                    _ = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
                     ?assertEqual(
                         1,
                         length(
@@ -324,7 +248,7 @@ supersession_replaces_not_accumulates_test_() ->
                         instance,
                         {captured, 'String', signature_change}
                     ),
-                    _ = receive_reload_check_announcement(),
+                    _ = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
                     ?assertEqual(
                         1,
                         length(
@@ -349,7 +273,7 @@ own_install_clears_stale_findings_as_caller_test_() ->
         {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
                     %% Seed TWO stale findings for Dashboard from DIFFERENT
                     %% origins, as if two earlier reloads (of two different
                     %% classes) had each flagged it. `clear_owner/1` is
@@ -418,7 +342,7 @@ own_install_clears_stale_findings_as_caller_test_() ->
                         beamtalk_workspace_findings_store:for_owner(<<"LoaderReCheckDashboard">>)
                     ),
 
-                    Event = receive_reload_check_announcement(),
+                    Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
                     ?assertEqual(
                         <<"self_edit">>, atom_to_binary(maps:get(classification, Event), utf8)
                     ),
@@ -453,28 +377,6 @@ no_op_install_with_nothing_to_clear_announces_nothing_test_() ->
 %% Caller-cap staleness marking (ADR 0105)
 %%====================================================================
 
-%% Second dependent, alphabetically AFTER Dashboard — with `recheck_caller_cap`
-%% set to 1, `apply_cap/2`'s alphabetically-first-N rule always keeps
-%% Dashboard and drops ListView.
-listview_xref() ->
-    [
-        #{
-            class_side => false,
-            selector => 'render:',
-            line => 2,
-            sends => [#{selector => size, line => 2, recv_kind => other}],
-            references => [#{class => 'LoaderReCheckCounter', line => 2}],
-            source_status => indexed,
-            provenance => class_body
-        }
-    ].
-
-listview_source() ->
-    <<
-        "Object subclass: LoaderReCheckListView\n"
-        "  render: c :: LoaderReCheckCounter -> Integer => (c size) + 1\n"
-    >>.
-
 %% Installs both dependents of `size`, with the caller cap set to 1 so
 %% Dashboard (alphabetically first) is always kept and ListView is always
 %% dropped. Restores the previous cap in a `try/after`.
@@ -483,9 +385,13 @@ with_capped_fixture(ReturnType, Fun) ->
     application:set_env(beamtalk_workspace, recheck_caller_cap, 1),
     try
         install_fixture(ReturnType),
-        ok = beamtalk_xref:register_class('LoaderReCheckListView', listview_xref()),
+        ok = beamtalk_xref:register_class(
+            'LoaderReCheckListView',
+            beamtalk_test_recheck_fixtures:listview_xref(['LoaderReCheckCounter'])
+        ),
         ok = beamtalk_workspace_meta:set_class_source(
-            <<"LoaderReCheckListView">>, listview_source()
+            <<"LoaderReCheckListView">>,
+            beamtalk_test_recheck_fixtures:listview_counter_source(?PREFIX)
         ),
         Fun()
     after
@@ -666,7 +572,9 @@ install_fixture_no_live_source(ReturnType) ->
     beamtalk_compiler_server:register_class(
         'LoaderReCheckCounter', counter_hierarchy(ReturnType)
     ),
-    ok = beamtalk_xref:register_class('LoaderReCheckDashboard', dashboard_xref()).
+    ok = beamtalk_xref:register_class(
+        'LoaderReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
+    ).
 
 skipped_candidate_with_existing_finding_gets_marked_stale_test_() ->
     {timeout, 30,

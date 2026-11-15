@@ -53,10 +53,7 @@ compiler_server_available() ->
 %% modules that assert on the "no workspace started" error path (e.g.
 %% beamtalk_logging_config_tests.erl).
 stop_workspace_meta_if_running() ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end.
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta).
 
 %% Start a throwaway workspace_meta (mode => run, so it never touches
 %% disk) for the duration of `Fun/1`, passing whether it actually started —

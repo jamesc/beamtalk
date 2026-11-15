@@ -18,18 +18,14 @@ use beamtalk_core::tool_expr::{
     rename_class_expr, rename_method_expr, save_class_expr,
 };
 use beamtalk_core::unparse::escape_string_literal;
-use rmcp::{
-    handler::server::wrapper::Parameters,
-    model::{CallToolResult, ContentBlock},
-    tool, tool_router,
-};
+use rmcp::{handler::server::wrapper::Parameters, model::CallToolResult, tool, tool_router};
 
 use crate::server::params::{
     PrecheckMethodParams, ReloadClassParams, RemoveClassParams, RemoveMethodParams,
     RenameClassParams, RenameMethodParams, SaveClassParams, SaveMethodParams, TryMethodParams,
 };
 use crate::server::{
-    BeamtalkMcp, ToolTimer, check_response, validate_class_name, validate_selector,
+    BeamtalkMcp, InternalErr, ToolTimer, check_response, validate_class_name, validate_selector,
 };
 
 /// Build the Beamtalk expression for the `save_method` MCP tool — durable
@@ -64,7 +60,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<ReloadClassParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("reload_class");
+        let mut timer = ToolTimer::start_quiet("reload_class");
         tracing::debug!(tool = "reload_class", class = %params.class, "tool invoked");
         validate_class_name(&params.class)?;
         // Use native Beamtalk API: ClassName reload
@@ -73,7 +69,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to reload class");
 
@@ -86,8 +82,7 @@ impl BeamtalkMcp {
             }
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Durably install a method on a Beamtalk class (ADR 0082 Phase 3).
@@ -102,7 +97,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<SaveMethodParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("save_method");
+        let mut timer = ToolTimer::start_quiet("save_method");
         validate_class_name(&params.class)?;
         let selector = params
             .selector
@@ -125,7 +120,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to save method");
 
@@ -138,8 +133,7 @@ impl BeamtalkMcp {
             }
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Ephemerally install a method on a Beamtalk class (ADR 0082 Phase 3).
@@ -155,7 +149,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<TryMethodParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("try_method");
+        let mut timer = ToolTimer::start_quiet("try_method");
         validate_class_name(&params.class)?;
         let selector = params
             .selector
@@ -176,7 +170,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to try method");
 
@@ -192,8 +186,7 @@ impl BeamtalkMcp {
             }
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Create a new Beamtalk class at a path (ADR 0082 Phase 3).
@@ -208,7 +201,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<SaveClassParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("save_class");
+        let mut timer = ToolTimer::start_quiet("save_class");
         if params.path.is_empty() {
             return Err(rmcp::ErrorData::invalid_params(
                 "save_class: 'path' must not be empty.",
@@ -233,7 +226,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to save class");
 
@@ -246,8 +239,7 @@ impl BeamtalkMcp {
             }
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Remove a method from a Beamtalk class (ADR 0112 Phase 4).
@@ -266,7 +258,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<RemoveMethodParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("remove_method");
+        let mut timer = ToolTimer::start_quiet("remove_method");
         validate_class_name(&params.class)?;
         let selector = params
             .selector
@@ -289,7 +281,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to remove method");
 
@@ -302,8 +294,7 @@ impl BeamtalkMcp {
             }
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Remove a class from the running Beamtalk system (ADR 0113 Phase 4).
@@ -324,7 +315,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<RemoveClassParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("remove_class");
+        let mut timer = ToolTimer::start_quiet("remove_class");
         validate_class_name(&params.class)?;
         tracing::debug!(tool = "remove_class", class = %params.class, "tool invoked");
 
@@ -333,7 +324,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to remove class");
 
@@ -349,8 +340,7 @@ impl BeamtalkMcp {
             )
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Rename a class in the running Beamtalk system (ADR 0114 Phase 5).
@@ -376,7 +366,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<RenameClassParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("rename_class");
+        let mut timer = ToolTimer::start_quiet("rename_class");
         validate_class_name(&params.class)?;
         validate_class_name(&params.new_name)?;
         tracing::debug!(
@@ -391,7 +381,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to rename class");
 
@@ -400,8 +390,7 @@ impl BeamtalkMcp {
             response.value_string()
         );
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Rename a method on a class in the running Beamtalk system (ADR 0114
@@ -427,7 +416,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<RenameMethodParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("rename_method");
+        let mut timer = ToolTimer::start_quiet("rename_method");
         validate_class_name(&params.class)?;
         let selector = params
             .selector
@@ -452,7 +441,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to rename method");
 
@@ -461,8 +450,7 @@ impl BeamtalkMcp {
             response.value_string()
         );
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Pre-save advisory precheck (ADR 0105 Phase 3).
@@ -477,7 +465,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<PrecheckMethodParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("precheck_method");
+        let mut timer = ToolTimer::start_quiet("precheck_method");
         validate_class_name(&params.class)?;
         let selector = params
             .selector
@@ -497,7 +485,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to precheck method");
 
@@ -510,7 +498,6 @@ impl BeamtalkMcp {
             }
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 }

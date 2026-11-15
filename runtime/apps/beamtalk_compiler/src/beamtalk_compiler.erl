@@ -48,6 +48,7 @@ All functions delegate to `beamtalk_compiler_server' (port backend).
     categorize_methods/2,
     class_state_field_defaults/2,
     reindent_method_source/2,
+    complete_method_source/2,
     find_selector_send_spans/3,
     find_definition_selector_spans/5,
     build_class_module_index_in_source/3,
@@ -62,14 +63,14 @@ Compile a REPL expression.
 `ModuleName' is the unique module name for this evaluation.
 `KnownVars' is a list of variable name binaries from the REPL session.
 
-Returns `{ok, CoreErlang, Warnings}' for expressions,
+Returns `{ok, CoreErlang, Warnings, ExprInfo}' for expressions,
 `{ok, class_definition, ClassInfo}' for inline class definitions,
 `{ok, method_definition, MethodInfo}' for standalone method definitions,
 or `{error, Diagnostics}' on failure, where each diagnostic is a map with
 `message', `line' (1-based), and optionally `hint'.
 """.
 -spec compile_expression(binary(), binary(), [binary()]) ->
-    {ok, binary(), [beamtalk_compiler_port:warning()]}
+    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
@@ -85,7 +86,7 @@ Options:
   class_superclass_index => #{binary() => binary()} — cross-file superclass info
 """.
 -spec compile_expression(binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [beamtalk_compiler_port:warning()]}
+    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
@@ -97,16 +98,18 @@ compile_expression(Source, ModuleName, KnownVars, Options) ->
 -doc """
 Compile a REPL expression in trace mode.
 
-Returns `{ok, CoreErlang, Warnings}' where the generated module's `eval/1'
+Returns `{ok, CoreErlang, Warnings, ExprInfo}' where the generated module's `eval/1'
 returns `{[{<<"src0">>, Val0}, ...], FinalState}' instead of `{Result, FinalState}'.
 """.
 -spec compile_expression_trace(binary(), binary(), [binary()]) ->
-    {ok, binary(), [beamtalk_compiler_port:warning()]} | {error, [map()]}.
+    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()}
+    | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars) ->
     beamtalk_compiler_server:compile_expression_trace(Source, ModuleName, KnownVars, #{}).
 
 -spec compile_expression_trace(binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [beamtalk_compiler_port:warning()]} | {error, [map()]}.
+    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()}
+    | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
     beamtalk_compiler_server:compile_expression_trace(Source, ModuleName, KnownVars, Options).
 
@@ -668,3 +671,15 @@ Returns `{ok, Source}' or `{error, Reason, Message}'.
     {ok, binary()} | {error, atom(), binary()}.
 reindent_method_source(Source, BaseIndent) ->
     beamtalk_compiler_server:reindent_method_source(Source, BaseIndent).
+
+-doc """
+The complete method definition for `Source' patching `Selector' (BT-4911).
+
+A full definition comes back unchanged; a bare method body gets the
+`Selector => ' header synthesised in front of it (after any leading comments).
+Returns `{ok, Source}' or `{error, Reason, Message}'.
+""".
+-spec complete_method_source(binary(), binary()) ->
+    {ok, binary()} | {error, atom(), binary()}.
+complete_method_source(Source, Selector) ->
+    beamtalk_compiler_server:complete_method_source(Source, Selector).

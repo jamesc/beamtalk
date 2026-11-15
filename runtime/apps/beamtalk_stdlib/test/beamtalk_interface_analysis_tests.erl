@@ -45,11 +45,7 @@ stop_compiler_if_started(false) ->
     ok.
 
 start_compiler_if_was_started(true) ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end;
+    beamtalk_test_boot:compiler();
 start_compiler_if_was_started(false) ->
     ok.
 

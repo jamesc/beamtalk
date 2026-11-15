@@ -20,7 +20,9 @@ use crate::server::params::{
     CompleteParams, EvaluateParams, InspectParams, LoadFileParams, LoadProjectParams,
     ShowCodegenParams, TestParams, UnloadParams,
 };
-use crate::server::{BeamtalkMcp, MCP_OUTPUT_MODE, ToolTimer, check_response, error_result};
+use crate::server::{
+    BeamtalkMcp, InternalErr, MCP_OUTPUT_MODE, ToolTimer, check_response, error_result,
+};
 use crate::server::{pretty_json, validate_class_name};
 
 #[tool_router(router = evaluate_tool_router, vis = "pub(crate)")]
@@ -33,7 +35,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<EvaluateParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("evaluate");
+        let mut timer = ToolTimer::start_quiet("evaluate");
         let use_trace = params.trace.unwrap_or(false);
         tracing::debug!(
             tool = "evaluate",
@@ -45,7 +47,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&params.code, use_trace)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         if response.is_error() {
             let msg = response.error_message().unwrap_or("Unknown error");
@@ -112,8 +114,7 @@ impl BeamtalkMcp {
         // shows them after an eval.
         parts.extend(warnings);
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(parts))
+        timer.ok_parts(parts)
     }
 
     /// Get autocompletion suggestions for partial beamtalk input.
@@ -124,7 +125,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<CompleteParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("complete");
+        let mut timer = ToolTimer::start_quiet("complete");
         let code_len = params.code.len();
         tracing::debug!(tool = "complete", code_len, cursor = ?params.cursor, "tool invoked");
         let cursor = params.cursor.unwrap_or(code_len).min(code_len);
@@ -135,7 +136,7 @@ impl BeamtalkMcp {
             .client
             .complete(code_up_to_cursor, cursor)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Completion failed");
 
@@ -146,8 +147,7 @@ impl BeamtalkMcp {
             completions.join("\n")
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Load all `.bt` source files from a project in dependency order.
@@ -158,7 +158,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<LoadProjectParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("load_project");
+        let mut timer = ToolTimer::start_quiet("load_project");
         let include_tests = params.include_tests.unwrap_or(false);
         let force = params.force.unwrap_or(false);
         tracing::debug!(tool = "load_project", path = %params.path, include_tests, force, "tool invoked");
@@ -166,7 +166,7 @@ impl BeamtalkMcp {
             .client
             .load_project(&params.path, include_tests, force)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to load project");
 
@@ -261,8 +261,7 @@ impl BeamtalkMcp {
             parts.push(ContentBlock::text(summary));
         }
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(parts))
+        timer.ok_parts(parts)
     }
 
     /// Load a `.bt` source file into the workspace.
@@ -273,7 +272,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<LoadFileParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("load_file");
+        let mut timer = ToolTimer::start_quiet("load_file");
         tracing::debug!(tool = "load_file", path = %params.path, "tool invoked");
         // Use native Beamtalk API: Workspace load: "path"
         let expr = format!(
@@ -284,7 +283,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to load file");
 
@@ -302,8 +301,7 @@ impl BeamtalkMcp {
         // Include any warnings
         parts.extend(warning_blocks(&response));
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(parts))
+        timer.ok_parts(parts)
     }
 
     /// Unload a class from the workspace.
@@ -314,22 +312,14 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<UnloadParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("unload");
+        let mut timer = ToolTimer::start_quiet("unload");
         validate_class_name(&params.class)?;
         tracing::debug!(tool = "unload", class = %params.class, "tool invoked");
-        let response = self
-            .client
-            .unload(&params.class)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let response = self.client.unload(&params.class).await.internal_err()?;
 
         check_response!(response, "Failed to unload class");
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(format!(
-            "Class '{}' unloaded",
-            params.class
-        ))]))
+        timer.ok_text(format!("Class '{}' unloaded", params.class))
     }
 
     /// Interrupt a running evaluation.
@@ -337,20 +327,12 @@ impl BeamtalkMcp {
         description = "Interrupt a running evaluation in the REPL. Use this to cancel long-running or stuck evaluations."
     )]
     pub(crate) async fn interrupt(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("interrupt");
-        tracing::debug!(tool = "interrupt", "tool invoked");
-        let response = self
-            .client
-            .interrupt()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let mut timer = ToolTimer::start("interrupt");
+        let response = self.client.interrupt().await.internal_err()?;
 
         check_response!(response, "Failed to send interrupt");
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            "Interrupt sent",
-        )]))
+        timer.ok_text("Interrupt sent")
     }
 
     /// Inspect a running actor's state by PID.
@@ -361,13 +343,9 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<InspectParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("inspect");
+        let mut timer = ToolTimer::start_quiet("inspect");
         tracing::debug!(tool = "inspect", actor = %params.actor, "tool invoked");
-        let response = self
-            .client
-            .inspect(&params.actor)
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let response = self.client.inspect(&params.actor).await.internal_err()?;
 
         check_response!(response, "Failed to inspect actor");
 
@@ -377,8 +355,7 @@ impl BeamtalkMcp {
             None => "No state available".to_string(),
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Inspect the generated Core Erlang code for a beamtalk expression or loaded class.
@@ -389,7 +366,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<ShowCodegenParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("show_codegen");
+        let mut timer = ToolTimer::start_quiet("show_codegen");
         tracing::debug!(tool = "show_codegen", class = ?params.class, has_code = params.code.is_some(), selector = ?params.selector, "tool invoked");
         // Normalize empty strings to absent — Some("") is not a valid class or code.
         let class = params.class.filter(|s| !s.is_empty());
@@ -416,7 +393,7 @@ impl BeamtalkMcp {
                 ));
             }
         }
-        .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        .internal_err()?;
 
         check_response!(response, "Failed to generate Core Erlang");
 
@@ -431,8 +408,7 @@ impl BeamtalkMcp {
 
         parts.extend(warnings);
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(parts))
+        timer.ok_parts(parts)
     }
 
     /// Run `BUnit` tests.
@@ -443,7 +419,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<TestParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("test");
+        let mut timer = ToolTimer::start_quiet("test");
         tracing::debug!(tool = "test", class = ?params.class, file = ?params.file, "tool invoked");
         if params.class.is_some() && params.file.is_some() {
             return Ok(error_result(
@@ -455,7 +431,7 @@ impl BeamtalkMcp {
             (_, Some(file)) => self.client.test_file(file).await,
             _ => self.client.test_all().await,
         }
-        .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        .internal_err()?;
 
         check_response!(response, "Test execution failed");
 
@@ -470,8 +446,7 @@ impl BeamtalkMcp {
             return Ok(error_result(format!("TEST FAILURES:\n{text}")));
         }
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 }
 

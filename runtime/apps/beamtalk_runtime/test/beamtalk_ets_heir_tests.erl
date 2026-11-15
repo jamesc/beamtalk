@@ -39,6 +39,10 @@ heir_test_() ->
                 fun adopt_owned_tables_sets_heir/0},
             {"ensure_table/2 creates, then reclaims after the owner dies",
                 fun ensure_table_creates_then_reclaims/0},
+            {"ensure_shared_table/2 creates with the heir, then adopts idempotently",
+                fun ensure_shared_table_creates_then_adopts/0},
+            {"ensure_shared_table/2 tolerates a creation race",
+                fun ensure_shared_table_tolerates_race/0},
             {"ensure_table/2 on a caller-owned table does not call the heir",
                 fun ensure_table_owned_skips_heir_call/0},
             {"trace store crash: tables survive and are reclaimed by the new store",
@@ -150,6 +154,49 @@ adopt_owned_tables_sets_heir() ->
         ?assert(false)
     end,
     delete_test_table().
+
+ensure_shared_table_creates_then_adopts() ->
+    HeirPid = whereis(beamtalk_ets_heir),
+    Opts = [named_table, public, set],
+    ?assertEqual(ok, beamtalk_ets_heir:ensure_shared_table(?TABLE, Opts)),
+    ?assertEqual(HeirPid, ets:info(?TABLE, heir)),
+    ets:insert(?TABLE, {kept, 1}),
+    %% Second call adopts the existing table; contents survive.
+    ?assertEqual(ok, beamtalk_ets_heir:ensure_shared_table(?TABLE, Opts)),
+    ?assertEqual([{kept, 1}], ets:lookup(?TABLE, kept)),
+    %% A table created without an heir gets one retroactively.
+    ets:delete(?TABLE),
+    ?TABLE = ets:new(?TABLE, Opts),
+    ?assertNotEqual(HeirPid, ets:info(?TABLE, heir)),
+    ?assertEqual(ok, beamtalk_ets_heir:ensure_shared_table(?TABLE, Opts)),
+    ?assertEqual(HeirPid, ets:info(?TABLE, heir)),
+    ets:delete(?TABLE).
+
+ensure_shared_table_tolerates_race() ->
+    %% Many processes create the same table at once: exactly one `ets:new/2`
+    %% wins, every caller returns `ok`.
+    Parent = self(),
+    Opts = [named_table, public, set],
+    Pids = [
+        spawn_link(fun() ->
+            Parent ! {done, self(), beamtalk_ets_heir:ensure_shared_table(?TABLE, Opts)},
+            receive
+                stop -> ok
+            end
+        end)
+     || _ <- lists:seq(1, 20)
+    ],
+    Results = [
+        receive
+            {done, Pid, R} -> R
+        after 2000 -> timeout
+        end
+     || Pid <- Pids
+    ],
+    %% Release the workers before asserting, so a failure leaves none blocked.
+    [P ! stop || P <- Pids],
+    ?assertEqual(lists:duplicate(20, ok), Results),
+    ?assertNotEqual(undefined, ets:whereis(?TABLE)).
 
 ensure_table_owned_skips_heir_call() ->
     HeirPid = whereis(beamtalk_ets_heir),
@@ -271,6 +318,17 @@ instance_registry_reclaims_after_crash() ->
     end.
 
 boot_tables_name_heir() ->
+    %% Other suites run in the same VM (e.g. beamtalk_class_registry_tests)
+    %% recreate this table from a test process, which would then own it.
+    %% Restart the app with the table removed so it is created by
+    %% beamtalk_runtime_app:start/2, whatever ran before.
+    ok = application:stop(beamtalk_runtime),
+    try
+        ets:delete(beamtalk_class_state_snapshot)
+    catch
+        error:badarg -> ok
+    end,
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
     HeirPid = whereis(beamtalk_ets_heir),
     %% beamtalk_class_state_snapshot is created by beamtalk_runtime_app:start/2
     %% (owned by the application master), not by the first class gen_server,

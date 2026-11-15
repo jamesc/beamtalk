@@ -1162,9 +1162,7 @@ init({ClassName, ClassInfo}) ->
 -spec join_class_registry() -> ok.
 join_class_registry() ->
     beamtalk_class_registry:ensure_pg_started(),
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
-    beamtalk_class_registry:ensure_methods_table(),
+    beamtalk_class_metadata:new(),
     beamtalk_class_registry:ensure_pid_table(),
     beamtalk_class_registry:ensure_loaded_classes_table(),
     beamtalk_class_registry:ensure_backing_module_index_table(),
@@ -2599,7 +2597,7 @@ do_remove_class_method(Selector, #class_state{name = ClassName} = State) ->
         {ok, Source} ->
             beamtalk_class_publish:put_method_xref(ClassName, true, Selector, Source);
         error ->
-            beamtalk_class_publish:safe_xref(fun() ->
+            beamtalk_extensions:safe_xref(fun() ->
                 beamtalk_xref:purge_method(ClassName, true, Selector)
             end)
     end,

@@ -665,11 +665,7 @@ method_source_binary_falls_back_to_list_expression_test() ->
 %%====================================================================
 
 loader_setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
     Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Proj = Tmp ++ "/bt_loader_proj_" ++ beamtalk_test_unique:id(),
@@ -685,10 +681,7 @@ loader_setup() ->
     ),
     %% A workspace_meta with a real project_path makes classify_source_file/1
     %% treat files under Proj as flushable (in-project).
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     {ok, _} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"loader_test_ws">>,
         project_path => list_to_binary(Proj),
@@ -720,18 +713,9 @@ loader_teardown(Proj) ->
     %% Stop the singleton servers this fixture started so later test modules
     %% (e.g. beamtalk_workspace_changelog_tests, which start_link their own
     %% registered server with a {ok, Pid} match) see a clean slate.
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        ClPid -> gen_server:stop(ClPid)
-    end,
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
-    case whereis(beamtalk_workspace_signature_store) of
-        undefined -> ok;
-        SigStorePid -> gen_server:stop(SigStorePid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_changelog),
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_signature_store),
     %% Stop the compiler app so later test modules in the shared EUnit node see
     %% the baseline "compiler not running" state (noproc error-path tests in
     %% beamtalk_repl_eval_tests depend on it).

@@ -68,14 +68,14 @@
 //! keystroke path the memo above means a keystroke re-stats the project but
 //! never re-parses it unless a fingerprint changed.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
+use beamtalk_core::build_layout::BuildLayout;
 use beamtalk_core::compilation::dep_graph::{
-    DEP_GRAPH_SNAPSHOT_FILE, DepGraphSnapshotError, declared_dependency_names_from_manifest_toml,
-    declared_path_dependencies_from_manifest_toml, read_dep_graph_snapshot,
+    DepGraphSnapshotError, declared_dependency_names_from_manifest_toml, read_dep_graph_snapshot,
     resolved_dependency_names,
 };
 use beamtalk_core::compilation::dep_order::topological_order;
@@ -85,6 +85,8 @@ use beamtalk_core::compilation::load_diagnostics_table_for_root;
 use beamtalk_core::semantic_analysis::ProjectAnalysisContext;
 use beamtalk_core::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
+use beamtalk_project::dependencies::parse_manifest_dependencies;
+use beamtalk_project::dependency_graph::discover_dependency_graph;
 use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::registry::load_native_type_registry_from;
@@ -435,89 +437,69 @@ fn registry_fingerprint(root: &Utf8Path, cache_dir: &Path) -> Vec<Fingerprint> {
 /// `beamtalk build` accepts — transitive dependencies included — until the
 /// next build rewrites the snapshot. The listing is only a fallback: with a
 /// usable snapshot, a checkout outside the resolved graph never contributes.
+///
+/// Where each dependency lives is the shared offline walk's call
+/// ([`discover_dependency_graph`]: path dependencies at the declared path,
+/// relative to the declaring manifest, git/registry ones under
+/// `_build/deps/<name>/`); this function only prunes it by the snapshot and
+/// orders the result.
 fn dependency_roots(root: &Utf8Path, manifest_toml: &str) -> Vec<(Utf8PathBuf, String)> {
-    let deps_dir = root.join("_build/deps");
+    let layout = BuildLayout::new(root);
     let declared = declared_dependency_names_from_manifest_toml(manifest_toml);
-    let (names, graph_is_resolved) =
-        match read_dep_graph_snapshot(deps_dir.join(DEP_GRAPH_SNAPSHOT_FILE).as_std_path()) {
-            Ok(snapshot) => (resolved_dependency_names(&snapshot, &declared), true),
-            Err(reason) => {
-                if reason != DepGraphSnapshotError::Missing {
-                    tracing::debug!(
-                        root = %root,
-                        %reason,
-                        "dependency-graph snapshot unusable; falling back to _build/deps/ checkouts"
-                    );
-                }
-                (
-                    unresolved_graph_dependency_names(&deps_dir, declared),
-                    false,
-                )
+    let resolved_names = match read_dep_graph_snapshot(layout.dep_graph_path().as_std_path()) {
+        Ok(snapshot) => Some(resolved_dependency_names(&snapshot, &declared)),
+        Err(reason) => {
+            if reason != DepGraphSnapshotError::Missing {
+                tracing::debug!(
+                    root = %root,
+                    %reason,
+                    "dependency-graph snapshot unusable; falling back to _build/deps/ checkouts"
+                );
             }
-        };
-    locate_dependencies(root, manifest_toml, &deps_dir, &names, graph_is_resolved)
-}
-
-/// A resolved dependency's on-disk root and the names its own manifest
-/// declares.
-struct LocatedDependency {
-    root: Utf8PathBuf,
-    declared: Vec<String>,
-}
-
-/// Find each of `names` on disk and order them as the build does.
-///
-/// Where a dependency lives depends on how its *declaring* manifest asks for
-/// it (BT-4326): a path dependency's sources stay at the declared path,
-/// relative to that manifest's directory (the build's
-/// `canonicalize_dep_path`); hex/git/registry dependencies are unpacked to
-/// `_build/deps/<name>/`. So this walks manifests from the project's, the way
-/// the build's discovery does, instead of guessing a layout. A name no
-/// manifest reaches (the unusable-snapshot fallback listing) is looked for
-/// under `_build/deps/`. With a usable snapshot (`graph_is_resolved`) only
-/// `names` are located; without one every dependency a manifest reaches is.
-///
-/// The result is in the build's compilation order
-/// ([`topological_order`]: leaves first, ties by name) — the order
-/// `dep_ctx.resolved_deps` carries, so a same-named alias declared by two
-/// dependencies has the same first-wins winner here as in the build.
-fn locate_dependencies(
-    root: &Utf8Path,
-    manifest_toml: &str,
-    deps_dir: &Utf8Path,
-    names: &BTreeSet<String>,
-    graph_is_resolved: bool,
-) -> Vec<(Utf8PathBuf, String)> {
-    let mut located: BTreeMap<String, LocatedDependency> = BTreeMap::new();
-    let mut queue = VecDeque::from([(root.to_path_buf(), manifest_toml.to_string())]);
-    while let Some((dir, toml)) = queue.pop_front() {
-        let paths: HashMap<String, String> = declared_path_dependencies_from_manifest_toml(&toml)
-            .into_iter()
-            .collect();
-        for name in declared_dependency_names_from_manifest_toml(&toml) {
-            // Without a usable snapshot `names` is only a guess (declared
-            // plus checkouts), so every dependency a manifest reaches counts:
-            // a transitive path dependency has no checkout to list.
-            if (graph_is_resolved && !names.contains(&name)) || located.contains_key(&name) {
-                continue;
-            }
-            let dep_root = match paths.get(&name) {
-                Some(path) => std::fs::canonicalize(dir.join(path).as_std_path())
-                    .ok()
-                    .and_then(|p| Utf8PathBuf::from_path_buf(p).ok()),
-                None => Some(deps_dir.join(&name)),
-            };
-            if let Some(dep) = dep_root.and_then(read_dependency) {
-                queue.push_back((dep.root.clone(), dep.manifest.clone()));
-                located.insert(name, dep.located);
-            }
+            None
         }
-    }
+    };
+
+    // A manifest whose `[dependencies]` the shared parser rejects has no
+    // walkable graph; its declared names are still looked up under
+    // `_build/deps/` below.
+    let direct =
+        parse_manifest_dependencies(manifest_toml, &layout.project_root().join("beamtalk.toml"))
+            .unwrap_or_default();
+    let mut located: BTreeMap<String, LocatedDependency> = discover_dependency_graph(root, direct)
+        .found
+        .into_iter()
+        // Without a usable snapshot every dependency a manifest reaches
+        // counts: a transitive path dependency has no checkout to list.
+        .filter(|dep| {
+            resolved_names
+                .as_ref()
+                .is_none_or(|names| names.contains(&dep.name))
+        })
+        // A dependency with no manifest cannot be built, so it contributes
+        // nothing.
+        .filter(|dep| dep.root.join("beamtalk.toml").is_file())
+        .map(|dep| {
+            (
+                dep.name,
+                LocatedDependency {
+                    root: dep.root,
+                    declared: dep.dependencies,
+                },
+            )
+        })
+        .collect();
+
+    // Names the walk did not reach (the unusable-snapshot fallback listing, or
+    // a snapshot entry whose declaring manifest changed) are looked for under
+    // `_build/deps/`.
+    let names = resolved_names
+        .unwrap_or_else(|| unresolved_graph_dependency_names(&layout.deps_dir(), declared));
     for name in names {
-        if !located.contains_key(name)
-            && let Some(dep) = read_dependency(deps_dir.join(name))
+        if !located.contains_key(&name)
+            && let Some(dep) = read_checkout(layout.dep_checkout_dir(&name))
         {
-            located.insert(name.clone(), dep.located);
+            located.insert(name, dep);
         }
     }
 
@@ -535,26 +517,20 @@ fn locate_dependencies(
         .collect()
 }
 
-/// A dependency checkout read from disk: its manifest text plus its
-/// [`LocatedDependency`] record.
-struct ReadDependency {
+/// A resolved dependency's on-disk root and the names its own manifest
+/// declares.
+struct LocatedDependency {
     root: Utf8PathBuf,
-    manifest: String,
-    located: LocatedDependency,
+    declared: Vec<String>,
 }
 
 /// Read `dep_root`'s manifest, or `None` when it has none (a dependency with
 /// no manifest cannot be built, so it contributes nothing).
-fn read_dependency(dep_root: Utf8PathBuf) -> Option<ReadDependency> {
+fn read_checkout(dep_root: Utf8PathBuf) -> Option<LocatedDependency> {
     let manifest = std::fs::read_to_string(dep_root.join("beamtalk.toml").as_std_path()).ok()?;
-    let declared = declared_dependency_names_from_manifest_toml(&manifest);
-    Some(ReadDependency {
-        root: dep_root.clone(),
-        manifest,
-        located: LocatedDependency {
-            root: dep_root,
-            declared,
-        },
+    Some(LocatedDependency {
+        declared: declared_dependency_names_from_manifest_toml(&manifest),
+        root: dep_root,
     })
 }
 
@@ -644,10 +620,7 @@ fn resolve_project_context(root: PathBuf, batch: Option<&str>) -> Option<FilePro
     let mut alias_fingerprint = fingerprint(&alias_files);
     alias_fingerprint.push(file_fingerprint(&manifest_path));
     alias_fingerprint.push(file_fingerprint(
-        utf8_root
-            .join("_build/deps")
-            .join(DEP_GRAPH_SNAPSHOT_FILE)
-            .as_std_path(),
+        BuildLayout::new(&utf8_root).dep_graph_path().as_std_path(),
     ));
     for (dep_root, _) in &dep_roots {
         alias_fingerprint.push(file_fingerprint(
@@ -656,7 +629,10 @@ fn resolve_project_context(root: PathBuf, batch: Option<&str>) -> Option<FilePro
     }
     alias_fingerprint.sort();
 
-    let registry_files = registry_fingerprint(&utf8_root, &root.join("_build/type_cache"));
+    let registry_files = registry_fingerprint(
+        &utf8_root,
+        BuildLayout::new(&utf8_root).type_cache_dir().as_std_path(),
+    );
 
     let mut cache = cache_lock();
     // The known Erlang modules ride the registry's memo: their inputs

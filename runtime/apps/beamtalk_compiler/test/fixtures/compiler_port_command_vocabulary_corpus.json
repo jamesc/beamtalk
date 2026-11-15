@@ -3,6 +3,7 @@
   "compile_expression_trace",
   "compile",
   "compile_method",
+  "complete_method_source",
   "diagnostics",
   "version",
   "resolve_completion_type",

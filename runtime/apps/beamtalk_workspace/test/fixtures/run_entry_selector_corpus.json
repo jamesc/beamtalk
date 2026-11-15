@@ -1,0 +1,21 @@
+[
+  {"selector": "run", "run_entry": true, "rust_valid": true, "why": "unary identifier"},
+  {"selector": "main:", "run_entry": true, "rust_valid": true, "why": "single arity-1 keyword"},
+  {"selector": "_private", "run_entry": true, "rust_valid": true, "why": "leading underscore identifier"},
+  {"selector": "run2", "run_entry": true, "rust_valid": true, "why": "digits after the first character"},
+  {"selector": "a", "run_entry": true, "rust_valid": true, "why": "single letter"},
+  {"selector": "a b", "run_entry": false, "rust_valid": false, "why": "embedded space"},
+  {"selector": "+", "run_entry": false, "rust_valid": true, "why": "binary selector is a valid selector but not a run entry"},
+  {"selector": ">=", "run_entry": false, "rust_valid": true, "why": "binary selector"},
+  {"selector": "runé", "run_entry": false, "rust_valid": false, "why": "non-ASCII letter"},
+  {"selector": "é", "run_entry": false, "rust_valid": false, "why": "non-ASCII first letter"},
+  {"selector": "at:put:", "run_entry": false, "rust_valid": true, "why": "arity-2 keyword"},
+  {"selector": ":", "run_entry": false, "rust_valid": true, "why": "colon alone has no identifier"},
+  {"selector": ":run", "run_entry": false, "rust_valid": true, "why": "leading colon"},
+  {"selector": "a:b", "run_entry": false, "rust_valid": true, "why": "colon in the middle"},
+  {"selector": "1abc", "run_entry": false, "rust_valid": true, "why": "identifier may not start with a digit"},
+  {"selector": "run!", "run_entry": false, "rust_valid": false, "why": "punctuation"},
+  {"selector": "run\n", "run_entry": false, "rust_valid": false, "why": "trailing newline"},
+  {"selector": "a-b", "run_entry": false, "rust_valid": false, "why": "hyphen inside an identifier"},
+  {"selector": "main::", "run_entry": false, "rust_valid": true, "why": "two colons"}
+]

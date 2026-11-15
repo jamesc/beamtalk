@@ -26,7 +26,7 @@ pub(crate) use class_span::{
     handle_resolve_class_span, handle_scan_source_dependencies,
 };
 pub(crate) use compile::handle_compile;
-pub(crate) use compile_method::handle_compile_method;
+pub(crate) use compile_method::{handle_compile_method, handle_complete_method_source};
 pub(crate) use completion::handle_resolve_completion_type;
 pub(crate) use diagnostics_and_version::{handle_diagnostics, handle_version};
 pub(crate) use expression::{handle_compile_expression, handle_compile_expression_trace};

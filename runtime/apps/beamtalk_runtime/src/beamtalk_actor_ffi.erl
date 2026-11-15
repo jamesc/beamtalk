@@ -408,8 +408,8 @@ unregister(#beamtalk_object{pid = {registered, Name0, Node0}} = Self) when
     %% means idempotent success is reserved for "already unregistered",
     %% never for "couldn't find out" — the actor may still be registered on
     %% Node0. Raise the same node_down/timeout error the siblings surface.
-    try
-        erpc:call(
+    case
+        beamtalk_call_failure:erpc(
             Node0,
             ?BT_ACTOR_WIRE_MODULE,
             unregister,
@@ -417,27 +417,25 @@ unregister(#beamtalk_object{pid = {registered, Name0, Node0}} = Self) when
             ?BT_REMOTE_CALL_TIMEOUT
         )
     of
-        ok -> ok
-    catch
-        error:{erpc, noconnection} ->
+        {ok, ok} ->
+            ok;
+        {error, {node_down, _}} ->
             beamtalk_error:raise(
                 (beamtalk_actor:node_down_error_record(Node0, unregister))#beamtalk_error{
                     class = Self#beamtalk_object.class
                 }
             );
-        error:{erpc, timeout} ->
+        {error, timeout} ->
             beamtalk_error:raise(
-                (beamtalk_actor_remote:remote_timeout_error_record(
+                beamtalk_actor_remote:remote_timeout_error_record(
                     Self#beamtalk_object.class, unregister, true
-                ))
+                )
             );
-        error:{erpc, ErpcReason} ->
+        {error, {other, {erpc, _} = ErpcReason}} ->
             beamtalk_error:raise(
-                generic_remote_error(Self#beamtalk_object.class, unregister, {erpc, ErpcReason})
+                generic_remote_error(Self#beamtalk_object.class, unregister, ErpcReason)
             );
-        error:{exception, Reason, _Stack} ->
-            beamtalk_error:raise(remote_unregister_error(Self#beamtalk_object.class, Reason));
-        exit:{exception, Reason} ->
+        {error, {other, Reason}} ->
             beamtalk_error:raise(remote_unregister_error(Self#beamtalk_object.class, Reason))
     end;
 unregister(#beamtalk_object{pid = {global, Name0}}) when is_atom(Name0) ->

@@ -17,11 +17,7 @@ and the compile (file) command.
 %% Start the compiler application for integration tests.
 setup() ->
     %% Ensure compiler app and dependencies are started
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end.
+    beamtalk_test_boot:compiler().
 
 teardown(_) ->
     ok.
@@ -83,7 +79,7 @@ compiler_test_() ->
 %%% Tests
 
 compile_expression_succeeds() ->
-    {ok, CoreErlang, []} =
+    {ok, CoreErlang, [], _} =
         beamtalk_compiler:compile_expression(<<"1 + 2">>, <<"test_mod">>, []),
     ?assert(is_binary(CoreErlang)),
     ?assert(byte_size(CoreErlang) > 0),
@@ -94,7 +90,7 @@ compile_expression_succeeds() ->
     ?assert(binary:match(CoreErlang, <<"1, 2">>) =/= nomatch).
 
 compile_expression_known_vars() ->
-    {ok, CoreErlang, []} =
+    {ok, CoreErlang, [], _} =
         beamtalk_compiler:compile_expression(<<"x + 1">>, <<"test_mod">>, [<<"x">>]),
     ?assert(is_binary(CoreErlang)),
     %% ADR 0081: REPL free identifiers now look up via `maps:find` with a
@@ -186,7 +182,7 @@ version_succeeds() ->
 
 compile_core_erlang_in_memory() ->
     %% First, get some Core Erlang from the compiler
-    {ok, CoreErlang, []} =
+    {ok, CoreErlang, [], _} =
         beamtalk_compiler:compile_expression(<<"42">>, <<"test_in_memory">>, []),
     %% Compile it in memory
     {ok, ModuleName, Binary} = beamtalk_compiler:compile_core_erlang(CoreErlang),
@@ -258,9 +254,9 @@ backend_default_port() ->
     end.
 
 multiple_compiles() ->
-    {ok, _, []} = beamtalk_compiler:compile_expression(<<"1 + 2">>, <<"m1">>, []),
-    {ok, _, []} = beamtalk_compiler:compile_expression(<<"3 * 4">>, <<"m2">>, []),
-    {ok, _, []} = beamtalk_compiler:compile_expression(<<"5 - 1">>, <<"m3">>, []).
+    {ok, _, [], _} = beamtalk_compiler:compile_expression(<<"1 + 2">>, <<"m1">>, []),
+    {ok, _, [], _} = beamtalk_compiler:compile_expression(<<"3 * 4">>, <<"m2">>, []),
+    {ok, _, [], _} = beamtalk_compiler:compile_expression(<<"5 - 1">>, <<"m3">>, []).
 
 compile_file_default_options() ->
     Source = <<"Actor subclass: WsModeTest\n  value => 42">>,
@@ -451,11 +447,11 @@ command_vocabulary_corpus_is_recognized() ->
 %% the command actually dispatched.
 assert_command_recognized(<<"compile_expression">>) ->
     ?assertMatch(
-        {ok, _, _}, beamtalk_compiler:compile_expression(<<"1 + 2">>, <<"bt3095_ce">>, [])
+        {ok, _, _, _}, beamtalk_compiler:compile_expression(<<"1 + 2">>, <<"bt3095_ce">>, [])
     );
 assert_command_recognized(<<"compile_expression_trace">>) ->
     ?assertMatch(
-        {ok, _, _},
+        {ok, _, _, _},
         beamtalk_compiler:compile_expression_trace(<<"1 + 2">>, <<"bt3095_cet">>, [])
     );
 assert_command_recognized(<<"compile">>) ->
@@ -509,6 +505,10 @@ assert_command_recognized(<<"resolve_method_span">>) ->
     );
 assert_command_recognized(<<"reindent_method_source">>) ->
     ?assertMatch({ok, _}, beamtalk_compiler:reindent_method_source(<<"greet => 42">>, <<"  ">>));
+assert_command_recognized(<<"complete_method_source">>) ->
+    ?assertEqual(
+        {ok, <<"greet => 42">>}, beamtalk_compiler:complete_method_source(<<"42">>, <<"greet">>)
+    );
 assert_command_recognized(<<"resolve_class_span">>) ->
     ?assertMatch(
         {ok, _, _},

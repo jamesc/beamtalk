@@ -1141,12 +1141,7 @@ revert_via_object_keyed_map(_Ctx) ->
 %% changelog's own `load_from_disk` would otherwise restore a prior run's
 %% leftover `changes.jsonl` entries into this run's ETS table.
 setup_changelog_ws() ->
-    Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary("test-ws-wip-" ++ Unique),
-    Tmp = filename:join(beamtalk_test_fs:base_dir(), "bt-wip-" ++ Unique),
-    ok = filelib:ensure_path(Tmp),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", Tmp),
+    {WorkspaceId, Tmp, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, ClogPid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     %% workspace_meta is registered under its module name; setAutoflush/autoflush
     %% and the workspace-up sentinel both depend on it.
@@ -1175,10 +1170,7 @@ cleanup_changelog_ws(#{
 }) ->
     stop_proc(MetaPid),
     stop_proc(ClogPid),
-    case OldHome of
-        false -> os:unsetenv("HOME");
-        _ -> os:putenv("HOME", OldHome)
-    end,
+    beamtalk_test_fs:restore_home(OldHome),
     _ = file:del_dir_r(Tmp),
     ok.
 
@@ -1209,16 +1201,11 @@ stop_proc(_) ->
 %%====================================================================
 
 dependencies_with_package_name_returns_map_test() ->
-    Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary("test-ws-deps-" ++ Unique),
-    Tmp = filename:join(beamtalk_test_fs:base_dir(), "bt-deps-" ++ Unique),
-    ok = filelib:ensure_path(Tmp),
+    {WorkspaceId, Tmp, OldHome} = beamtalk_test_fs:changelog_workspace(),
     %% A recorded root package makes get_package_name/0 resolve a real name,
     %% so dependencies/0 leaves the `undefined` short-circuit.
     OldRoot = application:get_env(beamtalk_runtime, root_package),
     application:set_env(beamtalk_runtime, root_package, <<"bt_deps_probe_pkg">>),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", Tmp),
     MetaPid =
         case
             beamtalk_workspace_meta:start_link(#{
@@ -1244,10 +1231,7 @@ dependencies_with_package_name_returns_map_test() ->
             {ok, RV} -> application:set_env(beamtalk_runtime, root_package, RV);
             undefined -> application:unset_env(beamtalk_runtime, root_package)
         end,
-        case OldHome of
-            false -> os:unsetenv("HOME");
-            _ -> os:putenv("HOME", OldHome)
-        end,
+        beamtalk_test_fs:restore_home(OldHome),
         _ = file:del_dir_r(Tmp)
     end.
 

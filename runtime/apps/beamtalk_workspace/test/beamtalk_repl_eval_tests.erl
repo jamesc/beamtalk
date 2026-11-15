@@ -21,26 +21,6 @@ Tests expression evaluation, file loading, and compilation.
 
 %%% Assignment extraction tests
 
-extract_assignment_valid_test() ->
-    ?assertEqual({ok, count}, beamtalk_repl_eval:extract_assignment("count := 0")),
-    ?assertEqual({ok, myVar}, beamtalk_repl_eval:extract_assignment("myVar := 123")),
-    ?assertEqual({ok, '_privateVar'}, beamtalk_repl_eval:extract_assignment("_privateVar := nil")).
-
-extract_assignment_with_whitespace_test() ->
-    ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x:=1")),
-    ?assertEqual({ok, y}, beamtalk_repl_eval:extract_assignment("y := 2")),
-    ?assertEqual({ok, z}, beamtalk_repl_eval:extract_assignment("z  :=  3")).
-
-extract_assignment_not_assignment_test() ->
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("1 + 2")),
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("array at: 1")),
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("getValue")).
-
-extract_assignment_invalid_variable_name_test() ->
-    %% Variables must start with letter or underscore
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("123 := 456")),
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("$var := 1")).
-
 %%% Diagnostics formatting tests
 
 format_formatted_diagnostics_empty_test() ->
@@ -155,50 +135,42 @@ inject_output_script_exit_test() ->
     ?assertEqual({script_exit, 7, <<"out">>, [<<"w">>], State}, Result).
 
 %%% rebuild_bindings_from_steps tests
+%%%
+%%% `StepAssignments' is the compiler's per-step answer (BT-4911): the variable
+%%% each trace step assigns, or `none'. The workspace no longer reads the step
+%%% source text.
 
 rebuild_bindings_from_steps_simple_assignment_test() ->
     %% A single assignment step stores the awaited value under the variable name.
-    Steps = [{<<"x := 42">>, 42}],
-    Bindings = #{},
-    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(Steps, Bindings),
+    Result = beamtalk_repl_eval:rebuild_bindings_from_steps([{<<"x := 42">>, 42}], [x], #{}),
     ?assertEqual(42, maps:get(x, Result)).
 
 rebuild_bindings_from_steps_overwrites_raw_future_test() ->
     %% When CleanBindings holds a raw future handle, the awaited value must replace it.
     FakeFuture = {beamtalk_future, self()},
     Steps = [{<<"x := asyncOp">>, resolved_value}],
-    Bindings = #{x => FakeFuture},
-    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(Steps, Bindings),
+    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(Steps, [x], #{x => FakeFuture}),
     ?assertEqual(resolved_value, maps:get(x, Result)).
 
 rebuild_bindings_from_steps_non_assignment_leaves_bindings_unchanged_test() ->
     %% Steps that are not assignments must not modify existing bindings.
-    Steps = [{<<"x + 1">>, 43}],
-    Bindings = #{x => 42},
-    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(Steps, Bindings),
+    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(
+        [{<<"x + 1">>, 43}], [none], #{x => 42}
+    ),
     ?assertEqual(42, maps:get(x, Result)),
     ?assertEqual(1, maps:size(Result)).
 
 rebuild_bindings_from_steps_chained_assignments_test() ->
     %% Each assignment in a multi-step trace is applied in order.
-    Steps = [
-        {<<"x := 10">>, 10},
-        {<<"y := 20">>, 20}
-    ],
-    Bindings = #{},
-    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(Steps, Bindings),
+    Steps = [{<<"x := 10">>, 10}, {<<"y := 20">>, 20}],
+    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(Steps, [x, y], #{}),
     ?assertEqual(10, maps:get(x, Result)),
     ?assertEqual(20, maps:get(y, Result)).
 
 rebuild_bindings_from_steps_mixed_steps_test() ->
     %% A mix of assignment and expression steps: only assignments update bindings.
-    Steps = [
-        {<<"x := 5">>, 5},
-        {<<"x + 1">>, 6},
-        {<<"y := 7">>, 7}
-    ],
-    Bindings = #{},
-    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(Steps, Bindings),
+    Steps = [{<<"x := 5">>, 5}, {<<"x + 1">>, 6}, {<<"y := 7">>, 7}],
+    Result = beamtalk_repl_eval:rebuild_bindings_from_steps(Steps, [x, none, y], #{}),
     ?assertEqual(5, maps:get(x, Result)),
     ?assertEqual(7, maps:get(y, Result)),
     ?assertEqual(2, maps:size(Result)).
@@ -206,8 +178,8 @@ rebuild_bindings_from_steps_mixed_steps_test() ->
 rebuild_bindings_from_steps_empty_steps_test() ->
     %% Empty step list must return bindings unchanged.
     Bindings = #{x => 99},
-    Result = beamtalk_repl_eval:rebuild_bindings_from_steps([], Bindings),
-    ?assertEqual(Bindings, Result).
+    ?assertEqual(Bindings, beamtalk_repl_eval:rebuild_bindings_from_steps([], [], Bindings)).
+
 %%% Additional handle_load tests
 
 handle_load_read_error_directory_test() ->
@@ -482,23 +454,6 @@ maybe_await_future_non_future_pid_test() ->
     Result = beamtalk_repl_eval:maybe_await_future(NonFuturePid),
     ?assertEqual(NonFuturePid, Result).
 
-%%% extract_assignment edge cases
-
-extract_assignment_empty_string_test() ->
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("")).
-
-extract_assignment_just_operator_test() ->
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment(":=")).
-
-extract_assignment_complex_rhs_test() ->
-    %% Assignment with complex RHS expression
-    ?assertEqual(
-        {ok, result}, beamtalk_repl_eval:extract_assignment("result := obj doSomething: 42")
-    ).
-
-extract_assignment_underscore_prefix_test() ->
-    ?assertEqual({ok, '_temp'}, beamtalk_repl_eval:extract_assignment("_temp := 0")).
-
 %%% handle_io_request tests
 
 handle_io_request_put_chars_utf8_test() ->
@@ -736,122 +691,6 @@ format_formatted_diagnostics_two_items_test() ->
     Result = beamtalk_repl_compiler:format_formatted_diagnostics([<<"A">>, <<"B">>]),
     ?assertEqual(<<"A\n\nB">>, Result).
 
-%%% extract_assignment edge cases
-
-extract_assignment_multiline_test() ->
-    ?assertMatch({ok, _}, beamtalk_repl_eval:extract_assignment("x := [1, 2, 3]")).
-
-extract_assignment_no_space_v2_test() ->
-    ?assertEqual({ok, abc}, beamtalk_repl_eval:extract_assignment("abc:=123")).
-
-%% A second top-level statement on its own line (no `.` at all)
-%% must bail to `none`, exactly like the existing period-separated case —
-%% otherwise the first statement's variable gets clobbered with the whole
-%% call's `Result` (the last statement's value) in process_eval_result/4.
-extract_assignment_newline_separated_statements_test() ->
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("alpha := 111\nbeta := 222")),
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("a1 := 1\na2 := 2\na3 := 3")).
-
-%% A trailing newline with nothing (or only whitespace) after it is not a
-%% second statement — the single assignment is still detected.
-extract_assignment_trailing_newline_test() ->
-    ?assertEqual({ok, count}, beamtalk_repl_eval:extract_assignment("count := 0\n")),
-    ?assertEqual({ok, count}, beamtalk_repl_eval:extract_assignment("count := 0\n  \n")).
-
-%% Regression guard: a SINGLE assignment whose right-hand side
-%% merely continues onto later lines (a multi-line block/collection
-%% literal, or the value on a continuation line) must NOT be mistaken for
-%% multiple statements — none of the continuation lines themselves open
-%% with `ident :=`, so this must still resolve to the one real assignment.
-extract_assignment_multiline_rhs_is_still_one_statement_test() ->
-    ?assertEqual({ok, result}, beamtalk_repl_eval:extract_assignment("result :=\n  42")),
-    ?assertEqual(
-        {ok, doubler},
-        beamtalk_repl_eval:extract_assignment("doubler := [\n  :x |\n  x * 2\n]")
-    ).
-
-%% Regression guard: a period *nested* inside a
-%% block/collection literal — itself part of the single outer assignment's
-%% right-hand side — must not be mistaken for the pre-existing
-%% period-separates-statements signal. `docs/beamtalk-language-features.md`'s
-%% own `ClassBuilder` cascade example is exactly this shape: multiple
-%% semicolon-chained keyword sends whose block-literal bodies use `.` to
-%% separate their *own* internal statements, all as one top-level
-%% assignment.
-extract_assignment_nested_period_in_cascade_is_still_one_statement_test() ->
-    Src =
-        "account := Object classBuilder\n"
-        "  name: #Account;\n"
-        "  superclass: Object;\n"
-        "  classVars: #{ #opened => 0 };\n"
-        "  fields: #{ #balance => 0 };\n"
-        "  methods: #{ #balance => [:inst | inst fieldAt: #balance] };\n"
-        "  classMethods: #{ #open => [:self | self.opened := self.opened + 1. self.opened] };\n"
-        "  register",
-    ?assertEqual({ok, account}, beamtalk_repl_eval:extract_assignment(Src)).
-
-%% Regression guard: a backslash-escaped quote
-%% inside a string literal (`"a\"b"`, per `lex_string/0`'s handling of `\`
-%% in `source_analysis/lexer.rs`) must not be mistaken for the string's
-%% closing delimiter — otherwise a `.` or newline that's still genuinely
-%% *inside* the string reads as depth-0 code and wrongly triggers a bail.
-extract_assignment_escaped_quote_in_string_is_still_one_statement_test() ->
-    %% s := "a\"b. c"  (one statement: a single-quoted string containing an
-    %% escaped quote, then ". " — which must stay inside the string).
-    Src = "s := \"a\\\"b. c\"",
-    ?assertEqual({ok, s}, beamtalk_repl_eval:extract_assignment(Src)),
-    %% Same shape, but the content after the escaped quote uses a newline +
-    %% ident-looking continuation instead of a period.
-    Src2 = "s := \"a\\\"b\nident := 1\"",
-    ?assertEqual({ok, s}, beamtalk_repl_eval:extract_assignment(Src2)),
-    %% An escaped backslash (`\\`) immediately before a REAL closing quote
-    %% must still close the string — only an odd run of backslashes escapes
-    %% the quote.
-    Src3 = "s := \"a\\\\\". y := 2",
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment(Src3)).
-
-%% Regression guard: a `$`-prefixed character
-%% literal (`$(`, `$"`, `$\n`, ... — see `lex_character/0`,
-%% `source_analysis/lexer.rs`) must be consumed atomically, never letting
-%% its payload character be read as a real bracket/quote — otherwise a
-%% `$(`/`$[`/`${` inside one statement permanently unbalances `Depth` and
-%% masks a real second top-level statement later in the same call.
-extract_assignment_character_literal_payload_is_not_a_bracket_test() ->
-    %% Genuinely two statements — the bracket-payload character literal in
-    %% the first one must not swallow the real top-level `.` separator.
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("x := $( class. y := 2")),
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("x := $[ class. y := 2")),
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("x := ${ class. y := 2")),
-    %% A single statement using a bracket- or quote-payload character
-    %% literal must still resolve correctly (no false bail either).
-    ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := $( class")),
-    ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := $\" class")),
-    %% Escaped-payload form (`$\c`) consumes all three characters together.
-    ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := $\\( class")).
-
-%% Regression guard: a string containing interpolation (`"...{expr}..."`)
-%% may itself contain a *nested* string literal inside the interpolated
-%% expression (`lex_interpolation_body`/`skip_nested_string`,
-%% `source_analysis/lexer.rs`). `skip_string_literal/1` mirrors that scan, so
-%% the whole interpolated string is one lexeme and a `.` inside it is never
-%% read as a statement separator.
-extract_assignment_interpolated_string_is_not_mis_parsed_test() ->
-    %% A nested string inside the interpolated expression, containing what
-    %% would look like a `.` statement separator if the scanner mis-closed the
-    %% outer string early.
-    ?assertEqual(
-        {ok, x}, beamtalk_repl_eval:extract_assignment("x := \"pre {a == \"z. bogus\"} mid\"")
-    ),
-    ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := \"Hello {name}\"")),
-    %% A genuine second statement after the interpolated string is still seen.
-    ?assertEqual(
-        none, beamtalk_repl_eval:extract_assignment("x := \"Hello {name}\". y := 2")
-    ),
-    %% A plain string with no interpolation at all is unaffected.
-    ?assertEqual(
-        {ok, x}, beamtalk_repl_eval:extract_assignment("x := \"no interpolation here\"")
-    ).
-
 %% An interpolation or nested string left unterminated is `unsupported`.
 skip_string_literal_unterminated_interpolation_test() ->
     ?assertEqual(unsupported, beamtalk_repl_eval:skip_string_literal("\"a {b")),
@@ -898,51 +737,6 @@ assert_literal_span_case(#{
         ExpectedEnd,
         Consumed,
         lists:flatten(io_lib:format("span-end mismatch for ~p (~ts)", [Source, Why]))
-    ).
-
-%% A `//` line comment containing an unbalanced bracket, followed
-%% by a genuine second top-level statement, must still be detected as two
-%% statements — the bracket inside the comment must not permanently bump
-%% `Depth` and mask the real statement boundary that follows. Exact repro
-%% from the issue: without comment-awareness, the `(` in `// (see below`
-%% bumps `Depth` to 1 and nothing ever closes it, so `extract_assignment/1`
-%% wrongly returns `{ok, alpha}` and `process_eval_result/4` clobbers
-%% `alpha`'s already-correct binding with `beta`'s value.
-extract_assignment_line_comment_unbalanced_bracket_test() ->
-    ?assertEqual(
-        none, beamtalk_repl_eval:extract_assignment("alpha := 1 // (see below\nbeta := 2")
-    ).
-
-%% A `"` inside a `//` comment must not be misread as the start of
-%% a real string literal — otherwise it could swallow real code that
-%% follows and mask a second statement through a different path.
-extract_assignment_line_comment_with_quote_test() ->
-    ?assertEqual(
-        none,
-        beamtalk_repl_eval:extract_assignment(
-            "alpha := 1 // says \"hi\" here\nbeta := 2"
-        )
-    ),
-    %% A single statement with a trailing `//` comment containing a quote is
-    %% unaffected — no false bail.
-    ?assertEqual(
-        {ok, alpha},
-        beamtalk_repl_eval:extract_assignment("alpha := 1 // says \"hi\" here")
-    ).
-
-%% Same shape, but with a `/* ... */` block comment instead of a
-%% `//` line comment — an unbalanced brace inside the block comment must
-%% not be read as real code either.
-extract_assignment_block_comment_unbalanced_brace_test() ->
-    ?assertEqual(
-        none,
-        beamtalk_repl_eval:extract_assignment("alpha := 1 /* { unbalanced */\nbeta := 2")
-    ),
-    %% A single statement with a block comment on the same line is
-    %% unaffected — no false bail.
-    ?assertEqual(
-        {ok, alpha},
-        beamtalk_repl_eval:extract_assignment("alpha := 1 /* note */")
     ).
 
 %% (Per AGENTS.md Essential Rules: a "mirrors" claim across the
@@ -1742,6 +1536,79 @@ handle_protocol_definition_no_register_class_test() ->
     code:purge(ModuleName),
     code:delete(ModuleName).
 
+-doc """
+BT-4864: a protocol whose `-on_load` hook parks a structured refusal and fails
+the load (the `stdlib_shadowing` path) must surface that refusal. A bare
+`code:load_binary/3` only saw `on_load_failure` and never drained it.
+""".
+handle_protocol_definition_surfaces_structured_load_refusal_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    Suffix = beamtalk_test_unique:id(),
+    ModuleName = list_to_atom("__bt_test_shadow_protocol" ++ Suffix),
+    ProtoName = "Bt4864Shadow" ++ Suffix,
+    ProtoAtom = list_to_atom(ProtoName),
+    Call = fun(M, F, Args) ->
+        {call, 4, {remote, 4, {atom, 4, M}, {atom, 4, F}}, Args}
+    end,
+    Forms = [
+        {attribute, 1, module, ModuleName},
+        {attribute, 2, export, []},
+        {attribute, 3, on_load, {hook, 0}},
+        {function, 4, hook, 0, [
+            {clause, 4, [], [], [
+                Call(beamtalk_class_registry, record_pending_load_error, [
+                    {atom, 4, ProtoAtom},
+                    Call(beamtalk_error, new, [{atom, 4, stdlib_shadowing}, {atom, 4, ProtoAtom}])
+                ]),
+                {atom, 4, false}
+            ]}
+        ]}
+    ],
+    {ok, ModuleName, Binary} = compile:forms(Forms),
+    %% Create the pending-error table from this (long-lived) test process: if the
+    %% on_load process creates it, the table dies with that process.
+    ok = beamtalk_class_registry:record_pending_load_error(ProtoAtom, undefined),
+    ok = beamtalk_class_registry:clear_pending_load_errors_by_names([ProtoAtom]),
+    ProtocolInfo = #{
+        binary => Binary,
+        module_name => ModuleName,
+        protocols => [list_to_binary(ProtoName)]
+    },
+    try
+        Result = beamtalk_repl_eval:handle_protocol_definition(ProtocolInfo, [], State),
+        ?assertMatch({error, #beamtalk_error{kind = stdlib_shadowing}, <<>>, [], _}, Result)
+    after
+        code:purge(ModuleName),
+        code:delete(ModuleName)
+    end.
+
+-doc """
+BT-4917: `validate_run_entry/3` accepts exactly an ASCII identifier with an
+optional trailing `:`. `run_entry_selector_corpus.json` pins it against Rust
+`is_valid_selector` (see `source_analysis::tests::run_entry_selector_matches_shared_corpus`).
+""".
+run_entry_selector_matches_shared_corpus_test() ->
+    Path = filename:join([
+        code:lib_dir(beamtalk_workspace),
+        "test",
+        "fixtures",
+        "run_entry_selector_corpus.json"
+    ]),
+    {ok, Raw} = file:read_file(Path),
+    Cases = json:decode(Raw),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(#{<<"selector">> := Sel, <<"run_entry">> := Expected, <<"why">> := Why}) ->
+            Actual =
+                case beamtalk_repl_eval:validate_run_entry(<<"Main">>, Sel, []) of
+                    {ok, _} -> true;
+                    {error, #beamtalk_error{kind = invalid_argument}} -> false
+                end,
+            ?assertEqual({Sel, Why, Expected}, {Sel, Why, Actual})
+        end,
+        Cases
+    ).
+
 %%====================================================================
 %% Type alias definition tests (ADR 0108 Phase 8)
 %%====================================================================
@@ -1884,12 +1751,8 @@ maybe_help_for_alias_ignores_selector_and_class_forms_test() ->
 %%====================================================================
 
 eval_setup() ->
-    application:ensure_all_started(compiler),
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
     %% Allow the runtime to register its bootstrap classes before compiling.
     ok = beamtalk_test_wait:class('Object'),
     %% A live beamtalk_workspace_meta is needed by reload_file/1,
@@ -1899,10 +1762,7 @@ eval_setup() ->
     %% handle_method_definition_with_source_compile_fail_test/0 above.
     %% `mode => run` avoids the disk-persistence side effect
     %% beamtalk_repl_loader_precheck_tests.erl's fixture also steers clear of.
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        OldPid -> gen_server:stop(OldPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     {ok, _} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"eval_success_ws">>,
         project_path => undefined,
@@ -1922,14 +1782,8 @@ eval_teardown(_) ->
     %% tests (and later test modules in the shared EUnit node) see the baseline
     %% "compiler not running" state this fixture started from.
     _ = application:stop(beamtalk_compiler),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end,
-    case whereis(beamtalk_workspace_signature_store) of
-        undefined -> ok;
-        SigStorePid -> gen_server:stop(SigStorePid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_signature_store),
     ok.
 
 %% Seed workspace_meta with `ClassSource` under `ClassNameBin` so a
@@ -1950,6 +1804,12 @@ eval_success_test_() ->
             fun do_eval_multi_statement_newline_separated_bindings/0},
         {"do_eval multi-statement newline-separated bindings, three vars (BT-3368)",
             fun do_eval_multi_statement_newline_separated_bindings_three/0},
+        {"do_eval: a comment holding a bracket does not hide the second statement (BT-4911)",
+            fun do_eval_assignment_comment_bracket_second_statement/0},
+        {"do_eval: a single typed or commented assignment still binds (BT-4911)",
+            fun do_eval_single_assignment_shapes_bind/0},
+        {"do_eval: non-assignments leave bindings alone (BT-4911)",
+            fun do_eval_non_assignment_binds_nothing/0},
         {"do_eval runtime error wraps in _error", fun do_eval_runtime_error/0},
         {"do_eval inline class definition", fun do_eval_class_definition/0},
         {"do_eval protocol definition", fun do_eval_protocol_definition/0},
@@ -1961,8 +1821,13 @@ eval_success_test_() ->
         {"do_eval_trace single statement", fun do_eval_trace_single/0},
         {"do_eval_trace multi statement", fun do_eval_trace_multi/0},
         {"do_eval_trace assignment rebuilds binding", fun do_eval_trace_assignment/0},
+        {"do_eval_trace: only assigning steps rebind (BT-4911)", fun do_eval_trace_mixed_steps/0},
         {"do_eval_trace runtime error wraps", fun do_eval_trace_runtime_error/0},
         {"compile_method on unrecorded class returns error", fun compile_method_unrecorded/0},
+        {"compile_method: bare body, full and commented definitions install (BT-4911)",
+            fun compile_method_bare_and_full_definitions/0},
+        {"compile_method: a bare body against a protocol gets its header (BT-4911)",
+            fun compile_method_protocol_bare_body/0},
         {"compile_method invalid body returns error", fun compile_method_invalid_body/0},
         {"compile_method non-method expression rejected", fun compile_method_not_a_method/0},
         {"do_show_codegen with binding known var", fun do_show_codegen_with_binding/0},
@@ -2086,6 +1951,27 @@ do_eval_multi_statement_newline_separated_bindings_three() ->
     ?assertEqual(2, maps:get(a2, Bindings)),
     ?assertEqual(3, maps:get(a3, Bindings)).
 
+do_eval_assignment_comment_bracket_second_statement() ->
+    %% The `(' in the comment must not mask the real second statement: `alpha'
+    %% keeps its own value instead of being rebound to `beta''s.
+    {ok, 2, _, _, State} =
+        beamtalk_repl_eval:do_eval("alpha := 1 // (see below\nbeta := 2", state0()),
+    Bindings = beamtalk_repl_state:get_bindings(State),
+    ?assertEqual(1, maps:get(alpha, Bindings)),
+    ?assertEqual(2, maps:get(beta, Bindings)).
+
+do_eval_single_assignment_shapes_bind() ->
+    {ok, 5, _, _, S1} = beamtalk_repl_eval:do_eval("n :: Integer := 5", state0()),
+    ?assertEqual(5, maps:get(n, beamtalk_repl_state:get_bindings(S1))),
+    {ok, 1, _, _, S2} = beamtalk_repl_eval:do_eval("m := 1 // trailing note", state0()),
+    ?assertEqual(1, maps:get(m, beamtalk_repl_state:get_bindings(S2))),
+    {ok, 3, _, _, S3} = beamtalk_repl_eval:do_eval("k := [:a | a + 1. a + 2] value: 1", state0()),
+    ?assertEqual(3, maps:get(k, beamtalk_repl_state:get_bindings(S3))).
+
+do_eval_non_assignment_binds_nothing() ->
+    {ok, 3, _, _, State} = beamtalk_repl_eval:do_eval("1 + 2", state0()),
+    ?assertEqual(#{}, beamtalk_repl_state:get_bindings(State)).
+
 do_eval_runtime_error() ->
     %% Sending an unknown message raises a does_not_understand; do_eval catches
     %% it, wraps it, and stores it under '_error' in the returned bindings.
@@ -2173,6 +2059,14 @@ do_eval_trace_assignment() ->
     Bindings = beamtalk_repl_state:get_bindings(State),
     ?assertEqual(42, maps:get(total, Bindings)).
 
+do_eval_trace_mixed_steps() ->
+    {ok, Steps, _, _, State} =
+        beamtalk_repl_eval:do_eval_trace("a := 1. a + 1. b := 2", state0()),
+    ?assertMatch([{_, 1}, {_, 2}, {_, 2}], Steps),
+    Bindings = beamtalk_repl_state:get_bindings(State),
+    ?assertEqual(1, maps:get(a, Bindings)),
+    ?assertEqual(2, maps:get(b, Bindings)).
+
 do_eval_trace_runtime_error() ->
     %% A runtime error (does_not_understand) during trace execution is caught,
     %% wrapped, and stored under '_error', returning a structured error tuple.
@@ -2189,6 +2083,43 @@ compile_method_unrecorded() ->
     Result = beamtalk_repl_eval:compile_method(<<"Object">>, <<"doubled">>, <<"self">>, ephemeral),
     ?assertMatch({error, _}, Result).
 
+compile_method_bare_and_full_definitions() ->
+    %% `compile:source:' passes a bare body, the IDE a full (possibly
+    %% comment-led) definition; the compiler synthesises the header itself.
+    ClassSource = "Actor subclass: EvalBareBodyCls\n  v => 1",
+    {ok, <<"EvalBareBodyCls">>, _, _, _} = beamtalk_repl_eval:do_eval(ClassSource, state0()),
+    seed_class_source(<<"EvalBareBodyCls">>, ClassSource),
+    ?assertEqual(
+        {ok, <<"EvalBareBodyCls">>},
+        beamtalk_repl_eval:compile_method(<<"EvalBareBodyCls">>, <<"v">>, <<"2">>, ephemeral)
+    ),
+    ?assertEqual(
+        {ok, <<"EvalBareBodyCls">>},
+        beamtalk_repl_eval:compile_method(
+            <<"EvalBareBodyCls">>, <<"v">>, <<"// note\nv => 3">>, ephemeral
+        )
+    ),
+    %% A body that declares another selector is still rejected loudly.
+    ?assertMatch(
+        {error, _},
+        beamtalk_repl_eval:compile_method(
+            <<"EvalBareBodyCls">>, <<"v">>, <<"other => 3">>, ephemeral
+        )
+    ).
+
+compile_method_protocol_bare_body() ->
+    %% A protocol provision patch splices the text into the protocol's file, so a
+    %% bare body must reach it with its header (the compiler's
+    %% `complete_method_source'), and a full definition must pass through.
+    ?assertEqual(
+        {ok, <<"provide => 1">>},
+        beamtalk_compiler:complete_method_source(<<"1">>, <<"provide">>)
+    ),
+    ?assertEqual(
+        {ok, <<"provide => 1">>},
+        beamtalk_compiler:complete_method_source(<<"provide => 1">>, <<"provide">>)
+    ).
+
 compile_method_invalid_body() ->
     Result = beamtalk_repl_eval:compile_method(
         <<"Object">>, <<"bad">>, <<"+++ garbage">>, ephemeral
@@ -2203,130 +2134,6 @@ compile_method_not_a_method() ->
         <<"Object">>, <<"plainExpr">>, <<"1 + 1">>, ephemeral
     ),
     ?assertMatch({error, _}, Result).
-
-%%% normalize_method_source/2 — `compile:source:`/MCP pass the method BODY only;
-%%% the IDE passes a full definition. The helper synthesises the `selector => '
-%%% header for a bare body and leaves a full (possibly comment-led) definition
-%%% untouched, so the structured install path always gets a complete method.
-
-normalize_method_source_full_definition_unchanged_test() ->
-    %% A full `selector => body' definition is returned verbatim.
-    Src = <<"increment => self.value + 1">>,
-    ?assertEqual(Src, beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)).
-
-normalize_method_source_bare_body_gets_header_test() ->
-    %% A bare body (no header) gets the canonical `selector => ' prepended.
-    ?assertEqual(
-        <<"increment => self.value + 1">>,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"self.value + 1">>)
-    ).
-
-normalize_method_source_bare_body_resembling_selector_test() ->
-    %% A bare body that merely starts with the selector name (but is not a header)
-    %% is still prefixed — `incremented' is not the `increment' header.
-    ?assertEqual(
-        <<"increment => incremented + 1">>,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"incremented + 1">>)
-    ).
-
-normalize_method_source_commented_full_definition_unchanged_test() ->
-    %% A full definition behind `//`/`///` comments is left intact (the header is
-    %% found past the comments), so saved comments round-trip.
-    Src = <<"// --- Section ---\n/// Doc.\nincrement => self.value + 1">>,
-    ?assertEqual(Src, beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)).
-
-%%====================================================================
-%% normalize_method_source/2's private helpers: header_separator/1
-%% (all five last-char branches), skip_leading_comments/1's no-trailing-
-%% newline clause, has_method_header/2's `class ` recursion + trim_leading_ws/1,
-%% header_after_token/1's identifier-continuation guard,
-%% binary_has_arrow_before_break/1's `.`/newline breaks, and first_token/1's
-%% fallback clause.
-%%====================================================================
-
-normalize_method_source_header_separator_newline_test() ->
-    %% A `//` comment WITH a trailing newline immediately followed by a bare
-    %% body: header_separator/1 sees the prefix ending in `\n` -> no extra
-    %% separator is inserted.
-    Src = <<"//x\nbareBody">>,
-    ?assertEqual(
-        <<"//x\nincrement => bareBody">>,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)
-    ).
-
-normalize_method_source_header_separator_space_test() ->
-    %% A `//` comment with NO trailing newline: skip_leading_comments/1's
-    %% single-element split clause returns an empty Body, so the whole
-    %% comment becomes the Prefix — header_separator/1 reads its own last
-    %% byte, here a trailing space, and inserts no extra separator.
-    Src = <<"// comment ends with space ">>,
-    ?assertEqual(
-        <<Src/binary, "increment => ">>,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)
-    ).
-
-normalize_method_source_header_separator_tab_test() ->
-    Src = <<"// comment ends with tab\t">>,
-    ?assertEqual(
-        <<Src/binary, "increment => ">>,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)
-    ).
-
-normalize_method_source_header_separator_cr_test() ->
-    Src = <<"// comment ends with cr\r">>,
-    ?assertEqual(
-        <<Src/binary, "increment => ">>,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)
-    ).
-
-normalize_method_source_header_separator_other_inserts_newline_test() ->
-    %% A comment-only source ending in ordinary text (no trailing whitespace)
-    %% would otherwise glue the injected header onto the comment line, so a
-    %% `\n` separator is inserted instead.
-    Src = <<"// comment ends with letter">>,
-    ?assertEqual(
-        <<Src/binary, "\nincrement => ">>,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, Src)
-    ).
-
-normalize_method_source_class_side_header_unchanged_test() ->
-    %% A `class ` modifier is skipped, then leading whitespace after it is
-    %% trimmed (trim_leading_ws/1's recursive clause) before matching the
-    %% selector header.
-    Src = <<"class   make => 5">>,
-    ?assertEqual(Src, beamtalk_repl_eval:normalize_method_source(<<"make">>, Src)).
-
-normalize_method_source_identifier_continuation_not_a_header_test() ->
-    %% `incremented + 1` for selector `increment` shares no header: the char
-    %% right after the token is a lowercase continuation, not a delimiter.
-    ?assertEqual(
-        <<"increment => incremented + 1">>,
-        beamtalk_repl_eval:normalize_method_source(<<"increment">>, <<"incremented + 1">>)
-    ).
-
-normalize_method_source_dot_break_not_a_header_test() ->
-    %% No `=>` arrow appears before the first `.` statement break, so this is
-    %% not a header even though the body starts with the selector token.
-    ?assertEqual(
-        <<"foo => foo bar. baz">>,
-        beamtalk_repl_eval:normalize_method_source(<<"foo">>, <<"foo bar. baz">>)
-    ).
-
-normalize_method_source_newline_break_not_a_header_test() ->
-    %% No `=>` arrow appears before the first newline statement break either.
-    ?assertEqual(
-        <<"foo => foo bar\nbaz">>,
-        beamtalk_repl_eval:normalize_method_source(<<"foo">>, <<"foo bar\nbaz">>)
-    ).
-
-normalize_method_source_first_token_fallback_test() ->
-    %% first_token/1's fallback clause: a selector binary whose split on
-    %% `:`/` ` yields an empty leading segment (e.g. it starts with `:`) is
-    %% returned unmodified rather than truncated to that empty head.
-    ?assertEqual(
-        <<":weird => body">>,
-        beamtalk_repl_eval:normalize_method_source(<<":weird">>, <<"body">>)
-    ).
 
 do_show_codegen_with_binding() ->
     %% A non-internal binding key is forwarded as a known var to the codegen
@@ -2760,10 +2567,7 @@ repopulate_class_sources_success_test() ->
     %% A standalone workspace_meta instance, mirroring
     %% handle_method_definition_with_source_compile_fail_test/0 above — this
     %% test does not run inside the eval_success_test_/0 fixture.
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        OldPid -> gen_server:stop(OldPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     {ok, WsPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"repopulate_test_ws">>,
         project_path => undefined,

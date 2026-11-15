@@ -64,6 +64,7 @@ to avoid temp files on disk.
     categorize_methods/2,
     class_state_field_defaults/2,
     reindent_method_source/2,
+    complete_method_source/2,
     find_selector_send_spans/3,
     find_definition_selector_spans/5,
     build_class_module_index_in_source/3,
@@ -176,14 +177,14 @@ start_link(Args) ->
 
 -doc """
 Compile a REPL expression.
-Returns `{ok, CoreErlang, Warnings}' for expressions,
+Returns `{ok, CoreErlang, Warnings, ExprInfo}' for expressions,
 `{ok, class_definition, ClassInfo}' for inline class definitions,
 `{ok, method_definition, MethodInfo}' for standalone method definitions,
 or `{error, Diagnostics}' on failure, where each diagnostic is a map with
 `message', `line' (1-based), and optionally `hint'.
 """.
 -spec compile_expression(binary(), binary(), [binary()]) ->
-    {ok, binary(), [beamtalk_compiler_port:warning()]}
+    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
@@ -199,7 +200,7 @@ Options:
   class_superclass_index => #{binary() => binary()} — cross-file superclass info
 """.
 -spec compile_expression(binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [beamtalk_compiler_port:warning()]}
+    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()}
     | {ok, class_definition, map()}
     | {ok, method_definition, map()}
     | {ok, protocol_definition, map()}
@@ -212,12 +213,14 @@ compile_expression(Source, ModuleName, KnownVars, Options) ->
 
 -doc "Compile a REPL expression in trace mode.".
 -spec compile_expression_trace(binary(), binary(), [binary()]) ->
-    {ok, binary(), [beamtalk_compiler_port:warning()]} | {error, [map()]}.
+    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()}
+    | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars) ->
     compile_expression_trace(Source, ModuleName, KnownVars, #{}).
 
 -spec compile_expression_trace(binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [beamtalk_compiler_port:warning()]} | {error, [map()]}.
+    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()}
+    | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
     gen_server:call(
         ?MODULE,
@@ -741,6 +744,18 @@ reindent_method_source(Source, BaseIndent) ->
     ).
 
 -doc """
+The complete method definition for `Source' patching `Selector' (BT-4911) —
+see `beamtalk_compiler_port:complete_method_source/3'. Returns `{ok, Source}'
+or `{error, Reason, Message}' on transport failure.
+""".
+-spec complete_method_source(binary(), binary()) ->
+    {ok, binary()} | {error, atom(), binary()}.
+complete_method_source(Source, Selector) ->
+    safe_call(
+        {complete_method_source, Source, Selector}, ?CALL_TIMEOUT_MS, ?SPAN_DOWN, ?SPAN_TIMEOUT
+    ).
+
+-doc """
 Register a class with its metadata in the compiler server cache.
 
 ADR 0050 Phase 3: Fire-and-forget cast. Silently dropped if the server is
@@ -1204,6 +1219,9 @@ handle_call({reindent_method_source, Source, BaseIndent}, _From, State) ->
         State#state.port, Source, BaseIndent
     ),
     {reply, Result, State};
+handle_call({complete_method_source, Source, Selector}, _From, State) ->
+    Result = beamtalk_compiler_port:complete_method_source(State#state.port, Source, Selector),
+    {reply, Result, State};
 handle_call(version, _From, State) ->
     Result = do_version(State#state.port),
     {reply, Result, State};
@@ -1487,7 +1505,8 @@ do_compile_method(Port, ClassSource, MethodSource, Options) ->
         stdlib_mode => maps:get(stdlib_mode, Options, false)
     },
     RequestFinal = beamtalk_compiler_port:add_compile_options(
-        put_defined_opts(Request0, Options, [class_name, module_name, source_path]), Options
+        put_defined_opts(Request0, Options, [class_name, module_name, source_path, selector]),
+        Options
     ),
     beamtalk_compiler_port:port_roundtrip(
         Port,

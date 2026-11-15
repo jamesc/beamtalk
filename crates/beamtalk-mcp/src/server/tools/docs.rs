@@ -18,75 +18,107 @@ use sha2::{Digest, Sha256};
 use crate::server::params::{
     DocsParams, ListClassesParams, PackageClassesParams, SearchClassesParams, SearchExamplesParams,
 };
-use crate::server::{BeamtalkMcp, MCP_OUTPUT_MODE, ToolTimer, check_response, pretty_json};
+use crate::server::{
+    BeamtalkMcp, InternalErr, MCP_OUTPUT_MODE, ToolTimer, check_response, pretty_json,
+};
 use crate::server::{validate_class_name, validate_erlang_module_name, validate_selector};
 
+use beamtalk_core::build_layout::BuildLayout;
+use beamtalk_package::dependency_classes::dependency_layout;
 use beamtalk_repl_protocol::format as fmt;
+use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::client::ReplClient;
 
-/// Discover package corpus files from the working directory's `_build/` tree.
+/// Discover package corpus files from the working directory's project.
 ///
-/// Looks for `corpus.json` and `class_corpus.json` in:
-/// - `_build/dev/` (root package)
-/// - `_build/deps/*/` (dependencies, resolved via their `_build/dev/`)
+/// Looks for `corpus.json` and `class_corpus.json` in the root package's
+/// `_build/dev/` and in each dependency's checkout (`_build/dev/` first, then
+/// the checkout root). Dependencies are located by
+/// [`dependency_layout`] — path dependencies at their declared path, git and
+/// registry ones under `_build/deps/<name>/` — the same walk `lint` uses.
 ///
 /// Returns `(example_corpora, class_corpora)` loaded from disk.
 fn discover_package_corpora() -> (
     Vec<beamtalk_examples::Corpus>,
     Vec<beamtalk_examples::ClassCorpus>,
 ) {
+    let Ok(cwd) = std::env::current_dir() else {
+        return (Vec::new(), Vec::new());
+    };
+    let root = beamtalk_project::discover_project_root(&cwd);
+    match Utf8Path::from_path(&root) {
+        Some(root) => discover_package_corpora_in(root),
+        None => (Vec::new(), Vec::new()),
+    }
+}
+
+/// The checkout roots of `root`'s dependencies: the declared graph
+/// ([`dependency_layout`]), or — when the manifest can't be read, so nothing
+/// is known about what it declares — every `_build/deps/*` checkout.
+fn dependency_roots(root: &Utf8Path) -> Vec<Utf8PathBuf> {
+    let layout = dependency_layout(root);
+    if !layout.manifest_unreadable {
+        return layout.found.into_iter().map(|dep| dep.root).collect();
+    }
+    let mut roots: Vec<Utf8PathBuf> = BuildLayout::new(root)
+        .deps_dir()
+        .read_dir_utf8()
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path().to_path_buf())
+        .filter(|path| path.is_dir())
+        .collect();
+    roots.sort_unstable();
+    roots
+}
+
+/// [`discover_package_corpora`] for an explicit project `root`.
+fn discover_package_corpora_in(
+    root: &Utf8Path,
+) -> (
+    Vec<beamtalk_examples::Corpus>,
+    Vec<beamtalk_examples::ClassCorpus>,
+) {
     let mut example_corpora = Vec::new();
     let mut class_corpora = Vec::new();
 
-    let Ok(cwd) = std::env::current_dir() else {
-        return (example_corpora, class_corpora);
-    };
-
-    let root = beamtalk_project::discover_project_root(&cwd);
-
     // Root package corpus
-    let dev_dir = root.join("_build").join("dev");
-    if let Some(corpus) = beamtalk_examples::load_corpus_from_file(&dev_dir.join("corpus.json")) {
-        tracing::debug!(path = %dev_dir.display(), "Loaded root package corpus");
+    let dev_dir = BuildLayout::new(root).profile_dir();
+    if let Some(corpus) = beamtalk_examples::load_corpus_from_file(
+        dev_dir.as_std_path().join("corpus.json").as_path(),
+    ) {
+        tracing::debug!(path = %dev_dir, "Loaded root package corpus");
         example_corpora.push(corpus);
     }
-    if let Some(corpus) =
-        beamtalk_examples::load_class_corpus_from_file(&dev_dir.join("class_corpus.json"))
-    {
-        tracing::debug!(path = %dev_dir.display(), "Loaded root package class corpus");
+    if let Some(corpus) = beamtalk_examples::load_class_corpus_from_file(
+        dev_dir.as_std_path().join("class_corpus.json").as_path(),
+    ) {
+        tracing::debug!(path = %dev_dir, "Loaded root package class corpus");
         class_corpora.push(corpus);
     }
 
-    // Dependency corpora
-    let deps_dir = root.join("_build").join("deps");
-    if let Ok(entries) = std::fs::read_dir(&deps_dir) {
-        for entry in entries.flatten() {
-            let dep_path = entry.path();
-            if !dep_path.is_dir() {
-                continue;
-            }
-            // Dependencies build their corpus in their own _build/dev/ during compilation,
-            // but the corpus is also placed alongside ebin in the dep's checkout.
-            // Check both the dep's _build/dev/ and the dep root itself.
-            for search_dir in [dep_path.join("_build").join("dev"), dep_path.clone()] {
-                if let Some(corpus) =
-                    beamtalk_examples::load_corpus_from_file(&search_dir.join("corpus.json"))
-                {
-                    tracing::debug!(path = %search_dir.display(), "Loaded dependency corpus");
-                    example_corpora.push(corpus);
-                    break;
-                }
-            }
-            for search_dir in [dep_path.join("_build").join("dev"), dep_path.clone()] {
-                if let Some(corpus) = beamtalk_examples::load_class_corpus_from_file(
-                    &search_dir.join("class_corpus.json"),
-                ) {
-                    tracing::debug!(path = %search_dir.display(), "Loaded dependency class corpus");
-                    class_corpora.push(corpus);
-                    break;
-                }
-            }
+    // Dependency corpora. A dependency builds its corpus in its own
+    // `_build/dev/` during compilation, but the corpus is also placed
+    // alongside `ebin` in the checkout, so check both.
+    for dep_root in dependency_roots(root) {
+        let search_dirs = [BuildLayout::new(&dep_root).profile_dir(), dep_root];
+        if let Some((dir, corpus)) = search_dirs.iter().find_map(|dir| {
+            beamtalk_examples::load_corpus_from_file(dir.join("corpus.json").as_std_path())
+                .map(|corpus| (dir, corpus))
+        }) {
+            tracing::debug!(path = %dir, "Loaded dependency corpus");
+            example_corpora.push(corpus);
+        }
+        if let Some((dir, corpus)) = search_dirs.iter().find_map(|dir| {
+            beamtalk_examples::load_class_corpus_from_file(
+                dir.join("class_corpus.json").as_std_path(),
+            )
+            .map(|corpus| (dir, corpus))
+        }) {
+            tracing::debug!(path = %dir, "Loaded dependency class corpus");
+            class_corpora.push(corpus);
         }
     }
 
@@ -182,7 +214,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<DocsParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("docs");
+        let mut timer = ToolTimer::start_quiet("docs");
         tracing::debug!(tool = "docs", class = ?params.class, erlang_module = ?params.erlang_module, selector = ?params.selector, "tool invoked");
 
         let expr = match (&params.class, &params.erlang_module) {
@@ -226,7 +258,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "No documentation found");
 
@@ -266,7 +298,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<SearchExamplesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("search_examples");
+        let mut timer = ToolTimer::start_quiet("search_examples");
         tracing::debug!(tool = "search_examples", limit = ?params.limit, "tool invoked");
         let start = std::time::Instant::now();
 
@@ -341,8 +373,7 @@ impl BeamtalkMcp {
             .collect::<Vec<_>>()
             .join("\n---\n\n");
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Search for Beamtalk classes by keyword or concept.
@@ -353,7 +384,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<SearchClassesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("search_classes");
+        let mut timer = ToolTimer::start_quiet("search_classes");
         tracing::debug!(tool = "search_classes", limit = ?params.limit, "tool invoked");
         let start = std::time::Instant::now();
 
@@ -398,10 +429,7 @@ impl BeamtalkMcp {
         );
 
         if results.is_empty() {
-            timer.mark_ok();
-            return Ok(CallToolResult::success(vec![ContentBlock::text(
-                "No classes found for that query. Try different keywords — e.g. 'http', 'collection', 'file', 'actor', 'subprocess'.",
-            )]));
+            return timer.ok_text("No classes found for that query. Try different keywords — e.g. 'http', 'collection', 'file', 'actor', 'subprocess'.",);
         }
 
         let text = results
@@ -449,8 +477,7 @@ impl BeamtalkMcp {
             .collect::<Vec<_>>()
             .join("\n---\n\n");
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// List all available Beamtalk classes with one-line descriptions.
@@ -461,21 +488,20 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<ListClassesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("list_classes");
+        let mut timer = ToolTimer::start_quiet("list_classes");
         tracing::debug!(tool = "list_classes", filter = ?params.filter, "tool invoked");
         let response = self
             .client
             .list_classes(params.filter.as_deref())
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to list classes");
 
         let classes = response.class_list.unwrap_or_default();
         let text = fmt::format_class_list(&classes, MCP_OUTPUT_MODE);
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// List all loaded Beamtalk packages with metadata.
@@ -483,24 +509,20 @@ impl BeamtalkMcp {
         description = "List all loaded Beamtalk packages with their versions, class counts, and dependencies. Returns package metadata from the runtime."
     )]
     pub(crate) async fn list_packages(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("list_packages");
-        tracing::debug!(tool = "list_packages", "tool invoked");
+        let mut timer = ToolTimer::start("list_packages");
 
         // Get list of package names via Package all
         let names_response = self
             .client
             .evaluate_with_options("Package all", false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(names_response, "Failed to list packages");
 
         let value = names_response.value_string();
         if value.is_empty() || value == "nil" {
-            timer.mark_ok();
-            return Ok(CallToolResult::success(vec![ContentBlock::text(
-                "No packages loaded",
-            )]));
+            return timer.ok_text("No packages loaded");
         }
 
         // For each package, get detailed info via a single Beamtalk expression
@@ -515,7 +537,7 @@ impl BeamtalkMcp {
                 false,
             )
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         let text = if detail_response.is_error() {
             // Fall back to just listing names
@@ -524,8 +546,7 @@ impl BeamtalkMcp {
             detail_response.value_string()
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// List all classes belonging to a named package.
@@ -536,7 +557,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<PackageClassesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("package_classes");
+        let mut timer = ToolTimer::start_quiet("package_classes");
         let pkg = &params.package;
         tracing::debug!(tool = "package_classes", package = %pkg, "tool invoked");
 
@@ -559,20 +580,18 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to get package classes");
 
         let text = response.value_string();
         if text.is_empty() || text == "#()" || text == "nil" {
-            timer.mark_ok();
-            return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
+            return timer.ok_text(format!(
                 "No classes found in package '{pkg}' (package may not be loaded)"
-            ))]));
+            ));
         }
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Discover supported REPL operations and protocol version.
@@ -580,13 +599,8 @@ impl BeamtalkMcp {
         description = "Discover supported REPL operations and protocol version. Returns the list of available ops with their parameters, and version information."
     )]
     pub(crate) async fn describe(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("describe");
-        tracing::debug!(tool = "describe", "tool invoked");
-        let response = self
-            .client
-            .describe()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let mut timer = ToolTimer::start("describe");
+        let response = self.client.describe().await.internal_err()?;
 
         check_response!(response, "Describe failed");
 
@@ -609,7 +623,108 @@ impl BeamtalkMcp {
             parts.push(ContentBlock::text("No describe information available"));
         }
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(parts))
+        timer.ok_parts(parts)
+    }
+}
+
+#[cfg(test)]
+mod corpus_discovery_tests {
+    use super::*;
+    use std::fs;
+
+    fn write(path: &Utf8Path, text: &str) {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+
+    fn corpus_json(id: &str) -> String {
+        format!(
+            r#"{{"entries":[{{"id":"{id}","title":"t","category":"c","tags":[],"source":"s","explanation":"e"}}]}}"#
+        )
+    }
+
+    fn class_corpus_json(name: &str) -> String {
+        format!(
+            r#"[{{"name":"{name}","superclass":"Object","doc":null,"methods":[],"is_sealed":false,"is_abstract":false}}]"#
+        )
+    }
+
+    fn write_package(root: &Utf8Path, name: &str, deps: &str) {
+        write(
+            &root.join("beamtalk.toml"),
+            &format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n\n[dependencies]\n{deps}"),
+        );
+    }
+
+    fn ids(corpora: &[beamtalk_examples::Corpus]) -> Vec<&str> {
+        corpora
+            .iter()
+            .flat_map(|c| c.entries.iter().map(|e| e.id.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn finds_root_git_and_path_dependency_corpora() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = Utf8Path::from_path(tmp.path()).unwrap();
+        let app = base.join("app");
+        write_package(
+            &app,
+            "app",
+            "fetched = { git = \"https://example.test/fetched\", tag = \"v1\" }\nsibling = { path = \"../sibling\" }\n",
+        );
+        write(
+            &BuildLayout::new(&app).profile_dir().join("corpus.json"),
+            &corpus_json("root"),
+        );
+        // A git dependency: checked out under `_build/deps/<name>/`, corpus in its `_build/dev/`.
+        let fetched = BuildLayout::new(&app).dep_checkout_dir("fetched");
+        write_package(&fetched, "fetched", "");
+        write(
+            &BuildLayout::new(&fetched).profile_dir().join("corpus.json"),
+            &corpus_json("fetched"),
+        );
+        // A path dependency lives outside `_build/deps/`, corpus beside its manifest.
+        let sibling = base.join("sibling");
+        write_package(&sibling, "sibling", "");
+        write(&sibling.join("corpus.json"), &corpus_json("sibling"));
+        write(
+            &sibling.join("class_corpus.json"),
+            &class_corpus_json("SiblingClass"),
+        );
+
+        let (examples, classes) = discover_package_corpora_in(&app);
+
+        assert_eq!(ids(&examples), ["root", "fetched", "sibling"]);
+        assert_eq!(classes.len(), 1);
+        assert_eq!(classes[0].entries[0].name, "SiblingClass");
+    }
+
+    #[test]
+    fn unreadable_manifest_falls_back_to_fetched_checkouts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = Utf8Path::from_path(tmp.path()).unwrap();
+        write(&app.join("beamtalk.toml"), "{ not toml");
+        let fetched = BuildLayout::new(app).dep_checkout_dir("fetched");
+        write(&fetched.join("corpus.json"), &corpus_json("fetched"));
+
+        let (examples, _) = discover_package_corpora_in(app);
+
+        assert_eq!(ids(&examples), ["fetched"]);
+    }
+
+    #[test]
+    fn ignores_checkouts_no_manifest_declares() {
+        let tmp = tempfile::tempdir().unwrap();
+        let app = Utf8Path::from_path(tmp.path()).unwrap();
+        write_package(app, "app", "");
+        let orphan = BuildLayout::new(app).dep_checkout_dir("removed");
+        write_package(&orphan, "removed", "");
+        write(&orphan.join("corpus.json"), &corpus_json("removed"));
+
+        let (examples, classes) = discover_package_corpora_in(app);
+
+        assert!(examples.is_empty());
+        assert!(classes.is_empty());
     }
 }

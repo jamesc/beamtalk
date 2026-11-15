@@ -798,14 +798,11 @@ maybe_stop_builder(Pid) when is_pid(Pid) ->
             %% when the caller drops the reference.
             ok;
         false ->
-            try
-                gen_server:stop(Pid, normal, 5000)
-            catch
-                exit:noproc -> ok;
-                exit:normal -> ok;
-                exit:timeout -> ok;
-                exit:{noproc, _} -> ok
-            end
+            beamtalk_call_failure:tolerate_gone(
+                fun() -> gen_server:stop(Pid, normal, 5000) end,
+                ok,
+                #{stopping => true, timeout => true}
+            )
     end.
 
 -doc """

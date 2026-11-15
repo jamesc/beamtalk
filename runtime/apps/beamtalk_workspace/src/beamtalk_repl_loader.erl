@@ -18,6 +18,7 @@ Extracted from beamtalk_repl_eval.
     handle_load/3,
     handle_load_source/3,
     load_class_module/3,
+    load_protocol_module/3,
     reload_method_definition/4,
     install_method/8,
     install_method/9,
@@ -1277,9 +1278,10 @@ Install a single method into a class via the structured backend compile
 (the rock-solid live-image write-surface idiom — IDE save / `compile:source:` /
 MCP `save_method`).
 
-`MethodSource` is the BARE method body (comments and all). It is parsed
-standalone by the backend — no `Class >>` text wrap, no `normalize_method_source`
-header-sniffing — so the stored source round-trips byte-for-byte. The class's
+`MethodSource` is the BARE method body (comments and all) or a full
+`selector => ...` definition; the backend synthesises the header for a bare
+body (BT-4911). It is parsed standalone — no `Class >>` text wrap — so the
+stored source round-trips byte-for-byte. The class's
 package-qualified module name and on-disk source path are preserved, so the
 patched class stays flushable + revertable.
 """.
@@ -1448,6 +1450,9 @@ install_method_with_source(
     ModuleIndex = beamtalk_repl_compiler:build_class_module_index(),
     Options = #{
         class_name => ClassNameBin,
+        %% The selector being patched: lets the backend synthesise the
+        %% `selector => ' header when `MethodSource' is a bare body (BT-4911).
+        selector => SelectorBin,
         %% Side comes from the caller: `false` for the instance-side
         %% `compile:source:` / MCP `save_method` / IDE-save chokepoint; `true`
         %% for a class-side revert re-install and for the REPL's `Class class >>
@@ -1562,6 +1567,7 @@ precheck_method_with_source(ClassNameBin, SelectorBin, MethodSource, ClassSource
     ModuleIndex = beamtalk_repl_compiler:build_class_module_index(),
     Options = #{
         class_name => ClassNameBin,
+        selector => SelectorBin,
         is_class_method => IsClassMethod,
         module_name => ModuleNameOverride,
         source_path => source_path_binary(SourcePath),

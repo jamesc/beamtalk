@@ -108,7 +108,7 @@ no_server_test_() ->
     ].
 
 setup() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     #{pid => Pid, workspace_id => WorkspaceId, tmp_home => TmpHome, old_home => OldHome}.
 
@@ -1047,7 +1047,7 @@ restart_test_() ->
     ]}.
 
 restart_bumps_epoch_and_tags_prior() ->
-    {WsId, TmpHome, OldHome} = fresh_workspace(),
+    {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     try
         {ok, P1} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
         ?assertEqual(1, beamtalk_workspace_changelog:epoch()),
@@ -1071,7 +1071,7 @@ restart_bumps_epoch_and_tags_prior() ->
     end.
 
 restart_tags_orphan_when_disk_advanced() ->
-    {WsId, TmpHome, OldHome} = fresh_workspace(),
+    {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     try
         %% A real on-disk source file whose method body the entry recorded.
         SrcFile = filename:join(TmpHome, "counter.bt"),
@@ -1101,7 +1101,7 @@ restart_tags_orphan_when_disk_advanced() ->
     end.
 
 restart_keeps_prior_when_disk_matches() ->
-    {WsId, TmpHome, OldHome} = fresh_workspace(),
+    {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     try
         Content = <<"class Counter\n  inc => ^ self value\nend\n">>,
         SrcFile = filename:join(TmpHome, "counter.bt"),
@@ -1143,7 +1143,7 @@ rotation_test_() ->
     ]}.
 
 rotation_archives_overflow() ->
-    {WsId, TmpHome, OldHome} = fresh_workspace(),
+    {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     try
         {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
         %% Append MAX_ENTRIES + 3 entries; the 3 oldest must be archived.
@@ -1176,7 +1176,7 @@ rotation_archives_overflow() ->
 rotation_keeps_state_when_archive_fails() ->
     %% Transactional rotation: if archiving the overflow segment fails, the live
     %% ETS and on-disk log must be left untouched (no history loss).
-    {WsId, TmpHome, OldHome} = fresh_workspace(),
+    {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     try
         {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
         Total = 1003,
@@ -1217,7 +1217,7 @@ rotation_keeps_state_when_archive_fails() ->
 
 archive_filenames_unique_within_same_second() ->
     %% Two rotations in the same wall-clock second must not collide.
-    {WsId, TmpHome, OldHome} = fresh_workspace(),
+    {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     try
         {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WsId}),
         %% Drive enough appends to force at least two separate rotations quickly.
@@ -1253,7 +1253,7 @@ archive_filenames_unique_within_same_second() ->
 load_enforces_ring_bound_when_disk_exceeds_max() ->
     %% A changes.jsonl persisted with > MAX_ENTRIES must be trimmed to the ring
     %% bound on startup, not left unbounded until the next append.
-    {WsId, TmpHome, OldHome} = fresh_workspace(),
+    {WsId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     try
         Dir = beamtalk_workspace_changelog:changes_dir(WsId),
         ok = filelib:ensure_path(Dir),
@@ -1639,24 +1639,6 @@ rename_method_input() ->
         author => <<"sess-1">>,
         author_kind => agent
     }.
-
-%% Create an isolated workspace: a unique id + a temp HOME so the changelog
-%% resolves its changes/ dir under our temp tree. Returns the prior HOME so it
-%% can be restored.
-%%
-%% Cross-invocation-unique — see `beamtalk_test_unique:id/0`: our
-%% own `load_from_disk` would otherwise restore a prior run's leftover
-%% `changes.jsonl` entries into this run's ETS table. This is the helper
-%% `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s
-%% `setup_with_changelog/0` (PR #3523) mirrors.
-fresh_workspace() ->
-    Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary("test-ws-" ++ Unique),
-    Tmp = filename:join(beamtalk_test_fs:base_dir(), "bt-changelog-" ++ Unique),
-    ok = filelib:ensure_path(Tmp),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", Tmp),
-    {WorkspaceId, Tmp, OldHome}.
 
 stop(Pid) ->
     case is_process_alive(Pid) of

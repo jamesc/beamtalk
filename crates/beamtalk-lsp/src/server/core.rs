@@ -758,7 +758,7 @@ impl Backend {
                         super::config::root_dependencies(root)
                             .found
                             .into_iter()
-                            .map(|dep| dep.root),
+                            .map(|dep| dep.root.into_std_path_buf()),
                     )
                 })
                 .collect();
@@ -1534,7 +1534,7 @@ fn root_type_registry(
         Some(true) => Some(NativeTypeRegistry::new()),
         Some(false) => None,
         None => beamtalk_package::native_type_specs::extract_project_type_specs(
-            &beamtalk_package::build_layout::BuildLayout::new(root),
+            &beamtalk_core::build_layout::BuildLayout::new(root),
         ),
     }?;
     let dependency_stubs =
