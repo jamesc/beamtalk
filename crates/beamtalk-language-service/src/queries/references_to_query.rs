@@ -204,124 +204,269 @@ fn collect_type_lines(
 mod tests {
     use super::*;
 
-    #[test]
-    fn finds_class_reference_in_send() {
+    // BT-4908: one table for the `find_references_to_in_source` cases.
+    // Rows are `(name, source, class, expected lines)`.
+    const CASES: &[(&str, &str, &str, &[u32])] = &[
         // `Integer new` — the receiver is a ClassReference.
-        let lines = find_references_to_in_source("make => Integer new", "Integer");
-        assert_eq!(lines, vec![1]);
-    }
-
-    #[test]
-    fn finds_class_reference_as_argument() {
-        let src = "check: x => x isKindOf: Counter";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![1]);
-    }
-
-    #[test]
-    fn finds_multiple_references_in_one_method() {
-        let src = "buildPair =>\n  a := Counter new\n  b := Counter new\n  Counter reset";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![2, 3, 4]);
-    }
-
-    #[test]
-    fn finds_reference_inside_block() {
-        let src = "spawn =>\n  [:x | Counter new value: x] value: 42";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![2]);
-    }
-
-    #[test]
-    fn finds_reference_in_cascade_argument() {
-        let src = "log =>\n  Transcript\n    show: Counter new printString;\n    show: \"!\"";
-        let lines = find_references_to_in_source(src, "Counter");
+        (
+            "finds_class_reference_in_send",
+            "make => Integer new",
+            "Integer",
+            &[1],
+        ),
+        (
+            "finds_class_reference_as_argument",
+            "check: x => x isKindOf: Counter",
+            "Counter",
+            &[1],
+        ),
+        (
+            "finds_multiple_references_in_one_method",
+            "buildPair =>\n  a := Counter new\n  b := Counter new\n  Counter reset",
+            "Counter",
+            &[2, 3, 4],
+        ),
+        (
+            "finds_reference_inside_block",
+            "spawn =>\n  [:x | Counter new value: x] value: 42",
+            "Counter",
+            &[2],
+        ),
         // Counter appears once on line 3 (the cascade's first show: argument).
         // Transcript on line 2 is a different class.
-        assert_eq!(lines, vec![3]);
-    }
-
-    #[test]
-    fn finds_reference_in_list_literal() {
-        let src = "classes => #(Integer, Float, String)";
-        let lines = find_references_to_in_source(src, "Float");
-        assert_eq!(lines, vec![1]);
-    }
-
-    #[test]
-    fn finds_reference_in_map_literal() {
-        let src = "kinds => #{#int => Integer, #str => String}";
-        let lines = find_references_to_in_source(src, "String");
-        assert_eq!(lines, vec![1]);
-    }
-
-    #[test]
-    fn returns_empty_when_no_references() {
-        let lines = find_references_to_in_source("greet => self name", "Counter");
-        assert!(lines.is_empty());
-    }
-
-    #[test]
-    fn handles_unparseable_source_without_panicking() {
-        let lines = find_references_to_in_source(")@!", "Counter");
-        assert!(lines.is_empty());
-    }
-
-    #[test]
-    fn does_not_match_lowercase_identifier_of_same_name() {
+        (
+            "finds_reference_in_cascade_argument",
+            "log =>\n  Transcript\n    show: Counter new printString;\n    show: \"!\"",
+            "Counter",
+            &[3],
+        ),
+        (
+            "finds_reference_in_list_literal",
+            "classes => #(Integer, Float, String)",
+            "Float",
+            &[1],
+        ),
+        (
+            "finds_reference_in_map_literal",
+            "kinds => #{#int => Integer, #str => String}",
+            "String",
+            &[1],
+        ),
+        (
+            "returns_empty_when_no_references",
+            "greet => self name",
+            "Counter",
+            &[],
+        ),
+        (
+            "handles_unparseable_source_without_panicking",
+            ")@!",
+            "Counter",
+            &[],
+        ),
         // A local variable named `counter` is parsed as an Identifier, not a
         // ClassReference, so it must not match a query for `Counter`.
-        let src = "use => counter := 1\n  counter + 1";
-        let lines = find_references_to_in_source(src, "counter");
-        assert!(lines.is_empty());
-    }
-
-    #[test]
-    fn finds_reference_in_return_type_annotation() {
-        let src = "make -> Counter => Counter new";
+        (
+            "does_not_match_lowercase_identifier_of_same_name",
+            "use => counter := 1\n  counter + 1",
+            "counter",
+            &[],
+        ),
         // Counter appears twice on line 1: once in the return type, once in
         // the body. Both should be reported.
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines.len(), 2);
-        assert_eq!(lines, vec![1, 1]);
-    }
-
-    #[test]
-    fn finds_reference_in_parameter_type_annotation() {
-        let src = "use: x :: Counter -> Integer =>\n  x value";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![1]);
-    }
-
-    #[test]
-    fn finds_reference_in_generic_type_parameter() {
-        let src = "items -> List(Counter) =>\n  List new";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![1]);
-    }
-
-    #[test]
-    fn does_not_match_synthetic_wrapper_class() {
+        (
+            "finds_reference_in_return_type_annotation",
+            "make -> Counter => Counter new",
+            "Counter",
+            &[1, 1],
+        ),
+        (
+            "finds_reference_in_parameter_type_annotation",
+            "use: x :: Counter -> Integer =>\n  x value",
+            "Counter",
+            &[1],
+        ),
+        (
+            "finds_reference_in_generic_type_parameter",
+            "items -> List(Counter) =>\n  List new",
+            "Counter",
+            &[1],
+        ),
         // Querying for the synthetic wrapper class name must return nothing —
         // the wrapper is an implementation detail, not a real reference.
-        let lines = find_references_to_in_source("noop => self", "__SyntheticReferencesScope");
-        assert!(lines.is_empty());
-    }
-
-    #[test]
-    fn finds_reference_with_leading_doc_comment() {
-        let src = "/// Builds an Integer.\nmake => Integer new";
-        let lines = find_references_to_in_source(src, "Integer");
-        assert_eq!(lines, vec![2]);
-    }
-
-    #[test]
-    fn finds_reference_in_match_arm_pattern() {
+        (
+            "does_not_match_synthetic_wrapper_class",
+            "noop => self",
+            "__SyntheticReferencesScope",
+            &[],
+        ),
+        (
+            "finds_reference_with_leading_doc_comment",
+            "/// Builds an Integer.\nmake => Integer new",
+            "Integer",
+            &[2],
+        ),
         // The only mention of `Result` is inside a match-arm constructor
         // pattern. Without walking patterns this would be missed.
-        let src = "classify: x =>\n  x match: [\n    Result ok: v -> v;\n    _ -> nil]";
-        let lines = find_references_to_in_source(src, "Result");
-        assert_eq!(lines, vec![3]);
+        (
+            "finds_reference_in_match_arm_pattern",
+            "classify: x =>\n  x match: [\n    Result ok: v -> v;\n    _ -> nil]",
+            "Result",
+            &[3],
+        ),
+        // The synthetic wrapper begins with `Object subclass: __Synthetic...`.
+        // `Object` is part of the class definition header (not a method body),
+        // so it must not contribute a false-positive reference when the caller
+        // queries for `Object`.
+        (
+            "does_not_match_object_in_synthetic_header",
+            "noop => self",
+            "Object",
+            &[],
+        ),
+        (
+            "finds_reference_in_destructure_assignment",
+            "make =>\n  {a, b} := Counter new",
+            "Counter",
+            &[2],
+        ),
+        (
+            "finds_reference_in_early_return",
+            "get: flag =>\n  flag ifTrue: [^ Counter new]\n  nil",
+            "Counter",
+            &[2],
+        ),
+        // The FieldAccess branch recurses into the receiver; Counter is found
+        // in a later statement on the same method body walk.
+        (
+            "walks_through_field_access_to_find_reference",
+            "get =>\n  x := self.count\n  Counter new",
+            "Counter",
+            &[3],
+        ),
+        (
+            "finds_reference_in_match_arm_guard",
+            "classify: x =>\n  x match: [\n    v when: [v isKindOf: Counter] -> true;\n    _ -> false]",
+            "Counter",
+            &[3],
+        ),
+        (
+            "finds_reference_in_string_interpolation",
+            "describe =>\n  \"count: {Counter new}\"",
+            "Counter",
+            &[2],
+        ),
+        (
+            "finds_reference_in_binary_construction",
+            "encode =>\n  <<(Counter new):8>>",
+            "Counter",
+            &[2],
+        ),
+        (
+            "finds_reference_in_list_literal_tail",
+            "cons =>\n  #(1 | Counter new)",
+            "Counter",
+            &[2],
+        ),
+        (
+            "finds_reference_in_array_literal",
+            "arr =>\n  #[Counter new, 1]",
+            "Counter",
+            &[2],
+        ),
+        (
+            "finds_reference_in_tuple_literal",
+            "tup =>\n  {Counter new, 1}",
+            "Counter",
+            &[2],
+        ),
+        // Pattern::Tuple containing a Constructor pattern referencing Result.
+        (
+            "finds_reference_in_match_pattern_tuple",
+            "classify: x =>\n  x match: [\n    {Result ok: v, 1} -> v;\n    _ -> nil]",
+            "Result",
+            &[3],
+        ),
+        // Pattern::Array containing a Constructor pattern referencing Result.
+        (
+            "finds_reference_in_match_pattern_array",
+            "classify: x =>\n  x match: [\n    #[Result ok: v] -> v;\n    _ -> nil]",
+            "Result",
+            &[3],
+        ),
+        // Pattern::Map branch is exercised; Counter is found in the match value.
+        (
+            "walks_through_map_pattern_finds_reference_in_value",
+            "classify =>\n  (Counter new) match: [\n    #{#key => v} -> v;\n    _ -> nil]",
+            "Counter",
+            &[2],
+        ),
+        // Pattern::Binary branch is exercised; Counter is found in the match value.
+        (
+            "walks_through_binary_pattern_finds_reference_in_value",
+            "classify =>\n  (Counter new) match: [\n    <<_:8>> -> nil;\n    _ -> nil]",
+            "Counter",
+            &[2],
+        ),
+        // Pattern::Type carries a class name and is reported when it matches.
+        (
+            "finds_reference_in_match_pattern_type",
+            "classify: x =>\n  x match: [\n    v :: Counter -> v;\n    _ -> nil]",
+            "Counter",
+            &[3],
+        ),
+        (
+            "finds_reference_in_union_type_annotation",
+            "use: x :: Counter | Integer -> Boolean =>\n  true",
+            "Counter",
+            &[1],
+        ),
+        // The existing generic-parameter test covers `List(Counter)`.
+        // This test covers the base (`Counter`) in `Counter(Integer)`.
+        (
+            "finds_reference_in_generic_base_type_annotation",
+            "use: x :: Counter(Integer) -> Boolean =>\n  true",
+            "Counter",
+            &[1],
+        ),
+        (
+            "finds_reference_in_difference_type_annotation",
+            "use: x :: Counter \\ Integer -> Boolean =>\n  true",
+            "Counter",
+            &[1],
+        ),
+        (
+            "finds_reference_in_intersection_type_annotation",
+            "use: x :: Counter & Integer -> Boolean =>\n  true",
+            "Counter",
+            &[1],
+        ),
+        (
+            "finds_reference_in_class_of_type_annotation",
+            "use: cls :: Counter class -> Boolean =>\n  true",
+            "Counter",
+            &[1],
+        ),
+        // `Counter >> selector` — the walker processes param types, return
+        // type, and body; Counter appears in param type (line 1), return type
+        // (line 1), and the body (line 2).
+        (
+            "finds_reference_in_standalone_method_definition",
+            "Counter >> increment: x :: Counter -> Counter =>\n  Counter new",
+            "Counter",
+            &[1, 1, 2],
+        ),
+    ];
+
+    #[test]
+    fn find_references_to_in_source_cases() {
+        for (name, src, class, expected) in CASES {
+            assert_eq!(
+                find_references_to_in_source(src, class),
+                *expected,
+                "[{name}] {src:?}"
+            );
+        }
     }
 
     #[test]
@@ -331,16 +476,6 @@ mod tests {
             "unwrap: x =>\n  x match: [\n    Result ok: (Wrapper value: v) -> v;\n    _ -> nil]";
         let lines = find_references_to_in_source(src, "Wrapper");
         assert_eq!(lines, vec![3]);
-    }
-
-    #[test]
-    fn does_not_match_object_in_synthetic_header() {
-        // The synthetic wrapper begins with `Object subclass: __Synthetic...`.
-        // `Object` is part of the class definition header (not a method body),
-        // so it must not contribute a false-positive reference when the caller
-        // queries for `Object`.
-        let lines = find_references_to_in_source("noop => self", "Object");
-        assert!(lines.is_empty());
     }
 
     /// Class-side method sources (as unparsed for `class_method_source`)
@@ -417,177 +552,5 @@ mod tests {
     fn all_refs_empty_when_no_references() {
         let hits = find_all_references_in_source("greet => self name");
         assert!(hits.is_empty(), "got {hits:?}");
-    }
-
-    // --- Expression walker: DestructureAssignment | Return ----------------
-
-    #[test]
-    fn finds_reference_in_destructure_assignment() {
-        let src = "make =>\n  {a, b} := Counter new";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![2]);
-    }
-
-    #[test]
-    fn finds_reference_in_early_return() {
-        let src = "get: flag =>\n  flag ifTrue: [^ Counter new]\n  nil";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![2]);
-    }
-
-    // --- Expression walker: FieldAccess -----------------------------------
-
-    #[test]
-    fn walks_through_field_access_to_find_reference() {
-        // The FieldAccess branch recurses into the receiver; Counter is found
-        // in a later statement on the same method body walk.
-        let src = "get =>\n  x := self.count\n  Counter new";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![3]);
-    }
-
-    // --- Expression walker: Match arm guard -------------------------------
-
-    #[test]
-    fn finds_reference_in_match_arm_guard() {
-        let src = "classify: x =>\n  x match: [\n    v when: [v isKindOf: Counter] -> true;\n    _ -> false]";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![3]);
-    }
-
-    // --- Expression walker: StringInterpolation ---------------------------
-
-    #[test]
-    fn finds_reference_in_string_interpolation() {
-        let src = "describe =>\n  \"count: {Counter new}\"";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![2]);
-    }
-
-    // --- Expression walker: BinaryConstruction ----------------------------
-
-    #[test]
-    fn finds_reference_in_binary_construction() {
-        let src = "encode =>\n  <<(Counter new):8>>";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![2]);
-    }
-
-    // --- Expression walker: ListLiteral tail ------------------------------
-
-    #[test]
-    fn finds_reference_in_list_literal_tail() {
-        let src = "cons =>\n  #(1 | Counter new)";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![2]);
-    }
-
-    // --- Expression walker: ArrayLiteral / TupleLiteral -------------------
-
-    #[test]
-    fn finds_reference_in_array_literal() {
-        let src = "arr =>\n  #[Counter new, 1]";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![2]);
-    }
-
-    #[test]
-    fn finds_reference_in_tuple_literal() {
-        let src = "tup =>\n  {Counter new, 1}";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![2]);
-    }
-
-    // --- Pattern walker: Tuple / Array / Map / Binary / Type --------------
-
-    #[test]
-    fn finds_reference_in_match_pattern_tuple() {
-        // Pattern::Tuple containing a Constructor pattern referencing Result.
-        let src = "classify: x =>\n  x match: [\n    {Result ok: v, 1} -> v;\n    _ -> nil]";
-        let lines = find_references_to_in_source(src, "Result");
-        assert_eq!(lines, vec![3]);
-    }
-
-    #[test]
-    fn finds_reference_in_match_pattern_array() {
-        // Pattern::Array containing a Constructor pattern referencing Result.
-        let src = "classify: x =>\n  x match: [\n    #[Result ok: v] -> v;\n    _ -> nil]";
-        let lines = find_references_to_in_source(src, "Result");
-        assert_eq!(lines, vec![3]);
-    }
-
-    #[test]
-    fn walks_through_map_pattern_finds_reference_in_value() {
-        // Pattern::Map branch is exercised; Counter is found in the match value.
-        let src = "classify =>\n  (Counter new) match: [\n    #{#key => v} -> v;\n    _ -> nil]";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![2]);
-    }
-
-    #[test]
-    fn walks_through_binary_pattern_finds_reference_in_value() {
-        // Pattern::Binary branch is exercised; Counter is found in the match value.
-        let src = "classify =>\n  (Counter new) match: [\n    <<_:8>> -> nil;\n    _ -> nil]";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![2]);
-    }
-
-    #[test]
-    fn finds_reference_in_match_pattern_type() {
-        // Pattern::Type carries a class name and is reported when it matches.
-        let src = "classify: x =>\n  x match: [\n    v :: Counter -> v;\n    _ -> nil]";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![3]);
-    }
-
-    // --- Type walker: Union / Generic base / Difference / Intersection / ClassOf ---
-
-    #[test]
-    fn finds_reference_in_union_type_annotation() {
-        let src = "use: x :: Counter | Integer -> Boolean =>\n  true";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![1]);
-    }
-
-    #[test]
-    fn finds_reference_in_generic_base_type_annotation() {
-        // The existing generic-parameter test covers `List(Counter)`.
-        // This test covers the base (`Counter`) in `Counter(Integer)`.
-        let src = "use: x :: Counter(Integer) -> Boolean =>\n  true";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![1]);
-    }
-
-    #[test]
-    fn finds_reference_in_difference_type_annotation() {
-        let src = "use: x :: Counter \\ Integer -> Boolean =>\n  true";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![1]);
-    }
-
-    #[test]
-    fn finds_reference_in_intersection_type_annotation() {
-        let src = "use: x :: Counter & Integer -> Boolean =>\n  true";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![1]);
-    }
-
-    #[test]
-    fn finds_reference_in_class_of_type_annotation() {
-        let src = "use: cls :: Counter class -> Boolean =>\n  true";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![1]);
-    }
-
-    // --- Standalone method definitions (module.method_definitions) --------
-
-    #[test]
-    fn finds_reference_in_standalone_method_definition() {
-        // `Counter >> selector` — the walker processes param types, return
-        // type, and body; Counter appears in param type (line 1), return type
-        // (line 1), and the body (line 2).
-        let src = "Counter >> increment: x :: Counter -> Counter =>\n  Counter new";
-        let lines = find_references_to_in_source(src, "Counter");
-        assert_eq!(lines, vec![1, 1, 2]);
     }
 }

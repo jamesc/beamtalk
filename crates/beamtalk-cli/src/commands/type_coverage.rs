@@ -510,7 +510,10 @@ mod tests {
             None,
             None,
         );
-        assert!(result.is_err());
+        assert_eq!(
+            format!("{:#}", result.unwrap_err()),
+            "'/nonexistent/beamtalk/path' is not a file or directory"
+        );
     }
 
     #[test]
@@ -518,9 +521,10 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let p = Utf8PathBuf::from_path_buf(dir.path().to_owned()).unwrap();
         let result = run(p.as_str(), false, OutputFormat::Text, None, None);
+        let msg = format!("{:#}", result.unwrap_err());
         assert!(
-            result.is_err(),
-            "empty dir should error: no .bt source files found"
+            msg.starts_with("no .bt source files found in '"),
+            "unexpected error: {msg}"
         );
     }
 
@@ -530,7 +534,10 @@ mod tests {
         let p = write_minimal_bt(&dir, "Foo.bt", "Object subclass: Foo\n  bar => 42\n");
         // 101% threshold is always unachievable, so run() should bail
         let result = run(p.as_str(), false, OutputFormat::Text, Some(101.0), None);
-        assert!(result.is_err(), "threshold above 100% must always fail");
+        assert_eq!(
+            format!("{:#}", result.unwrap_err()),
+            "type coverage 100.0% is below threshold 101.0%"
+        );
     }
 
     #[test]
@@ -546,9 +553,9 @@ mod tests {
         let p = write_minimal_bt(&dir, "Foo.bt", "Object subclass: Foo\n  bar => 42\n");
         // JSON output (with "passed": false) is printed before the bail check triggers
         let result = run(p.as_str(), false, OutputFormat::Json, Some(101.0), None);
-        assert!(
-            result.is_err(),
-            "json + threshold above 100% must always fail"
+        assert_eq!(
+            format!("{:#}", result.unwrap_err()),
+            "type coverage 100.0% is below threshold 101.0%"
         );
     }
 
@@ -563,7 +570,10 @@ mod tests {
             None,
             Some("NonExistent"),
         );
-        assert!(result.is_err(), "filter for unknown class should error");
+        assert_eq!(
+            format!("{:#}", result.unwrap_err()),
+            "no class named 'NonExistent' found in project files"
+        );
     }
 
     #[test]
