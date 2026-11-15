@@ -141,3 +141,37 @@ fn class_side_extension_suppresses_dnu_in_pipeline() {
         "Class-side extension should suppress DNU, got: {dnu:?}"
     );
 }
+
+// ---- unguarded `late` read in a cross-file `Foo >> terminate:` (BT-4863) ----
+//
+// A same-file `Foo >> terminate:` is folded into `Foo`'s body before the
+// check runs; only an extension in a *different* file than the class reaches
+// the standalone-method path of `check_unguarded_late_reads_in_lifecycle_hooks`.
+
+const LATE_ACTOR: &str = "typed Actor subclass: CodexClient\n  late state: proc :: Subprocess\n";
+
+fn cross_file_unguarded(ext_src: &str) -> Vec<crate::source_analysis::Diagnostic> {
+    let ctx = AnalysisContext::default().with_pre_loaded_classes(declared_by("app", LATE_ACTOR));
+    analyse_full(&parse_module(ext_src), ctx)
+        .diagnostics
+        .into_iter()
+        .filter(|d| {
+            d.category == Some(crate::source_analysis::DiagnosticCategory::UnguardedLateRead)
+        })
+        .collect()
+}
+
+#[test]
+fn cross_file_extension_terminate_with_unguarded_late_read_warns() {
+    let d = cross_file_unguarded("CodexClient >> terminate: reason => self.proc close\n");
+    assert_eq!(d.len(), 1, "{d:?}");
+    assert!(d[0].message.contains("`proc`"), "{}", d[0].message);
+}
+
+#[test]
+fn cross_file_extension_terminate_with_guarded_late_read_is_silent() {
+    let d = cross_file_unguarded(
+        "CodexClient >> terminate: reason =>\n  (self hasField: #proc)\n    ifTrue: [self.proc close]\n  nil\n",
+    );
+    assert!(d.is_empty(), "{d:?}");
+}

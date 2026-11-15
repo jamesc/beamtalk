@@ -20,9 +20,12 @@
 //! syntactic** walk — no dataflow, cheap by design (ADR 0124 §4d): for every
 //! class with at least one `late` slot, it looks at that class's own
 //! `terminate:`/`handleInfo:` method body (declared in the class body or as a
-//! standalone `Foo >> terminate: reason => ...` definition), plus (one level only) the body of
+//! standalone `Foo >> terminate: reason => ...` definition — in production a
+//! same-file extension has already been folded into the class body by
+//! `fold_same_file_extensions`, so only an extension in a *different* file than
+//! the class reaches the standalone path), plus (one level only) the body of
 //! any `self`-sent unary/keyword message that resolves to another of the
-//! class's own instance methods (inline or standalone), and reports every direct `self.slot` read
+//! class's own instance methods (inline or standalone) **declared in this module**, and reports every direct `self.slot` read
 //! of a `late` slot that is not lexically inside the `ifTrue:` (true) arm of
 //! `(self hasField: #slot) ifTrue: [...]` / `... ifTrue: [...] ifFalse:
 //! [...]` for that same slot. A `self.slot := value` **assignment target**
@@ -31,6 +34,12 @@
 //! `self.slot :=` and `self.slot` share the same `FieldAccess` AST shape;
 //! `value`, if it itself reads the slot (e.g. `self.proc := self.proc +
 //! 1`), is a distinct node and stays a candidate.
+//!
+//! **Cross-file limit.** For a cross-file extension (`Foo >> terminate:` here,
+//! `Foo` and its helpers in another file) the helper lookup only sees methods
+//! of this module; the hierarchy carries no method bodies. A helper defined in
+//! `Foo`'s own file is therefore not followed — a deliberate limit under the
+//! "per-class, syntactic" scope of ADR 0124 §4d (BT-4863).
 //!
 //! **Why only the `ifTrue:` arm counts as guarded.** `hasField:` answers
 //! `true` exactly when the slot is present, so only the branch taken when it
@@ -483,6 +492,11 @@ mod tests {
     }
 
     // ── standalone `Foo >> selector => ...` definitions (BT-4863) ───────
+    //
+    // These call the validator on the unfolded parse to exercise the merge
+    // logic directly; `analyse_full` folds same-file extensions first, so the
+    // production path for cross-file extensions is covered by
+    // `tests/extension_method_integration.rs`.
 
     #[test]
     fn unguarded_read_in_standalone_terminate_warns() {
@@ -548,7 +562,7 @@ mod tests {
     fn standalone_class_side_terminate_is_not_checked() {
         let src = "typed Actor subclass: CodexClient\n\
                     late state: proc :: Subprocess\n\n\
-                    CodexClient class >> terminate: reason => reason";
+                    CodexClient class >> terminate: reason => self.proc close";
         assert!(unguarded_findings(src).is_empty());
     }
 }
