@@ -170,109 +170,9 @@ pub(crate) fn generate_stack_frame_bif(
 
 #[cfg(test)]
 mod tests {
+    use super::super::assert_bif_table;
     use super::super::doc_to_string;
     use super::*;
-
-    // generate_exception_bif tests
-
-    #[test]
-    fn test_exception_message() {
-        let result = doc_to_string(generate_exception_bif("message", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_exception_handler':'dispatch'('message', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_exception_hint() {
-        let result = doc_to_string(generate_exception_bif("hint", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_exception_handler':'dispatch'('hint', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_exception_kind() {
-        let result = doc_to_string(generate_exception_bif("kind", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_exception_handler':'dispatch'('kind', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_exception_selector() {
-        let result = doc_to_string(generate_exception_bif("selector", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_exception_handler':'dispatch'('selector', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_exception_error_class() {
-        let result = doc_to_string(generate_exception_bif("errorClass", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_exception_handler':'dispatch'('errorClass', [], Self)".to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_exception_reason() {
-        let result = doc_to_string(generate_exception_bif("reason", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_exception_handler':'dispatch'('reason', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_exception_print_string() {
-        let result = doc_to_string(generate_exception_bif("printString", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_exception_handler':'dispatch'('printString', [], Self)".to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_exception_signal() {
-        let result = doc_to_string(generate_exception_bif("signal", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_exception_handler':'dispatch'('signal', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_exception_signal_with_message() {
-        let result = doc_to_string(generate_exception_bif("signal:", &["Msg".to_string()]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_exception_handler':'dispatch'('signal:', [Msg], Self)".to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_exception_full_stack_trace() {
-        let result = doc_to_string(generate_exception_bif("fullStackTrace", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_exception_handler':'dispatch'('fullStackTrace', [], Self)"
-                    .to_string()
-            )
-        );
-    }
 
     #[test]
     fn test_stack_frame_raw_mfa_and_is_hidden() {
@@ -285,73 +185,6 @@ mod tests {
                 ))
             );
         }
-    }
-
-    #[test]
-    fn test_exception_stack_trace() {
-        let result = doc_to_string(generate_exception_bif("stackTrace", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_exception_handler':'dispatch'('stackTrace', [], Self)".to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_exception_class_signal_with_message() {
-        let result = doc_to_string(generate_exception_bif("classSignal:", &["Msg".to_string()]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_exception_handler':'class_signal_message'(Msg, ClassSelf)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_exception_class_signal_with_message_and_reason() {
-        let result = doc_to_string(generate_exception_bif(
-            "classSignal:reason:",
-            &["Msg".to_string(), "Reason".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_exception_handler':'class_signal_message_reason'(Msg, Reason, ClassSelf)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_exception_class_signal() {
-        let result = doc_to_string(generate_exception_bif("classSignal", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_exception_handler':'class_signal'(ClassSelf)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_exception_class_signal_kind() {
-        let result = doc_to_string(generate_exception_bif(
-            "classSignalKind:class:selector:hint:",
-            &[
-                "Kind".to_string(),
-                "Class".to_string(),
-                "Selector".to_string(),
-                "Hint".to_string(),
-            ],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_exception_handler':'class_signal_kind'(Kind, Class, Selector, Hint)"
-                    .to_string()
-            )
-        );
     }
 
     // BT-4115: the class-literal send's lowering of a caller-safe class
@@ -412,83 +245,167 @@ mod tests {
         assert!(generate_exception_bif("new", &[]).is_none());
     }
 
-    // generate_stack_frame_bif tests
-
-    #[test]
-    fn test_stack_frame_method() {
-        let result = doc_to_string(generate_stack_frame_bif("method", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_stack_frame':'dispatch'('method', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_stack_frame_receiver_class() {
-        let result = doc_to_string(generate_stack_frame_bif("receiverClass", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_stack_frame':'dispatch'('receiverClass', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_stack_frame_arguments() {
-        let result = doc_to_string(generate_stack_frame_bif("arguments", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_stack_frame':'dispatch'('arguments', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_stack_frame_source_location() {
-        let result = doc_to_string(generate_stack_frame_bif("sourceLocation", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_stack_frame':'dispatch'('sourceLocation', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_stack_frame_module_name() {
-        let result = doc_to_string(generate_stack_frame_bif("moduleName", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_stack_frame':'dispatch'('moduleName', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_stack_frame_line() {
-        let result = doc_to_string(generate_stack_frame_bif("line", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_stack_frame':'dispatch'('line', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_stack_frame_file() {
-        let result = doc_to_string(generate_stack_frame_bif("file", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_stack_frame':'dispatch'('file', [], Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_stack_frame_print_string() {
-        let result = doc_to_string(generate_stack_frame_bif("printString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_stack_frame':'dispatch'('printString', [], Self)".to_string())
-        );
-    }
-
     #[test]
     fn test_stack_frame_unknown_selector_returns_none() {
         assert!(generate_stack_frame_bif("new", &[]).is_none());
         assert!(generate_stack_frame_bif("signal", &[]).is_none());
+    }
+
+    #[test]
+    fn generate_exception_bif_table() {
+        assert_bif_table(
+            generate_exception_bif,
+            &[
+                // generate_exception_bif tests
+                (
+                    "test_exception_message",
+                    "message",
+                    &[],
+                    "call 'beamtalk_exception_handler':'dispatch'('message', [], Self)",
+                ),
+                (
+                    "test_exception_hint",
+                    "hint",
+                    &[],
+                    "call 'beamtalk_exception_handler':'dispatch'('hint', [], Self)",
+                ),
+                (
+                    "test_exception_kind",
+                    "kind",
+                    &[],
+                    "call 'beamtalk_exception_handler':'dispatch'('kind', [], Self)",
+                ),
+                (
+                    "test_exception_selector",
+                    "selector",
+                    &[],
+                    "call 'beamtalk_exception_handler':'dispatch'('selector', [], Self)",
+                ),
+                (
+                    "test_exception_error_class",
+                    "errorClass",
+                    &[],
+                    "call 'beamtalk_exception_handler':'dispatch'('errorClass', [], Self)",
+                ),
+                (
+                    "test_exception_reason",
+                    "reason",
+                    &[],
+                    "call 'beamtalk_exception_handler':'dispatch'('reason', [], Self)",
+                ),
+                (
+                    "test_exception_print_string",
+                    "printString",
+                    &[],
+                    "call 'beamtalk_exception_handler':'dispatch'('printString', [], Self)",
+                ),
+                (
+                    "test_exception_signal",
+                    "signal",
+                    &[],
+                    "call 'beamtalk_exception_handler':'dispatch'('signal', [], Self)",
+                ),
+                (
+                    "test_exception_signal_with_message",
+                    "signal:",
+                    &["Msg"],
+                    "call 'beamtalk_exception_handler':'dispatch'('signal:', [Msg], Self)",
+                ),
+                (
+                    "test_exception_full_stack_trace",
+                    "fullStackTrace",
+                    &[],
+                    "call 'beamtalk_exception_handler':'dispatch'('fullStackTrace', [], Self)",
+                ),
+                (
+                    "test_exception_stack_trace",
+                    "stackTrace",
+                    &[],
+                    "call 'beamtalk_exception_handler':'dispatch'('stackTrace', [], Self)",
+                ),
+                (
+                    "test_exception_class_signal_with_message",
+                    "classSignal:",
+                    &["Msg"],
+                    "call 'beamtalk_exception_handler':'class_signal_message'(Msg, ClassSelf)",
+                ),
+                (
+                    "test_exception_class_signal_with_message_and_reason",
+                    "classSignal:reason:",
+                    &["Msg", "Reason"],
+                    "call 'beamtalk_exception_handler':'class_signal_message_reason'(Msg, Reason, ClassSelf)",
+                ),
+                (
+                    "test_exception_class_signal",
+                    "classSignal",
+                    &[],
+                    "call 'beamtalk_exception_handler':'class_signal'(ClassSelf)",
+                ),
+                (
+                    "test_exception_class_signal_kind",
+                    "classSignalKind:class:selector:hint:",
+                    &["Kind", "Class", "Selector", "Hint"],
+                    "call 'beamtalk_exception_handler':'class_signal_kind'(Kind, Class, Selector, Hint)",
+                ),
+            ],
+        );
+    }
+
+    #[test]
+    fn generate_stack_frame_bif_table() {
+        assert_bif_table(
+            generate_stack_frame_bif,
+            &[
+                // generate_stack_frame_bif tests
+                (
+                    "test_stack_frame_method",
+                    "method",
+                    &[],
+                    "call 'beamtalk_stack_frame':'dispatch'('method', [], Self)",
+                ),
+                (
+                    "test_stack_frame_receiver_class",
+                    "receiverClass",
+                    &[],
+                    "call 'beamtalk_stack_frame':'dispatch'('receiverClass', [], Self)",
+                ),
+                (
+                    "test_stack_frame_arguments",
+                    "arguments",
+                    &[],
+                    "call 'beamtalk_stack_frame':'dispatch'('arguments', [], Self)",
+                ),
+                (
+                    "test_stack_frame_source_location",
+                    "sourceLocation",
+                    &[],
+                    "call 'beamtalk_stack_frame':'dispatch'('sourceLocation', [], Self)",
+                ),
+                (
+                    "test_stack_frame_module_name",
+                    "moduleName",
+                    &[],
+                    "call 'beamtalk_stack_frame':'dispatch'('moduleName', [], Self)",
+                ),
+                (
+                    "test_stack_frame_line",
+                    "line",
+                    &[],
+                    "call 'beamtalk_stack_frame':'dispatch'('line', [], Self)",
+                ),
+                (
+                    "test_stack_frame_file",
+                    "file",
+                    &[],
+                    "call 'beamtalk_stack_frame':'dispatch'('file', [], Self)",
+                ),
+                (
+                    "test_stack_frame_print_string",
+                    "printString",
+                    &[],
+                    "call 'beamtalk_stack_frame':'dispatch'('printString', [], Self)",
+                ),
+            ],
+        );
     }
 }

@@ -21,32 +21,9 @@ fn price_band_class_info_with_lo_type(
         state_types.insert(ecow::EcoString::from("lo"), DeclaredType::parse(ty));
     }
     ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: ecow::EcoString::from("PriceBand"),
-        superclass: Some(ecow::EcoString::from("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![ecow::EcoString::from("lo")],
         state_types,
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("PriceBand", Some("Object"))
     }
 }
 
