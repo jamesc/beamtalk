@@ -21,17 +21,13 @@
 //!
 //! **DDD Context:** Compilation (CLI surface for the semantic checker).
 
-use camino::Utf8Path;
 use miette::Result;
 use tracing::{debug, error, info, instrument};
 
-use crate::beam_compiler::{
-    ClassHierarchyContext, CompileContext, analyse_source_with_bindings, diagnostics_are_errors,
-};
-use crate::commands::OutputFormat;
+use crate::beam_compiler::{analyse_source_with_bindings, diagnostics_are_errors};
 use crate::commands::build::{
-    build_class_index, compute_file_module_pairs, extract_type_specs, package_identity,
-    resolve_and_validate_dependencies, resolve_package_type_registry, setup_build_environment,
+    Pass2Inputs, build_class_index, compute_file_module_pairs, new_compile_context, pass2_inputs,
+    prepare_options, resolve_and_validate_dependencies, setup_build_environment,
     warn_if_otp_out_of_window,
 };
 
@@ -51,91 +47,32 @@ pub fn run_check(path: &str) -> Result<()> {
 
     let env = setup_build_environment(path)?;
 
-    // Same `CompilerOptions` shaping as `build`: a package directory check
-    // walks every project source file (Pass 1) before any per-file analysis
-    // runs (Pass 2), so the injected cross-file knowledge is
-    // project-complete. See `build` for the full rationale of each line.
-    let mut options = beamtalk_core::CompilerOptions::default();
-    let scope =
-        crate::commands::manifest::PackageCheckerScope::for_manifest(env.full_manifest.as_ref());
-    options.dependency_extensions_unknown = scope.has_package_dependencies;
-    if Utf8Path::new(path).is_dir() {
-        options.knowledge_scope = scope.knowledge_scope;
-    }
-    options.current_package =
-        package_identity(env.pkg_manifest(), options.stdlib_mode).map(str::to_owned);
+    // Same `CompilerOptions` shaping as `build`, by the same function.
+    let options = prepare_options(&env, path, &beamtalk_core::CompilerOptions::default());
     let options = &options;
 
     let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
     // Fresh Pass 1 (`force = true`) and no diagnostics-cache replay: check
     // is specified as an always-cold full gate, so it deliberately bypasses
     // the incremental machinery (`provenance_requires_rebuild`,
-    // diagnostics-cache replay) — every file is analysed from scratch.
-    let index = build_class_index(&env, &dep_ctx, options, true)?;
+    // diagnostics-cache replay) - every file is analysed from scratch.
+    let mut index = build_class_index(&env, &dep_ctx, options, true)?;
 
-    // Same Pass 2 context as `build`: project-known Erlang modules for the
+    // Same Pass 2 inputs as `build`: project-known Erlang modules for the
     // `unresolved_ffi` check, plus the ADR 0075 FFI type registry (read from
-    // existing `.beam` files/caches — never compiled here).
-    let pass2_options = beamtalk_core::CompilerOptions {
-        known_erlang_modules: beamtalk_core::ffi_type_specs::collect_known_erlang_modules(
-            &env.project_root,
-        ),
-        ..options.clone()
-    };
+    // existing `.beam` files/caches - never compiled here).
+    let Pass2Inputs {
+        options: pass2_options,
+        stub_diagnostics,
+        native_type_registry,
+        ..
+    } = pass2_inputs(&env, &dep_ctx, options);
     let options = &pass2_options;
-
-    let auto_extract_registry = extract_type_specs(
-        &env.layout,
-        env.pkg_manifest().is_some(),
-        options.stdlib_mode,
-    );
-    let resolved_registry = resolve_package_type_registry(
-        &env.project_root,
-        auto_extract_registry,
-        &dep_ctx.resolved_deps,
-        Some(OutputFormat::Text),
-    );
-    let stub_diagnostics: Vec<_> = resolved_registry.diagnostics().cloned().collect();
-    let native_type_registry = resolved_registry.registry;
-    let native_type_registry = native_type_registry.map(std::sync::Arc::new);
 
     let file_module_pairs = compute_file_module_pairs(&env)?;
 
-    let strict_deps = env
-        .full_manifest
-        .as_ref()
-        .is_some_and(|m| m.package.strict_deps);
-    let diagnostics_overrides = env
-        .full_manifest
-        .as_ref()
-        .map(|m| m.diagnostics.clone())
-        .unwrap_or_default();
-
-    let registry_ref = if index.dep_registry.is_empty() {
-        None
-    } else {
-        Some(&index.dep_registry)
-    };
-    let check_ctx = CompileContext {
-        hierarchy: ClassHierarchyContext {
-            class_module_index: index.class_module_index.clone(),
-            class_superclass_index: index.class_superclass_index.clone(),
-            pre_loaded_classes: index.all_class_infos.clone(),
-            pre_loaded_protocols: index.all_protocol_infos.clone(),
-            pre_loaded_protocol_defs: index.all_protocol_defs.clone(),
-            pre_loaded_protocol_sources: index.all_protocol_sources.clone(),
-            pre_loaded_aliases: index.all_alias_infos.clone(),
-            extension_index: index.extension_index.clone(),
-            dependency_extensions_complete: index.dependency_extensions_complete,
-        },
-        dep_registry: registry_ref,
-        strict_deps,
-        native_type_registry,
-        diagnostics_overrides,
-        // ADR 0127 §3: a provision shared by several users is reported once,
-        // against its protocol's file, after every file has been checked.
-        provision_sink: crate::beam_compiler::ProvisionSink::collecting(),
-    };
+    let mut cached_asts = std::mem::take(&mut index.cached_asts);
+    let check_ctx = new_compile_context(&env, &index, native_type_registry);
 
     // A broken `stubs/` file yields error-severity diagnostics (stub files
     // are parsed too) — fail on those instead of merely counting them in
@@ -149,7 +86,6 @@ pub fn run_check(path: &str) -> Result<()> {
     // Seed with stubs/ diagnostics (skipped signatures, version drift),
     // as `build` does.
     let mut all_check_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = stub_diagnostics;
-    let mut cached_asts = index.cached_asts;
     let mut failed_files = 0usize;
 
     // Unlike `build` (which stops at the first failing file), check analyses
@@ -211,7 +147,7 @@ pub fn run_check(path: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use camino::Utf8PathBuf;
+    use camino::{Utf8Path, Utf8PathBuf};
     use tempfile::TempDir;
 
     fn test_project_with(filename: &str, content: &str) -> (TempDir, Utf8PathBuf) {
