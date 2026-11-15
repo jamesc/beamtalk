@@ -307,7 +307,21 @@ pub fn read_manifest_dependencies(manifest_path: &Utf8Path) -> Result<Dependency
     let content = std::fs::read_to_string(manifest_path)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to read manifest '{manifest_path}'"))?;
-    let document: toml::Table = toml::from_str(&content)
+    parse_manifest_dependencies(&content, manifest_path)
+}
+
+/// [`read_manifest_dependencies`] for manifest text already in hand;
+/// `manifest_path` is only named in errors.
+///
+/// # Errors
+///
+/// Returns an error if `content` is not valid TOML or has a malformed
+/// `[dependencies]` section.
+pub fn parse_manifest_dependencies(
+    content: &str,
+    manifest_path: &Utf8Path,
+) -> Result<DependencyMap> {
+    let document: toml::Table = toml::from_str(content)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to parse manifest '{manifest_path}'"))?;
     parse_dependencies(document.get("dependencies"))

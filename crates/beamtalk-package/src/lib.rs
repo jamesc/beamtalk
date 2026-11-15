@@ -6,7 +6,6 @@
 //! **DDD Context:** Build System
 //!
 //! - [`manifest`] — `beamtalk.toml` parsing and validation
-//! - [`build_layout`] — centralised `_build/` path construction
 //! - [`dependency_classes`] — best-effort, offline dependency class resolution
 //! - [`ffi_type_registry`] — ADR 0075's FFI type resolution chain
 //! - [`native_type_specs`] — Erlang FFI type-spec extraction
@@ -14,7 +13,6 @@
 //! - [`lint_pipeline`] — the `beamtalk lint` analysis pipeline
 //! - [`content_hash`] — the shared SHA-256 hex digest
 
-pub mod build_layout;
 pub mod content_hash;
 pub mod dependency_classes;
 // Lives in `beamtalk-project` so the LSP applies the same rule (BT-4611).

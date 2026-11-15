@@ -12,8 +12,9 @@ use crate::decode::{
 };
 use crate::diagnostics::{Warning, collect_warnings, filter_error_diagnostics};
 use crate::respond::{
-    diagnostic_error_response, error_response, format_codegen_error, method_definition_ok_response,
-    method_signature_terms, ok_response, with_verifier_warnings,
+    diagnostic_error_response, error_response, expression_ok_response, format_codegen_error,
+    method_definition_ok_response, method_signature_terms, trace_expression_ok_response,
+    with_verifier_warnings,
 };
 
 use super::inline_definitions::{
@@ -115,6 +116,19 @@ pub(crate) fn parse_and_check_expression(
     }
 
     Ok((module, warnings, analysis))
+}
+
+/// The variable a top-level statement assigns: `Some(name)` for `name := …`
+/// (including `name :: Type := …`), `None` for anything else — destructuring,
+/// field assignment, or a non-assignment.
+fn assigned_variable(expression: &beamtalk_core::ast::Expression) -> Option<&str> {
+    match expression {
+        beamtalk_core::ast::Expression::Assignment { target, .. } => match target.as_ref() {
+            beamtalk_core::ast::Expression::Identifier(id) => Some(id.name.as_str()),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 /// Handle a single `compile_expression` request.
@@ -281,6 +295,14 @@ pub(crate) fn handle_compile_expression_with_options(
         .iter()
         .map(|s| s.expression.clone())
         .collect();
+    // The session variable to rebind to this eval's result: only when the whole
+    // source is one `name := …` statement. With several statements the eval
+    // module has already threaded each assignment through its own bindings,
+    // and the call's single result belongs to the last statement only.
+    let assigned_var = match expressions.as_slice() {
+        [only] => assigned_variable(only),
+        _ => None,
+    };
     match beamtalk_repl::codegen::generate_repl_expressions_surfacing_verifier(
         &expressions,
         &module.pipeline_sends,
@@ -290,9 +312,10 @@ pub(crate) fn handle_compile_expression_with_options(
         Some(&analysis.class_hierarchy),
         inject_verifier_violation,
     ) {
-        Ok((code, verifier_diagnostics)) => ok_response(
+        Ok((code, verifier_diagnostics)) => expression_ok_response(
             &code,
             &with_verifier_warnings(&warnings, &verifier_diagnostics),
+            assigned_var,
         ),
         Err(e) => error_response(&[format_codegen_error(&e, &source)]),
     }
@@ -380,6 +403,7 @@ pub(crate) fn handle_compile_expression_trace_with_options(
         .iter()
         .map(|s| s.expression.clone())
         .collect();
+    let step_assignments: Vec<Option<&str>> = expressions.iter().map(assigned_variable).collect();
     match beamtalk_repl::codegen::generate_repl_expressions_traced_surfacing_verifier(
         &expressions,
         &module.pipeline_sends,
@@ -390,9 +414,10 @@ pub(crate) fn handle_compile_expression_trace_with_options(
         Some(&analysis.class_hierarchy),
         options.injects_verifier_violation(),
     ) {
-        Ok((code, verifier_diagnostics)) => ok_response(
+        Ok((code, verifier_diagnostics)) => trace_expression_ok_response(
             &code,
             &with_verifier_warnings(&warnings, &verifier_diagnostics),
+            &step_assignments,
         ),
         Err(e) => error_response(&[format_codegen_error(&e, &source)]),
     }
