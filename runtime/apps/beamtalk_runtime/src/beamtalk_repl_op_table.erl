@@ -71,12 +71,14 @@ ops() ->
         e(<<"interrupt">>, beamtalk_repl_ops_actors, [], [], always),
         %% --- Editor support ---
         e(<<"complete">>, beamtalk_repl_ops_dev, [<<"code">>], [<<"cursor">>], always),
-        %% Live-image hover docs; optional `before`/`suffix` resolve keyword selectors.
+        %% Live-image hover docs; optional `before`/`suffix` resolve keyword
+        %% selectors; `class` + `side` (`instance` | `class`), sent together by
+        %% method editors, give `self` its type.
         e(
             <<"hover">>,
             beamtalk_repl_ops_dev,
             [<<"code">>],
-            [<<"before">>, <<"suffix">>],
+            [<<"before">>, <<"suffix">>, <<"class">>, <<"side">>],
             always
         ),
         %% Parse-only diagnostics; `mode` is `expression` | `method`; `source_path`

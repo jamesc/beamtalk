@@ -731,10 +731,6 @@ impl CoreErlangGenerator {
 
     /// [`Self::lower_body_exprs_with_reply`] once the local-producer sites
     /// are set.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "unified handler for all method body expression types with state threading"
-    )]
     fn lower_body_exprs_with_reply_in_sites(
         &mut self,
         body: &[&Expression],
@@ -801,1123 +797,1328 @@ impl CoreErlangGenerator {
                 && supports_early_return
                 && let Expression::Return { value, .. } = expr
             {
-                let mut value_kind = self.classify_body_expr(value);
-                // ADR 0131 Phase 2: a `^` value that is a local-threading
-                // producer, or holds one at an operand site, is lowered
-                // through `threaded_expression` (the generic arm below),
-                // which splices the producer's prelude; the dedicated arms
-                // compile their value with plain `expression_doc` and would
-                // leak the construct tuple.
-                // BT-3982: so is an evaluated literal block that is a
-                // producer (`^[:y | self.n := y] value: 5`).
-                if matches!(
-                    value_kind,
-                    BodyExprKind::ControlFlowWithMutations | BodyExprKind::Pure
-                ) && (self.statement_has_local_producer(expr)
-                    || self.evaluated_block_is_producer(value))
-                {
-                    value_kind = BodyExprKind::Pure;
-                }
-                match value_kind {
-                    BodyExprKind::SuperSend => {
-                        // BT-3819 / BT-4318: `^super take: (c ifTrue: [...])`
-                        // is the `super` producer, like the statement form.
-                        let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
-                        stmts.extend(tv.prelude);
-                        let reply = self.threaded_value_reply_doc(&tv.value);
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
-                    BodyExprKind::Tier2ValueCall => {
-                        let expr_str = self.generate_tier2_value_call_doc(value)?;
-                        let reply = self.emit_tuple_unpack_reply("T2Tuple", expr_str);
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
-                    BodyExprKind::DispatchingSelfSend => {
-                        // ADR 0118 phase 1a: `^self log: (self nextId)` — the
-                        // producer sequences its own arguments; its prelude
-                        // is this body's real `Statement` + `Bind` pair.
-                        let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
-                        stmts.extend(tv.prelude);
-                        let reply = self.threaded_value_reply_doc(&tv.value);
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
-                    BodyExprKind::ControlFlowWithMutations => {
-                        let expr_str = self.expression_doc(value)?;
-                        let reply = self.emit_tuple_unpack_reply("Tuple", expr_str);
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
-                    // ^ self.field := <control-flow-with-mutations>
-                    BodyExprKind::FieldAssignmentControlFlow => {
-                        if let Expression::Assignment {
-                            target, value: rhs, ..
-                        } = &**value
-                            && let Expression::FieldAccess { field, .. } = target.as_ref()
-                        {
-                            let tuple_var = self.fresh_temp_var("CfTuple");
-                            let val_var = self.fresh_temp_var("CfVal");
-                            let rhs_str = self.expression_doc(rhs)?;
-                            let rhs_state = self.fresh_temp_var("CfState");
-                            self.lower_cf_field_assignment_binds(
-                                &mut stmts,
-                                docvec![
-                                    "let ",
-                                    leaf::var(tuple_var.clone()),
-                                    " = ",
-                                    rhs_str,
-                                    " in let ",
-                                    leaf::var(val_var.clone()),
-                                    " = call 'erlang':'element'(1, ",
-                                    leaf::var(tuple_var.clone()),
-                                    ") in ",
-                                ],
-                                &tuple_var,
-                                &rhs_state,
-                                field.name.as_str(),
-                                &val_var,
-                                span,
-                            );
-                            let field_state = self.current_state_var();
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec![
-                                    "{'reply', ",
-                                    leaf::var(val_var),
-                                    ", ",
-                                    leaf::var(field_state),
-                                    "}",
-                                ],
-                                span,
-                            ));
-                        }
-                    }
-                    _ => {
-                        // ADR 0118 phase 1a: `^ Array with: (self bump)`,
-                        // `^ (items at: i) + (self bump)` — the value's
-                        // state-effecting sub-expressions land in this
-                        // body's IR as real `Bind`s (in source order, via
-                        // the sequencing rule), then the reply carries the
-                        // post-dispatch state.
-                        //
-                        // The reply's state is the one AFTER the prelude,
-                        // not `current_state_var()`: the value's own compile
-                        // may mint versions inside its closed document (a
-                        // conditional receiver's dispatch chain) that are
-                        // out of scope here — `state_var_after_prelude`.
-                        let version_before = self.state_version();
-                        let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
-                        let final_state = self.state_var_after_prelude(&tv.prelude, version_before);
-                        stmts.extend(tv.prelude);
-                        let value_str = self.threaded_value_doc(&tv.value);
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "let _ReturnValue = ",
-                                value_str,
-                                " in {'reply', _ReturnValue, ",
-                                leaf::var(final_state),
-                                "}",
-                            ],
-                            span,
-                        ));
-                    }
-                }
+                self.lower_reply_early_return(expr, value.as_ref(), span, &mut stmts)?;
                 return Ok(stmts);
             }
 
             match kind {
-                // Mutation hidden inside a shared multi-module helper
-                // (`generate_self_field_at_put_open` — also called from
-                // conditionals.rs): stays an opaque Statement; the version
-                // step it performs is accounted for by
-                // `verify_body_with_opaque_version_gaps`'s backfill.
                 BodyExprKind::SelfFieldAtPut => {
-                    // BT-4310: the name and value are sequenced ahead of the put.
-                    let scope =
-                        self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, &mut stmts)?;
-                    let (doc, val_var) = self.generate_self_field_at_put_open(expr)?;
-                    self.finish_precompiled_scope(scope)?;
-                    stmts.push(ThreadedStmt::Statement(doc, span));
-                    if is_last {
-                        let final_state = self.current_state_var();
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "{'reply', ",
-                                leaf::var(val_var),
-                                ", ",
-                                leaf::var(final_state),
-                                "}",
-                            ],
-                            span,
-                        ));
-                    }
+                    self.lower_reply_self_field_at_put(expr, span, is_last, &mut stmts)
                 }
-                // Mirrors SelfFieldAtPut immediately above — same opaque
-                // Statement + is_last reply shape, mirroring
-                // `generate_self_clear_field_open` (ADR 0124 §1/B4).
                 BodyExprKind::SelfClearField => {
-                    let scope =
-                        self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, &mut stmts)?;
-                    let (doc, val_var) = self.generate_self_clear_field_open(expr)?;
-                    self.finish_precompiled_scope(scope)?;
-                    stmts.push(ThreadedStmt::Statement(doc, span));
-                    if is_last {
-                        let final_state = self.current_state_var();
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "{'reply', ",
-                                leaf::var(val_var),
-                                ", ",
-                                leaf::var(final_state),
-                                "}",
-                            ],
-                            span,
-                        ));
-                    }
+                    self.lower_reply_self_clear_field(expr, span, is_last, &mut stmts)
                 }
                 BodyExprKind::FieldAssignment => {
-                    // ADR 0118 phase 1a: `self.log := self.log ++ #(self
-                    // getValue)`, `self.count := self.count + (self bump)` —
-                    // the RHS's state-effecting sub-expressions land in this
-                    // body's IR as real `Bind`s BEFORE `source_version` is
-                    // read (the exact snapshot a reverted prototype once
-                    // desynced) and before the shared open helper mints its
-                    // own step; the RHS compile below substitutes the
-                    // already-sequenced value.
-                    let rhs_scope = match expr {
-                        Expression::Assignment { value, .. } => {
-                            self.thread_ahead(value, &mut stmts, threaded_ir::FrameId::ROOT)?
-                        }
-                        _ => PrecompiledScope::new(),
-                    };
-                    if is_last {
-                        if let Expression::Assignment { target, value, .. } = expr
-                            && let Expression::FieldAccess { field, .. } = target.as_ref()
-                        {
-                            let val_var = self.fresh_temp_var("Val");
-                            let source_version = self.state_version();
-                            let value_str = self.expression_doc(value)?;
-                            let new_state = self.next_state_var();
-                            let target_version = self.state_version();
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec![
-                                    "let ",
-                                    leaf::var(val_var.clone()),
-                                    " = ",
-                                    value_str,
-                                    " in ",
-                                ],
-                                span,
-                            ));
-                            // BT-4369: every field write records itself.
-                            self.note_field_write(&field.name, span);
-                            // The real field mutation, as a real Bind —
-                            // `render_bind`'s `BindOp::Put` arm is the
-                            // single place the `maps:put` shape lives.
-                            stmts.push(ThreadedStmt::Bind {
-                                target: threaded_ir::VersionedVar::new(
-                                    threaded_ir::VersionPrefix::State,
-                                    target_version,
-                                    threaded_ir::FrameId::ROOT,
-                                ),
-                                source: threaded_ir::VersionedVar::new(
-                                    threaded_ir::VersionPrefix::State,
-                                    source_version,
-                                    threaded_ir::FrameId::ROOT,
-                                ),
-                                op: threaded_ir::BindOp::Put {
-                                    field: field.name.to_string(),
-                                    value: threaded_ir::ValueRef::Var(val_var.clone()),
-                                    // Unused placeholder — see
-                                    // `lower_cf_field_assignment_binds`.
-                                },
-                                span,
-                            });
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec![
-                                    "{'reply', ",
-                                    leaf::var(val_var),
-                                    ", ",
-                                    leaf::var(new_state),
-                                    "}",
-                                ],
-                                span,
-                            ));
-                        }
-                    } else {
-                        // Shared helper (`generate_field_assignment_open`,
-                        // also called from conditionals/exception_handling/
-                        // list_ops/intrinsics): opaque Statement, version
-                        // step backfilled at verify time.
-                        let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
-                        stmts.push(ThreadedStmt::Statement(doc, span));
-                    }
-                    self.finish_precompiled_scope(rhs_scope)?;
+                    self.lower_reply_field_assignment(expr, span, is_last, &mut stmts)
                 }
-                // Self.field := expr where RHS is control flow returning {Value, State}
                 BodyExprKind::FieldAssignmentControlFlow => {
-                    if let Expression::Assignment { target, value, .. } = expr
-                        && let Expression::FieldAccess { field, .. } = target.as_ref()
-                    {
-                        // ADR 0118 phase 1a: `self.f := 1 to: (self bump)
-                        // do: [..]` — the construct's own state-effecting
-                        // operands thread ahead of it.
-                        let producer = self.local_producer_locals(value.unwrap_parens());
-                        let rhs_scope =
-                            self.thread_ahead(value, &mut stmts, threaded_ir::FrameId::ROOT)?;
-                        // ADR 0118 phase 4: when the RHS is
-                        // itself an inline-threaded control-flow
-                        // construct, `thread_ahead` above already
-                        // spliced its real prelude into `stmts` (via
-                        // `subexpr_needs_prelude`/
-                        // `inline_control_flow_needs_threading`
-                        // recognizing this shape) and registered its
-                        // ALREADY-UNWRAPPED value for substitution —
-                        // `expression_doc` below returns that value
-                        // directly, not a `{Value, State}` tuple, so no
-                        // further `element/1` unwrap runs. Only the
-                        // field's own `maps:put` version-bump remains.
-                        // See `emit_actor_threaded_last_stmts`'s matching
-                        // comment. Every other `FieldAssignmentControlFlow`
-                        // shape (loops, list-ops) still returns a raw
-                        // tuple `Document`, unpacked by the `tuple_var`/
-                        // `lower_cf_field_assignment_binds` path below.
-                        let val_var = self.fresh_temp_var("CfVal");
-                        // ADR 0131 Phase 2d (BT-3795): a loop or fold that
-                        // is a local-threading producer (a sequenced site
-                        // of this write, `sequenced_operand_sites`) was
-                        // spliced by `thread_ahead` above too: its tuple
-                        // is unpacked and its locals rebound in the
-                        // prelude, so the value is already unwrapped.
-                        if producer.is_some()
-                            || self.inline_control_flow_needs_threading(value.unwrap_parens())
-                        {
-                            let value_str = self.expression_doc(value)?;
-                            self.finish_precompiled_scope(rhs_scope)?;
-                            let source_version = self.state_version();
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec![
-                                    "let ",
-                                    leaf::var(val_var.clone()),
-                                    " = ",
-                                    value_str,
-                                    " in "
-                                ],
-                                span,
-                            ));
-                            // BT-4369: every field write records itself.
-                            self.note_field_write(&field.name, span);
-                            let _ = self.next_state_var();
-                            let target_version = self.state_version();
-                            stmts.push(ThreadedStmt::Bind {
-                                target: threaded_ir::VersionedVar::new(
-                                    threaded_ir::VersionPrefix::State,
-                                    target_version,
-                                    threaded_ir::FrameId::ROOT,
-                                ),
-                                source: threaded_ir::VersionedVar::new(
-                                    threaded_ir::VersionPrefix::State,
-                                    source_version,
-                                    threaded_ir::FrameId::ROOT,
-                                ),
-                                op: threaded_ir::BindOp::Put {
-                                    field: field.name.to_string(),
-                                    value: threaded_ir::ValueRef::Var(val_var.clone()),
-                                },
-                                span,
-                            });
-                        } else {
-                            // Evaluate the RHS (returns {Value, State} tuple)
-                            let tuple_var = self.fresh_temp_var("CfTuple");
-                            let value_str = self.expression_doc(value)?;
-                            self.finish_precompiled_scope(rhs_scope)?;
-                            // Unpack the tuple: element(1) is the value, element(2) is the state
-                            let rhs_state = self.fresh_temp_var("CfState");
-                            self.lower_cf_field_assignment_binds(
-                                &mut stmts,
-                                docvec![
-                                    "let ",
-                                    leaf::var(tuple_var.clone()),
-                                    " = ",
-                                    value_str,
-                                    " in let ",
-                                    leaf::var(val_var.clone()),
-                                    " = call 'erlang':'element'(1, ",
-                                    leaf::var(tuple_var.clone()),
-                                    ") in ",
-                                ],
-                                &tuple_var,
-                                &rhs_state,
-                                field.name.as_str(),
-                                &val_var,
-                                span,
-                            );
-                        }
-                        let field_state = self.current_state_var();
-                        // Extract threaded locals from the control flow state
-                        // (e.g. ifTrue: [y := 1. y + 1] threads y via __local__ keys)
-                        let mut doc_parts: Vec<Document<'static>> = Vec::new();
-                        if let Some(threaded_vars) = self
-                            .threaded_locals_of(value)
-                            .and_then(ThreadedLocals::into_lowered)
-                            .filter(|_| {
-                                producer.is_none()
-                                    && !self.inline_producer_construct(value.unwrap_parens())
-                            })
-                        {
-                            for var in &threaded_vars {
-                                let tv_core = self
-                                    .lookup_var(var)
-                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                                doc_parts.push(docvec![
-                                    "let ",
-                                    leaf::var(tv_core),
-                                    " = call 'maps':'get'(",
-                                    leaf::atom(Self::local_state_key(var)),
-                                    ", ",
-                                    leaf::var(field_state.clone()),
-                                    ") in ",
-                                ]);
-                            }
-                        }
-                        if !doc_parts.is_empty() {
-                            stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
-                        }
-                        if is_last {
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec![
-                                    "{'reply', ",
-                                    leaf::var(val_var),
-                                    ", ",
-                                    leaf::var(field_state),
-                                    "}",
-                                ],
-                                span,
-                            ));
-                        }
-                    }
+                    self.lower_reply_field_assignment_control_flow(expr, span, is_last, &mut stmts)
                 }
-                // Self fieldAt: name put: expr where RHS is control flow returning {Value, State}
-                //
-                // The mutation is a real Bind: the map key is a dynamic
-                // (computed) value, not a static field name, so it cannot
-                // use `BindOp::Put` (whose `field` is a literal atom) —
-                // the investigation-established `Direct(ValueRef::Doc(...))`
-                // idiom carries the whole `maps:put` expression opaquely
-                // instead (ADR 0111 Addendum 4's type-level rule: a
-                // version-mutating statement must be a `Bind`, never a
-                // `Statement`, but `Bind`'s `op` may still be opaque).
                 BodyExprKind::SelfFieldAtPutControlFlow => {
-                    if let Expression::MessageSend { arguments, .. } = expr {
-                        // BT-4369: a dynamic-key field write records itself for the loop checkout.
-                        self.note_field_write("<dynamic>", span);
-                        let name_var = self.fresh_temp_var("Name");
-                        let name_code = self.expression_doc(&arguments[0])?;
-                        let tuple_var = self.fresh_temp_var("CfTuple");
-                        let val_var = self.fresh_temp_var("CfVal");
-                        let val_code = self.expression_doc(&arguments[1])?;
-                        let rhs_state = self.fresh_temp_var("CfState");
-                        let source_version = self.state_version();
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "let ",
-                                leaf::var(name_var.clone()),
-                                " = ",
-                                name_code,
-                                " in let ",
-                                leaf::var(tuple_var.clone()),
-                                " = ",
-                                val_code,
-                                " in let ",
-                                leaf::var(val_var.clone()),
-                                " = call 'erlang':'element'(1, ",
-                                leaf::var(tuple_var.clone()),
-                                ") in let ",
-                                leaf::var(rhs_state.clone()),
-                                " = call 'erlang':'element'(2, ",
-                                leaf::var(tuple_var),
-                                ") in ",
-                            ],
-                            span,
-                        ));
-                        let _ = self.next_state_var();
-                        let target_version = self.state_version();
-                        stmts.push(ThreadedStmt::Bind {
-                            target: threaded_ir::VersionedVar::new(
-                                threaded_ir::VersionPrefix::State,
-                                target_version,
-                                threaded_ir::FrameId::ROOT,
-                            ),
-                            source: threaded_ir::VersionedVar::new(
-                                threaded_ir::VersionPrefix::State,
-                                source_version,
-                                threaded_ir::FrameId::ROOT,
-                            ),
-                            op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                                "call 'maps':'put'(",
-                                leaf::var(name_var),
-                                ", ",
-                                leaf::var(val_var.clone()),
-                                ", ",
-                                leaf::var(rhs_state),
-                                ")",
-                            ])),
-                            span,
-                        });
-                        let field_state = self.current_state_var();
-                        let mut doc_parts: Vec<Document<'static>> = Vec::new();
-                        if let Some(threaded_vars) = self
-                            .threaded_locals_of(&arguments[1])
-                            .and_then(ThreadedLocals::into_lowered)
-                        {
-                            for var in &threaded_vars {
-                                let tv_core = self
-                                    .lookup_var(var)
-                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                                doc_parts.push(docvec![
-                                    "let ",
-                                    leaf::var(tv_core),
-                                    " = call 'maps':'get'(",
-                                    leaf::atom(Self::local_state_key(var)),
-                                    ", ",
-                                    leaf::var(field_state.clone()),
-                                    ") in ",
-                                ]);
-                            }
-                        }
-                        if !doc_parts.is_empty() {
-                            stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
-                        }
-                        if is_last {
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec![
-                                    "{'reply', ",
-                                    leaf::var(val_var),
-                                    ", ",
-                                    leaf::var(field_state),
-                                    "}",
-                                ],
-                                span,
-                            ));
-                        }
-                    }
+                    self.lower_reply_self_field_at_put_control_flow(expr, span, is_last, &mut stmts)
                 }
-                // {a, b} := expr where RHS is control flow returning {Value, State}.
-                // Element 2 of the RHS tuple becomes the next real `State` Bind
-                // (Direct — the RHS is a computed map, not a static field Put);
-                // the tuple unpack and threaded-local rebinds stay opaque Statements.
-                BodyExprKind::DestructureAssignmentControlFlow => {
-                    let mut rhs_value = None;
-                    if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                        // Evaluate RHS (returns {Value, State} tuple)
-                        let tuple_var = self.fresh_temp_var("CfTuple");
-                        let actual_val = self.fresh_temp_var("CfVal");
-                        let value_str = self.expression_doc(value)?;
-                        let source_version = self.state_version();
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "let ",
-                                leaf::var(tuple_var.clone()),
-                                " = ",
-                                value_str,
-                                " in let ",
-                                leaf::var(actual_val.clone()),
-                                " = call 'erlang':'element'(1, ",
-                                leaf::var(tuple_var.clone()),
-                                ") in ",
-                            ],
-                            span,
-                        ));
-                        let _ = self.next_state_var();
-                        let target_version = self.state_version();
-                        stmts.push(ThreadedStmt::Bind {
-                            target: threaded_ir::VersionedVar::new(
-                                threaded_ir::VersionPrefix::State,
-                                target_version,
-                                threaded_ir::FrameId::ROOT,
-                            ),
-                            source: threaded_ir::VersionedVar::new(
-                                threaded_ir::VersionPrefix::State,
-                                source_version,
-                                threaded_ir::FrameId::ROOT,
-                            ),
-                            op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                                "call 'erlang':'element'(2, ",
-                                leaf::var(tuple_var),
-                                ")",
-                            ])),
-                            span,
-                        });
-                        let new_state = self.current_state_var();
-                        // Extract threaded locals
-                        let mut doc_parts: Vec<Document<'static>> = Vec::new();
-                        if let Some(threaded_vars) = self
-                            .threaded_locals_of(value)
-                            .and_then(ThreadedLocals::into_lowered)
-                        {
-                            for var in &threaded_vars {
-                                let tv_core = self
-                                    .lookup_var(var)
-                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                                doc_parts.push(docvec![
-                                    "let ",
-                                    leaf::var(tv_core),
-                                    " = call 'maps':'get'(",
-                                    leaf::atom(Self::local_state_key(var)),
-                                    ", ",
-                                    leaf::var(new_state.clone()),
-                                    ") in ",
-                                ]);
-                            }
-                        }
-                        if !doc_parts.is_empty() {
-                            stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
-                        }
-                        // Now destructure the unpacked value
-                        let binding_docs =
-                            self.generate_destructure_bindings_from_var(pattern, &actual_val)?;
-                        for d in binding_docs {
-                            stmts.push(ThreadedStmt::Statement(d, span));
-                        }
-                        rhs_value = Some(actual_val);
-                    }
-                    if is_last {
-                        let reply = self.destructure_reply_doc(rhs_value)?;
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
-                }
-                // Real state Bind: the RHS's element 2 IS the next `State`
-                // version (a computed map, not a static field — Direct, not Put).
+                BodyExprKind::DestructureAssignmentControlFlow => self
+                    .lower_reply_destructure_assignment_control_flow(
+                        expr, span, is_last, &mut stmts,
+                    ),
                 BodyExprKind::LocalAssignTier2 => {
-                    if let Expression::Assignment { target, value, .. } = expr
-                        && let Expression::Identifier(id) = target.as_ref()
-                    {
-                        let var_name = &id.name;
-                        let core_var = self
-                            .lookup_var(var_name)
-                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                        let tuple_var = self.fresh_temp_var("T2Tuple");
-                        let value_str = self.generate_tier2_value_call_doc(value)?;
-                        self.bind_var(var_name, &core_var);
-                        let source_version = self.state_version();
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "let ",
-                                leaf::var(tuple_var.clone()),
-                                " = ",
-                                value_str,
-                                " in let ",
-                                leaf::var(core_var),
-                                " = call 'erlang':'element'(1, ",
-                                leaf::var(tuple_var.clone()),
-                                ")\n in ",
-                            ],
-                            span,
-                        ));
-                        let _ = self.next_state_var();
-                        let target_version = self.state_version();
-                        stmts.push(ThreadedStmt::Bind {
-                            target: threaded_ir::VersionedVar::new(
-                                threaded_ir::VersionPrefix::State,
-                                target_version,
-                                threaded_ir::FrameId::ROOT,
-                            ),
-                            source: threaded_ir::VersionedVar::new(
-                                threaded_ir::VersionPrefix::State,
-                                source_version,
-                                threaded_ir::FrameId::ROOT,
-                            ),
-                            op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                                "call 'erlang':'element'(2, ",
-                                leaf::var(tuple_var),
-                                ")",
-                            ])),
-                            span,
-                        });
-                    }
-                    if is_last {
-                        let reply = self.local_assign_reply_doc(expr)?;
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
+                    self.lower_reply_local_assign_tier2(expr, span, is_last, &mut stmts)
                 }
                 BodyExprKind::LocalAssignControlFlow => {
-                    // Route the actor `var := <control-flow-with-mutations>`
-                    // assign-RHS through the shared `ThreadedExpr` emitter. The Actor boundary
-                    // binds the target to element 1, advances the state version to element 2
-                    // (the threaded gen_server `State`, via a real Bind) and rebinds
-                    // `__local__`-threaded sibling outer-locals.
-                    //
-                    // ADR 0111 Addendum 4: `classify_body_expr` already decided this is
-                    // `LocalAssignControlFlow` (Phase 1) — `emit_actor_threaded_assign_rhs_stmts`
-                    // never declines, so there is no second computation left to disagree
-                    // with, and `verify_routing_invariant`/`RoutingMismatch` are deleted.
-                    if let Expression::Assignment { target, value, .. } = expr
-                        && let Expression::Identifier(id) = target.as_ref()
-                    {
-                        // ADR 0131 Phase 2: a loop or fold is a
-                        // local-threading producer — its construct
-                        // tuple, `State` `Bind` and `LocalRebind`s land
-                        // in this body's IR, then the target is bound
-                        // to its logical value.
-                        let var_name = &id.name;
-                        let core_var = self
-                            .lookup_var(var_name)
-                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                        if let Some(tv) =
-                            self.threaded_construct_value(value, threaded_ir::FrameId::ROOT)?
-                        {
-                            stmts.extend(tv.prelude);
-                            let value_str = self.threaded_value_doc(&tv.value);
-                            self.bind_var(var_name, &core_var);
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
-                                span,
-                            ));
-                        } else {
-                            // ADR 0118 phase 1a: `x := 1 to: (self bump) do:
-                            // [..]` — the construct's own state-effecting
-                            // operands thread ahead of it.
-                            let rhs_scope =
-                                self.thread_ahead(value, &mut stmts, threaded_ir::FrameId::ROOT)?;
-                            self.emit_actor_threaded_assign_rhs_stmts(var_name, value, &mut stmts)?;
-                            self.finish_precompiled_scope(rhs_scope)?;
-                        }
-                    }
-                    if is_last {
-                        let reply = self.local_assign_reply_doc(expr)?;
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
+                    self.lower_reply_local_assign_control_flow(expr, span, is_last, &mut stmts)
                 }
-                // Var := self method — dispatch RHS, bind result to var
                 BodyExprKind::LocalAssignSelfSend => {
-                    if let Expression::Assignment { target, value, .. } = expr
-                        && let Expression::Identifier(id) = target.as_ref()
-                    {
-                        let var_name = &id.name;
-                        let core_var = self
-                            .lookup_var(var_name)
-                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                        // ADR 0118 phase 1a: `v := self log: (self nextId)`
-                        // — the producer's `Statement` + real `Bind`
-                        // (its arguments sequenced first), then the
-                        // local bound to its pure result reference.
-                        let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
-                        stmts.extend(tv.prelude);
-                        let value_str = self.threaded_value_doc(&tv.value);
-                        self.bind_var(var_name, &core_var);
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
-                            span,
-                        ));
-                    }
-                    if is_last {
-                        let reply = self.local_assign_reply_doc(expr)?;
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
+                    self.lower_reply_local_assign_self_send(expr, span, is_last, &mut stmts)
                 }
-                // Var := [block needing Tier 2], where prescan_tier2_local_vars
-                // already proved every later use of `var` in this body is a safe
-                // `value`/`value:`/etc. call. Generate the block via
-                // generate_block_stateful directly (bypassing generate_block's
-                // "unsupported block" rejection, which is only needed when the
-                // compiler can't prove the later invocation site is safe).
                 BodyExprKind::LocalAssignTier2Block => {
-                    if let Expression::Assignment { target, value, .. } = expr
-                        && let (Expression::Identifier(id), Expression::Block(block)) =
-                            (target.as_ref(), value.as_ref())
-                    {
-                        let var_name = &id.name;
-                        let core_var = self
-                            .lookup_var(var_name)
-                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                        let captured_mutations = Self::captured_mutations_for_block(block);
-                        let value_str = self.generate_block_stateful(block, &captured_mutations)?;
-                        self.bind_var(var_name, &core_var);
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
-                            span,
-                        ));
-                    }
-                    if is_last {
-                        let reply = self.local_assign_reply_doc(expr)?;
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
+                    self.lower_reply_local_assign_tier2_block(expr, span, is_last, &mut stmts)
                 }
                 BodyExprKind::LocalAssignPure => {
-                    if let Expression::Assignment { target, value, .. } = expr
-                        && let Expression::Identifier(id) = target.as_ref()
-                    {
-                        // BT-3495: `r := (self.field := ...)` as a flat
-                        // top-level method-body statement — the RHS is
-                        // itself a field write, at any parenthesization
-                        // depth. `classify_body_expr` hands every
-                        // `LocalAssignPure` RHS here regardless of shape,
-                        // and the generic `threaded_expression` compile
-                        // below has no way to fold a NESTED field write's
-                        // own state mutation into this body's `State`
-                        // chain (it recompiles the whole `self.field :=
-                        // ...` expression via plain `generate_expression`,
-                        // producing an `erlc: unbound variable` crash).
-                        // Lower it through the SAME real-`Bind` producer
-                        // `FieldAssignment` (above) and the branch/loop
-                        // lowerings use — `lower_field_assignment_bind`
-                        // — then alias the local var to the identical
-                        // assigned value, exactly as `:=`'s "the whole
-                        // assignment evaluates to the assigned value"
-                        // semantics require (mirrors
-                        // `lower_local_var_assignment_bind`'s C2z fix,
-                        // BT-3493, one level up at this flat top-level
-                        // body instead of a branch/loop frame). Falls
-                        // through to this arm's own reply behavior below
-                        // (`local_assign_reply_doc`, the assigned value)
-                        // when this is the body's last statement — only
-                        // the RHS lowering differs.
-                        if let Some(field_write) = self.local_assign_field_write(value) {
-                            let field_val_var = self.lower_field_assignment_bind(
-                                field_write,
-                                threaded_ir::FrameId::ROOT,
-                                span,
-                                &mut stmts,
-                            )?;
-                            self.bind_var(&id.name, &field_val_var);
-                        } else {
-                            let var_name = &id.name;
-                            let core_var = self
-                                .lookup_var(var_name)
-                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                            // ADR 0118 phase 1a: `ok := (self recordOnce: x)
-                            // and: [y]`, `total := items size + (self bump)` —
-                            // the RHS's state-effecting sub-expressions land
-                            // in this body's IR as real `Bind`s, in source
-                            // order, via the sequencing rule.
-                            let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
-                            stmts.extend(tv.prelude);
-                            let value_str = self.threaded_value_doc(&tv.value);
-                            self.bind_var(var_name, &core_var);
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
-                                span,
-                            ));
-                        }
-                    }
-                    if is_last {
-                        let reply = self.local_assign_reply_doc(expr)?;
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
+                    self.lower_reply_local_assign_pure(expr, span, is_last, &mut stmts)
                 }
                 BodyExprKind::DestructureAssignment => {
-                    let mut rhs_value = None;
-                    if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                        // ADR 0118 phase 1b: `{a, b} := #(1, self bump)` —
-                        // the RHS's state-effecting sub-expressions land in
-                        // this body's IR as real `Bind`s before
-                        // `generate_destructure_bindings`'s own
-                        // `eval_rhs_to_temp_var` call (`expressions.rs`)
-                        // compiles `value` via `expression_doc`, which
-                        // substitutes the already-sequenced value.
-                        let (binding_docs, rhs_var) = self
-                            .generate_destructure_bindings_sequenced(
-                                pattern,
-                                value,
-                                threaded_ir::FrameId::ROOT,
-                                &mut stmts,
-                            )?;
-                        for d in binding_docs {
-                            stmts.push(ThreadedStmt::Statement(d, span));
-                        }
-                        rhs_value = Some(rhs_var);
-                    }
-                    if is_last {
-                        let reply = self.destructure_reply_doc(rhs_value)?;
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
+                    self.lower_reply_destructure_assignment(expr, span, is_last, &mut stmts)
                 }
                 BodyExprKind::SuperSend => {
-                    // BT-3814 / BT-4318: the one `super` producer — the
-                    // operands thread ahead of the dispatch (the sequencing
-                    // rule), and its `State` `Bind` carries the callee's
-                    // state change to the next statement or the reply.
-                    let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
-                    stmts.extend(tv.prelude);
-                    if is_last {
-                        let reply = self.threaded_value_reply_doc(&tv.value);
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
+                    self.lower_reply_super_send(expr, span, is_last, &mut stmts)
                 }
                 BodyExprKind::ErrorSend => {
-                    // BT-4310: `self error: (xs inject: ...) printString` — the
-                    // argument is sequenced ahead of the send, like a `super`
-                    // send's.
-                    let error_scope =
-                        self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, &mut stmts)?;
-                    if is_last {
-                        // Error send never returns — no reply tuple needed.
-                        let expr_str = self.expression_doc(expr)?;
-                        stmts.push(ThreadedStmt::Statement(docvec![expr_str], span));
-                    } else {
-                        let tmp_var = self.fresh_temp_var("seq");
-                        let expr_str = self.expression_doc(expr)?;
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in "],
-                            span,
-                        ));
-                    }
-                    self.finish_precompiled_scope(error_scope)?;
+                    self.lower_reply_error_send(expr, span, is_last, &mut stmts)
                 }
                 BodyExprKind::Tier2ValueCall => {
-                    if is_last {
-                        let expr_str = self.generate_tier2_value_call_doc(expr)?;
-                        let reply = self.emit_tuple_unpack_reply("T2Tuple", expr_str);
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    } else {
-                        // Real state Bind: element 2 of the Tier-2 tuple IS the
-                        // next `State` version (a computed map — Direct, not Put).
-                        let tuple_var = self.fresh_temp_var("T2Tuple");
-                        let discard_var = self.fresh_temp_var("T2Discard");
-                        let expr_str = self.generate_tier2_value_call_doc(expr)?;
-                        let source_version = self.state_version();
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "let ",
-                                leaf::var(tuple_var.clone()),
-                                " = ",
-                                expr_str,
-                                " in let ",
-                                leaf::var(discard_var),
-                                " = call 'erlang':'element'(1, ",
-                                leaf::var(tuple_var.clone()),
-                                ")\n in ",
-                            ],
-                            span,
-                        ));
-                        let _ = self.next_state_var();
-                        let target_version = self.state_version();
-                        stmts.push(ThreadedStmt::Bind {
-                            target: threaded_ir::VersionedVar::new(
-                                threaded_ir::VersionPrefix::State,
-                                target_version,
-                                threaded_ir::FrameId::ROOT,
-                            ),
-                            source: threaded_ir::VersionedVar::new(
-                                threaded_ir::VersionPrefix::State,
-                                source_version,
-                                threaded_ir::FrameId::ROOT,
-                            ),
-                            op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                                "call 'erlang':'element'(2, ",
-                                leaf::var(tuple_var),
-                                ")",
-                            ])),
-                            span,
-                        });
-                        let new_state = self.current_state_var();
-
-                        // Extract captured local mutations from NewState
-                        let mut doc_parts: Vec<Document<'static>> = Vec::new();
-                        if let Some(mutations) = self.get_inline_block_captured_mutations(expr) {
-                            for var in &mutations {
-                                let core_var = self
-                                    .lookup_var(var)
-                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                                doc_parts.push(docvec![
-                                    "let ",
-                                    leaf::var(core_var),
-                                    " = call 'maps':'get'(",
-                                    leaf::atom(Self::local_state_key(var)),
-                                    ", ",
-                                    leaf::var(new_state.clone()),
-                                    ") in ",
-                                ]);
-                            }
-                        }
-                        if !doc_parts.is_empty() {
-                            stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
-                        }
-                    }
+                    self.lower_reply_tier2_value_call(expr, span, is_last, &mut stmts)
                 }
                 BodyExprKind::ControlFlowWithMutations => {
-                    if is_last {
-                        // Route the last-position actor control-flow
-                        // construct through the shared `ThreadedExpr` emitter. The Actor
-                        // boundary binds element 1 (Reply) and element 2 (the threaded
-                        // gen_server `State`, via a real Bind) and returns
-                        // `{'reply', Reply, NewState}`.
-                        //
-                        // ADR 0111 Addendum 4: `classify_body_expr` already decided this
-                        // is `ControlFlowWithMutations` (Phase 1) —
-                        // `emit_actor_threaded_last_stmts` never declines, so
-                        // `verify_routing_invariant`/`RoutingMismatch` are deleted (no
-                        // second computation left to disagree with).
-                        //
-                        // ADR 0118 phase 1a: `1 to: (self bump) do: [..]`,
-                        // `(self bump) timesRepeat: [..]` — the construct's own
-                        // state-effecting operands (bounds, receiver) thread
-                        // ahead of it, so it starts from their post-dispatch
-                        // state.
-                        let scope =
-                            self.thread_ahead(expr, &mut stmts, threaded_ir::FrameId::ROOT)?;
-                        self.emit_actor_threaded_last_stmts(expr, &mut stmts)?;
-                        self.finish_precompiled_scope(scope)?;
-                    } else {
-                        // Real state Bind: element 2 of the construct's tuple IS the
-                        // next `State` version (a computed map — Direct, not Put).
-                        let scope =
-                            self.thread_ahead(expr, &mut stmts, threaded_ir::FrameId::ROOT)?;
-                        // ADR 0118 phase 4: when `expr` is itself an
-                        // inline-threaded control-flow construct, the
-                        // `thread_ahead` call just above (now that
-                        // `subexpr_needs_prelude` recognizes this shape) already
-                        // spliced its real prelude into `stmts` and registered
-                        // its already-unwrapped value — see
-                        // `emit_actor_threaded_last_stmts`'s matching comment.
-                        // `expression_doc` below then returns that value
-                        // directly, so no further `element/2` unwrap runs.
-                        // Every other `ControlFlowWithMutations` shape (loops,
-                        // list-ops) still returns a raw tuple `Document` here,
-                        // unpacked by the manual `Tuple`/`Bind` pair below.
-                        //
-                        // ADR 0131 Phase 3: that conditional is a local-threading
-                        // producer, so its prelude also carries one
-                        // `LocalRebind` per threaded local; only the raw tuple
-                        // path below re-reads its locals from the new state.
-                        let inline_conditional = self.thread_ahead_unwraps(expr);
-                        if inline_conditional {
-                            let expr_str = self.expression_doc(expr)?;
-                            self.finish_precompiled_scope(scope)?;
-                            let seq_var = self.fresh_temp_var("seq");
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec!["let ", leaf::var(seq_var), " = ", expr_str, " in "],
-                                span,
-                            ));
-                        } else {
-                            let tuple_var = self.fresh_temp_var("Tuple");
-                            let expr_str = self.expression_doc(expr)?;
-                            self.finish_precompiled_scope(scope)?;
-                            let source_version = self.state_version();
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec![
-                                    "let ",
-                                    leaf::var(tuple_var.clone()),
-                                    " = ",
-                                    expr_str,
-                                    " in "
-                                ],
-                                span,
-                            ));
-                            let _ = self.next_state_var();
-                            let target_version = self.state_version();
-                            stmts.push(ThreadedStmt::Bind {
-                                target: threaded_ir::VersionedVar::new(
-                                    threaded_ir::VersionPrefix::State,
-                                    target_version,
-                                    threaded_ir::FrameId::ROOT,
-                                ),
-                                source: threaded_ir::VersionedVar::new(
-                                    threaded_ir::VersionPrefix::State,
-                                    source_version,
-                                    threaded_ir::FrameId::ROOT,
-                                ),
-                                op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(
-                                    docvec![
-                                        "call 'erlang':'element'(2, ",
-                                        leaf::var(tuple_var),
-                                        ")",
-                                    ],
-                                )),
-                                span,
-                            });
-                        }
-                        let new_state = self.current_state_var();
-
-                        // Extract threaded locals from the updated state
-                        let mut doc_parts: Vec<Document<'static>> = Vec::new();
-                        if let Some(threaded_vars) = self
-                            .threaded_locals_of(expr)
-                            .and_then(ThreadedLocals::into_lowered)
-                            .filter(|_| !inline_conditional)
-                        {
-                            for var in &threaded_vars {
-                                let core_var = self
-                                    .lookup_var(var)
-                                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                                doc_parts.push(docvec![
-                                    "let ",
-                                    leaf::var(core_var),
-                                    " = call 'maps':'get'(",
-                                    leaf::atom(Self::local_state_key(var)),
-                                    ", ",
-                                    leaf::var(new_state.clone()),
-                                    ") in ",
-                                ]);
-                            }
-                        }
-                        if !doc_parts.is_empty() {
-                            stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
-                        }
-                    }
+                    self.lower_reply_control_flow_with_mutations(expr, span, is_last, &mut stmts)
                 }
                 BodyExprKind::DispatchingSelfSend => {
-                    // ADR 0118 phase 1a: `self log: (self nextId)` — the
-                    // producer (`generate_self_dispatch`) sequences its own
-                    // arguments and yields the `Statement` + real `Bind` pair
-                    // this body splices; the reply reads its pure result.
-                    let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
-                    stmts.extend(tv.prelude);
-                    if is_last {
-                        let reply = self.threaded_value_reply_doc(&tv.value);
-                        stmts.push(ThreadedStmt::Statement(reply, span));
-                    }
+                    self.lower_reply_dispatching_self_send(expr, span, is_last, &mut stmts)
                 }
                 BodyExprKind::EarlyReturn => {
                     return Err(CodeGenError::Internal(
                         "EarlyReturn should be handled before match dispatch".to_string(),
                     ));
                 }
-                // The top-level counterpart of `conditionals.rs`'s
-                // C12 catch-all — `Array with: (self bump)`, `(self
-                // recordOnce: x) and: [y]`, `"{self next}"` as a method-body
-                // statement of its own. Every order-safe nested self-send
-                // is threaded as a real `Bind` ahead of the compile, so the
-                // `post_state` read after it (and the next statement) see
-                // the dispatch's `NewState`. No-op when there is nothing to
-                // hoist.
-                //
-                // ADR 0118 phase 1a: `threaded_expression` replaces the planner
-                // here — the statement's state-effecting sub-expressions land
-                // in this body's IR as real `Bind`s in source order (the
-                // sequencing rule temp-binds whatever precedes them), and the
-                // `post_state` read after them (and the next statement) see
-                // the dispatch's `NewState`. A pure statement costs one
-                // `generate_expression` call, as before.
-                BodyExprKind::Pure => {
-                    if is_last {
-                        let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
-                        stmts.extend(tv.prelude);
-                        let expr_str = self.threaded_value_doc(&tv.value);
-                        let post_state = self.current_state_var();
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "let _Result = ",
-                                expr_str,
-                                " in {'reply', _Result, ",
-                                leaf::var(post_state),
-                                "}",
-                            ],
-                            span,
-                        ));
-                    } else {
-                        // Mint order: `seq` before the expression, as before.
-                        let tmp_var = self.fresh_temp_var("seq");
-                        let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
-                        stmts.extend(tv.prelude);
-                        let expr_str = self.threaded_value_doc(&tv.value);
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in "],
-                            span,
-                        ));
-                    }
-                }
-            }
+                BodyExprKind::Pure => self.lower_reply_pure(expr, span, is_last, &mut stmts),
+            }?;
         }
 
         Ok(stmts)
+    }
+
+    // Early return — always terminates generation regardless of position.
+    // Classify the inner value to handle super/tier2/dispatch returns.
+    fn lower_reply_early_return(
+        &mut self,
+        expr: &Expression,
+        value: &Expression,
+        span: Span,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        let mut value_kind = self.classify_body_expr(value);
+        // ADR 0131 Phase 2: a `^` value that is a local-threading
+        // producer, or holds one at an operand site, is lowered
+        // through `threaded_expression` (the generic arm below),
+        // which splices the producer's prelude; the dedicated arms
+        // compile their value with plain `expression_doc` and would
+        // leak the construct tuple.
+        // BT-3982: so is an evaluated literal block that is a
+        // producer (`^[:y | self.n := y] value: 5`).
+        if matches!(
+            value_kind,
+            BodyExprKind::ControlFlowWithMutations | BodyExprKind::Pure
+        ) && (self.statement_has_local_producer(expr) || self.evaluated_block_is_producer(value))
+        {
+            value_kind = BodyExprKind::Pure;
+        }
+        match value_kind {
+            BodyExprKind::SuperSend => {
+                // BT-3819 / BT-4318: `^super take: (c ifTrue: [...])`
+                // is the `super` producer, like the statement form.
+                let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
+                stmts.extend(tv.prelude);
+                let reply = self.threaded_value_reply_doc(&tv.value);
+                stmts.push(ThreadedStmt::Statement(reply, span));
+            }
+            BodyExprKind::Tier2ValueCall => {
+                let expr_str = self.generate_tier2_value_call_doc(value)?;
+                let reply = self.emit_tuple_unpack_reply("T2Tuple", expr_str);
+                stmts.push(ThreadedStmt::Statement(reply, span));
+            }
+            BodyExprKind::DispatchingSelfSend => {
+                // ADR 0118 phase 1a: `^self log: (self nextId)` — the
+                // producer sequences its own arguments; its prelude
+                // is this body's real `Statement` + `Bind` pair.
+                let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
+                stmts.extend(tv.prelude);
+                let reply = self.threaded_value_reply_doc(&tv.value);
+                stmts.push(ThreadedStmt::Statement(reply, span));
+            }
+            BodyExprKind::ControlFlowWithMutations => {
+                let expr_str = self.expression_doc(value)?;
+                let reply = self.emit_tuple_unpack_reply("Tuple", expr_str);
+                stmts.push(ThreadedStmt::Statement(reply, span));
+            }
+            // ^ self.field := <control-flow-with-mutations>
+            BodyExprKind::FieldAssignmentControlFlow => {
+                if let Expression::Assignment {
+                    target, value: rhs, ..
+                } = value
+                    && let Expression::FieldAccess { field, .. } = target.as_ref()
+                {
+                    let tuple_var = self.fresh_temp_var("CfTuple");
+                    let val_var = self.fresh_temp_var("CfVal");
+                    let rhs_str = self.expression_doc(rhs)?;
+                    let rhs_state = self.fresh_temp_var("CfState");
+                    self.lower_cf_field_assignment_binds(
+                        stmts,
+                        docvec![
+                            "let ",
+                            leaf::var(tuple_var.clone()),
+                            " = ",
+                            rhs_str,
+                            " in let ",
+                            leaf::var(val_var.clone()),
+                            " = call 'erlang':'element'(1, ",
+                            leaf::var(tuple_var.clone()),
+                            ") in ",
+                        ],
+                        &tuple_var,
+                        &rhs_state,
+                        field.name.as_str(),
+                        &val_var,
+                        span,
+                    );
+                    let field_state = self.current_state_var();
+                    stmts.push(ThreadedStmt::Statement(
+                        docvec![
+                            "{'reply', ",
+                            leaf::var(val_var),
+                            ", ",
+                            leaf::var(field_state),
+                            "}",
+                        ],
+                        span,
+                    ));
+                }
+            }
+            _ => {
+                // ADR 0118 phase 1a: `^ Array with: (self bump)`,
+                // `^ (items at: i) + (self bump)` — the value's
+                // state-effecting sub-expressions land in this
+                // body's IR as real `Bind`s (in source order, via
+                // the sequencing rule), then the reply carries the
+                // post-dispatch state.
+                //
+                // The reply's state is the one AFTER the prelude,
+                // not `current_state_var()`: the value's own compile
+                // may mint versions inside its closed document (a
+                // conditional receiver's dispatch chain) that are
+                // out of scope here — `state_var_after_prelude`.
+                let version_before = self.state_version();
+                let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
+                let final_state = self.state_var_after_prelude(&tv.prelude, version_before);
+                stmts.extend(tv.prelude);
+                let value_str = self.threaded_value_doc(&tv.value);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "let _ReturnValue = ",
+                        value_str,
+                        " in {'reply', _ReturnValue, ",
+                        leaf::var(final_state),
+                        "}",
+                    ],
+                    span,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    // The top-level counterpart of `conditionals.rs`'s
+    // C12 catch-all — `Array with: (self bump)`, `(self
+    // recordOnce: x) and: [y]`, `"{self next}"` as a method-body
+    // statement of its own. Every order-safe nested self-send
+    // is threaded as a real `Bind` ahead of the compile, so the
+    // `post_state` read after it (and the next statement) see
+    // the dispatch's `NewState`. No-op when there is nothing to
+    // hoist.
+    //
+    // ADR 0118 phase 1a: `threaded_expression` replaces the planner
+    // here — the statement's state-effecting sub-expressions land
+    // in this body's IR as real `Bind`s in source order (the
+    // sequencing rule temp-binds whatever precedes them), and the
+    // `post_state` read after them (and the next statement) see
+    // the dispatch's `NewState`. A pure statement costs one
+    // `generate_expression` call, as before.
+    fn lower_reply_pure(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        if is_last {
+            let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
+            stmts.extend(tv.prelude);
+            let expr_str = self.threaded_value_doc(&tv.value);
+            let post_state = self.current_state_var();
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "let _Result = ",
+                    expr_str,
+                    " in {'reply', _Result, ",
+                    leaf::var(post_state),
+                    "}",
+                ],
+                span,
+            ));
+        } else {
+            // Mint order: `seq` before the expression, as before.
+            let tmp_var = self.fresh_temp_var("seq");
+            let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
+            stmts.extend(tv.prelude);
+            let expr_str = self.threaded_value_doc(&tv.value);
+            stmts.push(ThreadedStmt::Statement(
+                docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in "],
+                span,
+            ));
+        }
+        Ok(())
+    }
+
+    // Mutation hidden inside a shared multi-module helper
+    // (`generate_self_field_at_put_open` — also called from
+    // conditionals.rs): stays an opaque Statement; the version
+    // step it performs is accounted for by
+    // `verify_body_with_opaque_version_gaps`'s backfill.
+    fn lower_reply_self_field_at_put(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        // BT-4310: the name and value are sequenced ahead of the put.
+        let scope = self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, stmts)?;
+        let (doc, val_var) = self.generate_self_field_at_put_open(expr)?;
+        self.finish_precompiled_scope(scope)?;
+        stmts.push(ThreadedStmt::Statement(doc, span));
+        if is_last {
+            let final_state = self.current_state_var();
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "{'reply', ",
+                    leaf::var(val_var),
+                    ", ",
+                    leaf::var(final_state),
+                    "}",
+                ],
+                span,
+            ));
+        }
+        Ok(())
+    }
+
+    // Mirrors SelfFieldAtPut immediately above — same opaque
+    // Statement + is_last reply shape, mirroring
+    // `generate_self_clear_field_open` (ADR 0124 §1/B4).
+    fn lower_reply_self_clear_field(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        let scope = self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, stmts)?;
+        let (doc, val_var) = self.generate_self_clear_field_open(expr)?;
+        self.finish_precompiled_scope(scope)?;
+        stmts.push(ThreadedStmt::Statement(doc, span));
+        if is_last {
+            let final_state = self.current_state_var();
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "{'reply', ",
+                    leaf::var(val_var),
+                    ", ",
+                    leaf::var(final_state),
+                    "}",
+                ],
+                span,
+            ));
+        }
+        Ok(())
+    }
+
+    fn lower_reply_field_assignment(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        // ADR 0118 phase 1a: `self.log := self.log ++ #(self
+        // getValue)`, `self.count := self.count + (self bump)` —
+        // the RHS's state-effecting sub-expressions land in this
+        // body's IR as real `Bind`s BEFORE `source_version` is
+        // read (the exact snapshot a reverted prototype once
+        // desynced) and before the shared open helper mints its
+        // own step; the RHS compile below substitutes the
+        // already-sequenced value.
+        let rhs_scope = match expr {
+            Expression::Assignment { value, .. } => {
+                self.thread_ahead(value, stmts, threaded_ir::FrameId::ROOT)?
+            }
+            _ => PrecompiledScope::new(),
+        };
+        if is_last {
+            if let Expression::Assignment { target, value, .. } = expr
+                && let Expression::FieldAccess { field, .. } = target.as_ref()
+            {
+                let val_var = self.fresh_temp_var("Val");
+                let source_version = self.state_version();
+                let value_str = self.expression_doc(value)?;
+                let new_state = self.next_state_var();
+                let target_version = self.state_version();
+                stmts.push(ThreadedStmt::Statement(
+                    docvec!["let ", leaf::var(val_var.clone()), " = ", value_str, " in ",],
+                    span,
+                ));
+                // BT-4369: every field write records itself.
+                self.note_field_write(&field.name, span);
+                // The real field mutation, as a real Bind —
+                // `render_bind`'s `BindOp::Put` arm is the
+                // single place the `maps:put` shape lives.
+                stmts.push(ThreadedStmt::Bind {
+                    target: threaded_ir::VersionedVar::new(
+                        threaded_ir::VersionPrefix::State,
+                        target_version,
+                        threaded_ir::FrameId::ROOT,
+                    ),
+                    source: threaded_ir::VersionedVar::new(
+                        threaded_ir::VersionPrefix::State,
+                        source_version,
+                        threaded_ir::FrameId::ROOT,
+                    ),
+                    op: threaded_ir::BindOp::Put {
+                        field: field.name.to_string(),
+                        value: threaded_ir::ValueRef::Var(val_var.clone()),
+                        // Unused placeholder — see
+                        // `lower_cf_field_assignment_binds`.
+                    },
+                    span,
+                });
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "{'reply', ",
+                        leaf::var(val_var),
+                        ", ",
+                        leaf::var(new_state),
+                        "}",
+                    ],
+                    span,
+                ));
+            }
+        } else {
+            // Shared helper (`generate_field_assignment_open`,
+            // also called from conditionals/exception_handling/
+            // list_ops/intrinsics): opaque Statement, version
+            // step backfilled at verify time.
+            let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
+            stmts.push(ThreadedStmt::Statement(doc, span));
+        }
+        self.finish_precompiled_scope(rhs_scope)?;
+        Ok(())
+    }
+
+    // Self.field := expr where RHS is control flow returning {Value, State}
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one statement kind (FieldAssignmentControlFlow) of the statement walker"
+    )]
+    fn lower_reply_field_assignment_control_flow(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        if let Expression::Assignment { target, value, .. } = expr
+            && let Expression::FieldAccess { field, .. } = target.as_ref()
+        {
+            // ADR 0118 phase 1a: `self.f := 1 to: (self bump)
+            // do: [..]` — the construct's own state-effecting
+            // operands thread ahead of it.
+            let producer = self.local_producer_locals(value.unwrap_parens());
+            let rhs_scope = self.thread_ahead(value, stmts, threaded_ir::FrameId::ROOT)?;
+            // ADR 0118 phase 4: when the RHS is
+            // itself an inline-threaded control-flow
+            // construct, `thread_ahead` above already
+            // spliced its real prelude into `stmts` (via
+            // `subexpr_needs_prelude`/
+            // `inline_control_flow_needs_threading`
+            // recognizing this shape) and registered its
+            // ALREADY-UNWRAPPED value for substitution —
+            // `expression_doc` below returns that value
+            // directly, not a `{Value, State}` tuple, so no
+            // further `element/1` unwrap runs. Only the
+            // field's own `maps:put` version-bump remains.
+            // See `emit_actor_threaded_last_stmts`'s matching
+            // comment. Every other `FieldAssignmentControlFlow`
+            // shape (loops, list-ops) still returns a raw
+            // tuple `Document`, unpacked by the `tuple_var`/
+            // `lower_cf_field_assignment_binds` path below.
+            let val_var = self.fresh_temp_var("CfVal");
+            // ADR 0131 Phase 2d (BT-3795): a loop or fold that
+            // is a local-threading producer (a sequenced site
+            // of this write, `sequenced_operand_sites`) was
+            // spliced by `thread_ahead` above too: its tuple
+            // is unpacked and its locals rebound in the
+            // prelude, so the value is already unwrapped.
+            if producer.is_some() || self.inline_control_flow_needs_threading(value.unwrap_parens())
+            {
+                let value_str = self.expression_doc(value)?;
+                self.finish_precompiled_scope(rhs_scope)?;
+                let source_version = self.state_version();
+                stmts.push(ThreadedStmt::Statement(
+                    docvec!["let ", leaf::var(val_var.clone()), " = ", value_str, " in "],
+                    span,
+                ));
+                // BT-4369: every field write records itself.
+                self.note_field_write(&field.name, span);
+                let _ = self.next_state_var();
+                let target_version = self.state_version();
+                stmts.push(ThreadedStmt::Bind {
+                    target: threaded_ir::VersionedVar::new(
+                        threaded_ir::VersionPrefix::State,
+                        target_version,
+                        threaded_ir::FrameId::ROOT,
+                    ),
+                    source: threaded_ir::VersionedVar::new(
+                        threaded_ir::VersionPrefix::State,
+                        source_version,
+                        threaded_ir::FrameId::ROOT,
+                    ),
+                    op: threaded_ir::BindOp::Put {
+                        field: field.name.to_string(),
+                        value: threaded_ir::ValueRef::Var(val_var.clone()),
+                    },
+                    span,
+                });
+            } else {
+                // Evaluate the RHS (returns {Value, State} tuple)
+                let tuple_var = self.fresh_temp_var("CfTuple");
+                let value_str = self.expression_doc(value)?;
+                self.finish_precompiled_scope(rhs_scope)?;
+                // Unpack the tuple: element(1) is the value, element(2) is the state
+                let rhs_state = self.fresh_temp_var("CfState");
+                self.lower_cf_field_assignment_binds(
+                    stmts,
+                    docvec![
+                        "let ",
+                        leaf::var(tuple_var.clone()),
+                        " = ",
+                        value_str,
+                        " in let ",
+                        leaf::var(val_var.clone()),
+                        " = call 'erlang':'element'(1, ",
+                        leaf::var(tuple_var.clone()),
+                        ") in ",
+                    ],
+                    &tuple_var,
+                    &rhs_state,
+                    field.name.as_str(),
+                    &val_var,
+                    span,
+                );
+            }
+            let field_state = self.current_state_var();
+            // Extract threaded locals from the control flow state
+            // (e.g. ifTrue: [y := 1. y + 1] threads y via __local__ keys)
+            let mut doc_parts: Vec<Document<'static>> = Vec::new();
+            if let Some(threaded_vars) = self
+                .threaded_locals_of(value)
+                .and_then(ThreadedLocals::into_lowered)
+                .filter(|_| {
+                    producer.is_none() && !self.inline_producer_construct(value.unwrap_parens())
+                })
+            {
+                for var in &threaded_vars {
+                    let tv_core = self
+                        .lookup_var(var)
+                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                    doc_parts.push(docvec![
+                        "let ",
+                        leaf::var(tv_core),
+                        " = call 'maps':'get'(",
+                        leaf::atom(Self::local_state_key(var)),
+                        ", ",
+                        leaf::var(field_state.clone()),
+                        ") in ",
+                    ]);
+                }
+            }
+            if !doc_parts.is_empty() {
+                stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
+            }
+            if is_last {
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "{'reply', ",
+                        leaf::var(val_var),
+                        ", ",
+                        leaf::var(field_state),
+                        "}",
+                    ],
+                    span,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    // Self fieldAt: name put: expr where RHS is control flow returning {Value, State}
+    //
+    // The mutation is a real Bind: the map key is a dynamic
+    // (computed) value, not a static field name, so it cannot
+    // use `BindOp::Put` (whose `field` is a literal atom) —
+    // the investigation-established `Direct(ValueRef::Doc(...))`
+    // idiom carries the whole `maps:put` expression opaquely
+    // instead (ADR 0111 Addendum 4's type-level rule: a
+    // version-mutating statement must be a `Bind`, never a
+    // `Statement`, but `Bind`'s `op` may still be opaque).
+    fn lower_reply_self_field_at_put_control_flow(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        if let Expression::MessageSend { arguments, .. } = expr {
+            // BT-4369: a dynamic-key field write records itself for the loop checkout.
+            self.note_field_write("<dynamic>", span);
+            let name_var = self.fresh_temp_var("Name");
+            let name_code = self.expression_doc(&arguments[0])?;
+            let tuple_var = self.fresh_temp_var("CfTuple");
+            let val_var = self.fresh_temp_var("CfVal");
+            let val_code = self.expression_doc(&arguments[1])?;
+            let rhs_state = self.fresh_temp_var("CfState");
+            let source_version = self.state_version();
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(name_var.clone()),
+                    " = ",
+                    name_code,
+                    " in let ",
+                    leaf::var(tuple_var.clone()),
+                    " = ",
+                    val_code,
+                    " in let ",
+                    leaf::var(val_var.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    leaf::var(tuple_var.clone()),
+                    ") in let ",
+                    leaf::var(rhs_state.clone()),
+                    " = call 'erlang':'element'(2, ",
+                    leaf::var(tuple_var),
+                    ") in ",
+                ],
+                span,
+            ));
+            let _ = self.next_state_var();
+            let target_version = self.state_version();
+            stmts.push(ThreadedStmt::Bind {
+                target: threaded_ir::VersionedVar::new(
+                    threaded_ir::VersionPrefix::State,
+                    target_version,
+                    threaded_ir::FrameId::ROOT,
+                ),
+                source: threaded_ir::VersionedVar::new(
+                    threaded_ir::VersionPrefix::State,
+                    source_version,
+                    threaded_ir::FrameId::ROOT,
+                ),
+                op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
+                    "call 'maps':'put'(",
+                    leaf::var(name_var),
+                    ", ",
+                    leaf::var(val_var.clone()),
+                    ", ",
+                    leaf::var(rhs_state),
+                    ")",
+                ])),
+                span,
+            });
+            let field_state = self.current_state_var();
+            let mut doc_parts: Vec<Document<'static>> = Vec::new();
+            if let Some(threaded_vars) = self
+                .threaded_locals_of(&arguments[1])
+                .and_then(ThreadedLocals::into_lowered)
+            {
+                for var in &threaded_vars {
+                    let tv_core = self
+                        .lookup_var(var)
+                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                    doc_parts.push(docvec![
+                        "let ",
+                        leaf::var(tv_core),
+                        " = call 'maps':'get'(",
+                        leaf::atom(Self::local_state_key(var)),
+                        ", ",
+                        leaf::var(field_state.clone()),
+                        ") in ",
+                    ]);
+                }
+            }
+            if !doc_parts.is_empty() {
+                stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
+            }
+            if is_last {
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "{'reply', ",
+                        leaf::var(val_var),
+                        ", ",
+                        leaf::var(field_state),
+                        "}",
+                    ],
+                    span,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    // {a, b} := expr where RHS is control flow returning {Value, State}.
+    // Element 2 of the RHS tuple becomes the next real `State` Bind
+    // (Direct — the RHS is a computed map, not a static field Put);
+    // the tuple unpack and threaded-local rebinds stay opaque Statements.
+    fn lower_reply_destructure_assignment_control_flow(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        let mut rhs_value = None;
+        if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+            // Evaluate RHS (returns {Value, State} tuple)
+            let tuple_var = self.fresh_temp_var("CfTuple");
+            let actual_val = self.fresh_temp_var("CfVal");
+            let value_str = self.expression_doc(value)?;
+            let source_version = self.state_version();
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(tuple_var.clone()),
+                    " = ",
+                    value_str,
+                    " in let ",
+                    leaf::var(actual_val.clone()),
+                    " = call 'erlang':'element'(1, ",
+                    leaf::var(tuple_var.clone()),
+                    ") in ",
+                ],
+                span,
+            ));
+            let _ = self.next_state_var();
+            let target_version = self.state_version();
+            stmts.push(ThreadedStmt::Bind {
+                target: threaded_ir::VersionedVar::new(
+                    threaded_ir::VersionPrefix::State,
+                    target_version,
+                    threaded_ir::FrameId::ROOT,
+                ),
+                source: threaded_ir::VersionedVar::new(
+                    threaded_ir::VersionPrefix::State,
+                    source_version,
+                    threaded_ir::FrameId::ROOT,
+                ),
+                op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
+                    "call 'erlang':'element'(2, ",
+                    leaf::var(tuple_var),
+                    ")",
+                ])),
+                span,
+            });
+            let new_state = self.current_state_var();
+            // Extract threaded locals
+            let mut doc_parts: Vec<Document<'static>> = Vec::new();
+            if let Some(threaded_vars) = self
+                .threaded_locals_of(value)
+                .and_then(ThreadedLocals::into_lowered)
+            {
+                for var in &threaded_vars {
+                    let tv_core = self
+                        .lookup_var(var)
+                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                    doc_parts.push(docvec![
+                        "let ",
+                        leaf::var(tv_core),
+                        " = call 'maps':'get'(",
+                        leaf::atom(Self::local_state_key(var)),
+                        ", ",
+                        leaf::var(new_state.clone()),
+                        ") in ",
+                    ]);
+                }
+            }
+            if !doc_parts.is_empty() {
+                stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
+            }
+            // Now destructure the unpacked value
+            let binding_docs = self.generate_destructure_bindings_from_var(pattern, &actual_val)?;
+            for d in binding_docs {
+                stmts.push(ThreadedStmt::Statement(d, span));
+            }
+            rhs_value = Some(actual_val);
+        }
+        if is_last {
+            let reply = self.destructure_reply_doc(rhs_value)?;
+            stmts.push(ThreadedStmt::Statement(reply, span));
+        }
+        Ok(())
+    }
+
+    // Real state Bind: the RHS's element 2 IS the next `State`
+    // version (a computed map, not a static field — Direct, not Put).
+    fn lower_reply_local_assign_tier2(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        if let Expression::Assignment { target, value, .. } = expr
+            && let Expression::Identifier(id) = target.as_ref()
+        {
+            let var_name = &id.name;
+            let core_var = self
+                .lookup_var(var_name)
+                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+            let tuple_var = self.fresh_temp_var("T2Tuple");
+            let value_str = self.generate_tier2_value_call_doc(value)?;
+            self.bind_var(var_name, &core_var);
+            let source_version = self.state_version();
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(tuple_var.clone()),
+                    " = ",
+                    value_str,
+                    " in let ",
+                    leaf::var(core_var),
+                    " = call 'erlang':'element'(1, ",
+                    leaf::var(tuple_var.clone()),
+                    ")\n in ",
+                ],
+                span,
+            ));
+            let _ = self.next_state_var();
+            let target_version = self.state_version();
+            stmts.push(ThreadedStmt::Bind {
+                target: threaded_ir::VersionedVar::new(
+                    threaded_ir::VersionPrefix::State,
+                    target_version,
+                    threaded_ir::FrameId::ROOT,
+                ),
+                source: threaded_ir::VersionedVar::new(
+                    threaded_ir::VersionPrefix::State,
+                    source_version,
+                    threaded_ir::FrameId::ROOT,
+                ),
+                op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
+                    "call 'erlang':'element'(2, ",
+                    leaf::var(tuple_var),
+                    ")",
+                ])),
+                span,
+            });
+        }
+        if is_last {
+            let reply = self.local_assign_reply_doc(expr)?;
+            stmts.push(ThreadedStmt::Statement(reply, span));
+        }
+        Ok(())
+    }
+
+    fn lower_reply_local_assign_control_flow(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        // Route the actor `var := <control-flow-with-mutations>`
+        // assign-RHS through the shared `ThreadedExpr` emitter. The Actor boundary
+        // binds the target to element 1, advances the state version to element 2
+        // (the threaded gen_server `State`, via a real Bind) and rebinds
+        // `__local__`-threaded sibling outer-locals.
+        //
+        // ADR 0111 Addendum 4: `classify_body_expr` already decided this is
+        // `LocalAssignControlFlow` (Phase 1) — `emit_actor_threaded_assign_rhs_stmts`
+        // never declines, so there is no second computation left to disagree
+        // with, and `verify_routing_invariant`/`RoutingMismatch` are deleted.
+        if let Expression::Assignment { target, value, .. } = expr
+            && let Expression::Identifier(id) = target.as_ref()
+        {
+            // ADR 0131 Phase 2: a loop or fold is a
+            // local-threading producer — its construct
+            // tuple, `State` `Bind` and `LocalRebind`s land
+            // in this body's IR, then the target is bound
+            // to its logical value.
+            let var_name = &id.name;
+            let core_var = self
+                .lookup_var(var_name)
+                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+            if let Some(tv) = self.threaded_construct_value(value, threaded_ir::FrameId::ROOT)? {
+                stmts.extend(tv.prelude);
+                let value_str = self.threaded_value_doc(&tv.value);
+                self.bind_var(var_name, &core_var);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
+                    span,
+                ));
+            } else {
+                // ADR 0118 phase 1a: `x := 1 to: (self bump) do:
+                // [..]` — the construct's own state-effecting
+                // operands thread ahead of it.
+                let rhs_scope = self.thread_ahead(value, stmts, threaded_ir::FrameId::ROOT)?;
+                self.emit_actor_threaded_assign_rhs_stmts(var_name, value, stmts)?;
+                self.finish_precompiled_scope(rhs_scope)?;
+            }
+        }
+        if is_last {
+            let reply = self.local_assign_reply_doc(expr)?;
+            stmts.push(ThreadedStmt::Statement(reply, span));
+        }
+        Ok(())
+    }
+
+    // Var := self method — dispatch RHS, bind result to var
+    fn lower_reply_local_assign_self_send(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        if let Expression::Assignment { target, value, .. } = expr
+            && let Expression::Identifier(id) = target.as_ref()
+        {
+            let var_name = &id.name;
+            let core_var = self
+                .lookup_var(var_name)
+                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+            // ADR 0118 phase 1a: `v := self log: (self nextId)`
+            // — the producer's `Statement` + real `Bind`
+            // (its arguments sequenced first), then the
+            // local bound to its pure result reference.
+            let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
+            stmts.extend(tv.prelude);
+            let value_str = self.threaded_value_doc(&tv.value);
+            self.bind_var(var_name, &core_var);
+            stmts.push(ThreadedStmt::Statement(
+                docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
+                span,
+            ));
+        }
+        if is_last {
+            let reply = self.local_assign_reply_doc(expr)?;
+            stmts.push(ThreadedStmt::Statement(reply, span));
+        }
+        Ok(())
+    }
+
+    // Var := [block needing Tier 2], where prescan_tier2_local_vars
+    // already proved every later use of `var` in this body is a safe
+    // `value`/`value:`/etc. call. Generate the block via
+    // generate_block_stateful directly (bypassing generate_block's
+    // "unsupported block" rejection, which is only needed when the
+    // compiler can't prove the later invocation site is safe).
+    fn lower_reply_local_assign_tier2_block(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        if let Expression::Assignment { target, value, .. } = expr
+            && let (Expression::Identifier(id), Expression::Block(block)) =
+                (target.as_ref(), value.as_ref())
+        {
+            let var_name = &id.name;
+            let core_var = self
+                .lookup_var(var_name)
+                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+            let captured_mutations = Self::captured_mutations_for_block(block);
+            let value_str = self.generate_block_stateful(block, &captured_mutations)?;
+            self.bind_var(var_name, &core_var);
+            stmts.push(ThreadedStmt::Statement(
+                docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
+                span,
+            ));
+        }
+        if is_last {
+            let reply = self.local_assign_reply_doc(expr)?;
+            stmts.push(ThreadedStmt::Statement(reply, span));
+        }
+        Ok(())
+    }
+
+    fn lower_reply_local_assign_pure(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        if let Expression::Assignment { target, value, .. } = expr
+            && let Expression::Identifier(id) = target.as_ref()
+        {
+            // BT-3495: `r := (self.field := ...)` as a flat
+            // top-level method-body statement — the RHS is
+            // itself a field write, at any parenthesization
+            // depth. `classify_body_expr` hands every
+            // `LocalAssignPure` RHS here regardless of shape,
+            // and the generic `threaded_expression` compile
+            // below has no way to fold a NESTED field write's
+            // own state mutation into this body's `State`
+            // chain (it recompiles the whole `self.field :=
+            // ...` expression via plain `generate_expression`,
+            // producing an `erlc: unbound variable` crash).
+            // Lower it through the SAME real-`Bind` producer
+            // `FieldAssignment` (above) and the branch/loop
+            // lowerings use — `lower_field_assignment_bind`
+            // — then alias the local var to the identical
+            // assigned value, exactly as `:=`'s "the whole
+            // assignment evaluates to the assigned value"
+            // semantics require (mirrors
+            // `lower_local_var_assignment_bind`'s C2z fix,
+            // BT-3493, one level up at this flat top-level
+            // body instead of a branch/loop frame). Falls
+            // through to this arm's own reply behavior below
+            // (`local_assign_reply_doc`, the assigned value)
+            // when this is the body's last statement — only
+            // the RHS lowering differs.
+            if let Some(field_write) = self.local_assign_field_write(value) {
+                let field_val_var = self.lower_field_assignment_bind(
+                    field_write,
+                    threaded_ir::FrameId::ROOT,
+                    span,
+                    stmts,
+                )?;
+                self.bind_var(&id.name, &field_val_var);
+            } else {
+                let var_name = &id.name;
+                let core_var = self
+                    .lookup_var(var_name)
+                    .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                // ADR 0118 phase 1a: `ok := (self recordOnce: x)
+                // and: [y]`, `total := items size + (self bump)` —
+                // the RHS's state-effecting sub-expressions land
+                // in this body's IR as real `Bind`s, in source
+                // order, via the sequencing rule.
+                let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
+                stmts.extend(tv.prelude);
+                let value_str = self.threaded_value_doc(&tv.value);
+                self.bind_var(var_name, &core_var);
+                stmts.push(ThreadedStmt::Statement(
+                    docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
+                    span,
+                ));
+            }
+        }
+        if is_last {
+            let reply = self.local_assign_reply_doc(expr)?;
+            stmts.push(ThreadedStmt::Statement(reply, span));
+        }
+        Ok(())
+    }
+
+    fn lower_reply_destructure_assignment(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        let mut rhs_value = None;
+        if let Expression::DestructureAssignment { pattern, value, .. } = expr {
+            // ADR 0118 phase 1b: `{a, b} := #(1, self bump)` —
+            // the RHS's state-effecting sub-expressions land in
+            // this body's IR as real `Bind`s before
+            // `generate_destructure_bindings`'s own
+            // `eval_rhs_to_temp_var` call (`expressions.rs`)
+            // compiles `value` via `expression_doc`, which
+            // substitutes the already-sequenced value.
+            let (binding_docs, rhs_var) = self.generate_destructure_bindings_sequenced(
+                pattern,
+                value,
+                threaded_ir::FrameId::ROOT,
+                stmts,
+            )?;
+            for d in binding_docs {
+                stmts.push(ThreadedStmt::Statement(d, span));
+            }
+            rhs_value = Some(rhs_var);
+        }
+        if is_last {
+            let reply = self.destructure_reply_doc(rhs_value)?;
+            stmts.push(ThreadedStmt::Statement(reply, span));
+        }
+        Ok(())
+    }
+
+    fn lower_reply_super_send(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        // BT-3814 / BT-4318: the one `super` producer — the
+        // operands thread ahead of the dispatch (the sequencing
+        // rule), and its `State` `Bind` carries the callee's
+        // state change to the next statement or the reply.
+        let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
+        stmts.extend(tv.prelude);
+        if is_last {
+            let reply = self.threaded_value_reply_doc(&tv.value);
+            stmts.push(ThreadedStmt::Statement(reply, span));
+        }
+        Ok(())
+    }
+
+    fn lower_reply_error_send(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        // BT-4310: `self error: (xs inject: ...) printString` — the
+        // argument is sequenced ahead of the send, like a `super`
+        // send's.
+        let error_scope = self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, stmts)?;
+        if is_last {
+            // Error send never returns — no reply tuple needed.
+            let expr_str = self.expression_doc(expr)?;
+            stmts.push(ThreadedStmt::Statement(docvec![expr_str], span));
+        } else {
+            let tmp_var = self.fresh_temp_var("seq");
+            let expr_str = self.expression_doc(expr)?;
+            stmts.push(ThreadedStmt::Statement(
+                docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in "],
+                span,
+            ));
+        }
+        self.finish_precompiled_scope(error_scope)?;
+        Ok(())
+    }
+
+    fn lower_reply_tier2_value_call(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        if is_last {
+            let expr_str = self.generate_tier2_value_call_doc(expr)?;
+            let reply = self.emit_tuple_unpack_reply("T2Tuple", expr_str);
+            stmts.push(ThreadedStmt::Statement(reply, span));
+        } else {
+            // Real state Bind: element 2 of the Tier-2 tuple IS the
+            // next `State` version (a computed map — Direct, not Put).
+            let tuple_var = self.fresh_temp_var("T2Tuple");
+            let discard_var = self.fresh_temp_var("T2Discard");
+            let expr_str = self.generate_tier2_value_call_doc(expr)?;
+            let source_version = self.state_version();
+            stmts.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(tuple_var.clone()),
+                    " = ",
+                    expr_str,
+                    " in let ",
+                    leaf::var(discard_var),
+                    " = call 'erlang':'element'(1, ",
+                    leaf::var(tuple_var.clone()),
+                    ")\n in ",
+                ],
+                span,
+            ));
+            let _ = self.next_state_var();
+            let target_version = self.state_version();
+            stmts.push(ThreadedStmt::Bind {
+                target: threaded_ir::VersionedVar::new(
+                    threaded_ir::VersionPrefix::State,
+                    target_version,
+                    threaded_ir::FrameId::ROOT,
+                ),
+                source: threaded_ir::VersionedVar::new(
+                    threaded_ir::VersionPrefix::State,
+                    source_version,
+                    threaded_ir::FrameId::ROOT,
+                ),
+                op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
+                    "call 'erlang':'element'(2, ",
+                    leaf::var(tuple_var),
+                    ")",
+                ])),
+                span,
+            });
+            let new_state = self.current_state_var();
+
+            // Extract captured local mutations from NewState
+            let mut doc_parts: Vec<Document<'static>> = Vec::new();
+            if let Some(mutations) = self.get_inline_block_captured_mutations(expr) {
+                for var in &mutations {
+                    let core_var = self
+                        .lookup_var(var)
+                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                    doc_parts.push(docvec![
+                        "let ",
+                        leaf::var(core_var),
+                        " = call 'maps':'get'(",
+                        leaf::atom(Self::local_state_key(var)),
+                        ", ",
+                        leaf::var(new_state.clone()),
+                        ") in ",
+                    ]);
+                }
+            }
+            if !doc_parts.is_empty() {
+                stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
+            }
+        }
+        Ok(())
+    }
+
+    fn lower_reply_control_flow_with_mutations(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        if is_last {
+            // Route the last-position actor control-flow
+            // construct through the shared `ThreadedExpr` emitter. The Actor
+            // boundary binds element 1 (Reply) and element 2 (the threaded
+            // gen_server `State`, via a real Bind) and returns
+            // `{'reply', Reply, NewState}`.
+            //
+            // ADR 0111 Addendum 4: `classify_body_expr` already decided this
+            // is `ControlFlowWithMutations` (Phase 1) —
+            // `emit_actor_threaded_last_stmts` never declines, so
+            // `verify_routing_invariant`/`RoutingMismatch` are deleted (no
+            // second computation left to disagree with).
+            //
+            // ADR 0118 phase 1a: `1 to: (self bump) do: [..]`,
+            // `(self bump) timesRepeat: [..]` — the construct's own
+            // state-effecting operands (bounds, receiver) thread
+            // ahead of it, so it starts from their post-dispatch
+            // state.
+            let scope = self.thread_ahead(expr, stmts, threaded_ir::FrameId::ROOT)?;
+            self.emit_actor_threaded_last_stmts(expr, stmts)?;
+            self.finish_precompiled_scope(scope)?;
+        } else {
+            // Real state Bind: element 2 of the construct's tuple IS the
+            // next `State` version (a computed map — Direct, not Put).
+            let scope = self.thread_ahead(expr, stmts, threaded_ir::FrameId::ROOT)?;
+            // ADR 0118 phase 4: when `expr` is itself an
+            // inline-threaded control-flow construct, the
+            // `thread_ahead` call just above (now that
+            // `subexpr_needs_prelude` recognizes this shape) already
+            // spliced its real prelude into `stmts` and registered
+            // its already-unwrapped value — see
+            // `emit_actor_threaded_last_stmts`'s matching comment.
+            // `expression_doc` below then returns that value
+            // directly, so no further `element/2` unwrap runs.
+            // Every other `ControlFlowWithMutations` shape (loops,
+            // list-ops) still returns a raw tuple `Document` here,
+            // unpacked by the manual `Tuple`/`Bind` pair below.
+            //
+            // ADR 0131 Phase 3: that conditional is a local-threading
+            // producer, so its prelude also carries one
+            // `LocalRebind` per threaded local; only the raw tuple
+            // path below re-reads its locals from the new state.
+            let inline_conditional = self.thread_ahead_unwraps(expr);
+            if inline_conditional {
+                let expr_str = self.expression_doc(expr)?;
+                self.finish_precompiled_scope(scope)?;
+                let seq_var = self.fresh_temp_var("seq");
+                stmts.push(ThreadedStmt::Statement(
+                    docvec!["let ", leaf::var(seq_var), " = ", expr_str, " in "],
+                    span,
+                ));
+            } else {
+                let tuple_var = self.fresh_temp_var("Tuple");
+                let expr_str = self.expression_doc(expr)?;
+                self.finish_precompiled_scope(scope)?;
+                let source_version = self.state_version();
+                stmts.push(ThreadedStmt::Statement(
+                    docvec![
+                        "let ",
+                        leaf::var(tuple_var.clone()),
+                        " = ",
+                        expr_str,
+                        " in "
+                    ],
+                    span,
+                ));
+                let _ = self.next_state_var();
+                let target_version = self.state_version();
+                stmts.push(ThreadedStmt::Bind {
+                    target: threaded_ir::VersionedVar::new(
+                        threaded_ir::VersionPrefix::State,
+                        target_version,
+                        threaded_ir::FrameId::ROOT,
+                    ),
+                    source: threaded_ir::VersionedVar::new(
+                        threaded_ir::VersionPrefix::State,
+                        source_version,
+                        threaded_ir::FrameId::ROOT,
+                    ),
+                    op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
+                        "call 'erlang':'element'(2, ",
+                        leaf::var(tuple_var),
+                        ")",
+                    ])),
+                    span,
+                });
+            }
+            let new_state = self.current_state_var();
+
+            // Extract threaded locals from the updated state
+            let mut doc_parts: Vec<Document<'static>> = Vec::new();
+            if let Some(threaded_vars) = self
+                .threaded_locals_of(expr)
+                .and_then(ThreadedLocals::into_lowered)
+                .filter(|_| !inline_conditional)
+            {
+                for var in &threaded_vars {
+                    let core_var = self
+                        .lookup_var(var)
+                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
+                    doc_parts.push(docvec![
+                        "let ",
+                        leaf::var(core_var),
+                        " = call 'maps':'get'(",
+                        leaf::atom(Self::local_state_key(var)),
+                        ", ",
+                        leaf::var(new_state.clone()),
+                        ") in ",
+                    ]);
+                }
+            }
+            if !doc_parts.is_empty() {
+                stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
+            }
+        }
+        Ok(())
+    }
+
+    fn lower_reply_dispatching_self_send(
+        &mut self,
+        expr: &Expression,
+        span: Span,
+        is_last: bool,
+        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
+    ) -> Result<()> {
+        use threaded_ir::ThreadedStmt;
+        // ADR 0118 phase 1a: `self log: (self nextId)` — the
+        // producer (`generate_self_dispatch`) sequences its own
+        // arguments and yields the `Statement` + real `Bind` pair
+        // this body splices; the reply reads its pure result.
+        let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
+        stmts.extend(tv.prelude);
+        if is_last {
+            let reply = self.threaded_value_reply_doc(&tv.value);
+            stmts.push(ThreadedStmt::Statement(reply, span));
+        }
+        Ok(())
     }
 
     /// Emit the `{'reply', Var, State}` close for a local assignment

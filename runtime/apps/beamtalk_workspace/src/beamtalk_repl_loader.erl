@@ -48,7 +48,6 @@ Extracted from beamtalk_repl_eval.
     normalize_class_source_key/1,
     patch_module_target/1,
     source_path_or_empty/1,
-    splice_replace/3,
     with_ambient_protocol_sources/1,
     %% Primitives that `beamtalk_repl_loader_newclass` (BT-4702) calls into.
     %% Same reason as above: shared with the single-site paths, exported only
@@ -1915,20 +1914,10 @@ reload_class_without_method(ClassNameBin, NewSourceBin) ->
     end.
 
 %% Cut the bytes `[start, end)' out of `Source', joining the surrounding text.
-%% A thin wrapper over `splice_replace/3` — removal is replacement
-%% with the empty binary.
+%% Removal is replacement with the empty binary (`beamtalk_workspace_span:splice/3`).
 -spec splice_out_span(binary(), beamtalk_repl_loader_rewrite:rewrite_span()) -> binary().
 splice_out_span(Source, Span) ->
-    splice_replace(Source, Span, <<>>).
-
-%% Replace the bytes `[start, end)' in `Source' with `NewText', joining the
-%% surrounding text. Shared leaf primitive (AGENTS.md's no-duplicate-
-%% implementations rule) behind both `splice_out_span/2` (removal — ADR 0112)
-%% and `beamtalk_repl_loader_rewrite:rewrite_sites/2`'s per-site splice (ADR 0114).
--spec splice_replace(binary(), beamtalk_repl_loader_rewrite:rewrite_span(), binary()) -> binary().
-splice_replace(Source, #{start := Start, 'end' := End}, NewText) ->
-    <<Before:Start/binary, _Old:(End - Start)/binary, After/binary>> = Source,
-    <<Before/binary, NewText/binary, After/binary>>.
+    beamtalk_workspace_span:splice(Source, Span, <<>>).
 
 %% Resolve a class's package-qualified module name + on-disk source path for a
 %% patch, by reusing the class's CURRENT loaded module (which already carries the
