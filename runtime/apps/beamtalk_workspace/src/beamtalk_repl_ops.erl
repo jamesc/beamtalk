@@ -183,7 +183,12 @@ call it.
 -spec encode(op_result(), protocol_msg()) -> binary().
 encode({ok, Value, Output, Warnings}, Msg) ->
     beamtalk_repl_protocol:encode_result(
-        Value, Msg, fun beamtalk_repl_json:term_to_json/1, Output, Warnings
+        Value,
+        Msg,
+        fun beamtalk_repl_json:term_to_json/1,
+        Output,
+        Warnings,
+        fun beamtalk_repl_json:value_type/1
     );
 encode({trace, Steps, Output, Warnings}, Msg) ->
     beamtalk_repl_protocol:encode_trace_result(

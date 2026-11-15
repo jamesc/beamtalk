@@ -7,7 +7,7 @@
 /// `signalKind:class:selector:hint:` restricts its `kind` argument to this
 /// type to catch a typo (e.g. `#idx_out_of_bounds`) at compile time instead
 /// of silently landing in the wrong catch hierarchy at runtime.
-type ExceptionKind = #does_not_understand | #arity_mismatch | #immutable_value | #runtime_error | #index_out_of_bounds | #empty_collection | #empty_queue | #not_found | #class_not_found | #no_superclass | #class_already_exists | #dispatch_error | #callback_failed | #actor_dead | #future_not_awaited | #internal_error | #key_error | #argument_error | #resource_error | #process_not_found | #timeout_error | #type_error | #instantiation_error | #erlang_exit | #erlang_throw | #signal
+type ExceptionKind = #does_not_understand | #arity_mismatch | #immutable_value | #runtime_error | #index_out_of_bounds | #empty_collection | #empty_queue | #not_found | #class_not_found | #no_superclass | #class_already_exists | #selector_not_found | #dispatch_error | #callback_failed | #actor_dead | #invalid_continuation | #invalid_defer | #future_not_awaited | #internal_error | #key_error | #pattern_mismatch | #unknown_field | #argument_error | #resource_error | #process_not_found | #timeout_error | #type_error | #instantiation_error | #erlang_exit | #erlang_throw | #signal | #node_down | #remote_code_mismatch | #not_serialisable | #shape_version_ahead | #shape_migration_failed | #wire_version_unsupported | #insecure_distribution | #invalid_node_name | #uninitialized_state_error | #stateful_block_dispatch
 
 /// Exception — Base class for all exceptions.
 ///

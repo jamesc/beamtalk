@@ -158,6 +158,12 @@ kind_to_class(shape_migration_failed) -> 'RuntimeError';
 kind_to_class(wire_version_unsupported) -> 'RuntimeError';
 kind_to_class(insecure_distribution) -> 'RuntimeError';
 kind_to_class(invalid_node_name) -> kind_to_class(type_error);
+%% Codegen-emitted kinds (BT-4912): `uninitialized_state_error` is a `late`
+%% slot read before it is set, `stateful_block_dispatch` a Tier 2 (stateful)
+%% block reached through a plain dispatch path. Both are runtime faults of
+%% the program, so they classify like the other `RuntimeError` kinds.
+kind_to_class(uninitialized_state_error) -> 'RuntimeError';
+kind_to_class(stateful_block_dispatch) -> 'RuntimeError';
 kind_to_class(_) -> 'Error'.
 
 -doc """
