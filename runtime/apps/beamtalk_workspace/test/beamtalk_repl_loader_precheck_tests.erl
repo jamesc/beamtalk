@@ -26,16 +26,9 @@ uses, has no such module to seed from.
 %%====================================================================
 
 precheck_setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     %% `mode => run` for the same test-isolation reason
     %% `beamtalk_recheck_tests:recheck_setup/0` uses it — see that module's
     %% comment for the disk-persistence gotcha this avoids.
@@ -57,14 +50,8 @@ precheck_setup() ->
     ok.
 
 precheck_teardown(_) ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
-    case whereis(beamtalk_workspace_signature_store) of
-        undefined -> ok;
-        SigStorePid -> gen_server:stop(SigStorePid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_signature_store),
     beamtalk_test_repl:clear_xref(),
     _ = application:stop(beamtalk_compiler),
     ok.

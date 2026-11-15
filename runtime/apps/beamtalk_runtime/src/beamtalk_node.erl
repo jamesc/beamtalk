@@ -351,14 +351,14 @@ introspect(#{'$beamtalk_class' := 'Node', name := Name}, Selector, Fun, Args) ->
 -spec remote_introspect(node(), atom(), atom(), list()) ->
     {ok, term()} | {error, #beamtalk_error{}}.
 remote_introspect(Name, Selector, Fun, Args) ->
-    try erpc:call(Name, ?MODULE, Fun, Args, ?BT_REMOTE_CALL_TIMEOUT) of
-        Value -> {ok, Value}
-    catch
-        error:{erpc, noconnection} ->
+    case beamtalk_call_failure:erpc(Name, ?MODULE, Fun, Args, ?BT_REMOTE_CALL_TIMEOUT) of
+        {ok, _} = Ok ->
+            Ok;
+        {error, {node_down, _}} ->
             {error, introspection_error(node_down, Selector, Name, <<>>)};
-        error:{erpc, timeout} ->
+        {error, timeout} ->
             {error, introspection_error(timeout, Selector, Name, <<>>)};
-        error:{exception, undef, _Stack} ->
+        {error, {other, undef}} ->
             {error,
                 introspection_error(
                     remote_code_mismatch,
@@ -366,11 +366,7 @@ remote_introspect(Name, Selector, Fun, Args) ->
                     Name,
                     <<"the peer runs a different beamtalk_runtime version">>
                 )};
-        error:{erpc, Reason} ->
-            {error, introspection_error(runtime_error, Selector, Name, format_reason(Reason))};
-        error:{exception, Reason, _Stack} ->
-            {error, introspection_error(runtime_error, Selector, Name, format_reason(Reason))};
-        exit:{exception, Reason} ->
+        {error, {other, Reason}} ->
             {error, introspection_error(runtime_error, Selector, Name, format_reason(Reason))}
     end.
 
@@ -422,19 +418,18 @@ Both share this one erpc-and-catch implementation rather than a second copy
 """.
 -spec remote_shape_manifest(node()) -> {ok, map()} | {error, #beamtalk_error{}}.
 remote_shape_manifest(Name) ->
-    try erpc:call(Name, beamtalk_release, shape_manifest, [], ?BT_REMOTE_CALL_TIMEOUT) of
-        Manifest when is_map(Manifest) ->
-            {ok, Manifest}
-    catch
-        error:{erpc, noconnection} ->
+    case
+        beamtalk_call_failure:erpc(
+            Name, beamtalk_release, shape_manifest, [], ?BT_REMOTE_CALL_TIMEOUT
+        )
+    of
+        {ok, Manifest} when is_map(Manifest) ->
+            {ok, Manifest};
+        {error, {node_down, _}} ->
             {error, remote_manifest_node_down_error(Name)};
-        error:{erpc, timeout} ->
+        {error, timeout} ->
             {error, remote_manifest_timeout_error(Name)};
-        error:{erpc, Reason} ->
-            {error, remote_manifest_error(Name, Reason)};
-        error:{exception, Reason, _Stack} ->
-            {error, remote_manifest_error(Name, Reason)};
-        exit:{exception, Reason} ->
+        {error, {other, Reason}} ->
             {error, remote_manifest_error(Name, Reason)}
     end.
 

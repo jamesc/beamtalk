@@ -156,13 +156,11 @@ reclaim(Table) ->
         HeirPid when HeirPid =:= self() ->
             {error, not_owner};
         _HeirPid ->
-            try
-                gen_server:call(?MODULE, {reclaim, Table})
-            catch
-                exit:{noproc, _} -> {error, no_heir};
-                exit:{normal, _} -> {error, no_heir};
-                exit:{shutdown, _} -> {error, no_heir}
-            end
+            beamtalk_call_failure:tolerate_gone(
+                fun() -> gen_server:call(?MODULE, {reclaim, Table}) end,
+                {error, no_heir},
+                #{stopping => true}
+            )
     end.
 
 -doc """

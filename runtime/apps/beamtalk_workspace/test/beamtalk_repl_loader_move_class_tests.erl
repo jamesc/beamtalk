@@ -45,16 +45,9 @@ gadget_source() ->
 %%====================================================================
 
 setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-move-class-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
@@ -91,10 +84,7 @@ teardown(_) ->
         end,
         ['Bt3272Gadget']
     ),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     ok.
 
 %% Same "real ChangeLog needs a resolvable HOME" wrinkle
@@ -103,30 +93,10 @@ teardown(_) ->
 %% see `beamtalk_test_unique:id/0`.
 setup_with_changelog() ->
     Fixture = setup(),
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary("bt-move-class-changelog-" ++ Unique),
-    ChangelogHome = filename:join(
-        beamtalk_test_fs:base_dir(), "bt-move-class-changelog-home-" ++ Unique
-    ),
-    ok = filelib:ensure_path(ChangelogHome),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", ChangelogHome),
-    {ok, _} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
-    Fixture#{old_home => OldHome}.
+    Fixture#{changelog_ws => beamtalk_test_fs:start_changelog_workspace()}.
 
-teardown_with_changelog(#{old_home := OldHome} = Fixture) ->
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    case OldHome of
-        false -> os:unsetenv("HOME");
-        _ -> os:putenv("HOME", OldHome)
-    end,
+teardown_with_changelog(#{changelog_ws := Ws} = Fixture) ->
+    beamtalk_test_fs:stop_changelog_workspace(Ws),
     teardown(Fixture).
 
 %%====================================================================
@@ -220,20 +190,13 @@ move_class_dynamic_no_source_file_test_() ->
     {setup, fun setup_dynamic/0, fun teardown_dynamic/1, fun move_class_dynamic_no_source_file/1}.
 
 setup_dynamic() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
     %% (Re)load the stdlib classes: a suite earlier in the same EUnit VM may
     %% have stopped every class process, and the stdlib refusal case needs a
     %% real, `.beam`-backed stdlib class to classify as `stdlib`.
     ok = beamtalk_stdlib:init(),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-move-class-dyn-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
@@ -264,10 +227,7 @@ teardown_dynamic(_Fixture) ->
                 _:_ -> ok
             end
     end,
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     ok.
 
 move_class_dynamic_no_source_file(#{proj_dir := ProjDir}) ->
@@ -308,16 +268,9 @@ move_class_dependency_refusal_test_() ->
     {setup, fun setup_dependency/0, fun teardown_dynamic/1, fun move_class_dependency_refusal/1}.
 
 setup_dependency() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     Unique = beamtalk_test_unique:id(),
     %% `ProjDir` is the active project tree; the fixture class's own source
     %% file lives OUTSIDE it (`OutsideDir`), so `classify_source_file/1`

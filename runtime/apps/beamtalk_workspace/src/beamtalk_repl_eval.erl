@@ -58,22 +58,12 @@ module loading to beamtalk_repl_loader.
 %% process dictionary (that is seeded only in eval workers).
 -export([announce_binding_changed/3]).
 
-%% Lexeme skippers (conformance-tested against the Rust lexer), shared with
-%% the cockpit hover's keyword-send scanner in `beamtalk_repl_ops_dev`.
--export([
-    skip_string_literal/1,
-    skip_character_literal/1,
-    skip_line_comment/1,
-    skip_block_comment/1
-]).
-
 %% Exported for testing (only in test builds)
 -ifdef(TEST).
 -export([
     announce_binding_changed/2,
-    extract_assignment/1,
     maybe_await_future/1,
-    rebuild_bindings_from_steps/2,
+    rebuild_bindings_from_steps/3,
     should_purge_module/2,
     strip_internal_bindings/1,
     inject_output/3,
@@ -84,7 +74,6 @@ module loading to beamtalk_repl_loader.
     maybe_help_for_alias/2,
     format_alias_help/2,
     wrap_load_err/3,
-    normalize_method_source/2,
     resolve_entry/2,
     is_keyword_selector/1,
     class_name_binary/1,
@@ -168,12 +157,13 @@ do_eval_expression(Expression, State, Subscriber) ->
         %% ADR 0108 Phase 8: type alias definition
         {ok, type_alias_definition, AliasInfo, Warnings} ->
             handle_type_alias_definition(AliasInfo, Warnings, NewState);
-        {ok, Binary, _ResultExpr, Warnings} ->
+        {ok, Binary, #{assigned_var := AssignedVar}, Warnings} ->
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
                     eval_loaded_module(
                         ModuleName,
                         Expression,
+                        AssignedVar,
                         Bindings,
                         RegistryPid,
                         Subscriber,
@@ -563,7 +553,7 @@ do_eval_trace(Expression, State) ->
     RegistryPid = beamtalk_repl_state:get_actor_registry(State),
 
     case beamtalk_repl_compiler:compile_expression_trace(Expression, ModuleName, Bindings) of
-        {ok, Binary, _ResultExpr, Warnings} ->
+        {ok, Binary, #{step_assignments := StepAssignments}, Warnings} ->
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
                     BindingsWithRegistry =
@@ -596,7 +586,7 @@ do_eval_trace(Expression, State) ->
                                 )
                             of
                                 {value, {_Src, {future_rejected, FutureReason}}} ->
-                                    %% Mirror process_eval_result/4: wrap and store in '_error'.
+                                    %% Mirror process_eval_result/5: wrap and store in '_error'.
                                     FutExObj = beamtalk_exception_handler:ensure_wrapped(
                                         FutureReason
                                     ),
@@ -610,7 +600,7 @@ do_eval_trace(Expression, State) ->
                                     %% variable assignments whose RHS was a future are stored with
                                     %% the resolved value rather than the raw future handle.
                                     FinalBindings = rebuild_bindings_from_steps(
-                                        AwaitedSteps, CleanBindings
+                                        AwaitedSteps, StepAssignments, CleanBindings
                                     ),
                                     FinalState = beamtalk_repl_state:set_bindings(
                                         FinalBindings, NewState
@@ -851,7 +841,7 @@ run_self_eval_module(ModuleName, Binary, Bindings) ->
                         %% An awaited future that rejected/timed out is an error,
                         %% not a success — honour the structured-error contract
                         %% rather than leaking the internal `{future_rejected, _}`
-                        %% tuple through `{ok, _}` (mirrors process_eval_result/4).
+                        %% tuple through `{ok, _}` (mirrors process_eval_result/5).
                         FutExObj = beamtalk_exception_handler:ensure_wrapped(FutureReason),
                         {error, beamtalk_repl_errors:ensure_structured_error(FutExObj)};
                     Value ->
@@ -1016,10 +1006,9 @@ precheck_method(ClassNameBin, Selector, Source, Side) ->
         {ok, _Module} ->
             {error, stdlib_method_read_only_error(ClassNameBin, SelectorBin)};
         none ->
-            MethodSource = normalize_method_source(SelectorBin, Source),
             IsClassMethod = (Side =:= class),
             beamtalk_repl_loader:precheck_method(
-                ClassNameBin, SelectorBin, MethodSource, IsClassMethod
+                ClassNameBin, SelectorBin, Source, IsClassMethod
             )
     end.
 
@@ -1107,22 +1096,19 @@ remove_class_unknown_error(ClassNameBin) ->
     {ok, binary()} | {error, term()}.
 do_compile_method(ClassNameBin, SelectorBin, Source, Intent, Author, AuthorKind, Side) ->
     %% `compile:source:` / MCP `save_method` pass the method BODY only (no
-    %% `selector => ' header); the IDE save passes a full method definition.
-    %% `normalize_method_source/2' synthesises the header for the bare-body case
-    %% and leaves a full (possibly comment-led) definition untouched, so the
-    %% structured install path always receives a complete method definition. This
-    %% is header *synthesis*, not the old `Class >>` text-wrap — the backend then
-    %% parses the result standalone, so comments/formatting still round-trip
-    %% exactly and the patched class keeps its package-qualified module name +
-    %% on-disk source attribution (flushable + revertable).
-    MethodSource = normalize_method_source(SelectorBin, Source),
+    %% `selector => ' header); the IDE save passes a full method definition. The
+    %% backend parses the source standalone and synthesises the header itself for
+    %% the bare-body case (it is given the selector, BT-4911), so comments and
+    %% formatting round-trip exactly and the patched class keeps its
+    %% package-qualified module name + on-disk source attribution (flushable +
+    %% revertable).
     State = beamtalk_repl_state:new(undefined, 0),
     IsClassMethod = (Side =:= class),
     case
         beamtalk_repl_loader:install_method(
             ClassNameBin,
             SelectorBin,
-            MethodSource,
+            Source,
             Intent,
             Author,
             AuthorKind,
@@ -1187,141 +1173,6 @@ stdlib_method_read_only_error(ClassNameBin, SelectorBin) ->
         <<"Built-in (stdlib) classes ship with the standard library; edit them in the Beamtalk source tree and rebuild, not from the workspace.">>
     ).
 
-%% A `compile:source:' / MCP `save_method' body may be a full method definition
-%% or just the body (the selector is supplied separately). When it is a bare
-%% body, prepend the canonical `selector => ' header so the structured install
-%% path receives a complete method definition. We only treat the source as
-%% already-headed when it begins with the selector token *and* that token is
-%% followed by a header form — args / arg names / whitespace up to the `=>'
-%% arrow. A bare expression such as `incremented + 1' for selector `increment'
-%% shares no such header and is correctly prefixed.
-%%
-%% Leading doc comments (`///') and line comments (`//') precede the header in
-%% stored method source, so we look past them before testing for a header; a
-%% documented full definition is left intact. NOTE: this is header *synthesis*,
-%% not the removed `Class >>` text-wrap — its output is parsed standalone by the
-%% backend, so comments round-trip exactly.
--spec normalize_method_source(binary(), binary()) -> binary().
-normalize_method_source(SelectorBin, Source) ->
-    Body = skip_leading_comments(Source),
-    Head = first_token(SelectorBin),
-    case has_method_header(Body, Head) of
-        true ->
-            Source;
-        false ->
-            PrefixLen = byte_size(Source) - byte_size(Body),
-            <<Prefix:PrefixLen/binary, _/binary>> = Source,
-            %% A leading `//' comment with no trailing newline (a comment-only
-            %% source) would otherwise glue the injected `selector => ' onto the
-            %% comment line, swallowing the header. Insert a newline when the
-            %% prefix ends mid-comment so the header starts fresh.
-            Sep = header_separator(Prefix),
-            <<Prefix/binary, Sep/binary, SelectorBin/binary, " => ", Body/binary>>
-    end.
-
-%% Separator between a consumed comment/whitespace prefix and the injected
-%% `selector => ' header. Empty when the prefix already ends at a line or
-%% statement boundary (newline / whitespace / no prefix); a newline only when the
-%% prefix ends in comment text (a `//' comment without a trailing newline).
--spec header_separator(binary()) -> binary().
-header_separator(<<>>) ->
-    <<>>;
-header_separator(Prefix) ->
-    case binary:last(Prefix) of
-        $\n -> <<>>;
-        $\s -> <<>>;
-        $\t -> <<>>;
-        $\r -> <<>>;
-        _ -> <<"\n">>
-    end.
-
-%% Skip leading whitespace and full-line `//'/`///' comments, returning the first
-%% suffix of `Source' that begins a real expression or method header. `Body' is
-%% always a suffix of `Source', so the consumed prefix can be recovered by length.
--spec skip_leading_comments(binary()) -> binary().
-skip_leading_comments(Source) ->
-    Trimmed = string:trim(Source, leading),
-    case Trimmed of
-        <<"//", _/binary>> ->
-            case binary:split(Trimmed, <<"\n">>) of
-                [_Comment, Rest] -> skip_leading_comments(Rest);
-                [_Comment] -> <<>>
-            end;
-        _ ->
-            Trimmed
-    end.
-
-%% True iff `Trimmed' starts with the selector token `Head' followed by a valid
-%% method header: the token, then anything (args / arg names / whitespace), then
-%% the `=>' arrow, before any other top-level statement boundary. We require both
-%% the leading token *and* an arrow so a bare body that merely happens to begin
-%% with the selector name (e.g. `increment + 1') is not mistaken for a header.
--spec has_method_header(binary(), binary()) -> boolean().
-has_method_header(<<"class ", Rest/binary>>, Head) ->
-    %% A class-side method definition leads with the `class ' modifier (e.g.
-    %% `class make => ...'). Skip it and test the header on the rest — this keeps
-    %% a complete class-side definition (such as a recovered prior body from a
-    %% class-side revert) intact instead of re-wrapping it under a
-    %% synthesised instance-side header.
-    has_method_header(trim_leading_ws(Rest), Head);
-has_method_header(Trimmed, Head) ->
-    HeadSize = byte_size(Head),
-    case Trimmed of
-        <<Head:HeadSize/binary, Rest/binary>> ->
-            %% The char right after the token must be a header delimiter, not a
-            %% continuation of a longer identifier (so `increments' is not read
-            %% as the `increment' header) — `:' for keyword selectors, or
-            %% whitespace, or an operator/`=>' for unary/binary selectors.
-            header_after_token(Rest);
-        _ ->
-            false
-    end.
-
-%% Drop leading spaces/tabs, returning a binary (string:trim/2 returns chardata,
-%% which the binary-match clauses above cannot pattern-match against).
--spec trim_leading_ws(binary()) -> binary().
-trim_leading_ws(<<C, Rest/binary>>) when C =:= $\s; C =:= $\t -> trim_leading_ws(Rest);
-trim_leading_ws(Bin) -> Bin.
-
--spec header_after_token(binary()) -> boolean().
-header_after_token(<<>>) ->
-    false;
-%% Identifier continuation: not a header boundary (e.g. `increments').
-header_after_token(<<C, _/binary>>) when
-    (C >= $a andalso C =< $z);
-    (C >= $A andalso C =< $Z);
-    (C >= $0 andalso C =< $9);
-    C =:= $_
-->
-    false;
-header_after_token(Rest) ->
-    %% A keyword/unary/binary header reaches the `=>' arrow before the next
-    %% top-level statement separator (`.' or newline).
-    binary_has_arrow_before_break(Rest).
-
-%% True iff `Bin' contains a `=>' arrow before the first top-level statement
-%% break (newline or `.'), i.e. the leading token really opens a method header.
--spec binary_has_arrow_before_break(binary()) -> boolean().
-binary_has_arrow_before_break(<<"=>", _/binary>>) ->
-    true;
-binary_has_arrow_before_break(<<$\n, _/binary>>) ->
-    false;
-binary_has_arrow_before_break(<<$., _/binary>>) ->
-    false;
-binary_has_arrow_before_break(<<_, Rest/binary>>) ->
-    binary_has_arrow_before_break(Rest);
-binary_has_arrow_before_break(<<>>) ->
-    false.
-
-%% First whitespace/`:'-delimited token of a (possibly keyword) selector binary,
-%% e.g. `at:put:' -> `at', `increment' -> `increment', `+' -> `+'.
--spec first_token(binary()) -> binary().
-first_token(SelectorBin) ->
-    case binary:split(SelectorBin, [<<":">>, <<" ">>]) of
-        [Head | _] when byte_size(Head) > 0 -> Head;
-        _ -> SelectorBin
-    end.
-
 %%% Internal functions
 
 -doc "Handle inline class definition: load class module, eval trailing expressions.".
@@ -1345,9 +1196,13 @@ handle_class_definition(
             %% Eval trailing expressions after class load
             case code:load_binary(TrailingModName, "", TrailingBinary) of
                 {module, TrailingModName} ->
+                    %% The text is a class definition followed by trailing
+                    %% expressions, never a single `name := ...` statement, so
+                    %% there is no variable to rebind to the call's result.
                     eval_loaded_module(
                         TrailingModName,
                         Expression,
+                        none,
                         MergedBindings,
                         RegistryPid,
                         Subscriber,
@@ -1454,6 +1309,7 @@ maybe_register_protocol_class(ModuleName) ->
 -spec eval_loaded_module(
     atom(),
     string(),
+    atom() | none,
     map(),
     pid() | undefined,
     pid() | undefined,
@@ -1461,11 +1317,13 @@ maybe_register_protocol_class(ModuleName) ->
     beamtalk_repl_state:state()
 ) ->
     eval_result().
-eval_loaded_module(ModuleName, Expression, Bindings, RegistryPid, Subscriber, Warnings, State) ->
+eval_loaded_module(
+    ModuleName, Expression, AssignedVar, Bindings, RegistryPid, Subscriber, Warnings, State
+) ->
     CaptureRef = beamtalk_io_capture:start(Subscriber),
     EvalResult =
         try
-            execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State)
+            execute_and_process(ModuleName, Expression, AssignedVar, Bindings, RegistryPid, State)
         catch
             throw:{beamtalk_script_exit, Code} ->
                 %% `Program exit: Code` evaluated in a connected session
@@ -1486,9 +1344,11 @@ eval_loaded_module(ModuleName, Expression, Bindings, RegistryPid, Subscriber, Wa
     inject_output(EvalResult, Output, Warnings).
 
 -doc "Execute module and process the result (assignment/future handling).".
--spec execute_and_process(atom(), string(), map(), pid() | undefined, beamtalk_repl_state:state()) ->
+-spec execute_and_process(
+    atom(), string(), atom() | none, map(), pid() | undefined, beamtalk_repl_state:state()
+) ->
     {ok, term(), beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
-execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State) ->
+execute_and_process(ModuleName, Expression, AssignedVar, Bindings, RegistryPid, State) ->
     BindingsWithRegistry =
         case RegistryPid of
             undefined -> Bindings;
@@ -1497,19 +1357,23 @@ execute_and_process(ModuleName, Expression, Bindings, RegistryPid, State) ->
     {RawResult, UpdatedBindings} = apply(ModuleName, eval, [BindingsWithRegistry]),
     CleanBindings = strip_internal_bindings(UpdatedBindings),
     Result = maybe_await_future(RawResult),
-    process_eval_result(Result, Expression, CleanBindings, State).
+    process_eval_result(Result, Expression, AssignedVar, CleanBindings, State).
 
 -doc "Process evaluation result: handle rejected futures and assignments.".
--spec process_eval_result(term(), string(), map(), beamtalk_repl_state:state()) ->
+-spec process_eval_result(term(), string(), atom() | none, map(), beamtalk_repl_state:state()) ->
     {ok, term(), beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
-process_eval_result({future_rejected, ErrorReason}, _Expression, CleanBindings, State) ->
+process_eval_result(
+    {future_rejected, ErrorReason}, _Expression, _AssignedVar, CleanBindings, State
+) ->
     FutExObj = beamtalk_exception_handler:ensure_wrapped(ErrorReason),
     FutBindings = CleanBindings#{'_error' => FutExObj},
     FinalState = beamtalk_repl_state:set_bindings(FutBindings, State),
     {error, FutExObj, FinalState};
-process_eval_result(Result, Expression, CleanBindings, State) ->
-    case extract_assignment(Expression) of
-        {ok, VarName} ->
+process_eval_result(Result, Expression, AssignedVar, CleanBindings, State) ->
+    %% `AssignedVar' comes from the compiler (the source is one `name := ...'
+    %% statement) — the workspace does not re-parse the source to find it.
+    case AssignedVar of
+        VarName when VarName =/= none ->
             %% Bindings keep the RAW value (Character-ness is display-only;
             %% `x := $A` binds 65 so later `x + 1` still works), while the
             %% returned display value is tagged for `$X` rendering (BT-4167).
@@ -1642,329 +1506,26 @@ cleanup_module(ModuleName, RegistryPid) ->
     ok.
 
 -doc """
-Rebuild bindings by extracting variable assignments from awaited trace steps.
+Rebuild bindings from awaited trace steps.
 
-For each step whose source text is a simple assignment (`VarName := Expr`), the
-binding is updated with the awaited (resolved) value from the step.  This ensures
+`StepAssignments` is the compiler's per-step answer (one entry per step, in
+order, BT-4911): the variable a step assigns, or `none`. Each assigning step's
+binding is updated with the awaited (resolved) value from the step. This ensures
 that if the RHS was a future the session binding holds the final value, not the
 raw `{beamtalk_future, Pid}` handle stored by the evaluator before awaiting.
 """.
--spec rebuild_bindings_from_steps([{binary(), term()}], map()) -> map().
-rebuild_bindings_from_steps(Steps, Bindings) ->
+-spec rebuild_bindings_from_steps([{binary(), term()}], [atom() | none], map()) -> map().
+rebuild_bindings_from_steps(Steps, StepAssignments, Bindings) ->
     lists:foldl(
-        fun({Src, AwaitedVal}, Acc) ->
-            SrcStr = binary_to_list(Src),
-            case extract_assignment(SrcStr) of
-                {ok, VarName} -> Acc#{VarName => AwaitedVal};
-                none -> Acc
-            end
+        fun
+            ({{_Src, AwaitedVal}, VarName}, Acc) when VarName =/= none ->
+                Acc#{VarName => AwaitedVal};
+            ({_Step, none}, Acc) ->
+                Acc
         end,
         Bindings,
-        Steps
+        lists:zip(Steps, StepAssignments)
     ).
-
--doc """
-Extract variable name from assignment expression.
-
-`Expression` is the *whole* source text of a REPL `eval` call, which may
-contain more than one top-level statement. The caller
-(`process_eval_result/4`) uses a match here to re-bind `VarName` to the
-call's own `Result` — correct only when `Result` and `VarName`'s assignment
-are the *same* statement, i.e. `Expression` is a single statement. Bails to
-`none` whenever `has_second_top_level_statement/1` finds a second top-level
-statement, leaving the per-statement bindings already threaded correctly
-through eval's own `State` map untouched, rather than clobbering the
-first/earlier variable with the last statement's value.
-""".
--spec extract_assignment(string()) -> {ok, atom()} | none.
-extract_assignment(Expression) ->
-    case has_second_top_level_statement(Expression) of
-        true ->
-            none;
-        false ->
-            case
-                re:run(
-                    Expression,
-                    "^\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*:=",
-                    [{capture, [1], list}]
-                )
-            of
-                % elp:fixme W0023 intentional atom creation
-                {match, [VarName]} -> {ok, list_to_atom(VarName)};
-                nomatch -> none
-            end
-    end.
-
--doc """
-True when `Expression` has a second top-level statement following the
-first, found by scanning left to right and tracking `[]`/`()`/`{}` nesting
-depth. A `"..."` string or `$x` character literal is skipped
-atomically via `skip_string_literal/1`/`skip_character_literal/1` — as a
-single lexeme, never character-by-character — so nothing inside either one
-(a `.`, a newline, a bracket) is ever individually inspected. A `//...`
-line comment or `/* ... */` block comment is skipped the same way via
-`skip_line_comment/1`/`skip_block_comment/1` — mirroring
-`lex_line_comment`/`lex_block_comment` (`source_analysis/lexer.rs`) — so a
-bracket, quote, period, or newline inside a comment is never read as real
-code either.
-
-Two signals count as a statement boundary, and only at depth 0:
-
-  - A `.` followed by whitespace then more content — Smalltalk-family
-    statement-separator syntax (the pre-existing check, now depth-aware:
-    `self.opened := self.opened + 1. self.opened` inside a class-method
-    block literal is two statements *of that block*, not of the enclosing
-    top-level assignment).
-  - A newline whose next line itself opens with `ident :=` — REPL input is
-    just as commonly separated by bare newlines with no `.` at all (e.g.
-    `alpha := 111\nbeta := 222`). Narrower than the period check (shape-
-    gated, not "any content") because an ordinary newline is not statement-
-    significant in this grammar at all — it's only a *weak* signal here,
-    so a single assignment whose own right-hand side merely continues onto
-    later lines (`result :=\n  42`, or a multi-line block/collection
-    literal whose body doesn't itself open with `ident :=`) must not
-    trigger it.
-""".
--spec has_second_top_level_statement(string()) -> boolean().
-has_second_top_level_statement(Expression) ->
-    scan_for_second_top_level_statement(Expression, 0).
-
--spec scan_for_second_top_level_statement(string(), integer()) -> boolean().
-scan_for_second_top_level_statement([], _Depth) ->
-    false;
-scan_for_second_top_level_statement([$" | _] = Chars, Depth) ->
-    case skip_string_literal(Chars) of
-        {ok, Rest} -> scan_for_second_top_level_statement(Rest, Depth);
-        unsupported -> true
-    end;
-scan_for_second_top_level_statement([$$ | _] = Chars, Depth) ->
-    scan_for_second_top_level_statement(skip_character_literal(Chars), Depth);
-scan_for_second_top_level_statement([$/, $/ | _] = Chars, Depth) ->
-    scan_for_second_top_level_statement(skip_line_comment(Chars), Depth);
-scan_for_second_top_level_statement([$/, $* | _] = Chars, Depth) ->
-    scan_for_second_top_level_statement(skip_block_comment(Chars), Depth);
-scan_for_second_top_level_statement([C | Rest], Depth) when
-    C =:= $[; C =:= $(; C =:= ${
-->
-    scan_for_second_top_level_statement(Rest, Depth + 1);
-scan_for_second_top_level_statement([C | Rest], Depth) when
-    C =:= $]; C =:= $); C =:= $}
-->
-    scan_for_second_top_level_statement(Rest, max(Depth - 1, 0));
-scan_for_second_top_level_statement([$. | Rest], 0) ->
-    case re:run(Rest, "^\\s+\\S", []) of
-        {match, _} -> true;
-        nomatch -> scan_for_second_top_level_statement(Rest, 0)
-    end;
-scan_for_second_top_level_statement([$\n | Rest], 0) ->
-    case re:run(Rest, "^\\s*[a-zA-Z_][a-zA-Z0-9_]*\\s*:=", []) of
-        {match, _} -> true;
-        nomatch -> scan_for_second_top_level_statement(Rest, 0)
-    end;
-scan_for_second_top_level_statement([_ | Rest], Depth) ->
-    scan_for_second_top_level_statement(Rest, Depth).
-
--doc """
-Skips one string literal starting at the opening `"`, returning
-`{ok, Rest}` with the characters immediately after its closing `"`, or
-`unsupported` if the string is malformed beyond what the lexer would accept
-(an interpolation or nested string left unterminated).
-
-Mirrors `lex_string/0` (`source_analysis/lexer.rs`): `""` (doubled delimiter)
-is a literal `"` inside the string, and `\` escapes whatever character
-follows it — including another `\`, a `"`, or a `{` — so that pair is always
-consumed together and never independently reopens/closes the string. An
-unterminated plain string (malformed input that would already have failed
-compilation before reaching here) returns `{ok, []}`.
-
-An unescaped `{` starts a string interpolation, skipped by
-`skip_interpolation_body/1`, a mirror of `lex_interpolation_body` (brace
-depth, nested strings, comments, character literals, backslash pairs, the
-empty `{}` and doubled `{{ … }}` forms). A single BT string token can thus
-contain more than two `"` characters.
-
-Conformance-tested against the real Rust lexer via the shared corpus
-`runtime/apps/beamtalk_workspace/test/fixtures/
-string_and_character_literal_span_corpus.json`, interpolated cases included —
-see
-`beamtalk_repl_eval_tests:string_and_character_literal_span_matches_shared_corpus_test/0`
-and `source_analysis::lexer::tests::string_and_character_literal_span_matches_shared_corpus`.
-""".
--spec skip_string_literal(string()) -> {ok, string()} | unsupported.
-skip_string_literal([$" | Rest]) ->
-    skip_string_literal_body(Rest).
-
--spec skip_string_literal_body(string()) -> {ok, string()} | unsupported.
-skip_string_literal_body([]) ->
-    {ok, []};
-skip_string_literal_body([${ | Rest]) ->
-    case skip_interpolation_body(Rest) of
-        {ok, After} -> skip_string_literal_body(After);
-        unsupported -> unsupported
-    end;
-skip_string_literal_body([$", $" | Rest]) ->
-    skip_string_literal_body(Rest);
-skip_string_literal_body([$" | Rest]) ->
-    {ok, Rest};
-skip_string_literal_body([$\\, _Escaped | Rest]) ->
-    skip_string_literal_body(Rest);
-skip_string_literal_body([$\\]) ->
-    {ok, []};
-skip_string_literal_body([_ | Rest]) ->
-    skip_string_literal_body(Rest).
-
-%% Mirror of `lex_interpolation_body` (`source_analysis/lexer.rs`): `Chars`
-%% starts just after the interpolation's opening `{`; returns the characters
-%% after its matching `}`. Unterminated input is `unsupported`.
--spec skip_interpolation_body(string()) -> {ok, string()} | unsupported.
-skip_interpolation_body([${ | _] = Chars) ->
-    %% Doubled `{{`: `skip_doubled_braces` consumes to the matching depth-0
-    %% `}` counting only braces (no strings or comments).
-    skip_doubled_braces(Chars, 1);
-skip_interpolation_body(Chars) ->
-    case lists:dropwhile(fun(C) -> lists:member(C, " \t\r\n") end, Chars) of
-        [$} | Rest] ->
-            %% Empty `{}` (whitespace only): the lexer reports an error token
-            %% but its extent still ends at this `}`.
-            {ok, Rest};
-        _ ->
-            skip_interpolation_chars(Chars, 1)
-    end.
-
--spec skip_doubled_braces(string(), non_neg_integer()) -> {ok, string()} | unsupported.
-skip_doubled_braces(Rest, 0) -> {ok, Rest};
-skip_doubled_braces([], _Depth) -> unsupported;
-skip_doubled_braces([${ | Rest], Depth) -> skip_doubled_braces(Rest, Depth + 1);
-skip_doubled_braces([$} | Rest], Depth) -> skip_doubled_braces(Rest, Depth - 1);
-skip_doubled_braces([_ | Rest], Depth) -> skip_doubled_braces(Rest, Depth).
-
--spec skip_interpolation_chars(string(), pos_integer()) -> {ok, string()} | unsupported.
-skip_interpolation_chars([], _Depth) ->
-    unsupported;
-skip_interpolation_chars([$" | Rest], Depth) ->
-    case skip_nested_string(Rest) of
-        {ok, After} -> skip_interpolation_chars(After, Depth);
-        unsupported -> unsupported
-    end;
-skip_interpolation_chars([${ | Rest], Depth) ->
-    skip_interpolation_chars(Rest, Depth + 1);
-skip_interpolation_chars([$/, $/ | _] = Chars, Depth) ->
-    skip_interpolation_chars(skip_line_comment(Chars), Depth);
-skip_interpolation_chars([$/, $* | _] = Chars, Depth) ->
-    case skip_block_comment_terminated(Chars) of
-        {ok, After} -> skip_interpolation_chars(After, Depth);
-        unsupported -> unsupported
-    end;
-skip_interpolation_chars([$$ | _] = Chars, Depth) ->
-    skip_interpolation_chars(skip_character_literal(Chars), Depth);
-skip_interpolation_chars([$} | Rest], 1) ->
-    {ok, Rest};
-skip_interpolation_chars([$} | Rest], Depth) ->
-    skip_interpolation_chars(Rest, Depth - 1);
-skip_interpolation_chars([$\\, _ | Rest], Depth) ->
-    skip_interpolation_chars(Rest, Depth);
-skip_interpolation_chars([_ | Rest], Depth) ->
-    skip_interpolation_chars(Rest, Depth).
-
-%% Mirror of `skip_nested_string` (`source_analysis/lexer.rs`): `Chars` starts
-%% just after the nested string's opening `"`. EOF before the closing quote is
-%% `unsupported` (the lexer treats that `"` as the outer string's close and
-%% reports an error).
--spec skip_nested_string(string()) -> {ok, string()} | unsupported.
-skip_nested_string([]) -> unsupported;
-skip_nested_string([$", $" | Rest]) -> skip_nested_string(Rest);
-skip_nested_string([$" | Rest]) -> {ok, Rest};
-skip_nested_string([$\\, _ | Rest]) -> skip_nested_string(Rest);
-skip_nested_string([_ | Rest]) -> skip_nested_string(Rest).
-
-%% A `/* ... */` comment that must be terminated (inside an interpolation the
-%% lexer treats EOF there as incomplete input).
--spec skip_block_comment_terminated(string()) -> {ok, string()} | unsupported.
-skip_block_comment_terminated([$/, $* | Rest]) -> block_comment_end(Rest).
-
--spec block_comment_end(string()) -> {ok, string()} | unsupported.
-block_comment_end([]) -> unsupported;
-block_comment_end([$*, $/ | Rest]) -> {ok, Rest};
-block_comment_end([_ | Rest]) -> block_comment_end(Rest).
-
--doc """
-Skips one character literal starting at `$`, returning the characters
-immediately after its single payload character.
-
-Mirrors `lex_character/0` (`source_analysis/lexer.rs`) exactly: `$x` (any
-payload character, including `(`, `"`, `.`, another `$`, ...) or `$\x` (an
-escaped payload — `$\n`, `$\(`, ...) is consumed atomically as one token,
-never letting the payload be read as bracket/quote/period syntax. A `$`
-with no payload (malformed/truncated input) returns `[]`.
-""".
--spec skip_character_literal(string()) -> string().
-skip_character_literal([$$, $\\, _Escaped | Rest]) ->
-    Rest;
-skip_character_literal([$$, _Payload | Rest]) ->
-    Rest;
-skip_character_literal([$$]) ->
-    [].
-
--doc """
-Skips one `//...` line comment starting at the opening `//`, returning the
-characters from (and including) the terminating `\n`, or `[]` if the
-comment runs to end of input.
-
-Mirrors `lex_line_comment/0` (`source_analysis/lexer.rs`): the comment body
-is everything up to but not including the next `\n`, consumed atomically
-so a `.`, bracket, or `"` inside it is never read as real code. The `\n`
-itself is left in `Rest` so the caller's own newline-boundary check
-(`scan_for_second_top_level_statement/2`'s `$\n` clause) still applies to
-it exactly as if the comment weren't there. A `///` doc comment shares this
-same span rule (only its semantics differ, not its termination), so this
-also handles doc comments correctly without a separate clause.
-
-Conformance-tested against the real Rust lexer via the shared corpus
-`runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json` —
-see `beamtalk_repl_eval_tests:comment_span_matches_shared_corpus_test/0` and
-`source_analysis::lexer::tests::comment_span_matches_shared_corpus`.
-""".
--spec skip_line_comment(string()) -> string().
-skip_line_comment([$/, $/ | Rest]) ->
-    skip_line_comment_body(Rest).
-
--spec skip_line_comment_body(string()) -> string().
-skip_line_comment_body([]) ->
-    [];
-skip_line_comment_body([$\n | _] = Chars) ->
-    Chars;
-skip_line_comment_body([_ | Rest]) ->
-    skip_line_comment_body(Rest).
-
--doc """
-Skips one `/* ... */` block comment starting at the opening `/*`, returning
-the characters immediately after its closing `*/`, or `[]` if the comment
-is unterminated (runs to end of input).
-
-Mirrors `lex_block_comment/0` (`source_analysis/lexer.rs`): the whole span,
-delimiters included, is consumed atomically, so a `.`, bracket, or `"`
-inside it is never read as real code. An unterminated block comment is a
-lex-time error in the real compiler (this caller never reaches a
-comment that would fail to compile in practice) but is still consumed
-harmlessly to end of input here, matching `extract_assignment/1`'s existing
-policy of never raising on malformed input.
-
-Conformance-tested against the real Rust lexer via the shared corpus
-`runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json` —
-see `beamtalk_repl_eval_tests:comment_span_matches_shared_corpus_test/0` and
-`source_analysis::lexer::tests::comment_span_matches_shared_corpus`.
-""".
--spec skip_block_comment(string()) -> string().
-skip_block_comment([$/, $* | Rest]) ->
-    skip_block_comment_body(Rest).
-
--spec skip_block_comment_body(string()) -> string().
-skip_block_comment_body([]) ->
-    [];
-skip_block_comment_body([$*, $/ | Rest]) ->
-    Rest;
-skip_block_comment_body([_ | Rest]) ->
-    skip_block_comment_body(Rest).
 
 -doc "Auto-await a Future if the result is a tagged future tuple.".
 -spec maybe_await_future(term()) -> term().

@@ -2917,8 +2917,8 @@ mod tests {
         );
     }
 
-    /// The REPL's `beamtalk_repl_eval` module
-    /// (`runtime/apps/beamtalk_workspace/src/beamtalk_repl_eval.erl`) has a
+    /// The REPL's `beamtalk_repl_editor_context` module
+    /// (`runtime/apps/beamtalk_workspace/src/beamtalk_repl_editor_context.erl`) has a
     /// hand-rolled Erlang mirror of `lex_string`/`lex_character`'s span
     /// computation (`skip_string_literal/1`/`skip_character_literal/1`),
     /// needed because the workspace app cannot depend on this Rust crate. A
@@ -2928,7 +2928,7 @@ mod tests {
     /// implementations to the same cases — string escapes (backslash and
     /// doubled-quote) and character-literal payloads — so the two can't
     /// silently drift apart. The Erlang side asserts the identical cases in
-    /// `beamtalk_repl_eval_tests:string_and_character_literal_span_matches_shared_corpus_test/0`.
+    /// `beamtalk_repl_editor_context_tests:string_and_character_literal_span_matches_shared_corpus_test/0`.
     #[test]
     fn string_and_character_literal_span_matches_shared_corpus() {
         let path = beamtalk_workspace::cargo_workspace_root!().join(
@@ -2979,8 +2979,7 @@ mod tests {
         }
     }
 
-    /// `beamtalk_repl_eval`'s statement scanner
-    /// (`scan_for_second_top_level_statement/2`) has a hand-rolled Erlang
+    /// `beamtalk_repl_editor_context`'s hover scanner has a hand-rolled Erlang
     /// mirror of `lex_line_comment`/`lex_block_comment`'s span computation
     /// (`skip_line_comment/1`/`skip_block_comment/1`), for the same
     /// cross-crate-dependency reason as the string/character mirror above. A
@@ -2993,7 +2992,7 @@ mod tests {
     /// comment runs to end of input) — its text length is directly
     /// comparable to the Erlang side's consumed-character count. The Erlang
     /// side asserts the identical cases in
-    /// `beamtalk_repl_eval_tests:comment_span_matches_shared_corpus_test/0`.
+    /// `beamtalk_repl_editor_context_tests:comment_span_matches_shared_corpus_test/0`.
     #[test]
     fn comment_span_matches_shared_corpus() {
         let path = beamtalk_workspace::cargo_workspace_root!()
@@ -3034,6 +3033,209 @@ mod tests {
                 expected_end,
                 "span-end mismatch for {source:?} ({why})"
             );
+        }
+    }
+
+    /// Lexer-token category name used by the REPL completion corpora.
+    fn corpus_category(kind: &TokenKind) -> &'static str {
+        match kind {
+            TokenKind::Identifier(_) => "identifier",
+            TokenKind::Integer(_) => "integer",
+            TokenKind::Float(_) => "float",
+            TokenKind::String(_) => "string",
+            TokenKind::StringStart(_) => "string_start",
+            TokenKind::StringSegment(_) => "string_segment",
+            TokenKind::StringEnd(_) => "string_end",
+            TokenKind::Symbol(_) => "symbol",
+            TokenKind::Character(_) => "character",
+            TokenKind::Keyword(_) => "keyword",
+            TokenKind::BinarySelector(_) => "binary_selector",
+            TokenKind::LeftParen => "left_paren",
+            TokenKind::RightParen => "right_paren",
+            TokenKind::PipeGt => "pipe_gt",
+            TokenKind::GtGt => "gt_gt",
+            TokenKind::Error(_) => "error",
+            _ => "other",
+        }
+    }
+
+    fn read_corpus(name: &str) -> Vec<serde_json::Value> {
+        let path = beamtalk_workspace::cargo_workspace_root!()
+            .join("runtime/apps/beamtalk_workspace/test/fixtures")
+            .join(name);
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        cases
+    }
+
+    fn corpus_tokens(source: &str) -> Vec<(&'static str, String)> {
+        lex(source)
+            .iter()
+            .map(|t| {
+                (
+                    corpus_category(t.kind()),
+                    source[t.span().start() as usize..t.span().end() as usize].to_string(),
+                )
+            })
+            .collect()
+    }
+
+    /// Reference chain derivation from real lexer tokens: `a |> m1 m2` is
+    /// the chain `a m1 m2` (ADR 0145). Returns `(receiver, hops)` where a hop
+    /// is `("unary" | "binary", selector)`; `unary_only` rejects binary hops.
+    fn lexer_chain(
+        tokens: &[(&'static str, String)],
+        unary_only: bool,
+    ) -> Option<(String, Vec<(&'static str, String)>)> {
+        let toks: Vec<_> = tokens.iter().filter(|(c, _)| *c != "pipe_gt").collect();
+        if toks.len() < 2
+            || toks
+                .iter()
+                .any(|(c, _)| matches!(*c, "left_paren" | "right_paren" | "gt_gt"))
+        {
+            return None;
+        }
+        let mut hops = Vec::new();
+        let mut rest = toks[1..].iter();
+        while let Some((cat, text)) = rest.next() {
+            match *cat {
+                "identifier" => hops.push(("unary", text.clone())),
+                "binary_selector" if !unary_only => {
+                    let (arg_cat, _) = rest.next()?;
+                    if *arg_cat == "keyword" {
+                        return None;
+                    }
+                    hops.push(("binary", text.clone()));
+                }
+                _ => return None,
+            }
+        }
+        if hops.is_empty() {
+            return None;
+        }
+        Some((toks[0].1.clone(), hops))
+    }
+
+    /// BT-4916: the Erlang send-chain tokenisers
+    /// (`beamtalk_repl_editor_context:tokenise_send_chain/1`,
+    /// `tokenise_binary_chain/1`) stay in Erlang because completion runs
+    /// in-process on half-typed lines (ADR 0045). The shared corpus
+    /// `completion_send_chain_corpus.json` pins them to this lexer: each case
+    /// lists the lexer's token categories, and the chain derived from the real
+    /// tokens must equal the case's `lexer_view` (when it records an intended
+    /// `divergence` from the Erlang result) or else its `unary` / `binary`
+    /// expectation. The Erlang side asserts the same expectations in
+    /// `beamtalk_repl_editor_context_tests:send_chain_matches_shared_corpus_test/0`.
+    #[test]
+    fn completion_send_chain_matches_shared_corpus() {
+        for case in &read_corpus("completion_send_chain_corpus.json") {
+            let expr = case["expr"].as_str().expect("expr is a string");
+            let why = case["why"].as_str().unwrap_or("");
+            let tokens = corpus_tokens(expr);
+            let categories: Vec<&str> = tokens.iter().map(|(c, _)| *c).collect();
+            let expected_cats: Vec<&str> = case["tokens"]
+                .as_array()
+                .expect("tokens is an array")
+                .iter()
+                .map(|v| v.as_str().expect("category is a string"))
+                .collect();
+            assert_eq!(
+                categories, expected_cats,
+                "token categories for {expr:?} ({why})"
+            );
+
+            let view = case.get("lexer_view").unwrap_or(case);
+            if case.get("divergence").is_some() {
+                assert_ne!(
+                    case.get("lexer_view"),
+                    None,
+                    "divergence without lexer_view for {expr:?}"
+                );
+            }
+            let unary = lexer_chain(&tokens, true)
+                .map(|(r, hops)| (r, hops.into_iter().map(|(_, s)| s).collect::<Vec<_>>()));
+            let want_unary = view["unary"].as_object().map(|o| {
+                (
+                    o["receiver"].as_str().unwrap().to_string(),
+                    o["selectors"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|s| s.as_str().unwrap().to_string())
+                        .collect::<Vec<_>>(),
+                )
+            });
+            assert_eq!(unary, want_unary, "unary chain for {expr:?} ({why})");
+
+            let binary = lexer_chain(&tokens, false);
+            let want_binary = view["binary"].as_object().map(|o| {
+                (
+                    o["receiver"].as_str().unwrap().to_string(),
+                    o["hops"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|h| {
+                            let kind = match h[0].as_str().unwrap() {
+                                "unary" => "unary",
+                                _ => "binary",
+                            };
+                            (kind, h[1].as_str().unwrap().to_string())
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            });
+            assert_eq!(binary, want_binary, "binary chain for {expr:?} ({why})");
+        }
+    }
+
+    /// BT-4916: `beamtalk_repl_editor_context:receiver_literal_class/1` (the
+    /// literal half of the completion receiver classifier) is pinned to this
+    /// lexer by `completion_receiver_literal_corpus.json`. A receiver that
+    /// lexes as exactly one Integer token, or as a string, completes as
+    /// `Integer` / `String`; each case's `class` is the Erlang verdict and
+    /// `lexer_class` (with a `divergence` note) the lexer's where they differ
+    /// on purpose. The Erlang side asserts `class` in
+    /// `beamtalk_repl_editor_context_tests:receiver_literal_class_matches_shared_corpus_test/0`.
+    #[test]
+    fn completion_receiver_literal_matches_shared_corpus() {
+        for case in &read_corpus("completion_receiver_literal_corpus.json") {
+            let receiver = case["receiver"].as_str().expect("receiver is a string");
+            let why = case["why"].as_str().unwrap_or("");
+            let tokens = corpus_tokens(receiver);
+            let categories: Vec<&str> = tokens.iter().map(|(c, _)| *c).collect();
+            let expected_cats: Vec<&str> = case["tokens"]
+                .as_array()
+                .expect("tokens is an array")
+                .iter()
+                .map(|v| v.as_str().expect("category is a string"))
+                .collect();
+            assert_eq!(
+                categories, expected_cats,
+                "token categories for {receiver:?} ({why})"
+            );
+
+            let lexer_class = match categories.as_slice() {
+                ["integer"] => Some("Integer"),
+                ["string"] | ["string_start", ..] => Some("String"),
+                _ => None,
+            };
+            let want = if case.get("divergence").is_some() {
+                case["lexer_class"].as_str()
+            } else {
+                case["class"].as_str()
+            };
+            assert_eq!(lexer_class, want, "lexer class for {receiver:?} ({why})");
+            if case.get("divergence").is_some() {
+                assert_ne!(
+                    case["class"].as_str(),
+                    want,
+                    "a divergence note on {receiver:?} must actually differ ({why})"
+                );
+            }
         }
     }
 }

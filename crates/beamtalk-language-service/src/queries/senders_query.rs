@@ -28,8 +28,8 @@
 //! Callers treat "no senders found" identically to "could not parse".
 
 use super::selector_span;
-use beamtalk_core::ast::{BinarySegment, Expression, Pattern, StringSegment};
-use beamtalk_core::ast_walker::walk_pattern;
+use beamtalk_core::ast::MessageSelector;
+use beamtalk_core::ast_walker::walk_sends;
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
@@ -60,14 +60,16 @@ pub fn find_senders_in_source(method_source: &str, selector_name: &str) -> Vec<u
 
     beamtalk_core::ast_walker::for_each_expr_seq(&module, |seq| {
         for stmt in seq {
-            collect_send_lines(
-                &stmt.expression,
-                selector_name,
-                &wrapped,
-                &mut wrapped_lines,
-            );
+            walk_sends(&stmt.expression, &mut |send| {
+                if send.selector.name() == selector_name {
+                    wrapped_lines.push(selector_line(send.selector, send.span, &wrapped));
+                }
+            });
         }
     });
+    // `walk_sends` reports a cascade's messages together, ahead of the sends
+    // nested in their receiver and arguments; restore source order.
+    wrapped_lines.sort_unstable();
 
     // Translate from wrapped-source line numbers back to input-source space.
     wrapped_lines
@@ -76,130 +78,11 @@ pub fn find_senders_in_source(method_source: &str, selector_name: &str) -> Vec<u
         .collect()
 }
 
-/// Recursively collect line numbers of message sends matching `selector_name`.
-fn collect_send_lines(expr: &Expression, selector_name: &str, source: &str, lines: &mut Vec<u32>) {
-    match expr {
-        Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            span,
-            ..
-        } => {
-            if selector.name() == selector_name {
-                lines.push(selector_line(selector, *span, source));
-            }
-            collect_send_lines(receiver, selector_name, source, lines);
-            for arg in arguments {
-                collect_send_lines(arg, selector_name, source, lines);
-            }
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            collect_send_lines(receiver, selector_name, source, lines);
-            for msg in messages {
-                if msg.selector.name() == selector_name {
-                    lines.push(selector_line(&msg.selector, msg.span, source));
-                }
-                for arg in &msg.arguments {
-                    collect_send_lines(arg, selector_name, source, lines);
-                }
-            }
-        }
-        Expression::Assignment { target, value, .. } => {
-            collect_send_lines(target, selector_name, source, lines);
-            collect_send_lines(value, selector_name, source, lines);
-        }
-        Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
-            collect_send_lines(value, selector_name, source, lines);
-        }
-        Expression::Block(block) => {
-            for stmt in &block.body {
-                collect_send_lines(&stmt.expression, selector_name, source, lines);
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            collect_send_lines(expression, selector_name, source, lines);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            collect_send_lines(receiver, selector_name, source, lines);
-        }
-        Expression::Match { value, arms, .. } => {
-            collect_send_lines(value, selector_name, source, lines);
-            for arm in arms {
-                collect_pattern_send_lines(&arm.pattern, selector_name, source, lines);
-                if let Some(guard) = &arm.guard {
-                    collect_send_lines(guard, selector_name, source, lines);
-                }
-                collect_send_lines(&arm.body, selector_name, source, lines);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for segment in segments {
-                if let StringSegment::Interpolation(inner) = segment {
-                    collect_send_lines(inner, selector_name, source, lines);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                collect_send_lines(inner, selector_name, source, lines);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for element in elements {
-                collect_send_lines(element, selector_name, source, lines);
-            }
-            if let Some(tail_expr) = tail {
-                collect_send_lines(tail_expr, selector_name, source, lines);
-            }
-        }
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for element in elements {
-                collect_send_lines(element, selector_name, source, lines);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                collect_send_lines(&pair.key, selector_name, source, lines);
-                collect_send_lines(&pair.value, selector_name, source, lines);
-            }
-        }
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::ClassReference { .. }
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. }
-        | Expression::Error { .. } => {}
-    }
-}
-
-/// Collect line numbers of message sends inside a [`Pattern`] by walking it
-/// with [`walk_pattern`] and delegating each embedded expression to
-/// [`collect_send_lines`].
-fn collect_pattern_send_lines(
-    pattern: &Pattern,
-    selector_name: &str,
-    source: &str,
-    lines: &mut Vec<u32>,
-) {
-    walk_pattern(pattern, &mut |expr| {
-        collect_send_lines(expr, selector_name, source, lines);
-    });
-}
-
 /// Determine the line number to report for a matching send. Uses the span of
 /// the selector keywords when available (so the line points at the selector
 /// token rather than the receiver, for multi-line sends) and falls back to
 /// the enclosing message-send span otherwise.
-fn selector_line(
-    selector: &beamtalk_core::ast::MessageSelector,
-    fallback: Span,
-    source: &str,
-) -> u32 {
+fn selector_line(selector: &MessageSelector, fallback: Span, source: &str) -> u32 {
     selector_span(selector)
         .unwrap_or(fallback)
         .line_number(source)
@@ -246,6 +129,17 @@ mod tests {
         let src = "shout =>\n  [:x | x asString] value: 42";
         let lines = find_senders_in_source(src, "asString");
         assert_eq!(lines, vec![2]);
+    }
+
+    #[test]
+    fn cascade_sends_are_reported_in_source_order() {
+        // A cascade's messages are reported together by the walker, ahead of the
+        // send nested in the first message's argument; lines stay in source order.
+        let src = "run =>\n  self log: (self fmt)\n    ; other: 1\n    ; fmt";
+        // `fmt` is sent inside the first argument (line 2) and as the last cascade
+        // message (line 4).
+        assert_eq!(find_senders_in_source(src, "fmt"), vec![2, 4]);
+        assert_eq!(find_senders_in_source(src, "other:"), vec![3]);
     }
 
     #[test]

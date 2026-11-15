@@ -32,10 +32,7 @@ methods_op_known_class_returns_instance_and_class_methods_test() ->
     ClassName = 'BT1026TestClass',
     RegName = beamtalk_class_registry:registry_name(ClassName),
     %% Clean up any leftover registration from a previous test run
-    case whereis(RegName) of
-        undefined -> ok;
-        Pid0 -> gen_server:stop(Pid0)
-    end,
+    beamtalk_test_proc:stop_registered(RegName),
     InstanceFun = fun(_Self) -> ok end,
     ClassFun = fun(_Self) -> ok end,
     ClassInfo = #{
@@ -85,10 +82,7 @@ methods_op_protocol_json_shape_test() ->
     beamtalk_test_boot:registry(),
     ClassName = 'BT1026ProtoTestClass',
     RegName = beamtalk_class_registry:registry_name(ClassName),
-    case whereis(RegName) of
-        undefined -> ok;
-        Pid0 -> gen_server:stop(Pid0)
-    end,
+    beamtalk_test_proc:stop_registered(RegName),
     Fun = fun(_Self) -> ok end,
     ClassInfo = #{
         name => ClassName,
@@ -131,10 +125,7 @@ methods_op_name_equals_selector_test() ->
     beamtalk_test_boot:registry(),
     ClassName = 'BT1026NameSelectorClass',
     RegName = beamtalk_class_registry:registry_name(ClassName),
-    case whereis(RegName) of
-        undefined -> ok;
-        Pid0 -> gen_server:stop(Pid0)
-    end,
+    beamtalk_test_proc:stop_registered(RegName),
     Fun = fun(_Self) -> ok end,
     ClassInfo = #{
         name => ClassName,

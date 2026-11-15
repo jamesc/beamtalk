@@ -50,8 +50,8 @@
 
 use super::selector_span;
 use beamtalk_core::announce_selectors::is_announce_selector;
-use beamtalk_core::ast::{BinarySegment, Expression, Pattern, StringSegment};
-use beamtalk_core::ast_walker::walk_pattern;
+use beamtalk_core::ast::{Expression, MessageSelector};
+use beamtalk_core::ast_walker::walk_sends;
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
@@ -97,9 +97,22 @@ pub fn find_announce_sites_in_source(method_source: &str) -> Vec<AnnounceHit> {
 
     beamtalk_core::ast_walker::for_each_expr_seq(&module, |seq| {
         for stmt in seq {
-            collect_announce_sites(&stmt.expression, &wrapped, &mut hits);
+            walk_sends(&stmt.expression, &mut |send| {
+                if is_announce_selector(send.selector.name().as_str()) {
+                    push_announce(
+                        send.selector,
+                        send.arguments,
+                        send.span,
+                        &wrapped,
+                        &mut hits,
+                    );
+                }
+            });
         }
     });
+    // `walk_sends` reports a cascade's messages together, ahead of the sends
+    // nested in their receiver and arguments; restore source order.
+    hits.sort_by_key(|hit| hit.line);
 
     // Translate from wrapped-source line numbers back to input-source space.
     for hit in &mut hits {
@@ -146,7 +159,7 @@ fn class_reference_name(expr: &Expression) -> Option<String> {
 /// ignored). A keyword send with no arguments cannot be an announce site, but is
 /// handled defensively as unresolvable.
 fn push_announce(
-    selector: &beamtalk_core::ast::MessageSelector,
+    selector: &MessageSelector,
     arguments: &[Expression],
     span: Span,
     source: &str,
@@ -160,128 +173,11 @@ fn push_announce(
     });
 }
 
-/// Recursively collect every announce emission into `hits`.
-fn collect_announce_sites(expr: &Expression, source: &str, hits: &mut Vec<AnnounceHit>) {
-    match expr {
-        Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            span,
-            ..
-        } => {
-            if is_announce_selector(selector.name().as_str()) {
-                push_announce(selector, arguments, *span, source, hits);
-            }
-            collect_announce_sites(receiver, source, hits);
-            for arg in arguments {
-                collect_announce_sites(arg, source, hits);
-            }
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            collect_announce_sites(receiver, source, hits);
-            for msg in messages {
-                if is_announce_selector(msg.selector.name().as_str()) {
-                    push_announce(&msg.selector, &msg.arguments, msg.span, source, hits);
-                }
-                for arg in &msg.arguments {
-                    collect_announce_sites(arg, source, hits);
-                }
-            }
-        }
-        Expression::Assignment { target, value, .. } => {
-            collect_announce_sites(target, source, hits);
-            collect_announce_sites(value, source, hits);
-        }
-        Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
-            collect_announce_sites(value, source, hits);
-        }
-        Expression::Block(block) => {
-            for stmt in &block.body {
-                collect_announce_sites(&stmt.expression, source, hits);
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            collect_announce_sites(expression, source, hits);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            collect_announce_sites(receiver, source, hits);
-        }
-        Expression::Match { value, arms, .. } => {
-            collect_announce_sites(value, source, hits);
-            for arm in arms {
-                collect_pattern_announce_sites(&arm.pattern, source, hits);
-                if let Some(guard) = &arm.guard {
-                    collect_announce_sites(guard, source, hits);
-                }
-                collect_announce_sites(&arm.body, source, hits);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for segment in segments {
-                if let StringSegment::Interpolation(inner) = segment {
-                    collect_announce_sites(inner, source, hits);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                collect_announce_sites(inner, source, hits);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for element in elements {
-                collect_announce_sites(element, source, hits);
-            }
-            if let Some(tail_expr) = tail {
-                collect_announce_sites(tail_expr, source, hits);
-            }
-        }
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for element in elements {
-                collect_announce_sites(element, source, hits);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                collect_announce_sites(&pair.key, source, hits);
-                collect_announce_sites(&pair.value, source, hits);
-            }
-        }
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::ClassReference { .. }
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. }
-        | Expression::Error { .. } => {}
-    }
-}
-
-/// Recursively collect announce emissions inside a [`Pattern`].
-///
-/// Mirrors `all_sends_query::collect_pattern_sends`: patterns carry no message
-/// sends today, but the walker traverses container patterns and the
-/// binary-segment size expression defensively so loosening the parser later does
-/// not silently regress this query.
-fn collect_pattern_announce_sites(pattern: &Pattern, source: &str, hits: &mut Vec<AnnounceHit>) {
-    walk_pattern(pattern, &mut |expr| {
-        collect_announce_sites(expr, source, hits);
-    });
-}
-
 /// Determine the line number to report for an emission. Uses the span of the
 /// selector keywords when available (so the line points at the selector token
 /// rather than the receiver, for multi-line sends) and falls back to the
 /// enclosing message-send span otherwise.
-fn selector_line(
-    selector: &beamtalk_core::ast::MessageSelector,
-    fallback: Span,
-    source: &str,
-) -> u32 {
+fn selector_line(selector: &MessageSelector, fallback: Span, source: &str) -> u32 {
     selector_span(selector)
         .unwrap_or(fallback)
         .line_number(source)

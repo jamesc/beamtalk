@@ -606,20 +606,12 @@ ancestor_builder_defaults(Name) ->
     case beamtalk_class_registry:whereis_class(Name) of
         Pid when is_pid(Pid), Pid =/= self() ->
             try
-                gen_server:call(Pid, field_defaults, 5000)
+                beamtalk_call_failure:tolerate_gone(
+                    fun() -> gen_server:call(Pid, field_defaults, 5000) end,
+                    #{},
+                    #{stopping => true, timeout => true}
+                )
             catch
-                exit:{timeout, _} ->
-                    #{};
-                exit:{noproc, _} ->
-                    #{};
-                exit:{shutdown, _} ->
-                    #{};
-                exit:{normal, _} ->
-                    #{};
-                exit:{{shutdown, _}, _} ->
-                    #{};
-                exit:{{normal, _}, _} ->
-                    #{};
                 exit:{Reason, _} ->
                     ?LOG_WARNING(
                         "ancestor_builder_defaults: class ~p process exited (~p) "

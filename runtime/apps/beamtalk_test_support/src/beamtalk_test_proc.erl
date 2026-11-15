@@ -10,7 +10,14 @@ Shared EUnit process helpers (BT-4677): dummy processes and deterministic
 stop/kill. Every stop waits on a monitor `'DOWN'`, never a `timer:sleep`.
 """.
 
--export([spawn_idle/0, kill_and_wait/1, stop/1, await_down/2]).
+-export([
+    spawn_idle/0,
+    kill_and_wait/1,
+    stop/1,
+    await_down/2,
+    stop_registered/1,
+    restart/1
+]).
 
 -doc "Spawn an unlinked process that idles until it is killed or sent `stop`.".
 -spec spawn_idle() -> pid().
@@ -54,6 +61,25 @@ stop(Pid) when is_pid(Pid) ->
     end;
 stop(_) ->
     ok.
+
+-doc """
+Stop the process registered as `Name` (via `stop/1`), if any. A no-op when
+nothing is registered under `Name`. Replaces the hand-written
+`case whereis(Name) of undefined -> ok; Pid -> gen_server:stop(Pid) end`.
+""".
+-spec stop_registered(atom()) -> ok.
+stop_registered(Name) ->
+    stop(whereis(Name)).
+
+-doc """
+Stop the singleton registered as `Name` (if any), then start a fresh one with
+`Name:start_link/0` — the module is assumed to share its registered name, as
+every Beamtalk workspace singleton does. Returns what `start_link/0` returns.
+""".
+-spec restart(module()) -> {ok, pid()} | {error, term()} | ignore.
+restart(Name) ->
+    ok = stop_registered(Name),
+    Name:start_link().
 
 %% proc_lib-started processes (gen_server, supervisor, ...) record `$ancestors`.
 is_otp_process(Pid) ->

@@ -13,6 +13,10 @@ including expression compilation, file compilation, and codegen display.
 Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
 """.
 
+-type expression_info() ::
+    #{assigned_var := atom() | none} | #{step_assignments := [atom() | none]}.
+-export_type([expression_info/0]).
+
 -export([
     compile_expression/3,
     compile_expression/4,
@@ -42,7 +46,7 @@ Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
     compile_file_via_port/5,
     assemble_class_result/5,
     compile_trailing_expressions/2,
-    compile_standard_expression/2,
+    compile_standard_expression/3,
     compile_file_core/4,
     format_core_error/1
 ]).
@@ -52,7 +56,7 @@ Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
 
 -doc "Compile a Beamtalk expression to bytecode.".
 -spec compile_expression(string(), atom(), map()) ->
-    {ok, binary(), term(), [beamtalk_repl_protocol:warning()]}
+    {ok, binary(), expression_info(), [beamtalk_repl_protocol:warning()]}
     | {ok, class_definition, map(), [beamtalk_repl_protocol:warning()]}
     | {ok, method_definition, map(), [beamtalk_repl_protocol:warning()]}
     | {ok, protocol_definition, map(), [beamtalk_repl_protocol:warning()]}
@@ -70,7 +74,7 @@ Compile a Beamtalk expression to bytecode, with earlier-turn type aliases.
 `::' annotations in `Expression' resolve names this session already knows.
 """.
 -spec compile_expression(string(), atom(), map(), [binary()]) ->
-    {ok, binary(), term(), [beamtalk_repl_protocol:warning()]}
+    {ok, binary(), expression_info(), [beamtalk_repl_protocol:warning()]}
     | {ok, class_definition, map(), [beamtalk_repl_protocol:warning()]}
     | {ok, method_definition, map(), [beamtalk_repl_protocol:warning()]}
     | {ok, protocol_definition, map(), [beamtalk_repl_protocol:warning()]}
@@ -107,7 +111,7 @@ caller omits `known_type_aliases`. Skipping registration only skips the
 results; it does not skip alias *resolution* for the expression itself.
 """.
 -spec compile_expression_no_registration(string(), atom(), map()) ->
-    {ok, binary(), term(), [beamtalk_repl_protocol:warning()]}
+    {ok, binary(), expression_info(), [beamtalk_repl_protocol:warning()]}
     | {ok, class_definition, map(), [beamtalk_repl_protocol:warning()]}
     | {ok, method_definition, map(), [beamtalk_repl_protocol:warning()]}
     | {ok, protocol_definition, map(), [beamtalk_repl_protocol:warning()]}
@@ -131,8 +135,8 @@ compile_expression_no_registration(Expression, ModuleName, Bindings) ->
                     {ok, protocol_definition, #{}, []};
                 {ok, type_alias_definition, _AliasInfo} ->
                     {ok, type_alias_definition, #{}, []};
-                {ok, CoreErlang, Warnings} ->
-                    compile_standard_expression(CoreErlang, Warnings);
+                {ok, CoreErlang, Warnings, ExprInfo} ->
+                    compile_standard_expression(CoreErlang, Warnings, ExprInfo);
                 {error, Diagnostics} ->
                     {error, Diagnostics}
             end
@@ -147,7 +151,7 @@ Like `compile_expression/3' but the generated module's `eval/1' returns
 `{[{<<"src0">>, Val0}, ...], FinalState}' — one step per top-level statement.
 """.
 -spec compile_expression_trace(string(), atom(), map()) ->
-    {ok, binary(), term(), [beamtalk_repl_protocol:warning()]} | {error, term()}.
+    {ok, binary(), expression_info(), [beamtalk_repl_protocol:warning()]} | {error, term()}.
 compile_expression_trace(Expression, ModuleName, Bindings) ->
     SourceBin = list_to_binary(Expression),
     ModNameBin = atom_to_binary(ModuleName, utf8),
@@ -160,8 +164,8 @@ compile_expression_trace(Expression, ModuleName, Bindings) ->
                     SourceBin, ModNameBin, KnownVars, CompileOpts
                 )
             of
-                {ok, CoreErlang, Warnings} ->
-                    compile_standard_expression(CoreErlang, Warnings);
+                {ok, CoreErlang, Warnings, ExprInfo} ->
+                    compile_standard_expression(CoreErlang, Warnings, ExprInfo);
                 {error, Diagnostics} ->
                     {error, Diagnostics}
             end
@@ -211,7 +215,7 @@ compile_for_codegen(SourceBin, ModNameBin, KnownVars) ->
                 {ok, protocol_definition, _ProtocolInfo} ->
                     {error,
                         {compile_error, <<"show-codegen does not support protocol definitions">>}};
-                {ok, CoreErlang, Warnings} ->
+                {ok, CoreErlang, Warnings, _ExprInfo} ->
                     {ok, CoreErlang, Warnings};
                 {error, Diagnostics} ->
                     {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
@@ -492,8 +496,8 @@ compile_expression_via_port(Expression, ModuleName, Bindings, KnownTypeAliasSour
                     Warnings = maps:get(warnings, AliasInfo, []),
                     {ok, type_alias_definition,
                         maps:with([alias_name, expansion, doc_comment], AliasInfo), Warnings};
-                {ok, CoreErlang, Warnings} ->
-                    compile_standard_expression(CoreErlang, Warnings);
+                {ok, CoreErlang, Warnings, ExprInfo} ->
+                    compile_standard_expression(CoreErlang, Warnings, ExprInfo);
                 {error, Diagnostics} ->
                     %% Return structured diagnostics (maps with message/line/hint)
                     %% so callers can surface line numbers and hints to MCP clients.
@@ -658,15 +662,38 @@ assemble_class_result(Binary, ClassModName, Classes, Warnings, TrailingResult) -
     {ok, class_definition, ClassInfo2, Warnings}.
 
 %% Compile a standard (non-class, non-method) expression.
--spec compile_standard_expression(binary(), [beamtalk_repl_protocol:warning()]) ->
-    {ok, binary(), term(), [beamtalk_repl_protocol:warning()]} | {error, binary()}.
-compile_standard_expression(CoreErlang, Warnings) ->
+%%
+%% The third element is what the compiler learned about the statements
+%% (BT-4911): the session variable `compile_expression' assigns, or one entry
+%% per `compile_expression_trace' step. The workspace never re-parses the source
+%% to find it.
+-spec compile_standard_expression(
+    binary(),
+    [beamtalk_repl_protocol:warning()],
+    beamtalk_compiler_port:expression_info()
+) ->
+    {ok, binary(), expression_info(), [beamtalk_repl_protocol:warning()]} | {error, binary()}.
+compile_standard_expression(CoreErlang, Warnings, ExprInfo) ->
     case beamtalk_compiler:compile_core_erlang(CoreErlang) of
         {ok, _CompiledMod, Binary} ->
-            {ok, Binary, {port_compiled}, Warnings};
+            {ok, Binary, decode_expression_info(ExprInfo), Warnings};
         {error, Reason} ->
             {error, format_core_error(Reason)}
     end.
+
+%% The compiler names variables as binaries; the workspace binds them by atom.
+-spec decode_expression_info(beamtalk_compiler_port:expression_info()) -> expression_info().
+decode_expression_info(#{assigned_var := Name}) ->
+    #{assigned_var => binding_name(Name)};
+decode_expression_info(#{step_assignments := Names}) ->
+    #{step_assignments => [binding_name(Name) || Name <- Names]}.
+
+-spec binding_name(binary() | none) -> atom() | none.
+binding_name(none) ->
+    none;
+binding_name(Name) when is_binary(Name) ->
+    % elp:fixme W0023 intentional atom creation
+    binary_to_atom(Name, utf8).
 
 %% Compile file via beamtalk_compiler OTP app (port backend).
 compile_file_via_port(Source, Path, StdlibMode, ModuleNameOverride) ->

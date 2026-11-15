@@ -27,7 +27,15 @@ process is already registered, and `beamtalk_stdlib:init/0` is itself
 idempotent (a normal stdlib load skips a module whose on_load already ran).
 """.
 
--export([boot_real_stdlib/1, wait_for_class/2, registry/0, runtime/0]).
+-export([
+    boot_real_stdlib/1,
+    wait_for_class/2,
+    registry/0,
+    runtime/0,
+    compiler/0,
+    workspace/1,
+    clear_compiler_classes/0
+]).
 
 -doc """
 Boot `beamtalk_runtime` + real stdlib, then block until `CanaryClass` is
@@ -110,3 +118,82 @@ runtime() ->
         end,
         ok
     end.
+
+-doc """
+Start the compiler application and its `beamtalk_compiler` port server
+(tolerating an already-started one). Replaces the three-line
+`ensure_all_started(compiler)` / `case ensure_all_started(beamtalk_compiler)`
+sequence repeated across the integration suites.
+""".
+-spec compiler() -> ok.
+compiler() ->
+    application:ensure_all_started(compiler),
+    case application:ensure_all_started(beamtalk_compiler) of
+        {ok, _} -> ok;
+        {error, {already_started, _}} -> ok
+    end.
+
+-doc """
+Boot a fresh, isolated workspace for the integration suites that drive the
+real compiler: start `compiler`, `beamtalk_compiler` and `beamtalk_runtime`,
+replace any running `beamtalk_workspace_meta` with a fresh one in **run
+mode**, reset the xref and compiler class caches, then restart the named
+singletons.
+
+`mode => run` is load-bearing for test isolation, not tidiness: in REPL mode
+(the default) `beamtalk_workspace_meta` persists `class_sources` to
+`~/.beamtalk/workspaces/<workspace_id>/metadata.json` and reloads it on the
+next `init/1`, so a "fresh" restart under the same id would resurrect a
+previous test's `set_class_source/2` calls. Run mode skips disk entirely.
+
+Options:
+  * `workspace_id` (binary, required) — the meta process's workspace id.
+  * `restart` (`[module()]`, default `[]`) — singletons restarted with
+    `beamtalk_test_proc:restart/1`, in order (e.g. a findings store).
+  * `clear_xref` (default `true`) — empty the `beamtalk_xref` tables.
+  * `announcements` (default `false`) — ensure the SystemAnnouncer bus is up,
+    so a test body's own `beamtalk_repl_subscriptions:subscribe/2` registers
+    (it is silently skipped when the bus is not running yet).
+
+Idempotent; pair with `beamtalk_test_proc:stop_registered/1` in teardown.
+""".
+-spec workspace(#{
+    workspace_id := binary(),
+    restart => [module()],
+    clear_xref => boolean(),
+    announcements => boolean()
+}) -> ok.
+workspace(#{workspace_id := WorkspaceId} = Opts) ->
+    ok = compiler(),
+    application:ensure_all_started(beamtalk_runtime),
+    ok = beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
+    {ok, _} = beamtalk_workspace_meta:start_link(#{
+        workspace_id => WorkspaceId,
+        project_path => undefined,
+        created_at => erlang:system_time(second),
+        mode => run
+    }),
+    case maps:get(clear_xref, Opts, true) of
+        true -> beamtalk_test_repl:clear_xref();
+        false -> ok
+    end,
+    ok = clear_compiler_classes(),
+    [{ok, _} = beamtalk_test_proc:restart(Name) || Name <- maps:get(restart, Opts, [])],
+    case maps:get(announcements, Opts, false) of
+        true -> ok = beamtalk_announcements:ensure_started();
+        false -> ok
+    end,
+    ok.
+
+%% `beamtalk_compiler_server:clear_classes/0` is exported only under
+%% `-ifdef(TEST)`; this module lives in `src/` (compiled without TEST), so
+%% dialyzer cannot see it. The tests that call this run with TEST defined.
+-dialyzer({no_missing_calls, clear_compiler_classes/0}).
+
+-doc """
+Clear the compiler server's ambient class and alias caches (ADR 0108). Only
+callable from a test build, where `beamtalk_compiler_server` exports it.
+""".
+-spec clear_compiler_classes() -> ok.
+clear_compiler_classes() ->
+    beamtalk_compiler_server:clear_classes().

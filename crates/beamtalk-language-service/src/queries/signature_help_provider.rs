@@ -27,8 +27,8 @@ use crate::queries::cursor_context::{ClassContext, resolve_receiver_class};
 use crate::queries::signature_text;
 use crate::queries::{protocols_for_module, type_of_parsed};
 use crate::{ParameterInfo, Position, SignatureHelp, SignatureInfo};
-use beamtalk_core::ast::{BinarySegment, Expression, MessageSelector, Module};
-use beamtalk_core::ast_walker::cascade_shared_receiver;
+use beamtalk_core::ast::{Expression, MessageSelector, Module};
+use beamtalk_core::ast_walker::{CursorBound, cascade_shared_receiver, children_in_source_order};
 use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
 use beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo;
 use beamtalk_core::semantic_analysis::protocol_registry::{
@@ -138,17 +138,25 @@ pub fn compute_signature_help(
 }
 
 /// Recursively searches for a keyword message send containing the cursor.
-#[expect(clippy::too_many_lines, reason = "match on Expression variants")]
+///
+/// The cursor may sit just after the call's last character
+/// ([`CursorBound::Touching`]), so a half-typed `at: 1 put:|` still shows help.
 fn find_signature_in_expr(
     expr: &Expression,
     offset: u32,
     context: &ClassContext<'_>,
     lookup: &Lookup<'_>,
 ) -> Option<SignatureHelp> {
-    let span = expr.span();
-    if offset < span.start() || offset > span.end() {
+    if !CursorBound::Touching.contains(expr.span(), offset) {
         return None;
     }
+
+    // Check nested expressions first (inner-most message wins).
+    let nested = || {
+        children_in_source_order(expr)
+            .into_iter()
+            .find_map(|child| find_signature_in_expr(child, offset, context, lookup))
+    };
 
     match expr {
         Expression::MessageSend {
@@ -158,20 +166,13 @@ fn find_signature_in_expr(
             span,
             ..
         } => {
-            // Check nested expressions first (inner-most message wins)
-            if let Some(help) = find_signature_in_expr(receiver, offset, context, lookup) {
+            if let Some(help) = nested() {
                 return Some(help);
-            }
-            for arg in arguments {
-                if let Some(help) = find_signature_in_expr(arg, offset, context, lookup) {
-                    return Some(help);
-                }
             }
 
             // Only provide signature help for keyword messages
             if let MessageSelector::Keyword(parts) = selector
-                && offset >= span.start()
-                && offset <= span.end()
+                && CursorBound::Touching.contains(*span, offset)
             {
                 // Determine which parameter is active based on cursor position
                 let active_param = determine_active_parameter(parts, arguments, offset);
@@ -198,18 +199,6 @@ fn find_signature_in_expr(
             }
             None
         }
-        Expression::Block(block) => block
-            .body
-            .iter()
-            .find_map(|s| find_signature_in_expr(&s.expression, offset, context, lookup)),
-        Expression::Assignment { target, value, .. } => {
-            find_signature_in_expr(target, offset, context, lookup)
-                .or_else(|| find_signature_in_expr(value, offset, context, lookup))
-        }
-        Expression::Return { value, .. } => find_signature_in_expr(value, offset, context, lookup),
-        Expression::Parenthesized { expression, .. } => {
-            find_signature_in_expr(expression, offset, context, lookup)
-        }
         Expression::Cascade {
             receiver, messages, ..
         } => {
@@ -223,8 +212,7 @@ fn find_signature_in_expr(
                     }
                 }
                 if let MessageSelector::Keyword(parts) = &msg.selector
-                    && offset >= msg.span.start()
-                    && offset <= msg.span.end()
+                    && CursorBound::Touching.contains(msg.span, offset)
                 {
                     let active_param = determine_active_parameter(parts, &msg.arguments, offset);
                     let selector_name = msg.selector.name();
@@ -243,43 +231,7 @@ fn find_signature_in_expr(
             }
             None
         }
-        Expression::Match { value, arms, .. } => {
-            find_signature_in_expr(value, offset, context, lookup).or_else(|| {
-                arms.iter()
-                    .find_map(|arm| find_signature_in_expr(&arm.body, offset, context, lookup))
-            })
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            find_signature_in_expr(receiver, offset, context, lookup)
-        }
-        Expression::MapLiteral { pairs, .. } => pairs.iter().find_map(|pair| {
-            find_signature_in_expr(&pair.key, offset, context, lookup)
-                .or_else(|| find_signature_in_expr(&pair.value, offset, context, lookup))
-        }),
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            elements
-                .iter()
-                .find_map(|e| find_signature_in_expr(e, offset, context, lookup))
-        }
-        Expression::ListLiteral { elements, tail, .. } => elements
-            .iter()
-            .find_map(|e| find_signature_in_expr(e, offset, context, lookup))
-            .or_else(|| {
-                tail.as_ref()
-                    .and_then(|t| find_signature_in_expr(t, offset, context, lookup))
-            }),
-        Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
-            if let beamtalk_core::ast::StringSegment::Interpolation(expr) = seg {
-                find_signature_in_expr(expr, offset, context, lookup)
-            } else {
-                None
-            }
-        }),
-        Expression::BinaryConstruction { segments, .. } => segments
-            .iter()
-            .flat_map(BinarySegment::sub_expressions)
-            .find_map(|expr| find_signature_in_expr(expr, offset, context, lookup)),
-        _ => None,
+        _ => nested(),
     }
 }
 
@@ -586,6 +538,17 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         compute_signature_help(&module, source, position, &hierarchy, None, None, None)
+    }
+
+    #[test]
+    fn signature_help_cursor_at_end_of_call_still_shows_help() {
+        // Signature help uses the `Touching` rule: with the cursor just after the
+        // last character of the call (`... to: 2|`), the call is still open.
+        let source = "Object subclass: Calc\n  add: x to: y => x + y\n  run => self add: 1 to: 2";
+        let end = u32::try_from("  run => self add: 1 to: 2".len()).unwrap();
+        let help = sig_help_at(source, Position::new(2, end))
+            .expect("help with the cursor at the end of the call");
+        assert_eq!(help.active_parameter, 1);
     }
 
     #[test]

@@ -48,11 +48,7 @@ eval_with_self_class_definition_does_not_touch_alias_xref_test_() ->
     end}.
 
 compiler_setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end.
+    beamtalk_test_boot:compiler().
 
 alias_xref_setup() ->
     ok = compiler_setup(),

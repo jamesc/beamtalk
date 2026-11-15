@@ -38,18 +38,11 @@ the moduledoc's "Crash isolation" section) swallows any exception and returns
 %%====================================================================
 
 worker_setup() ->
-    case whereis(beamtalk_workspace_shape_recheck_worker) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end,
-    {ok, _} = beamtalk_workspace_shape_recheck_worker:start_link(),
+    {ok, _} = beamtalk_test_proc:restart(beamtalk_workspace_shape_recheck_worker),
     ok.
 
 worker_teardown(_) ->
-    case whereis(beamtalk_workspace_shape_recheck_worker) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_shape_recheck_worker),
     ok.
 
 %%====================================================================

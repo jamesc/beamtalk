@@ -184,7 +184,7 @@ pub fn lint_type_registry(
     dependency_stubs: &[DependencyStubsDir],
 ) -> ResolvedTypeRegistry {
     if let Some(root) = package_root {
-        let layout = crate::build_layout::BuildLayout::new(root);
+        let layout = beamtalk_core::build_layout::BuildLayout::new(root);
         let auto_extract = crate::native_type_specs::extract_project_type_specs(&layout);
         resolve_package_type_registry(root, auto_extract, dependency_stubs)
     } else if source_files

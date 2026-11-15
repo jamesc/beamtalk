@@ -8,6 +8,8 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use beamtalk_core::build_layout::BuildLayout;
+use beamtalk_package::dependency_classes::DependencyCheckout;
 use tower_lsp::lsp_types::InitializeParams;
 
 /// Session-wide cap on preloaded source files: the startup preload and every
@@ -72,15 +74,6 @@ impl DependencyLoad {
         )
     }
 }
-/// One dependency of a package root, as found on disk.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::server) struct DependencyDirs {
-    /// The dependency's checkout root.
-    pub(in crate::server) root: PathBuf,
-    /// Where its Beamtalk source lives: `src/`, or the root itself
-    /// ([`beamtalk_project::dependency_graph::dependency_source_dir`]).
-    pub(in crate::server) src: PathBuf,
-}
 /// A package root's declared dependencies, as far as they are on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::server) struct RootDependencies {
@@ -88,7 +81,7 @@ pub(in crate::server) struct RootDependencies {
     /// or malformed `[dependencies]` table conservatively counts as yes.
     pub(in crate::server) declared: bool,
     /// Every transitive dependency found on disk.
-    pub(in crate::server) found: Vec<DependencyDirs>,
+    pub(in crate::server) found: Vec<DependencyCheckout>,
     /// Whether that is all of them: the manifest was read and every
     /// transitive dependency was found, with a readable manifest.
     pub(in crate::server) all_found: bool,
@@ -138,19 +131,10 @@ pub(in crate::server) fn workspace_roots(params: &InitializeParams) -> Vec<PathB
 /// one resolves to the owning `<pkg>` instead.
 pub(in crate::server) fn package_root_for_file(path: &Path) -> Option<PathBuf> {
     let root = beamtalk_project::discover_project_root(path);
-    if let Some(owner) = owning_package_of_dependency_checkout(&root) {
+    if let Some(owner) = beamtalk_core::build_layout::project_root_of_dep_checkout(&root) {
         return package_root_for_file(owner);
     }
     root.join("beamtalk.toml").is_file().then_some(root)
-}
-/// `Some(<pkg>)` when `dir` is a fetched dependency checkout
-/// `<pkg>/_build/deps/<name>` (where git and registry dependencies live).
-fn owning_package_of_dependency_checkout(dir: &Path) -> Option<&Path> {
-    let deps = dir.parent()?;
-    let build = deps.parent()?;
-    (deps.file_name()? == "deps" && build.file_name()? == "_build")
-        .then(|| build.parent())
-        .flatten()
 }
 pub(in crate::server) fn configured_stdlib_source_dir(params: &InitializeParams) -> Option<String> {
     params
@@ -270,31 +254,30 @@ pub(in crate::server) fn root_dependencies(root: &Path) -> RootDependencies {
     }
     RootDependencies {
         declared: layout.has_package_dependencies,
-        found: layout
-            .found
-            .into_iter()
-            .map(|dep| DependencyDirs {
-                src: dep.src.into_std_path_buf(),
-                root: dep.root.into_std_path_buf(),
-            })
-            .collect(),
+        found: layout.found,
         all_found: layout.all_found,
     }
 }
-/// Every fetched checkout under `root/_build/deps/` with a `src/` — the
-/// fallback when the manifest's `[dependencies]` can't be read.
-fn fetched_dependency_checkouts(root: &Path) -> Vec<DependencyDirs> {
-    let deps_dir = root.join("_build").join("deps");
-    let Ok(entries) = fs::read_dir(&deps_dir) else {
+/// Every fetched checkout under `<root>/_build/deps/` with a `src/` — the
+/// fallback when the manifest's `[dependencies]` can't be read. Empty for a
+/// non-UTF-8 root, which the layout walk can't represent either.
+fn fetched_dependency_checkouts(root: &Path) -> Vec<DependencyCheckout> {
+    let Some(utf8_root) = camino::Utf8Path::from_path(root) else {
         return Vec::new();
     };
-    let mut out: Vec<DependencyDirs> = entries
+    let layout = BuildLayout::new(utf8_root);
+    let Ok(entries) = layout.deps_dir().read_dir_utf8() else {
+        return Vec::new();
+    };
+    let mut out: Vec<DependencyCheckout> = entries
         .flatten()
-        .map(|entry| entry.path())
-        .filter(|dep| dep.join("src").is_dir())
-        .map(|dep| DependencyDirs {
-            src: dep.join("src"),
-            root: dep,
+        .filter(|entry| entry.path().join("src").is_dir())
+        .map(|entry| DependencyCheckout {
+            name: entry.file_name().to_string(),
+            src: entry.path().join("src"),
+            root: entry.path().to_path_buf(),
+            dependencies: Vec::new(),
+            stubs_dir: None,
         })
         .collect();
     out.sort_unstable_by(|a, b| a.root.cmp(&b.root));
@@ -306,7 +289,7 @@ pub(in crate::server) fn dependency_src_dirs(root: &Path) -> Vec<PathBuf> {
     root_dependencies(root)
         .found
         .into_iter()
-        .map(|dep| dep.src)
+        .map(|dep| dep.src.into_std_path_buf())
         .collect()
 }
 /// Whether `path` lies in a directory [`collect_preload_files`] walks for
@@ -466,14 +449,14 @@ fn walk_dependency_sources(
             match preload_walker
                 .clone()
                 .max_files(*remaining_budget)
-                .walk_pathbuf(&dep.src)
+                .walk_pathbuf(dep.src.as_std_path())
             {
                 Ok(found) => {
                     *remaining_budget = remaining_budget.saturating_sub(found.len());
                     // `stubs/` holds FFI stubs, not source (as in the CLI's
                     // dependency scan); it is only reachable when the
                     // dependency has no `src/`.
-                    let stubs = dep.root.join("stubs");
+                    let stubs = dep.root.join("stubs").into_std_path_buf();
                     for path in found {
                         if path.starts_with(&stubs) {
                             continue;
@@ -488,7 +471,7 @@ fn walk_dependency_sources(
                 }
                 Err(_) => dependencies.loaded = false,
             }
-            dependencies.src_dirs.push(dep.src);
+            dependencies.src_dirs.push(dep.src.into_std_path_buf());
         }
     }
     // A walk that ran the budget down to zero may have been cut short.

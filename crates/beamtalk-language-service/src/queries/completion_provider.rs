@@ -37,7 +37,9 @@ use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{
     BinarySegment, ClassKind, Expression, MethodDefinition, Module, declared_shape_migrations,
 };
-use beamtalk_core::ast_walker::{for_each_expr_seq, walk_expression};
+use beamtalk_core::ast_walker::{
+    CursorBound, children_in_source_order, for_each_expr_seq, walk_expression,
+};
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 use beamtalk_core::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;
@@ -45,7 +47,7 @@ use beamtalk_core::semantic_analysis::type_checker::native_type_registry::Native
 use beamtalk_core::semantic_analysis::{
     AliasRegistry, ClassHierarchy, InferredType, ProtocolRegistry,
 };
-use beamtalk_core::source_analysis::{TokenKind, lex};
+use beamtalk_core::source_analysis::{Span, TokenKind, lex};
 use ecow::EcoString;
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -1021,16 +1023,31 @@ fn receiver_side_of_type(ty: &InferredType) -> Option<ReceiverSide> {
 }
 
 /// Recursively search for a receiver expression at the given cursor offset.
+///
+/// The cursor is "within" an expression when it is on it, just after it, or one
+/// space past it ([`CursorBound::Trailing`]): completion runs on the token the
+/// user has just finished typing.
 fn find_receiver_in_expr(
     expr: &Expression,
     offset: u32,
     type_map: &TypeMap,
 ) -> Option<ReceiverSide> {
-    let span = expr.span();
-    // Check if cursor is within or just after this expression
-    if offset < span.start() || offset > span.end() + 1 {
+    if !CursorBound::Trailing.contains(expr.span(), offset) {
         return None;
     }
+    // The cursor is "right after" an expression when it is at its end or one
+    // space past it.
+    let just_after =
+        |span: Span| offset >= span.end() && CursorBound::Trailing.contains(span, offset);
+    // Children are tried last to first: `Trailing` lets an earlier sibling's
+    // span reach the next one's first character, and the cursor belongs to the
+    // token typed last.
+    let nested = || {
+        children_in_source_order(expr)
+            .into_iter()
+            .rev()
+            .find_map(|child| find_receiver_in_expr(child, offset, type_map))
+    };
     match expr {
         // If cursor is right after a message send, the result type is the receiver
         Expression::MessageSend {
@@ -1049,14 +1066,14 @@ fn find_receiver_in_expr(
                 return Some(ty);
             }
             // If cursor is just after the message send span, use the send's result type
-            if offset >= span.end() && offset <= span.end() + 1 {
+            if just_after(*span) {
                 return receiver_side_of_expr(expr, type_map);
             }
             None
         }
         // If cursor is right after an identifier, use its type
         Expression::Identifier(ident) => {
-            if offset >= ident.span.end() && offset <= ident.span.end() + 1 {
+            if just_after(ident.span) {
                 type_map.get(ident.span).and_then(receiver_side_of_type)
             } else {
                 None
@@ -1065,7 +1082,7 @@ fn find_receiver_in_expr(
         // If cursor is right after a class reference, use class-side methods;
         // after a literal, its type.
         Expression::ClassReference { span, .. } | Expression::Literal(_, span) => {
-            if offset >= span.end() && offset <= span.end() + 1 {
+            if just_after(*span) {
                 receiver_side_of_expr(expr, type_map)
             } else {
                 None
@@ -1073,34 +1090,25 @@ fn find_receiver_in_expr(
         }
         // If cursor is right after a field access (`self.transport`), use the
         // field's type — e.g. a `:: Transport class` field (ADR 0144).
-        Expression::FieldAccess { receiver, span, .. } => {
-            if offset >= span.end() && offset <= span.end() + 1 {
+        Expression::FieldAccess { span, .. } => {
+            if just_after(*span) {
                 type_map.get(*span).and_then(receiver_side_of_type)
             } else {
-                find_receiver_in_expr(receiver, offset, type_map)
+                nested()
             }
         }
-        // Recurse into assignments
-        Expression::Assignment { target, value, .. } => {
-            find_receiver_in_expr(target, offset, type_map)
-                .or_else(|| find_receiver_in_expr(value, offset, type_map))
-        }
-        // Recurse into parenthesized
-        Expression::Parenthesized { expression, span } => {
-            if offset >= span.end() && offset <= span.end() + 1 {
+        Expression::Parenthesized { span, .. } => {
+            if just_after(*span) {
                 receiver_side_of_expr(expr, type_map)
             } else {
-                find_receiver_in_expr(expression, offset, type_map)
+                nested()
             }
         }
-        // Recurse into blocks
-        Expression::Block(block) => block
-            .body
-            .iter()
-            .find_map(|s| find_receiver_in_expr(&s.expression, offset, type_map)),
-        _ => None,
+        // Assignments, blocks and every other container: descend.
+        _ => nested(),
     }
 }
+
 /// Adds completions filtered by a known receiver type.
 ///
 /// Returns `true` if completions were added (caller should skip context-based fallback).
@@ -1947,6 +1955,30 @@ mod tests {
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
+    #[test]
+    fn completions_receiver_found_one_space_past_the_token() {
+        // Completion uses the `Trailing` rule: with the cursor one space past the
+        // end of `c` (`c |`), `find_receiver_in_expr` still resolves `c`'s type.
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nc := Counter spawn\nc ";
+        let completions = completions_at(source, Position::new(6, 2));
+        assert!(
+            completions.iter().any(|c| c.label == "increment"),
+            "cursor one past the token should resolve `c` to Counter"
+        );
+    }
+
+    #[test]
+    fn completions_receiver_found_inside_a_tuple_literal() {
+        // Containers are descended into too, and the later element wins when the
+        // earlier one's trailing slack reaches it.
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nc := Counter spawn\nt := {1, c }";
+        let completions = completions_at(source, Position::new(6, 11));
+        assert!(
+            completions.iter().any(|c| c.label == "increment"),
+            "cursor after `c` in a tuple should resolve to Counter"
+        );
+    }
+
     #[test]
     fn completions_dynamic_type_shows_all_methods() {
         // For untyped variables, should fall back to showing all methods

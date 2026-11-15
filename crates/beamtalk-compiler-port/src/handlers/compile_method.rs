@@ -5,7 +5,7 @@
 //! compile that backs the live-image write-surface (IDE save /
 //! `compile:source:` / REPL `>>`).
 
-use beamtalk_etf::{map_get, term_to_bool, term_to_string};
+use beamtalk_etf::{atom, binary_from_str as binary, map_get, term_to_bool, term_to_string};
 use eetf::{Map, Term};
 
 use crate::decode::{
@@ -22,13 +22,129 @@ use crate::respond::{
 
 use super::inline_definitions::derive_class_module_name;
 
+/// A method source resolved against the selector the caller is patching
+/// (BT-4911): the text that was actually parsed, plus that parse's outcome.
+struct ResolvedMethodSource {
+    /// The source that was parsed — `method_source` itself, or (for a bare
+    /// body) with the `selector => ` header synthesised. Diagnostic spans and
+    /// every later stage index into this text.
+    source: String,
+    method: Option<beamtalk_core::ast::MethodDefinition>,
+    diagnostics: Vec<beamtalk_core::source_analysis::Diagnostic>,
+}
+
+/// Resolve `method_source` to exactly one method definition, synthesising the
+/// `selector => ` header for a bare body.
+///
+/// `compile:source:` / MCP `save_method` pass the method BODY only (the
+/// selector travels separately); the IDE save passes a full definition. The
+/// source is tried as given first, so a full definition — comment-led,
+/// class-side, byte-for-byte — never goes through synthesis. Only when it does
+/// not parse AND a `selector` is supplied is the header inserted, after any
+/// leading whitespace/comments (so they round-trip), and the result re-parsed.
+///
+/// When neither form parses, the original's diagnostics are kept if the parser
+/// recovered a method with the requested selector (the header was there, the
+/// body is broken); otherwise the synthesised form's (a broken bare body).
+fn resolve_method_source(method_source: String, selector: Option<&str>) -> ResolvedMethodSource {
+    use beamtalk_core::source_analysis::{lex_with_eof, parse_method};
+
+    let (method, diagnostics) = parse_method(lex_with_eof(&method_source));
+    let selector = selector.filter(|s| !s.is_empty());
+    let needs_header = match selector {
+        Some(selector) if !filter_error_diagnostics(&diagnostics).is_empty() => {
+            // The header was written iff the parser recovered a method for the
+            // requested selector from the original text.
+            method
+                .as_ref()
+                .is_none_or(|m| m.selector.name() != selector)
+        }
+        _ => false,
+    };
+    let Some(selector) = selector.filter(|_| needs_header) else {
+        return ResolvedMethodSource {
+            source: method_source,
+            method,
+            diagnostics,
+        };
+    };
+    let source = with_synthesised_header(&method_source, selector);
+    let (method, diagnostics) = parse_method(lex_with_eof(&source));
+    ResolvedMethodSource {
+        source,
+        method,
+        diagnostics,
+    }
+}
+
+/// Parse `method_source` as exactly one method definition (see
+/// [`resolve_method_source`]), or return a ready error response.
+fn parse_method_source(
+    method_source: String,
+    selector: Option<&str>,
+) -> Result<beamtalk_core::ast::MethodDefinition, Term> {
+    let resolved = resolve_method_source(method_source, selector);
+    let errors = filter_error_diagnostics(&resolved.diagnostics);
+    if !errors.is_empty() {
+        return Err(diagnostic_error_response(&errors, &resolved.source));
+    }
+    resolved.method.ok_or_else(|| {
+        error_response(&["method_source is not a single method definition".to_string()])
+    })
+}
+
+/// Handle a `complete_method_source` request (BT-4911): the method definition
+/// text for `source` patching `selector` — `source` unchanged when it already
+/// carries its header (or no `selector` is given), else with `selector => `
+/// synthesised in front of the body. A pure text transform that shares
+/// [`resolve_method_source`] with `compile_method`, for callers that splice the
+/// text themselves (a protocol provision patch) and so need the complete
+/// definition rather than a compile.
+///
+/// Request fields: `source` (binary), `selector` (binary).
+/// Response: `#{status => ok, source => <<...>>}`; parse problems are NOT
+/// reported here — the caller's own compile/splice step surfaces them.
+pub(crate) fn handle_complete_method_source(request: &Map) -> Term {
+    let Some(source) = map_get(request, "source").and_then(term_to_string) else {
+        return error_response(&["Missing or invalid 'source' field".to_string()]);
+    };
+    let selector = map_get(request, "selector").and_then(term_to_string);
+    let resolved = resolve_method_source(source, selector.as_deref());
+    Term::from(Map::from([
+        (atom("status"), atom("ok")),
+        (atom("source"), binary(&resolved.source)),
+    ]))
+}
+
+/// Insert `selector => ` before the first real token of `source`, keeping any
+/// leading whitespace and `//` / `///` comments in front of it.
+fn with_synthesised_header(source: &str, selector: &str) -> String {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
+    let body_start = tokens
+        .iter()
+        .map(|t| t.span().start() as usize)
+        .next()
+        .map_or(source.len(), |start| start.min(source.len()));
+    let (prefix, body) = source.split_at(body_start);
+    // A comment-only source ending mid-comment (no trailing newline) would
+    // swallow the header onto the comment line: start it on a fresh line.
+    let separator = match prefix.chars().last() {
+        Some(c) if !c.is_whitespace() => "\n",
+        _ => "",
+    };
+    format!("{prefix}{separator}{selector} => {body}")
+}
+
 /// Handle a `compile_method` request — the structured single-method compile that
 /// backs the live-image write-surface (IDE save / `compile:source:` / REPL `>>`).
 ///
 /// Inputs:
 ///   - `class_source`: the current full class definition,
-///   - `method_source`: the BARE method body (comments and all) — NO `Class >>`
-///     prefix and NO header-sniffing,
+///   - `method_source`: a full method definition, or (with `selector`) the BARE
+///     method body (comments and all) — NO `Class >>` prefix,
+///   - `selector` (optional): the selector the caller is patching; when
+///     `method_source` does not parse as a method definition, the
+///     `selector => ` header is synthesised in front of it (BT-4911),
 ///   - `is_class_method`: instance-side vs class-side,
 ///   - plus the usual `module_name` override, `source_path`, and class indexes.
 ///
@@ -75,15 +191,13 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     // so the file's own on-disk aliases stay in scope.
     let pre_loaded_aliases = scope.aliases(session_aliases);
 
-    // 1. Parse the bare method body directly — no `Class >>`, no normalize.
-    let method_tokens = beamtalk_core::source_analysis::lex_with_eof(&method_source);
-    let (parsed_method, method_diags) = beamtalk_core::source_analysis::parse_method(method_tokens);
-    let method_errors = filter_error_diagnostics(&method_diags);
-    if !method_errors.is_empty() {
-        return diagnostic_error_response(&method_errors, &method_source);
-    }
-    let Some(method) = parsed_method else {
-        return error_response(&["method_source is not a single method definition".to_string()]);
+    // 1. Parse the method source standalone. When the caller names the
+    //    `selector` and the source is a bare body (no `selector =>` header),
+    //    the header is synthesised first (BT-4911) — see `parse_method_source`.
+    let selector_hint = map_get(request, "selector").and_then(term_to_string);
+    let method = match parse_method_source(method_source, selector_hint.as_deref()) {
+        Ok(method) => method,
+        Err(resp) => return resp,
     };
 
     // The recorded form + selector come straight from the parsed AST, so the

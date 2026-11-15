@@ -25,7 +25,7 @@ pub use beamtalk_core::ffi_type_specs::{
     load_type_cache_registry, shared_otp_cache_dir, spawn_build_worker_node,
 };
 
-use crate::build_layout::BuildLayout;
+use beamtalk_core::build_layout::BuildLayout;
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use camino::Utf8PathBuf;
 
@@ -94,8 +94,9 @@ pub fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
     }
 
     // Cache directory under the runtime _build to avoid re-extracting specs
-    let cache_dir: Utf8PathBuf = Utf8PathBuf::from_path_buf(runtime_dir.join("_build/type_cache"))
+    let cache_dir: Utf8PathBuf = Utf8PathBuf::from_path_buf(runtime_dir.clone())
         .unwrap_or_else(|p| Utf8PathBuf::from(p.to_string_lossy().as_ref()));
+    let cache_dir = BuildLayout::new(cache_dir).type_cache_dir();
 
     match extract_beam_specs(&beam_files, &cache_dir) {
         Ok(mut registry) => {

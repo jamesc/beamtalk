@@ -25,14 +25,20 @@ Contents:
     offset (hover and the `nav-query` `keyword_selector` kind)
   * `tokenise_send_chain/1`, `tokenise_binary_chain/1` — unary and mixed
     unary/binary send chains
+  * `receiver_literal_class/1` — the class a literal receiver token completes
+    against (`42` → `Integer`, `"hi"` → `String`)
   * `walk_chain/2`, `walk_chain_class/2`, `walk_mixed_chain/2`,
     `walk_mixed_chain_class/2` — follow a chain's declared return types
   * `is_identifier_char/1` — the completion word-boundary rule
+  * `skip_string_literal/1`, `skip_character_literal/1`, `skip_line_comment/1`,
+    `skip_block_comment/1` — lexeme skippers for the hover scanner
 
 These deliberately live beside, not on top of, the Rust compiler's lexer: the
 live REPL resolves against the running image, not an AST
 (`docs/development/surface-parity.md`, `complete` and `hover`). The word
-boundary rule is pinned to the Rust `completion_word_start` by a shared corpus.
+boundary rule, the lexeme skippers, the send-chain tokenisers and receiver-literal
+classification are each pinned to the Rust lexer by a shared corpus (see
+`test/fixtures/`).
 
 Extracted from beamtalk_repl_ops_dev (BT-4706).
 """.
@@ -44,10 +50,15 @@ Extracted from beamtalk_repl_ops_dev (BT-4706).
     keyword_send_at/3,
     tokenise_send_chain/1,
     tokenise_binary_chain/1,
+    receiver_literal_class/1,
     walk_chain/2,
     walk_chain_class/2,
     walk_mixed_chain/2,
-    walk_mixed_chain_class/2
+    walk_mixed_chain_class/2,
+    skip_string_literal/1,
+    skip_character_literal/1,
+    skip_line_comment/1,
+    skip_block_comment/1
 ]).
 
 %% Export internals for white-box testing.
@@ -83,7 +94,7 @@ the rest of the buffer after it. Returns:
                                   (interpolated string, oversized context)
 
 The text is scanned into tokens (strings, character literals and comments are
-skipped atomically by the `beamtalk_repl_eval` lexeme skippers). A newline is a
+skipped atomically by the lexeme skippers below). A newline is a
 statement boundary unless the next line starts with a keyword part — the
 language's own rule for splitting a send across lines. From the hovered keyword
 we walk outward over its bracket level until a statement boundary (newline,
@@ -229,16 +240,16 @@ hover_tokens([$\n | _] = Cs, Len, Total, Acc) ->
 hover_tokens([C | Rest], Len, Total, Acc) when C =:= $\s; C =:= $\t; C =:= $\r ->
     hover_tokens(Rest, Len - 1, Total, Acc);
 hover_tokens([$/, $/ | _] = Cs, _Len, Total, Acc) ->
-    hover_skip(beamtalk_repl_eval:skip_line_comment(Cs), Total, Acc);
+    hover_skip(skip_line_comment(Cs), Total, Acc);
 hover_tokens([$/, $* | _] = Cs, _Len, Total, Acc) ->
-    hover_skip(beamtalk_repl_eval:skip_block_comment(Cs), Total, Acc);
+    hover_skip(skip_block_comment(Cs), Total, Acc);
 hover_tokens([$" | _] = Cs, Len, Total, Acc) ->
-    case beamtalk_repl_eval:skip_string_literal(Cs) of
+    case skip_string_literal(Cs) of
         {ok, Rest} -> hover_push(word, Cs, Len - length(Rest), Len, Total, Acc);
         unsupported -> unsupported
     end;
 hover_tokens([$$ | _] = Cs, Len, Total, Acc) ->
-    Rest = beamtalk_repl_eval:skip_character_literal(Cs),
+    Rest = skip_character_literal(Cs),
     hover_push(word, Cs, Len - length(Rest), Len, Total, Acc);
 hover_tokens([$#, C | _] = Cs, Len, Total, Acc) when C =:= $(; C =:= $[; C =:= ${ ->
     hover_push(open, Cs, 2, Len, Total, Acc);
@@ -650,6 +661,28 @@ parse_binary_hops([Token | Rest]) ->
     end.
 
 -doc """
+The class a literal receiver token completes against, or `undefined`.
+
+A token that starts with a digit is an `Integer` only when the whole token is
+digits (guards against `3.14`, `1e10` and `16rFF` being misread); a token that
+starts with `"` is a `String`; anything else is not a literal this rule
+classifies. Deliberately narrower than the Rust lexer — completion runs on
+half-typed lines — and pinned to it by the shared corpus
+`test/fixtures/completion_receiver_literal_corpus.json`, whose `divergence`
+notes record every case where the two differ on purpose.
+""".
+-spec receiver_literal_class(binary()) -> 'Integer' | 'String' | undefined.
+receiver_literal_class(<<H, _/binary>> = Receiver) when H >= $0, H =< $9 ->
+    case lists:all(fun(C) -> C >= $0 andalso C =< $9 end, binary_to_list(Receiver)) of
+        true -> 'Integer';
+        false -> undefined
+    end;
+receiver_literal_class(<<$", _/binary>>) ->
+    'String';
+receiver_literal_class(_) ->
+    undefined.
+
+-doc """
 Walk an instance-side send chain containing mixed unary and binary hops.
 
 For each `{unary, Sel}` hop: looks up `get_method_return_type(ClassName, Sel)`.
@@ -762,3 +795,207 @@ walk_chain_class(ClassName, [Selector | Rest]) ->
         {error, not_found} ->
             undefined
     end.
+
+%%% Lexeme skippers (conformance-tested against the Rust lexer)
+
+-doc """
+Skips one string literal starting at the opening `"`, returning
+`{ok, Rest}` with the characters immediately after its closing `"`, or
+`unsupported` if the string is malformed beyond what the lexer would accept
+(an interpolation or nested string left unterminated).
+
+Mirrors `lex_string/0` (`source_analysis/lexer.rs`): `""` (doubled delimiter)
+is a literal `"` inside the string, and `\` escapes whatever character
+follows it — including another `\`, a `"`, or a `{` — so that pair is always
+consumed together and never independently reopens/closes the string. An
+unterminated plain string (malformed input that would already have failed
+compilation before reaching here) returns `{ok, []}`.
+
+An unescaped `{` starts a string interpolation, skipped by
+`skip_interpolation_body/1`, a mirror of `lex_interpolation_body` (brace
+depth, nested strings, comments, character literals, backslash pairs, the
+empty `{}` and doubled `{{ … }}` forms). A single BT string token can thus
+contain more than two `"` characters.
+
+Conformance-tested against the real Rust lexer via the shared corpus
+`runtime/apps/beamtalk_workspace/test/fixtures/
+string_and_character_literal_span_corpus.json`, interpolated cases included —
+see
+`beamtalk_repl_editor_context_tests:string_and_character_literal_span_matches_shared_corpus_test/0`
+and `source_analysis::lexer::tests::string_and_character_literal_span_matches_shared_corpus`.
+""".
+-spec skip_string_literal(string()) -> {ok, string()} | unsupported.
+skip_string_literal([$" | Rest]) ->
+    skip_string_literal_body(Rest).
+
+-spec skip_string_literal_body(string()) -> {ok, string()} | unsupported.
+skip_string_literal_body([]) ->
+    {ok, []};
+skip_string_literal_body([${ | Rest]) ->
+    case skip_interpolation_body(Rest) of
+        {ok, After} -> skip_string_literal_body(After);
+        unsupported -> unsupported
+    end;
+skip_string_literal_body([$", $" | Rest]) ->
+    skip_string_literal_body(Rest);
+skip_string_literal_body([$" | Rest]) ->
+    {ok, Rest};
+skip_string_literal_body([$\\, _Escaped | Rest]) ->
+    skip_string_literal_body(Rest);
+skip_string_literal_body([$\\]) ->
+    {ok, []};
+skip_string_literal_body([_ | Rest]) ->
+    skip_string_literal_body(Rest).
+
+%% Mirror of `lex_interpolation_body` (`source_analysis/lexer.rs`): `Chars`
+%% starts just after the interpolation's opening `{`; returns the characters
+%% after its matching `}`. Unterminated input is `unsupported`.
+-spec skip_interpolation_body(string()) -> {ok, string()} | unsupported.
+skip_interpolation_body([${ | _] = Chars) ->
+    %% Doubled `{{`: `skip_doubled_braces` consumes to the matching depth-0
+    %% `}` counting only braces (no strings or comments).
+    skip_doubled_braces(Chars, 1);
+skip_interpolation_body(Chars) ->
+    case lists:dropwhile(fun(C) -> lists:member(C, " \t\r\n") end, Chars) of
+        [$} | Rest] ->
+            %% Empty `{}` (whitespace only): the lexer reports an error token
+            %% but its extent still ends at this `}`.
+            {ok, Rest};
+        _ ->
+            skip_interpolation_chars(Chars, 1)
+    end.
+
+-spec skip_doubled_braces(string(), non_neg_integer()) -> {ok, string()} | unsupported.
+skip_doubled_braces(Rest, 0) -> {ok, Rest};
+skip_doubled_braces([], _Depth) -> unsupported;
+skip_doubled_braces([${ | Rest], Depth) -> skip_doubled_braces(Rest, Depth + 1);
+skip_doubled_braces([$} | Rest], Depth) -> skip_doubled_braces(Rest, Depth - 1);
+skip_doubled_braces([_ | Rest], Depth) -> skip_doubled_braces(Rest, Depth).
+
+-spec skip_interpolation_chars(string(), pos_integer()) -> {ok, string()} | unsupported.
+skip_interpolation_chars([], _Depth) ->
+    unsupported;
+skip_interpolation_chars([$" | Rest], Depth) ->
+    case skip_nested_string(Rest) of
+        {ok, After} -> skip_interpolation_chars(After, Depth);
+        unsupported -> unsupported
+    end;
+skip_interpolation_chars([${ | Rest], Depth) ->
+    skip_interpolation_chars(Rest, Depth + 1);
+skip_interpolation_chars([$/, $/ | _] = Chars, Depth) ->
+    skip_interpolation_chars(skip_line_comment(Chars), Depth);
+skip_interpolation_chars([$/, $* | _] = Chars, Depth) ->
+    case skip_block_comment_terminated(Chars) of
+        {ok, After} -> skip_interpolation_chars(After, Depth);
+        unsupported -> unsupported
+    end;
+skip_interpolation_chars([$$ | _] = Chars, Depth) ->
+    skip_interpolation_chars(skip_character_literal(Chars), Depth);
+skip_interpolation_chars([$} | Rest], 1) ->
+    {ok, Rest};
+skip_interpolation_chars([$} | Rest], Depth) ->
+    skip_interpolation_chars(Rest, Depth - 1);
+skip_interpolation_chars([$\\, _ | Rest], Depth) ->
+    skip_interpolation_chars(Rest, Depth);
+skip_interpolation_chars([_ | Rest], Depth) ->
+    skip_interpolation_chars(Rest, Depth).
+
+%% Mirror of `skip_nested_string` (`source_analysis/lexer.rs`): `Chars` starts
+%% just after the nested string's opening `"`. EOF before the closing quote is
+%% `unsupported` (the lexer treats that `"` as the outer string's close and
+%% reports an error).
+-spec skip_nested_string(string()) -> {ok, string()} | unsupported.
+skip_nested_string([]) -> unsupported;
+skip_nested_string([$", $" | Rest]) -> skip_nested_string(Rest);
+skip_nested_string([$" | Rest]) -> {ok, Rest};
+skip_nested_string([$\\, _ | Rest]) -> skip_nested_string(Rest);
+skip_nested_string([_ | Rest]) -> skip_nested_string(Rest).
+
+%% A `/* ... */` comment that must be terminated (inside an interpolation the
+%% lexer treats EOF there as incomplete input).
+-spec skip_block_comment_terminated(string()) -> {ok, string()} | unsupported.
+skip_block_comment_terminated([$/, $* | Rest]) -> block_comment_end(Rest).
+
+-spec block_comment_end(string()) -> {ok, string()} | unsupported.
+block_comment_end([]) -> unsupported;
+block_comment_end([$*, $/ | Rest]) -> {ok, Rest};
+block_comment_end([_ | Rest]) -> block_comment_end(Rest).
+
+-doc """
+Skips one character literal starting at `$`, returning the characters
+immediately after its single payload character.
+
+Mirrors `lex_character/0` (`source_analysis/lexer.rs`) exactly: `$x` (any
+payload character, including `(`, `"`, `.`, another `$`, ...) or `$\x` (an
+escaped payload — `$\n`, `$\(`, ...) is consumed atomically as one token,
+never letting the payload be read as bracket/quote/period syntax. A `$`
+with no payload (malformed/truncated input) returns `[]`.
+""".
+-spec skip_character_literal(string()) -> string().
+skip_character_literal([$$, $\\, _Escaped | Rest]) ->
+    Rest;
+skip_character_literal([$$, _Payload | Rest]) ->
+    Rest;
+skip_character_literal([$$]) ->
+    [].
+
+-doc """
+Skips one `//...` line comment starting at the opening `//`, returning the
+characters from (and including) the terminating `\n`, or `[]` if the
+comment runs to end of input.
+
+Mirrors `lex_line_comment/0` (`source_analysis/lexer.rs`): the comment body
+is everything up to but not including the next `\n`, consumed atomically
+so a `.`, bracket, or `"` inside it is never read as real code. The `\n`
+itself is left in `Rest` so the caller's own newline-boundary check
+(a caller's own newline-boundary check) still applies to
+it exactly as if the comment weren't there. A `///` doc comment shares this
+same span rule (only its semantics differ, not its termination), so this
+also handles doc comments correctly without a separate clause.
+
+Conformance-tested against the real Rust lexer via the shared corpus
+`runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json` —
+see `beamtalk_repl_editor_context_tests:comment_span_matches_shared_corpus_test/0` and
+`source_analysis::lexer::tests::comment_span_matches_shared_corpus`.
+""".
+-spec skip_line_comment(string()) -> string().
+skip_line_comment([$/, $/ | Rest]) ->
+    skip_line_comment_body(Rest).
+
+-spec skip_line_comment_body(string()) -> string().
+skip_line_comment_body([]) ->
+    [];
+skip_line_comment_body([$\n | _] = Chars) ->
+    Chars;
+skip_line_comment_body([_ | Rest]) ->
+    skip_line_comment_body(Rest).
+
+-doc """
+Skips one `/* ... */` block comment starting at the opening `/*`, returning
+the characters immediately after its closing `*/`, or `[]` if the comment
+is unterminated (runs to end of input).
+
+Mirrors `lex_block_comment/0` (`source_analysis/lexer.rs`): the whole span,
+delimiters included, is consumed atomically, so a `.`, bracket, or `"`
+inside it is never read as real code. An unterminated block comment is a
+lex-time error in the real compiler (this caller never reaches a
+comment that would fail to compile in practice) but is still consumed
+harmlessly to end of input here, following the module's policy of never
+raising on malformed input.
+
+Conformance-tested against the real Rust lexer via the shared corpus
+`runtime/apps/beamtalk_workspace/test/fixtures/comment_span_corpus.json` —
+see `beamtalk_repl_editor_context_tests:comment_span_matches_shared_corpus_test/0` and
+`source_analysis::lexer::tests::comment_span_matches_shared_corpus`.
+""".
+-spec skip_block_comment(string()) -> string().
+skip_block_comment([$/, $* | Rest]) ->
+    skip_block_comment_body(Rest).
+
+-spec skip_block_comment_body(string()) -> string().
+skip_block_comment_body([]) ->
+    [];
+skip_block_comment_body([$*, $/ | Rest]) ->
+    Rest;
+skip_block_comment_body([_ | Rest]) ->
+    skip_block_comment_body(Rest).

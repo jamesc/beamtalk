@@ -161,6 +161,7 @@ mod runtime_export_contract_tests;
 pub mod selector_mangler;
 mod sequencing;
 mod spec_codegen;
+mod statement_kinds;
 mod supervisor_codegen;
 mod synced_call;
 mod threaded_expr;

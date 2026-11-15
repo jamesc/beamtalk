@@ -276,8 +276,7 @@ impl CoreErlangGenerator {
         stmts: &mut Vec<ThreadedStmt>,
         write_of: &dyn Fn(&str) -> LocalWrite,
     ) -> Result<(String, bool)> {
-        // The right-hand side is sequenced first, as
-        // `generate_destructure_bindings_sequenced` sequences it: its prelude
+        // The right-hand side is sequenced first (`thread_ahead`): its prelude
         // may rebind a name the pattern binds (a producer writing `w` in
         // `#(w, _) := #(<loop writing w>, 0)`), so each name's direct-rebind
         // source is read after it, as `lower_direct_var_update_in_loop_bind`

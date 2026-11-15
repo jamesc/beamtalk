@@ -988,7 +988,7 @@ server_api_test_() ->
     ]}.
 
 api_compile_expression() ->
-    {ok, Core, []} = beamtalk_compiler_server:compile_expression(<<"1 + 2">>, <<"m">>, []),
+    {ok, Core, [], _} = beamtalk_compiler_server:compile_expression(<<"1 + 2">>, <<"m">>, []),
     ?assert(binary:match(Core, <<"'erlang':'+'">>) =/= nomatch).
 
 %% BT-4449: the real port's warning shape, end to end through the Erlang
@@ -996,7 +996,7 @@ api_compile_expression() ->
 %% key. Pins the Rust `respond::build_warning_terms` shape against
 %% `beamtalk_compiler_port:warning()`.
 api_compile_expression_warning_hint() ->
-    {ok, _Core, Warnings} =
+    {ok, _Core, Warnings, _} =
         beamtalk_compiler_server:compile_expression(<<"\"abc\" sizee">>, <<"m">>, []),
     ?assertMatch(
         [#{message := _, hint := <<"Did you mean 'size'?">>}],
@@ -1006,18 +1006,18 @@ api_compile_expression_warning_hint() ->
 
 api_compile_expression_opts() ->
     Options = #{class_module_index => #{<<"Counter">> => <<"bt@app@counter">>}},
-    {ok, Core, _} =
+    {ok, Core, _, _} =
         beamtalk_compiler_server:compile_expression(<<"1 + 2">>, <<"m">>, [], Options),
     ?assert(is_binary(Core)).
 
 api_compile_trace() ->
-    {ok, Core, []} =
+    {ok, Core, [], _} =
         beamtalk_compiler_server:compile_expression_trace(<<"1 + 2">>, <<"m">>, []),
     ?assert(is_binary(Core)).
 
 api_compile_trace_opts() ->
     Options = #{class_hierarchy => #{'Counter' => #{superclass => 'Object'}}},
-    {ok, Core, _} =
+    {ok, Core, _, _} =
         beamtalk_compiler_server:compile_expression_trace(<<"1 + 2">>, <<"m">>, [], Options),
     ?assert(is_binary(Core)).
 
@@ -1159,11 +1159,7 @@ api_resolve_method_span() ->
     ?assertEqual(Prev, binary:part(Source, Start, End - Start)).
 
 start_compiler() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end.
+    beamtalk_test_boot:compiler().
 
 stop_compiler(_) ->
     ok.

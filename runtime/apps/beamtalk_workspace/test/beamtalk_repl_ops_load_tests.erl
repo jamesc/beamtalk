@@ -1345,11 +1345,7 @@ with_root_package(Value, Fun) ->
 %% here — mirrors beamtalk_compiler_tests's own setup/teardown convention of
 %% leaving the app started for the rest of the shared EUnit node.
 ensure_compiler_started() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end.
+    beamtalk_test_boot:compiler().
 
 relative_bt_path_root_test() ->
     Dir = filename:absname(make_temp_dir()),
@@ -1529,11 +1525,7 @@ module_atom_casing_parity_test_() ->
     {setup, fun parity_setup/0, fun parity_teardown/1, fun parity_assert/1}.
 
 parity_setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
     Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Proj =
@@ -1545,10 +1537,7 @@ parity_setup() ->
     ),
     %% A workspace_meta with a real project_path so compute_package_module_name/1
     %% derives the package-qualified module atom on load.
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     {ok, _} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"ops_parity_ws">>,
         project_path => list_to_binary(Proj),
@@ -1557,10 +1546,7 @@ parity_setup() ->
     Proj.
 
 parity_teardown(Proj) ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     %% NB: only stop beamtalk_compiler here. Do NOT stop beamtalk_runtime — it is
     %% a shared OTP application other tests in this EUnit node rely on being up
     %% (e.g. beamtalk_repl_server_tests' ranch listener, beamtalk_workspace_sup_tests).
@@ -1977,11 +1963,7 @@ save_native_source_requires_source_test() ->
 %%====================================================================
 
 setup_project_class(ClassName, Src) ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
     Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Proj = Tmp ++ "/bt_section_" ++ beamtalk_test_unique:id(),
@@ -1993,10 +1975,7 @@ setup_project_class(ClassName, Src) ->
     ok = filelib:ensure_dir(filename:join(SrcDir, "anchor")),
     Path = filename:join(SrcDir, atom_to_list(ClassName) ++ ".bt"),
     ok = file:write_file(Path, Src),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     {ok, _} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"section_ws">>,
         project_path => list_to_binary(Proj),
@@ -2017,10 +1996,7 @@ setup_project_class(ClassName, Src) ->
     {Proj, Path}.
 
 teardown_project_class(Proj) ->
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     rm_temp_dir(Proj).
 
 save_section_renames_existing_divider_test() ->
