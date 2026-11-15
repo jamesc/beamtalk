@@ -254,12 +254,14 @@ its text (a user `printString` answering `3.14` is an `object`, not a
 
 The tag names the kind of the *value*, not the text `term_to_json/1` produced:
 `string`, `integer`, `float`, `boolean`, `nil`, `symbol`, `character`, `list`,
-`block`, `actor`, `future`, `class`, `error`, `object`. The set is open: a
+`block`, `actor`, `future`, `class`, `error`, `object` (a tagged value
+object). Shapes with no useful tag (plain Dictionary, tuple, bitstring) answer
+`undefined` and the field is omitted. The set is open: a
 client treats an unknown tag as absent and falls back to its heuristic.
 Element types inside a `list` are not tagged (they would change the shape of
 `value`).
 """.
--spec value_type(term()) -> binary().
+-spec value_type(term()) -> binary() | undefined.
 value_type(nil) ->
     <<"nil">>;
 value_type(Value) when is_boolean(Value) -> <<"boolean">>;
@@ -304,8 +306,17 @@ value_type(#beamtalk_object{class = Class}) ->
     end;
 value_type({beamtalk_supervisor, _, _, _}) ->
     <<"actor">>;
+value_type(Value) when is_map(Value) ->
+    %% Only tagged value objects (user classes, which `term_to_json/1`
+    %% renders through their `printString`) are `object`. A plain Dictionary
+    %% and the remaining shapes (tuples, bitstrings) are left untagged so the
+    %% client keeps colouring their text as before.
+    case beamtalk_runtime_api:tagged_map_class_of(Value) of
+        undefined -> undefined;
+        _ -> <<"object">>
+    end;
 value_type(_) ->
-    <<"object">>.
+    undefined.
 
 -doc """
 Render an element nested inside a List (BT-4203).

@@ -175,6 +175,25 @@ fn literal(arg: &str) -> Option<String> {
     is_kind(inner).then(|| inner.to_string())
 }
 
+/// The source up to its trailing inline `#[cfg(test)] mod tests { .. }` block.
+///
+/// `#[cfg(test)]` also marks single items and out-of-line `mod x;`
+/// declarations in the middle of a file, so cutting at the first marker would
+/// silently skip everything after it; only an inline test module is a cut.
+fn non_test_source(src: &str) -> &str {
+    const MARKER: &str = "#[cfg(test)]\n";
+    let mut from = 0;
+    while let Some(rel) = src[from..].find(MARKER) {
+        let at = from + rel;
+        let next_line = src[at + MARKER.len()..].lines().next().unwrap_or("");
+        if next_line.trim_start().starts_with("mod ") && next_line.trim_end().ends_with('{') {
+            return &src[..at];
+        }
+        from = at + MARKER.len();
+    }
+    src
+}
+
 /// Kinds emitted by non-test codegen source.
 fn emitted_kinds() -> BTreeSet<String> {
     let mut files = Vec::new();
@@ -182,8 +201,7 @@ fn emitted_kinds() -> BTreeSet<String> {
     let mut kinds = BTreeSet::new();
     for file in files {
         let src = fs::read_to_string(&file).expect("read source");
-        // Drop the `#[cfg(test)]` tail so test-only fixtures are not scanned.
-        let src = src.split("#[cfg(test)]").next().expect("split");
+        let src = non_test_source(&src);
         for (idx, _) in src.match_indices("beamtalk_error_doc(") {
             // Skip the definition itself (`fn beamtalk_error_doc(`) and docs.
             if src[..idx].ends_with("fn ") || src[..idx].ends_with("//! ") {
@@ -191,6 +209,16 @@ fn emitted_kinds() -> BTreeSet<String> {
             }
             let open = idx + "beamtalk_error_doc".len();
             if let Some(kind) = string_literal_arg(src, open, 5) {
+                kinds.insert(kind);
+            }
+        }
+        // `primitives::build_error_doc(kind, ..)` takes the kind first.
+        for (idx, _) in src.match_indices("build_error_doc(") {
+            if src[..idx].ends_with("fn ") {
+                continue;
+            }
+            let open = idx + "build_error_doc".len();
+            if let Some(kind) = string_literal_arg(src, open, 0) {
                 kinds.insert(kind);
             }
         }
@@ -224,7 +252,15 @@ fn unknown_in(label: &str, kinds: &BTreeSet<String>) -> Vec<String> {
 fn scanners_find_the_known_anchors() {
     // Guard against a scanner silently matching nothing.
     let emitted = emitted_kinds();
-    for k in ["user_error", "stateful_block_dispatch", "pattern_mismatch"] {
+    // `user_error` and `class_not_found` are emitted after a mid-file
+    // `#[cfg(test)]` item; `empty_collection` goes through `build_error_doc`.
+    for k in [
+        "user_error",
+        "class_not_found",
+        "empty_collection",
+        "stateful_block_dispatch",
+        "pattern_mismatch",
+    ] {
         assert!(
             emitted.contains(k),
             "emitted-kind scan missed `{k}`: {emitted:?}"

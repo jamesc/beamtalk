@@ -1039,5 +1039,6 @@ value_type_error_and_object_test() ->
     ?assertEqual(
         <<"error">>, beamtalk_repl_json:value_type(beamtalk_error:new(type_error, 'Integer'))
     ),
-    ?assertEqual(<<"object">>, beamtalk_repl_json:value_type(#{a => 1})),
-    ?assertEqual(<<"object">>, beamtalk_repl_json:value_type({1, 2})).
+    %% Untagged shapes carry no tag: the client keeps its text heuristic.
+    ?assertEqual(undefined, beamtalk_repl_json:value_type(#{a => 1})),
+    ?assertEqual(undefined, beamtalk_repl_json:value_type({1, 2})).
