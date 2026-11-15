@@ -561,9 +561,11 @@ Returns `not_found` when no registered class has this module, not an error —
 callers should fall back to the string heuristic in that case, exactly as
 `beamtalk_workspace_project_sync:module_to_class_name_map/0` already does in bulk.
 
-O(1): a lookup in `module_to_class_map/0`, which is memoised in
+A lookup in `module_to_class_map/0`, which is memoised in
 `beamtalk_class_derived_cache` and rebuilt (one ETS fold) only after a class
-write flushes it. Calling this once per module in a loop is therefore cheap.
+write flushes it: no fold per call, but the cache read copies the whole map
+(one entry per loaded class) onto the caller's heap. To resolve many modules
+at once, fetch the map once with `module_to_class_map/0`.
 """.
 -spec class_name_for_module(atom()) -> {ok, class_name()} | not_found.
 class_name_for_module(Module) when is_atom(Module) ->

@@ -987,8 +987,9 @@ supervisor_callback_module(Pid) ->
 %% registry, or `nil` for a non-Beamtalk (foreign) module. Reliable: it matches
 %% the registry's recorded module, never reconstructs the name from text.
 %%
-%% `beamtalk_class_registry:class_name_for_module/1` is an ETS read of a
-%% memoised module->class map: no `gen_server:call` to a class process (this
+%% `beamtalk_class_registry:class_name_for_module/1` reads a memoised
+%% module->class map (one ETS read that copies the map, no fold): no
+%% `gen_server:call` to a class process (this
 %% can run inside one, where such calls deadlock two classes against each
 %% other, BT-3820) and no per-call scan of every loaded class, however many
 %% supervisor-looking pids a snapshot walk meets (the fan-out BT-3605 hit
