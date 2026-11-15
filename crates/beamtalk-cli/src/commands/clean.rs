@@ -25,9 +25,9 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use tracing::{debug, info};
 
-use super::build_layout::BuildLayout;
 use super::util::find_project_root;
 use beamtalk_cli::path_util::is_symlink;
+use beamtalk_core::build_layout::BuildLayout;
 
 /// What `clean` is allowed to remove.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

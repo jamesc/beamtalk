@@ -13,9 +13,9 @@
 
 use crate::commands::OutputFormat;
 use crate::commands::build::collect_source_files_from_dir;
-use beamtalk_cli::lint_pipeline::{self, DependencyMetadata};
 use beamtalk_core::semantic_analysis::CoverageReport;
 use beamtalk_language_service::{ByteOffset, Position};
+use beamtalk_package::lint_pipeline::{self, DependencyMetadata};
 use beamtalk_project::package;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{IntoDiagnostic, Result};
@@ -56,7 +56,7 @@ pub fn run(
         Some(project_root) => super::lint::merge_dependency_infos(project_root),
         None => (Vec::new(), DependencyMetadata::default()),
     };
-    let native_type_registry = beamtalk_cli::ffi_type_registry::lint_type_registry(
+    let native_type_registry = beamtalk_package::ffi_type_registry::lint_type_registry(
         sources.package_root.as_deref(),
         &source_files,
         &dependency_stubs,
@@ -715,7 +715,7 @@ mod tests {
         // Live extraction needs OTP `.beam` files on disk; skip rather than
         // false-fail where they are not discoverable (e.g. a sandbox).
         let pkg_root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
-        let probe = beamtalk_cli::ffi_type_registry::lint_type_registry(
+        let probe = beamtalk_package::ffi_type_registry::lint_type_registry(
             Some(&pkg_root),
             &[root.join("handles.bt")],
             &[],
@@ -781,7 +781,7 @@ mod tests {
         // the fresh fast path instead of an `erlc` compile (as lint's
         // dependency tests do).
         let consumer_root = Utf8PathBuf::from_path_buf(consumer_dir).unwrap();
-        let layout = crate::commands::build_layout::BuildLayout::new(&consumer_root);
+        let layout = beamtalk_core::build_layout::BuildLayout::new(&consumer_root);
         let ebin_dir = layout.dep_ebin_dir("producer");
         fs::create_dir_all(&ebin_dir).unwrap();
         fs::write(ebin_dir.join("bt@producer@producer.beam"), b"BEAM").unwrap();

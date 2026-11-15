@@ -32,6 +32,7 @@ use super::startup_command::{build_detached_node_command, write_cookie_args_file
 
 use crate::beam_compiler::escape_erlang_string;
 use crate::commands::protocol::ProtocolClient;
+use beamtalk_repl_protocol::RequestBuilder;
 use miette::{Result, miette};
 
 /// Default idle timeout in seconds (4 hours)
@@ -512,7 +513,7 @@ fn wait_for_tcp_ready(
     // restart, WS handler not yet registered, scheduler jitter). Fast
     // initial probes catch quick readiness; slower later probes avoid
     // busy-spinning while cowboy finishes route registration.
-    let request = serde_json::json!({"op": "health"});
+    let request = RequestBuilder::health();
     // Remember the most recent WS-level failure so the final timeout error can name
     // the actual cause (auth/session error, handshake rejection, read timeout)
     // instead of the opaque "health check failed". Without this the recurring

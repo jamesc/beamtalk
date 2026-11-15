@@ -35,7 +35,7 @@ use super::storage::{
 /// never turn into a hard error here.
 fn project_fingerprint(project_path: &Path) -> Option<String> {
     let utf8_path = camino::Utf8Path::from_path(project_path)?;
-    beamtalk_cli::manifest::find_manifest(utf8_path)
+    beamtalk_package::manifest::find_manifest(utf8_path)
         .ok()
         .flatten()
         .map(|manifest| manifest.name)

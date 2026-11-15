@@ -30,9 +30,9 @@ use ecow::EcoString;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::commands::util::{
-    alias_surface_value, extension_surface_value, protocol_surface_value, sha256_hex,
-    signature_only_class_info,
+    alias_surface_value, extension_surface_value, protocol_surface_value, signature_only_class_info,
 };
+use beamtalk_package::content_hash::sha256_hex;
 
 /// What a name hashes to when nothing on the surface carries it.
 const ABSENT: &str = "absent";

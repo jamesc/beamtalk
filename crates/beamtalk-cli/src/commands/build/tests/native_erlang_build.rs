@@ -4,7 +4,7 @@
 //! ADR 0072 Phase 1: native Erlang compilation during build, and native-module collision detection across the root package and its dependencies.
 
 use super::*;
-use crate::commands::build_layout::BuildLayout;
+use beamtalk_core::build_layout::BuildLayout;
 
 #[test]
 fn test_rebar3_path_returns_bundled_when_exists() {
@@ -236,7 +236,7 @@ fn test_collision_between_root_and_dependency() {
         is_direct: true,
         via_chain: Vec::new(),
         stubs_dir: None,
-        extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
+        extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(),
     }];
 
     let result = check_native_module_collisions(&project_path, "root_pkg", &deps);
@@ -303,7 +303,7 @@ fn test_collision_between_two_dependencies() {
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
-            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
+            extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(),
         },
         super::super::super::deps::path::ResolvedDependency {
             name: "dep_b".to_string(),
@@ -318,7 +318,7 @@ fn test_collision_between_two_dependencies() {
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
-            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
+            extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(),
         },
     ];
 
@@ -382,7 +382,7 @@ fn test_no_collision_different_native_modules() {
         is_direct: true,
         via_chain: Vec::new(),
         stubs_dir: None,
-        extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
+        extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(),
     }];
 
     let result = check_native_module_collisions(&project_path, "root_pkg", &deps);

@@ -16,7 +16,7 @@ use miette::{Context, Result};
 use std::collections::BTreeMap;
 use tracing::{debug, info};
 
-use crate::commands::manifest::{self, ParsedManifest};
+use beamtalk_package::manifest::{self, ParsedManifest};
 
 use super::lockfile::{LockEntry, Lockfile, RegistryVersion};
 use super::registry::{self, RegistryLocation};
@@ -1144,7 +1144,7 @@ dep_pkg = {{ path = "{dep_str}" }}"#
             "fixture must compile the unrelated `zulu` before `app_lib`"
         );
 
-        let layout = crate::commands::build_layout::BuildLayout::new(&root);
+        let layout = beamtalk_core::build_layout::BuildLayout::new(&root);
         let ebin = layout.dep_ebin_dir("app_lib");
         let app = fs::read_to_string(ebin.join("app_lib.app")).unwrap();
         assert!(
@@ -1177,7 +1177,7 @@ dep_pkg = {{ path = "{dep_str}" }}"#
         let options = beamtalk_core::CompilerOptions::default();
         resolve_dependency_graph(&root, &options).unwrap();
 
-        let layout = crate::commands::build_layout::BuildLayout::new(&root);
+        let layout = beamtalk_core::build_layout::BuildLayout::new(&root);
         let mut all_entries = Vec::new();
         for (dep, expected) in [
             ("zulu", "Handler"),
@@ -1307,7 +1307,7 @@ my_git_dep = {{ git = "{url}", tag = "v1.0.0" }}"#
         let options = beamtalk_core::CompilerOptions::default();
 
         // _build/deps should NOT exist yet
-        let test_layout = crate::commands::build_layout::BuildLayout::new(&root_path);
+        let test_layout = beamtalk_core::build_layout::BuildLayout::new(&root_path);
         let deps_dir = test_layout.deps_dir();
         assert!(
             !deps_dir.exists(),
@@ -1461,7 +1461,7 @@ middle = {{ path = "{middle_str}" }}"#
         );
 
         // The package was fetched into the usual dep checkout directory.
-        let layout = crate::commands::build_layout::BuildLayout::new(&root_path);
+        let layout = beamtalk_core::build_layout::BuildLayout::new(&root_path);
         assert!(
             layout
                 .dep_checkout_dir("my_pkg")
@@ -1594,7 +1594,7 @@ middle = {{ path = "{middle_str}" }}"#
         let options = beamtalk_core::CompilerOptions::default();
 
         resolve_dependency_graph(&root_path, &options).unwrap();
-        let checkout_manifest = crate::commands::build_layout::BuildLayout::new(&root_path)
+        let checkout_manifest = beamtalk_core::build_layout::BuildLayout::new(&root_path)
             .dep_checkout_dir("my_pkg")
             .join("beamtalk.toml");
         assert!(
@@ -1831,7 +1831,7 @@ middle = {{ path = "{middle_str}" }}"#
         // the lockfile bookkeeping: repo B's MARKER file must be present
         // with repo B's content (repo A has no MARKER file at all).
         let checkout_dir =
-            crate::commands::build_layout::BuildLayout::new(&root_path).dep_checkout_dir("my_pkg");
+            beamtalk_core::build_layout::BuildLayout::new(&root_path).dep_checkout_dir("my_pkg");
         assert!(fs::read_to_string(checkout_dir.join("beamtalk.toml")).is_ok());
         let marker = fs::read_to_string(checkout_dir.join("MARKER"))
             .expect("checkout must come from repo B, which has a MARKER file");

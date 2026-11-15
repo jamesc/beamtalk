@@ -9,7 +9,7 @@
 //! it returns, so tests are safe to run in parallel.
 
 use assert_cmd::Command;
-use beamtalk_cli::pid_liveness::is_process_alive;
+use beamtalk_workspace::pid_liveness::is_process_alive;
 use std::cell::OnceCell;
 use std::path::{Path, PathBuf};
 use std::sync::Once;

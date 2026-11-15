@@ -284,7 +284,7 @@ impl BeamCompiler {
         // -mode minimal: only loads kernel+stdlib, skips scanning other -pa dirs at boot
         // -boot no_dot_erlang: skips .erlang config file
         debug!("Spawning BEAM node with beamtalk_build_worker");
-        let mut child = spawn_build_worker_node(&pa_args)
+        let mut child = beamtalk_package::native_type_specs::spawn_build_worker_node(&pa_args)
             .wrap_err("Failed to start BEAM node for compilation.\nIs Erlang/OTP installed?")?;
 
         // From here, the protocol is identical to the escript backend
@@ -650,17 +650,6 @@ pub fn write_core_erlang_with_source(
 
     write_core_erlang_bytes(&core_erlang, output_path)
 }
-
-// OTP/dependency Erlang type-spec extraction lives in the
-// `beamtalk_cli` lib crate so `beamtalk-mcp` can share it — mirrors
-// where `dependency_classes`/`build_layout`/`manifest` also live.
-// Re-exported here so existing `beam_compiler::X` references
-// throughout this crate keep working unchanged.
-pub use beamtalk_cli::native_type_specs::{
-    OtpDiscovery, current_spec_mapping_stamp, discover_dependency_beam_files,
-    discover_otp_beam_files, discover_otp_version, extract_beam_specs, extract_beam_specs_tiered,
-    load_type_cache_registry, shared_otp_cache_dir, spawn_build_worker_node,
-};
 
 #[cfg(test)]
 mod tests {
