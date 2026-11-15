@@ -18,6 +18,7 @@ use super::super::threaded_ir::{
     ThreadedValue, ValueRef, VersionPrefix, VersionedVar, build_family_construct_tuple,
     build_family_local_threading_prelude,
 };
+use super::super::threaded_rebind::{RebindLayout, RebindNaming};
 use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -209,9 +210,7 @@ impl CoreErlangGenerator {
                     if self.expr_yields_vt_threaded_tuple(value) {
                         self.emit_vt_threaded_local_assignment(&id.name, value, &mut parts)?;
                     } else {
-                        let core_var = self
-                            .lookup_var(&id.name)
-                            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                        let core_var = self.resolve_local_core_var(&id.name);
                         let val_doc = self.expression_doc(value)?;
                         parts.push(docvec![
                             "let ",
@@ -947,20 +946,13 @@ impl CoreErlangGenerator {
                 leaf::var(tuple_var.clone()),
                 ") in ",
             ]);
-            for var in &threaded_vars {
-                let core_var = self
-                    .lookup_var(var)
-                    .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                docs.push(docvec![
-                    "let ",
-                    leaf::var(core_var),
-                    " = call 'maps':'get'(",
-                    leaf::atom(Self::local_state_key(var)),
-                    ", ",
-                    leaf::var(state_var.clone()),
-                    ") in ",
-                ]);
-            }
+            docs.extend(self.rebind_threaded_locals(
+                &threaded_vars,
+                |_, v| Self::local_state_key(v),
+                &state_var,
+                RebindNaming::ReuseBound,
+                RebindLayout::Inline,
+            ));
         }
         if let Some(rebind_doc) = self.extract_vt_loop_family_slot(&tuple_var, &families, span) {
             docs.push(rebind_doc);
@@ -1051,9 +1043,7 @@ impl CoreErlangGenerator {
                 if let Expression::Assignment { target, value, .. } = body_expr
                     && let Expression::Identifier(id) = target.as_ref()
                 {
-                    let core_var = self
-                        .lookup_var(&id.name)
-                        .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                    let core_var = self.resolve_local_core_var(&id.name);
                     // ADR 0118 phase 5b: a class-method
                     // self-send on the RHS (`x := self bump`), at any
                     // nesting depth, threads as a real prelude via
@@ -1171,10 +1161,7 @@ impl CoreErlangGenerator {
         all_mutations
             .iter()
             .map(|var| {
-                let core_var = cg
-                    .lookup_var(var)
-                    .cloned()
-                    .unwrap_or_else(|| Self::to_core_erlang_var(var));
+                let core_var = cg.resolve_local_core_var(var);
                 leaf::var(core_var)
             })
             .collect()

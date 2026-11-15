@@ -19,7 +19,7 @@ Validates output matches #Pid<>/#Port<>/#Ref<> patterns.
 
 pid_to_string_returns_binary_test() ->
     Result = beamtalk_opaque_ops:pid_to_string(self()),
-    ?assert(is_binary(Result)).
+    ?assertEqual(list_to_binary("#Pid" ++ pid_to_list(self())), Result).
 
 pid_to_string_has_pid_prefix_test() ->
     Result = beamtalk_opaque_ops:pid_to_string(self()),
@@ -67,7 +67,7 @@ port_to_string_ends_with_closing_bracket_test() ->
 ref_to_string_returns_binary_test() ->
     Ref = make_ref(),
     Result = beamtalk_opaque_ops:ref_to_string(Ref),
-    ?assert(is_binary(Result)).
+    ?assertEqual(list_to_binary(ref_to_list(Ref)), Result).
 
 ref_to_string_has_ref_prefix_test() ->
     Ref = make_ref(),

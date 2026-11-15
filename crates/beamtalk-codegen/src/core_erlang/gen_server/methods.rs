@@ -11,6 +11,7 @@
 use super::super::method_frame::{MethodBoundary, MethodFrame};
 use super::super::sequencing::PrecompiledScope;
 use super::super::statement_kinds::{StmtCx, StmtTail};
+use super::super::threaded_rebind::{RebindLayout, RebindNaming};
 use super::super::{CodeGenError, CoreErlangGenerator, Result, threaded_ir};
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
@@ -1168,20 +1169,13 @@ impl CoreErlangGenerator {
                     producer.is_none() && !self.inline_producer_construct(value.unwrap_parens())
                 })
             {
-                for var in &threaded_vars {
-                    let tv_core = self
-                        .lookup_var(var)
-                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                    doc_parts.push(docvec![
-                        "let ",
-                        leaf::var(tv_core),
-                        " = call 'maps':'get'(",
-                        leaf::atom(Self::local_state_key(var)),
-                        ", ",
-                        leaf::var(field_state.clone()),
-                        ") in ",
-                    ]);
-                }
+                doc_parts.extend(self.rebind_threaded_locals(
+                    &threaded_vars,
+                    |_, v| Self::local_state_key(v),
+                    &field_state,
+                    RebindNaming::ReuseBound,
+                    RebindLayout::Inline,
+                ));
             }
             if !doc_parts.is_empty() {
                 stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
@@ -1287,20 +1281,13 @@ impl CoreErlangGenerator {
                 .threaded_locals_of(&arguments[1])
                 .and_then(ThreadedLocals::into_lowered)
             {
-                for var in &threaded_vars {
-                    let tv_core = self
-                        .lookup_var(var)
-                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                    doc_parts.push(docvec![
-                        "let ",
-                        leaf::var(tv_core),
-                        " = call 'maps':'get'(",
-                        leaf::atom(Self::local_state_key(var)),
-                        ", ",
-                        leaf::var(field_state.clone()),
-                        ") in ",
-                    ]);
-                }
+                doc_parts.extend(self.rebind_threaded_locals(
+                    &threaded_vars,
+                    |_, v| Self::local_state_key(v),
+                    &field_state,
+                    RebindNaming::ReuseBound,
+                    RebindLayout::Inline,
+                ));
             }
             if !doc_parts.is_empty() {
                 stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
@@ -1386,20 +1373,13 @@ impl CoreErlangGenerator {
                 .threaded_locals_of(value)
                 .and_then(ThreadedLocals::into_lowered)
             {
-                for var in &threaded_vars {
-                    let tv_core = self
-                        .lookup_var(var)
-                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                    doc_parts.push(docvec![
-                        "let ",
-                        leaf::var(tv_core),
-                        " = call 'maps':'get'(",
-                        leaf::atom(Self::local_state_key(var)),
-                        ", ",
-                        leaf::var(new_state.clone()),
-                        ") in ",
-                    ]);
-                }
+                doc_parts.extend(self.rebind_threaded_locals(
+                    &threaded_vars,
+                    |_, v| Self::local_state_key(v),
+                    &new_state,
+                    RebindNaming::ReuseBound,
+                    RebindLayout::Inline,
+                ));
             }
             if !doc_parts.is_empty() {
                 stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
@@ -1437,9 +1417,7 @@ impl CoreErlangGenerator {
             && let Expression::Identifier(id) = target.as_ref()
         {
             let var_name = &id.name;
-            let core_var = self
-                .lookup_var(var_name)
-                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+            let core_var = self.resolve_local_core_var(var_name);
             let tuple_var = self.fresh_temp_var("T2Tuple");
             let value_str = self.generate_tier2_value_call_doc(value)?;
             self.bind_var(var_name, &core_var);
@@ -1518,9 +1496,7 @@ impl CoreErlangGenerator {
             // in this body's IR, then the target is bound
             // to its logical value.
             let var_name = &id.name;
-            let core_var = self
-                .lookup_var(var_name)
-                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+            let core_var = self.resolve_local_core_var(var_name);
             if let Some(tv) = self.threaded_construct_value(value, threaded_ir::FrameId::ROOT)? {
                 stmts.extend(tv.prelude);
                 let value_str = self.threaded_value_doc(&tv.value);
@@ -1563,9 +1539,7 @@ impl CoreErlangGenerator {
             && let Expression::Identifier(id) = target.as_ref()
         {
             let var_name = &id.name;
-            let core_var = self
-                .lookup_var(var_name)
-                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+            let core_var = self.resolve_local_core_var(var_name);
             // ADR 0118 phase 1a: `v := self log: (self nextId)`
             // — the producer's `Statement` + real `Bind`
             // (its arguments sequenced first), then the
@@ -1610,9 +1584,7 @@ impl CoreErlangGenerator {
                 (target.as_ref(), value.as_ref())
         {
             let var_name = &id.name;
-            let core_var = self
-                .lookup_var(var_name)
-                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+            let core_var = self.resolve_local_core_var(var_name);
             let captured_mutations = Self::captured_mutations_for_block(block);
             let value_str = self.generate_block_stateful(block, &captured_mutations)?;
             self.bind_var(var_name, &core_var);
@@ -1688,9 +1660,7 @@ impl CoreErlangGenerator {
                 self.bind_var(&id.name, &field_val_var);
             } else {
                 let var_name = &id.name;
-                let core_var = self
-                    .lookup_var(var_name)
-                    .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                let core_var = self.resolve_local_core_var(var_name);
                 // ADR 0118 phase 1a: `ok := (self recordOnce: x)
                 // and: [y]`, `total := items size + (self bump)` —
                 // the RHS's state-effecting sub-expressions land
@@ -1833,20 +1803,13 @@ impl CoreErlangGenerator {
             // Extract captured local mutations from NewState
             let mut doc_parts: Vec<Document<'static>> = Vec::new();
             if let Some(mutations) = self.get_inline_block_captured_mutations(expr) {
-                for var in &mutations {
-                    let core_var = self
-                        .lookup_var(var)
-                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                    doc_parts.push(docvec![
-                        "let ",
-                        leaf::var(core_var),
-                        " = call 'maps':'get'(",
-                        leaf::atom(Self::local_state_key(var)),
-                        ", ",
-                        leaf::var(new_state.clone()),
-                        ") in ",
-                    ]);
-                }
+                doc_parts.extend(self.rebind_threaded_locals(
+                    &mutations,
+                    |_, v| Self::local_state_key(v),
+                    &new_state,
+                    RebindNaming::ReuseBound,
+                    RebindLayout::Inline,
+                ));
             }
             if !doc_parts.is_empty() {
                 stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));
@@ -1964,20 +1927,13 @@ impl CoreErlangGenerator {
                 .and_then(ThreadedLocals::into_lowered)
                 .filter(|_| !inline_conditional)
             {
-                for var in &threaded_vars {
-                    let core_var = self
-                        .lookup_var(var)
-                        .map_or_else(|| Self::to_core_erlang_var(var), String::clone);
-                    doc_parts.push(docvec![
-                        "let ",
-                        leaf::var(core_var),
-                        " = call 'maps':'get'(",
-                        leaf::atom(Self::local_state_key(var)),
-                        ", ",
-                        leaf::var(new_state.clone()),
-                        ") in ",
-                    ]);
-                }
+                doc_parts.extend(self.rebind_threaded_locals(
+                    &threaded_vars,
+                    |_, v| Self::local_state_key(v),
+                    &new_state,
+                    RebindNaming::ReuseBound,
+                    RebindLayout::Inline,
+                ));
             }
             if !doc_parts.is_empty() {
                 stmts.push(ThreadedStmt::Statement(Document::Vec(doc_parts), span));

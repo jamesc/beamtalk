@@ -14,6 +14,7 @@ use super::super::threaded_ir::{
 };
 use super::super::{CoreErlangGenerator, Result};
 use super::family_slots::append_family_slots;
+use super::loop_scope::{DirectParamsKind, DirectParamsLoopScope};
 use super::plan::ThreadingPlan;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -442,74 +443,37 @@ impl CoreErlangGenerator {
         // a method parameter's own gensym'd `Args`-pattern binding).
         let initial_direct_args = plan.initial_direct_args(self);
 
-        // BT-4121: the guarded-operator marker spans the body lowering.
-        // `prestore_state` is the loop-entry `State` the pre-store captures
-        // when the marker asks for the bracket.
-        let prestore_state = self.state_var_to_store();
-        self.push_guarded_op_loop(body, None);
-        self.push_scope();
-
-        // Bind the block counter param if any (e.g. to:do: [:i | ...] → bind "i" → counter)
-        if let Some(ref bt_name) = frame.body_param {
-            self.bind_var(bt_name, &frame.counter);
-        }
-
-        // Register var → param bindings (no unpack docs emitted in
-        // direct-params mode — structurally guaranteed by
-        // `generate_unpack_at_iteration_start`'s own
-        // `if !use_direct_params && !use_hybrid_params` guard).
-        plan.generate_unpack_at_iteration_start(self);
-
+        let scope = DirectParamsLoopScope {
+            kind: DirectParamsKind::Direct,
+            plan,
+            body,
+            condition: None,
+            counter_param: frame
+                .body_param
+                .as_deref()
+                .map(|bt_name| (bt_name, frame.counter.as_str())),
+        };
+        let outcome = self.with_direct_params_loop_scope(
+            &scope,
+            |this| {
+                // Body — set in_direct_params_loop so nested list ops skip StateAcc repack.
+                let prev_direct_params_loop = this.loop_mode.in_direct_params_loop;
+                this.loop_mode.in_direct_params_loop = true;
+                let lowered = this.generate_letrec_body_ir(body, plan);
+                this.loop_mode.in_direct_params_loop = prev_direct_params_loop;
+                lowered
+            },
+            // Build exit StateAcc using the INITIAL param names (current iteration values).
+            |this, guarded_op_bracket| {
+                let exit_stateacc =
+                    plan.generate_exit_stateacc(&param_names, this, guarded_op_bracket);
+                docvec!["<'false'> when 'true' -> ", exit_stateacc, " end "]
+            },
+        )?;
         let condition_stmt = ThreadedStmt::Statement(frame.condition_prelude.clone(), body.span);
         let condition_value = ValueRef::Doc(frame.condition_value.clone());
-
-        // Body — set in_direct_params_loop so nested list ops skip StateAcc repack.
-        let prev_direct_params_loop = self.loop_mode.in_direct_params_loop;
-        self.loop_mode.in_direct_params_loop = true;
-        // BT-3562: capture the real pre-loop state variable name so a bare
-        // mid-body field read resolves to it instead of an unbound
-        // `StateAcc` — this loop's `letrec` fun binds no `StateAcc`
-        // accumulator parameter (only `param_names` above). See
-        // `LoopMode::direct_params_outer_state_var`'s doc comment (the
-        // identical `generate_while_loop_direct` fix this mirrors).
-        //
-        // Reuses the OUTER loop's own already-captured variable when nested
-        // inside another non-hybrid direct-params loop, rather than
-        // re-deriving one via the raw `current_state_var()` — by this point
-        // `in_loop_body` is already `true`, so a fresh derivation would
-        // produce a bogus `StateAcc*` name one level deeper.
-        // `current_field_read_state_var()` cannot be used directly here: it
-        // reads `direct_params_outer_state_var` itself, which `.take()`
-        // just cleared to `None` — read the outer value via
-        // `prev_direct_params_outer_state_var` instead, before it's
-        // overwritten below (mirrors the identical
-        // `generate_while_loop_direct` fix).
-        let prev_direct_params_outer_state_var =
-            self.loop_mode.direct_params_outer_state_var.take();
-        self.loop_mode.direct_params_outer_state_var = Some(
-            prev_direct_params_outer_state_var
-                .clone()
-                .unwrap_or_else(|| self.current_state_var()),
-        );
-        let (body_stmts, ir_frame) = self.generate_letrec_body_ir(body, plan)?;
-        self.loop_mode.direct_params_outer_state_var = prev_direct_params_outer_state_var;
-        self.loop_mode.in_direct_params_loop = prev_direct_params_loop;
-
-        // BT-4121: check out the marker (nil pre-store unless the loop
-        // brackets with a `State` in scope).
-        let (guarded_op_bracket, prestore) = self.checkout_guarded_op_loop_docs(
-            self.pop_guarded_op_loop(),
-            false,
-            body.span,
-            &prestore_state,
-        );
-
-        // Build exit StateAcc using the INITIAL param names (current iteration values).
-        let exit_stateacc = plan.generate_exit_stateacc(&param_names, self, guarded_op_bracket);
-
-        self.pop_scope();
-
-        let exit_arm = docvec!["<'false'> when 'true' -> ", exit_stateacc, " end "];
+        let (body_stmts, ir_frame) = outcome.lowered;
+        let (exit_arm, prestore) = (outcome.exit_stateacc, outcome.prestore);
 
         let produces: Vec<VersionedVar> = plan
             .threaded_locals
@@ -602,48 +566,38 @@ impl CoreErlangGenerator {
         // inside the loop and at the outer call site.
         let initial_local_args = plan.initial_direct_args(self);
 
-        // BT-4121: the guarded-operator marker spans the body lowering. A
-        // hybrid loop cannot bracket (its parameters advance past the entry
-        // `State`), so the checkout below only reports loud when the mode
-        // selection missed an operator (it routes hybrid bodies with one to
-        // `StateAcc`, so this never fires).
-        self.push_guarded_op_loop(body, None);
-        self.push_scope();
-
-        // Bind block counter param if any (e.g. to:do: [:i | ...] → bind "i" → counter)
-        if let Some(ref bt_name) = frame.body_param {
-            self.bind_var(bt_name, &frame.counter);
-        }
-
-        // Register local var bindings (no unpack docs emitted in hybrid mode
-        // — structurally guaranteed by `generate_unpack_at_iteration_start`'s
-        // own `if !use_direct_params && !use_hybrid_params` guard).
-        plan.generate_unpack_at_iteration_start(self);
-
+        // A hybrid loop cannot bracket (its parameters advance past the entry
+        // `State`): the shared bracket's checkout only reports loud.
+        let scope = DirectParamsLoopScope {
+            kind: DirectParamsKind::Hybrid,
+            plan,
+            body,
+            condition: None,
+            counter_param: frame
+                .body_param
+                .as_deref()
+                .map(|bt_name| (bt_name, frame.counter.as_str())),
+        };
+        let outcome = self.with_direct_params_loop_scope(
+            &scope,
+            // Run body with hybrid field params active.
+            |this| this.generate_letrec_hybrid_body_ir(body, plan, &all_field_params),
+            // Exit StateAcc: uses initial param names (current iteration's starting values).
+            // In the exit arm (false branch), the body hasn't executed, so params are unchanged.
+            |this, _bracket| {
+                let exit_stateacc = plan.generate_exit_stateacc_full_extract(
+                    &local_param_names,
+                    &mutated_param_names,
+                    &initial_state,
+                    this,
+                );
+                docvec!["<'false'> when 'true' -> ", exit_stateacc, " end "]
+            },
+        )?;
         let condition_stmt = ThreadedStmt::Statement(frame.condition_prelude.clone(), body.span);
         let condition_value = ValueRef::Doc(frame.condition_value.clone());
-
-        // Run body with hybrid field params active.
-        let (body_stmts, ir_frame) =
-            self.generate_letrec_hybrid_body_ir(body, plan, &all_field_params)?;
-
-        // BT-4121: check out the marker (loud when the mode selection
-        // missed a guarded operator; a hybrid loop never brackets).
-        // BT-4523: and report a `^` lowered in it (`NlrThrowInHybridLoop`).
-        let nlr_errors = self.checkout_hybrid_loop(body.span);
-
-        // Exit StateAcc: uses initial param names (current iteration's starting values).
-        // In the exit arm (false branch), the body hasn't executed, so params are unchanged.
-        let exit_stateacc = plan.generate_exit_stateacc_full_extract(
-            &local_param_names,
-            &mutated_param_names,
-            &initial_state,
-            self,
-        );
-
-        self.pop_scope();
-
-        let exit_arm = docvec!["<'false'> when 'true' -> ", exit_stateacc, " end "];
+        let (body_stmts, ir_frame) = outcome.lowered;
+        let (exit_arm, nlr_errors) = (outcome.exit_stateacc, outcome.nlr_errors);
 
         let produces: Vec<VersionedVar> =
             plan.threaded_locals
