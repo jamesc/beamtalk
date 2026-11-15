@@ -40,7 +40,12 @@ Keys are caller-chosen terms; namespace them with a leading tag
 `{chain_has_user_new1, Class}`, `{chain_has_user_new0, Class}`,
 `module_to_class_map` (a bare atom: the whole module -> class-name map),
 `{module_class, Module}` (one module's `{ok, Class} | not_found` answer behind
-`beamtalk_class_registry:class_name_for_module/1`, derived from the map),
+`beamtalk_class_registry:class_name_for_module/1`, derived from the map;
+`not_found` is cached on purpose, unlike `inherits_from/2`'s unregistered
+names: foreign modules (`lists`, `gen_server`, supervisor callbacks) are the
+common miss, and a miss that bypassed the cache would copy the whole map. The
+rows are bounded by the distinct module atoms asked about and flushed by the
+next class write),
 `{direct_constructor, ClassPid, Selector}`).
 `chain_has_user_new1` is whether an ancestor of `Class` defines a user
 class-side `new:` (`beamtalk_class_metadata:chain_has_user_new1/1`, BT-4409);
