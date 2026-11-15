@@ -68,7 +68,15 @@ struct ToolTimer {
 }
 
 impl ToolTimer {
-    fn new(tool: &'static str) -> Self {
+    /// Start timing a tool call and log `"tool invoked"` with just the tool name.
+    fn start(tool: &'static str) -> Self {
+        tracing::debug!(tool, "tool invoked");
+        Self::start_quiet(tool)
+    }
+
+    /// Start timing without logging, for handlers that log `"tool invoked"`
+    /// themselves with extra argument fields.
+    fn start_quiet(tool: &'static str) -> Self {
         Self {
             tool,
             start: std::time::Instant::now(),
@@ -78,6 +86,32 @@ impl ToolTimer {
 
     fn mark_ok(&mut self) {
         self.is_ok = true;
+    }
+
+    /// Mark the call successful and return `text` as a single-block result.
+    fn ok_text(&mut self, text: impl Into<String>) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.ok_parts(vec![ContentBlock::text(text.into())])
+    }
+
+    /// Mark the call successful and return `parts` as the result content.
+    #[expect(
+        clippy::unnecessary_wraps,
+        reason = "returned directly from handlers, which return Result"
+    )]
+    fn ok_parts(&mut self, parts: Vec<ContentBlock>) -> Result<CallToolResult, rmcp::ErrorData> {
+        self.mark_ok();
+        Ok(CallToolResult::success(parts))
+    }
+}
+
+/// Map a transport/client error into an MCP internal error.
+trait InternalErr<T> {
+    fn internal_err(self) -> Result<T, rmcp::ErrorData>;
+}
+
+impl<T, E: std::fmt::Display> InternalErr<T> for Result<T, E> {
+    fn internal_err(self) -> Result<T, rmcp::ErrorData> {
+        self.map_err(|e| rmcp::ErrorData::internal_error(e.to_string(), None))
     }
 }
 
