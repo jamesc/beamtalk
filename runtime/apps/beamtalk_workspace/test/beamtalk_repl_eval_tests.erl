@@ -1742,6 +1742,79 @@ handle_protocol_definition_no_register_class_test() ->
     code:purge(ModuleName),
     code:delete(ModuleName).
 
+-doc """
+BT-4864: a protocol whose `-on_load` hook parks a structured refusal and fails
+the load (the `stdlib_shadowing` path) must surface that refusal. A bare
+`code:load_binary/3` only saw `on_load_failure` and never drained it.
+""".
+handle_protocol_definition_surfaces_structured_load_refusal_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    Suffix = beamtalk_test_unique:id(),
+    ModuleName = list_to_atom("__bt_test_shadow_protocol" ++ Suffix),
+    ProtoName = "Bt4864Shadow" ++ Suffix,
+    ProtoAtom = list_to_atom(ProtoName),
+    Call = fun(M, F, Args) ->
+        {call, 4, {remote, 4, {atom, 4, M}, {atom, 4, F}}, Args}
+    end,
+    Forms = [
+        {attribute, 1, module, ModuleName},
+        {attribute, 2, export, []},
+        {attribute, 3, on_load, {hook, 0}},
+        {function, 4, hook, 0, [
+            {clause, 4, [], [], [
+                Call(beamtalk_class_registry, record_pending_load_error, [
+                    {atom, 4, ProtoAtom},
+                    Call(beamtalk_error, new, [{atom, 4, stdlib_shadowing}, {atom, 4, ProtoAtom}])
+                ]),
+                {atom, 4, false}
+            ]}
+        ]}
+    ],
+    {ok, ModuleName, Binary} = compile:forms(Forms),
+    %% Create the pending-error table from this (long-lived) test process: if the
+    %% on_load process creates it, the table dies with that process.
+    ok = beamtalk_class_registry:record_pending_load_error(ProtoAtom, undefined),
+    ok = beamtalk_class_registry:clear_pending_load_errors_by_names([ProtoAtom]),
+    ProtocolInfo = #{
+        binary => Binary,
+        module_name => ModuleName,
+        protocols => [list_to_binary(ProtoName)]
+    },
+    try
+        Result = beamtalk_repl_eval:handle_protocol_definition(ProtocolInfo, [], State),
+        ?assertMatch({error, #beamtalk_error{kind = stdlib_shadowing}, <<>>, [], _}, Result)
+    after
+        code:purge(ModuleName),
+        code:delete(ModuleName)
+    end.
+
+-doc """
+BT-4917: `validate_run_entry/3` accepts exactly an ASCII identifier with an
+optional trailing `:`. `run_entry_selector_corpus.json` pins it against Rust
+`is_valid_selector` (see `source_analysis::tests::run_entry_selector_matches_shared_corpus`).
+""".
+run_entry_selector_matches_shared_corpus_test() ->
+    Path = filename:join([
+        code:lib_dir(beamtalk_workspace),
+        "test",
+        "fixtures",
+        "run_entry_selector_corpus.json"
+    ]),
+    {ok, Raw} = file:read_file(Path),
+    Cases = json:decode(Raw),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(#{<<"selector">> := Sel, <<"run_entry">> := Expected, <<"why">> := Why}) ->
+            Actual =
+                case beamtalk_repl_eval:validate_run_entry(<<"Main">>, Sel, []) of
+                    {ok, _} -> true;
+                    {error, #beamtalk_error{kind = invalid_argument}} -> false
+                end,
+            ?assertEqual({Sel, Why, Expected}, {Sel, Why, Actual})
+        end,
+        Cases
+    ).
+
 %%====================================================================
 %% Type alias definition tests (ADR 0108 Phase 8)
 %%====================================================================
