@@ -1011,11 +1011,11 @@ fn check_alias_leak_ref(
     // Protocols have no `is_internal` flag yet — nothing to check.
 }
 
-/// E0402: Emit error when an internal method satisfies a public protocol.
-///
 /// Selector and span of each `internal` method on one side of a class.
 type InternalMethods = Vec<(EcoString, Span)>;
 
+/// E0402: Emit error when an internal method satisfies a public protocol.
+///
 /// If a class implements a selector required by a public protocol but declares
 /// the method `internal`, that's a leaked visibility error — the protocol
 /// promises the method is part of the public API, but the method is hidden.
