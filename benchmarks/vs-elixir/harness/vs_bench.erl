@@ -472,8 +472,8 @@ measure(Fun, N) ->
 %% words columns are not meaningful.
 trace_flags() ->
     case os:getenv("VS_BENCH_NO_TRACE") of
-        false -> [garbage_collection];
-        _ -> []
+        "1" -> [];
+        _ -> [garbage_collection]
     end.
 
 debug_others(Worker, Before, After) ->
