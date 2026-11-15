@@ -21,8 +21,8 @@ use miette::{IntoDiagnostic, Result, WrapErr};
 use std::cmp::Ordering;
 
 use crate::commands::deps::registry::compare_versions;
-use crate::commands::manifest::{self, validate_exact_version};
 use crate::commands::util::find_project_root;
+use beamtalk_package::manifest::{self, validate_exact_version};
 
 /// Which segment `bump` increments.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

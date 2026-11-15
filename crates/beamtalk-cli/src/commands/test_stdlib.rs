@@ -537,7 +537,7 @@ pub fn run_tests(path: &str, opts: &TestRunOptions) -> Result<()> {
     let native_type_registry = test_files
         .iter()
         .any(|f| beamtalk_project::package::is_under_stdlib_dir(f.as_std_path()))
-        .then(super::build_stdlib::extract_stdlib_type_specs)
+        .then(beamtalk_package::native_type_specs::extract_stdlib_type_specs)
         .flatten()
         .map(std::sync::Arc::new);
 

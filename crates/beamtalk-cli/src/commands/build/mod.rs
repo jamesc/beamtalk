@@ -23,6 +23,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 
+use beamtalk_package::ffi_type_registry::ResolvedTypeRegistry;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::Result;
 use tracing::{debug, error, info, instrument};
@@ -65,14 +66,8 @@ pub use sources::{collect_formattable_files_from_dir, collect_source_files_from_
 pub(crate) use sources::{
     compile_file_with_surface, compile_to_beam, compute_file_module_pairs, compute_relative_module,
 };
-#[cfg(test)]
 pub(crate) use stubs::{
-    DependencyStubsDir, StubLayer, distribution_stubs_dir, load_dependency_stub_registries,
-    load_project_stub_registry,
-};
-pub(crate) use stubs::{
-    ResolvedTypeRegistry, dependency_stub_dirs, extract_type_specs, render_stub_reports,
-    resolve_package_type_registry,
+    dependency_stub_dirs, extract_type_specs, render_stub_reports, resolve_package_type_registry,
 };
 
 // Re-exported only for `build::tests` (which relies on `super::*` to see
@@ -170,7 +165,7 @@ pub(crate) fn prepare_options(
     // dependency_extensions_complete`; ADR 0070 WS3, BT-4608).
     // Both flags come from the rule `lint`/`test` share.
     let scope =
-        crate::commands::manifest::PackageCheckerScope::for_manifest(env.full_manifest.as_ref());
+        beamtalk_package::manifest::PackageCheckerScope::for_manifest(env.full_manifest.as_ref());
     options.dependency_extensions_unknown = scope.has_package_dependencies;
     if Utf8Path::new(path).is_dir() {
         options.knowledge_scope = scope.knowledge_scope;
@@ -710,8 +705,10 @@ fn fold_direct_ffi_proofs(
     if proofs.is_empty() {
         return stub_inputs_hash;
     }
-    let proofs_hash = crate::commands::util::sha256_hex(proofs.join("\n").as_bytes());
-    crate::commands::util::sha256_hex(format!("{stub_inputs_hash}\n{proofs_hash}").as_bytes())
+    let proofs_hash = beamtalk_package::content_hash::sha256_hex(proofs.join("\n").as_bytes());
+    beamtalk_package::content_hash::sha256_hex(
+        format!("{stub_inputs_hash}\n{proofs_hash}").as_bytes(),
+    )
 }
 
 /// Compile one file and re-key it on the slice of the cross-file surface that
@@ -763,7 +760,7 @@ fn fold_known_erlang_modules(
         .collect();
     modules.sort_unstable();
     let enabled = u8::from(known_erlang_modules.check_enabled());
-    crate::commands::util::sha256_hex(
+    beamtalk_package::content_hash::sha256_hex(
         format!(
             "{analysis_surface_hash}\nerlang:{enabled}:{}",
             modules.join(",")

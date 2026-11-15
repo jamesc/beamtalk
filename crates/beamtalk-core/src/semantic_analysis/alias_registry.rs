@@ -58,6 +58,9 @@ use ecow::EcoString;
 use crate::ast::{Identifier, Module, TypeAliasDefinition, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::class_hierarchy::DeclaredType;
+use crate::semantic_analysis::namespace_collision::{
+    Declared, Existing, Origin, namespace_collision,
+};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::type_checker::{
     InferredType, is_type_var_placeholder, resolve_declared_type, resolve_type_annotation,
@@ -582,40 +585,24 @@ impl AliasRegistry {
             // Unrecorded: collisions are keyed through the alias-seeding
             // marker below, not through every pre-loaded alias name (BT-4791).
             if hierarchy.has_class_unrecorded(&info.name) {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "Pre-loaded type alias `{}` collides with class of the same name — \
-                             type aliases share the class/protocol namespace",
-                            info.name
-                        ),
-                        info.span,
-                    )
-                    .with_hint(format!(
-                        "Rename the type alias in its defining file to avoid conflicting with class `{}`",
-                        info.name
-                    ))
-                    .with_category(DiagnosticCategory::Type),
-                );
+                diagnostics.push(namespace_collision(
+                    Declared::TypeAlias,
+                    Existing::Class,
+                    Origin::PreLoaded,
+                    &info.name,
+                    info.span,
+                ));
                 continue;
             }
 
             if protocol_registry.has_protocol_unrecorded(&info.name) {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "Pre-loaded type alias `{}` collides with protocol of the same name — \
-                             type aliases share the class/protocol namespace",
-                            info.name
-                        ),
-                        info.span,
-                    )
-                    .with_hint(format!(
-                        "Rename the type alias in its defining file to avoid conflicting with protocol `{}`",
-                        info.name
-                    ))
-                    .with_category(DiagnosticCategory::Type),
-                );
+                diagnostics.push(namespace_collision(
+                    Declared::TypeAlias,
+                    Existing::Protocol,
+                    Origin::PreLoaded,
+                    &info.name,
+                    info.span,
+                ));
                 continue;
             }
 
@@ -907,37 +894,20 @@ fn namespace_collision_diagnostic(
     hierarchy: &ClassHierarchy,
     protocol_registry: &ProtocolRegistry,
 ) -> Option<Diagnostic> {
-    if hierarchy.has_class(name) {
-        return Some(
-            Diagnostic::error(
-                format!(
-                    "`{name}` is already defined as a class — \
-                     type aliases share the class/protocol namespace"
-                ),
-                span,
-            )
-            .with_hint(format!(
-                "Rename the type alias to avoid conflicting with class `{name}`"
-            ))
-            .with_category(DiagnosticCategory::Type),
-        );
-    }
-    if protocol_registry.has_protocol(name) {
-        return Some(
-            Diagnostic::error(
-                format!(
-                    "`{name}` is already defined as a protocol — \
-                     type aliases share the class/protocol namespace"
-                ),
-                span,
-            )
-            .with_hint(format!(
-                "Rename the type alias to avoid conflicting with protocol `{name}`"
-            ))
-            .with_category(DiagnosticCategory::Type),
-        );
-    }
-    None
+    let existing = if hierarchy.has_class(name) {
+        Existing::Class
+    } else if protocol_registry.has_protocol(name) {
+        Existing::Protocol
+    } else {
+        return None;
+    };
+    Some(namespace_collision(
+        Declared::TypeAlias,
+        existing,
+        Origin::Local,
+        name,
+        span,
+    ))
 }
 
 /// DFS visitation state for [`find_cycles`] — standard white/grey/black

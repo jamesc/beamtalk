@@ -696,6 +696,91 @@ impl LintGate {
 mod tests {
     use super::*;
 
+    #[test]
+    fn find_package_root_from_subdir() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+
+        // Use the canonical form of root for the expected value: on macOS
+        // `/tmp` resolves to `/private/tmp`; on Windows short/long path names
+        // differ. `find_package_root` canonicalises internally, so the expected
+        // value must do the same to match.
+        let root_utf8 =
+            camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(root).unwrap()).unwrap();
+        let src_utf8 =
+            camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(&src).unwrap()).unwrap();
+
+        // From subdir, should find parent
+        assert_eq!(find_package_root(&src_utf8), Some(root_utf8.clone()));
+
+        // From root itself, should find it directly
+        assert_eq!(find_package_root(&root_utf8), Some(root_utf8.clone()));
+    }
+
+    #[test]
+    fn find_package_root_from_file() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join("foo.bt"), "Object subclass: Foo\n").unwrap();
+
+        let file_utf8 = camino::Utf8PathBuf::from_path_buf(src.join("foo.bt")).unwrap();
+        // Canonicalise root — see find_package_root_from_subdir for rationale.
+        let root_utf8 =
+            camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(root).unwrap()).unwrap();
+
+        assert_eq!(find_package_root(&file_utf8), Some(root_utf8));
+    }
+
+    #[test]
+    fn find_package_root_none_without_manifest() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        assert_eq!(find_package_root(&dir), None);
+    }
+
+    /// `find_package_root` must work for relative paths like `test/`
+    /// by canonicalizing the start path.
+    ///
+    /// Serialized on `cwd` because it temporarily mutates the process working
+    /// directory, matching the convention used by tests in `run.rs` / `test.rs`.
+    #[test]
+    #[serial_test::serial(cwd)]
+    fn find_package_root_canonicalizes_relative_paths() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let root = temp.path();
+        std::fs::write(
+            root.join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let test_dir = root.join("test");
+        std::fs::create_dir_all(&test_dir).unwrap();
+
+        // Run the check from the package root with a relative argument.
+        let prev_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(root).unwrap();
+        let relative = camino::Utf8PathBuf::from("test");
+        let found = find_package_root(&relative);
+        std::env::set_current_dir(prev_cwd).unwrap();
+
+        let expected = camino::Utf8PathBuf::from_path_buf(root.canonicalize().unwrap()).unwrap();
+        assert_eq!(found, Some(expected));
+    }
+
     fn package_with(files: &[(&str, &str)]) -> (tempfile::TempDir, Utf8PathBuf) {
         let temp = tempfile::TempDir::new().unwrap();
         // Canonical root: the pipeline reports the canonical spelling of

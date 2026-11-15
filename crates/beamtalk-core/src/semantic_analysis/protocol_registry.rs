@@ -24,6 +24,9 @@ use crate::ast::{
     MessageSelector, Module, ParameterDefinition, ProtocolDefinition, TypeAnnotation,
 };
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
+use crate::semantic_analysis::namespace_collision::{
+    Declared, Existing, Origin, namespace_collision,
+};
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::trait_expansion;
 use crate::semantic_analysis::type_checker::TypeChecker;
@@ -590,21 +593,13 @@ impl ProtocolRegistry {
                     .and_then(|ci| ci.superclass.as_deref())
                     .is_some_and(|sc| sc == "Protocol");
                 if !is_protocol_class {
-                    diagnostics.push(
-                        Diagnostic::error(
-                            format!(
-                                "Pre-loaded protocol `{}` collides with class of the same name — \
-                                 protocols and classes share a namespace",
-                                info.name
-                            ),
-                            info.span,
-                        )
-                        .with_hint(format!(
-                            "Rename the protocol in its defining file to avoid conflicting with class `{}`",
-                            info.name
-                        ))
-                        .with_category(DiagnosticCategory::Type),
-                    );
+                    diagnostics.push(namespace_collision(
+                        Declared::Protocol,
+                        Existing::Class,
+                        Origin::PreLoaded,
+                        &info.name,
+                        info.span,
+                    ));
                     continue;
                 }
             }
@@ -676,19 +671,13 @@ impl ProtocolRegistry {
                     .and_then(|info| info.superclass.as_deref())
                     .is_some_and(|sc| sc == "Protocol");
                 if !is_protocol_class {
-                    diagnostics.push(
-                        Diagnostic::error(
-                            format!(
-                                "`{name}` is already defined as a class — \
-                                 protocols and classes share a namespace"
-                            ),
-                            protocol_def.name.span,
-                        )
-                        .with_hint(format!(
-                            "Rename the protocol to avoid conflicting with class `{name}`"
-                        ))
-                        .with_category(DiagnosticCategory::Type),
-                    );
+                    diagnostics.push(namespace_collision(
+                        Declared::Protocol,
+                        Existing::Class,
+                        Origin::Local,
+                        name,
+                        protocol_def.name.span,
+                    ));
                     continue;
                 }
             }
@@ -1145,23 +1134,6 @@ impl ProtocolRegistry {
             .keys()
             .filter(|proto_name| {
                 self.check_conformance(class_name, proto_name, hierarchy)
-                    .is_ok()
-            })
-            .cloned()
-            .collect()
-    }
-
-    /// Returns the list of classes that conform to a protocol.
-    #[must_use]
-    pub fn conforming_classes(
-        &self,
-        protocol_name: &str,
-        hierarchy: &ClassHierarchy,
-    ) -> Vec<EcoString> {
-        hierarchy
-            .class_names()
-            .filter(|class_name| {
-                self.check_conformance(class_name, protocol_name, hierarchy)
                     .is_ok()
             })
             .cloned()

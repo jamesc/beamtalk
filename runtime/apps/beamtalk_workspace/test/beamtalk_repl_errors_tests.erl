@@ -104,22 +104,15 @@ ensure_structured_error_eval_error_unknown_reason_test() ->
     ?assertMatch(#beamtalk_error{kind = internal_error}, Result).
 
 ensure_structured_error_eval_error_same_tag_different_arity_test() ->
-    %% is_known_error_reason/1 matches {Tag, Arity} pairs, not bare
-    %% Tag. beamtalk_behaviour_intrinsics.erl:706 constructs a 4-arity
-    %% {class_not_found, _, Path, Defined}, distinct from the REPL's own
-    %% 2-arity {class_not_found, ClassName} clause in ensure_structured_error/1.
-    %% A 4-arity reason must NOT be misidentified as "known" and delegated
-    %% (there is no ensure_structured_error/1 clause for that arity) — it
-    %% should fall through to the generic "Evaluation error: Class:Reason"
-    %% wrapper, preserving the eval_error Class context.
+    %% is_known_error_reason/1 matches {Tag, Arity} pairs, not bare Tag: the
+    %% 2-arity {class_not_found, ClassName} and the loader's 4-arity
+    %% {class_not_found, Expected, Path, Defined} are different shapes. A
+    %% malformed 4-tuple (Defined not a list) degrades to internal_error
+    %% rather than crashing the normaliser.
     Result = beamtalk_repl_errors:ensure_structured_error(
         {eval_error, error, {class_not_found, some_mod, "path", true}}
     ),
-    ?assertMatch(#beamtalk_error{kind = internal_error}, Result),
-    ?assertMatch(
-        {beamtalk_string, <<"Evaluation error: error:", _/binary>>},
-        Result#beamtalk_error.message
-    ).
+    ?assertMatch(#beamtalk_error{kind = internal_error}, Result).
 
 %%% ============================================================================
 %%% ensure_structured_error/1 — compile_error variants
@@ -604,3 +597,103 @@ normalize_diagnostic_wire_encoding_test() ->
     ),
     ?assert(is_binary(Encoded)),
     ?assert(byte_size(Encoded) > 0).
+
+%%% ============================================================================
+%%% BT-4897: loader reasons that used to fall through to the `~p` dump
+%%% ============================================================================
+
+ensure_structured_error_loader_class_not_found_test() ->
+    %% beamtalk_repl_loader:verify_class_present/3's shape.
+    Result = beamtalk_repl_errors:ensure_structured_error(
+        {class_not_found, 'Counter', "/some/path.bt", ["Other", "Another"]}
+    ),
+    ?assertMatch(#beamtalk_error{kind = class_not_found, class = 'REPL'}, Result),
+    ?assertEqual(
+        {beamtalk_string,
+            <<"Class Counter not found in /some/path.bt (the file defines: Other, Another)">>},
+        Result#beamtalk_error.message
+    ).
+
+ensure_structured_error_loader_class_not_found_defines_nothing_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error(
+        {class_not_found, 'Counter', "/some/path.bt", []}
+    ),
+    ?assertMatch(#beamtalk_error{kind = class_not_found}, Result),
+    ?assertEqual(
+        {beamtalk_string,
+            <<"Class Counter not found in /some/path.bt (the file defines no classes)">>},
+        Result#beamtalk_error.message
+    ).
+
+ensure_structured_error_eval_error_wrapping_loader_class_not_found_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error(
+        {eval_error, error, {class_not_found, 'Counter', "/p.bt", ["Other"]}}
+    ),
+    ?assertMatch(#beamtalk_error{kind = class_not_found}, Result).
+
+ensure_structured_error_core_compile_error_map_test() ->
+    %% beamtalk_repl_compiler:compile_file_core/4's shape (compiler server map).
+    Result = beamtalk_repl_errors:ensure_structured_error(
+        {core_compile_error, #{message => <<"bad core">>, raw => []}}
+    ),
+    ?assertMatch(#beamtalk_error{kind = compile_error, class = 'Compiler'}, Result),
+    ?assertEqual(
+        {beamtalk_string, <<"Core Erlang compilation failed: bad core">>},
+        Result#beamtalk_error.message
+    ).
+
+ensure_structured_error_core_compile_error_opaque_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error({core_compile_error, some_reason}),
+    ?assertMatch(#beamtalk_error{kind = compile_error}, Result),
+    ?assertEqual(
+        {beamtalk_string, <<"Core Erlang compilation failed: some_reason">>},
+        Result#beamtalk_error.message
+    ).
+
+ensure_structured_error_method_span_unresolved_test() ->
+    %% The old 2-tuple {method_not_found, Reason} shared a tag with the 3-tuple
+    %% DNU shape and fell through to the `~p` dump; it is now its own shape and
+    %% keeps the compiler port's message.
+    Result = beamtalk_repl_errors:ensure_structured_error(
+        {method_span_unresolved, method_not_found, <<"Counter has no method 'foo'">>}
+    ),
+    ?assertMatch(#beamtalk_error{kind = runtime_error, class = 'REPL'}, Result),
+    ?assertEqual(
+        {beamtalk_string, <<"Cannot locate the method to remove: Counter has no method 'foo'">>},
+        Result#beamtalk_error.message
+    ).
+
+ensure_structured_error_old_two_tuple_method_not_found_is_not_known_test() ->
+    %% Nothing produces `{method_not_found, Reason}` any more; a stray one is
+    %% not "known" and gets the generic eval_error wrapper.
+    Result = beamtalk_repl_errors:ensure_structured_error(
+        {eval_error, error, {method_not_found, foo}}
+    ),
+    ?assertMatch(#beamtalk_error{kind = internal_error}, Result),
+    ?assertMatch(
+        {beamtalk_string, <<"Evaluation error: error:", _/binary>>},
+        Result#beamtalk_error.message
+    ).
+
+%% /2 collapse: every known shape delegates to /1 with the same result.
+ensure_structured_error_2_known_shapes_match_1_test() ->
+    Shapes = [
+        {class_not_found, 'Counter', "/p.bt", ["Other"]},
+        {core_compile_error, #{message => <<"m">>, raw => []}},
+        {method_span_unresolved, method_not_found, <<"m">>},
+        {unknown_op, <<"x">>},
+        empty_expression,
+        timeout
+    ],
+    [
+        ?assertEqual(
+            beamtalk_repl_errors:ensure_structured_error(S),
+            beamtalk_repl_errors:ensure_structured_error(S, error)
+        )
+     || S <- Shapes
+    ].
+
+ensure_structured_error_2_unknown_keeps_class_prefix_test() ->
+    Result = beamtalk_repl_errors:ensure_structured_error(weird, error),
+    ?assertMatch(#beamtalk_error{kind = internal_error}, Result),
+    ?assertEqual({beamtalk_string, <<"error: weird">>}, Result#beamtalk_error.message).

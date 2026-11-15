@@ -16,8 +16,9 @@ use std::fs;
 use tracing::{debug, info, warn};
 
 use super::surface_key::{SurfaceKeys, consulted_key, decode_surface, encode_surface};
-use crate::commands::util::{content_hash_of, sha256_hex};
+use crate::commands::util::content_hash_of;
 use beamtalk_core::semantic_analysis::consulted::ConsultedSurface;
+use beamtalk_package::content_hash::sha256_hex;
 
 /// Result of per-file change detection.
 ///

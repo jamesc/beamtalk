@@ -1845,8 +1845,8 @@ remove_class_method(ClassNameBin, SelectorBin, Side) ->
                             ),
                             Error
                     end;
-                {error, Reason, _Msg} ->
-                    {error, {method_not_found, Reason}}
+                {error, Reason, Msg} ->
+                    {error, {method_span_unresolved, Reason, Msg}}
             end
     end.
 

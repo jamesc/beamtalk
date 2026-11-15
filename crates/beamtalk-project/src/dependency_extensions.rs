@@ -17,7 +17,7 @@
 //! protocols and aliases do: from the dependency's *source*, parsed by the
 //! scan that already reads every dependency file. Both CLI dependency
 //! scanners (`build_dep_class_index` for `build`/`check`/`lint`/`test`, and
-//! `beamtalk_cli::dependency_classes` for MCP lint) collect a
+//! `beamtalk_package::dependency_classes` for MCP lint) collect a
 //! [`DependencyExtensions`] per dependency through [`DependencyExtensions::add_file`],
 //! and merge them with [`merge_dependency_extensions`]. The LSP indexes
 //! dependency source into its `ProjectIndex` instead, and applies the same

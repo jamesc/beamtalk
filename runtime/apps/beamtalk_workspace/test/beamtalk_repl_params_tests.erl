@@ -76,6 +76,28 @@ actor_pid_invalid_string_test() ->
 actor_pid_missing_param_is_invalid_pid_test() ->
     {error, #beamtalk_error{kind = invalid_pid}} = beamtalk_repl_params:actor_pid(#{}).
 
+actor_pid_wrong_typed_param_is_invalid_pid_test_() ->
+    %% A malformed request can send any JSON value; none may crash the helper.
+    [
+        ?_assertMatch(
+            {error, #beamtalk_error{kind = invalid_pid, class = 'Actor'}},
+            beamtalk_repl_params:actor_pid(#{<<"actor">> => Value})
+        )
+     || Value <- [42, 1.5, "0.1.0", [<<"a">>], #{<<"k">> => 1}, true, null]
+    ].
+
+%% The rendered error must not itself crash on code points above 255.
+actor_pid_wrong_typed_unicode_value_test() ->
+    {error, #beamtalk_error{kind = invalid_pid, message = Msg}} =
+        beamtalk_repl_params:actor_pid(#{<<"actor">> => #{<<"k">> => [8364, 955]}}),
+    ?assertEqual({beamtalk_string, <<"Invalid actor PID: <not a string>">>}, Msg).
+
+nonempty_or_undefined_wrong_type_is_absent_test_() ->
+    [
+        ?_assertEqual(undefined, beamtalk_repl_params:nonempty_or_undefined(Value))
+     || Value <- [42, "str", [<<"a">>], #{<<"k">> => 1}, true]
+    ].
+
 actor_pid_unknown_actor_test() ->
     PidBin = list_to_binary(pid_to_list(self())),
     beamtalk_test_actor_registry:without_registry(fun() ->

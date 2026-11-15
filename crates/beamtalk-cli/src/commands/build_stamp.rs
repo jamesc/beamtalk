@@ -50,7 +50,7 @@ pub(crate) fn current_beamtalk_version() -> &'static str {
 /// `beamtalk_version` alone.
 pub(crate) fn current_otp_version() -> Option<&'static str> {
     static OTP: OnceLock<Option<String>> = OnceLock::new();
-    OTP.get_or_init(crate::beam_compiler::discover_otp_version)
+    OTP.get_or_init(beamtalk_package::native_type_specs::discover_otp_version)
         .as_deref()
 }
 
@@ -131,7 +131,7 @@ pub(crate) enum StampStatus {
 /// Read the stamp at `stamp_path` and decide whether the scope is fresh.
 ///
 /// `current_otp` is the running toolchain's compound OTP version (the same key
-/// [`crate::beam_compiler::discover_otp_version`] reports). When it is `None`
+/// [`beamtalk_package::native_type_specs::discover_otp_version`] reports). When it is `None`
 /// (OTP could not be probed) the OTP axis is skipped and only `beamtalk_version`
 /// is compared — an inability to probe never forces a rebuild on its own.
 pub(crate) fn read_stamp_status(stamp_path: &Utf8Path, current_otp: Option<&str>) -> StampStatus {

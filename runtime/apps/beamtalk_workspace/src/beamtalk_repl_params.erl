@@ -54,13 +54,16 @@ nonempty_binary(Params, Key) ->
     end.
 
 -doc """
-Normalise an optional string param: `""` is treated the same as absent.
-Answers the non-empty binary, or `undefined`.
+Normalise an optional string param: `""` is treated the same as absent, and so
+is a wrong-typed value (a number, list or map from a malformed request) — the
+op then reports the param as missing instead of crashing. Answers the
+non-empty binary, or `undefined`.
 """.
--spec nonempty_or_undefined(binary() | undefined) -> binary() | undefined.
+-spec nonempty_or_undefined(term()) -> binary() | undefined.
 nonempty_or_undefined(<<>>) -> undefined;
 nonempty_or_undefined(undefined) -> undefined;
-nonempty_or_undefined(Bin) when is_binary(Bin) -> Bin.
+nonempty_or_undefined(Bin) when is_binary(Bin) -> Bin;
+nonempty_or_undefined(_WrongType) -> undefined.
 
 -doc "Resolve a name to an existing atom, applying the `Policy` for an unknown name.".
 -spec existing_atom_param(binary(), unknown_policy()) -> {ok, atom()} | {error, term()}.
@@ -77,15 +80,23 @@ unknown(Name, {error, Fun}) -> {error, Fun(Name)}.
 -doc """
 Read the `actor` param as a pid and check it is a registered actor. Answers
 `{ok, Pid, PidBin}`, or `{error, #beamtalk_error{}}` for an invalid or
-unknown pid (see `invalid_pid_error/2`).
+unknown pid (see `invalid_pid_error/2`). A missing or non-string `actor`
+param is an `invalid_pid` error like any other unparseable pid.
 """.
 -spec actor_pid(map()) -> {ok, pid(), binary()} | {error, beamtalk_error:error()}.
 actor_pid(Params) ->
-    PidStr = binary_to_list(maps:get(<<"actor">>, Params, <<>>)),
+    PidStr = pid_param_string(maps:get(<<"actor">>, Params, <<>>)),
     case validate_actor_pid(PidStr) of
         {ok, Pid} -> {ok, Pid, list_to_binary(PidStr)};
         {error, Reason} -> {error, invalid_pid_error(Reason, PidStr)}
     end.
+
+%% A wrong-typed `actor` value is never echoed (it can be arbitrarily large and
+%% hold code points `list_to_binary/1` rejects); the error shows a placeholder.
+%% It can never parse as a pid, so `validate_actor_pid/1` answers `invalid_pid`.
+-spec pid_param_string(term()) -> string().
+pid_param_string(Bin) when is_binary(Bin) -> binary_to_list(Bin);
+pid_param_string(_Other) -> "<not a string>".
 
 -spec validate_actor_pid(string()) -> {ok, pid()} | {error, invalid_pid | unknown_actor}.
 validate_actor_pid(PidStr) ->

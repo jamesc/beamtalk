@@ -13,12 +13,12 @@ use std::fs;
 use std::path::PathBuf;
 use tracing::{debug, info, instrument};
 
-use crate::commands::build_layout::BuildLayout;
 use crate::commands::deps::lockfile::{NativeLockSource, NativePackageLock};
-use crate::commands::manifest::{
+use beamtalk_core::build_layout::BuildLayout;
+use beamtalk_core::compilation::GitReference;
+use beamtalk_package::manifest::{
     self, NativeDependency, NativeDependencyMap, NativeOverrideMap, NativeSource,
 };
-use beamtalk_core::compilation::GitReference;
 
 use super::environment::{BuildEnvironment, DependencyContext};
 

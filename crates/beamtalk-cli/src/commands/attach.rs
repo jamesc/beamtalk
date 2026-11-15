@@ -70,7 +70,7 @@ fn attach_by_workspace_id(name_or_id: Option<&str>) -> Result<()> {
         return Err(workspace_not_running(&workspace_id, name_or_id));
     }
 
-    let cookie = read_workspace_cookie(&workspace_id)?.trim().to_string();
+    let cookie = read_workspace_cookie(&workspace_id)?;
 
     let host = node_info.connect_host();
 

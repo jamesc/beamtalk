@@ -9,7 +9,7 @@
 use crate::ast::MethodKind;
 use crate::semantic_analysis::type_checker::InferredType;
 use ecow::EcoString;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::ClassHierarchy;
 use super::class_info::{ClassInfo, MethodInfo};
@@ -160,22 +160,6 @@ impl ClassHierarchy {
                 .and_then(|mi| mi.get(selector))?;
             Some(&info.class_methods[idx]).filter(|m| m.kind == MethodKind::Primary)
         })
-    }
-
-    /// Collects the set of selectors that have `spawns_block: true` anywhere
-    /// in the hierarchy.
-    ///
-    /// Used by the self-capture validator to precompute which selectors should
-    /// skip false-positive warnings. Call once before walking the AST, then
-    /// use `HashSet::contains` for O(1) lookups per expression node.
-    #[must_use]
-    pub fn spawns_block_selectors(&self) -> HashSet<EcoString> {
-        self.classes
-            .values()
-            .flat_map(|info| info.methods.iter().chain(info.class_methods.iter()))
-            .filter(|m| m.spawns_block)
-            .map(|m| m.selector.clone())
-            .collect()
     }
 
     /// Check if a class explicitly overrides `doesNotUnderstand:args:` on the instance side.

@@ -4,6 +4,10 @@
 //! Stub-registry resolution tests (ADR 0075 Phase 2): project/package/distribution/auto-extract precedence, version-drift detection, and cross-package collision checks for dependency stub registries.
 
 use super::*;
+use beamtalk_package::ffi_type_registry::{
+    DependencyStubsDir, StubLayer, distribution_stubs_dir, load_dependency_stub_registries,
+    load_project_stub_registry,
+};
 
 // ── load_project_stub_registry tests (ADR 0075 Phase 2) ────────
 

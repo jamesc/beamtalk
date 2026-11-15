@@ -24,12 +24,13 @@
 
 use crate::commands::OutputFormat;
 use crate::diagnostic::CompileDiagnostic;
-use beamtalk_cli::lint_pipeline::{self, DependencyMetadata, LintGate};
-#[cfg(test)]
-use beamtalk_cli::lint_pipeline::{FileContext, analyse_file, dedup_pre_loaded_alias_collision};
-pub(crate) use beamtalk_cli::lint_pipeline::{collect_lint_files, find_package_root};
 #[cfg(test)]
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
+use beamtalk_package::lint_pipeline::{self, DependencyMetadata, LintGate};
+#[cfg(test)]
+use beamtalk_package::lint_pipeline::{
+    FileContext, analyse_file, dedup_pre_loaded_alias_collision,
+};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::Result;
 use tracing::warn;
@@ -42,12 +43,12 @@ use tracing::warn;
 /// buccaneer-style sources the REPL `load-project` rejects fail CI here too
 /// (BT-4334).
 ///
-/// The analysis is [`beamtalk_cli::lint_pipeline`], shared with the MCP
+/// The analysis is [`beamtalk_package::lint_pipeline`], shared with the MCP
 /// `lint` tool (BT-4585); this function supplies the CLI's dependency
 /// resolution and FFI type registry and prints the results.
 pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> Result<()> {
     let source_path = Utf8PathBuf::from(path);
-    let (source_files, erl_files) = collect_lint_files(&source_path, path)?;
+    let (source_files, erl_files) = lint_pipeline::collect_lint_files(&source_path, path)?;
 
     // Pass 1: parse the full package source set — not only the targets —
     // so cross-file type/DNU diagnostics in Pass 2 match what `build` emits.
@@ -74,7 +75,7 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
     // The FFI type registry, built by the function MCP `lint` uses too
     // (BT-4643); its stub-tier diagnostics stream in `format` as they
     // always have, outside the lint gate.
-    let resolved_registry = beamtalk_cli::ffi_type_registry::lint_type_registry(
+    let resolved_registry = beamtalk_package::ffi_type_registry::lint_type_registry(
         sources.package_root.as_deref(),
         &source_files,
         &dependency_stubs,
@@ -214,19 +215,19 @@ fn lint_erl_files(erl_files: &[Utf8PathBuf], format: OutputFormat) -> Result<usi
 /// Resolve the project's dependencies and collect their class, protocol and
 /// alias metadata and extension methods (ADR 0070 WS3, BT-4608) for the
 /// shared pipeline, plus each one's own stub directory (ADR 0075 layer 2)
-/// for [`beamtalk_cli::ffi_type_registry::lint_type_registry`].
+/// for [`beamtalk_package::ffi_type_registry::lint_type_registry`].
 ///
 /// Best-effort: if dependency resolution fails (a network error for a git
 /// dep, a dependency cycle, a dependency manifest that does not validate),
 /// lint falls back to the dependency checkouts already on disk — the offline
 /// scan MCP `lint` always uses
-/// ([`beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources`])
+/// ([`beamtalk_package::dependency_classes::resolve_dependency_class_infos_with_sources`])
 /// — rather than failing, or dropping every dependency's classes and stubs,
 /// so both surfaces see the same dependencies whenever resolution fails.
 pub(crate) fn merge_dependency_infos(
     project_root: &Utf8Path,
 ) -> (
-    Vec<beamtalk_cli::ffi_type_registry::DependencyStubsDir>,
+    Vec<beamtalk_package::ffi_type_registry::DependencyStubsDir>,
     DependencyMetadata,
 ) {
     let options = beamtalk_core::CompilerOptions::default();
@@ -234,7 +235,7 @@ pub(crate) fn merge_dependency_infos(
         Ok(resolved_deps) => {
             let mut metadata = DependencyMetadata::default();
             metadata.extensions_complete =
-                beamtalk_cli::dependency_extensions::merge_dependency_extensions(
+                beamtalk_project::dependency_extensions::merge_dependency_extensions(
                     resolved_deps.iter().map(|dep| &dep.extensions),
                     &mut metadata.extensions,
                 );
@@ -258,7 +259,7 @@ pub(crate) fn merge_dependency_infos(
                  using the dependency checkouts already on disk"
             );
             let mut scan =
-                beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources(
+                beamtalk_package::dependency_classes::resolve_dependency_class_infos_with_sources(
                     project_root,
                 );
             (std::mem::take(&mut scan.stub_dirs), scan.into())
@@ -624,62 +625,6 @@ mod tests {
     }
 
     #[test]
-    fn find_package_root_from_subdir() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let root = temp.path();
-        std::fs::write(
-            root.join("beamtalk.toml"),
-            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
-        )
-        .unwrap();
-        let src = root.join("src");
-        std::fs::create_dir_all(&src).unwrap();
-
-        // Use the canonical form of root for the expected value: on macOS
-        // `/tmp` resolves to `/private/tmp`; on Windows short/long path names
-        // differ. `find_package_root` canonicalises internally, so the expected
-        // value must do the same to match.
-        let root_utf8 =
-            camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(root).unwrap()).unwrap();
-        let src_utf8 =
-            camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(&src).unwrap()).unwrap();
-
-        // From subdir, should find parent
-        assert_eq!(find_package_root(&src_utf8), Some(root_utf8.clone()));
-
-        // From root itself, should find it directly
-        assert_eq!(find_package_root(&root_utf8), Some(root_utf8.clone()));
-    }
-
-    #[test]
-    fn find_package_root_from_file() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let root = temp.path();
-        std::fs::write(
-            root.join("beamtalk.toml"),
-            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
-        )
-        .unwrap();
-        let src = root.join("src");
-        std::fs::create_dir_all(&src).unwrap();
-        std::fs::write(src.join("foo.bt"), "Object subclass: Foo\n").unwrap();
-
-        let file_utf8 = camino::Utf8PathBuf::from_path_buf(src.join("foo.bt")).unwrap();
-        // Canonicalise root — see find_package_root_from_subdir for rationale.
-        let root_utf8 =
-            camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(root).unwrap()).unwrap();
-
-        assert_eq!(find_package_root(&file_utf8), Some(root_utf8));
-    }
-
-    #[test]
-    fn find_package_root_none_without_manifest() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let dir = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        assert_eq!(find_package_root(&dir), None);
-    }
-
-    #[test]
     fn expect_all_stale_without_cross_file_actor_class() {
         // Without cross-file class info, lint can't know MyActor is an Actor,
         // so `@expect all` would be stale (no diagnostic emitted).
@@ -760,7 +705,7 @@ mod tests {
     fn lint_extraction_records_protocol_source_identity() {
         let temp = tempfile::TempDir::new().unwrap();
         // Canonicalise root — the recorded protocol source path is the
-        // canonical spelling; see find_package_root_from_subdir.
+        // canonical spelling; see the `find_package_root` tests in `beamtalk-package`.
         let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(temp.path()).unwrap()).unwrap();
         std::fs::write(
             root.join("beamtalk.toml"),
@@ -929,7 +874,7 @@ mod tests {
         // so `ensure_deps_resolved` takes the fresh/no-recompile fast path
         // (`collect_fresh_deps` → `build_dep_class_index`) instead of a real
         // `erlc` compile, keeping this test fast and toolchain-independent.
-        let layout = crate::commands::build_layout::BuildLayout::new(&consumer_root);
+        let layout = beamtalk_core::build_layout::BuildLayout::new(&consumer_root);
         let ebin_dir = layout.dep_ebin_dir("producer");
         std::fs::create_dir_all(&ebin_dir).unwrap();
         std::fs::write(ebin_dir.join("bt@producer@types.beam"), b"BEAM").unwrap();
@@ -1137,7 +1082,7 @@ mod tests {
 
         let source_path = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()).unwrap();
         let (source_files, _erl_files) =
-            collect_lint_files(&source_path, source_path.as_str()).unwrap();
+            lint_pipeline::collect_lint_files(&source_path, source_path.as_str()).unwrap();
 
         assert!(
             source_files.iter().all(|f| !f.as_str().contains("_build")),
@@ -1174,7 +1119,7 @@ mod tests {
 
         let source_path = camino::Utf8PathBuf::from_path_buf(root.to_path_buf()).unwrap();
         let (source_files, _erl_files) =
-            collect_lint_files(&source_path, source_path.as_str()).unwrap();
+            lint_pipeline::collect_lint_files(&source_path, source_path.as_str()).unwrap();
 
         assert_eq!(
             source_files,
@@ -1238,7 +1183,7 @@ mod tests {
 
         // Fake the producer's compiled state so dependency resolution takes
         // the fresh/no-recompile fast path (mirrors the sibling test above).
-        let layout = crate::commands::build_layout::BuildLayout::new(&consumer_root);
+        let layout = beamtalk_core::build_layout::BuildLayout::new(&consumer_root);
         let ebin_dir = layout.dep_ebin_dir("producer");
         std::fs::create_dir_all(&ebin_dir).unwrap();
         std::fs::write(ebin_dir.join("bt@producer@types.beam"), b"BEAM").unwrap();
@@ -1329,7 +1274,7 @@ mod tests {
 
         // Fake both producers' compiled state so dependency resolution takes
         // the fresh/no-recompile fast path (mirrors the sibling tests above).
-        let layout = crate::commands::build_layout::BuildLayout::new(&consumer_root);
+        let layout = beamtalk_core::build_layout::BuildLayout::new(&consumer_root);
         for pkg in ["producer_a", "producer_b"] {
             let ebin_dir = layout.dep_ebin_dir(pkg);
             std::fs::create_dir_all(&ebin_dir).unwrap();
@@ -1466,35 +1411,6 @@ mod tests {
         );
     }
 
-    /// `find_package_root` must work for relative paths like `test/`
-    /// by canonicalizing the start path.
-    ///
-    /// Serialized on `cwd` because it temporarily mutates the process working
-    /// directory, matching the convention used by tests in `run.rs` / `test.rs`.
-    #[test]
-    #[serial_test::serial(cwd)]
-    fn find_package_root_canonicalizes_relative_paths() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let root = temp.path();
-        std::fs::write(
-            root.join("beamtalk.toml"),
-            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
-        )
-        .unwrap();
-        let test_dir = root.join("test");
-        std::fs::create_dir_all(&test_dir).unwrap();
-
-        // Run the check from the package root with a relative argument.
-        let prev_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(root).unwrap();
-        let relative = camino::Utf8PathBuf::from("test");
-        let found = find_package_root(&relative);
-        std::env::set_current_dir(prev_cwd).unwrap();
-
-        let expected = camino::Utf8PathBuf::from_path_buf(root.canonicalize().unwrap()).unwrap();
-        assert_eq!(found, Some(expected));
-    }
-
     /// With no FFI registry, an `(Erlang m) f:` call in a typed class
     /// infers as `Dynamic(UntypedFfi)` and lint emits the
     /// "Dynamic in typed class (untyped FFI)" warning.
@@ -1594,7 +1510,7 @@ mod tests {
     fn lint_extracts_type_specs_live_on_cold_cache_bt_2851() {
         let temp = tempfile::TempDir::new().unwrap();
         let root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-        let layout = crate::commands::build_layout::BuildLayout::new(&root);
+        let layout = beamtalk_core::build_layout::BuildLayout::new(&root);
 
         // No `_build/` directory exists yet — the cold-cache case.
         assert!(!layout.type_cache_dir().exists());
@@ -1645,7 +1561,7 @@ mod tests {
     /// suffix) must be ignored.
     #[test]
     fn load_type_cache_registry_populates_from_cached_json() {
-        use crate::beam_compiler::load_type_cache_registry;
+        use beamtalk_package::native_type_specs::load_type_cache_registry;
 
         let temp = tempfile::TempDir::new().unwrap();
         let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
@@ -1657,7 +1573,7 @@ mod tests {
             serde_json::json!({
                 "beam_mtime_secs": 0,
                 "beam_mtime_nanos": 0,
-                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "mapping_stamp": beamtalk_package::native_type_specs::current_spec_mapping_stamp(),
                 "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
             })
             .to_string(),
@@ -1689,7 +1605,7 @@ mod tests {
     /// lint without crashing.
     #[test]
     fn load_type_cache_registry_returns_none_when_missing() {
-        use crate::beam_compiler::load_type_cache_registry;
+        use beamtalk_package::native_type_specs::load_type_cache_registry;
 
         let temp = tempfile::TempDir::new().unwrap();
         let missing = camino::Utf8PathBuf::from_path_buf(temp.path().join("nonexistent")).unwrap();
@@ -1708,8 +1624,8 @@ mod tests {
     /// signature and reintroduce a lint/build disagreement.
     #[test]
     fn load_type_cache_registry_picks_latest_when_module_has_multiple_hashes() {
-        use crate::beam_compiler::load_type_cache_registry;
         use beamtalk_core::semantic_analysis::type_checker::FunctionSignature;
+        use beamtalk_package::native_type_specs::load_type_cache_registry;
 
         let temp = tempfile::TempDir::new().unwrap();
         let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
@@ -1723,7 +1639,7 @@ mod tests {
             serde_json::json!({
                 "beam_mtime_secs": 0,
                 "beam_mtime_nanos": 0,
-                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "mapping_stamp": beamtalk_package::native_type_specs::current_spec_mapping_stamp(),
                 "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Symbol">>}]"#,
             })
             .to_string(),
@@ -1747,7 +1663,7 @@ mod tests {
             serde_json::json!({
                 "beam_mtime_secs": 1,
                 "beam_mtime_nanos": 0,
-                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "mapping_stamp": beamtalk_package::native_type_specs::current_spec_mapping_stamp(),
                 "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
             })
             .to_string(),
@@ -1774,7 +1690,7 @@ mod tests {
     /// loader must drop the entry so lint does not warn off stale signatures.
     #[test]
     fn load_type_cache_registry_skips_entry_when_beam_mtime_changed() {
-        use crate::beam_compiler::load_type_cache_registry;
+        use beamtalk_package::native_type_specs::load_type_cache_registry;
 
         let temp = tempfile::TempDir::new().unwrap();
         let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
@@ -1799,7 +1715,7 @@ mod tests {
             "beam_mtime_secs": stale_secs,
             "beam_mtime_nanos": 0,
             "beam_path": beam_path.to_str().unwrap(),
-            "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+            "mapping_stamp": beamtalk_package::native_type_specs::current_spec_mapping_stamp(),
             "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Symbol">>}]"#,
         })
         .to_string();
@@ -1824,7 +1740,7 @@ mod tests {
     /// that may now be wrong.
     #[test]
     fn load_type_cache_registry_skips_entry_when_beam_missing() {
-        use crate::beam_compiler::load_type_cache_registry;
+        use beamtalk_package::native_type_specs::load_type_cache_registry;
 
         let temp = tempfile::TempDir::new().unwrap();
         let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
@@ -1835,7 +1751,7 @@ mod tests {
             "beam_mtime_secs": 1,
             "beam_mtime_nanos": 0,
             "beam_path": missing_beam.to_str().unwrap(),
-            "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+            "mapping_stamp": beamtalk_package::native_type_specs::current_spec_mapping_stamp(),
             "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 1,line => 1,name => <<"close">>,params => [#{name => <<"sock">>,type => <<"Object">>}],return_type => <<"Symbol">>}]"#,
         })
         .to_string();
@@ -1864,7 +1780,7 @@ mod tests {
     /// the case where the stamp itself is absent.
     #[test]
     fn load_type_cache_registry_loads_legacy_entry_without_beam_path() {
-        use crate::beam_compiler::load_type_cache_registry;
+        use beamtalk_package::native_type_specs::load_type_cache_registry;
 
         let temp = tempfile::TempDir::new().unwrap();
         let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
@@ -1876,7 +1792,7 @@ mod tests {
             serde_json::json!({
                 "beam_mtime_secs": 0,
                 "beam_mtime_nanos": 0,
-                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "mapping_stamp": beamtalk_package::native_type_specs::current_spec_mapping_stamp(),
                 "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
             })
             .to_string(),
@@ -1897,7 +1813,7 @@ mod tests {
     /// accepted as fresh.
     #[test]
     fn load_type_cache_registry_skips_entry_when_mapping_stamp_missing() {
-        use crate::beam_compiler::load_type_cache_registry;
+        use beamtalk_package::native_type_specs::load_type_cache_registry;
 
         let temp = tempfile::TempDir::new().unwrap();
         let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
@@ -1923,7 +1839,7 @@ mod tests {
     /// the old mapping forever.
     #[test]
     fn load_type_cache_registry_skips_entry_when_mapping_stamp_differs() {
-        use crate::beam_compiler::load_type_cache_registry;
+        use beamtalk_package::native_type_specs::load_type_cache_registry;
 
         let temp = tempfile::TempDir::new().unwrap();
         let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
@@ -1952,7 +1868,7 @@ mod tests {
     /// is the steady-state case after a fresh `beamtalk build`.
     #[test]
     fn load_type_cache_registry_loads_entry_when_beam_mtime_matches() {
-        use crate::beam_compiler::load_type_cache_registry;
+        use beamtalk_package::native_type_specs::load_type_cache_registry;
 
         let temp = tempfile::TempDir::new().unwrap();
         let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
@@ -1966,7 +1882,7 @@ mod tests {
             "beam_mtime_secs": dur.as_secs(),
             "beam_mtime_nanos": dur.subsec_nanos(),
             "beam_path": beam_path.to_str().unwrap(),
-            "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+            "mapping_stamp": beamtalk_package::native_type_specs::current_spec_mapping_stamp(),
             "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 2,line => 1,name => <<"connect">>,params => [#{name => <<"sockaddr">>,type => <<"Symbol">>},#{name => <<"port">>,type => <<"Integer">>}],return_type => <<"Result(Dynamic | Tuple, Symbol)">>}]"#,
         })
         .to_string();
@@ -1992,7 +1908,7 @@ mod tests {
     /// hex chars — the hash format `TypeCache::cache_path` writes.
     #[test]
     fn load_type_cache_registry_disambiguates_underscored_module_names() {
-        use crate::beam_compiler::load_type_cache_registry;
+        use beamtalk_package::native_type_specs::load_type_cache_registry;
 
         let temp = tempfile::TempDir::new().unwrap();
         let cache_dir = camino::Utf8PathBuf::from_path_buf(temp.path().join("type_cache")).unwrap();
@@ -2005,7 +1921,7 @@ mod tests {
             serde_json::json!({
                 "beam_mtime_secs": 0,
                 "beam_mtime_nanos": 0,
-                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "mapping_stamp": beamtalk_package::native_type_specs::current_spec_mapping_stamp(),
                 "specs_line": r#"beamtalk-specs-module:gen_tcp_socket:[#{arity => 1,line => 1,name => <<"close">>,params => [#{name => <<"sock">>,type => <<"Object">>}],return_type => <<"Symbol">>}]"#,
             })
             .to_string(),
@@ -2016,7 +1932,7 @@ mod tests {
             serde_json::json!({
                 "beam_mtime_secs": 0,
                 "beam_mtime_nanos": 0,
-                "mapping_stamp": crate::beam_compiler::current_spec_mapping_stamp(),
+                "mapping_stamp": beamtalk_package::native_type_specs::current_spec_mapping_stamp(),
                 "specs_line": r#"beamtalk-specs-module:gen_tcp:[#{arity => 1,line => 1,name => <<"close">>,params => [#{name => <<"sock">>,type => <<"Object">>}],return_type => <<"Symbol">>}]"#,
             })
             .to_string(),

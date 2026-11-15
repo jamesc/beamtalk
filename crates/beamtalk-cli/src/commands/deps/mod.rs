@@ -32,8 +32,8 @@ use miette::{IntoDiagnostic, Result, WrapErr};
 use std::collections::{BTreeMap, VecDeque};
 use tracing::{debug, info};
 
-use crate::commands::build_layout::BuildLayout;
-use crate::commands::manifest;
+use beamtalk_core::build_layout::BuildLayout;
+use beamtalk_package::manifest;
 
 /// Ensure dependencies are resolved and compiled, with staleness detection.
 ///
@@ -746,7 +746,7 @@ pub(crate) mod test_support {
             write_source(consumer.as_std_path(), name, content);
         }
 
-        let layout = crate::commands::build_layout::BuildLayout::new(&consumer);
+        let layout = beamtalk_core::build_layout::BuildLayout::new(&consumer);
         let ebin_dir = layout.dep_ebin_dir("producer");
         fs::create_dir_all(&ebin_dir).unwrap();
         for (name, _) in producer_files {
@@ -1447,7 +1447,7 @@ mod tests {
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
-            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
+            extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(),
         }];
 
         clean_stale_deps(&root, &resolved).unwrap();
@@ -1483,7 +1483,8 @@ mod tests {
                 is_direct: true,
                 via_chain: Vec::new(),
                 stubs_dir: None,
-                extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
+                extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(
+                ),
             },
             path::ResolvedDependency {
                 name: "b".to_string(),
@@ -1498,7 +1499,8 @@ mod tests {
                 is_direct: true,
                 via_chain: Vec::new(),
                 stubs_dir: None,
-                extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
+                extensions: beamtalk_project::dependency_extensions::DependencyExtensions::default(
+                ),
             },
         ];
 
@@ -2465,7 +2467,7 @@ mod tests {
         let root = overlapping_protocol_project(&temp);
 
         let (_, offline, _) =
-            beamtalk_cli::dependency_classes::resolve_dependency_class_infos(&root);
+            beamtalk_package::dependency_classes::resolve_dependency_class_infos(&root);
 
         assert_eq!(provided_surface(&offline), expected_overlap_surface());
     }
