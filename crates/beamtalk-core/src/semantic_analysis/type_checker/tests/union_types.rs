@@ -551,38 +551,10 @@ fn union_receiver_dynamic_member_no_warning() {
 #[test]
 fn bt3469_union_member_with_cross_file_parent_downgrades_to_open() {
     use crate::semantic_analysis::class_hierarchy::ClassInfo;
-    use std::collections::HashMap;
 
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "PartialA".into(),
-        // `MissingAncestor` is never registered — the checker cannot
-        // enumerate PartialA's full method surface.
-        superclass: Some("MissingAncestor".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("PartialA", Some("MissingAncestor"))
     }]);
 
     let module = Module::new(

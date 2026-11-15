@@ -468,6 +468,85 @@ const PROCESS_BOUND_CLASS_SELECTORS: &[&str] = &[
 ];
 
 impl ClassInfo {
+    /// Test fixture: a plain, non-sealed, non-abstract class named `name`
+    /// extending `superclass`, with every other field at its neutral value
+    /// (no state, methods, package or type parameters).
+    ///
+    /// Tests override the fields they care about with struct-update syntax:
+    /// `ClassInfo { is_sealed: true, ..ClassInfo::test("Foo", Some("Object")) }`.
+    /// Deliberately not a `Default` impl: no production caller builds a
+    /// nameless `ClassInfo`. Compiled only for tests and the `test` feature
+    /// (dependent crates' dev-dependencies).
+    #[cfg(any(test, feature = "test"))]
+    #[must_use]
+    pub fn test(name: &str, superclass: Option<&str>) -> Self {
+        Self {
+            name: name.into(),
+            superclass: superclass.map(Into::into),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: false,
+            is_native: false,
+            auto_ctors: None,
+            handle_scope: None,
+            surface_incomplete: false,
+            in_caller_new1: false,
+            is_module_less: false,
+            state: Vec::new(),
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            state_kinds: HashMap::new(),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: Vec::new(),
+            class_methods: Vec::new(),
+            class_variables: Vec::new(),
+            type_params: Vec::new(),
+            type_param_bounds: Vec::new(),
+            superclass_type_args: Vec::new(),
+        }
+    }
+
+    /// Test fixture: an `Object` subclass `name` with one primary instance
+    /// method `selector` whose single parameter has type `param_type` and
+    /// whose return type is `return_type` (both parsed as declared types).
+    /// The arity is taken from the selector (`compute:` is 1, `size` is 0;
+    /// pass `None` for `param_type` on a unary selector).
+    #[cfg(any(test, feature = "test"))]
+    #[must_use]
+    pub fn class_with_method(
+        name: &str,
+        selector: &str,
+        param_type: Option<&str>,
+        return_type: &str,
+    ) -> Self {
+        Self {
+            methods: vec![MethodInfo {
+                selector: selector.into(),
+                arity: usize::from(param_type.is_some()),
+                kind: MethodKind::Primary,
+                defined_in: name.into(),
+                is_sealed: false,
+                is_internal: false,
+                spawns_block: false,
+                return_type: Some(DeclaredType::parse(return_type)),
+                param_types: param_type
+                    .map(|t| Some(DeclaredType::parse(t)))
+                    .into_iter()
+                    .collect(),
+                doc: None,
+                origin: None,
+                primitive: None,
+                constant_value: None,
+                answers_receiver: false,
+            }],
+            ..Self::test(name, Some("Object"))
+        }
+    }
+
     /// Whether this entry is a superclass-index stub inserted by
     /// `ClassHierarchy::add_external_superclasses`: it carries only a name and
     /// a superclass, so its class variables and method surface are unknown,

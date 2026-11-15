@@ -11,7 +11,6 @@
 use super::common::*;
 use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 use crate::source_analysis::Severity;
-use std::collections::HashMap;
 
 /// Build a hierarchy containing one class whose single method `consume:` takes
 /// one untyped parameter. `superclass` decides the class kind — pass `"Actor"`
@@ -19,26 +18,6 @@ use std::collections::HashMap;
 fn hierarchy_with(class: &str, superclass: &str) -> ClassHierarchy {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: class.into(),
-        superclass: Some(superclass.into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: "consume:".into(),
             arity: 1,
@@ -48,7 +27,6 @@ fn hierarchy_with(class: &str, superclass: &str) -> ClassHierarchy {
             is_internal: false,
             spawns_block: false,
             return_type: None,
-            // Untyped parameter: the sendability check must fire regardless.
             param_types: vec![None],
             doc: None,
 
@@ -57,11 +35,7 @@ fn hierarchy_with(class: &str, superclass: &str) -> ClassHierarchy {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test(class, Some(superclass))
     }]);
     hierarchy
 }
