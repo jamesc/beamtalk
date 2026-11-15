@@ -300,7 +300,10 @@ impl CoreErlangGenerator {
     ///
     /// The order of checks matters: more specific patterns (e.g. field assignment,
     /// `do:` with local threading) must come before general ones (e.g. pure).
-    fn classify_vt_body_expr(&self, expr: &Expression) -> VtBodyExprKind {
+    pub(in crate::core_erlang) fn classify_vt_body_expr(
+        &self,
+        expr: &Expression,
+    ) -> VtBodyExprKind {
         if matches!(expr, Expression::Return { .. }) {
             return VtBodyExprKind::EarlyReturn;
         }
