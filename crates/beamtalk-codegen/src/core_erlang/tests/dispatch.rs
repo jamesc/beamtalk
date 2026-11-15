@@ -2305,13 +2305,13 @@ sealed Object subclass: Bar
     let msg = &generated.warnings[0].message;
     assert_has(
         "Warning should mention the missing module",
-        &msg,
+        msg,
         &["bt@stdlib@foo"],
     );
-    assert_has("Warning should mention the selector", &msg, &["doIt"]);
+    assert_has("Warning should mention the selector", msg, &["doIt"]);
     assert_has(
         "Warning should explain the issue",
-        &msg,
+        msg,
         &["has not been compiled"],
     );
     // Verify the span points at the @primitive expression, not a dummy zero span.
@@ -3929,7 +3929,7 @@ fn test_explicit_own_class_send_cases_on_the_receiver_tag() {
     let own_arm = &run[tag_case..literal_arm];
     assert_has(
         "the Base arm is the own-class direct path",
-        &own_arm,
+        own_arm,
         &[
             "call 'test':'class_who:'(ClassSelf, ",
             "'class_self_dispatch_local'('Base', 'who:', [",
@@ -3937,13 +3937,13 @@ fn test_explicit_own_class_send_cases_on_the_receiver_tag() {
     );
     assert_lacks(
         "the Base arm never sends to its own class process.",
-        &own_arm,
+        own_arm,
         &["'class_send'"],
     );
     let literal = &run[literal_arm..];
     assert_has(
         "the literal arm is the guarded direct call with Base's own reference",
-        &literal,
+        literal,
         &[
             "'class_who:', 'Base class'} := ",
             "'static_call_target'(",
@@ -4047,47 +4047,10 @@ fn test_actor_self_send_in_sealed_class_stays_static() {
 fn test_abstract_actor_spawn_raises_instantiation_error() {
     // Abstract Actor subclasses must emit spawn/0 and spawn/1 as
     // instantiation_error stubs — not real safe_spawn calls.
-    use beamtalk_core::ast::*;
-
-    let class = ClassDefinition {
-        name: Identifier::new("AbstractQueue", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: true,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
-    let module = Module {
-        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
-        literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        classes: vec![class],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-    let code = generate_module(&module, CodegenOptions::new("bt@abstract_queue"))
-        .expect("codegen should succeed");
+    let code = codegen_named(
+        "abstract Actor subclass: AbstractQueue\n",
+        "bt@abstract_queue",
+    );
 
     assert_has(
         "Abstract actor spawn/0 must have arity-0 fun signature.",
@@ -4129,7 +4092,7 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
     );
     // BT-4477: spawn_monitored_async/0,1 are abstract stubs too.
     assert_has(
-        "",
+        "Abstract actor must emit spawn_monitored_async/0,1 stubs",
         &code,
         &[
             "'spawn_monitored_async'/0 = fun () ->",
@@ -4169,47 +4132,7 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
     // spawn/0 and spawn/1 ok-branches must register the new pid with
     // beamtalk_object_instances:register/2, wrapped in try-catch so a missing
     // registry (e.g. in stdlib unit tests) does not crash the spawn.
-    use beamtalk_core::ast::*;
-
-    let class = ClassDefinition {
-        name: Identifier::new("Counter", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
-    let module = Module {
-        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
-        literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-    let code =
-        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+    let code = codegen_named("Actor subclass: Counter\n", "counter");
 
     assert_has(
         "instance registration success arm must return the ok value.",
@@ -4254,47 +4177,7 @@ fn test_spawn_with_args_validates_map_argument() {
     // spawn/1 must guard InitArgs with erlang:is_map before calling
     // safe_spawn. A non-map raises type_error with the 'spawnWith:' selector
     // and a descriptive hint.
-    use beamtalk_core::ast::*;
-
-    let class = ClassDefinition {
-        name: Identifier::new("Counter", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
-    let module = Module {
-        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
-        literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-    let code =
-        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+    let code = codegen_named("Actor subclass: Counter\n", "counter");
 
     assert_has(
         "spawn/1 must guard InitArgs with erlang:is_map.",
