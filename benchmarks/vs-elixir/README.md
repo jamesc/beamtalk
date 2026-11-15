@@ -65,6 +65,82 @@ that branch. `baseline_branch` points a run at another branch's last night
 (for example `main`). The comparison and the gate are
 `scripts/ci/vs_elixir_nightly.py` (tests: `just test-vs-elixir-nightly`).
 
+## Benchee for the concurrent rows (BT-4935 spike)
+
+`benchee.sh` (`just bench-vs-elixir-benchee`) runs rows 16a-16d under
+[Benchee](https://github.com/bencheeorg/benchee) in a node set up as `run.sh`
+sets it up (same build, same code path, `vs_bench:boot/0`). Each row is one
+Benchee job whose scenarios call the same `VbBench` class method and the same
+`VeBench` floor function the harness calls, with N = 1. Benchee is a `:bench`-env
+dependency of the Mix project only (`MIX_ENV=bench`); `run.sh`, the nightly
+workflow and the harness rows are unchanged. Knobs (env): `BENCHEE_PARALLEL`,
+`BENCHEE_TIME`, `BENCHEE_WARMUP`, `BENCHEE_ROWS`, `BENCHEE_N`,
+`BENCHEE_SAVE` / `BENCHEE_LOAD` (save a run, compare a later one),
+`BENCHEE_OVERHEAD=1` (empty function and no-op Beamtalk call only);
+`ERL_FLAGS="+S 1:1"` picks the scheduler count.
+
+Measured on a shared 4-vCPU Intel Xeon 2.30GHz cloud container (15.7 GB),
+OTP 28.5, Elixir 1.20.1, Benchee 1.5.1, `beamtalk` edge build `cc33345`; 5 s
+measurement + 2 s warm-up per scenario, 3 identical runs per configuration.
+Each cell is the median of the three runs' medians; "spread" is
+(max - min) / min across the three runs' medians. Compare only within this
+table.
+
+| Row | Config | Benchee BT | Benchee EX | spread BT / EX | Benchee BT p99 | Harness BT | Harness EX | spread BT / EX |
+|---|---|--:|--:|--:|--:|--:|--:|--:|
+| 16a | 1 sched | 10.1 µs | 0.94 µs | 3% / 2% | 30.6 µs | 28.4 µs | 1.31 µs | 1% / 1% |
+| 16a | 4 sched, par 1 | 16.9 µs | 1.08 µs | **115%** / 2% | 62.4 µs | 45.8 µs | 1.86 µs | 24% / 9% |
+| 16a | 4 sched, par 4 | 30.7 µs | 2.13 µs | 6% / 61% | 99.5 µs | - | - | - |
+| 16c | 1 sched | 10.8 µs | 3.09 µs | 2% / 1% | 32.2 µs | 27.4 µs | 4.10 µs | 6% / 2% |
+| 16c | 4 sched, par 1 | 13.4 µs | 3.35 µs | 1% / 2% | 36.7 µs | 43.1 µs | 4.92 µs | 14% / 5% |
+| 16c | 4 sched, par 4 | 56.2 µs | 10.9 µs | 46% / 89% | 163 µs | - | - | - |
+| 16d (100 per op) | 1 sched | 1.03 ms | 71.6 µs | 6% / 1% | 1.78 ms | 2.91 ms | 112.8 µs | 3% / 2% |
+| 16d | 4 sched, par 1 | 1.42 ms | 84.8 µs | **1.4%** / 18% | 2.23 ms | 3.37 ms | 230 µs | **49%** / 9% |
+| 16d | 4 sched, par 4 | 3.59 ms | 166 µs | 36% / 35% | 12.5 ms | - | - | - |
+
+16b tracks 16a within a few percent in every configuration. Observations:
+
+- **Same code, different numbers.** The harness reports 2-3x higher
+  Beamtalk times than Benchee (16a: 28 µs against 10 µs at one scheduler).
+  Not batch size: Benchee at N = 2000 gives 10.8 µs/op. The harness wraps
+  each timed call in a GC trace of every process in the node, and these rows
+  start thousands of processes. Not isolated by experiment. Use Benchee's
+  figures for the time of a row and the harness's for reductions, heap words
+  and attribution. The Beamtalk/Elixir ratio for 16a at one scheduler is 11x
+  (Benchee) against 22x (harness).
+- **Noise.** At one scheduler, identical runs agree within 1-6% on both
+  tools. At four schedulers the harness's 16d varies by 49% across three runs
+  (the BT-4854 "up to 40%"); Benchee's 16d varies by 1.4%, because it takes
+  5 s of samples (thousands of batches) where the harness takes 7 rounds.
+  Benchee does not make every row stable: 16a/16b at four schedulers had one
+  run at 2x the others (13.5, 16.9, 29.0 µs medians) with a narrower
+  within-run spread than the other runs, so Benchee's standard deviation did
+  not warn of it. Run-to-run shifts here are regime changes (the container's
+  scheduling), not within-run variance. Benchee's reported standard deviation
+  is 100-2000% on most rows because of rare multi-millisecond outliers; use
+  the median and p99.
+- **Differences outside the noise.** Beamtalk against Elixir is 3-22x across
+  all rows and configurations, far outside any spread seen. Two identical
+  runs of the same code differ by more than a 10% threshold on 16a/16b with
+  4 schedulers, so a gate on those rows needs the spread, not one number.
+- **Parallel.** With `parallel: 4`, per-call latency rises 2-4x (16c BT:
+  13.4 to 56.2 µs). Throughput gains about 2x for 16a and none for 16c, so
+  this measures contention in the start path, a different question from the
+  single-caller cost.
+- **Measurement overhead.** An empty Benchee function costs 29-30 ns
+  (median) / 31-34 ns (mean). A no-op Beamtalk class call (`asyncStartRun: 0`)
+  and a typed `a + 1` row (11b) have a median of 32-33 ns, 3 ns over empty,
+  but means of 103-147 ns: a few multi-microsecond outliers (GC, scheduling)
+  per million samples. Medians can be trusted for operations of about 300 ns
+  and up (overhead at most 10% and a stable 30 ns to subtract); means and
+  standard deviation only from tens of microseconds. The per-operation rows in
+  the tens of nanoseconds stay on the harness (confirmed: they are at or below
+  the 30 ns floor).
+- **Save and compare.** `BENCHEE_SAVE=a` then `BENCHEE_SAVE=b BENCHEE_LOAD=a`
+  prints both runs side by side and "x slower" by mean ips. It does not test
+  significance and sets no exit status, so it cannot gate by itself. It could
+  feed BT-4853's gate through a small script that reads the saved files.
+
 ## Method
 
 **One loop shape on both sides.** Every Beamtalk row is

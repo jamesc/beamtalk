@@ -8,6 +8,7 @@
 # Env: BENCHEE_PARALLEL (default 1), BENCHEE_TIME (s, default 5),
 #      BENCHEE_WARMUP (s, default 2), BENCHEE_ROWS (default 16a,16b,16c,16d),
 #      BENCHEE_SAVE (name to save under), BENCHEE_LOAD (saved name to compare),
+#      BENCHEE_N (operations per call, default 1; the harness uses 2000, 100 for 16d),
 #      BENCHEE_OVERHEAD=1 (empty scenario and no-op Beamtalk call only).
 
 :ok = :vs_bench.boot()
@@ -61,7 +62,8 @@ if System.get_env("BENCHEE_OVERHEAD") == "1" do
   )
 else
   for id <- rows do
-    {title, btf, exf, n} = Map.fetch!(jobs, id)
+    {title, btf, exf, n0} = Map.fetch!(jobs, id)
+    n = n0 * String.to_integer(env.("BENCHEE_N", "1"))
     IO.puts("\n## #{title}")
 
     Benchee.run(
