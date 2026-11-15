@@ -167,7 +167,20 @@ Membership. Under D, scanning by the marker finds every compiled actor, supervis
 
 ### Supervised children and `removeFromSystem` / purge
 
-This hazard exists **on main today**, independent of this ADR: `stop_class_actors/1` reads the registered actor list, which already holds supervised and named children, and kills each. `removeFromSystem` kills the actors *before* it stops the class process and deletes the module. **Reproduction result: pending (a test on main is running); this section is completed before the revision is final.**
+This hazard exists **on main today**, independent of this ADR: `stop_class_actors/1` reads the registered actor list, which already holds supervised and named children, and kills each. `removeFromSystem` kills the actors *before* it stops the class process and deletes the module.
+
+**Reproduced on main (40 runs, each on a fresh node, real REPL path with the workspace running; `RfsPermAN` is an `Actor` with `supervisionPolicy` `#permanent`, or `#transient`, and `RfsPermSN` a `Supervisor` whose `childSpecs` name it):**
+- The `{kill, Pid}` from `stop_class_actors` kills the child; the supervisor restarts it in the same millisecond, on the module that is still loaded. `soft_purge` does not object (a gen_server holds its module by atom, not on its stack). `removeFromSystem` then deletes the class and the module and **returns `nil`**. 20/20 permanent, 20/20 transient, no timing dependence.
+- Result: the class is gone ("Class 'RfsPermActor' not found"), the supervisor is alive, `whichChildren` shows a new child `#running`: **a zombie actor on a deleted module**. The "removal aborts half-applied" branch never happened.
+- The first crash of that child afterwards (`exit(Pid, kill)` as a stand-in for any later failure) makes every restart fail with `{undef, [{bt@rfs_perm_actor, init, ...}]}`; 9 failed starts, then `reached_max_restart_intensity`, and the **supervisor dies** (`isAlive` false, `RfsPermSN current` is `nil`). The REPL session survived. A nested tree and a normal-exit transient child were not tested.
+- One run on a shared node, after two earlier zombie-supervisor iterations, crashed the registered actor list (`beamtalk_repl_actors`) with `{normal, {gen_server, call, [ClassPid, module_name]}}` from the `track` cast handler (it resolves the module with a call to a class process that is exiting), after which the session held a stale registry pid and every eval failed with `noproc`. Not reproduced in the 40 fresh-node runs and not diagnosed; under option D that handler does not exist.
+
+So this is a **bug on main**: removing a class that a supervisor holds a spec for leaves a zombie child and a time bomb in the supervisor. It is out of scope for this ADR to fix, and the ADR neither worsens nor fixes it: the actor list already holds supervised children, so `stop_class_actors` and `should_purge_module` already see them. The only readers that gain members are `allInstances` and hot reload (see Migration Path). The fix belongs to its own issue; this ADR records the options so that issue is not decided by accident:
+1. **Refuse** `removeFromSystem` while any supervisor holds a child spec that names the class (a structured `#beamtalk_error{}` naming the supervisor). Smallest, safest, and the user decides.
+2. **Stop through the supervisor:** `supervisor:terminate_child/2` then `delete_child/2` for each spec naming the class, then delete the module. Removes the spec from a running supervisor, which silently changes its shape.
+3. Kill the supervisor first. Rejected: takes unrelated siblings down.
+
+Recommendation for that issue: (1). Until it is fixed, whichever option this ADR adopts must not make `stop_class_actors` see *fewer* supervised children than today (that would trade the zombie for a dead actor with a live module, which is no better).
 
 ## Prior Art
 
