@@ -159,6 +159,7 @@ release nodes do not start a workspace, so this code is a no-op there.
 %% multi-site `'rename-class'`/`'rename-method'` kinds.
 -export([
     target_key/1,
+    shadow_key/1,
     sites_flushable/1
 ]).
 
@@ -824,9 +825,8 @@ change_entries() ->
 %% the pending-changes view shows. Every other active entry for the same
 %% target is *shadowed*: an older patch (or a patch superseded by a revert,
 %% since a revert is itself a patch — ADR 0082 "Undo") that newer state
-%% replaced. Mirrors `beamtalk_workspace_flush:target_key/1` /
-%% `shadow_duplicates/1` so the displayed dirty set matches what flush
-%% actually writes. Inactive entries (prior-epoch / orphan / flushed) never
+%% replaced. Flush's `shadow_duplicates/1` uses the same `shadow_key/1`
+%% (BT-4859), so the displayed dirty set matches what flush actually writes. Inactive entries (prior-epoch / orphan / flushed) never
 %% survive and never shadow.
 %%
 %% Keyed on `(class, selector, side)`, not just `(class, selector)` (ADR 0112's
@@ -854,7 +854,7 @@ survivor_seqs(Entries) ->
     ).
 
 %% The `(class, selector, side)` shadow-key tuple for `E` — shared by
-%% `survivor_seqs/1` and `entry_to_value/2` so both agree on what shadows what.
+%% `survivor_seqs/1`, `entry_to_value/2` and flush's `shadow_duplicates/1` so all agree on what shadows what.
 %%
 %% Whole-class-level entries (`'new-class'`, `'class-def'`, `'remove-class'`)
 %% carry no `selector`, so without a tie-breaker they would all collide on
@@ -870,7 +870,7 @@ survivor_seqs(Entries) ->
 %% visible.
 -type shadow_key() ::
     {binary(), binary() | undefined, side() | undefined} | {binary(), undefined, kind()}.
--spec shadow_key(#entry{}) -> shadow_key().
+-spec shadow_key(entry()) -> shadow_key().
 shadow_key(#entry{selector = undefined} = E) ->
     {E#entry.class, undefined, E#entry.kind};
 shadow_key(E) ->
@@ -1304,8 +1304,7 @@ explicitly (`kind` alone can no longer double as the side discriminator once
 it is spent distinguishing removal from patch); a legacy `instance`/`class`
 -kind patch entry has no stored `side` — it derives one from its own `kind`,
 exactly as `kind` always doubled for side before this ADR. This single
-accessor is what both the flush shadow-key (`beamtalk_workspace_flush:
-target_key/1`) and `revert:`'s side-resolution
+accessor is what both the shared shadow key (`shadow_key/1`, used by flush) and `revert:`'s side-resolution
 (`beamtalk_workspace_interface_primitives:revert_side/1`) key/resolve on,
 per ADR 0112's required fix to ADR 0082's `(class, selector)`-only shadow key.
 """.

@@ -92,6 +92,9 @@ flush_test_() ->
         fun flush_kinds_remove_class_with_confirm_deletes_file/1,
         fun remove_class_already_gone_is_soft_success/1,
         fun remove_class_mixed_with_patch_is_conflict/1,
+        fun new_class_not_shadowed_by_later_class_def/1,
+        fun new_class_not_shadowed_by_later_remove_class/1,
+        fun flush_shadow_key_agrees_with_changelog/1,
         fun remove_class_abort_restores_staged_file_on_other_file_conflict/1,
         fun remove_class_staged_delete_crash_recovery/1,
         %% ADR 0114 Phase 2: rename-class multi-file destructive flush
@@ -2059,6 +2062,59 @@ remove_class_already_gone_is_soft_success(#{proj_dir := ProjDir}) ->
         ?_assertEqual(false, filelib:is_regular(File)),
         ?_assert(entry_flushed(Seq))
     ].
+
+%% BT-4859: whole-class entries (`new-class`, `class-def`, `remove-class`)
+%% carry no selector. Flush must key them by kind (the changelog's
+%% `shadow_key/1`), so a later `class-def`/`remove-class` never shadows an
+%% older, still-pending `new-class` for the same class.
+new_class_not_shadowed_by_later_class_def(#{proj_dir := ProjDir}) ->
+    File = list_to_binary(filename:join([ProjDir, "src", "greeter.bt"])),
+    {ok, NewSeq} = beamtalk_workspace_changelog:append(
+        new_class_input(<<"Greeter">>, <<"Object subclass: Greeter\n">>, File)
+    ),
+    {ok, DefSeq} = beamtalk_workspace_changelog:append(
+        class_def_input(<<"Greeter">>, <<"Object subclass: Greeter\n">>, <<>>, File, 0, 0)
+    ),
+    {Applied, Shadowed} = beamtalk_workspace_flush:shadow_duplicates(
+        beamtalk_workspace_changelog:entries()
+    ),
+    Seqs = fun(Es) -> [beamtalk_workspace_changelog:entry_seq(E) || E <- Es] end,
+    [
+        ?_assertEqual([NewSeq, DefSeq], Seqs(Applied)),
+        ?_assertEqual([], Shadowed)
+    ].
+
+new_class_not_shadowed_by_later_remove_class(#{proj_dir := ProjDir}) ->
+    File = list_to_binary(filename:join([ProjDir, "src", "greeter.bt"])),
+    Src = <<"Object subclass: Greeter\n">>,
+    {ok, NewSeq} = beamtalk_workspace_changelog:append(new_class_input(<<"Greeter">>, Src, File)),
+    {ok, RemSeq} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Greeter">>, Src, File)
+    ),
+    {Applied, Shadowed} = beamtalk_workspace_flush:shadow_duplicates(
+        beamtalk_workspace_changelog:entries()
+    ),
+    Seqs = fun(Es) -> [beamtalk_workspace_changelog:entry_seq(E) || E <- Es] end,
+    [
+        ?_assertEqual([NewSeq, RemSeq], Seqs(Applied)),
+        ?_assertEqual([], Shadowed)
+    ].
+
+%% Flush shadowing and the pending-changes view share one key function.
+flush_shadow_key_agrees_with_changelog(#{proj_dir := ProjDir}) ->
+    File = list_to_binary(filename:join([ProjDir, "src", "greeter.bt"])),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        new_class_input(<<"Greeter">>, <<"Object subclass: Greeter\n">>, File)
+    ),
+    {ok, _} = beamtalk_workspace_changelog:append(
+        remove_class_input(<<"Greeter">>, <<"Object subclass: Greeter\n">>, File)
+    ),
+    {_, Shadowed} = beamtalk_workspace_flush:shadow_duplicates(
+        beamtalk_workspace_changelog:entries()
+    ),
+    Views = beamtalk_workspace_changelog:change_entries(),
+    ViewShadowed = [V || V <- Views, maps:get(shadowed, V) =:= true],
+    [?_assertEqual([], Shadowed), ?_assertEqual([], ViewShadowed)].
 
 %% Defensive: a `remove-class` entry sharing a `sourceFile` group with an
 %% un-shadowed patch (different target_key — the removal's own key has no
