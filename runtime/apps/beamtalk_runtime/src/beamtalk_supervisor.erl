@@ -2278,6 +2278,9 @@ spawn_kind(ClassName) ->
                 not_found -> not_found
             end
     end,
+    %% Deliberately `walk_ancestors/3`, not `walk_or_warn/4`: `unknown` is a
+    %% documented answer (callers must not read it as "not spawnable"), and a
+    %% cycle is one of its ordinary causes next to a missing metadata row.
     case beamtalk_hierarchy:walk_ancestors(ClassName, Step, ?MAX_HIERARCHY_DEPTH) of
         {found, Kind} -> Kind;
         _ -> unknown
@@ -3258,10 +3261,12 @@ child_class_from_children(SupClass, SupPid) ->
         is_pid(Pid),
         is_atom(M)
     ],
+    %% One read of the memoised map, not one per child (each read copies it).
+    ModClasses = beamtalk_class_registry:module_to_class_map(),
     Resolved = [
         {ClassName, M}
      || M <- Modules,
-        {ok, ClassName} <- [beamtalk_class_registry:class_name_for_module(M)]
+        {ok, ClassName} <- [maps:find(M, ModClasses)]
     ],
     case Resolved of
         [Entry | _] ->

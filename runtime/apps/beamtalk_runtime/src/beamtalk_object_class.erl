@@ -672,18 +672,11 @@ published_compiled_method(ClassName, class, Selector) ->
                 {found, Method}
         end
     end,
-    case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
-        {found, Method} ->
-            Method;
-        not_found ->
-            nil;
-        {max_depth_exceeded, CycleName} ->
-            ?LOG_WARNING(
-                "class-method lookup exceeded ~p levels at ~p (starting from ~p) for ~p -- possible cycle",
-                [?MAX_HIERARCHY_DEPTH, CycleName, ClassName, Selector],
-                #{domain => [beamtalk, runtime]}
-            ),
-            nil
+    Ctx = #{start => ClassName, selector => Selector},
+    case beamtalk_hierarchy:walk_or_warn(ClassName, StepFun, published_compiled_method, Ctx) of
+        {found, Method} -> Method;
+        not_found -> nil;
+        {cycle, _} -> nil
     end.
 
 %% `ClassName`'s own `CompiledMethod` for `Selector` (no chain walk), or `nil`.

@@ -159,6 +159,7 @@ mod routing;
 #[cfg(test)]
 mod runtime_export_contract_tests;
 pub mod selector_mangler;
+pub mod sentinel_tags;
 mod sequencing;
 mod spec_codegen;
 mod statement_kinds;
@@ -416,7 +417,9 @@ impl CoreErlangGenerator {
                     // All NLR throws carry state as a 4-tuple (`nlr_throw_state_doc`).
                     let state_doc = self.nlr_throw_state_doc(*span);
                     let throw_doc = docvec![
-                        "call 'erlang':'throw'({'$bt_nlr', ",
+                        "call 'erlang':'throw'({",
+                        leaf::atom(sentinel_tags::NLR),
+                        ", ",
                         leaf::var(nlr_token),
                         ", ",
                         value_doc,

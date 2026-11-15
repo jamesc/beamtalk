@@ -561,10 +561,11 @@ Returns `not_found` when no registered class has this module, not an error —
 callers should fall back to the string heuristic in that case, exactly as
 `beamtalk_workspace_project_sync:module_to_class_name_map/0` already does in bulk.
 
-For resolving many modules at once (e.g. every frame of a stacktrace), prefer
-`module_to_class_map/0` and look up each module in the result — this function
-rebuilds the whole map (an ETS scan) on every call, so calling it once per
-module in a loop pays that scan once per module instead of once total.
+A lookup in `module_to_class_map/0`, which is memoised in
+`beamtalk_class_derived_cache` and rebuilt (one ETS fold) only after a class
+write flushes it: no fold per call, but the cache read copies the whole map
+(one entry per loaded class) onto the caller's heap. To resolve many modules
+at once, fetch the map once with `module_to_class_map/0`.
 """.
 -spec class_name_for_module(atom()) -> {ok, class_name()} | not_found.
 class_name_for_module(Module) when is_atom(Module) ->
@@ -576,12 +577,12 @@ class_name_for_module(_) ->
     not_found.
 
 -doc """
-Build the full module→class-name map from the class metadata table in a
-single pass — the batch counterpart to `class_name_for_module/1`.
-
-Use this when resolving many modules at once (e.g. `beamtalk_stack_frame:wrap/1`
-mapping every frame of a stacktrace to its class): one ETS fold plus O(1) map
-lookups thereafter, instead of one full scan per module.
+The full module→class-name map, built from the class metadata table in a
+single pass and memoised in `beamtalk_class_derived_cache` (key
+`module_to_class_map`; every class metadata write that can change a row's
+module flushes it, so a reload or new class is seen on the next call).
+`class_name_for_module/1` is a lookup in this map; use the map directly to
+resolve many modules at once (e.g. `beamtalk_stack_frame:wrap/1`).
 
 Backed by `beamtalk_class_metadata:foldl_modules/2` — a plain
 `read_concurrency: true` ETS fold, not `live_class_entries/0`. The earlier
@@ -595,10 +596,13 @@ whether its process is currently alive), so no process round trip is needed.
 """.
 -spec module_to_class_map() -> #{atom() => class_name()}.
 module_to_class_map() ->
-    beamtalk_class_metadata:foldl_modules(
-        fun({Name, Mod}, Acc) -> Acc#{Mod => Name} end,
-        #{}
-    ).
+    beamtalk_class_derived_cache:fetch(module_to_class_map, fun() ->
+        {cache,
+            beamtalk_class_metadata:foldl_modules(
+                fun({Name, Mod}, Acc) -> Acc#{Mod => Name} end,
+                #{}
+            )}
+    end).
 
 -doc """
 Returns true if the given module atom is a bootstrap stub.
@@ -637,7 +641,7 @@ Returns false if the class is not in the hierarchy table (safe during bootstrap)
 Used by beamtalk_exception_handler for hierarchy-aware matching, and (via
 `beamtalk_class_derived_cache:inherits_from/2`) by `isKindOf:`.
 
-Walked with `beamtalk_hierarchy:walk_ancestors/3`, bounded by
+Walked with `beamtalk_hierarchy:walk_or_warn/4`, bounded by
 `?MAX_HIERARCHY_DEPTH` like every other ancestor walk: a superclass cycle in
 the metadata answers `false` (with a warning) rather than looping forever on
 a hot dispatch path.
@@ -653,18 +657,10 @@ inherits_from(ClassName, Ancestor) ->
                 not_found -> not_found
             end
     end,
-    case beamtalk_hierarchy:walk_ancestors(ClassName, Step, ?MAX_HIERARCHY_DEPTH) of
-        {found, true} ->
-            true;
-        not_found ->
-            false;
-        {max_depth_exceeded, At} ->
-            ?LOG_WARNING(
-                "inherits_from: max hierarchy depth ~p exceeded at ~p looking for ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, At, Ancestor],
-                #{domain => [beamtalk, runtime]}
-            ),
-            false
+    case beamtalk_hierarchy:walk_or_warn(ClassName, Step, inherits_from, #{ancestor => Ancestor}) of
+        {found, true} -> true;
+        not_found -> false;
+        {cycle, _} -> false
     end.
 
 -doc """

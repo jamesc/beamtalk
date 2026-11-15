@@ -32,7 +32,7 @@
 //! `beamtalk-core`) dependency on this crate and is deliberately out of
 //! scope here.
 
-use crate::response::{ActorInfo, ClassInfo, ModuleInfo};
+use crate::response::{ActorInfo, ClassInfo};
 
 // ---------------------------------------------------------------------------
 // OutputMode
@@ -438,22 +438,6 @@ pub fn format_class_list(classes: &[ClassInfo], mode: OutputMode) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// format_module_summary
-// ---------------------------------------------------------------------------
-
-/// Single-line module summary: `<name> (<actor_count> actors, loaded <time_ago>)`.
-#[must_use]
-pub fn format_module_summary(module: &ModuleInfo, mode: OutputMode) -> String {
-    let name = paint(mode, BOLD, &module.name);
-    format!(
-        "{name} ({} actor{}, loaded {})",
-        module.actor_count,
-        if module.actor_count == 1 { "" } else { "s" },
-        module.time_ago,
-    )
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -800,45 +784,6 @@ mod tests {
         assert_eq!(
             format_class_list(&[], OutputMode::Plain),
             "No classes found"
-        );
-    }
-
-    // --- format_module_summary ---
-
-    fn make_module(name: &str, count: u32, time_ago: &str) -> ModuleInfo {
-        ModuleInfo {
-            name: name.to_string(),
-            source_file: "x.bt".to_string(),
-            actor_count: count,
-            load_time: 0,
-            time_ago: time_ago.to_string(),
-        }
-    }
-
-    #[test]
-    fn module_summary_singular() {
-        let m = make_module("Counter", 1, "2m ago");
-        assert_eq!(
-            format_module_summary(&m, OutputMode::Plain),
-            "Counter (1 actor, loaded 2m ago)"
-        );
-    }
-
-    #[test]
-    fn module_summary_plural() {
-        let m = make_module("Counter", 3, "now");
-        assert_eq!(
-            format_module_summary(&m, OutputMode::Plain),
-            "Counter (3 actors, loaded now)"
-        );
-    }
-
-    #[test]
-    fn module_summary_zero() {
-        let m = make_module("Counter", 0, "5m ago");
-        assert_eq!(
-            format_module_summary(&m, OutputMode::Plain),
-            "Counter (0 actors, loaded 5m ago)"
         );
     }
 }

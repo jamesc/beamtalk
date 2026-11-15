@@ -83,14 +83,18 @@ load_fake_class_module(ClassNameAtom) ->
     {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".beam", Bin),
     Mod.
 
-%% like load_fake_class_module/1, but under the package-qualified
-%% bt@{PackageName}@{snake_case} module name a src/-located file in a
-%% packaged project actually compiles under
-%% (beamtalk_repl_loader:resolve_package_module/4's common case) — used to
-%% cover class_module_loaded/3's package-qualified branch.
+%% like load_fake_class_module/1, but under the package-qualified module name
+%% a src/-located file in a packaged project compiles under
+%% (bt@{PackageName}@{Segments}, the compiler port's module_name_for_path rule,
+%% BT-4868) — used to cover class_module_loaded/2 resolving the class's live
+%% module from class metadata. `Segments` is the `@`-joined path below src/.
 load_fake_class_module_qualified(ClassNameAtom, PackageName) ->
     Snake = beamtalk_module_name:camel_to_snake(atom_to_list(ClassNameAtom)),
-    ModNameStr = "bt@" ++ binary_to_list(PackageName) ++ "@" ++ Snake,
+    load_fake_class_module_qualified(ClassNameAtom, PackageName, Snake).
+
+load_fake_class_module_qualified(ClassNameAtom, PackageName, Segments) ->
+    _ = ClassNameAtom,
+    ModNameStr = "bt@" ++ binary_to_list(PackageName) ++ "@" ++ Segments,
     % elp:fixme W0023 intentional atom creation
     ModuleAtom = list_to_atom(ModNameStr),
     Forms = [
@@ -463,6 +467,8 @@ stale_metadata_project_path_does_not_override_launcher_test() ->
     PrevPkg = application:get_env(beamtalk_runtime, root_package),
     ok = beamtalk_package:set_root_package(<<"mypkg">>),
     stop_if_running(),
+    %% The module name comes from the compiler port (BT-4868).
+    {ok, _} = application:ensure_all_started(beamtalk_compiler),
     {ok, Pid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WsId,
         project_path => list_to_binary(RealDir),
@@ -472,13 +478,15 @@ stale_metadata_project_path_does_not_override_launcher_test() ->
         {ok, Meta} = beamtalk_workspace_meta:get_metadata(),
         ?assertEqual(list_to_binary(RealDir), maps:get(project_path, Meta)),
         ?assertEqual(
-            <<"bt@mypkg@lib_thing">>,
+            {ok, <<"bt@mypkg@lib_thing">>},
             beamtalk_repl_loader:compute_package_module_name(
                 filename:join([RealDir, "src", "lib_thing.bt"])
             )
         )
     after
         gen_server:stop(Pid),
+        %% Restore the baseline "compiler not running" state later modules expect.
+        _ = application:stop(beamtalk_compiler),
         case PrevPkg of
             {ok, V} -> application:set_env(beamtalk_runtime, root_package, V);
             undefined -> application:unset_env(beamtalk_runtime, root_package)
@@ -1381,8 +1389,9 @@ class_source_survives_restart_when_module_loaded_test() ->
 %% a class_sources entry for a class in a
 %% *packaged* project — the common case, not an edge case — survives restore.
 %% Its module is registered under the package-qualified bt@{pkg}@{snake} name
-%% (resolve_package_module/4's shape for a src/-located file), not the
-%% unqualified bt@{snake} name class_module_loaded/3 originally only checked.
+%% (the compiler port's module_name_for_path shape for a src/-located file),
+%% not the unqualified bt@{snake} name; class_module_loaded/2 finds it through
+%% the class's live metadata row.
 class_source_survives_restart_for_packaged_project_test() ->
     stop_if_running(),
     ProjectDir = filename:join(
@@ -1400,6 +1409,8 @@ class_source_survives_restart_for_packaged_project_test() ->
     MetaFile = metadata_path_for(WsId),
     _ = file:delete(MetaFile),
     ModuleAtom = load_fake_class_module_qualified('Bt3108Pkg', <<"bt3108pkg">>),
+    ok = beamtalk_class_metadata:new(),
+    ok = beamtalk_class_metadata:insert('Bt3108Pkg', ModuleAtom, [], 'Object', false),
     try
         Init = #{
             workspace_id => WsId,
@@ -1417,8 +1428,45 @@ class_source_survives_restart_for_packaged_project_test() ->
         gen_server:stop(Pid2)
     after
         application:unset_env(beamtalk_runtime, root_package),
+        _ = beamtalk_class_metadata:delete('Bt3108Pkg'),
         _ = file:delete(MetaFile),
         _ = file:del_dir_r(ProjectDir),
+        _ = code:purge(ModuleAtom),
+        _ = code:delete(ModuleAtom)
+    end.
+
+%% BT-4868: a class in a src/ SUBDIRECTORY (module bt@{pkg}@util@{snake}) used to
+%% fail class_module_loaded's class-name-only derivation and be dropped on
+%% restore. Reading the class's live module from metadata covers every shape the
+%% loader's naming rule can produce, with no second copy of that rule here.
+class_source_survives_restart_for_subdirectory_class_test() ->
+    stop_if_running(),
+    WsId = <<"clssrc_sub_", (list_to_binary(beamtalk_test_unique:id()))/binary>>,
+    MetaFile = metadata_path_for(WsId),
+    _ = file:delete(MetaFile),
+    ModuleAtom = load_fake_class_module_qualified(
+        'Bt4868Sub', <<"bt4868pkg">>, "util@bt4868_sub_file"
+    ),
+    ok = beamtalk_class_metadata:new(),
+    ok = beamtalk_class_metadata:insert('Bt4868Sub', ModuleAtom, [], 'Object', false),
+    try
+        Init = #{
+            workspace_id => WsId,
+            project_path => <<"/bt_test/clssrc_sub">>,
+            created_at => erlang:system_time(second)
+        },
+        {ok, Pid1} = beamtalk_workspace_meta:start_link(Init),
+        Source = "Object subclass: Bt4868Sub [\n  bar => 1\n]\n",
+        ok = beamtalk_workspace_meta:register_module(ModuleAtom),
+        ok = beamtalk_workspace_meta:set_class_source(<<"Bt4868Sub">>, Source),
+        gen_server:stop(Pid1),
+        beamtalk_test_wait:dead(Pid1),
+        {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
+        ?assertEqual(Source, beamtalk_workspace_meta:get_class_source(<<"Bt4868Sub">>)),
+        gen_server:stop(Pid2)
+    after
+        _ = beamtalk_class_metadata:delete('Bt4868Sub'),
+        _ = file:delete(MetaFile),
         _ = code:purge(ModuleAtom),
         _ = code:delete(ModuleAtom)
     end.

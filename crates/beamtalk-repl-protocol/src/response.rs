@@ -113,11 +113,6 @@ pub struct ReplResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actors: Option<Vec<ActorInfo>>,
 
-    // --- Module operations ---
-    /// Module list (modules op — legacy protocol, retained for backward compat).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modules: Option<Vec<ModuleInfo>>,
-
     // --- Session operations ---
     /// Session list (sessions op).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -167,15 +162,6 @@ pub struct ReplResponse {
     /// Generated Core Erlang source (show-codegen op).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub core_erlang: Option<String>,
-
-    // --- Reload ---
-    /// Number of actors affected by reload.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub affected_actors: Option<u32>,
-
-    /// Number of actors that failed code migration.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub migration_failures: Option<u32>,
 
     // --- Load-project ---
     /// Per-file load errors (load-project op). Each entry is a structured map
@@ -429,21 +415,6 @@ pub struct ClassInfo {
     /// Whether the class is abstract (cannot be instantiated directly).
     #[serde(rename = "abstract")]
     pub is_abstract: bool,
-}
-
-/// Information about a loaded module, deserialized from REPL JSON.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ModuleInfo {
-    /// Module name as registered in the BEAM node.
-    pub name: String,
-    /// Path to the source `.bt` file that defined this module.
-    pub source_file: String,
-    /// Number of actors currently running from this module.
-    pub actor_count: u32,
-    /// Unix timestamp when the module was loaded.
-    pub load_time: i64,
-    /// Human-readable relative time since load (e.g., `"2 minutes ago"`).
-    pub time_ago: String,
 }
 
 /// Information about an active REPL session, deserialized from REPL JSON.
@@ -807,13 +778,5 @@ mod tests {
         assert_eq!(info.superclass.as_deref(), Some("Value"));
         assert!(info.sealed);
         assert!(!info.is_abstract);
-    }
-
-    #[test]
-    fn deserialize_module_info() {
-        let json = r#"{"name":"Counter","source_file":"counter.bt","actor_count":1,"load_time":0,"time_ago":"2m ago"}"#;
-        let info: ModuleInfo = serde_json::from_str(json).unwrap();
-        assert_eq!(info.name, "Counter");
-        assert_eq!(info.actor_count, 1);
     }
 }

@@ -172,6 +172,10 @@ pub(super) const GENERATED_BUILTINS_HRL_PATH: &str =
 const GENERATED_CLASS_VARS_KEYS_HRL_PATH: &str =
     "runtime/apps/beamtalk_runtime/include/beamtalk_class_vars_keys.hrl";
 
+/// Default path for the generated runtime sentinel-atom header (BT-4901).
+const GENERATED_SENTINEL_TAGS_HRL_PATH: &str =
+    "runtime/apps/beamtalk_runtime/include/beamtalk_sentinel_tags.hrl";
+
 /// Default path for the generated removed-supervisor-config header (ADR 0135).
 const GENERATED_SUPERVISOR_CONFIG_HRL_PATH: &str =
     "runtime/apps/beamtalk_runtime/include/beamtalk_supervisor_config.hrl";
@@ -418,6 +422,17 @@ pub(super) fn generate_class_vars_keys_hrl() -> Result<()> {
     write_generated_file_if_changed(
         &dest,
         &beamtalk_codegen::core_erlang::class_var_keys::erlang_header(),
+    )
+}
+
+/// Generate `beamtalk_sentinel_tags.hrl` from codegen's `sentinel_tags` leaf
+/// (BT-4901): the reserved atoms generated Core Erlang and the runtime must
+/// agree on, rendered from one Rust source instead of copied.
+pub(super) fn generate_sentinel_tags_hrl() -> Result<()> {
+    let dest = Utf8PathBuf::from(GENERATED_SENTINEL_TAGS_HRL_PATH);
+    write_generated_file_if_changed(
+        &dest,
+        &beamtalk_codegen::core_erlang::sentinel_tags::erlang_header(),
     )
 }
 

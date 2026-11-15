@@ -18,7 +18,7 @@ Test groups:
    4. unwrap_class_call/1 — ok and error paths
    5. undef classification — module_not_loaded vs method_not_found
    6. class_send/3 — undefined class, unknown selector, new/spawn
-   7. class_name_from_pid/1 — via registered/unregistered processes
+   7. self_class_name/0 — via dictionary/unregistered processes
    8. find_class_method_in_ancestors — chain traversal, depth limits
    9. metaclass_send — local and not_found paths
   10. undef classification extended — local vs inherited hint variants
@@ -808,52 +808,42 @@ test_class_send_ignores_dead_entry_group_leader() ->
     end.
 
 %%% ============================================================================
-%%% 7. class_name_from_pid — via registered/unregistered processes
+%%% 7. self_class_name — the class named in self-instantiation errors
 %%%
-%%% class_name_from_pid/1 is private but reachable via the self-instantiation
-%%% error path: class_send(self(), spawn, []) when ClassPid =:= self() and the
-%%% process dictionary has no beamtalk_class_name key calls
-%%% handle_self_instantiation_error → class_name_from_pid(self()).
+%%% The self-instantiation error path (class_send(self(), spawn, []) when the
+%%% process dictionary has no usable class metadata) names the class from the
+%%% process dictionary's beamtalk_class_name, or `unknown`. A registered process
+%%% name is NOT consulted (class_name_from_pid/1 used to parse it; BT-4892).
 %%% ============================================================================
 
-class_name_from_pid_test_() ->
+self_class_name_test_() ->
     {setup, fun setup_minimal/0, fun teardown_pids/1, fun(_) ->
         [
-            {"beamtalk_class_ prefix extracted as class name",
-                fun test_class_name_from_registered_pid/0},
+            {"dictionary class name is used", fun test_class_name_from_dictionary/0},
             {"unregistered process yields unknown class name",
                 fun test_class_name_from_unregistered_pid/0},
-            {"wrong-prefix registered process yields unknown class name",
-                fun test_class_name_from_wrong_prefix/0}
+            {"registered name is not parsed for the class name",
+                fun test_class_name_ignores_registered_name/0}
         ]
     end}.
 
-%% Process registered as beamtalk_class_<ClassName>: class_name_from_pid/1
-%% strips the prefix and returns <ClassName> as the class atom.
-test_class_name_from_registered_pid() ->
-    ClassName = 'BT1085NameTestPid',
-    % elp:fixme W0023 intentional atom creation
-    RegName = list_to_atom("beamtalk_class_" ++ atom_to_list(ClassName)),
-    register(RegName, self()),
+%% beamtalk_class_name in the process dictionary, but no module: the
+%% self-instantiation fallback error names that class.
+test_class_name_from_dictionary() ->
+    ClassName = 'BT4892DictNameTestClass',
+    put(beamtalk_class_name, ClassName),
     try
-        %% Trigger the self-instantiation error path:
-        %%   class_send(self(), spawn, []) → handle_self_instantiation →
-        %%   handle_self_instantiation_error → class_name_from_pid(self()).
-        %% Process dict has no beamtalk_class_name so error path fires.
-        %% class_name_from_pid reads registered_name, strips prefix, returns ClassName.
         ?assertBtError(
             instantiation_error, ClassName, beamtalk_class_dispatch:class_send(self(), spawn, [])
         )
     after
-        unregister(RegName)
+        erase(beamtalk_class_name)
     end.
 
-%% An anonymous (unregistered) process: class_name_from_pid/1 returns `unknown`.
+%% An anonymous (unregistered) process with an empty process dictionary:
+%% the class name is `unknown`.
 test_class_name_from_unregistered_pid() ->
     Parent = self(),
-    %% Spawn a fresh, completely unregistered process.  Its process dict is
-    %% empty so handle_self_instantiation_error fires, and class_name_from_pid
-    %% finds no registered_name → returns `unknown`.
     spawn(fun() ->
         try
             beamtalk_class_dispatch:class_send(self(), spawn, [])
@@ -869,10 +859,10 @@ test_class_name_from_unregistered_pid() ->
         ?assert(false)
     end.
 
-%% Process registered under a non-beamtalk_class_ prefix: class_name_from_pid/1
-%% sees a registered name but the prefix does not match, so it returns `unknown`.
-test_class_name_from_wrong_prefix() ->
-    RegName = bt1085_test_process_wrong_prefix,
+%% A process registered as beamtalk_class_<Name> but with no dictionary
+%% metadata is `unknown`: the registered name is no longer parsed.
+test_class_name_ignores_registered_name() ->
+    RegName = beamtalk_class_BT4892RegisteredOnly,
     register(RegName, self()),
     try
         ?assertBtError(
@@ -1759,10 +1749,8 @@ class_send_self_instantiation_error_test_() ->
                 {beamtalk_class_module, {put, some_fake_module}},
                 {beamtalk_class_is_abstract, {put, not_a_boolean}}
             ]},
-            %% class_name_from_pid/1 handles registered names that don't start with
-            %% "beamtalk_class_" and returns 'unknown'; exercised indirectly through
-            %% handle_self_instantiation_error with no process-dict metadata and no
-            %% matching registered name for the current process.
+            %% No process-dict class name: handle_self_instantiation_error names
+            %% the class `unknown`.
             {"unregistered process, no metadata", 'new', [], Absent}
         ]
     ].

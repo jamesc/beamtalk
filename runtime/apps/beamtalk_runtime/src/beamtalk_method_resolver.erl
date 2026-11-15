@@ -150,7 +150,14 @@ published_method_info(ClassName, Selector) ->
         end
     end,
     %% `+ 1`: the walk starts at `ClassName` itself, which
-    %% `resolve_with_hierarchy/2` does not count against the budget.
+    %% `resolve_with_hierarchy/2` does not count against the budget (it checks
+    %% the receiver's own table outside the walk, then walks `MAX` ancestors),
+    %% so both budgets admit the same chain length.
+    %%
+    %% Deliberately `walk_ancestors/3`, not `walk_or_warn/4`: a cycle answers
+    %% `unpublished`, which the caller does not cache and which falls through
+    %% to `resolve_with_hierarchy/2`, whose walk warns. Warning here too would
+    %% log twice per lookup.
     case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH + 1) of
         {found, Result} -> Result;
         not_found -> not_found;
@@ -161,7 +168,7 @@ published_method_info(ClassName, Selector) ->
 Resolve a method, walking the superclass chain if not found locally.
 
 The walk itself (depth guard, cycle warning, advance-to-superclass)
-is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the
+is `beamtalk_hierarchy:walk_or_warn/4`; this function supplies only the
 per-class published-record probe.
 
 `ClassPid`'s own method table is checked here, outside the depth-counted
@@ -175,23 +182,18 @@ resolve_with_hierarchy(ClassPid, Selector) ->
     case beamtalk_object_class:compiled_method_safe(ClassPid, instance, Selector) of
         nil ->
             StepFun = fun(Pid, _Depth) -> method_step(Pid, Selector) end,
+            Ctx = #{
+                selector => Selector,
+                node_name => fun beamtalk_object_class:class_name_safe/1
+            },
             case
-                beamtalk_hierarchy:walk_ancestors(
-                    superclass_pid(ClassPid), StepFun, ?MAX_HIERARCHY_DEPTH
+                beamtalk_hierarchy:walk_or_warn(
+                    superclass_pid(ClassPid), StepFun, resolve_with_hierarchy, Ctx
                 )
             of
-                {found, Method} ->
-                    Method;
-                not_found ->
-                    nil;
-                {max_depth_exceeded, CyclePid} ->
-                    CycleClass = beamtalk_object_class:class_name_safe(CyclePid),
-                    ?LOG_WARNING(
-                        ">> hierarchy walk exceeded ~p levels at ~p",
-                        [?MAX_HIERARCHY_DEPTH, CycleClass],
-                        #{domain => [beamtalk, runtime]}
-                    ),
-                    nil
+                {found, Method} -> Method;
+                not_found -> nil;
+                {cycle, _} -> nil
             end;
         Method ->
             Method
@@ -210,7 +212,7 @@ resolve_class_side(ClassPid, Selector) ->
     beamtalk_object_class:compiled_method_safe(ClassPid, class, Selector).
 
 -doc """
-Per-node probe for the `beamtalk_hierarchy:walk_ancestors/3` walk: check
+Per-node probe for the `beamtalk_hierarchy:walk_or_warn/4` walk: check
 `ClassPid`'s own method table for `Selector`, and if absent, resolve its
 superclass's pid as the next node.
 """.

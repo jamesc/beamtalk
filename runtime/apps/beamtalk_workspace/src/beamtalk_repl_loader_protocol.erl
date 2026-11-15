@@ -263,13 +263,12 @@ compile_fanout_user(ClassAtom, ProtocolSources, BatchOpts) ->
             nil -> "";
             _ -> binary_to_list(SourceFileBin)
         end,
-    ModuleNameOverride = beamtalk_repl_loader:compute_package_module_name(Path),
     PrebuiltIndexes = maps:merge(
         beamtalk_repl_compiler:build_class_indexes(),
         BatchOpts#{protocol_sources => ProtocolSources}
     ),
-    Compiled = beamtalk_repl_loader:compile_reload_source(
-        Source, Path, ModuleNameOverride, ClassAtom, PrebuiltIndexes
+    Compiled = beamtalk_repl_loader:compile_reload_source_by_path(
+        Source, Path, ClassAtom, PrebuiltIndexes
     ),
     {Path, Compiled}.
 
@@ -375,10 +374,9 @@ rollback_one_install({protocol, Path, _ClassNames}, OldProtocolSources) ->
             ({_NameBin, undefined}) ->
                 ok;
             ({_NameBin, OldSource}) ->
-                ModuleNameOverride = beamtalk_repl_loader:compute_package_module_name(Path),
                 case
-                    beamtalk_repl_loader:compile_reload_source(
-                        OldSource, Path, ModuleNameOverride, undefined
+                    beamtalk_repl_loader:compile_reload_source_by_path(
+                        OldSource, Path, undefined
                     )
                 of
                     {ok, protocol_definition, OldProtocolInfo} ->
@@ -410,7 +408,6 @@ rollback_one_install({ClassAtom, Path, _ClassNames}, OldProtocolSources) ->
             %% shape as an `undefined` protocol source above.
             ok;
         UserSource ->
-            ModuleNameOverride = beamtalk_repl_loader:compute_package_module_name(Path),
             %% Merge over the ambient snapshot the same way the forward-compile
             %% path (`reload_protocol_fanout/3`) does — `OldProtocolSources`
             %% only carries the name(s) *this reloaded file* defines, so a
@@ -429,8 +426,8 @@ rollback_one_install({ClassAtom, Path, _ClassNames}, OldProtocolSources) ->
                 }
             ),
             case
-                beamtalk_repl_loader:compile_reload_source(
-                    UserSource, Path, ModuleNameOverride, ClassAtom, PrebuiltIndexes
+                beamtalk_repl_loader:compile_reload_source_by_path(
+                    UserSource, Path, ClassAtom, PrebuiltIndexes
                 )
             of
                 {ok, compiled, Binary, ClassNames2, ModuleName2} ->
@@ -814,14 +811,13 @@ patched_protocol_source(Source, ProtocolBin, SelectorBin, MethodSource) ->
     binary()
 ) -> ok | {error, term()}.
 apply_protocol_edit(ProtocolBin, Path, NewSource, Captures, SelectorBin) ->
-    ModuleNameOverride = beamtalk_repl_loader:compute_package_module_name(Path),
     PrebuiltIndexes = beamtalk_repl_loader:with_ambient_protocol_sources(
         beamtalk_repl_compiler:build_class_indexes()
     ),
     Result =
         case
-            beamtalk_repl_loader:compile_reload_source(
-                NewSource, Path, ModuleNameOverride, undefined, PrebuiltIndexes
+            beamtalk_repl_loader:compile_reload_source_by_path(
+                NewSource, Path, undefined, PrebuiltIndexes
             )
         of
             {ok, protocol_definition, _Info} = ProtocolResult ->
