@@ -15,26 +15,6 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo, SuperclassTypeArg};
 
     let collection_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("GenCollection"),
-        superclass: Some(eco_string("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: eco_string("first"),
@@ -88,34 +68,12 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
                 answers_receiver: false,
             },
         ],
-        class_methods: vec![],
-        class_variables: vec![],
         type_params: vec![eco_string("E")],
         type_param_bounds: vec![None],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("GenCollection", Some("Object"))
     };
 
     let array_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("GenArray"),
-        superclass: Some(eco_string("GenCollection")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: eco_string("append:"),
             arity: 1,
@@ -133,11 +91,10 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_methods: vec![],
-        class_variables: vec![],
         type_params: vec![eco_string("E")],
         type_param_bounds: vec![None],
         superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }],
+        ..ClassInfo::test("GenArray", Some("GenCollection"))
     };
 
     hierarchy.add_from_beam_meta(vec![collection_info, array_info]);
@@ -215,34 +172,10 @@ fn generic_inheritance_concrete_superclass_type_arg() {
 
     // IntArray has no type params, but maps Integer to GenCollection's E
     let int_array_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("IntArray"),
-        superclass: Some(eco_string("GenCollection")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
         superclass_type_args: vec![SuperclassTypeArg::Concrete {
             declared: DeclaredType::parse("Integer"),
         }],
+        ..ClassInfo::test("IntArray", Some("GenCollection"))
     };
     hierarchy.add_from_beam_meta(vec![int_array_info]);
 
@@ -321,32 +254,10 @@ fn generic_inheritance_multi_level_composition() {
 
     // SortedArray(E) extends GenArray(E)
     let sorted_info = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("SortedArray"),
-        superclass: Some(eco_string("GenArray")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
         type_params: vec![eco_string("E")],
         type_param_bounds: vec![None],
         superclass_type_args: vec![SuperclassTypeArg::ParamRef { param_index: 0 }],
+        ..ClassInfo::test("SortedArray", Some("GenArray"))
     };
     hierarchy.add_from_beam_meta(vec![sorted_info]);
 
@@ -419,32 +330,9 @@ fn type_param_bounds_conforming_type_no_warning() {
     use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "BoundedLogger".into(),
-        superclass: Some("Actor".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
         type_params: vec!["T".into()],
         type_param_bounds: vec![Some("Printable".into())],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("BoundedLogger", Some("Actor"))
     }]);
 
     let mut registry = ProtocolRegistry::new();
@@ -496,32 +384,9 @@ fn type_param_bounds_non_conforming_type_warns() {
     use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "BoundedLogger".into(),
-        superclass: Some("Actor".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
         type_params: vec!["T".into()],
         type_param_bounds: vec![Some("HasSortKey".into())],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("BoundedLogger", Some("Actor"))
     }]);
 
     let mut registry = ProtocolRegistry::new();
@@ -604,32 +469,9 @@ fn type_param_bounds_dynamic_skipped() {
     use crate::semantic_analysis::class_hierarchy::ClassInfo;
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "BoundedLogger".into(),
-        superclass: Some("Actor".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
         type_params: vec!["T".into()],
         type_param_bounds: vec![Some("Printable".into())],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("BoundedLogger", Some("Actor"))
     }]);
 
     let registry = ProtocolRegistry::new();
@@ -662,30 +504,14 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
 
     // Add a sealed Value class: SealedBox(T) — covariant (immutable)
     let sealed_box = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("SealedBox"),
-        superclass: Some(eco_string("Value")),
         is_sealed: true,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
         is_value: true,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![eco_string("value")],
         state_types: {
             let mut m = std::collections::HashMap::new();
             m.insert(eco_string("value"), DeclaredType::parse("T"));
             m
         },
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: eco_string("value"),
             arity: 0,
@@ -720,38 +546,19 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_variables: vec![],
         type_params: vec![eco_string("T")],
         type_param_bounds: vec![None],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("SealedBox", Some("Value"))
     };
 
     // Add an Actor class: ActorBox(T) — invariant (mutable state)
     let actor_box = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("ActorBox"),
-        superclass: Some(eco_string("Actor")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![eco_string("value")],
         state_types: {
             let mut m = std::collections::HashMap::new();
             m.insert(eco_string("value"), DeclaredType::parse("T"));
             m
         },
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: eco_string("value"),
@@ -788,65 +595,22 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 answers_receiver: false,
             },
         ],
-        class_methods: vec![],
-        class_variables: vec![],
         type_params: vec![eco_string("T")],
         type_param_bounds: vec![None],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("ActorBox", Some("Actor"))
     };
 
     // Add an unsealed Value class: OpenBox(T) — invariant (can be subclassed)
     let open_box = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("OpenBox"),
-        superclass: Some(eco_string("Value")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
         is_value: true,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
         state: vec![eco_string("value")],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
         type_params: vec![eco_string("T")],
         type_param_bounds: vec![None],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("OpenBox", Some("Value"))
     };
 
     // Add a class that accepts SealedBox(Printable) parameter
     let consumer = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("BoxConsumer"),
-        superclass: Some(eco_string("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: eco_string("printBox:"),
@@ -883,11 +647,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 answers_receiver: false,
             },
         ],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("BoxConsumer", Some("Object"))
     };
 
     hierarchy.add_from_beam_meta(vec![sealed_box, actor_box, open_box, consumer]);
@@ -1002,32 +762,7 @@ fn variance_covariant_non_conforming_rejected() {
 
     // Add OpaqueType without asString — does not conform to Printable
     hierarchy.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("OpaqueType"),
-        superclass: Some(eco_string("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("OpaqueType", Some("Object"))
     }]);
 
     assert!(
@@ -1282,26 +1017,7 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
     let mut h = ClassHierarchy::with_builtins();
     h.add_from_beam_meta(vec![ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: "HttpClient".into(),
-        superclass: Some("Object".into()),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
         package: Some("http".into()),
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![
             MethodInfo {
                 selector: "get:".into(),
@@ -1355,10 +1071,7 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("HttpClient", Some("Object"))
     }]);
     h
 }

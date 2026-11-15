@@ -168,7 +168,6 @@ mod tests {
     use crate::ast::MethodKind;
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
     use ecow::EcoString;
-    use std::collections::HashMap;
 
     fn eco(s: &str) -> EcoString {
         EcoString::from(s)
@@ -196,32 +195,7 @@ mod tests {
 
     fn base_class_info(name: &str, superclass: &str) -> ClassInfo {
         ClassInfo {
-            surface_incomplete: false,
-            in_caller_new1: false,
-            is_module_less: false,
-            name: eco(name),
-            superclass: Some(eco(superclass)),
-            is_sealed: false,
-            is_abstract: false,
-            is_typed: false,
-            is_internal: false,
-            package: None,
-            is_value: false,
-            is_native: false,
-            auto_ctors: None,
-            handle_scope: None,
-            state: vec![],
-            state_types: HashMap::new(),
-            state_has_default: HashMap::new(),
-            state_kinds: HashMap::new(),
-            initialize_assigns: std::collections::BTreeSet::new(),
-            has_dynamic_field_writer: false,
-            methods: vec![],
-            class_methods: vec![],
-            class_variables: vec![],
-            type_params: vec![],
-            type_param_bounds: vec![],
-            superclass_type_args: vec![],
+            ..ClassInfo::test(name, Some(superclass))
         }
     }
 

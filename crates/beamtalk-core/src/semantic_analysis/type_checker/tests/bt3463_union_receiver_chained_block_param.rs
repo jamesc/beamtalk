@@ -285,30 +285,9 @@ typed Actor subclass: Watcher
 #[allow(clippy::too_many_lines)] // test fixture — length is proportional to ClassInfo fields
 fn union_class_side_send_instance_only_dnu_override_still_contributes() {
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
-    use std::collections::HashMap;
 
     let mut hierarchy = ClassHierarchy::with_builtins();
     let with_instance_override = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("WithInstanceOverride"),
-        superclass: Some(eco_string("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
         methods: vec![MethodInfo {
             selector: eco_string("doesNotUnderstand:args:"),
             arity: 2,
@@ -343,33 +322,9 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("WithInstanceOverride", Some("Object"))
     };
     let plain = ClassInfo {
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        name: eco_string("Plain"),
-        superclass: Some(eco_string("Object")),
-        is_sealed: false,
-        is_abstract: false,
-        is_typed: false,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        state: vec![],
-        state_types: HashMap::new(),
-        state_has_default: HashMap::new(),
-        state_kinds: HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
         class_methods: vec![MethodInfo {
             selector: eco_string("spawn:"),
             arity: 1,
@@ -387,10 +342,7 @@ fn union_class_side_send_instance_only_dnu_override_still_contributes() {
             constant_value: None,
             answers_receiver: false,
         }],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("Plain", Some("Object"))
     };
     hierarchy.add_from_beam_meta(vec![with_instance_override, plain]);
 
