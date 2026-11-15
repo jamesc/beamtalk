@@ -445,7 +445,7 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context, Mode) ->
             stock -> unwrap_string_args(Args);
             beamtalk -> Args
         end,
-    %% bt-catcher-audit: converted - snapshot taken here is restored before the badarg retry
+    %% bt-catcher-audit: converted - snapshot taken here is restored before the badarg / function_clause retry
     %% (BT-3728)
     try
         coerce_ffi_result(Module, erlang:apply(Module, FunName, CallArgs), Mode)
@@ -579,8 +579,8 @@ The single FFI exception classifier shared by the apply and badarg-retry paths.
 
 Both `apply_with_coercion/6` and `maybe_retry/9` used to inline a copy of
 this clause set; they only differed in what `badarg` does (retry vs. raise). That
-divergence is now the `OnRetry` continuation — a `fun/6` invoked as
-`OnRetry(Module, FunName, Args, OrigSelector, Context, Stack)` — so adding a new
+divergence is now the `OnRetry` continuation — a `fun/7` invoked as
+`OnRetry(Reason, Module, FunName, Args, OrigSelector, Context, Stack)` — so adding a new
 exception clause here cannot silently skip one path.
 
 Policy (ADR 0101 Part 2), matching the doc on `apply_with_coercion/6`:
@@ -909,6 +909,11 @@ the **argument list** (`{M, F, Args, []}`), including when `error_handler`
 or a `'$handle_undefined_function'/2` re-raises it. For `function_clause` the
 head that matched no clause is likewise the top frame, with the argument list;
 an empty stacktrace counts as the target there too (a `type_error`).
+
+Best effort for `function_clause`: a body-recursive target that fails in a
+recursive call to itself (`f([<<"a">>, 1])` failing in `f([1])`) also has its own
+MFA on top, so it is reported as a head mismatch (`type_error`) although the
+arguments passed matched a clause.
 
 Anything else is a fault inside a callee that did run, and must not be
 reported as the FFI function being missing: an `undef` from a nested call has
