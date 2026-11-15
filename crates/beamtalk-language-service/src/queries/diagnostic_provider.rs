@@ -637,6 +637,9 @@ pub fn compute_diagnostics_and_analysis(
     if let Some(package) = project.package_name.as_deref() {
         ctx = ctx.with_current_package(package);
     }
+    if let Some(known_packages) = &project.known_packages {
+        ctx = ctx.with_known_packages(known_packages.clone());
+    }
     let mut analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, ctx);
     // Diagnostics are consumed by `run_diagnostic_pipeline` below;
     // take them out so the rest of `analysis_result` can be returned for
