@@ -369,17 +369,14 @@ impl ClassCtx<'_> {
     /// `Some(false)` for `self` (late-bound), `Some(true)` for the class's own
     /// name (binds this class's method directly), `None` for anything else.
     fn own_class_receiver(&self, receiver: &Expression) -> Option<bool> {
-        match receiver.unwrap_parens() {
-            _ if receiver.is_self() => Some(false),
-            own if crate::semantic_analysis::block_facts::is_own_class_reference(
-                own,
-                self.class_name,
-            ) =>
-            {
-                Some(true)
-            }
-            _ => None,
+        if receiver.is_self() {
+            return Some(false);
         }
+        crate::semantic_analysis::block_facts::is_own_class_reference(
+            receiver.unwrap_parens(),
+            self.class_name,
+        )
+        .then_some(true)
     }
 
     /// Whether a class-side send of `selector` to this class may write a class
