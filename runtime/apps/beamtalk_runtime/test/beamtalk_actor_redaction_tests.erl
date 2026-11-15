@@ -343,7 +343,9 @@ compiled_actor_proc_lib_report_redacts_queued_send_test() ->
         Info = await_proc_lib_report(Pid),
         Messages = proplists:get_value(messages, Info),
         ?assertMatch([{'$gen_call', _, {'unlock:', ?R, _}}], Messages),
-        ?assertEqual(nomatch, string:find(lists:flatten(io_lib:format("~p", [Info])), ?UNLOCK_ARG_STR))
+        ?assertEqual(
+            nomatch, string:find(lists:flatten(io_lib:format("~p", [Info])), ?UNLOCK_ARG_STR)
+        )
     after
         beamtalk_test_log:stop_capture(Capture)
     end.
@@ -367,7 +369,9 @@ async_spawned_actor_proc_lib_report_redacts_queued_send_test() ->
         Info = await_proc_lib_report(Pid),
         Messages = proplists:get_value(messages, Info),
         ?assertMatch([{'$gen_call', _, {'unlock:', ?R, _}}], Messages),
-        ?assertEqual(nomatch, string:find(lists:flatten(io_lib:format("~p", [Info])), ?UNLOCK_ARG_STR))
+        ?assertEqual(
+            nomatch, string:find(lists:flatten(io_lib:format("~p", [Info])), ?UNLOCK_ARG_STR)
+        )
     after
         beamtalk_test_log:stop_capture(Capture)
     end.
