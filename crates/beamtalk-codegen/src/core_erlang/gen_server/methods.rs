@@ -10,6 +10,7 @@
 
 use super::super::method_frame::{MethodBoundary, MethodFrame};
 use super::super::sequencing::PrecompiledScope;
+use super::super::statement_kinds::{StmtCx, StmtTail};
 use super::super::{CodeGenError, CoreErlangGenerator, Result, threaded_ir};
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
@@ -790,6 +791,7 @@ impl CoreErlangGenerator {
             let is_last = i == body_len - 1;
             let is_early_return = matches!(&kind, BodyExprKind::EarlyReturn);
             let span = expr.span();
+            let cx = StmtCx::root(expr, span, is_last);
 
             // Early return — always terminates generation regardless of position.
             // Classify the inner value to handle super/tier2/dispatch returns.
@@ -802,64 +804,49 @@ impl CoreErlangGenerator {
             }
 
             match kind {
-                BodyExprKind::SelfFieldAtPut => {
-                    self.lower_reply_self_field_at_put(expr, span, is_last, &mut stmts)
-                }
-                BodyExprKind::SelfClearField => {
-                    self.lower_reply_self_clear_field(expr, span, is_last, &mut stmts)
-                }
-                BodyExprKind::FieldAssignment => {
-                    self.lower_reply_field_assignment(expr, span, is_last, &mut stmts)
-                }
+                BodyExprKind::SelfFieldAtPut => self.lower_reply_self_field_at_put(cx, &mut stmts),
+                BodyExprKind::SelfClearField => self.lower_reply_self_clear_field(cx, &mut stmts),
+                BodyExprKind::FieldAssignment => self.lower_reply_field_assignment(cx, &mut stmts),
                 BodyExprKind::FieldAssignmentControlFlow => {
-                    self.lower_reply_field_assignment_control_flow(expr, span, is_last, &mut stmts)
+                    self.lower_reply_field_assignment_control_flow(cx, &mut stmts)
                 }
                 BodyExprKind::SelfFieldAtPutControlFlow => {
-                    self.lower_reply_self_field_at_put_control_flow(expr, span, is_last, &mut stmts)
+                    self.lower_reply_self_field_at_put_control_flow(cx, &mut stmts)
                 }
-                BodyExprKind::DestructureAssignmentControlFlow => self
-                    .lower_reply_destructure_assignment_control_flow(
-                        expr, span, is_last, &mut stmts,
-                    ),
+                BodyExprKind::DestructureAssignmentControlFlow => {
+                    self.lower_reply_destructure_assignment_control_flow(cx, &mut stmts)
+                }
                 BodyExprKind::LocalAssignTier2 => {
-                    self.lower_reply_local_assign_tier2(expr, span, is_last, &mut stmts)
+                    self.lower_reply_local_assign_tier2(cx, &mut stmts)
                 }
                 BodyExprKind::LocalAssignControlFlow => {
-                    self.lower_reply_local_assign_control_flow(expr, span, is_last, &mut stmts)
+                    self.lower_reply_local_assign_control_flow(cx, &mut stmts)
                 }
                 BodyExprKind::LocalAssignSelfSend => {
-                    self.lower_reply_local_assign_self_send(expr, span, is_last, &mut stmts)
+                    self.lower_reply_local_assign_self_send(cx, &mut stmts)
                 }
                 BodyExprKind::LocalAssignTier2Block => {
-                    self.lower_reply_local_assign_tier2_block(expr, span, is_last, &mut stmts)
+                    self.lower_reply_local_assign_tier2_block(cx, &mut stmts)
                 }
-                BodyExprKind::LocalAssignPure => {
-                    self.lower_reply_local_assign_pure(expr, span, is_last, &mut stmts)
-                }
+                BodyExprKind::LocalAssignPure => self.lower_reply_local_assign_pure(cx, &mut stmts),
                 BodyExprKind::DestructureAssignment => {
-                    self.lower_reply_destructure_assignment(expr, span, is_last, &mut stmts)
+                    self.lower_stmt_destructure_assignment(cx, &mut StmtTail::Reply, &mut stmts)
                 }
-                BodyExprKind::SuperSend => {
-                    self.lower_reply_super_send(expr, span, is_last, &mut stmts)
-                }
-                BodyExprKind::ErrorSend => {
-                    self.lower_reply_error_send(expr, span, is_last, &mut stmts)
-                }
-                BodyExprKind::Tier2ValueCall => {
-                    self.lower_reply_tier2_value_call(expr, span, is_last, &mut stmts)
-                }
+                BodyExprKind::SuperSend => self.lower_reply_super_send(cx, &mut stmts),
+                BodyExprKind::ErrorSend => self.lower_reply_error_send(cx, &mut stmts),
+                BodyExprKind::Tier2ValueCall => self.lower_reply_tier2_value_call(cx, &mut stmts),
                 BodyExprKind::ControlFlowWithMutations => {
-                    self.lower_reply_control_flow_with_mutations(expr, span, is_last, &mut stmts)
+                    self.lower_reply_control_flow_with_mutations(cx, &mut stmts)
                 }
                 BodyExprKind::DispatchingSelfSend => {
-                    self.lower_reply_dispatching_self_send(expr, span, is_last, &mut stmts)
+                    self.lower_stmt_dispatching_self_send(cx, &mut StmtTail::Reply, &mut stmts)
                 }
                 BodyExprKind::EarlyReturn => {
                     return Err(CodeGenError::Internal(
                         "EarlyReturn should be handled before match dispatch".to_string(),
                     ));
                 }
-                BodyExprKind::Pure => self.lower_reply_pure(expr, span, is_last, &mut stmts),
+                BodyExprKind::Pure => self.lower_reply_pure(cx, &mut stmts),
             }?;
         }
 
@@ -1014,12 +1001,16 @@ impl CoreErlangGenerator {
     // `generate_expression` call, as before.
     fn lower_reply_pure(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         if is_last {
             let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
             stmts.extend(tv.prelude);
@@ -1056,12 +1047,16 @@ impl CoreErlangGenerator {
     // `verify_body_with_opaque_version_gaps`'s backfill.
     fn lower_reply_self_field_at_put(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         // BT-4310: the name and value are sequenced ahead of the put.
         let scope = self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, stmts)?;
         let (doc, val_var) = self.generate_self_field_at_put_open(expr)?;
@@ -1088,12 +1083,16 @@ impl CoreErlangGenerator {
     // `generate_self_clear_field_open` (ADR 0124 §1/B4).
     fn lower_reply_self_clear_field(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         let scope = self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, stmts)?;
         let (doc, val_var) = self.generate_self_clear_field_open(expr)?;
         self.finish_precompiled_scope(scope)?;
@@ -1116,12 +1115,16 @@ impl CoreErlangGenerator {
 
     fn lower_reply_field_assignment(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         // ADR 0118 phase 1a: `self.log := self.log ++ #(self
         // getValue)`, `self.count := self.count + (self bump)` —
         // the RHS's state-effecting sub-expressions land in this
@@ -1203,12 +1206,16 @@ impl CoreErlangGenerator {
     )]
     fn lower_reply_field_assignment_control_flow(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         if let Expression::Assignment { target, value, .. } = expr
             && let Expression::FieldAccess { field, .. } = target.as_ref()
         {
@@ -1355,12 +1362,16 @@ impl CoreErlangGenerator {
     // `Statement`, but `Bind`'s `op` may still be opaque).
     fn lower_reply_self_field_at_put_control_flow(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         if let Expression::MessageSend { arguments, .. } = expr {
             // BT-4369: a dynamic-key field write records itself for the loop checkout.
             self.note_field_write("<dynamic>", span);
@@ -1463,12 +1474,16 @@ impl CoreErlangGenerator {
     // the tuple unpack and threaded-local rebinds stay opaque Statements.
     fn lower_reply_destructure_assignment_control_flow(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         let mut rhs_value = None;
         if let Expression::DestructureAssignment { pattern, value, .. } = expr {
             // Evaluate RHS (returns {Value, State} tuple)
@@ -1551,14 +1566,19 @@ impl CoreErlangGenerator {
 
     // Real state Bind: the RHS's element 2 IS the next `State`
     // version (a computed map, not a static field — Direct, not Put).
+    // See `lower_reply_local_assign_pure`: not shared with the arm walker.
     fn lower_reply_local_assign_tier2(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         if let Expression::Assignment { target, value, .. } = expr
             && let Expression::Identifier(id) = target.as_ref()
         {
@@ -1612,14 +1632,19 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // See `lower_reply_local_assign_pure`: not shared with the arm walker.
     fn lower_reply_local_assign_control_flow(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         // Route the actor `var := <control-flow-with-mutations>`
         // assign-RHS through the shared `ThreadedExpr` emitter. The Actor boundary
         // binds the target to element 1, advances the state version to element 2
@@ -1667,14 +1692,19 @@ impl CoreErlangGenerator {
     }
 
     // Var := self method — dispatch RHS, bind result to var
+    // See `lower_reply_local_assign_pure`: not shared with the arm walker.
     fn lower_reply_local_assign_self_send(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         if let Expression::Assignment { target, value, .. } = expr
             && let Expression::Identifier(id) = target.as_ref()
         {
@@ -1708,14 +1738,19 @@ impl CoreErlangGenerator {
     // generate_block_stateful directly (bypassing generate_block's
     // "unsupported block" rejection, which is only needed when the
     // compiler can't prove the later invocation site is safe).
+    // See `lower_reply_local_assign_pure`: not shared with the arm walker.
     fn lower_reply_local_assign_tier2_block(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         if let Expression::Assignment { target, value, .. } = expr
             && let (Expression::Identifier(id), Expression::Block(block)) =
                 (target.as_ref(), value.as_ref())
@@ -1739,14 +1774,28 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // `LocalAssign*` is deliberately NOT shared with the conditional-arm walker
+    // (`lower_arm_local_assign`, which routes every `LocalAssign*` kind through
+    // `lower_local_var_assignment_bind`). The two bodies differ in how a local
+    // lives, not only in their tail: a method body binds the local's OWN Core
+    // var (`let Count = V in`) and, for a Tier 2 call, advances the `State`
+    // version directly; an arm writes the local to its frame's scratch slot so
+    // `StateAcc` carries it out of the conditional, through a `Val` temp and a
+    // Gensym state. Unifying them renames the temps of every local assignment
+    // in every method body and changes the `ThreadedIr` shape of the Tier 2 and
+    // control-flow cases.
     fn lower_reply_local_assign_pure(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         if let Expression::Assignment { target, value, .. } = expr
             && let Expression::Identifier(id) = target.as_ref()
         {
@@ -1810,49 +1859,18 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    fn lower_reply_destructure_assignment(
-        &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
-        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
-    ) -> Result<()> {
-        use threaded_ir::ThreadedStmt;
-        let mut rhs_value = None;
-        if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-            // ADR 0118 phase 1b: `{a, b} := #(1, self bump)` —
-            // the RHS's state-effecting sub-expressions land in
-            // this body's IR as real `Bind`s before
-            // `generate_destructure_bindings`'s own
-            // `eval_rhs_to_temp_var` call (`expressions.rs`)
-            // compiles `value` via `expression_doc`, which
-            // substitutes the already-sequenced value.
-            let (binding_docs, rhs_var) = self.generate_destructure_bindings_sequenced(
-                pattern,
-                value,
-                threaded_ir::FrameId::ROOT,
-                stmts,
-            )?;
-            for d in binding_docs {
-                stmts.push(ThreadedStmt::Statement(d, span));
-            }
-            rhs_value = Some(rhs_var);
-        }
-        if is_last {
-            let reply = self.destructure_reply_doc(rhs_value)?;
-            stmts.push(ThreadedStmt::Statement(reply, span));
-        }
-        Ok(())
-    }
-
     fn lower_reply_super_send(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         // BT-3814 / BT-4318: the one `super` producer — the
         // operands thread ahead of the dispatch (the sequencing
         // rule), and its `State` `Bind` carries the callee's
@@ -1868,12 +1886,16 @@ impl CoreErlangGenerator {
 
     fn lower_reply_error_send(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         // BT-4310: `self error: (xs inject: ...) printString` — the
         // argument is sequenced ahead of the send, like a `super`
         // send's.
@@ -1896,12 +1918,16 @@ impl CoreErlangGenerator {
 
     fn lower_reply_tier2_value_call(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         if is_last {
             let expr_str = self.generate_tier2_value_call_doc(expr)?;
             let reply = self.emit_tuple_unpack_reply("T2Tuple", expr_str);
@@ -1976,12 +2002,16 @@ impl CoreErlangGenerator {
 
     fn lower_reply_control_flow_with_mutations(
         &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
+        cx: StmtCx<'_>,
         stmts: &mut Vec<threaded_ir::ThreadedStmt>,
     ) -> Result<()> {
         use threaded_ir::ThreadedStmt;
+        let StmtCx {
+            expr,
+            span,
+            is_last,
+            ..
+        } = cx;
         if is_last {
             // Route the last-position actor control-flow
             // construct through the shared `ThreadedExpr` emitter. The Actor
@@ -2100,27 +2130,6 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    fn lower_reply_dispatching_self_send(
-        &mut self,
-        expr: &Expression,
-        span: Span,
-        is_last: bool,
-        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
-    ) -> Result<()> {
-        use threaded_ir::ThreadedStmt;
-        // ADR 0118 phase 1a: `self log: (self nextId)` — the
-        // producer (`generate_self_dispatch`) sequences its own
-        // arguments and yields the `Statement` + real `Bind` pair
-        // this body splices; the reply reads its pure result.
-        let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
-        stmts.extend(tv.prelude);
-        if is_last {
-            let reply = self.threaded_value_reply_doc(&tv.value);
-            stmts.push(ThreadedStmt::Statement(reply, span));
-        }
-        Ok(())
-    }
-
     /// Emit the `{'reply', Var, State}` close for a local assignment
     /// `x := expr` in last position, once its open let chain has bound `x`:
     /// an assignment evaluates to the assigned value, so the method answers
@@ -2154,7 +2163,10 @@ impl CoreErlangGenerator {
     /// Emit the `{'reply', Rhs, State}` close for a destructuring assignment
     /// `{a, b} := expr` in last position: it evaluates to its right-hand side,
     /// `rhs_value` the variable bound to it (BT-3889).
-    fn destructure_reply_doc(&mut self, rhs_value: Option<String>) -> Result<Document<'static>> {
+    pub(in crate::core_erlang) fn destructure_reply_doc(
+        &mut self,
+        rhs_value: Option<String>,
+    ) -> Result<Document<'static>> {
         let rhs = rhs_value.ok_or_else(|| {
             CodeGenError::Internal(
                 "destructure_reply_doc: a destructuring arm bound no right-hand side".to_string(),
@@ -2173,7 +2185,10 @@ impl CoreErlangGenerator {
     /// ADR 0118 phase 1a: the last-position reply for a spliced
     /// [`threaded_ir::ThreadedValue`] — `{'reply', <value>, StateN}` where
     /// `StateN` is the state after the value's prelude.
-    fn threaded_value_reply_doc(&mut self, value: &threaded_ir::ValueRef) -> Document<'static> {
+    pub(in crate::core_erlang) fn threaded_value_reply_doc(
+        &mut self,
+        value: &threaded_ir::ValueRef,
+    ) -> Document<'static> {
         let value_doc = self.threaded_value_doc(value);
         let final_state = self.current_state_var();
         docvec!["{'reply', ", value_doc, ", ", leaf::var(final_state), "}"]
