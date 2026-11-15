@@ -2198,7 +2198,7 @@ http_read_all(Sock, Acc) ->
 http_ws_no_upgrade_test(Port) ->
     Response = http_get(Port, <<"/ws">>),
     %% Without Upgrade: websocket header, cowboy should not return 101
-    ?assert(binary:match(Response, <<"101">>) =:= nomatch).
+    ?assert(binary:match(Response, <<"HTTP/1.1 101">>) =:= nomatch).
 
 %%====================================================================
 %% write_port_file/3 — direct unit tests (no TCP listener)
