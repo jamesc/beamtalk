@@ -139,8 +139,9 @@ impl CoreErlangGenerator {
     /// root binds them with the extraction's `let`s alone
     /// ([`LocalWrite::Plain`]); an arm also writes each to its frame's slot
     /// ([`LocalWrite::Slot`], BT-4439). A destructuring whose right-hand side
-    /// is itself a field write (`{a, b} := (self.x := ...)`, BT-3495) lowers
-    /// the write as its own real `Bind`, then destructures the assigned value.
+    /// is itself a field write (`{a, b} := (self.x := ...)`, BT-3495) lowers,
+    /// in an arm, the write as its own real `Bind`, then destructures the
+    /// assigned value; a method body leaves it to `thread_ahead`.
     pub(super) fn lower_stmt_destructure_assignment(
         &mut self,
         cx: StmtCx<'_>,
@@ -158,7 +159,15 @@ impl CoreErlangGenerator {
             return Ok(());
         };
         let write_of = |_: &str| local_write;
-        let rhs_var = if let Some(field_write) = self.local_assign_field_write(value) {
+        // Only an arm lowers the field write as its own `Bind` here. A method
+        // body already sequences it: `thread_ahead` threads the assignment
+        // as a producer and the extraction reads the sequenced value
+        // (`Bt4919DestructureFieldWriteTest` pins both bodies).
+        let field_write = match tail {
+            StmtTail::Arm { .. } => self.local_assign_field_write(value),
+            StmtTail::Reply => None,
+        };
+        let rhs_var = if let Some(field_write) = field_write {
             let field_val_var =
                 self.lower_field_assignment_bind(field_write, frame, span, stmts)?;
             let _ = self.lower_destructure_bind_from_var(

@@ -1570,6 +1570,7 @@ impl CoreErlangGenerator {
 
     // Real state Bind: the RHS's element 2 IS the next `State`
     // version (a computed map, not a static field — Direct, not Put).
+    // See `lower_reply_local_assign_pure`: not shared with the arm walker.
     fn lower_reply_local_assign_tier2(
         &mut self,
         cx: StmtCx<'_>,
@@ -1635,6 +1636,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // See `lower_reply_local_assign_pure`: not shared with the arm walker.
     fn lower_reply_local_assign_control_flow(
         &mut self,
         cx: StmtCx<'_>,
@@ -1694,6 +1696,7 @@ impl CoreErlangGenerator {
     }
 
     // Var := self method — dispatch RHS, bind result to var
+    // See `lower_reply_local_assign_pure`: not shared with the arm walker.
     fn lower_reply_local_assign_self_send(
         &mut self,
         cx: StmtCx<'_>,
@@ -1739,6 +1742,7 @@ impl CoreErlangGenerator {
     // generate_block_stateful directly (bypassing generate_block's
     // "unsupported block" rejection, which is only needed when the
     // compiler can't prove the later invocation site is safe).
+    // See `lower_reply_local_assign_pure`: not shared with the arm walker.
     fn lower_reply_local_assign_tier2_block(
         &mut self,
         cx: StmtCx<'_>,
@@ -1774,6 +1778,16 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // `LocalAssign*` is deliberately NOT shared with the conditional-arm walker
+    // (`lower_arm_local_assign`, which routes every `LocalAssign*` kind through
+    // `lower_local_var_assignment_bind`). The two bodies differ in how a local
+    // lives, not only in their tail: a method body binds the local's OWN Core
+    // var (`let Count = V in`) and, for a Tier 2 call, advances the `State`
+    // version directly; an arm writes the local to its frame's scratch slot so
+    // `StateAcc` carries it out of the conditional, through a `Val` temp and a
+    // Gensym state. Unifying them renames the temps of every local assignment
+    // in every method body and changes the `ThreadedIr` shape of the Tier 2 and
+    // control-flow cases.
     fn lower_reply_local_assign_pure(
         &mut self,
         cx: StmtCx<'_>,

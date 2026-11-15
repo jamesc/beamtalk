@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4919: `{a, b} := (self.pair := {x, y})` in an actor method body lowers the
+// field write as its own real `Bind` and destructures the assigned value, as
+// a conditional arm always has. See fixtures/bt4919destructure_field_write_actor.bt.
+
+TestCase subclass: Bt4919DestructureFieldWriteTest
+
+  testNonLastPositionBindsNamesAndWritesField =>
+    a := Bt4919DestructureFieldWriteActor spawn
+    self assert: (a sumWritten: 3 and: 4) equals: 7
+    self assert: a pair equals: {3, 4}
+    self assert: a count equals: 1
+
+  testStateThreadsAcrossCalls =>
+    a := Bt4919DestructureFieldWriteActor spawn
+    a sumWritten: 1 and: 2
+    self assert: (a sumWritten: 10 and: 20) equals: 30
+    self assert: a pair equals: {10, 20}
+    self assert: a count equals: 2
+
+  testLastPositionAnswersAssignedValue =>
+    a := Bt4919DestructureFieldWriteActor spawn
+    self assert: (a writeLast: 5 and: 6) equals: {5, 6}
+    self assert: a pair equals: {5, 6}

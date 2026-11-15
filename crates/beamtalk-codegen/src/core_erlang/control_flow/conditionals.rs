@@ -3905,6 +3905,12 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // Not shared with the actor-method walker (`lower_reply_local_assign_*`):
+    // an arm writes the local to its frame's scratch slot (`push_local_slot_put`)
+    // so `StateAcc` carries it out of the conditional, and for a Tier 2 or
+    // control-flow right-hand side threads the call's `NewState` through a
+    // Gensym state. A method body binds the local's own Core var and advances
+    // the `State` version directly. See `lower_reply_local_assign_pure`.
     fn lower_arm_local_assign(
         &mut self,
         cx: StmtCx<'_>,
