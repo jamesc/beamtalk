@@ -28,9 +28,7 @@ typed Object subclass: Repro
   shout -> List(String) =>
     ^(((Stream on: #(1, 2, 3)) collect: [:n | n printString]) select: [:s | s isEmpty not]) asList
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();

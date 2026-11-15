@@ -21,9 +21,7 @@
 use super::common::*;
 
 fn build(source: &str) -> (Module, ClassHierarchy) {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     (module, hierarchy)
 }

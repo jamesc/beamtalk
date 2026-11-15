@@ -511,9 +511,7 @@ Object subclass: Box(T)
   value -> T => x
   wrapped -> T => self value
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -565,9 +563,7 @@ Object subclass: Pair(K, V)
   second -> V => v
   rewrap -> V => self second
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -622,9 +618,7 @@ Object subclass: Base(E)
 Base(R) subclass: Sub(R)
   borrow -> R => super peek
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -675,9 +669,7 @@ Object subclass: Base(E)
 Base(Integer) subclass: IntBase
   borrow -> Integer => super peek
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -729,9 +721,7 @@ Object subclass: Box(T)
   state: x :: T = nil
   metatype => self class
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();

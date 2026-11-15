@@ -140,12 +140,10 @@ fn build_diagnostic(value: &Expression, span: Span) -> Diagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::{lex_with_eof, parse};
+    use crate::test_helpers::test_support::parse_ok;
 
     fn findings(src: &str) -> Vec<Diagnostic> {
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         let mut diagnostics = Vec::new();
         check_handle_info_catch_all(&module, &hierarchy, &mut diagnostics);

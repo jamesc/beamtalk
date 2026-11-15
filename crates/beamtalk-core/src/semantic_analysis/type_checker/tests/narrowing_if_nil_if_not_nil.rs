@@ -29,9 +29,7 @@ typed Object subclass: Repro
       ifNil: [42]
       ifNotNil: [:snap | "got one"]
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -66,9 +64,7 @@ typed Object subclass: Repro
       ifNotNil: [:snap | "got one"]
       ifNil: [42]
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -101,9 +97,7 @@ typed Object subclass: Repro
       ifNil: ["none"]
       ifNotNil: [:snap | "some"]
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -138,9 +132,7 @@ typed Object subclass: Repro
       ifNil: [^"early"]
       ifNotNil: [:snap | "got one"]
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -173,9 +165,7 @@ typed Object subclass: Repro
       ifNil: [^42]
       ifNotNil: [:snap | "got one"]
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -217,9 +207,7 @@ typed Object subclass: Repro
   go -> String =>
     ^self.name ifNil: [""]
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -254,9 +242,7 @@ typed Object subclass: Repro
   go =>
     self.count ifNil: ["none"]
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -286,9 +272,7 @@ typed Object subclass: Repro
   go =>
     self.name ifNotNil: [:n | n size]
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -318,9 +302,7 @@ typed Object subclass: Repro
   go =>
     self.name ifNotNil: [:n | n size]
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -352,9 +334,7 @@ typed Object subclass: Repro
   go =>
     self.count ifNil: ["none"]
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -385,9 +365,7 @@ typed Object subclass: Repro
   go =>
     self.value ifNil: [true]
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -418,9 +396,7 @@ typed Object subclass: Repro
   go -> String =>
     ^self.name ifNil: [^"early"]
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -447,9 +423,7 @@ typed Object subclass: Repro
   go -> Nil =>
     ^self.name ifNotNil: [:n | ^n size]
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -478,9 +452,7 @@ typed Object subclass: Repro
   go: aBlock =>
     self.name ifNil: aBlock
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -509,9 +481,7 @@ typed Object subclass: Repro
   go =>
     nil ifNil: ["a"]
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();

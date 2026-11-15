@@ -962,6 +962,7 @@ mod tests {
     use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
     use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
     use crate::source_analysis::Span;
+    use crate::test_helpers::test_support::parse_ok;
 
     use crate::test_helpers::test_support::unit_span as span;
 
@@ -1984,9 +1985,7 @@ mod tests {
     // forwarded type params, `Concrete` for fixed types).
 
     fn parse_module(source: &str) -> (crate::ast::Module, ClassHierarchy) {
-        let tokens = crate::source_analysis::lex_with_eof(source);
-        let (module, diags) = crate::source_analysis::parse(tokens);
-        assert!(diags.is_empty(), "Parse failed: {diags:?}");
+        let module = parse_ok(source);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         (module, hierarchy)
     }

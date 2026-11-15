@@ -97,7 +97,7 @@ pub(super) fn assign(name: &str, value: Expression) -> Expression {
     }
 }
 
-pub(super) use crate::test_helpers::test_support::parse_source;
+pub(super) use crate::test_helpers::test_support::{parse_ok, parse_source};
 
 // Helper: run the full diagnostic pipeline (type check + @expect suppression).
 // Suppression is owned by `apply_expect_directives` in diagnostic_provider —
@@ -155,9 +155,7 @@ pub(super) fn return_types_and_diags(
     std::collections::HashMap<MethodReturnKey, InferredType>,
     Vec<Diagnostic>,
 ) {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     let mut checker = check(&module, &hierarchy);
     let diagnostics = checker.take_diagnostics();
@@ -419,9 +417,7 @@ pub(super) fn type_dnu_diags(source: &str) -> Vec<Diagnostic> {
 /// Source to the diagnostics of the whole semantic `analyse` pass. The source
 /// must parse without any diagnostic (BT-4678).
 pub(super) fn analyse_diags(source: &str) -> Vec<Diagnostic> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     crate::semantic_analysis::analyse(&module).diagnostics
 }
 

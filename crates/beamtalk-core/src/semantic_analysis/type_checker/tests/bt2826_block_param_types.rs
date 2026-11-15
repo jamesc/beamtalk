@@ -24,9 +24,7 @@ typed Object subclass: Repro
   shout -> String =>
     ^"abc" collect: [:c | c uppercase]
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
@@ -73,9 +71,7 @@ typed Object subclass: Repro
   watch: w :: Worker -> Symbol =>
     ^w onExit: [:reason | reason printString]
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();

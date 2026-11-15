@@ -20,9 +20,7 @@ use ecow::EcoString;
 
 /// Lex + parse + build a hierarchy for a full source string.
 fn parse_and_build(source: &str) -> (Module, ClassHierarchy) {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();

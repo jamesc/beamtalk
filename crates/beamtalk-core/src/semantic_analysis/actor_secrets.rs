@@ -294,11 +294,11 @@ fn check_out_of_file_declarations(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::{Severity, lex_with_eof, parse};
+    use crate::source_analysis::Severity;
+    use crate::test_helpers::test_support::parse_ok;
 
     fn check(src: &str) -> (Module, Vec<Diagnostic>) {
-        let (module, parse_diags) = parse(lex_with_eof(src));
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build_with_options(&module, true);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();

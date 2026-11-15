@@ -255,9 +255,7 @@ typed Object subclass: Nv
     y :: Integer | Nil := self obj
     y isNil ifTrue: [0] ifFalse: [y + 1]
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -414,9 +412,7 @@ Object subclass: Caller
     ms isNil ifTrue: [^nil]
     Receiver process: ms
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     // Filter by DiagnosticCategory::Type so argument-type warnings
@@ -444,9 +440,7 @@ Object subclass: Caller
     local :: Integer := ms
     local
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -477,9 +471,7 @@ Object subclass: Caller
     ms isNil ifTrue: [^nil]
     r process: ms
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result

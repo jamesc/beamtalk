@@ -586,12 +586,12 @@ mod tests {
     use crate::source_analysis::Severity;
     use crate::source_analysis::lex_with_eof;
     use crate::source_analysis::parse;
+    use crate::test_helpers::test_support::parse_ok;
 
     // ── BT-4797: static-only handle classes in type patterns ──────────────────
 
     fn type_pattern_diags(src: &str) -> Vec<Diagnostic> {
-        let (module, parse_diags) = parse(lex_with_eof(src));
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let hierarchy = ClassHierarchy::with_builtins();
         let mut diagnostics = Vec::new();
         check_type_pattern_classes(&module, &hierarchy, false, &mut diagnostics);
@@ -640,9 +640,7 @@ mod tests {
     #[test]
     fn match_exhaustiveness_result_missing_error_arm_is_error() {
         let src = "(Result ok: 42) match: [Result ok: v -> [v + 1]]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_match_exhaustiveness(&module, &mut diagnostics);
         assert_eq!(
@@ -667,9 +665,7 @@ mod tests {
     #[test]
     fn match_exhaustiveness_result_missing_ok_arm_is_error() {
         let src = "(Result error: #x) match: [Result error: e -> [e]]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_match_exhaustiveness(&module, &mut diagnostics);
         assert_eq!(
@@ -689,9 +685,7 @@ mod tests {
     #[test]
     fn match_exhaustiveness_result_both_arms_no_error() {
         let src = "r match: [Result ok: v -> [v]; Result error: e -> [0]]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_match_exhaustiveness(&module, &mut diagnostics);
         assert!(
@@ -704,9 +698,7 @@ mod tests {
     #[test]
     fn match_exhaustiveness_wildcard_suppresses_check() {
         let src = "r match: [Result ok: v -> [v]; _ -> [0]]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_match_exhaustiveness(&module, &mut diagnostics);
         assert!(
@@ -719,9 +711,7 @@ mod tests {
     #[test]
     fn match_exhaustiveness_non_constructor_match_no_error() {
         let src = "x match: [1 -> [#one]; 2 -> [#two]; _ -> [#other]]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_match_exhaustiveness(&module, &mut diagnostics);
         assert!(
@@ -743,9 +733,7 @@ mod tests {
     #[test]
     fn match_exhaustiveness_non_result_scrutinee_with_result_arm_is_error() {
         let src = "42 match: [Result ok: v -> v]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_match_exhaustiveness(&module, &mut diagnostics);
         assert_eq!(
@@ -766,9 +754,7 @@ mod tests {
     #[test]
     fn match_exhaustiveness_fires_inside_method() {
         let src = "Object subclass: Foo\n  run: r => r match: [Result ok: v -> [v]]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_match_exhaustiveness(&module, &mut diagnostics);
         assert_eq!(
@@ -784,9 +770,7 @@ mod tests {
     #[test]
     fn match_exhaustiveness_guarded_wildcard_does_not_suppress() {
         let src = "r match: [Result ok: v -> [v]; _ when: [true] -> [0]]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_match_exhaustiveness(&module, &mut diagnostics);
         assert_eq!(
@@ -808,9 +792,7 @@ mod tests {
     #[test]
     fn match_exhaustiveness_guarded_constructor_arm_not_counted() {
         let src = "r match: [Result ok: v when: [v > 0] -> [v]; Result error: e -> [0]]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_match_exhaustiveness(&module, &mut diagnostics);
         assert_eq!(
@@ -831,9 +813,7 @@ mod tests {
     #[test]
     fn match_exhaustiveness_unguarded_wildcard_still_suppresses() {
         let src = "r match: [Result ok: v -> [v]; _ -> [0]]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_match_exhaustiveness(&module, &mut diagnostics);
         assert!(
@@ -846,9 +826,7 @@ mod tests {
     #[test]
     fn match_exhaustiveness_unguarded_constructor_arm_counts() {
         let src = "r match: [Result ok: v -> [v]; Result error: _ -> [0]]";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_match_exhaustiveness(&module, &mut diagnostics);
         assert!(
@@ -863,9 +841,7 @@ mod tests {
     #[test]
     fn assignment_in_match_arm_warns() {
         let src = r#"x match: [#ok -> result := "yes"; _ -> result := "no"]"#;
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         warn_assignment_in_match_arms(&module, &mut diagnostics);
         assert_eq!(
@@ -890,9 +866,7 @@ mod tests {
     #[test]
     fn self_field_assignment_in_match_arm_does_not_warn() {
         let src = "Actor subclass: Probe\n  state: total = 0\n\n  bump: v =>\n    v match: [1 -> self.total := self.total + 10; _ -> self.total := self.total + 1]\n    self.total\n";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         warn_assignment_in_match_arms(&module, &mut diagnostics);
         assert!(
@@ -905,9 +879,7 @@ mod tests {
     #[test]
     fn no_assignment_in_match_arm_no_warning() {
         let src = r#"x match: [#ok -> "yes"; _ -> "no"]"#;
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         warn_assignment_in_match_arms(&module, &mut diagnostics);
         assert!(

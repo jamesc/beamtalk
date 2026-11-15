@@ -586,6 +586,7 @@ mod tests {
     };
     use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
     use crate::source_analysis::{Severity, Span};
+    use crate::test_helpers::test_support::parse_ok;
 
     fn test_span() -> Span {
         Span::new(0, 10)
@@ -731,9 +732,7 @@ mod tests {
     // gating on `has_cross_file_classes`, exactly like `check_unresolved_classes`).
 
     fn parse_and_build(source: &str) -> (Module, ClassHierarchy) {
-        let tokens = crate::source_analysis::lex_with_eof(source);
-        let (module, parse_diags) = crate::source_analysis::parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(source);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         (module, hierarchy.unwrap())
     }

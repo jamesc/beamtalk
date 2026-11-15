@@ -170,9 +170,7 @@ fn dictionary_view_equals_the_pre_shape_inference() {
 }
 
 fn warnings(source: &str) -> Vec<(String, String)> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     crate::semantic_analysis::analyse(&module)
         .diagnostics
         .into_iter()

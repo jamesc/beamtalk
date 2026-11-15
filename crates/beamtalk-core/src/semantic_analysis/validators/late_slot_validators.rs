@@ -149,13 +149,10 @@ mod tests {
     use super::*;
     use crate::semantic_analysis::ClassHierarchy;
     use crate::source_analysis::Severity;
-    use crate::source_analysis::lex_with_eof;
-    use crate::source_analysis::parse;
+    use crate::test_helpers::test_support::parse_ok;
 
     fn diagnostics_for(src: &str) -> Vec<Diagnostic> {
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         // Mirror `analyse_full`'s registration order (protocols, then
         // aliases) so alias- and protocol-typed `late` slots resolve as
