@@ -169,8 +169,7 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% (`beamtalk_workspace_shape_store`) and build-time
     %% (`beamtalk_release_shapes`) flatteners — see `normalize_field_shape/2`.
     normalize_field_shape/2,
-    field_type_to_binary/1,
-    field_kind_to_binary/1
+    field_type_to_binary/1
 ]).
 
 -define(TABLE, beamtalk_class_metadata).

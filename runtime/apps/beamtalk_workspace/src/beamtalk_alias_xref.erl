@@ -86,17 +86,25 @@ every other ADR 0105/0108 hot-reload mechanism already documents and accepts.
 
 Mirrors every other ADR 0105/0108 store: state lives in this gen_server's
 `#state{}`, supervised under `beamtalk_workspace_sup`. `clear/0` is
-test-only for now: it gives tests an explicit reset without a restart. It is
+compiled in test builds only (BT-4903): it gives tests an explicit reset without a
+restart. It is
 not called on the `Workspace changes revert:` path today; a future revert
 enhancement may wire it in, but that has not happened yet.
 """.
 
 -include_lib("kernel/include/logger.hrl").
 
--export([start_link/0, register_class/2, register_class_additive/2, dependents_of/1, clear/0]).
+-export([start_link/0, register_class/2, register_class_additive/2, dependents_of/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
+
+%% Exported for tests only (BT-4903): no production caller.
+-ifdef(TEST).
+-export([
+    clear/0
+]).
+-endif.
 
 -record(state, {
     %% alias name -> set of dependent class names.
@@ -201,7 +209,8 @@ dependents_of(AliasNameBin) when is_binary(AliasNameBin) ->
         exit:{timeout, _} -> []
     end.
 
--doc "Clear every recorded edge. Test-only for now (a future `Workspace changes revert:` may call it — not wired in yet).".
+-ifdef(TEST).
+-doc "Clear every recorded edge. Compiled in test builds only (a future `Workspace changes revert:` may call it — not wired in yet).".
 -spec clear() -> ok.
 clear() ->
     try
@@ -210,6 +219,7 @@ clear() ->
         exit:{noproc, _} -> ok;
         exit:{timeout, _} -> ok
     end.
+-endif.
 
 %%====================================================================
 %% gen_server callbacks

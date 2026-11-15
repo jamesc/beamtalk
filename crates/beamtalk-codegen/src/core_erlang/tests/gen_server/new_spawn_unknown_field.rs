@@ -22,10 +22,7 @@ fn test_value_new_validates_init_args_against_default_state() {
         "  field: port = 4000\n",
         "  field: handler = nil\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("conf")).expect("codegen should succeed");
+    let code = codegen_named(src, "conf");
 
     let new = extract_core_fn(&code, "'new'/1 = fun").expect("new/1 must be generated");
     assert!(
@@ -54,10 +51,7 @@ fn test_actor_init_base_validates_init_args_leaf_only() {
         "  state: value = 0\n",
         "  getValue => self.value\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+    let code = codegen_named(src, "counter");
 
     let init = extract_core_fn(&code, "'init'/1 = fun").expect("init/1 must be generated");
     assert!(
@@ -91,10 +85,7 @@ fn test_actor_init_subclass_validates_against_merged_state() {
         "Counter subclass: LoggingCounter\n",
         "  state: logCount = 0\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("logging_counter"))
-        .expect("codegen should succeed");
+    let code = codegen_named(src, "logging_counter");
 
     let init = extract_core_fn(&code, "'init'/1 = fun").expect("init/1 must be generated");
     assert!(
@@ -128,10 +119,7 @@ fn test_spawn_reraises_init_unknown_field_keeps_other_wraps() {
         "  state: value = 0\n",
         "  getValue => self.value\n",
     );
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+    let code = codegen_named(src, "counter");
 
     let spawn = extract_core_fn(&code, "'spawn'/1 = fun").expect("spawn/1 must be generated");
     assert!(

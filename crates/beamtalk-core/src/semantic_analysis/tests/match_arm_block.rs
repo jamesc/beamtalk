@@ -15,7 +15,7 @@ use crate::compilation::diagnostics_policy::{
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
 fn arm_block(src: &str) -> Vec<Diagnostic> {
-    analyse(&parse_module(src))
+    analyse(&parse_bt(src))
         .diagnostics
         .into_iter()
         .filter(|d| d.category == Some(DiagnosticCategory::MatchArmBlock))
@@ -64,7 +64,7 @@ fn dispatch_table_stays_silent_through_analyse_full() {
 #[test]
 fn expect_match_arm_block_suppresses_the_warning() {
     let src = "Object subclass: Shapes\n  describe: x =>\n    @expect match_arm_block\n    x match: [1 -> [2 + 3]; _ -> 0]\n";
-    let module = parse_module(src);
+    let module = parse_bt(src);
     let mut diags = analyse(&module).diagnostics;
     apply_expect_directives(&module, &mut diags);
     assert!(
@@ -82,7 +82,7 @@ fn expect_match_arm_block_suppresses_the_warning() {
 #[test]
 fn diagnostics_table_off_mutes_the_warning() {
     let src = "Object subclass: Shapes\n  describe: x => x match: [1 -> [2 + 3]; _ -> 0]";
-    let diags = analyse(&parse_module(src)).diagnostics;
+    let diags = analyse(&parse_bt(src)).diagnostics;
     assert!(
         diags
             .iter()

@@ -162,4 +162,11 @@ pub struct CompilerOptions {
     /// compiles) emit no unresolved-module warnings rather than false
     /// positives.
     pub known_erlang_modules: ffi_type_specs::KnownErlangModules,
+
+    /// Package names a `pkg@Class` qualifier may name (ADR 0070 Phase 2):
+    /// the package's declared dependencies, the package itself and the
+    /// stdlib — see [`semantic_analysis::known_qualifier_packages`]. `None`
+    /// (single files, manifest-less directories, an unreadable manifest)
+    /// skips the check, since no package set exists to check against.
+    pub known_packages: Option<std::collections::HashSet<String>>,
 }

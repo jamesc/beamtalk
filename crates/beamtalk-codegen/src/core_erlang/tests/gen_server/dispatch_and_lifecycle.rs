@@ -567,10 +567,7 @@ fn test_script_module_keyword_method_dispatch_destructures_args() {
     // This exercises generate_legacy_method_clause with non-empty param_vars
     // (line 329) and build_dispatch_clause's Args-case branch.
     let src = "add := [:a :b | a + b]";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("test")).expect("codegen should succeed");
+    let code = codegen(src);
 
     let dispatch_body =
         extract_core_fn(&code, "'dispatch'/4 = fun").expect("should have dispatch/4");
@@ -598,10 +595,7 @@ fn test_method_table_with_script_methods_includes_arity() {
     // Script/workspace modules emit method_table entries for every
     // `name := [block]` binding, with the block arity as the value.
     let src = "unary := [42]. binary := [:a :b | a + b]";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code =
-        generate_module(&module, CodegenOptions::new("test")).expect("codegen should succeed");
+    let code = codegen(src);
 
     let table_body =
         extract_core_fn(&code, "'method_table'/0 = fun").expect("should have method_table/0");

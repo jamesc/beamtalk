@@ -143,16 +143,6 @@ impl RequestBuilder {
         req
     }
 
-    /// Build a `load-source` request.
-    #[must_use]
-    pub fn load_source(source: &str) -> serde_json::Value {
-        serde_json::json!({
-            "op": "load-source",
-            "id": next_msg_id(),
-            "source": source
-        })
-    }
-
     /// Build a `load-project` request.
     #[must_use]
     pub fn load_project(path: &str, include_tests: bool) -> serde_json::Value {
@@ -206,12 +196,6 @@ impl RequestBuilder {
     #[must_use]
     pub fn sessions() -> serde_json::Value {
         Self::no_param("sessions")
-    }
-
-    /// Build a `clone` request.
-    #[must_use]
-    pub fn clone_session() -> serde_json::Value {
-        Self::no_param("clone")
     }
 
     /// Build a `close` request.
@@ -665,13 +649,6 @@ mod tests {
     }
 
     #[test]
-    fn load_source_request_has_correct_shape() {
-        let req = RequestBuilder::load_source("class Foo\n  x => 42");
-        assert_eq!(req["op"], "load-source");
-        assert_eq!(req["source"], "class Foo\n  x => 42");
-    }
-
-    #[test]
     fn load_project_request_has_correct_shape() {
         let req = RequestBuilder::load_project("/my/project", false);
         assert_eq!(req["op"], "load-project");
@@ -713,12 +690,6 @@ mod tests {
     fn sessions_request_has_correct_op() {
         let req = RequestBuilder::sessions();
         assert_eq!(req["op"], "sessions");
-    }
-
-    #[test]
-    fn clone_session_request_has_correct_op() {
-        let req = RequestBuilder::clone_session();
-        assert_eq!(req["op"], "clone");
     }
 
     #[test]
@@ -1028,14 +999,12 @@ mod tests {
             RequestBuilder::erlang_complete("p", Some("m")),
             RequestBuilder::show_codegen("1"),
             RequestBuilder::show_codegen_class("C", Some("s")),
-            RequestBuilder::load_source("s"),
             RequestBuilder::load_project("p", true),
             RequestBuilder::with_package_name(
                 RequestBuilder::load_project_with_force("p", true, true),
                 Some("pkg"),
             ),
             RequestBuilder::sessions(),
-            RequestBuilder::clone_session(),
             RequestBuilder::close(),
             RequestBuilder::actors(),
             RequestBuilder::inspect("a"),

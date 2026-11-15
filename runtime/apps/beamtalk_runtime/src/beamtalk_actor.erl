@@ -426,6 +426,8 @@ handle_getValue([], State) ->
 %% and any supervisor child MFA recorded by an earlier release name this module,
 %% so a mixed-version cluster keeps working
 %% (see the moduledocs of `beamtalk_actor_registry` / `_remote` / `_ffi`).
+%% The `spawnAs`/`spawnAsGlobal` delegates first shipped in v0.5.0 and are to be
+%% removed once the next release after 0.5.0 has shipped (BT-4903).
 -export([
     'spawnAs'/2,
     'spawnAs'/3,
@@ -995,11 +997,13 @@ Handles the full spawn sequence:
 Unlike `safe_spawn/2` (unnamed) in its common case, this stays
 **linked** — it is the shared implementation behind both
 `spawnAs:`/`spawnWith:as:`/`spawnAs:scope:`/`spawnWith:as:scope:` *and*
-the real OTP supervisor child MFA that `beamtalk_supervisor:spec_to_otp/1`
-builds for `SupervisionSpec withName:`/`withName:scope:` children (ADR
-0079: `{beamtalk_actor, spawnAs, [Name, Module]}` / `[Name, Module,
-InitArgs]`, or, for `global`, `{beamtalk_actor, spawnAsGlobal, ...}` —
-either way this function is the start callback). That link is not a
+the start `beamtalk_supervisor:start_actor_child/3` makes for
+`SupervisionSpec withName:`/`withName:scope:` children (ADR 0079; a child spec
+recorded by a release before BT-4701 names `{beamtalk_actor, spawnAs, ...}` /
+`{beamtalk_actor, spawnAsGlobal, ...}` instead, which the compatibility
+delegates at the end of this module still forward to
+`beamtalk_actor_registry` — either way this function is the start callback).
+That link is not a
 bug — it is exactly the OTP contract a real supervisor relies on to
 detect the child's exit and restart it; removing it would silently break
 supervised named-actor restart (see `beamtalk_supervisor_tests:supervisor_restart_re_registers_name_test/0`).
@@ -4652,6 +4656,10 @@ object_fallback(Selector, Args, Self, State, ClassName) ->
 %%% stdlib-shim code moved to. Kept under this module's name for at least one
 %%% release: they are `erpc` targets, OTP supervisor child MFAs, or the resolve
 %%% function registered with `global`, or an MFA recorded by an earlier release.
+%%%
+%%% Removal date for `spawnAs/2,3` and `spawnAsGlobal/2,3` (BT-4903): they first
+%%% shipped in v0.5.0 (15 Nov 2026), and are to be removed once the next release
+%%% after 0.5.0 has shipped.
 
 'spawnAs'(A1, A2) -> beamtalk_actor_registry:'spawnAs'(A1, A2).
 'spawnAs'(A1, A2, A3) -> beamtalk_actor_registry:'spawnAs'(A1, A2, A3).

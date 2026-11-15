@@ -21,8 +21,6 @@ between its markers differs from the compiler's.
 -export([
     overridable/0,
     species_dependent/0,
-    species_construction/0,
-    species_construction_class_side/0,
     extended_on/1,
     species_construction_extended_on/1
 ]).

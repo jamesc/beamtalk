@@ -75,28 +75,8 @@ pub fn resolve_dependency_graph(
     let lockfile = Lockfile::read(project_root)?.unwrap_or_default();
 
     // Phase 1: Discover the full dependency graph
-    // Newly resolved git/registry deps are collected so we can update the lockfile.
-    let mut ctx = DiscoveryContext {
-        project_root,
-        graph: BTreeMap::new(),
-        discovery_stack: vec![root_name.clone()],
-        lockfile: &lockfile,
-        new_lock_entries: Vec::new(),
-        // The registry is a property of the project being built, so the root
-        // manifest's `[registry]` governs the whole graph — a transitive
-        // dependency cannot redirect resolution to a registry of its own.
-        registry_location: registry::resolve_registry_location(
-            project_root,
-            root_manifest.registry.as_ref(),
-        ),
-        registry_identity: registry::registry_identity(root_manifest.registry.as_ref()),
-    };
-
-    discover_deps(&mut ctx, project_root, &root_name, &root_manifest)?;
-
-    // Extract results from context (drops the lockfile borrow)
-    let graph = ctx.graph;
-    let new_lock_entries = ctx.new_lock_entries;
+    let (graph, new_lock_entries) =
+        discover_dependency_graph(project_root, &root_manifest, &lockfile)?;
 
     // Update lockfile with any newly resolved git/registry deps
     if !new_lock_entries.is_empty() {
@@ -160,6 +140,174 @@ pub fn resolve_dependency_graph(
     }
 
     Ok(resolved)
+}
+
+/// Walk the root manifest's dependency graph against `lockfile`, fetching
+/// whatever the lock does not pin. Returns the discovered graph and the lock
+/// entries produced along the way; nothing is written to disk here.
+fn discover_dependency_graph(
+    project_root: &Utf8Path,
+    root_manifest: &ParsedManifest,
+    lockfile: &Lockfile,
+) -> Result<(BTreeMap<String, DepNode>, Vec<LockEntry>)> {
+    let root_name = root_manifest.package.name.clone();
+    // Newly resolved git/registry deps are collected so we can update the lockfile.
+    let mut ctx = DiscoveryContext {
+        project_root,
+        graph: BTreeMap::new(),
+        discovery_stack: vec![root_name.clone()],
+        lockfile,
+        new_lock_entries: Vec::new(),
+        // The registry is a property of the project being built, so the root
+        // manifest's `[registry]` governs the whole graph — a transitive
+        // dependency cannot redirect resolution to a registry of its own.
+        registry_location: registry::resolve_registry_location(
+            project_root,
+            root_manifest.registry.as_ref(),
+        ),
+        registry_identity: registry::registry_identity(root_manifest.registry.as_ref()),
+    };
+
+    discover_deps(&mut ctx, project_root, &root_name, root_manifest)?;
+    Ok((ctx.graph, ctx.new_lock_entries))
+}
+
+/// What `deps update` asks the resolver to forget before re-resolving.
+pub(crate) enum Unlock<'a> {
+    /// Every git and registry lock entry.
+    All,
+    /// `name` and everything it pulls in that no *other* direct dependency
+    /// also reaches. A shared transitive stays pinned unless the new version
+    /// of `name` asks for something different, which the resolver then
+    /// re-resolves (or rejects as a version conflict) on its own.
+    Subtree(&'a str),
+}
+
+/// The outcome of [`relock_dependency_graph`].
+pub(crate) struct Relocked {
+    /// The lockfile to write: unlocked entries re-resolved, everything else
+    /// untouched, entries the graph no longer reaches removed.
+    pub lockfile: Lockfile,
+    /// Names the root manifest reaches, direct and transitive.
+    pub reachable: std::collections::BTreeSet<String>,
+}
+
+/// Re-resolve part of the dependency graph for `beamtalk deps update`
+/// (BT-4920), without compiling anything or touching `beamtalk.lock`.
+///
+/// Entries selected by `unlock` are dropped from the lock, then the whole
+/// graph is rediscovered: unlocked entries are fetched afresh, the rest is
+/// honoured exactly as `beamtalk build` honours it. Walking the whole graph
+/// (not just the updated subtree) is what lets a single-version conflict with
+/// another dependent surface here, before anything is written.
+///
+/// Lock entries nothing reaches any more are removed: for `Unlock::All` any
+/// such entry, for `Unlock::Subtree` only those the updated package used to
+/// pull in (a package dropped by its new version).
+pub(crate) fn relock_dependency_graph(
+    project_root: &Utf8Path,
+    unlock: &Unlock<'_>,
+) -> Result<Relocked> {
+    let root_manifest = manifest::parse_manifest_full(&project_root.join("beamtalk.toml"))?;
+    let mut lockfile = Lockfile::read(project_root)?.unwrap_or_default();
+
+    let (unlocked, candidates_for_removal): (Vec<String>, Vec<String>) = match unlock {
+        Unlock::All => {
+            let all: Vec<String> = lockfile.packages.keys().cloned().collect();
+            (all.clone(), all)
+        }
+        Unlock::Subtree(target) => {
+            let others: Vec<&str> = root_manifest
+                .dependencies
+                .keys()
+                .map(String::as_str)
+                .filter(|n| n != target)
+                .collect();
+            let shared = locked_subtree(project_root, &root_manifest, &others);
+            let subtree = locked_subtree(project_root, &root_manifest, &[target]);
+            let unlocked = subtree
+                .iter()
+                .filter(|n| !shared.contains(*n) || *n == target)
+                .cloned()
+                .collect();
+            (unlocked, subtree.into_iter().collect())
+        }
+    };
+    for name in &unlocked {
+        lockfile.packages.remove(name);
+    }
+
+    let (graph, new_lock_entries) =
+        discover_dependency_graph(project_root, &root_manifest, &lockfile)?;
+    for entry in new_lock_entries {
+        lockfile.insert(entry);
+    }
+
+    let reachable: std::collections::BTreeSet<String> = graph.keys().cloned().collect();
+    for name in candidates_for_removal {
+        if !reachable.contains(&name) {
+            lockfile.packages.remove(&name);
+        }
+    }
+    Ok(Relocked {
+        lockfile,
+        reachable,
+    })
+}
+
+/// Names reachable from `roots` (inclusive) by following the dependency
+/// declarations of the checkouts already on disk. A package with no checkout
+/// contributes only itself; path dependencies are followed through their
+/// directories so git/registry packages below them are found too.
+fn locked_subtree(
+    project_root: &Utf8Path,
+    root_manifest: &ParsedManifest,
+    roots: &[&str],
+) -> std::collections::BTreeSet<String> {
+    let layout = beamtalk_core::build_layout::BuildLayout::new(project_root);
+    let mut seen = std::collections::BTreeSet::new();
+    let mut stack: Vec<(String, Utf8PathBuf)> = Vec::new();
+    for name in roots {
+        if let Some(spec) = root_manifest.dependencies.get(*name) {
+            stack.push((
+                (*name).to_string(),
+                dependency_dir(project_root, &layout, name, &spec.source),
+            ));
+        }
+    }
+    while let Some((name, dir)) = stack.pop() {
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        let Ok(manifest) = manifest::parse_manifest_full(&dir.join("beamtalk.toml")) else {
+            debug!(dep = %name, %dir, "No readable manifest in checkout; not following its dependencies");
+            continue;
+        };
+        for (dep_name, spec) in &manifest.dependencies {
+            stack.push((
+                dep_name.clone(),
+                dependency_dir(&dir, &layout, dep_name, &spec.source),
+            ));
+        }
+    }
+    seen
+}
+
+fn dependency_dir(
+    parent_dir: &Utf8Path,
+    layout: &beamtalk_core::build_layout::BuildLayout,
+    name: &str,
+    source: &DependencySource,
+) -> Utf8PathBuf {
+    match source {
+        DependencySource::Path { path } => Utf8Path::from_path(path).map_or_else(
+            || parent_dir.to_path_buf(),
+            |p| canonicalize_dep_path(parent_dir, p),
+        ),
+        DependencySource::Git { .. } | DependencySource::Registry { .. } => {
+            layout.dep_checkout_dir(name)
+        }
+    }
 }
 
 /// Compute the "via" chain from the root package to a transitive dependency.

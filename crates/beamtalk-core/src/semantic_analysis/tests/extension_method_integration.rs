@@ -152,7 +152,7 @@ const LATE_ACTOR: &str = "typed Actor subclass: CodexClient\n  late state: proc 
 
 fn cross_file_unguarded(ext_src: &str) -> Vec<crate::source_analysis::Diagnostic> {
     let ctx = AnalysisContext::default().with_pre_loaded_classes(declared_by("app", LATE_ACTOR));
-    analyse_full(&parse_module(ext_src), ctx)
+    analyse_full(&parse_bt(ext_src), ctx)
         .diagnostics
         .into_iter()
         .filter(|d| {
