@@ -961,6 +961,7 @@ mod tests {
     use crate::ast::TypeAnnotation;
     use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
     use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+    use crate::semantic_analysis::test_helpers::parse_and_build;
     use crate::source_analysis::Span;
 
     use crate::test_helpers::test_support::unit_span as span;
@@ -1983,20 +1984,12 @@ mod tests {
     // type-param positions via `superclass_type_args` (`ParamRef` for
     // forwarded type params, `Concrete` for fixed types).
 
-    fn parse_module(source: &str) -> (crate::ast::Module, ClassHierarchy) {
-        let tokens = crate::source_analysis::lex_with_eof(source);
-        let (module, diags) = crate::source_analysis::parse(tokens);
-        assert!(diags.is_empty(), "Parse failed: {diags:?}");
-        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-        (module, hierarchy)
-    }
-
     #[test]
     fn super_receiver_threads_child_param_through_param_ref() {
         // `Sub(R) extends Base(R)` — Sub's R forwards to Base's E.
         // Calling super from inside Sub(R) with self typed as
         // Known("Sub", [Known("R")]) should produce Known("Base", [Known("R")]).
-        let (_, hierarchy) = parse_module(
+        let (_, hierarchy) = parse_and_build(
             "Object subclass: Base(E)\n  state: x :: E = nil\n\nBase(R) subclass: Sub(R)\n",
         );
         let child_type_args = vec![InferredType::known("R")];
@@ -2023,7 +2016,7 @@ mod tests {
     fn super_receiver_substitutes_concrete_superclass_arg() {
         // `IntBase extends Base(Integer)` — Integer is fixed; Sub has no type
         // params of its own. super's receiver must carry the concrete Integer.
-        let (_, hierarchy) = parse_module(
+        let (_, hierarchy) = parse_and_build(
             "Object subclass: Base(E)\n  state: x :: E = nil\n\nBase(Integer) subclass: IntBase\n",
         );
         let result = super_receiver_type(&"IntBase".into(), &[], &"Base".into(), &hierarchy, None);
@@ -2045,7 +2038,7 @@ mod tests {
     /// nominal class named `SomeAlias`.
     #[test]
     fn super_receiver_expands_alias_typed_concrete_superclass_arg() {
-        let (_, hierarchy) = parse_module(
+        let (_, hierarchy) = parse_and_build(
             "Object subclass: Base(E)\n  state: x :: E = nil\n\nBase(SomeAlias) subclass: IntBase\n",
         );
         let registry = alias_registry_with("SomeAlias", TypeAnnotation::Simple(ident("Integer")));
@@ -2081,7 +2074,7 @@ mod tests {
     fn super_receiver_falls_back_when_no_extends_annotation() {
         // Non-generic child of non-generic parent — no superclass_type_args.
         // super's receiver should match `receiver_type_for_class(parent)`.
-        let (_, hierarchy) = parse_module("Object subclass: Parent\n\nParent subclass: Child\n");
+        let (_, hierarchy) = parse_and_build("Object subclass: Parent\n\nParent subclass: Child\n");
         let result = super_receiver_type(&"Child".into(), &[], &"Parent".into(), &hierarchy, None);
         let expected = receiver_type_for_class(&"Parent".into(), &hierarchy);
         assert_eq!(result, expected);
@@ -2091,7 +2084,7 @@ mod tests {
     fn super_receiver_unknown_child_falls_back_safely() {
         // Child class not in hierarchy — must not panic; falls back to the
         // parent's symbolic placeholders.
-        let (_, hierarchy) = parse_module("Object subclass: Base(E)\n");
+        let (_, hierarchy) = parse_and_build("Object subclass: Base(E)\n");
         let result = super_receiver_type(
             &"NonExistentChild".into(),
             &[InferredType::known("R")],

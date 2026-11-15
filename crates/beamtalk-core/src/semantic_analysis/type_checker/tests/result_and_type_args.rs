@@ -519,9 +519,9 @@ fn union_dnu_all_missing_emits_warning() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
+    let mut session = InferSession::new();
+
+    session.env.set_local(
         "x",
         InferredType::Union {
             members: vec![InferredType::known("Integer"), InferredType::known("Float")],
@@ -529,14 +529,10 @@ fn union_dnu_all_missing_emits_warning() {
         },
     );
 
-    let _ty = checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    let _ty = session.infer(&module.expressions[0].expression, &hierarchy);
 
-    let dnu_diags: Vec<_> = checker
+    let dnu_diags: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("not understand"))
@@ -568,18 +564,16 @@ fn union_dnu_partial_missing_emits_hint() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
+    let mut session = InferSession::new();
 
-    let _ty = checker.infer_expr(
-        &module.expressions[0].expression,
-        &hierarchy,
-        &mut env,
-        false,
-    );
+    session
+        .env
+        .set_local("x", InferredType::simple_union(&["String", "Integer"]));
 
-    let dnu_diags: Vec<_> = checker
+    let _ty = session.infer(&module.expressions[0].expression, &hierarchy);
+
+    let dnu_diags: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("not understand"))
@@ -602,32 +596,28 @@ fn union_dnu_partial_missing_emits_hint() {
 #[test]
 fn generic_list_flatten_returns_unparameterized_list() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
 
     // Variable typed as List(List(Integer)) — a nested list
-    env.set_local(
-        "nested",
-        InferredType::Known {
-            class_name: eco_string("List"),
-            type_args: vec![InferredType::Known {
-                class_name: eco_string("List"),
-                type_args: vec![InferredType::known("Integer")],
-                provenance: TypeProvenance::Inferred(span()),
-            }],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
 
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(
             var("nested"),
             MessageSelector::Unary("flatten".into()),
             vec![],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "nested",
+            InferredType::Known {
+                class_name: eco_string("List"),
+                type_args: vec![InferredType::Known {
+                    class_name: eco_string("List"),
+                    type_args: vec![InferredType::known("Integer")],
+                    provenance: TypeProvenance::Inferred(span()),
+                }],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
     assert_eq!(
         result.as_known().map(EcoString::as_str),
@@ -640,17 +630,6 @@ fn generic_list_flatten_returns_unparameterized_list() {
 #[test]
 fn generic_list_partition_returns_dictionary() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-
-    env.set_local(
-        "nums",
-        InferredType::Known {
-            class_name: eco_string("List"),
-            type_args: vec![InferredType::known("Integer")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
 
     let block = Expression::Block(Block::new(
         vec![crate::ast::BlockParameter::new("x", span())],
@@ -662,15 +641,21 @@ fn generic_list_partition_returns_dictionary() {
         span(),
     ));
 
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(
             var("nums"),
             MessageSelector::Keyword(vec![KeywordPart::new("partition:", span())]),
             vec![block],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "nums",
+            InferredType::Known {
+                class_name: eco_string("List"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
     assert_eq!(
         result.as_known().map(EcoString::as_str),

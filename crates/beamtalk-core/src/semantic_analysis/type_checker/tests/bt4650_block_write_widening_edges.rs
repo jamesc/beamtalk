@@ -8,9 +8,7 @@
 use super::common::*;
 
 fn check(src: &str) -> Vec<Diagnostic> {
-    let (module, perrs) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
-    assert!(perrs.is_empty(), "parse errors: {perrs:?}");
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let (module, hierarchy) = parse_and_build(src);
     run_with_expect(&module, &hierarchy)
 }
 
@@ -60,9 +58,7 @@ fn remote_probe(body: &str) -> String {
 /// A joined type is a union, which no sendability warning fires on, so the
 /// fact is read from the per-identifier table the block-capture hint uses.
 fn last_read_remote(src: &str) -> Option<super::super::known_remote::KnownRemote> {
-    let (module, perrs) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
-    assert!(perrs.is_empty(), "parse errors: {perrs:?}");
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let (module, hierarchy) = parse_and_build(src);
     let mut checker = super::common::check(&module, &hierarchy);
     let spans = checker.take_known_remote_spans();
     let offset = src.rfind("remote useNode:").unwrap();

@@ -22,11 +22,9 @@ fn map(pairs: Vec<MapPair>) -> Expression {
     }
 }
 
+// Binds the built-in hierarchy; the shared `infer` takes one explicitly.
 fn infer(expr: &Expression) -> InferredType {
-    let mut checker = TypeChecker::new();
-    let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    checker.infer_expr(expr, &hierarchy, &mut env, false)
+    super::common::infer(expr, &ClassHierarchy::with_builtins())
 }
 
 fn field(key: &str, value: InferredType) -> ShapeFieldType {
@@ -172,9 +170,7 @@ fn dictionary_view_equals_the_pre_shape_inference() {
 }
 
 fn warnings(source: &str) -> Vec<(String, String)> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     crate::semantic_analysis::analyse(&module)
         .diagnostics
         .into_iter()

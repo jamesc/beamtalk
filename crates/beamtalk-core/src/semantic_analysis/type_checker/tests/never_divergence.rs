@@ -30,9 +30,7 @@ typed Object subclass: Caller
     ms isNil ifTrue: [Sink log: (self error: "missing")]
     Receiver process: ms
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -60,9 +58,7 @@ typed Object subclass: Caller
     ms isNil ifTrue: [(self error: "missing")]
     Receiver process: ms
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -91,9 +87,7 @@ typed Object subclass: Caller
     ms isNil ifTrue: [sink := (self error: "missing")]
     Receiver process: ms
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -121,9 +115,7 @@ typed Object subclass: Caller
     ms isNil ifTrue: [(self error: "missing") yourself; yourself]
     Receiver process: ms
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -157,9 +149,7 @@ typed Object subclass: Caller
     ms isNil ifTrue: [callbacks add: [self error: "later"]]
     Receiver process: ms
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     // The `ifTrue:` branch constructs a block that *would* diverge if run,

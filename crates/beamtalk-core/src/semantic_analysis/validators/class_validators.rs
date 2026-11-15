@@ -1364,16 +1364,13 @@ mod tests {
     use super::*;
     use crate::semantic_analysis::ClassHierarchy;
     use crate::source_analysis::Severity;
-    use crate::source_analysis::lex_with_eof;
-    use crate::source_analysis::parse;
+    use crate::test_helpers::test_support::parse_ok;
 
     /// Future is a runtime-only built-in class, with no `.bt` source stub.
     /// User-defined `Future` classes should trigger a stdlib shadowing warning.
     #[test]
     fn future_class_triggers_shadowing_warning() {
-        let tokens = lex_with_eof("Object subclass: Future\n  value => 1");
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok("Object subclass: Future\n  value => 1");
         assert_eq!(module.classes.len(), 1);
         let mut diagnostics = Vec::new();
         check_stdlib_name_shadowing(&module, &mut diagnostics);
@@ -1386,9 +1383,7 @@ mod tests {
     /// A class named `Integer` (generated stdlib) SHOULD trigger the warning.
     #[test]
     fn stdlib_class_triggers_shadowing_warning() {
-        let tokens = lex_with_eof("Object subclass: Integer\n  value => 1");
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok("Object subclass: Integer\n  value => 1");
         assert_eq!(module.classes.len(), 1);
         let mut diagnostics = Vec::new();
         check_stdlib_name_shadowing(&module, &mut diagnostics);
@@ -1399,9 +1394,7 @@ mod tests {
     /// A class named `Self` should be rejected.
     #[test]
     fn self_as_class_name_is_error() {
-        let tokens = lex_with_eof("Object subclass: Self\n  value => 1");
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok("Object subclass: Self\n  value => 1");
         let mut diagnostics = Vec::new();
         check_stdlib_name_shadowing(&module, &mut diagnostics);
         assert_eq!(
@@ -1418,9 +1411,7 @@ mod tests {
     #[test]
     fn value_subclass_slot_assign_is_error() {
         let src = "Value subclass: Point\n  state: x = 0\n  setX: v => self.x := v";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1447,9 +1438,7 @@ mod tests {
     #[test]
     fn actor_subclass_slot_assign_is_allowed() {
         let src = "Actor subclass: Counter\n  state: value = 0\n  increment => self.value := self.value + 1";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1466,9 +1455,7 @@ mod tests {
         // The class defines both `withValue:` (custom override) and a method that
         // directly assigns `self.value :=` — the validator should warn.
         let src = "Actor subclass: BankAccount\n  state: value = 0\n  withValue: v => v\n  setDirectly: v => self.value := v";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1495,9 +1482,7 @@ mod tests {
     fn no_bypass_warning_inside_with_selector_method() {
         let src =
             "Actor subclass: BankAccount\n  state: value = 0\n  withValue: v => self.value := v";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1512,9 +1497,7 @@ mod tests {
     #[test]
     fn object_subclass_slot_assign_no_diagnostic() {
         let src = "Object subclass: Plain\n  state: x = 0\n  setX: v => self.x := v";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1530,9 +1513,7 @@ mod tests {
     #[test]
     fn value_slot_assign_inside_block_is_error() {
         let src = "Value subclass: Point\n  state: x = 0\n  setX: v => [self.x := v] value";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1551,9 +1532,7 @@ mod tests {
     fn value_standalone_method_slot_assign_is_error() {
         // class declared separately; standalone method adds a mutating method to the value type
         let src = "Value subclass: Point\n  state: x = 0\nPoint >> setX: v => self.x := v";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         assert_eq!(
             module.method_definitions.len(),
             1,
@@ -1577,9 +1556,7 @@ mod tests {
     fn cast_on_value_type_is_error() {
         // `Point` is a Value subclass, so `Point foo!` should produce an error
         let src = "Value subclass: Point\n  state: x = 0\n  doStuff => Point foo!";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1602,9 +1579,7 @@ mod tests {
     fn cast_on_actor_type_is_ok() {
         // Actor subclass should NOT produce an error for cast
         let src = "Actor subclass: Worker\n  doStuff => Worker foo!";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1618,9 +1593,7 @@ mod tests {
     #[test]
     fn value_instance_method_nil_return_is_error() {
         let src = "Value subclass: MyVal\n  doSomething -> Nil => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1642,9 +1615,7 @@ mod tests {
     #[test]
     fn value_class_method_nil_return_is_exempt() {
         let src = "Value subclass: MyVal\n  class create -> Nil => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1659,9 +1630,7 @@ mod tests {
     #[test]
     fn object_instance_method_nil_return_is_exempt() {
         let src = "Object subclass: MyObj\n  doSomething -> Nil => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1676,9 +1645,7 @@ mod tests {
     #[test]
     fn actor_instance_method_nil_return_is_exempt() {
         let src = "Actor subclass: MyActor\n  doSomething -> Nil => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1693,9 +1660,7 @@ mod tests {
     #[test]
     fn value_block_param_nil_return_is_exempt() {
         let src = "Value subclass: MyVal\n  each: block :: Block -> Nil => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1710,9 +1675,7 @@ mod tests {
     #[test]
     fn value_no_block_param_nil_return_is_error() {
         let src = "Value subclass: MyVal\n  sideEffect -> Nil => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1729,9 +1692,7 @@ mod tests {
     #[test]
     fn value_subclass_responsibility_nil_return_is_exempt() {
         let src = "Value subclass: MyVal\n  doSomething -> Nil => self subclassResponsibility";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1746,9 +1707,7 @@ mod tests {
     #[test]
     fn value_subclass_responsibility_early_return_is_exempt() {
         let src = "Value subclass: MyVal\n  doSomething -> Nil => ^ self subclassResponsibility";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1763,9 +1722,7 @@ mod tests {
     #[test]
     fn standalone_value_method_nil_return_is_error() {
         let src = "Value subclass: MyVal\n  doSomething => nil\nMyVal >> doVoid -> Nil => nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1787,9 +1744,7 @@ mod tests {
     #[test]
     fn state_on_value_errors() {
         let src = "Value subclass: Point\n  state: x = 0\n  state: y = 0";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1807,9 +1762,7 @@ mod tests {
     #[test]
     fn field_on_actor_errors() {
         let src = "Actor subclass: Counter\n  field: count = 0";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1827,9 +1780,7 @@ mod tests {
     #[test]
     fn state_on_object_errors() {
         let src = "Object subclass: BadObj\n  state: x = 0";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1849,9 +1800,7 @@ mod tests {
     #[test]
     fn late_state_on_object_errors() {
         let src = "Object subclass: BadObj\n  late state: x :: Integer";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1868,9 +1817,7 @@ mod tests {
     #[test]
     fn field_on_object_errors() {
         let src = "Object subclass: BadObj\n  field: x = 0";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1887,9 +1834,7 @@ mod tests {
     #[test]
     fn field_on_value_no_error() {
         let src = "Value subclass: Point\n  field: x = 0\n  field: y = 0";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1903,9 +1848,7 @@ mod tests {
     #[test]
     fn state_on_actor_no_error() {
         let src = "Actor subclass: Counter\n  state: count = 0";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1921,9 +1864,7 @@ mod tests {
         // A class that inherits from a Value subclass should also get errors
         // when using state: instead of field:
         let src = "Value subclass: Shape\n  field: color = \"red\"\n\nShape subclass: Circle\n  state: radius = 0";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1942,9 +1883,7 @@ mod tests {
     fn object_no_state_no_error() {
         // Object subclass with no data declarations should produce no errors
         let src = "Object subclass: Helper\n  class doStuff => 42";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1959,9 +1898,7 @@ mod tests {
     fn testcase_subclass_state_errors() {
         // TestCase subclasses are not exempt from this check
         let src = "Value subclass: TestCase\n  field: name = \"\"\n\nTestCase subclass: MyTest\n  state: counter = nil";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -1982,9 +1919,7 @@ mod tests {
     #[test]
     fn value_subclass_case_insensitive_setter_collision_is_error() {
         let src = "Value subclass: Weird\n  field: x = 0\n  field: X = 0";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -2009,9 +1944,7 @@ mod tests {
     #[test]
     fn value_subclass_exact_duplicate_slot_name_is_error() {
         let src = "Value subclass: Dup\n  field: x = 0\n  field: x = 1";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -2032,9 +1965,7 @@ mod tests {
     #[test]
     fn value_subclass_distinct_slots_no_collision() {
         let src = "Value subclass: Point\n  field: x = 0\n  field: y = 0";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -2052,9 +1983,7 @@ mod tests {
     #[test]
     fn value_subclass_user_defined_setter_suppresses_collision() {
         let src = "Value subclass: Weird\n  field: x = 0\n  field: X = 0\n  withX: v => v";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
@@ -2071,9 +2000,7 @@ mod tests {
     #[test]
     fn actor_subclass_case_insensitive_slots_no_collision_check() {
         let src = "Actor subclass: Weird\n  state: x = 0\n  state: X = 0";
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();

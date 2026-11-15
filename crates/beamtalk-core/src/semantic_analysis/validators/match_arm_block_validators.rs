@@ -100,12 +100,10 @@ fn build_diagnostic(block: &Block) -> Diagnostic {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source_analysis::{lex_with_eof, parse};
+    use crate::test_helpers::test_support::parse_ok;
 
     fn findings(src: &str) -> Vec<Diagnostic> {
-        let tokens = lex_with_eof(src);
-        let (module, parse_diags) = parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let module = parse_ok(src);
         let mut diagnostics = Vec::new();
         check_match_arm_block(&module, &mut diagnostics);
         diagnostics

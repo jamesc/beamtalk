@@ -20,17 +20,11 @@ fn union_arg_all_compatible_no_warning() {
         "Number",
     )]);
 
-    let mut checker = TypeChecker::new();
-    checker.check_argument_types(
-        &"Calculator".into(),
+    let checker = check_args(
+        "Calculator",
         "compute:",
         &[InferredType::simple_union(&["Integer", "Float"])],
-        span(),
         &hierarchy,
-        false,
-        None,
-        None,
-        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),
@@ -50,17 +44,11 @@ fn union_arg_none_compatible_warns() {
         "Integer",
     )]);
 
-    let mut checker = TypeChecker::new();
-    checker.check_argument_types(
-        &"Calculator".into(),
+    let checker = check_args(
+        "Calculator",
         "compute:",
         &[InferredType::simple_union(&["String", "Symbol"])],
-        span(),
         &hierarchy,
-        false,
-        None,
-        None,
-        &[],
     );
     assert_eq!(
         checker.diagnostics().len(),
@@ -86,17 +74,11 @@ fn union_arg_mixed_compatible_hints() {
         "Number",
     )]);
 
-    let mut checker = TypeChecker::new();
-    checker.check_argument_types(
-        &"Calculator".into(),
+    let checker = check_args(
+        "Calculator",
         "compute:",
         &[InferredType::simple_union(&["Integer", "String"])],
-        span(),
         &hierarchy,
-        false,
-        None,
-        None,
-        &[],
     );
     assert_eq!(
         checker.diagnostics().len(),
@@ -122,17 +104,11 @@ fn union_arg_dynamic_still_skips() {
         "Integer",
     )]);
 
-    let mut checker = TypeChecker::new();
-    checker.check_argument_types(
-        &"Calculator".into(),
+    let checker = check_args(
+        "Calculator",
         "compute:",
         &[InferredType::Dynamic(DynamicReason::Unknown)],
-        span(),
         &hierarchy,
-        false,
-        None,
-        None,
-        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),
@@ -189,18 +165,13 @@ fn class_literal_arg_accepted_for_behaviour_param() {
     // Passing a class literal (TestCase) to a param expecting Behaviour
     // should not warn — class objects flow through Metaclass → Class → Behaviour.
     let hierarchy = test_hierarchy_with_class_literal_arg("Behaviour");
-    let mut checker = TypeChecker::new();
     let class_ref_arg = class_ref("TestCase");
-    checker.check_argument_types(
-        &"ClassChecker".into(),
+    let checker = check_args_with_exprs(
+        "ClassChecker",
         "accept:",
         &[InferredType::known("TestCase")],
-        span(),
+        std::slice::from_ref(&class_ref_arg),
         &hierarchy,
-        false,
-        Some(std::slice::from_ref(&class_ref_arg)),
-        None,
-        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),
@@ -213,18 +184,13 @@ fn class_literal_arg_accepted_for_behaviour_param() {
 fn class_literal_arg_accepted_for_class_param() {
     // A class literal should satisfy a Class-typed parameter.
     let hierarchy = test_hierarchy_with_class_literal_arg("Class");
-    let mut checker = TypeChecker::new();
     let class_ref_arg = class_ref("TestCase");
-    checker.check_argument_types(
-        &"ClassChecker".into(),
+    let checker = check_args_with_exprs(
+        "ClassChecker",
         "accept:",
         &[InferredType::known("TestCase")],
-        span(),
+        std::slice::from_ref(&class_ref_arg),
         &hierarchy,
-        false,
-        Some(std::slice::from_ref(&class_ref_arg)),
-        None,
-        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),
@@ -238,18 +204,13 @@ fn class_literal_arg_accepted_for_object_param() {
     // Object sits above Behaviour in the metaclass tower, so a class
     // literal must satisfy an Object-typed parameter.
     let hierarchy = test_hierarchy_with_class_literal_arg("Object");
-    let mut checker = TypeChecker::new();
     let class_ref_arg = class_ref("TestCase");
-    checker.check_argument_types(
-        &"ClassChecker".into(),
+    let checker = check_args_with_exprs(
+        "ClassChecker",
         "accept:",
         &[InferredType::known("TestCase")],
-        span(),
+        std::slice::from_ref(&class_ref_arg),
         &hierarchy,
-        false,
-        Some(std::slice::from_ref(&class_ref_arg)),
-        None,
-        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),
@@ -263,18 +224,13 @@ fn class_literal_arg_accepted_for_protoobject_param() {
     // ProtoObject is the root of the metaclass tower — every class literal
     // must satisfy it.
     let hierarchy = test_hierarchy_with_class_literal_arg("ProtoObject");
-    let mut checker = TypeChecker::new();
     let class_ref_arg = class_ref("TestCase");
-    checker.check_argument_types(
-        &"ClassChecker".into(),
+    let checker = check_args_with_exprs(
+        "ClassChecker",
         "accept:",
         &[InferredType::known("TestCase")],
-        span(),
+        std::slice::from_ref(&class_ref_arg),
         &hierarchy,
-        false,
-        Some(std::slice::from_ref(&class_ref_arg)),
-        None,
-        &[],
     );
     assert!(
         checker.diagnostics().is_empty(),
@@ -288,18 +244,13 @@ fn class_literal_arg_rejected_for_unrelated_param() {
     // A class literal whose metaclass chain does NOT include the expected
     // type (e.g., expected Integer) should still warn.
     let hierarchy = test_hierarchy_with_class_literal_arg("Integer");
-    let mut checker = TypeChecker::new();
     let class_ref_arg = class_ref("TestCase");
-    checker.check_argument_types(
-        &"ClassChecker".into(),
+    let checker = check_args_with_exprs(
+        "ClassChecker",
         "accept:",
         &[InferredType::known("TestCase")],
-        span(),
+        std::slice::from_ref(&class_ref_arg),
         &hierarchy,
-        false,
-        Some(std::slice::from_ref(&class_ref_arg)),
-        None,
-        &[],
     );
     assert_eq!(
         checker.diagnostics().len(),
@@ -322,18 +273,13 @@ fn instance_identifier_still_rejected_for_class_param() {
     // as `TestCase` is an instance, not a class, and should not satisfy a
     // `:: Class` parameter.
     let hierarchy = test_hierarchy_with_class_literal_arg("Class");
-    let mut checker = TypeChecker::new();
     let ident_arg = var("aTestCase");
-    checker.check_argument_types(
-        &"ClassChecker".into(),
+    let checker = check_args_with_exprs(
+        "ClassChecker",
         "accept:",
         &[InferredType::known("TestCase")],
-        span(),
+        std::slice::from_ref(&ident_arg),
         &hierarchy,
-        false,
-        Some(std::slice::from_ref(&ident_arg)),
-        None,
-        &[],
     );
     assert_eq!(
         checker.diagnostics().len(),
@@ -354,18 +300,13 @@ fn instance_identifier_still_rejected_for_behaviour_param() {
     // argument is an identifier of a user class type — only class literals
     // carry the "is-a Behaviour" semantics.
     let hierarchy = test_hierarchy_with_class_literal_arg("Behaviour");
-    let mut checker = TypeChecker::new();
     let ident_arg = var("aTestCase");
-    checker.check_argument_types(
-        &"ClassChecker".into(),
+    let checker = check_args_with_exprs(
+        "ClassChecker",
         "accept:",
         &[InferredType::known("TestCase")],
-        span(),
+        std::slice::from_ref(&ident_arg),
         &hierarchy,
-        false,
-        Some(std::slice::from_ref(&ident_arg)),
-        None,
-        &[],
     );
     assert_eq!(
         checker.diagnostics().len(),
@@ -704,11 +645,9 @@ fn union_type_param_bounds_all_conform_no_warning() {
     };
     registry.register_module(&proto_module, &hierarchy);
 
-    let mut checker = TypeChecker::new();
-    checker.check_type_param_bounds(
-        &"BoundedLogger".into(),
+    let checker = check_bounds(
+        "BoundedLogger",
         &[InferredType::simple_union(&["Integer", "String"])],
-        span(),
         &hierarchy,
         &registry,
     );
@@ -754,11 +693,9 @@ fn union_type_param_bounds_none_conform_warns() {
     };
     registry.register_module(&proto_module, &hierarchy);
 
-    let mut checker = TypeChecker::new();
-    checker.check_type_param_bounds(
-        &"BoundedLogger".into(),
+    let checker = check_bounds(
+        "BoundedLogger",
         &[InferredType::simple_union(&["Integer", "String"])],
-        span(),
         &hierarchy,
         &registry,
     );
@@ -838,11 +775,9 @@ fn union_type_param_bounds_mixed_conformance_hints() {
     };
     registry.register_module(&proto_module, &hierarchy);
 
-    let mut checker = TypeChecker::new();
-    checker.check_type_param_bounds(
-        &"BoundedLogger".into(),
+    let checker = check_bounds(
+        "BoundedLogger",
         &[InferredType::simple_union(&["SortableInt", "String"])],
-        span(),
         &hierarchy,
         &registry,
     );
@@ -869,24 +804,20 @@ fn union_type_param_bounds_mixed_conformance_hints() {
 #[test]
 fn generic_list_first_returns_element_type() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
 
     // Simulate a variable typed as List(String)
-    env.set_local(
-        "names",
-        InferredType::Known {
-            class_name: eco_string("List"),
-            type_args: vec![InferredType::known("String")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
 
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(var("names"), MessageSelector::Unary("first".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "names",
+            InferredType::Known {
+                class_name: eco_string("List"),
+                type_args: vec![InferredType::known("String")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
     assert_eq!(
         result.as_known().map(EcoString::as_str),
@@ -899,23 +830,18 @@ fn generic_list_first_returns_element_type() {
 #[test]
 fn generic_list_last_returns_element_type() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
 
-    env.set_local(
-        "nums",
-        InferredType::Known {
-            class_name: eco_string("List"),
-            type_args: vec![InferredType::known("Integer")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(var("nums"), MessageSelector::Unary("last".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "nums",
+            InferredType::Known {
+                class_name: eco_string("List"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
     assert_eq!(
         result.as_known().map(EcoString::as_str),
@@ -928,27 +854,22 @@ fn generic_list_last_returns_element_type() {
 #[test]
 fn generic_list_at_returns_element_type() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
 
-    env.set_local(
-        "items",
-        InferredType::Known {
-            class_name: eco_string("List"),
-            type_args: vec![InferredType::known("Float")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(
             var("items"),
             MessageSelector::Keyword(vec![KeywordPart::new("at:", span())]),
             vec![int_lit(1)],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "items",
+            InferredType::Known {
+                class_name: eco_string("List"),
+                type_args: vec![InferredType::known("Float")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
     assert_eq!(
         result.as_known().map(EcoString::as_str),
@@ -961,27 +882,22 @@ fn generic_list_at_returns_element_type() {
 #[test]
 fn generic_array_at_returns_element_type() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
 
-    env.set_local(
-        "arr",
-        InferredType::Known {
-            class_name: eco_string("Array"),
-            type_args: vec![InferredType::known("String")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(
             var("arr"),
             MessageSelector::Keyword(vec![KeywordPart::new("at:", span())]),
             vec![int_lit(1)],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "arr",
+            InferredType::Known {
+                class_name: eco_string("Array"),
+                type_args: vec![InferredType::known("String")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
     assert_eq!(
         result.as_known().map(EcoString::as_str),
@@ -994,30 +910,25 @@ fn generic_array_at_returns_element_type() {
 #[test]
 fn generic_dictionary_at_returns_value_type() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
 
-    env.set_local(
-        "dict",
-        InferredType::Known {
-            class_name: eco_string("Dictionary"),
-            type_args: vec![
-                InferredType::known("String"),
-                InferredType::known("Integer"),
-            ],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(
             var("dict"),
             MessageSelector::Keyword(vec![KeywordPart::new("at:", span())]),
             vec![str_lit("key")],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "dict",
+            InferredType::Known {
+                class_name: eco_string("Dictionary"),
+                type_args: vec![
+                    InferredType::known("String"),
+                    InferredType::known("Integer"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
     assert_eq!(
         result.as_known().map(EcoString::as_str),
@@ -1030,34 +941,29 @@ fn generic_dictionary_at_returns_value_type() {
 #[test]
 fn generic_nested_dictionary_at_returns_nested_type() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
 
-    env.set_local(
-        "nested",
-        InferredType::Known {
-            class_name: eco_string("Dictionary"),
-            type_args: vec![
-                InferredType::known("String"),
-                InferredType::Known {
-                    class_name: eco_string("Array"),
-                    type_args: vec![InferredType::known("Integer")],
-                    provenance: TypeProvenance::Declared(span()),
-                },
-            ],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(
             var("nested"),
             MessageSelector::Keyword(vec![KeywordPart::new("at:", span())]),
             vec![str_lit("key")],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "nested",
+            InferredType::Known {
+                class_name: eco_string("Dictionary"),
+                type_args: vec![
+                    InferredType::known("String"),
+                    InferredType::Known {
+                        class_name: eco_string("Array"),
+                        type_args: vec![InferredType::known("Integer")],
+                        provenance: TypeProvenance::Declared(span()),
+                    },
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
 
     // Should return Array(Integer)
@@ -1082,24 +988,20 @@ fn generic_nested_dictionary_at_returns_nested_type() {
 #[test]
 fn generic_block_value_returns_last_type_arg() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
 
     // Block(String) — zero-arg block returning String
-    env.set_local(
-        "blk",
-        InferredType::Known {
-            class_name: eco_string("Block"),
-            type_args: vec![InferredType::known("String")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
 
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(var("blk"), MessageSelector::Unary("value".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "blk",
+            InferredType::Known {
+                class_name: eco_string("Block"),
+                type_args: vec![InferredType::known("String")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
     assert_eq!(
         result.as_known().map(EcoString::as_str),
@@ -1112,31 +1014,27 @@ fn generic_block_value_returns_last_type_arg() {
 #[test]
 fn generic_block_value_colon_returns_last_type_arg() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
 
     // Block(Integer, String) — one-arg block taking Integer, returning String
-    env.set_local(
-        "blk",
-        InferredType::Known {
-            class_name: eco_string("Block"),
-            type_args: vec![
-                InferredType::known("Integer"),
-                InferredType::known("String"),
-            ],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
 
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(
             var("blk"),
             MessageSelector::Keyword(vec![KeywordPart::new("value:", span())]),
             vec![int_lit(42)],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "blk",
+            InferredType::Known {
+                class_name: eco_string("Block"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("String"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
     assert_eq!(
         result.as_known().map(EcoString::as_str),
@@ -1149,17 +1047,13 @@ fn generic_block_value_colon_returns_last_type_arg() {
 #[test]
 fn generic_unresolved_type_param_falls_back_to_dynamic() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
 
     // Bare List without type args — first should be Dynamic
-    env.set_local("plain", InferredType::known("List"));
 
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(var("plain"), MessageSelector::Unary("first".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
+        &[("plain", InferredType::known("List"))],
     );
     assert!(
         matches!(result, InferredType::Dynamic(DynamicReason::Unknown)),
@@ -1171,17 +1065,6 @@ fn generic_unresolved_type_param_falls_back_to_dynamic() {
 #[test]
 fn generic_inject_into_resolves_accumulator_type() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-
-    env.set_local(
-        "arr",
-        InferredType::Known {
-            class_name: eco_string("Array"),
-            type_args: vec![InferredType::known("Integer")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
 
     // arr inject: 0 into: [:acc :x | acc + x]
     // A should be inferred as Integer from the initial value argument
@@ -1198,7 +1081,7 @@ fn generic_inject_into_resolves_accumulator_type() {
         span(),
     ));
 
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(
             var("arr"),
             MessageSelector::Keyword(vec![
@@ -1208,8 +1091,14 @@ fn generic_inject_into_resolves_accumulator_type() {
             vec![int_lit(0), block],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "arr",
+            InferredType::Known {
+                class_name: eco_string("Array"),
+                type_args: vec![InferredType::known("Integer")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
     assert_eq!(
         result.as_known().map(EcoString::as_str),
@@ -1222,17 +1111,6 @@ fn generic_inject_into_resolves_accumulator_type() {
 #[test]
 fn generic_list_detect_returns_element_type() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-
-    env.set_local(
-        "strs",
-        InferredType::Known {
-            class_name: eco_string("List"),
-            type_args: vec![InferredType::known("String")],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
 
     let block = Expression::Block(Block::new(
         vec![crate::ast::BlockParameter::new("x", span())],
@@ -1244,15 +1122,21 @@ fn generic_list_detect_returns_element_type() {
         span(),
     ));
 
-    let result = checker.infer_expr(
+    let result = infer_with_locals(
         &msg_send(
             var("strs"),
             MessageSelector::Keyword(vec![KeywordPart::new("detect:", span())]),
             vec![block],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "strs",
+            InferredType::Known {
+                class_name: eco_string("List"),
+                type_args: vec![InferredType::known("String")],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
     assert_eq!(
         result.as_known().map(EcoString::as_str),
@@ -1646,18 +1530,7 @@ fn union_arg_parameterized_members_all_match_no_warning() {
         InferredType::known_with_args("Array", vec![InferredType::known("Integer")]),
         InferredType::known_with_args("Array", vec![InferredType::known("Float")]),
     ]);
-    let mut checker = TypeChecker::new();
-    checker.check_argument_types(
-        &"Sink".into(),
-        "take:",
-        &[arg],
-        span(),
-        &hierarchy,
-        false,
-        None,
-        None,
-        &[],
-    );
+    let checker = check_args("Sink", "take:", &[arg], &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "Array(Integer) | Array(Float) members are all Array(Number) — no diagnostic expected, got: {:?}",

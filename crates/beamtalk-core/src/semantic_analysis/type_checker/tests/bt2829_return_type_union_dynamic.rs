@@ -22,16 +22,6 @@
 
 use super::common::*;
 
-/// Build a hierarchy containing a single empty `typed` class named
-/// `class_name`, on top of the builtins (so `String`/`Integer`/`Object`
-/// comparisons resolve). Mirrors the empty-class pattern already used by the
-/// branch-union tests (`typed Object subclass: ReplaySnapshot` with no body).
-fn typed_class_hierarchy(class_name: &str) -> ClassHierarchy {
-    let source = format!("typed Object subclass: {class_name}\n");
-    let module = parse_source(&source);
-    ClassHierarchy::build(&module).0.unwrap()
-}
-
 /// Same as [`typed_class_hierarchy`] but without the `typed` modifier.
 fn untyped_class_hierarchy(class_name: &str) -> ClassHierarchy {
     let source = format!("Object subclass: {class_name}\n");
@@ -68,14 +58,6 @@ fn union_of(members: &[&str]) -> InferredType {
     }
 }
 
-fn type_mismatch_diagnostics(checker: &TypeChecker) -> Vec<&Diagnostic> {
-    checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.message.contains("declares return type"))
-        .collect()
-}
-
 // ── Part A: Union body vs. declared return type ─────────────────────────
 
 /// AC (a): a `Union` body whose members are all compatible with the declared
@@ -87,8 +69,7 @@ fn bt2829_union_body_all_compatible_no_diagnostic() {
     let method = method_with_return_type(TypeAnnotation::Simple(ident("Object")));
     let body_type = union_of(&["String", "Integer"]);
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     assert!(
         type_mismatch_diagnostics(&checker).is_empty(),
@@ -112,8 +93,7 @@ fn bt2829_union_body_matches_declared_union_no_diagnostic() {
     });
     let body_type = union_of(&["String", "Integer"]);
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     assert!(
         type_mismatch_diagnostics(&checker).is_empty(),
@@ -132,8 +112,7 @@ fn bt2829_union_body_incompatible_member_warns() {
     let method = method_with_return_type(TypeAnnotation::Simple(ident("String")));
     let body_type = union_of(&["String", "Integer"]);
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     let warnings = type_mismatch_diagnostics(&checker);
     assert_eq!(
@@ -166,8 +145,7 @@ fn bt2829_union_body_with_dynamic_member_skips() {
         provenance: TypeProvenance::Inferred(span()),
     };
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     assert!(
         type_mismatch_diagnostics(&checker).is_empty(),
@@ -194,8 +172,7 @@ fn bt2829_dynamic_body_ambiguous_control_flow_hints_in_typed_class() {
     let method = method_with_return_type(TypeAnnotation::Simple(ident("String")));
     let body_type = InferredType::Dynamic(DynamicReason::AmbiguousControlFlow);
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     let hints = dynamic_hint_diagnostics(&checker);
     assert_eq!(
@@ -217,8 +194,7 @@ fn bt2829_dynamic_body_unannotated_return_hints_in_typed_class() {
     let method = method_with_return_type(TypeAnnotation::Simple(ident("String")));
     let body_type = InferredType::Dynamic(DynamicReason::UnannotatedReturn);
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     let hints = dynamic_hint_diagnostics(&checker);
     assert_eq!(
@@ -246,8 +222,7 @@ fn bt2829_dynamic_body_other_reasons_no_diagnostic_in_typed_class() {
         DynamicReason::Unknown,
     ] {
         let body_type = InferredType::Dynamic(reason);
-        let mut checker = TypeChecker::new();
-        checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+        let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
         assert!(
             dynamic_hint_diagnostics(&checker).is_empty(),
@@ -267,8 +242,7 @@ fn bt2829_untyped_class_union_incompatible_no_diagnostic() {
     let method = method_with_return_type(TypeAnnotation::Simple(ident("String")));
     let body_type = union_of(&["String", "Integer"]);
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     assert!(
         type_mismatch_diagnostics(&checker).is_empty(),
@@ -285,8 +259,7 @@ fn bt2829_untyped_class_dynamic_ambiguous_control_flow_no_diagnostic() {
     let method = method_with_return_type(TypeAnnotation::Simple(ident("String")));
     let body_type = InferredType::Dynamic(DynamicReason::AmbiguousControlFlow);
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     assert!(
         dynamic_hint_diagnostics(&checker).is_empty(),
@@ -339,8 +312,7 @@ fn bt2840_known_body_mismatched_type_args_against_union_member_warns() {
         vec![InferredType::known("Integer"), InferredType::known("Error")],
     );
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     let warnings = type_mismatch_diagnostics(&checker);
     assert_eq!(
@@ -371,8 +343,7 @@ fn bt2840_union_body_member_mismatched_type_args_against_union_member_warns() {
         provenance: TypeProvenance::Inferred(span()),
     };
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     let warnings = type_mismatch_diagnostics(&checker);
     assert_eq!(
@@ -395,8 +366,7 @@ fn bt2840_known_body_matching_type_args_against_union_member_no_diagnostic() {
         vec![InferredType::known("String"), InferredType::known("Error")],
     );
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     assert!(
         type_mismatch_diagnostics(&checker).is_empty(),
@@ -415,8 +385,7 @@ fn bt2840_known_body_unparameterized_against_union_member_no_diagnostic() {
     let method = method_with_return_type(result_string_error_or_nil());
     let body_type = InferredType::known("Result");
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     assert!(
         type_mismatch_diagnostics(&checker).is_empty(),

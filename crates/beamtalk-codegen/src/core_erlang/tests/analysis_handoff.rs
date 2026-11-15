@@ -28,24 +28,14 @@ use beamtalk_core::semantic_analysis::type_checker::{CHECK_MODULE_CALL_COUNT, In
 use beamtalk_core::semantic_analysis::{
     AnalysisContext, analyse_full, lower_analysed_module_for_codegen,
 };
-
-fn parse_fixture(src: &str) -> beamtalk_core::ast::Module {
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-    let errors: Vec<_> = diagnostics
-        .iter()
-        .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "fixture failed to parse: {errors:?}");
-    module
-}
+use beamtalk_core::test_helpers::test_support::parse_ok;
 
 /// A driver that runs `analyse_full` and threads the result into codegen via
 /// `with_analysis` performs each of the three costly passes exactly once —
 /// codegen makes zero *additional* calls of its own.
 #[test]
 fn with_analysis_skips_codegen_re_derivation() {
-    let module = parse_fixture("Object subclass: Greeter\n  greet => \"hello\".\n");
+    let module = parse_ok("Object subclass: Greeter\n  greet => \"hello\".\n");
 
     let build_before = BUILD_CALL_COUNT.with(std::cell::Cell::get);
     let facts_before = COMPUTE_SEMANTIC_FACTS_CALL_COUNT.with(std::cell::Cell::get);
@@ -100,7 +90,7 @@ fn with_analysis_skips_codegen_re_derivation() {
 /// aren't vacuously true because codegen never calls these functions at all).
 #[test]
 fn without_analysis_codegen_computes_its_own() {
-    let module = parse_fixture("Object subclass: Greeter\n  greet => \"hello\".\n");
+    let module = parse_ok("Object subclass: Greeter\n  greet => \"hello\".\n");
 
     let build_before = BUILD_CALL_COUNT.with(std::cell::Cell::get);
     let facts_before = COMPUTE_SEMANTIC_FACTS_CALL_COUNT.with(std::cell::Cell::get);
@@ -155,9 +145,8 @@ fn base_class_info(
 /// the empty-cross-file-metadata (REPL/single-file) case.
 #[test]
 fn with_analysis_skips_re_derivation_with_overlapping_cross_file_metadata() {
-    let module = parse_fixture(
-        "Object subclass: Bar\n  useFoo: f => f.\n\nBar subclass: Baz\n  hi => \"hi\".\n",
-    );
+    let module =
+        parse_ok("Object subclass: Bar\n  useFoo: f => f.\n\nBar subclass: Baz\n  hi => \"hi\".\n");
 
     // Mirrors a package build's Pass 1 output: full ClassInfo for a
     // same-package sibling file's class, AND a name-only superclass index
@@ -220,7 +209,7 @@ fn with_analysis_skips_re_derivation_with_overlapping_cross_file_metadata() {
 /// content, proves the writeback ran).
 #[test]
 fn with_analysis_trusts_driver_prepared_module() {
-    let mut module = parse_fixture("Object subclass: Foo\n  bar => 42.\n");
+    let mut module = parse_ok("Object subclass: Foo\n  bar => 42.\n");
     let analysis = analyse_full(&module, AnalysisContext::default());
 
     lower_analysed_module_for_codegen(&mut module, &analysis);
@@ -247,7 +236,7 @@ fn with_analysis_trusts_driver_prepared_module() {
 /// *the AST is consequently unprepared*).
 #[test]
 fn with_analysis_without_driver_prep_omits_writeback() {
-    let module = parse_fixture("Object subclass: Foo\n  bar => 42.\n");
+    let module = parse_ok("Object subclass: Foo\n  bar => 42.\n");
     let analysis = analyse_full(&module, AnalysisContext::default());
 
     let code = crate::core_erlang::generate_module(
@@ -280,7 +269,7 @@ fn with_analysis_without_driver_prep_omits_writeback() {
 /// fallback). The correct, freshly-reinferred `Integer` must win.
 #[test]
 fn with_analysis_refreshes_stale_return_type_when_hand_off_invalidated() {
-    let mut module = parse_fixture("Object subclass: Foo\n  bar => 42.\n");
+    let mut module = parse_ok("Object subclass: Foo\n  bar => 42.\n");
     let mut analysis = analyse_full(&module, AnalysisContext::default());
 
     let key: beamtalk_core::semantic_analysis::type_checker::MethodReturnKey =
@@ -335,8 +324,7 @@ fn with_analysis_refreshes_stale_return_type_when_hand_off_invalidated() {
 /// `class_send` through the class `gen_server`.
 #[test]
 fn beamtalk_class_named_emits_direct_call_in_batch_compile() {
-    let mut module =
-        parse_fixture("Object subclass: Foo\n  find => Beamtalk classNamed: #Integer.\n");
+    let mut module = parse_ok("Object subclass: Foo\n  find => Beamtalk classNamed: #Integer.\n");
     let analysis = analyse_full(&module, AnalysisContext::default());
     lower_analysed_module_for_codegen(&mut module, &analysis);
     let code = crate::core_erlang::generate_module(
@@ -369,9 +357,8 @@ fn stale_hand_off_never_reflattens_against_the_stdlib() {
         carried_protocols, first_wins_protocol_map,
     };
     // The package's own `Comparable`, declared in another file.
-    let other_file =
-        parse_fixture("Protocol define: Comparable\n  < other -> Boolean\n\n  foo => 42\n");
-    let mut module = parse_fixture(
+    let other_file = parse_ok("Protocol define: Comparable\n  < other -> Boolean\n\n  foo => 42\n");
+    let mut module = parse_ok(
         "Value subclass: Rank\n  uses: Comparable\n  field: level :: Integer = 0\n\n  \
          < other => self.level < other level\n",
     );

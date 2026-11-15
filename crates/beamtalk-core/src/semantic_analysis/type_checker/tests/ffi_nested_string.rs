@@ -19,18 +19,10 @@ use crate::compilation::diagnostics_policy::{
 };
 use crate::source_analysis::Severity;
 
-fn build(source: &str) -> (Module, ClassHierarchy) {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    (module, hierarchy)
-}
-
 /// Type-checks `source` and applies `@expect` suppression, like the real
 /// pipeline (the type checker itself never suppresses).
 fn diagnostics(source: &str) -> Vec<Diagnostic> {
-    let (module, hierarchy) = build(source);
+    let (module, hierarchy) = parse_and_build(source);
     let mut checker = check(&module, &hierarchy);
     let mut diags = checker.take_diagnostics();
     apply_expect_directives(&module, &mut diags);
@@ -193,8 +185,9 @@ fn hint_spans_the_offending_argument() {
 #[test]
 fn hint_fires_whether_or_not_the_registry_knows_the_function() {
     // With a registry entry for `lists:member/2` the hint is unchanged.
-    let (module, hierarchy) =
-        build("Object subclass: Probe\n  run =>\n    Erlang lists member: \"a\" with: #(\"a\")\n");
+    let (module, hierarchy) = parse_and_build(
+        "Object subclass: Probe\n  run =>\n    Erlang lists member: \"a\" with: #(\"a\")\n",
+    );
     let mut reg = NativeTypeRegistry::new();
     reg.register_module(
         "lists",

@@ -17,15 +17,6 @@
 
 use super::common::*;
 
-/// Build a hierarchy containing a single empty `typed` class named
-/// `class_name`, on top of the builtins. Mirrors the pattern in
-/// `bt2829_return_type_union_dynamic.rs`.
-fn typed_class_hierarchy(class_name: &str) -> ClassHierarchy {
-    let source = format!("typed Object subclass: {class_name}\n");
-    let module = parse_source(&source);
-    ClassHierarchy::build(&module).0.unwrap()
-}
-
 /// Build a minimal unary method with the given declared return type
 /// annotation. `body` is irrelevant — `check_return_type` is called
 /// directly with a hand-constructed `body_type`, bypassing inference.
@@ -56,14 +47,6 @@ fn array_of(element: TypeAnnotation) -> TypeAnnotation {
     }
 }
 
-fn type_mismatch_diagnostics(checker: &TypeChecker) -> Vec<&Diagnostic> {
-    checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.message.contains("declares return type"))
-        .collect()
-}
-
 /// AC: `Array(String)` declared vs. a body inferring `Array(String | Nil)`
 /// now produces a diagnostic — `Nil` isn't assignable to the expected
 /// `String` element type. This is the exact repro from the issue (nested
@@ -81,8 +64,7 @@ fn bt2847_nested_union_incompatible_member_warns() {
         ])],
     );
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     let warnings = type_mismatch_diagnostics(&checker);
     assert_eq!(
@@ -115,8 +97,7 @@ fn bt2847_nested_union_all_compatible_no_diagnostic() {
         ])],
     );
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     assert!(
         type_mismatch_diagnostics(&checker).is_empty(),
@@ -135,8 +116,7 @@ fn bt2847_nested_dynamic_stays_permissive() {
     let body_type =
         InferredType::known_with_args("Array", vec![InferredType::Dynamic(DynamicReason::Unknown)]);
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     assert!(
         type_mismatch_diagnostics(&checker).is_empty(),
@@ -164,8 +144,7 @@ fn bt2847_nested_union_with_dynamic_member_skips() {
         }],
     );
 
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("Probe"), &hierarchy);
+    let checker = check_return(&method, &body_type, "Probe", &hierarchy);
 
     assert!(
         type_mismatch_diagnostics(&checker).is_empty(),
