@@ -1039,9 +1039,13 @@ fn find_receiver_in_expr(
     // space past it.
     let just_after =
         |span: Span| offset >= span.end() && CursorBound::Trailing.contains(span, offset);
+    // Children are tried last to first: `Trailing` lets an earlier sibling's
+    // span reach the next one's first character, and the cursor belongs to the
+    // token typed last.
     let nested = || {
         children_in_source_order(expr)
             .into_iter()
+            .rev()
             .find_map(|child| find_receiver_in_expr(child, offset, type_map))
     };
     match expr {
@@ -1960,6 +1964,18 @@ mod tests {
         assert!(
             completions.iter().any(|c| c.label == "increment"),
             "cursor one past the token should resolve `c` to Counter"
+        );
+    }
+
+    #[test]
+    fn completions_receiver_found_inside_a_tuple_literal() {
+        // Containers are descended into too, and the later element wins when the
+        // earlier one's trailing slack reaches it.
+        let source = "Actor subclass: Counter\n  state: count = 0\n\n  increment => self.count := self.count + 1\n\nc := Counter spawn\nt := {1, c }";
+        let completions = completions_at(source, Position::new(6, 11));
+        assert!(
+            completions.iter().any(|c| c.label == "increment"),
+            "cursor after `c` in a tuple should resolve to Counter"
         );
     }
 
