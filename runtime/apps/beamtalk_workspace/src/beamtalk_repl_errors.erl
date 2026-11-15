@@ -480,7 +480,7 @@ resolve_qualified_class_name(ClassBin) when is_binary(ClassBin) ->
     case binary:match(ClassBin, <<"@">>) of
         nomatch ->
             %% Plain class name — existing behavior
-            beamtalk_repl_errors:safe_to_existing_atom(ClassBin);
+            safe_to_existing_atom(ClassBin);
         {Pos, _Len} ->
             %% Package-qualified: "json@Parser" → package=json, class=Parser
             PkgBin = binary:part(ClassBin, 0, Pos),
@@ -496,6 +496,6 @@ resolve_qualified_class_name(ClassBin) when is_binary(ClassBin) ->
                     {error, badarg};
                 _ModAtom ->
                     %% Module name atom exists — now resolve the class name atom
-                    beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin)
+                    safe_to_existing_atom(ClassNameBin)
             end
     end.
