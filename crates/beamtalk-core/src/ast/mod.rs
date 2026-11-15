@@ -248,6 +248,54 @@ impl Module {
         });
         inline.chain(standalone)
     }
+
+    /// [`Self::methods_with_owner`] with mutable access to each method, in the
+    /// same order. The owner name is a shared borrow of the class (or
+    /// standalone definition) and the method a mutable borrow of a disjoint
+    /// field, so a pass can look the owner up while rewriting the method.
+    pub fn methods_with_owner_mut(
+        &mut self,
+    ) -> impl Iterator<
+        Item = (
+            &str,
+            crate::source_analysis::MethodSide,
+            &mut MethodDefinition,
+        ),
+    > {
+        use crate::source_analysis::MethodSide;
+        let inline = self.classes.iter_mut().flat_map(|c| {
+            let ClassDefinition {
+                name,
+                methods,
+                class_methods,
+                ..
+            } = c;
+            let name = name.name.as_str();
+            methods
+                .iter_mut()
+                .map(move |m| (name, MethodSide::Instance, m))
+                .chain(
+                    class_methods
+                        .iter_mut()
+                        .map(move |m| (name, MethodSide::Class, m)),
+                )
+        });
+        let standalone = self.method_definitions.iter_mut().map(|s| {
+            let StandaloneMethodDefinition {
+                class_name,
+                is_class_method,
+                method,
+                ..
+            } = s;
+            let side = if *is_class_method {
+                MethodSide::Class
+            } else {
+                MethodSide::Instance
+            };
+            (class_name.name.as_str(), side, method)
+        });
+        inline.chain(standalone)
+    }
 }
 
 /// A comment in the source code.
@@ -551,6 +599,27 @@ mod tests {
             ]
         );
         assert_eq!(module.all_methods().count(), seen.len());
+    }
+
+    #[test]
+    fn methods_with_owner_mut_matches_methods_with_owner() {
+        use crate::source_analysis::{lex_with_eof, parse};
+        let src = "Object subclass: Foo\n  a => 1\n  class b => 2\n\
+                   Foo >> c => 3\n\
+                   Foo class >> d => 4\n";
+        let (mut module, diagnostics) = parse(lex_with_eof(src));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let shared: Vec<_> = module
+            .methods_with_owner()
+            .map(|(owner, side, m)| (owner.to_string(), side, m.selector.name().to_string()))
+            .collect();
+        let mut seen = Vec::new();
+        for (owner, side, method) in module.methods_with_owner_mut() {
+            seen.push((owner.to_string(), side, method.selector.name().to_string()));
+            method.is_sealed = true; // mutable access reaches the method itself
+        }
+        assert_eq!(seen, shared);
+        assert!(module.all_methods().all(|m| m.is_sealed));
     }
 
     #[test]

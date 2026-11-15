@@ -301,7 +301,7 @@ impl NameResolver {
             Identifier(id) => {
                 // Check if variable is defined in scope
                 if self.scope.lookup(&id.name).is_none() {
-                    if id.name == "self" {
+                    if expr.is_self() {
                         self.diagnostics.push(Diagnostic::error(
                             "self can only be used inside a method body",
                             id.span,

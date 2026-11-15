@@ -378,7 +378,8 @@ pub fn is_loop_or_fold_block_arg(selector: &str, arg_index: usize) -> bool {
 /// BT-4075: whether an `error:` send to `receiver` can be statically known to
 /// be the `Object>>error:` raise, which never returns and runs no user code.
 ///
-/// Only a bare `self` or a literal (`0 error: "boom"`) can be: any other
+/// Only `self` (parentheses looked through, see [`super::Expression::is_self`]) or a
+/// literal (`0 error: "boom"`) can be: any other
 /// receiver may be a class object whose class side defines `error:`
 /// (`Result class>>error:`, `Logger class>>error:`), and then `error:` is an
 /// ordinary send that answers a value. This is the syntactic half of the rule,
