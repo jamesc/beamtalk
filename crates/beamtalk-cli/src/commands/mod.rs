@@ -50,6 +50,7 @@ pub mod doctor;
 pub(crate) mod erlang_eval;
 pub(crate) mod erlfmt;
 pub mod escript;
+pub(crate) mod fixture;
 pub mod fmt;
 pub mod generate;
 pub mod lint;
