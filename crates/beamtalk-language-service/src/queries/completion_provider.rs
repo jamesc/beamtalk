@@ -28,6 +28,7 @@
 use crate::queries::cursor_context::{ClassContext, find_class_context};
 use crate::queries::erlang_modules;
 use crate::queries::shape_keys;
+use crate::queries::signature_text;
 use crate::queries::{
     enrich_hierarchy_with_inferred_returns, protocols_for_module, type_of_parsed,
 };
@@ -1215,30 +1216,20 @@ fn method_completion_detail(
     method: &beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo,
     class_name: &str,
 ) -> String {
-    let param_types: Vec<Option<String>> = method
-        .param_types
-        .iter()
-        .map(|t| t.as_ref().map(ToString::to_string))
-        .collect();
     signature_detail(
         class_name,
-        &param_types,
-        method.return_type.as_ref().map(ToString::to_string),
+        &signature_text::param_type_texts(&method.param_types),
+        signature_text::type_text(method.return_type.as_ref()),
     )
 }
 /// [`method_completion_detail`] for a protocol `class` requirement (ADR
 /// 0144), whose signature is declared on the protocol rather than on a
 /// class: e.g. `on Transport class (String) -> Transport`.
 fn requirement_completion_detail(requirement: &ProtocolMethodRequirement, owner: &str) -> String {
-    let param_types: Vec<Option<String>> = requirement
-        .param_types
-        .iter()
-        .map(|t| t.as_ref().map(ToString::to_string))
-        .collect();
     signature_detail(
         owner,
-        &param_types,
-        requirement.return_type.as_ref().map(ToString::to_string),
+        &signature_text::param_type_texts(&requirement.param_types),
+        signature_text::type_text(requirement.return_type.as_ref()),
     )
 }
 /// The shared `on Owner (P1, P2) -> R` completion-detail format: parameter

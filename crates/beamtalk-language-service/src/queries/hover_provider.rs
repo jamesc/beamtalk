@@ -28,6 +28,7 @@
 
 use crate::queries::cursor_context::{ClassContext, find_class_context, resolve_receiver_class};
 use crate::queries::shape_keys;
+use crate::queries::signature_text;
 use crate::queries::{
     enrich_hierarchy_with_inferred_returns, protocols_for_module, type_of_parsed,
 };
@@ -1601,29 +1602,12 @@ fn method_info_signature(
     // and hand the composer the text it contracts for.
     let return_type_text = method.return_type.as_ref().map(ToString::to_string);
     let return_type = return_type_text.as_deref();
-    let param_type_texts: Vec<Option<String>> = method
-        .param_types
-        .iter()
-        .map(|ty| ty.as_ref().map(ToString::to_string))
-        .collect();
+    let param_type_texts = signature_text::param_type_texts(&method.param_types);
 
     if selector.contains(':') {
-        // Keyword message: interleave keyword parts (re-adding the trailing
-        // `:` the split strips) with param types.
-        let keywords: Vec<String> = selector
-            .split(':')
-            .filter(|s| !s.is_empty())
-            .map(|part| format!("{part}:"))
-            .collect();
-        let params: Vec<SignatureParam<'_>> = keywords
-            .iter()
-            .enumerate()
-            .map(|(i, keyword)| SignatureParam {
-                keyword,
-                name: None,
-                type_text: param_type_texts.get(i).and_then(Option::as_deref),
-            })
-            .collect();
+        // Keyword message: interleave keyword parts with param types.
+        let keywords = signature_text::keyword_parts(selector);
+        let params = signature_text::keyword_params(&keywords, &param_type_texts);
         render_signature_text(
             SignatureSelector::Params(&params),
             return_type,
