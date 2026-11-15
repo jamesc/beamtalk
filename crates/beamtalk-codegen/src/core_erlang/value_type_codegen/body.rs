@@ -17,7 +17,7 @@ use super::super::threaded_ir::{
     FrameId, ThreadedStmt, ThreadedValue, TokenId, ValueRef, VersionPrefix,
 };
 use super::super::threaded_rebind::{RebindLayout, RebindNaming};
-use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary, Result};
+use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, NlrBoundary, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, concat, join, leaf};
 use beamtalk_core::ast::{
@@ -399,14 +399,14 @@ impl CoreErlangGenerator {
     /// at element 3 of its `{Value, StateAcc, Self}` result tuple
     /// is extracted and rebound — shared by every construct whose extra
     /// slot sits at that same position: the value-type/class-method Letrec
-    /// loop's three extraction sites
+    /// loop's extraction sites
     /// (the local-threading producer's construct tuple —
     /// `lower_local_threading_construct`, ADR 0131 — in last, `^` and
     /// assignment-RHS position, [`Self::emit_vt_loop_open_extraction`]'s non-last-position
-    /// open chain) AND `on:do:`/`ensure:`'s own three mirror
+    /// open chain) AND `on:do:`/`ensure:`'s own mirror
     /// sites (BT-3506: [`Self::emit_vt_exception_tuple_unwrap_to_var`],
     /// [`Self::generate_vt_exception_construct_open`],
-    /// [`Self::emit_vt_exception_assign_rhs`]) — so none of the six can
+    /// [`Self::emit_vt_exception_assign_rhs`]) — so none of them can
     /// independently drift on which family maps to which rebind (AGENTS.md's
     /// no-duplicate-implementations rule).
     ///
@@ -818,7 +818,17 @@ impl CoreErlangGenerator {
                 }
             }
             // BT-4889: a non-last `[..] value` with captured mutations is lowered by
-            // `vt_inline_block_value_producer`; the former open-chain arm was never hit.
+            // `lower_root_statement_with_producer` (the conditional producer for a
+            // block that writes only locals, `vt_inline_block_value_producer` for one
+            // that writes a field). The former open-chain arm was never hit, so reaching
+            // here is a loud internal error, not a silently dropped write.
+            VtBodyExprKind::BlockWithCapturedMutations if !is_last => {
+                return Err(CodeGenError::Internal(
+                    "BT-4889: non-last block value with captured mutations escaped the \
+                     local-threading producer"
+                        .to_string(),
+                ));
+            }
             VtBodyExprKind::Pure | VtBodyExprKind::BlockWithCapturedMutations => {
                 if is_last {
                     self.emit_vt_last_expr(expr, index, body_parts)?;

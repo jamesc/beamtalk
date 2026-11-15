@@ -204,7 +204,16 @@ impl CoreErlangGenerator {
                 {
                     // No assignment-RHS threading construct reaches this arm
                     // (BT-4889 measured the former tuple-rebind branch as never
-                    // hit): the local-threading producer lowers those.
+                    // hit): the local-threading producer lowers those. Binding the
+                    // target to the raw tuple would lose the threaded locals, so
+                    // fail loudly instead.
+                    if self.expr_yields_vt_threaded_tuple(value) {
+                        return Err(CodeGenError::Internal(
+                            "BT-4889: threading-construct assignment RHS reached the vt \
+                             branch-value builder"
+                                .to_string(),
+                        ));
+                    }
                     let core_var = self.resolve_local_core_var(&id.name);
                     let val_doc = self.expression_doc(value)?;
                     parts.push(docvec![
