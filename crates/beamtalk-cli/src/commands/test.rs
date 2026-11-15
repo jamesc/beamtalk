@@ -2846,14 +2846,22 @@ mod tests {
         );
         let (_temp, dir) = temp_utf8_dir();
         fs::create_dir_all(dir.join("fixtures")).unwrap();
-        fs::create_dir_all(dir.join("Fixtures")).unwrap();
+        // On a case-insensitive filesystem (Windows, default macOS) `Fixtures`
+        // is the directory just created, so the two spellings cannot coexist
+        // and only the skipped-`fixtures` half of the check applies.
+        let case_sensitive = !dir.join("Fixtures").exists();
         fs::write(dir.join("fixtures/a.bt"), "").unwrap();
-        fs::write(dir.join("Fixtures/b.bt"), "").unwrap();
+        if case_sensitive {
+            fs::create_dir_all(dir.join("Fixtures")).unwrap();
+            fs::write(dir.join("Fixtures/b.bt"), "").unwrap();
+        }
         let found = find_test_files(&dir).unwrap();
-        assert!(
-            found.iter().any(|f| f.ends_with("Fixtures/b.bt")),
-            "{found:?}"
-        );
+        if case_sensitive {
+            assert!(
+                found.iter().any(|f| f.ends_with("Fixtures/b.bt")),
+                "{found:?}"
+            );
+        }
         assert!(
             !found.iter().any(|f| f.ends_with("fixtures/a.bt")),
             "{found:?}"
