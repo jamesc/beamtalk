@@ -540,7 +540,7 @@ walk_in_class_chain(Selector, Args, Self, State, ClassName) ->
     end.
 
 -doc """
-Per-node probe for the `beamtalk_hierarchy:walk_ancestors/3` walk: check
+Per-node probe for the `beamtalk_hierarchy:walk_or_warn/4` walk: check
 whether `ClassName` has `Selector` locally and, if so, invoke it; otherwise
 advance to its superclass. Always resolves to `{found, dispatch_result()}` —
 this module never lets the generic walker's bare `not_found` escape, since

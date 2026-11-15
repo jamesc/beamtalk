@@ -212,7 +212,7 @@ resolve_class_side(ClassPid, Selector) ->
     beamtalk_object_class:compiled_method_safe(ClassPid, class, Selector).
 
 -doc """
-Per-node probe for the `beamtalk_hierarchy:walk_ancestors/3` walk: check
+Per-node probe for the `beamtalk_hierarchy:walk_or_warn/4` walk: check
 `ClassPid`'s own method table for `Selector`, and if absent, resolve its
 superclass's pid as the next node.
 """.
