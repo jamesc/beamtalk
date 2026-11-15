@@ -132,6 +132,7 @@ What D costs, plainly:
 - A scan signals every process in the node.
 - Bare-pid sends pay ≈1.6 µs plus a signal until their callers are fixed to pass the class.
 - Native actors need the `'$initial_call'` match.
+- **Read-your-writes is weaker.** Today the synchronous `register/2` makes an actor visible to the next `allInstances`, reload or purge as soon as `spawn` returns, *including async spawn*, where the row exists before `init/1` has run. A scan sees an actor only after its generated `init/1` has written the marker. For `spawn` and `spawn_monitored` the start waits for `init/1`, so the guarantee holds; for `spawn_monitored_async` an immediate `allInstances` can miss a just-spawned actor. `stop_class_actors` and hot reload can likewise miss an actor that is mid-`proc_lib` start. A process that dies during a scan is skipped (`process_info` answers `undefined`). C keeps today's guarantee; D trades it away, and the owner should say whether that is acceptable.
 
 Who is hurt: a node with ~1M processes that runs hot reload, `removeFromSystem` or a polled actor list. The project does not currently serve that case through those readers (hot reload is a development operation; production nodes are not hot-reloaded in bulk), and ordinary runtime paths do not touch them. Whether the project needs to is the one owner call D hinges on.
 
@@ -153,7 +154,8 @@ Who is hurt: a node with ~1M processes that runs hot reload, `removeFromSystem` 
 2. One enumeration at the process counts of the project's real nodes (the maintainer's, and a buccaneer load test), including with 100k–1M live processes, stays inside a bound the owner accepts for hot reload and the REPL actor list.
 3. The `'$beamtalk_actor_started_at'` write in generated `init/1` costs less than the registry hop it replaces.
 4. Native-actor listing through `'$initial_call'` works in a test.
-5. Every reader in the table above has a test (including `trace_store` bottlenecks and `actor_health`, which must not return empty silently).
+5. The weaker read-your-writes is pinned by tests: a sync-spawned actor is visible to the next `allInstances`; an async-spawned one may not be, and the test says so; a process dying mid-scan is skipped.
+6. Every reader in the table above has a test (including `trace_store` bottlenecks and `actor_health`, which must not return empty silently).
 
 **If C is chosen instead,** it must be built as specified in [Option C](#c--the-minimal-table-design), with `PendingMax` **a placeholder** (the first draft's 8192 was asserted before any harness result). The open-loop harness (16 spawners, `PendingMax` 512) showed pending peaking at ≈520, server mailbox 36–58 and dead rows ≤530 over ≈400k registrations per mode; the value for production has to come from the `+S 18` run (where does pacing start, how much memory does an async flood hold), and is part of acceptance.
 
