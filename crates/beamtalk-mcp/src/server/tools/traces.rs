@@ -7,17 +7,13 @@
 //! call tracing introspection.
 
 use beamtalk_repl_protocol::format::{self as fmt, Diagnostic as FmtDiagnostic};
-use rmcp::{
-    handler::server::wrapper::Parameters,
-    model::{CallToolResult, ContentBlock},
-    tool, tool_router,
-};
+use rmcp::{handler::server::wrapper::Parameters, model::CallToolResult, tool, tool_router};
 
 use crate::server::params::{
     ActorStatsParams, ExportTracesParams, GetTracesParams, SupervisionTreeParams,
 };
 use crate::server::{
-    BeamtalkMcp, MCP_OUTPUT_MODE, ToolTimer, check_response, error_result, pretty_json,
+    BeamtalkMcp, InternalErr, MCP_OUTPUT_MODE, ToolTimer, check_response, error_result, pretty_json,
 };
 
 /// Beamtalk expression behind the `nodes` tool: one `#{#name, #skewCount}` row
@@ -31,21 +27,15 @@ impl BeamtalkMcp {
         description = "List all running actors in the workspace. Returns each actor's PID and class."
     )]
     pub(crate) async fn list_actors(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("list_actors");
-        tracing::debug!(tool = "list_actors", "tool invoked");
-        let response = self
-            .client
-            .actors()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let mut timer = ToolTimer::start("list_actors");
+        let response = self.client.actors().await.internal_err()?;
 
         check_response!(response, "Failed to list actors");
 
         let actors = response.actors.unwrap_or_default();
         let text = fmt::format_actor_list(&actors, MCP_OUTPUT_MODE);
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Snapshot the live supervision tree (ADR 0092).
@@ -56,7 +46,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<SupervisionTreeParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("supervision_tree");
+        let mut timer = ToolTimer::start_quiet("supervision_tree");
         let scope = params.scope.as_deref().unwrap_or("default");
         tracing::debug!(tool = "supervision_tree", scope, "tool invoked");
         // Surface the snapshot through the same term-returning eval seam every
@@ -72,7 +62,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(code, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         if response.is_error() {
             let msg = response.error_message().unwrap_or("Unknown error");
@@ -87,8 +77,7 @@ impl BeamtalkMcp {
         // `#()` for an empty snapshot.
         let value = response.value_string();
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(value)]))
+        timer.ok_text(value)
     }
 
     /// List connected cluster nodes with shape-skew counts (ADR 0126 §8/§10).
@@ -96,8 +85,7 @@ impl BeamtalkMcp {
         description = "List every visible connected BEAM node, each with its name and current shape-skew count (classes whose version differs from this node's, ADR 0126 Phase 4). Cluster-scoped — unlike list_actors, which is local-node-only by design."
     )]
     pub(crate) async fn nodes(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("nodes");
-        tracing::debug!(tool = "nodes", "tool invoked");
+        let mut timer = ToolTimer::start("nodes");
         // Surfaced through the same term-returning eval seam every surface
         // shares. The per-node facts live on `Node` (`stdlib/src/node.bt`):
         // `Node connected` lists the peers and `Node>>shapeSkew` is backed by
@@ -107,7 +95,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(NODES_EXPR, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         if response.is_error() {
             let msg = response.error_message().unwrap_or("Unknown error");
@@ -122,8 +110,7 @@ impl BeamtalkMcp {
         // for a node with no connected peers.
         let value = response.value_string();
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(value)]))
+        timer.ok_text(value)
     }
 
     /// Enable actor trace event capture (ADR 0069).
@@ -131,20 +118,12 @@ impl BeamtalkMcp {
         description = "Enable actor trace event capture. Class-level aggregate stats (call counts, durations) are always on; this enables detailed per-event traces and per-actor stats. Call get-traces and actor-stats after running actor code to inspect results. Disable with evaluate(\"Tracing disable\")."
     )]
     pub(crate) async fn enable_tracing(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("enable_tracing");
-        tracing::debug!(tool = "enable_tracing", "tool invoked");
-        let response = self
-            .client
-            .enable_tracing()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let mut timer = ToolTimer::start("enable_tracing");
+        let response = self.client.enable_tracing().await.internal_err()?;
 
         check_response!(response, "Failed to enable tracing");
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            "Tracing enabled. Run actor code, then use get-traces or actor-stats to inspect results.",
-        )]))
+        timer.ok_text("Tracing enabled. Run actor code, then use get-traces or actor-stats to inspect results.",)
     }
 
     /// Disable actor trace event capture (ADR 0069).
@@ -152,20 +131,12 @@ impl BeamtalkMcp {
         description = "Disable actor trace event capture. Class-level aggregate stats remain available; per-actor detail is dropped. Use enable-tracing to resume capture."
     )]
     pub(crate) async fn disable_tracing(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("disable_tracing");
-        tracing::debug!(tool = "disable_tracing", "tool invoked");
-        let response = self
-            .client
-            .disable_tracing()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let mut timer = ToolTimer::start("disable_tracing");
+        let response = self.client.disable_tracing().await.internal_err()?;
 
         check_response!(response, "Failed to disable tracing");
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(
-            "Tracing disabled. Aggregate stats remain available via actor-stats.",
-        )]))
+        timer.ok_text("Tracing disabled. Aggregate stats remain available via actor-stats.")
     }
 
     /// Get captured trace events with optional filtering (ADR 0069).
@@ -176,7 +147,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<GetTracesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("get_traces");
+        let mut timer = ToolTimer::start_quiet("get_traces");
         tracing::debug!(
             tool = "get_traces",
             actor = ?params.actor,
@@ -199,7 +170,7 @@ impl BeamtalkMcp {
                 params.limit,
             )
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to get traces");
 
@@ -211,8 +182,7 @@ impl BeamtalkMcp {
             }
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Export trace events to a JSON file with optional filtering (ADR 0069).
@@ -223,7 +193,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<ExportTracesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("export_traces");
+        let mut timer = ToolTimer::start_quiet("export_traces");
         tracing::debug!(
             tool = "export_traces",
             path = ?params.path,
@@ -248,7 +218,7 @@ impl BeamtalkMcp {
                 params.limit,
             )
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to export traces");
 
@@ -257,8 +227,7 @@ impl BeamtalkMcp {
             None => "No traces to export. Enable tracing first with enable-tracing, then run actor code.".to_string(),
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Get aggregate actor statistics (ADR 0069).
@@ -269,14 +238,14 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<ActorStatsParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("actor_stats");
+        let mut timer = ToolTimer::start_quiet("actor_stats");
         tracing::debug!(tool = "actor_stats", actor = ?params.actor, "tool invoked");
 
         let response = self
             .client
             .actor_stats(params.actor.as_deref())
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to get actor stats");
 
@@ -285,7 +254,6 @@ impl BeamtalkMcp {
             None => "No stats available.".to_string(),
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 }

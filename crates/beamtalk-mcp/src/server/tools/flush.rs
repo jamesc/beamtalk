@@ -7,14 +7,10 @@
 //! re-validating the workspace's pending-change state.
 
 use beamtalk_core::tool_expr::{FlushFilter, flush_expr_with_confirm_destructive};
-use rmcp::{
-    handler::server::wrapper::Parameters,
-    model::{CallToolResult, ContentBlock},
-    tool, tool_router,
-};
+use rmcp::{handler::server::wrapper::Parameters, model::CallToolResult, tool, tool_router};
 
 use crate::server::params::FlushParams;
-use crate::server::{BeamtalkMcp, ToolTimer, check_response, validate_class_name};
+use crate::server::{BeamtalkMcp, InternalErr, ToolTimer, check_response, validate_class_name};
 
 #[tool_router(router = flush_tool_router, vis = "pub(crate)")]
 impl BeamtalkMcp {
@@ -34,7 +30,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<FlushParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("flush");
+        let mut timer = ToolTimer::start_quiet("flush");
         // Mutual exclusivity: at most one filter.
         let provided = [
             params.class.as_deref(),
@@ -98,7 +94,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Flush failed");
 
@@ -111,8 +107,7 @@ impl BeamtalkMcp {
             }
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// List pending `ChangeLog` entries (ADR 0082 Phase 3).
@@ -123,14 +118,13 @@ impl BeamtalkMcp {
         description = "Return the workspace ChangeLog — the navigable view of pending in-memory changes against the on-disk source files. Compiles to 'Workspace changes'. Pair with 'dirty_methods' for the per-class breakdown of dirty selectors, or 'flush' to write durable entries to disk. (ADR 0082 Phase 3, BT-2288.)"
     )]
     pub(crate) async fn list_changes(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("list_changes");
-        tracing::debug!(tool = "list_changes", "tool invoked");
+        let mut timer = ToolTimer::start("list_changes");
 
         let response = self
             .client
             .evaluate_with_options("Workspace changes", false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to list changes");
 
@@ -143,8 +137,7 @@ impl BeamtalkMcp {
             }
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Per-class dirty selectors (ADR 0082 Phase 3).
@@ -155,14 +148,13 @@ impl BeamtalkMcp {
         description = "Return the per-class set of dirty selectors in the workspace — the structured 'what specifically has changed?' view. Compiles to 'Workspace changes dirtyMethods'. Pair with 'list_changes' for the full summary or 'flush' to write durable entries to disk. (ADR 0082 Phase 3, BT-2288.)"
     )]
     pub(crate) async fn dirty_methods(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("dirty_methods");
-        tracing::debug!(tool = "dirty_methods", "tool invoked");
+        let mut timer = ToolTimer::start("dirty_methods");
 
         let response = self
             .client
             .evaluate_with_options("Workspace changes dirtyMethods", false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to list dirty methods");
 
@@ -175,8 +167,7 @@ impl BeamtalkMcp {
             }
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Whole-image re-check (ADR 0105 Phase 3).
@@ -189,14 +180,13 @@ impl BeamtalkMcp {
         description = "Re-check every live class in the workspace against the current image, not just the dependents of the last reload. Compiles to 'Workspace recheckImage' — the explicit, on-demand, unbounded sweep (ADR 0105 Phase 3), as opposed to the automatic post-reload check which only re-checks xref-filtered dependents of one changed selector, capped per reload. Returns a report Dictionary (checked/stale/findings). (ADR 0105 Phase 3, BT-2782.)"
     )]
     pub(crate) async fn recheck_image(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("recheck_image");
-        tracing::debug!(tool = "recheck_image", "tool invoked");
+        let mut timer = ToolTimer::start("recheck_image");
 
         let response = self
             .client
             .evaluate_with_options("Workspace recheckImage", false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to recheck image");
 
@@ -209,7 +199,6 @@ impl BeamtalkMcp {
             }
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 }
