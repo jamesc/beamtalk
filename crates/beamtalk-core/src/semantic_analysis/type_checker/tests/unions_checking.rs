@@ -5,6 +5,7 @@
 
 use super::super::*;
 use super::common::*;
+use crate::semantic_analysis::class_hierarchy::ClassInfo;
 
 // --- Argument type checking with unions ---
 
