@@ -19,13 +19,19 @@ Class-file reload for the loader: `reload_class_file/1,2,3`, compiling a source 
     reload_class_file/1,
     reload_class_file/2,
     reload_class_file/3,
-    verify_class_present/3,
     compile_reload_source/4,
     compile_reload_source/5,
     compile_reload_source_by_path/3,
     compile_reload_source_by_path/4,
     install_reload_result/2
 ]).
+
+%% Exported for tests only (BT-4903): no production caller.
+-ifdef(TEST).
+-export([
+    verify_class_present/3
+]).
+-endif.
 
 -doc """
 Compile and load a source file without REPL session state.

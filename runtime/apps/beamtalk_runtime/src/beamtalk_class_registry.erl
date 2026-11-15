@@ -41,7 +41,6 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     ensure_class_warnings_table/0,
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
-    drain_class_warnings_by_qualified_names/1,
     record_pending_load_error/2,
     drain_pending_load_errors_by_names/1,
     clear_pending_load_errors_by_names/1,
@@ -70,7 +69,6 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     ensure_loaded_classes_table/0,
     record_loaded_class/2,
     forget_loaded_class/2,
-    loaded_class_names/0,
     loaded_class_entries/0,
     meta_backing_module/1,
     ensure_backing_module_index_table/0,
@@ -89,7 +87,13 @@ Extracted from `beamtalk_object_class` for single-responsibility.
 ]).
 
 -ifdef(TEST).
--export([class_identity/1, prune_dead_class_pids/1]).
+-export([
+    class_identity/1,
+    prune_dead_class_pids/1,
+    %% No production caller; definitions are test-only too (BT-4903).
+    loaded_class_names/0,
+    drain_class_warnings_by_qualified_names/1
+]).
 -endif.
 
 -export_type([
@@ -358,12 +362,10 @@ record_class_collision_warning(ClassName, OldModule, NewModule) ->
 Drain collision warnings for the given class names after a file load.
 Called by the REPL load handler after loading a file, to collect
 warnings and surface them to the client. Removes entries from the table.
-Drains ALL packages for each class name. Use
-drain_class_warnings_by_qualified_names/1 for per-package precision.
+Drains ALL packages for each class name.
 
 Non-atomic (`match_object` then `delete_object`) — a concurrent
-insert landing between the two survives, unlike
-`drain_class_warnings_by_qualified_names/1`'s atomic `ets:take/2`. Acceptable
+insert landing between the two survives. Acceptable
 here because "ALL packages for a class name" is inherently a wider,
 best-effort sweep (the caller already can't pin down which package's warning
 it wants); a warning added mid-drain is picked up by the next drain instead of
@@ -395,11 +397,12 @@ drain_class_warnings_by_names(ClassNames) ->
             )
     end.
 
+-ifdef(TEST).
 -doc """
 Drain collision warnings for the given {Package, ClassName} pairs.
 Package-aware drain that only removes warnings for the specified
-package, leaving other packages' warnings intact. Use this from reload
-handlers where the package context is known.
+package, leaving other packages' warnings intact. Test-only (BT-4903): no production
+caller.
 
 Atomic (`ets:take/2`) — stronger than
 `drain_class_warnings_by_names/1`'s match-then-delete, since the package
@@ -425,6 +428,7 @@ drain_class_warnings_by_qualified_names(QualifiedNames) ->
                 QualifiedNames
             )
     end.
+-endif.
 
 -doc """
 Record a structured error to be surfaced after a failed module load.
@@ -1140,7 +1144,7 @@ restarted class (whose new init already re-recorded a different pid) is not
 clobbered by the dying old process: only a row still pointing at `Pid` is
 removed. On a crash (an untrappable kill, or a callback exception: BT-4622)
 this is not called, so a dead row can linger;
-`loaded_class_names/0` / `loaded_class_entries/0` filter those out with a cheap
+`loaded_class_entries/0` filters those out with a cheap
 local `is_process_alive/1` (no messaging), exactly as `live_class_entries/0`
 drops dead pg members.
 """.
@@ -1159,6 +1163,7 @@ forget_loaded_class(ClassName, Pid) when is_atom(ClassName), is_pid(Pid) ->
             ok
     end.
 
+-ifdef(TEST).
 -doc """
 Return the set of currently-loaded class names.
 
@@ -1173,14 +1178,14 @@ loaded_class_names() ->
     sets:from_list(
         [Name || {Name, _Pid} <- loaded_class_entries()], [{version, 2}]
     ).
+-endif.
 
 -doc """
 Return the live `{ClassName, Pid}` rows from the loaded-class index.
 
-The pid-carrying counterpart to `loaded_class_names/0`: dead-pid rows are
-filtered out with a local `is_process_alive/1` (no gen_server hop). The xref
-miss-policy uses the names for stale-drop and the pids to interrogate only the
-(typically empty) loaded-but-unindexed set.
+Dead-pid rows are filtered out with a local `is_process_alive/1` (no
+gen_server hop). The xref miss-policy uses the names for stale-drop and the
+pids to interrogate only the (typically empty) loaded-but-unindexed set.
 """.
 -spec loaded_class_entries() -> [{class_name(), pid()}].
 loaded_class_entries() ->
