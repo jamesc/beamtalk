@@ -70,7 +70,8 @@ expression_info_assigned_var_test() ->
 
 expression_info_trace_steps_test() ->
     with_port(fun(Port) ->
-        {ok, _, [], Info} =
+        %% (`a + 1' draws a "no effect" warning; only the info is under test.)
+        {ok, _, _Warnings, Info} =
             beamtalk_compiler_port:compile_expression_trace(
                 Port, <<"a := 1. a + 1. b := 2">>, <<"t">>, []
             ),
@@ -178,7 +179,7 @@ compile_on_closed_port_returns_error_test() ->
 handle_response_expression_ok_test() ->
     Response = #{status => ok, core_erlang => <<"core">>, warnings => []},
     ?assertEqual(
-        {ok, <<"core">>, []},
+        {ok, <<"core">>, [], #{assigned_var => none}},
         beamtalk_compiler_port:handle_response(Response)
     ).
 
@@ -189,7 +190,10 @@ handle_response_expression_with_warnings_test() ->
         warnings => [#{message => <<"unused var">>}, #{message => <<"m">>, hint => <<"h">>}]
     },
     ?assertEqual(
-        {ok, <<"core">>, [#{message => <<"unused var">>}, #{message => <<"m">>, hint => <<"h">>}]},
+        {ok, <<"core">>, [#{message => <<"unused var">>}, #{message => <<"m">>, hint => <<"h">>}],
+            #{
+                assigned_var => none
+            }},
         beamtalk_compiler_port:handle_response(Response)
     ).
 

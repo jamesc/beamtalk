@@ -101,12 +101,14 @@ Returns `{ok, CoreErlang, Warnings, ExprInfo}' where the generated module's `eva
 returns `{[{<<"src0">>, Val0}, ...], FinalState}' instead of `{Result, FinalState}'.
 """.
 -spec compile_expression_trace(binary(), binary(), [binary()]) ->
-    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()} | {error, [map()]}.
+    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()}
+    | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars) ->
     beamtalk_compiler_server:compile_expression_trace(Source, ModuleName, KnownVars, #{}).
 
 -spec compile_expression_trace(binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()} | {error, [map()]}.
+    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()}
+    | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
     beamtalk_compiler_server:compile_expression_trace(Source, ModuleName, KnownVars, Options).
 

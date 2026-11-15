@@ -321,7 +321,9 @@ compile_for_codegen_noproc_test() ->
 
 compile_standard_expression_bad_core_test() ->
     %% Invalid core erlang → compile_core_erlang fails → {error, _}
-    Result = beamtalk_repl_compiler:compile_standard_expression(<<"not valid core erlang">>, []),
+    Result = beamtalk_repl_compiler:compile_standard_expression(
+        <<"not valid core erlang">>, [], #{assigned_var => none}
+    ),
     ?assertMatch({error, _}, Result).
 
 %%====================================================================

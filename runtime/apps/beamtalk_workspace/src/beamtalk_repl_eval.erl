@@ -1371,7 +1371,9 @@ execute_and_process(ModuleName, Expression, AssignedVar, Bindings, RegistryPid, 
 -doc "Process evaluation result: handle rejected futures and assignments.".
 -spec process_eval_result(term(), string(), atom() | none, map(), beamtalk_repl_state:state()) ->
     {ok, term(), beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
-process_eval_result({future_rejected, ErrorReason}, _Expression, _AssignedVar, CleanBindings, State) ->
+process_eval_result(
+    {future_rejected, ErrorReason}, _Expression, _AssignedVar, CleanBindings, State
+) ->
     FutExObj = beamtalk_exception_handler:ensure_wrapped(ErrorReason),
     FutBindings = CleanBindings#{'_error' => FutExObj},
     FinalState = beamtalk_repl_state:set_bindings(FutBindings, State),

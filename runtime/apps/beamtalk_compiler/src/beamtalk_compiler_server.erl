@@ -212,12 +212,14 @@ compile_expression(Source, ModuleName, KnownVars, Options) ->
 
 -doc "Compile a REPL expression in trace mode.".
 -spec compile_expression_trace(binary(), binary(), [binary()]) ->
-    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()} | {error, [map()]}.
+    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()}
+    | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars) ->
     compile_expression_trace(Source, ModuleName, KnownVars, #{}).
 
 -spec compile_expression_trace(binary(), binary(), [binary()], map()) ->
-    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()} | {error, [map()]}.
+    {ok, binary(), [beamtalk_compiler_port:warning()], beamtalk_compiler_port:expression_info()}
+    | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
     gen_server:call(
         ?MODULE,
