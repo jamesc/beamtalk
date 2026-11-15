@@ -343,10 +343,13 @@ pub fn read_port_file(workspace_id: &str) -> Result<Option<(u16, Option<String>)
     if let Some(parsed) = parse_port_file(&content) {
         Ok(Some(parsed))
     } else {
-        tracing::warn!(
-            path = %port_file_path.display(),
-            "Invalid port file content in workspace port file"
-        );
+        // An empty file is "not written yet", not corruption: stay quiet.
+        if !content.trim().is_empty() {
+            tracing::warn!(
+                path = %port_file_path.display(),
+                "Invalid port file content in workspace port file"
+            );
+        }
         Ok(None)
     }
 }
