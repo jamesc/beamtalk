@@ -143,8 +143,7 @@ pub(super) fn check(module: &Module, hierarchy: &ClassHierarchy) -> TypeChecker 
 /// (lints are tolerated, unlike [`return_types_and_diags`], which requires an
 /// empty parse-diagnostic list).
 pub(super) fn diags_parse_ok(source: &str) -> Vec<Diagnostic> {
-    let module = crate::test_helpers::test_support::parse_ok(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let (module, hierarchy) = parse_and_build(source);
     check(&module, &hierarchy).take_diagnostics()
 }
 
@@ -206,12 +205,7 @@ pub(super) fn infer_with_locals(
     hierarchy: &ClassHierarchy,
     locals: &[(&str, InferredType)],
 ) -> InferredType {
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    for (name, ty) in locals {
-        env.set_local(*name, ty.clone());
-    }
-    checker.infer_expr(expr, hierarchy, &mut env, false)
+    infer_with_diags(expr, hierarchy, locals).0
 }
 
 /// Like [`infer_with_locals`], but also hands back the diagnostics the
