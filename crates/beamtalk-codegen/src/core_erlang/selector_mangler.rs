@@ -32,8 +32,8 @@
 use beamtalk_cerl_doc::hash::fnv1a_64;
 
 /// Erlang's hard cap on atom size (ERTS source: `MAX_ATOM_CHARACTERS` / UTF-8
-/// bytes).  Selectors or class names that exceed this limit cannot be emitted
-/// as legal Core Erlang atoms and are dropped from xref / dispatch tables.
+/// bytes).  Names that would exceed it are hashed to `kw_<16-hex>` by the
+/// mangling helpers here, and dropped from xref / accessor metadata tables.
 pub(in crate::core_erlang) const MAX_ATOM_BYTES: usize = 255;
 
 /// The prefix the runtime prepends to selector atoms to form class method
