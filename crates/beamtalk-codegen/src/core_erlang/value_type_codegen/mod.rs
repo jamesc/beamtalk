@@ -64,7 +64,7 @@ pub(in crate::core_erlang) enum VtBodyExprKind {
     /// for why this is a separate kind rather than a widening of that one.
     ConditionalWithSelfFieldThreading,
     /// Non-last block value with captured mutations.
-    BlockWithCapturedMutations,
+    BlockWithCapturedMutations(Vec<String>),
     /// Non-last `whileTrue:` / `whileFalse:` with local mutations.
     WhileWithLocalThreading,
     /// Non-last `on:do:`/`ensure:` with local mutations and/or a

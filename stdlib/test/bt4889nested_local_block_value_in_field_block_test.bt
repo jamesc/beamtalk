@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4889: a local-only `[x := x + 1] value` nested as a NON-LAST statement inside a
+// field-writing block value is lowered by the value-type open chain
+// (`generate_vt_block_value_open`), not the method-root producer. Pins that the nested
+// write to `x` survives, so the open chain cannot be deleted as unreachable.
+
+TestCase subclass: Bt4889NestedLocalBlockValueInFieldBlockTest
+  field: n = 0
+
+  nestedLocalBlockInFieldBlock =>
+    x := 0
+    [[x := x + 1] value. self.n := x] value
+    x + self.n
+
+  testNestedLocalWriteSurvivesAndFeedsTheFieldWrite =>
+    self assert: self nestedLocalBlockInFieldBlock equals: 2

@@ -17,7 +17,7 @@ use super::super::threaded_ir::{
     FrameId, ThreadedStmt, ThreadedValue, TokenId, ValueRef, VersionPrefix,
 };
 use super::super::threaded_rebind::{RebindLayout, RebindNaming};
-use super::super::{CodeGenContext, CodeGenError, CoreErlangGenerator, NlrBoundary, Result};
+use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, concat, join, leaf};
 use beamtalk_core::ast::{
@@ -133,7 +133,7 @@ impl CoreErlangGenerator {
                 }
                 _ => false,
             },
-            VtBodyExprKind::BlockWithCapturedMutations => {
+            VtBodyExprKind::BlockWithCapturedMutations(_) => {
                 self.is_vt_field_writing_block_value(stmt)
             }
             // BT-3821: a conditional whose arms write a field is a producer
@@ -156,7 +156,7 @@ impl CoreErlangGenerator {
     /// statements after the send read. The block's value is its last
     /// expression. Parameters are bound to the arguments in a scope of their
     /// own; a captured outer local the block writes stays rebound after it,
-    /// as the retired open-chain lowering did.
+    /// as in [`Self::generate_vt_block_value_open`].
     pub(in crate::core_erlang) fn vt_inline_block_value_producer(
         &mut self,
         expr: &Expression,
@@ -289,7 +289,7 @@ impl CoreErlangGenerator {
             other => {
                 matches!(
                     self.classify_vt_body_expr(other),
-                    VtBodyExprKind::Pure | VtBodyExprKind::BlockWithCapturedMutations
+                    VtBodyExprKind::Pure | VtBodyExprKind::BlockWithCapturedMutations(_)
                 ) && self.subexpr_has_field_write_producer(other)
             }
         }
@@ -355,8 +355,8 @@ impl CoreErlangGenerator {
         if self.is_exception_construct_with_vt_local_threading(expr) {
             return VtBodyExprKind::ExceptionConstructWithThreading;
         }
-        if Self::inline_block_captured_mutations(expr).is_some() {
-            return VtBodyExprKind::BlockWithCapturedMutations;
+        if let Some(mutations) = Self::inline_block_captured_mutations(expr) {
+            return VtBodyExprKind::BlockWithCapturedMutations(mutations);
         }
         VtBodyExprKind::Pure
     }
@@ -817,19 +817,16 @@ impl CoreErlangGenerator {
                     body_parts.push(doc);
                 }
             }
-            // BT-4889: a non-last `[..] value` with captured mutations is lowered by
-            // `lower_root_statement_with_producer` (the conditional producer for a
-            // block that writes only locals, `vt_inline_block_value_producer` for one
-            // that writes a field). The former open-chain arm was never hit, so reaching
-            // here is a loud internal error, not a silently dropped write.
-            VtBodyExprKind::BlockWithCapturedMutations if !is_last => {
-                return Err(CodeGenError::Internal(
-                    "BT-4889: non-last block value with captured mutations escaped the \
-                     local-threading producer"
-                        .to_string(),
-                ));
+            VtBodyExprKind::BlockWithCapturedMutations(mutations) => {
+                // Non-last block value with captured mutations.
+                if is_last {
+                    self.emit_vt_last_expr(expr, index, body_parts)?;
+                } else {
+                    let doc = self.generate_vt_block_value_open(expr, mutations)?;
+                    body_parts.push(doc);
+                }
             }
-            VtBodyExprKind::Pure | VtBodyExprKind::BlockWithCapturedMutations => {
+            VtBodyExprKind::Pure => {
                 if is_last {
                     self.emit_vt_last_expr(expr, index, body_parts)?;
                 } else {
@@ -1112,6 +1109,100 @@ impl CoreErlangGenerator {
             expr_doc,
             " in\n",
         ])
+    }
+
+    /// Generate an open let-chain for a non-last `[block_withmutations] value`
+    /// in `ValueType` context. Each assignment in the block body becomes a top-level
+    /// `let Var = val in\n` so the mutation is visible to subsequent expressions.
+    fn generate_vt_block_value_open(
+        &mut self,
+        expr: &Expression,
+        mutations: &[String],
+    ) -> Result<Document<'static>> {
+        let (block, arguments) = if let Expression::MessageSend {
+            receiver,
+            arguments,
+            ..
+        } = expr
+        {
+            if let Expression::Block(block) = receiver.as_ref() {
+                (block, arguments.as_slice())
+            } else {
+                // Fallback: sequence as side effect
+                let tmp_var = self.fresh_temp_var("seq");
+                let doc = self.expression_doc(expr)?;
+                return Ok(docvec!["    let ", leaf::var(tmp_var), " = ", doc, " in\n",]);
+            }
+        } else {
+            let tmp_var = self.fresh_temp_var("seq");
+            let doc = self.expression_doc(expr)?;
+            return Ok(docvec!["    let ", leaf::var(tmp_var), " = ", doc, " in\n",]);
+        };
+
+        let mut parts: Vec<Document<'static>> = Vec::new();
+
+        // Use a nested scope so block parameters and block-local variables
+        // don't leak into the method scope. Only captured mutations are
+        // re-bound in the outer scope after the block finishes.
+        self.push_scope();
+
+        // Bind block parameters to arguments (for value: variants)
+        for (i, param) in block.parameters.iter().enumerate() {
+            if i < arguments.len() {
+                let arg_var = self.fresh_temp_var(&param.name);
+                let arg_doc = self.expression_doc(&arguments[i])?;
+                parts.push(docvec![
+                    "    let ",
+                    leaf::var(arg_var.clone()),
+                    " = ",
+                    arg_doc,
+                    " in\n",
+                ]);
+                self.bind_var(&param.name, &arg_var);
+            }
+        }
+
+        // Emit block body as open let-chains.
+        // Track which variables are captured mutations so we can re-bind them
+        // in the outer scope after popping the parameter scope.
+        let mut rebound_vars: Vec<(String, String)> = Vec::new();
+
+        let body = super::super::util::collect_body_exprs(&block.body);
+
+        for body_expr in &body {
+            if Self::is_local_var_assignment(body_expr) {
+                if let Expression::Assignment { target, value, .. } = body_expr
+                    && let Expression::Identifier(id) = target.as_ref()
+                {
+                    let core_var = self.resolve_local_core_var(&id.name);
+                    let val_doc = self.expression_doc(value)?;
+                    parts.push(docvec![
+                        "    let ",
+                        leaf::var(core_var.clone()),
+                        " = ",
+                        val_doc,
+                        " in\n",
+                    ]);
+                    self.bind_var(&id.name, &core_var);
+                    // Track for re-binding in outer scope
+                    if mutations.iter().any(|m| m == id.name.as_str()) {
+                        rebound_vars.push((id.name.to_string(), core_var));
+                    }
+                }
+            } else {
+                let tmp = self.fresh_temp_var("seq");
+                let doc = self.expression_doc(body_expr)?;
+                parts.push(docvec!["    let ", leaf::var(tmp), " = ", doc, " in\n",]);
+            }
+        }
+
+        // Pop the block scope, then re-bind only captured mutations in the outer scope
+        self.pop_scope();
+        for (name, core_var) in &rebound_vars {
+            self.bind_var(name, core_var);
+        }
+
+        Ok(Document::Vec(parts))
     }
 
     /// Returns `true` if `expr` is a `do:` message send with a literal
