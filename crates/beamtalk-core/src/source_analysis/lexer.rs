@@ -3238,4 +3238,59 @@ mod tests {
             }
         }
     }
+
+    /// BT-4927: the receiver *token* that ends a line decides whether
+    /// completion sees a negative literal (`-5`) or a binary send (`a - 5`).
+    /// The lexer's rule is purely lexical: a `-` directly followed by a digit
+    /// is part of the number token whatever precedes it; a spaced `- 5` is the
+    /// binary selector. `completion_negative_literal_context_corpus.json`
+    /// pins `beamtalk_repl_editor_context:receiver_literal_class/1` on the last
+    /// whitespace-separated token of each source to the class of the lexer's
+    /// last token. The Erlang side is
+    /// `beamtalk_repl_editor_context_tests:negative_literal_context_matches_shared_corpus_test/0`.
+    #[test]
+    fn completion_negative_literal_context_matches_shared_corpus() {
+        for case in &read_corpus("completion_negative_literal_context_corpus.json") {
+            let source = case["source"].as_str().expect("source is a string");
+            let why = case["why"].as_str().unwrap_or("");
+            let tokens = corpus_tokens(source);
+            let categories: Vec<&str> = tokens.iter().map(|(c, _)| *c).collect();
+            let expected_cats: Vec<&str> = case["tokens"]
+                .as_array()
+                .expect("tokens is an array")
+                .iter()
+                .map(|v| v.as_str().expect("category is a string"))
+                .collect();
+            assert_eq!(
+                categories, expected_cats,
+                "token categories for {source:?} ({why})"
+            );
+
+            let (last_cat, last_text) = tokens.last().expect("source lexes to a token");
+            let lexer_class = (*last_cat == "integer").then_some("Integer");
+            if case.get("divergence").is_some() {
+                assert_eq!(
+                    lexer_class,
+                    case["lexer_class"].as_str(),
+                    "lexer class for {source:?} ({why})"
+                );
+                assert_ne!(
+                    case["class"].as_str(),
+                    lexer_class,
+                    "a divergence note on {source:?} must actually differ ({why})"
+                );
+            } else {
+                assert_eq!(
+                    lexer_class,
+                    case["class"].as_str(),
+                    "lexer class for {source:?} ({why})"
+                );
+                assert_eq!(
+                    Some(last_text.as_str()),
+                    case["receiver_token"].as_str(),
+                    "receiver token for {source:?} ({why})"
+                );
+            }
+        }
+    }
 }

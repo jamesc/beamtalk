@@ -558,6 +558,9 @@ Binary selector characters: + - * / < > = ~ % & ? , \
 These are the same characters recognised by the Beamtalk lexer.
 """.
 -spec is_binary_selector_token(binary()) -> boolean().
+is_binary_selector_token(<<$-, D, _/binary>>) when D >= $0, D =< $9 ->
+    %% `-5` is one Integer token in the Rust lexer, never a binary selector.
+    false;
 is_binary_selector_token(<<H, _/binary>>) ->
     lists:member(H, "+-*/<>=~%&?,\\");
 is_binary_selector_token(<<>>) ->
@@ -675,24 +678,55 @@ parse_binary_hops([Token | Rest]) ->
 -doc """
 The class a literal receiver token completes against, or `undefined`.
 
-A token that starts with a digit is an `Integer` only when the whole token is
-digits (guards against `3.14`, `1e10` and `16rFF` being misread); a token that
-starts with `"` is a `String`; anything else is not a literal this rule
-classifies. Deliberately narrower than the Rust lexer — completion runs on
-half-typed lines — and pinned to it by the shared corpus
-`test/fixtures/completion_receiver_literal_corpus.json`, whose `divergence`
-notes record every case where the two differ on purpose.
+A token is an `Integer` when it is one Integer token of the Rust lexer
+(`lex_number` / `lex_number_with_prefix`): digits, optionally `r` and
+alphanumerics (radix `16rFF`, `2r1010`), or a `-` directly followed by digits
+(`-5`). The sign is part of the token whatever precedes it, which is why only
+a `-` glued to its digit counts here: `a - 5 ab` ends in the token `5`, a
+binary send, and `a -5 ab` in the literal `-5`. A negative radix has no
+lexer form (`-16` then `rFF`), and floats and exponent forms (`3.14`, `-1.5`,
+`1e10`, `1e-3`) are not classified. A token that starts with `"` is a
+`String`; anything else is not a literal this rule classifies. Narrower than
+the Rust lexer where completion runs on half-typed lines, and pinned to it by
+the shared corpora `test/fixtures/completion_receiver_literal_corpus.json`
+and `test/fixtures/completion_negative_literal_context_corpus.json`, whose
+`divergence` notes record every case where the two differ on purpose.
 """.
 -spec receiver_literal_class(binary()) -> 'Integer' | 'String' | undefined.
-receiver_literal_class(<<H, _/binary>> = Receiver) when H >= $0, H =< $9 ->
-    case lists:all(fun(C) -> C >= $0 andalso C =< $9 end, binary_to_list(Receiver)) of
+receiver_literal_class(<<$", _/binary>>) ->
+    'String';
+receiver_literal_class(<<$-, Digits/binary>>) ->
+    case Digits =/= <<>> andalso all_digits(Digits) of
         true -> 'Integer';
         false -> undefined
     end;
-receiver_literal_class(<<$", _/binary>>) ->
-    'String';
+receiver_literal_class(<<H, _/binary>> = Receiver) when H >= $0, H =< $9 ->
+    {_Digits, Rest} = lists:splitwith(fun is_digit/1, binary_to_list(Receiver)),
+    case Rest of
+        [] -> 'Integer';
+        [$r | Radix] -> radix_class(Radix);
+        _ -> undefined
+    end;
 receiver_literal_class(_) ->
     undefined.
+
+-spec radix_class(string()) -> 'Integer' | undefined.
+radix_class(Radix) ->
+    case lists:all(fun is_ascii_alphanumeric/1, Radix) of
+        true -> 'Integer';
+        false -> undefined
+    end.
+
+-spec all_digits(binary()) -> boolean().
+all_digits(Bin) ->
+    lists:all(fun is_digit/1, binary_to_list(Bin)).
+
+-spec is_digit(char()) -> boolean().
+is_digit(C) -> C >= $0 andalso C =< $9.
+
+-spec is_ascii_alphanumeric(char()) -> boolean().
+is_ascii_alphanumeric(C) ->
+    is_digit(C) orelse (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z).
 
 -doc """
 Walk an instance-side send chain containing mixed unary and binary hops.
