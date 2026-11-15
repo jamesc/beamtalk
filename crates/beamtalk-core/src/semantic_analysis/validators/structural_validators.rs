@@ -585,6 +585,7 @@ mod tests {
         MethodDefinition, MethodKind, TypeParamDecl,
     };
     use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+    use crate::semantic_analysis::test_helpers::parse_and_build;
     use crate::source_analysis::{Severity, Span};
 
     fn test_span() -> Span {
@@ -729,14 +730,6 @@ mod tests {
     // `analyse_full` — `check_unresolved_type_aliases` has no internal
     // cross-file gate of its own (see its doc: callers are responsible for
     // gating on `has_cross_file_classes`, exactly like `check_unresolved_classes`).
-
-    fn parse_and_build(source: &str) -> (Module, ClassHierarchy) {
-        let tokens = crate::source_analysis::lex_with_eof(source);
-        let (module, parse_diags) = crate::source_analysis::parse(tokens);
-        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-        let (hierarchy, _) = ClassHierarchy::build(&module);
-        (module, hierarchy.unwrap())
-    }
 
     fn registered_aliases(
         module: &Module,

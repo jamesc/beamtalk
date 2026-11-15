@@ -19,7 +19,7 @@
 
 // ── Membership diagnostics name the alias (ADR 0108 Error examples) ────────
 
-use super::common::analyse_diags;
+use super::common::{analyse_diags, parse_ok};
 #[test]
 fn singleton_comparison_against_alias_names_alias_and_suggests_correction() {
     // ADR 0108's own example: `#premanent` vs `#permanent`. The receiver's
@@ -247,9 +247,7 @@ Object subclass: RestartStrategy
 Object subclass: Widget
   restart: policy :: RestartStrategy => policy
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let (hierarchy, hierarchy_diags) = crate::semantic_analysis::ClassHierarchy::build(&module);
     let hierarchy = hierarchy.expect("hierarchy should build");
     assert!(

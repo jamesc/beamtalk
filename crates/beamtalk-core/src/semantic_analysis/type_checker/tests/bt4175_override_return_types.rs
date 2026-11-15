@@ -12,9 +12,7 @@ use super::common::*;
 use crate::source_analysis::Severity;
 
 fn analyse_type_diags(source: &str) -> Vec<Diagnostic> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     crate::semantic_analysis::analyse(&module)
         .diagnostics
         .into_iter()
@@ -132,9 +130,7 @@ Base subclass: Derived
   @expect type
   value -> String => "x"
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let mut diags = crate::semantic_analysis::analyse(&module).diagnostics;
     assert_eq!(
         override_return_warnings(&diags).len(),

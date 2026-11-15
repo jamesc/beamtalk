@@ -14,13 +14,11 @@
 //! non-stdlib compile (mirroring `with_builtins`' always-on stdlib
 //! classes and `stdlib_protocols`' last-tier `uses:` fallback).
 
-use super::common::analyse_diags;
+use super::common::{analyse_diags, parse_ok};
 use crate::semantic_analysis::{AnalysisContext, analyse_full};
 
 fn analyse_diagnostics_as_stdlib(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let ctx = AnalysisContext {
         current_package: Some(crate::semantic_analysis::stdlib_protocols::STDLIB_PACKAGE),
         ..AnalysisContext::default()

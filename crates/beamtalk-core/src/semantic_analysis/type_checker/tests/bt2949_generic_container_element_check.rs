@@ -211,20 +211,6 @@ fn list_concat_source(arg_literal: &str) -> String {
     )
 }
 
-fn run_with_protocols(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let mut hierarchy = ClassHierarchy::with_builtins();
-    let user_hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    hierarchy.merge(&user_hierarchy);
-
-    let mut checker = check_with_protocols(
-        &module,
-        &hierarchy,
-        &crate::semantic_analysis::protocol_registry::ProtocolRegistry::new(),
-    );
-    checker.take_diagnostics()
-}
-
 #[test]
 fn list_concat_incompatible_element_warns() {
     let diags = run_with_protocols(&list_concat_source("#(\"a\", \"b\")"));

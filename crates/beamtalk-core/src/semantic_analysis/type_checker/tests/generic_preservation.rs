@@ -32,12 +32,7 @@ typed Object subclass: Driver
     r :: Result(List(String), Error) := Box wrap: #()
     r
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes
@@ -50,12 +45,12 @@ typed Object subclass: Driver
         .find(|m| m.selector.name() == "probe")
         .expect("probe method");
     // Last expression is `r` — its type should be Result(List(String), Error).
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("self", InferredType::known("Driver"));
-    let _ = checker.infer_expr(&probe.body[0].expression, &hierarchy, &mut env, false);
+    let mut session = InferSession::new();
+
+    session.env.set_local("self", InferredType::known("Driver"));
+    let _ = session.infer(&probe.body[0].expression, &hierarchy);
     let last_stmt = probe.body.last().expect("probe body non-empty");
-    let r_ty = checker.infer_expr(&last_stmt.expression, &hierarchy, &mut env, false);
+    let r_ty = session.infer(&last_stmt.expression, &hierarchy);
     assert_full_result_list_string_error(&r_ty);
 }
 
@@ -74,12 +69,7 @@ typed Object subclass: Driver
     r := Box wrap: #()
     r
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes
@@ -91,15 +81,13 @@ typed Object subclass: Driver
         .iter()
         .find(|m| m.selector.name() == "probe")
         .expect("probe method");
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("self", InferredType::known("Driver"));
-    let _ = checker.infer_expr(&probe.body[0].expression, &hierarchy, &mut env, false);
-    let r_ty = checker.infer_expr(
+    let mut session = InferSession::new();
+
+    session.env.set_local("self", InferredType::known("Driver"));
+    let _ = session.infer(&probe.body[0].expression, &hierarchy);
+    let r_ty = session.infer(
         &probe.body.last().expect("probe body non-empty").expression,
         &hierarchy,
-        &mut env,
-        false,
     );
     assert_full_result_list_string_error(&r_ty);
 }
@@ -119,12 +107,7 @@ typed Object subclass: Driver
     files := r unwrap
     files frobnicate
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
     let checker = check(&module, &hierarchy);
 
     // `files` must be `List(String)`, not Dynamic — `List` does not
@@ -242,12 +225,7 @@ typed Object subclass: Driver
     events := store readEvents
     events
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes
@@ -260,19 +238,17 @@ typed Object subclass: Driver
         .find(|m| m.selector.name() == "probe:")
         .expect("probe: method");
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("self", InferredType::known("Driver"));
-    env.set_local("store", InferredType::known("Store"));
-    // Walk the body so each binding is recorded in env.
+    let mut session = InferSession::new();
+
+    session.env.set_local("self", InferredType::known("Driver"));
+    session.env.set_local("store", InferredType::known("Store"));
+    // Walk the body so each binding is recorded in the env.
     for stmt in &probe.body {
-        let _ = checker.infer_expr(&stmt.expression, &hierarchy, &mut env, false);
+        let _ = session.infer(&stmt.expression, &hierarchy);
     }
-    let events_ty = checker.infer_expr(
+    let events_ty = session.infer(
         &probe.body.last().expect("probe body non-empty").expression,
         &hierarchy,
-        &mut env,
-        false,
     );
     let InferredType::Known {
         class_name,
@@ -317,12 +293,7 @@ typed Object subclass: Driver
     first := events first
     first xyzzyNonsense
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let checker = check(&module, &hierarchy);
 
@@ -359,12 +330,7 @@ typed Object subclass: Driver
     kids := Sup children
     kids
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes
@@ -377,17 +343,15 @@ typed Object subclass: Driver
         .find(|m| m.selector.name() == "probe")
         .expect("probe method");
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("self", InferredType::known("Driver"));
+    let mut session = InferSession::new();
+
+    session.env.set_local("self", InferredType::known("Driver"));
     for stmt in &probe.body {
-        let _ = checker.infer_expr(&stmt.expression, &hierarchy, &mut env, false);
+        let _ = session.infer(&stmt.expression, &hierarchy);
     }
-    let kids_ty = checker.infer_expr(
+    let kids_ty = session.infer(
         &probe.body.last().expect("probe body non-empty").expression,
         &hierarchy,
-        &mut env,
-        false,
     );
     let InferredType::Known {
         class_name,
@@ -422,12 +386,7 @@ typed Object subclass: Driver
     m := store readMap
     m
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes
@@ -440,18 +399,16 @@ typed Object subclass: Driver
         .find(|m| m.selector.name() == "probe:")
         .expect("probe: method");
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("self", InferredType::known("Driver"));
-    env.set_local("store", InferredType::known("Store"));
+    let mut session = InferSession::new();
+
+    session.env.set_local("self", InferredType::known("Driver"));
+    session.env.set_local("store", InferredType::known("Store"));
     for stmt in &probe.body {
-        let _ = checker.infer_expr(&stmt.expression, &hierarchy, &mut env, false);
+        let _ = session.infer(&stmt.expression, &hierarchy);
     }
-    let m_ty = checker.infer_expr(
+    let m_ty = session.infer(
         &probe.body.last().expect("probe body non-empty").expression,
         &hierarchy,
-        &mut env,
-        false,
     );
     let InferredType::Known {
         class_name,
@@ -486,12 +443,7 @@ typed Object subclass: Driver
     s := store readSet
     s
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes
@@ -504,18 +456,16 @@ typed Object subclass: Driver
         .find(|m| m.selector.name() == "probe:")
         .expect("probe: method");
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("self", InferredType::known("Driver"));
-    env.set_local("store", InferredType::known("Store"));
+    let mut session = InferSession::new();
+
+    session.env.set_local("self", InferredType::known("Driver"));
+    session.env.set_local("store", InferredType::known("Store"));
     for stmt in &probe.body {
-        let _ = checker.infer_expr(&stmt.expression, &hierarchy, &mut env, false);
+        let _ = session.infer(&stmt.expression, &hierarchy);
     }
-    let s_ty = checker.infer_expr(
+    let s_ty = session.infer(
         &probe.body.last().expect("probe body non-empty").expression,
         &hierarchy,
-        &mut env,
-        false,
     );
     let InferredType::Known {
         class_name,

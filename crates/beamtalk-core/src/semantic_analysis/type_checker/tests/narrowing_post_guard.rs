@@ -23,9 +23,7 @@ typed Object subclass: Caller
     ms isNil ifTrue: [self error: "missing"]
     Receiver process: ms
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -54,9 +52,7 @@ typed Actor subclass: Engine
     self.eventStore isNil ifTrue: [^nil]
     Store process: self.eventStore
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -84,9 +80,7 @@ typed Actor subclass: Engine
     self.eventStore isNil ifTrue: [self error: "no event store"]
     Store process: self.eventStore
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -114,9 +108,7 @@ typed Object subclass: Caller
     ms isNil ifTrue: [42]
     Receiver process: ms
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     // The negative case must produce the specific argument-mismatch
@@ -174,9 +166,7 @@ typed Actor subclass: Engine
     self.eventStore isNil ifTrue: [^nil]
     Store process: eventStore
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -208,9 +198,7 @@ typed Object subclass: Caller
     ]
     Receiver process: ms
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -240,9 +228,7 @@ typed Object subclass: Caller
       ifFalse: [ms := nil]
     Receiver process: ms
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     // Because the ifFalse: block reassigns `ms` to nil, we must still warn
@@ -298,9 +284,7 @@ typed Object subclass: Caller
     (x isKindOf: Integer) ifFalse: [^nil]
     Receiver process: x
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -335,9 +319,7 @@ typed Object subclass: Caller
     items :: MyList := coll
     items asString
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -368,9 +350,7 @@ typed Object subclass: Caller
     (x isKindOf: Integer) ifTrue: [self error: "was integer"]
     Receiver process: x
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -403,9 +383,7 @@ typed Object subclass: Caller
     (x isKindOf: Integer) ifTrue: [self error: "was integer"] ifFalse: [Transcript show: "ok"]
     Receiver process: x
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -434,9 +412,7 @@ typed Object subclass: Caller
   run: x :: Integer | String =>
     (x isKindOf: Integer) ifTrue: [Receiver process: x]
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -464,9 +440,7 @@ typed Object subclass: Caller
     (x isKindOf: Integer) ifFalse: [42]
     Receiver process: x
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let mismatch_warnings: Vec<_> = result
@@ -505,9 +479,7 @@ typed Object subclass: Caller
     (x class =:= Integer) ifTrue: [self error: "was exactly integer"]
     Receiver process: x
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let mismatch_warnings: Vec<_> = result
@@ -546,9 +518,7 @@ typed Object subclass: Caller
     x isNil ifFalse: [^nil]
     Receiver process: x
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -578,9 +548,7 @@ typed Object subclass: Caller
     pid == #undefined ifTrue: [^false]
     Receiver process: pid
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -608,9 +576,7 @@ typed Object subclass: Caller
     pid =:= #undefined ifTrue: [^false]
     Receiver process: pid
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -638,9 +604,7 @@ typed Object subclass: Caller
     pid /= #undefined ifFalse: [^false]
     Receiver process: pid
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -670,9 +634,7 @@ typed Object subclass: Caller
     Receiver process: d
     true
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -701,9 +663,7 @@ typed Object subclass: Caller
     d == #east ifTrue: [^nil]
     Receiver process: d
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -759,9 +719,7 @@ typed Object subclass: Caller
     (x respondsTo: #customMethod) ifFalse: [^nil]
     x customMethod
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let dnu_warnings: Vec<_> = result
@@ -792,9 +750,7 @@ typed Object subclass: Caller
     (x respondsTo: #asString) ifFalse: [^""]
     x asString
 "#;
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -822,9 +778,7 @@ typed Object subclass: Caller
     (x respondsTo: #customMethod) ifTrue: [^nil]
     x customMethod
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let dnu_warnings: Vec<_> = result
