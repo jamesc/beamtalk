@@ -369,7 +369,11 @@ fn scan_liveview(text: &str) -> Vec<Sent> {
     }
 
     if let Some(at) = text.find("{op, params} =") {
-        let end = (at + 400).min(text.len());
+        // The `case` that picks the op ends where the computed-op call begins.
+        let end = at
+            + text[at..]
+                .find("dispatch_simple(op, params)")
+                .expect("`{op, params} =` is followed by `dispatch_simple(op, params)`");
         let mut rest = &text[at..end];
         while let Some(p) = rest.find("{\"") {
             let after = &rest[p + 2..];
