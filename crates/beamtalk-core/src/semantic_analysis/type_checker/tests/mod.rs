@@ -78,6 +78,7 @@ mod bt4713_while_condition_narrowing;
 mod bt4714_boolean_local_alias_narrowing;
 mod bt4715_field_narrowing_self_send;
 mod bt4731_map_literal_shapes;
+mod bt4862_nested_protocol_conformance;
 mod cast_and_sync_send;
 mod destructure_and_extension;
 mod dynamic_and_blocks;

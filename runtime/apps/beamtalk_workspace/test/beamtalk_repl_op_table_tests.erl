@@ -16,6 +16,8 @@ Covers:
   the router refuses are exactly the WebSocket-transport ones;
 * `describe` advertises every op in the table (including the save ops);
 * the capability classification of REPL ops comes from the table;
+* every param a handler reads (`maps:get(<<"x">>, Params, …)` and friends) is
+  declared in that op's table row (BT-4865);
 * the table matches the shared fixture `fixtures/repl_op_table.json`, which the
   Rust `RequestBuilder` conformance test, `beamtalk-surface-drift` and the
   `docs/repl-protocol.md` check read. To refresh the fixture after editing the
@@ -139,3 +141,117 @@ table_matches_shared_fixture_test() ->
                 >>}
             )
     end.
+
+%%% ---------------------------------------------------------------------------
+%%% Handlers read only declared params (BT-4865)
+%%% ---------------------------------------------------------------------------
+
+%% Envelope fields every message carries; never op params.
+-define(ENVELOPE, [<<"op">>, <<"id">>, <<"session">>]).
+
+handlers_read_only_declared_params_test() ->
+    Problems = lists:append([
+        undeclared_reads(Handler)
+     || Handler <- lists:usort([H || #{handler := H} <- beamtalk_repl_op_table:ops(), H =/= ?WS])
+    ]),
+    ?assertEqual([], Problems).
+
+%% The scanner itself must see reads, or the test above passes vacuously.
+param_scanner_sees_known_reads_test() ->
+    ?assertEqual(
+        [<<"before">>, <<"class">>, <<"code">>, <<"side">>, <<"suffix">>],
+        lists:sort(op_reads(beamtalk_repl_ops_dev, <<"hover">>))
+    ),
+    ?assertEqual([<<"actor">>], op_reads(beamtalk_repl_ops_actors, <<"kill">>)).
+
+undeclared_reads(Handler) ->
+    [
+        {Handler, Op, undeclared_param, Key}
+     || #{op := Op, handler := H, params := P, optional := O} <- beamtalk_repl_op_table:ops(),
+        H =:= Handler,
+        Key <- op_reads(Handler, Op),
+        not lists:member(Key, P ++ O ++ ?ENVELOPE)
+    ].
+
+%% Literal binary keys that `Handler`'s clauses for `Op` read from the request
+%% params, following local calls transitively.
+op_reads(Handler, Op) ->
+    Forms = abstract_code(Handler),
+    Funs = #{{Name, Arity} => Clauses || {function, _, Name, Arity, Clauses} <- Forms},
+    Roots = [
+        C
+     || {function, _, handle_term, 4, Clauses} <- Forms,
+        {clause, _, [{bin, _, [{bin_element, _, {string, _, S}, _, _}]} | _], _, _} = C <- Clauses,
+        list_to_binary(S) =:= Op
+    ],
+    Reachable = reachable(Roots, Funs),
+    lists:usort(lists:append([param_keys(C) || C <- Roots ++ Reachable])).
+
+abstract_code(Module) ->
+    {module, Module} = code:ensure_loaded(Module),
+    {Module, Beam, _} = code:get_object_code(Module),
+    {ok, {Module, [{abstract_code, {raw_abstract_v1, Forms}}]}} =
+        beam_lib:chunks(Beam, [abstract_code]),
+    Forms.
+
+%% Clauses of the local functions reachable from `Roots`.
+reachable(Roots, Funs) ->
+    reachable(lists:append([local_calls(C) || C <- Roots]), Funs, #{}, []).
+
+reachable([], _Funs, _Seen, Acc) ->
+    Acc;
+reachable([FA | Rest], Funs, Seen, Acc) ->
+    case {Seen, Funs} of
+        {#{FA := _}, _} ->
+            reachable(Rest, Funs, Seen, Acc);
+        {_, #{FA := Clauses}} ->
+            reachable(
+                lists:append([local_calls(C) || C <- Clauses]) ++ Rest,
+                Funs,
+                Seen#{FA => true},
+                Clauses ++ Acc
+            );
+        _ ->
+            reachable(Rest, Funs, Seen, Acc)
+    end.
+
+local_calls(Form) ->
+    collect(
+        fun
+            ({call, _, {atom, _, Name}, Args}) -> [{Name, length(Args)}];
+            ({'fun', _, {function, Name, Arity}}) -> [{Name, Arity}];
+            (_) -> []
+        end,
+        Form
+    ).
+
+%% Keys read as `maps:get/find/is_key/take(<<"k">>, Params…)` or through the
+%% `binary_param(<<"k">>, Params)` helper; the map must be a variable named
+%% `Params` so rows and results being read are not mistaken for requests.
+param_keys(Form) ->
+    collect(
+        fun
+            (
+                {call, _, {remote, _, {atom, _, maps}, {atom, _, F}}, [K, {var, _, 'Params'} | _]}
+            ) when
+                F =:= get; F =:= find; F =:= is_key; F =:= take
+            ->
+                literal_key(K);
+            ({call, _, {atom, _, binary_param}, [K, {var, _, 'Params'}]}) ->
+                literal_key(K);
+            (_) ->
+                []
+        end,
+        Form
+    ).
+
+literal_key({bin, _, [{bin_element, _, {string, _, S}, _, _}]}) -> [list_to_binary(S)];
+literal_key(_) -> [].
+
+%% Pre-order fold of `Fun` over every abstract-format node in `Term`.
+collect(Fun, Term) when is_tuple(Term) ->
+    Fun(Term) ++ lists:append([collect(Fun, X) || X <- tuple_to_list(Term)]);
+collect(Fun, Term) when is_list(Term) ->
+    lists:append([collect(Fun, X) || X <- Term]);
+collect(_Fun, _Term) ->
+    [].

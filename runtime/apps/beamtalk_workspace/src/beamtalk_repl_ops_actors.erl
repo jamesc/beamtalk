@@ -100,7 +100,7 @@ handle_term(<<"inspect">>, Params, _Msg, _SessionPid) ->
             end
     end;
 handle_term(<<"kill">>, Params, _Msg, _SessionPid) ->
-    PidStr = binary_to_list(maps:get(<<"actor">>, Params, maps:get(<<"pid">>, Params, <<>>))),
+    PidStr = binary_to_list(maps:get(<<"actor">>, Params, <<>>)),
     case validate_actor_pid(PidStr) of
         {error, Reason} ->
             {error, invalid_pid_error(Reason, PidStr)};

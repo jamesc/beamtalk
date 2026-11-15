@@ -792,10 +792,10 @@ check-generated-builtins: build
         runtime/apps/beamtalk_runtime/include/beamtalk_supervisor_config.hrl \
         runtime/apps/beamtalk_stdlib/src/beamtalk_stdlib.app.src \
         > /dev/null 2>&1; then
-        echo "❌ generated builtin-class / class-var-key artifacts are out of date — run 'just build-stdlib' and commit"
+        echo "❌ generated build-stdlib artifacts (builtins, class-var keys, supervisor config, stdlib app.src) are out of date — run 'just build-stdlib' and commit"
         exit 1
     fi
-    echo "✅ generated builtin-class / class-var-key artifacts are up to date"
+    echo "✅ generated build-stdlib artifacts (builtins, class-var keys, supervisor config, stdlib app.src) are up to date"
 
 # Guard the BT-3362 crate split's build-time win: beamtalk-lsp and beamtalk-lint
 # analyze code but never generate it, so neither should depend on beamtalk-codegen

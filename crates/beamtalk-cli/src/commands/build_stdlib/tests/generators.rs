@@ -781,21 +781,13 @@ fn test_runtime_only_builtin_classes_are_not_generated_builtins() {
 /// The checked-in Erlang header must carry exactly the Rust runtime-only list.
 #[test]
 fn test_generated_hrl_runtime_only_list_matches_rust() {
-    use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
     let root = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let hrl = fs::read_to_string(
         root.join("runtime/apps/beamtalk_runtime/include/beamtalk_generated_builtins.hrl"),
     )
     .unwrap();
-    let expected = ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES
-        .iter()
-        .map(|n| format!("'{n}'"))
-        .collect::<Vec<_>>()
-        .join(", ");
     assert!(
-        hrl.contains(&format!(
-            "-define(BEAMTALK_RUNTIME_ONLY_BUILTIN_CLASSES, [{expected}])."
-        )),
+        hrl.contains(&runtime_only_builtins_define()),
         "run `just build-stdlib`; header out of date with ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES"
     );
 }

@@ -844,7 +844,7 @@ this table drifts from the fixture. To refresh it after editing the op table:
 | `run-entry` | `class`, `selector` | `args` | `always` | `beamtalk_ws_handler` |
 | `interrupt` | — | — | `always` | `beamtalk_repl_ops_actors` |
 | `complete` | `code` | `cursor` | `always` | `beamtalk_repl_ops_dev` |
-| `hover` | `code` | `before`, `suffix` | `always` | `beamtalk_repl_ops_dev` |
+| `hover` | `code` | `before`, `suffix`, `class`, `side` | `always` | `beamtalk_repl_ops_dev` |
 | `diagnostics` | `code` | `mode`, `source_path` | `compiler` | `beamtalk_repl_ops_dev` |
 | `show-codegen` | — | `code`, `class`, `selector` | `compiler` | `beamtalk_repl_ops_dev` |
 | `erlang-help` | `module` | `function` | `always` | `beamtalk_repl_ops_dev` |
