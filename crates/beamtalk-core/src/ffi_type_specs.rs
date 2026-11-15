@@ -26,6 +26,7 @@
 //! [`collect_project_dependency_ebin_dirs`] to resolve those directories from
 //! a project root; `beamtalk-cli` additionally wraps this via `BuildLayout`.
 
+use crate::build_layout::BuildLayout;
 use crate::semantic_analysis::type_checker::{
     NativeTypeRegistry, is_specs_line, is_specs_result_error, is_specs_result_ok, parse_specs_line,
 };
@@ -1379,13 +1380,6 @@ fn collect_beam_stems(ebin_dir: &std::path::Path, out: &mut std::collections::Ha
     }
 }
 
-/// The package's own compiled `native/` ebin, relative to the project root.
-///
-/// Single source of truth shared by [`collect_project_dependency_ebin_dirs`]
-/// (which builds the path) and [`is_own_native_ebin`] (which recognises it)
-/// so the two cannot drift apart (BT-4626).
-const NATIVE_EBIN_REL: &str = "_build/dev/native/ebin";
-
 /// Collect the ebin directories for a project's native and path dependencies.
 ///
 /// Scans the standard `_build/` layout for a project rooted at `project_root`:
@@ -1400,11 +1394,11 @@ const NATIVE_EBIN_REL: &str = "_build/dev/native/ebin";
 /// `beamtalk-cli` (via `BuildLayout`) and `beamtalk-lsp` call this function —
 /// it is the single source of truth for project-dependency ebin discovery.
 pub fn collect_project_dependency_ebin_dirs(project_root: &Utf8Path) -> Vec<Utf8PathBuf> {
-    let build_root = project_root.join("_build");
+    let layout = BuildLayout::new(project_root);
     let mut dirs = Vec::new();
 
     // Path dependencies: `_build/deps/*/ebin/`.
-    if let Ok(entries) = std::fs::read_dir(build_root.join("deps")) {
+    if let Ok(entries) = std::fs::read_dir(layout.deps_dir()) {
         for entry in entries.flatten() {
             let ebin = entry.path().join("ebin");
             if ebin.is_dir()
@@ -1416,18 +1410,13 @@ pub fn collect_project_dependency_ebin_dirs(project_root: &Utf8Path) -> Vec<Utf8
     }
 
     // The project's own native/ code, compiled to `_build/dev/native/ebin/`.
-    let native_ebin = project_root.join(NATIVE_EBIN_REL);
+    let native_ebin = layout.native_ebin_dir();
     if native_ebin.is_dir() {
         dirs.push(native_ebin);
     }
 
     // rebar3 hex/git deps: `_build/dev/native/default/lib/*/ebin/`.
-    let lib_dir = build_root
-        .join("dev")
-        .join("native")
-        .join("default")
-        .join("lib");
-    if let Ok(entries) = std::fs::read_dir(&lib_dir) {
+    if let Ok(entries) = std::fs::read_dir(layout.rebar_lib_dir()) {
         for entry in entries.flatten() {
             let path = entry.path();
             if !path.is_dir() {
@@ -1612,7 +1601,7 @@ pub fn collect_installed_erlang_modules() -> KnownErlangModules {
 /// result-coercion-free FFI calls (BT-4507).
 #[must_use]
 pub fn is_own_native_ebin(dir: &Utf8Path) -> bool {
-    dir.ends_with(NATIVE_EBIN_REL)
+    BuildLayout::is_native_ebin_dir(dir)
 }
 
 /// ADR 0075 Phase 1: Extract type specs from OTP and

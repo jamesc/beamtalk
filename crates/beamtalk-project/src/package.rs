@@ -16,6 +16,7 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
+use beamtalk_core::build_layout::{BUILD_DIR_NAME, DEPS_DIR_NAME};
 use beamtalk_core::file_walker::FileWalker;
 
 /// Canonicalize `path`, falling back to the original path on any I/O error.
@@ -170,7 +171,7 @@ pub fn dep_name_for_path(path: &Path) -> Option<String> {
         .collect();
     components
         .windows(2)
-        .position(|w| w == ["_build", "deps"])
+        .position(|w| w == [BUILD_DIR_NAME, DEPS_DIR_NAME])
         .and_then(|i| components.get(i + 2))
         .map(|name| (*name).to_owned())
 }

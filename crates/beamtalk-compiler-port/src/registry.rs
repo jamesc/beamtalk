@@ -111,7 +111,7 @@ pub(crate) fn load_native_type_registry_from(
         );
         return NativeTypeRegistry::new();
     };
-    let cache_dir = root.join("_build").join("type_cache");
+    let cache_dir = beamtalk_core::build_layout::BuildLayout::new(root).type_cache_dir();
     if let Some(registry) = beamtalk_core::ffi_type_specs::load_type_cache_registry(&cache_dir) {
         tracing::debug!(
             modules = registry.module_count(),
