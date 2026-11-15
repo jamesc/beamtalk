@@ -121,8 +121,12 @@ dashboard_xref(Prefix) ->
 -spec dashboard_source(binary()) -> binary().
 dashboard_source(Prefix) ->
     <<
-        "Object subclass: ", Prefix/binary, "Dashboard\n"
-        "  refresh: c :: ", Prefix/binary, "Counter -> Integer => (c size) + 1\n"
+        "Object subclass: ",
+        Prefix/binary,
+        "Dashboard\n"
+        "  refresh: c :: ",
+        Prefix/binary,
+        "Counter -> Integer => (c size) + 1\n"
     >>.
 
 -doc """
@@ -139,15 +143,21 @@ listview_xref(References) ->
 -spec listview_counter_source(binary()) -> binary().
 listview_counter_source(Prefix) ->
     <<
-        "Object subclass: ", Prefix/binary, "ListView\n"
-        "  render: c :: ", Prefix/binary, "Counter -> Integer => (c size) + 1\n"
+        "Object subclass: ",
+        Prefix/binary,
+        "ListView\n"
+        "  render: c :: ",
+        Prefix/binary,
+        "Counter -> Integer => (c size) + 1\n"
     >>.
 
 -doc "An unrelated same-selector site: `render:` takes a `List`.".
 -spec listview_list_source(binary()) -> binary().
 listview_list_source(Prefix) ->
     <<
-        "Object subclass: ", Prefix/binary, "ListView\n"
+        "Object subclass: ",
+        Prefix/binary,
+        "ListView\n"
         "  render: xs :: List -> Integer => (xs size) + 1\n"
     >>.
 
@@ -162,8 +172,12 @@ dashboard_name_accessor_xref(Prefix) ->
 -spec dashboard_name_accessor_source(binary()) -> binary().
 dashboard_name_accessor_source(Prefix) ->
     <<
-        "Object subclass: ", Prefix/binary, "Dashboard\n"
-        "  cleanup: c :: ", Prefix/binary, "Counter => c name\n"
+        "Object subclass: ",
+        Prefix/binary,
+        "Dashboard\n"
+        "  cleanup: c :: ",
+        Prefix/binary,
+        "Counter => c name\n"
     >>.
 
 %%====================================================================

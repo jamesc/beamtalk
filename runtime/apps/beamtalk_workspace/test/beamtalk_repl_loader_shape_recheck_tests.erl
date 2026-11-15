@@ -35,7 +35,11 @@ shape_loader_teardown(_) ->
 fixture_opts() ->
     #{
         workspace_id => <<"shape_loader_test_ws">>,
-        restart => [beamtalk_workspace_shape_store, beamtalk_workspace_shape_recheck_worker, beamtalk_workspace_findings_store]
+        restart => [
+            beamtalk_workspace_shape_store,
+            beamtalk_workspace_shape_recheck_worker,
+            beamtalk_workspace_findings_store
+        ]
     }.
 
 %%====================================================================
@@ -130,10 +134,12 @@ removing_a_state_slot_flags_the_real_dependent_test_() ->
                     %% generation 2, since that is the reload trigger_shape/2
                     %% must find it for.
                     ok = beamtalk_xref:register_class(
-                        'LoaderShapeDashboard', beamtalk_test_recheck_fixtures:dashboard_name_accessor_xref(?PREFIX)
+                        'LoaderShapeDashboard',
+                        beamtalk_test_recheck_fixtures:dashboard_name_accessor_xref(?PREFIX)
                     ),
                     ok = beamtalk_workspace_meta:set_class_source(
-                        <<"LoaderShapeDashboard">>, beamtalk_test_recheck_fixtures:dashboard_name_accessor_source(?PREFIX)
+                        <<"LoaderShapeDashboard">>,
+                        beamtalk_test_recheck_fixtures:dashboard_name_accessor_source(?PREFIX)
                     ),
 
                     %% Generation 2: `name` removed. The shape store already

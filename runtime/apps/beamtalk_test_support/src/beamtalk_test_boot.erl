@@ -27,7 +27,15 @@ process is already registered, and `beamtalk_stdlib:init/0` is itself
 idempotent (a normal stdlib load skips a module whose on_load already ran).
 """.
 
--export([boot_real_stdlib/1, wait_for_class/2, registry/0, runtime/0, compiler/0, workspace/1, clear_compiler_classes/0]).
+-export([
+    boot_real_stdlib/1,
+    wait_for_class/2,
+    registry/0,
+    runtime/0,
+    compiler/0,
+    workspace/1,
+    clear_compiler_classes/0
+]).
 
 -doc """
 Boot `beamtalk_runtime` + real stdlib, then block until `CanaryClass` is

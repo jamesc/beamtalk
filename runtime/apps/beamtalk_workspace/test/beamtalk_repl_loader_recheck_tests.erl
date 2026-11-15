@@ -71,7 +71,9 @@ install_fixture(ReturnType) ->
     beamtalk_compiler_server:register_class(
         'LoaderReCheckCounter', counter_hierarchy(ReturnType)
     ),
-    ok = beamtalk_xref:register_class('LoaderReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)),
+    ok = beamtalk_xref:register_class(
+        'LoaderReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
+    ),
     ok = beamtalk_workspace_meta:set_class_source(
         <<"LoaderReCheckDashboard">>, beamtalk_test_recheck_fixtures:dashboard_source(?PREFIX)
     ).
@@ -383,9 +385,13 @@ with_capped_fixture(ReturnType, Fun) ->
     application:set_env(beamtalk_workspace, recheck_caller_cap, 1),
     try
         install_fixture(ReturnType),
-        ok = beamtalk_xref:register_class('LoaderReCheckListView', beamtalk_test_recheck_fixtures:listview_xref(['LoaderReCheckCounter'])),
+        ok = beamtalk_xref:register_class(
+            'LoaderReCheckListView',
+            beamtalk_test_recheck_fixtures:listview_xref(['LoaderReCheckCounter'])
+        ),
         ok = beamtalk_workspace_meta:set_class_source(
-            <<"LoaderReCheckListView">>, beamtalk_test_recheck_fixtures:listview_counter_source(?PREFIX)
+            <<"LoaderReCheckListView">>,
+            beamtalk_test_recheck_fixtures:listview_counter_source(?PREFIX)
         ),
         Fun()
     after
@@ -566,7 +572,9 @@ install_fixture_no_live_source(ReturnType) ->
     beamtalk_compiler_server:register_class(
         'LoaderReCheckCounter', counter_hierarchy(ReturnType)
     ),
-    ok = beamtalk_xref:register_class('LoaderReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)).
+    ok = beamtalk_xref:register_class(
+        'LoaderReCheckDashboard', beamtalk_test_recheck_fixtures:dashboard_xref(?PREFIX)
+    ).
 
 skipped_candidate_with_existing_finding_gets_marked_stale_test_() ->
     {timeout, 30,

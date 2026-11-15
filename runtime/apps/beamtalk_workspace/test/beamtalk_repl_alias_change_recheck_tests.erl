@@ -39,7 +39,11 @@ alias_recheck_teardown(_) ->
 fixture_opts() ->
     #{
         workspace_id => <<"alias_change_recheck_test_ws">>,
-        restart => [beamtalk_alias_xref, beamtalk_workspace_shape_recheck_worker, beamtalk_workspace_findings_store],
+        restart => [
+            beamtalk_alias_xref,
+            beamtalk_workspace_shape_recheck_worker,
+            beamtalk_workspace_findings_store
+        ],
         clear_xref => false
     }.
 

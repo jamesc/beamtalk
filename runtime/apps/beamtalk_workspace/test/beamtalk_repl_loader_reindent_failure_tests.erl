@@ -65,7 +65,10 @@ setup() ->
     beamtalk_compiler_server:clear_classes(),
     State0 = beamtalk_repl_state:new(undefined, 0),
     {ok, _Classes, State1} = beamtalk_repl_loader:handle_load(GadgetPath, State0),
-    #{proj_dir => ProjDir, gadget_path => GadgetPath, state => State1,
+    #{
+        proj_dir => ProjDir,
+        gadget_path => GadgetPath,
+        state => State1,
         changelog_ws => ChangelogWs
     }.
 
