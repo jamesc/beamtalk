@@ -1162,9 +1162,7 @@ init({ClassName, ClassInfo}) ->
 -spec join_class_registry() -> ok.
 join_class_registry() ->
     beamtalk_class_registry:ensure_pg_started(),
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
-    beamtalk_class_registry:ensure_methods_table(),
+    beamtalk_class_metadata:new(),
     beamtalk_class_registry:ensure_pid_table(),
     beamtalk_class_registry:ensure_loaded_classes_table(),
     beamtalk_class_registry:ensure_backing_module_index_table(),

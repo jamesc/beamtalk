@@ -204,20 +204,9 @@ init() ->
 -doc "Idempotently create the protocol definitions ETS table.".
 -spec ensure_protocol_table() -> ok.
 ensure_protocol_table() ->
-    case ets:info(?PROTOCOL_TABLE) of
-        undefined ->
-            ets:new(?PROTOCOL_TABLE, [
-                named_table,
-                set,
-                public,
-                {read_concurrency, true}
-                | beamtalk_ets_heir:heir_option()
-            ]),
-            ok;
-        _ ->
-            %% Table already exists (e.g., re-init after hot reload)
-            ok
-    end.
+    beamtalk_ets_heir:ensure_shared_table(?PROTOCOL_TABLE, [
+        named_table, set, public, {read_concurrency, true}
+    ]).
 
 -doc """
 Idempotently create the `conforms_to/2` result cache ETS table.
@@ -228,20 +217,9 @@ touches registered protocol definitions.
 """.
 -spec ensure_conforms_cache_table() -> ok.
 ensure_conforms_cache_table() ->
-    case ets:info(?CONFORMS_CACHE_TABLE) of
-        undefined ->
-            ets:new(?CONFORMS_CACHE_TABLE, [
-                named_table,
-                set,
-                public,
-                {read_concurrency, true},
-                {write_concurrency, true}
-                | beamtalk_ets_heir:heir_option()
-            ]),
-            ok;
-        _ ->
-            ok
-    end.
+    beamtalk_ets_heir:ensure_shared_table(?CONFORMS_CACHE_TABLE, [
+        named_table, set, public, {read_concurrency, true}, {write_concurrency, true}
+    ]).
 
 -doc """
 Idempotently create the ADR 0127 §12 users-index tables: `?USES_TABLE`
@@ -253,32 +231,12 @@ own separation above.
 """.
 -spec ensure_uses_tables() -> ok.
 ensure_uses_tables() ->
-    case ets:info(?USES_TABLE) of
-        undefined ->
-            ets:new(?USES_TABLE, [
-                named_table,
-                set,
-                public,
-                {read_concurrency, true}
-                | beamtalk_ets_heir:heir_option()
-            ]),
-            ok;
-        _ ->
-            ok
-    end,
-    case ets:info(?USERS_TABLE) of
-        undefined ->
-            ets:new(?USERS_TABLE, [
-                named_table,
-                bag,
-                public,
-                {read_concurrency, true}
-                | beamtalk_ets_heir:heir_option()
-            ]),
-            ok;
-        _ ->
-            ok
-    end.
+    ok = beamtalk_ets_heir:ensure_shared_table(?USES_TABLE, [
+        named_table, set, public, {read_concurrency, true}
+    ]),
+    beamtalk_ets_heir:ensure_shared_table(?USERS_TABLE, [
+        named_table, bag, public, {read_concurrency, true}
+    ]).
 
 %%% ============================================================================
 %%% Registration

@@ -392,18 +392,7 @@ new() ->
 
 -spec ensure_table(atom(), [term()]) -> ok.
 ensure_table(Table, Opts) ->
-    case ets:info(Table) of
-        undefined ->
-            try
-                ets:new(Table, Opts ++ beamtalk_ets_heir:heir_option()),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _ ->
-            beamtalk_ets_heir:maybe_set_heir(Table),
-            ok
-    end.
+    beamtalk_ets_heir:ensure_shared_table(Table, Opts).
 
 %%====================================================================
 %% Writes
@@ -795,12 +784,7 @@ table is a no-op.
 """.
 -spec put_class_doc(class_name(), term()) -> ok.
 put_class_doc(Name, Doc) ->
-    try
-        ets:update_element(?TABLE, Name, [{#class_metadata.doc, Doc}]),
-        ok
-    catch
-        error:badarg -> ok
-    end.
+    set_field(Name, #class_metadata.doc, Doc).
 
 -doc """
 Look up a class's published doc (see `put_class_doc/2`); `not_found` when the
@@ -1412,12 +1396,7 @@ put_class_variables(Name, HasClassVars) when is_boolean(HasClassVars) ->
 
 -spec update_has_class_variables(class_name(), boolean()) -> ok.
 update_has_class_variables(Name, HasClassVars) ->
-    try
-        _ = ets:update_element(?TABLE, Name, {#class_metadata.has_class_variables, HasClassVars}),
-        ok
-    catch
-        error:badarg -> ok
-    end.
+    set_field(Name, #class_metadata.has_class_variables, HasClassVars).
 
 -doc """
 Whether a class declares class variables: the fact `put_class_variables/2`
@@ -1469,21 +1448,14 @@ memo (`beamtalk_class_dispatch`, ADR 0142 §2) reads the list.
 """.
 -spec put_process_bound_selectors(class_name(), [selector()] | undefined) -> ok.
 put_process_bound_selectors(Name, Selectors) when is_list(Selectors); Selectors =:= undefined ->
-    new(),
-    case field(Name, #class_metadata.process_bound_selectors) of
-        Selectors ->
-            ok;
-        _ ->
-            try
-                _ = ets:update_element(
-                    ?TABLE, Name, {#class_metadata.process_bound_selectors, Selectors}
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end,
+    put_if_changed(
+        Name,
+        #class_metadata.process_bound_selectors,
+        Selectors,
+        fun() ->
             beamtalk_class_derived_cache:invalidate()
-    end.
+        end
+    ).
 
 -doc """
 A class's generated process-bound class-side selector list, or `unknown` when
@@ -1514,24 +1486,19 @@ publishes this set after its own invalidations.
 """.
 -spec put_direct_constructors(class_name(), [selector()]) -> ok.
 put_direct_constructors(Name, Ctors) when is_list(Ctors) ->
-    new(),
-    case field(Name, #class_metadata.direct_constructors) of
-        Ctors ->
-            ok;
-        _ ->
-            try
-                ets:update_element(?TABLE, Name, {#class_metadata.direct_constructors, Ctors}),
-                ok
-            catch
-                error:badarg -> ok
-            end,
+    put_if_changed(
+        Name,
+        #class_metadata.direct_constructors,
+        Ctors,
+        fun() ->
             %% Flush the memo before erasing the keys: the locked re-check in
             %% `static_call_target/4` reads the memoised constructor verdict,
             %% so a key install that lands between an erase and a later flush
             %% would re-derive from the old row and survive.
             beamtalk_class_derived_cache:invalidate(),
             beamtalk_class_shadow_flags:invalidate(Name)
-    end.
+        end
+    ).
 
 -doc """
 Store a class's certified literal class-side bodies (BT-4363, BT-4504).
@@ -1552,21 +1519,14 @@ module's meta, while the old code may still be current.
 """.
 -spec put_constant_class_methods(class_name(), #{selector() => constant_value()}) -> ok.
 put_constant_class_methods(Name, Constants) when is_map(Constants) ->
-    new(),
-    case field(Name, #class_metadata.constant_class_methods) of
-        Constants ->
-            ok;
-        _ ->
-            try
-                ets:update_element(
-                    ?TABLE, Name, {#class_metadata.constant_class_methods, Constants}
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end,
+    put_if_changed(
+        Name,
+        #class_metadata.constant_class_methods,
+        Constants,
+        fun() ->
             beamtalk_class_shadow_flags:invalidate(Name)
-    end.
+        end
+    ).
 
 -doc """
 Store a class's certified caller-safe signal primitives (BT-4493):
@@ -1583,21 +1543,14 @@ meta while the old code may still be current (`-on_load`).
 """.
 -spec put_caller_safe_primitives(class_name(), #{selector() => atom()}) -> ok.
 put_caller_safe_primitives(Name, Primitives) when is_map(Primitives) ->
-    new(),
-    case field(Name, #class_metadata.caller_safe_primitives) of
-        Primitives ->
-            ok;
-        _ ->
-            try
-                ets:update_element(
-                    ?TABLE, Name, {#class_metadata.caller_safe_primitives, Primitives}
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end,
+    put_if_changed(
+        Name,
+        #class_metadata.caller_safe_primitives,
+        Primitives,
+        fun() ->
             beamtalk_class_shadow_flags:invalidate(Name)
-    end.
+        end
+    ).
 
 -doc "A class's certified caller-safe primitives (`#{}` when none or unknown).".
 -spec lookup_caller_safe_primitives(class_name()) -> #{selector() => atom()}.
@@ -1638,21 +1591,14 @@ dynamic `new:` fast path off without recompiling them.
 """.
 -spec put_defines_user_class_new1(class_name(), boolean() | undefined) -> ok.
 put_defines_user_class_new1(Name, Defines) when is_boolean(Defines); Defines =:= undefined ->
-    new(),
-    case field(Name, #class_metadata.defines_user_class_new1) of
-        Defines ->
-            ok;
-        _ ->
-            try
-                _ = ets:update_element(
-                    ?TABLE, Name, {#class_metadata.defines_user_class_new1, Defines}
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end,
+    put_if_changed(
+        Name,
+        #class_metadata.defines_user_class_new1,
+        Defines,
+        fun() ->
             beamtalk_class_derived_cache:invalidate()
-    end.
+        end
+    ).
 
 -doc """
 Whether `Name` itself defines a user class-side `new:`: the fact
@@ -1737,26 +1683,19 @@ re-derived, and the class's and its descendants' static call keys are erased.
 """.
 -spec put_defines_user_class_new0(class_name(), boolean() | undefined) -> ok.
 put_defines_user_class_new0(Name, Defines) when is_boolean(Defines); Defines =:= undefined ->
-    new(),
-    case field(Name, #class_metadata.defines_user_class_new0) of
-        Defines ->
-            ok;
-        _ ->
-            try
-                _ = ets:update_element(
-                    ?TABLE, Name, {#class_metadata.defines_user_class_new0, Defines}
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end,
+    put_if_changed(
+        Name,
+        #class_metadata.defines_user_class_new0,
+        Defines,
+        fun() ->
             %% Flush the memo before erasing the keys (see `put_direct_constructors/2`):
             %% a descendant's static `new` key is installed only while the
             %% memoised verdict, which reads this fact, allows it, and
             %% `invalidate/1` also erases the descendants' keys.
             beamtalk_class_derived_cache:invalidate(),
             beamtalk_class_shadow_flags:invalidate(Name)
-    end.
+        end
+    ).
 
 -doc """
 Whether `Name` itself defines a user class-side `new`: the fact
@@ -1939,11 +1878,7 @@ restored selector set before deleting the fun. A no-op if the row is absent.
 -spec set_class_method_selectors(class_name(), [selector()]) -> ok.
 set_class_method_selectors(Name, Selectors) ->
     new(),
-    try
-        ets:update_element(?TABLE, Name, [{#class_metadata.selectors, Selectors}])
-    catch
-        error:badarg -> ok
-    end,
+    set_field(Name, #class_metadata.selectors, Selectors),
     beamtalk_class_derived_cache:invalidate().
 
 -doc """
@@ -2001,13 +1936,7 @@ A no-op if the row is absent.
 -spec reset_runtime_class_methods(class_name()) -> ok.
 reset_runtime_class_methods(Name) ->
     new(),
-    try
-        ets:update_element(?TABLE, Name, [
-            {#class_metadata.has_runtime_class_methods, false}
-        ])
-    catch
-        error:badarg -> ok
-    end,
+    set_field(Name, #class_metadata.has_runtime_class_methods, false),
     %% BT-3669: clear the flag only after the gate is closed.
     beamtalk_class_shadow_flags:clear(runtime_fun, Name),
     ok.
@@ -2015,6 +1944,33 @@ reset_runtime_class_methods(Name) ->
 %%====================================================================
 %% Internal
 %%====================================================================
+
+%% Write one field of an existing row in place (BT-4891). `ets:update_element/3`
+%% returns `false` for a missing row and raises `badarg` for a missing table;
+%% both are a no-op, so a setter never has to handle either.
+-spec set_field(class_name(), pos_integer(), term()) -> ok.
+set_field(Name, Pos, Value) ->
+    try
+        _ = ets:update_element(?TABLE, Name, {Pos, Value}),
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+%% Shared body of the `put_*` setters that skip an unchanged value: ensure the
+%% table, and if the field differs write it (`set_field/3`) and then run
+%% `AfterFun` -- the cache/flag invalidation, which must land after the write.
+-spec put_if_changed(class_name(), pos_integer(), term(), fun(() -> term())) -> ok.
+put_if_changed(Name, Pos, Value, AfterFun) ->
+    new(),
+    case field(Name, Pos) of
+        Value ->
+            ok;
+        _ ->
+            set_field(Name, Pos, Value),
+            _ = AfterFun(),
+            ok
+    end.
 
 %% Reconcile the {Superclass, ClassName, Owner} reverse-edge index with a
 %% row write that set Name's superclass to NewSuperclass, given the value it

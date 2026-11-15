@@ -185,10 +185,10 @@ ensure_pg_started_test() ->
     ?assertEqual(ok, beamtalk_class_registry:ensure_pg_started()).
 
 %%% ============================================================================
-%%% ensure_hierarchy_table tests
+%%% beamtalk_class_metadata:new/0 tests
 %%% ============================================================================
 
-ensure_hierarchy_table_test_() ->
+class_metadata_new_test_() ->
     {setup,
         fun() ->
             %% Save existing entries to restore after test
@@ -214,10 +214,10 @@ ensure_hierarchy_table_test_() ->
                 beamtalk_class_derived_cache:invalidate()
         end,
         fun() ->
-            ?assertEqual(ok, beamtalk_class_registry:ensure_hierarchy_table()),
+            ?assertEqual(ok, beamtalk_class_metadata:new()),
             ?assertNotEqual(undefined, ets:info(beamtalk_class_metadata)),
             %% Idempotent
-            ?assertEqual(ok, beamtalk_class_registry:ensure_hierarchy_table())
+            ?assertEqual(ok, beamtalk_class_metadata:new())
         end}.
 
 %%% ============================================================================
@@ -227,7 +227,7 @@ ensure_hierarchy_table_test_() ->
 inherits_from_test_() ->
     {setup,
         fun() ->
-            beamtalk_class_registry:ensure_hierarchy_table(),
+            beamtalk_class_metadata:new(),
             Saved = ets:tab2list(beamtalk_class_metadata),
             ets:delete_all_objects(beamtalk_class_metadata),
             beamtalk_class_metadata:insert('Object', undefined, undefined, none, undefined),
@@ -271,7 +271,7 @@ inherits_from_test_() ->
 direct_subclasses_test_() ->
     {setup,
         fun() ->
-            beamtalk_class_registry:ensure_hierarchy_table(),
+            beamtalk_class_metadata:new(),
             Saved = ets:tab2list(beamtalk_class_metadata),
             %% direct_subclasses/1 reads beamtalk_class_subclass_index,
             %% a table separate from beamtalk_class_metadata. Wiping only the main
@@ -320,7 +320,7 @@ direct_subclasses_test_() ->
 all_subclasses_test_() ->
     {setup,
         fun() ->
-            beamtalk_class_registry:ensure_hierarchy_table(),
+            beamtalk_class_metadata:new(),
             Saved = ets:tab2list(beamtalk_class_metadata),
             %% See direct_subclasses_test_/0's setup for why the
             %% subclass index must be cleared/restored alongside the main table.
@@ -818,7 +818,7 @@ get_method_return_type_test_() ->
     {setup,
         fun() ->
             beamtalk_class_registry:ensure_pg_started(),
-            beamtalk_class_registry:ensure_hierarchy_table(),
+            beamtalk_class_metadata:new(),
             %% BT-3826: return types are read from the class's published metadata
             %% row, so the hierarchy edges below are merged into it (`insert/5`
             %% would overwrite the whole row, wiping the published reflection).
@@ -1080,8 +1080,7 @@ restart_class_recovery_test_() ->
     {setup,
         fun() ->
             beamtalk_class_registry:ensure_pg_started(),
-            beamtalk_class_registry:ensure_hierarchy_table(),
-            beamtalk_class_registry:ensure_module_table(),
+            beamtalk_class_metadata:new(),
             beamtalk_class_registry:ensure_pid_table(),
             HierSaved = ets:tab2list(beamtalk_class_metadata),
             %% Start a class, then kill it to test recovery
@@ -1258,17 +1257,6 @@ drain_warnings_no_table_test() ->
     ).
 
 %%% ============================================================================
-%%% ensure_module_table tests
-%%% ============================================================================
-
-ensure_module_table_test() ->
-    beamtalk_class_registry:ensure_module_table(),
-    ?assertNotEqual(undefined, ets:info(beamtalk_class_metadata)),
-    %% Idempotent
-    beamtalk_class_registry:ensure_module_table(),
-    ?assertNotEqual(undefined, ets:info(beamtalk_class_metadata)).
-
-%%% ============================================================================
 %%% pending load errors tests
 %%% ============================================================================
 
@@ -1421,8 +1409,7 @@ bt1982_restart_class_already_started_test_() ->
     {setup,
         fun() ->
             beamtalk_class_registry:ensure_pg_started(),
-            beamtalk_class_registry:ensure_hierarchy_table(),
-            beamtalk_class_registry:ensure_module_table(),
+            beamtalk_class_metadata:new(),
             ClassName = 'BT1982RestartAS',
             ClassInfo = #{
                 name => ClassName,
@@ -1482,8 +1469,7 @@ bt1982_restart_class_recovers_dead_process_test_() ->
     {setup,
         fun() ->
             beamtalk_class_registry:ensure_pg_started(),
-            beamtalk_class_registry:ensure_hierarchy_table(),
-            beamtalk_class_registry:ensure_module_table(),
+            beamtalk_class_metadata:new(),
             beamtalk_class_registry:ensure_pid_table(),
             ClassName = 'BT1982RestartRecover',
             ClassInfo = #{
@@ -1549,7 +1535,7 @@ bt1982_get_method_return_type_walks_on_process_exit_test_() ->
     {setup,
         fun() ->
             beamtalk_class_registry:ensure_pg_started(),
-            beamtalk_class_registry:ensure_hierarchy_table(),
+            beamtalk_class_metadata:new(),
             %% Set up a parent class with a known return type, then register a
             %% child with none.
             {ok, ParentPid} = beamtalk_object_class:start('BT1982RTParent', #{
@@ -2115,8 +2101,7 @@ bt4552_prune_dead_class_pids_caps_dead_rows_test() ->
 %% flips the BT-4552 pin, which expected the row gone and no restart.
 bt4622_callback_crash_keeps_class_restartable_test() ->
     beamtalk_class_registry:ensure_pg_started(),
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_metadata:new(),
     beamtalk_class_registry:ensure_pid_table(),
     Name = 'BT4622CallbackCrash',
     {ok, Pid} = beamtalk_object_class:start(Name, #{
@@ -2195,8 +2180,7 @@ bt4646_builder_class(Name) ->
 
 bt4646_builder_class(Name, Super) ->
     beamtalk_class_registry:ensure_pg_started(),
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_metadata:new(),
     beamtalk_class_registry:ensure_pid_table(),
     InstFun = fun(Self, _Args, State) -> {reply, inst_ok, State, Self} end,
     ClassFun = fun(_ClassSelf) -> class_ok end,
@@ -2327,8 +2311,7 @@ bt4646_module_less_restart_returns_removed_error_test() ->
 %% A compiled (module-backed) class restarts exactly as before.
 bt4646_compiled_class_still_restarts_test() ->
     beamtalk_class_registry:ensure_pg_started(),
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_metadata:new(),
     beamtalk_class_registry:ensure_pid_table(),
     Name = 'BT4646CompiledRestart',
     {ok, Pid} = beamtalk_object_class:start(Name, #{
@@ -2722,8 +2705,7 @@ bt4808_rename_copies_its_own_facts_not_a_same_name_class_test() ->
 
 bt4808_builder_class(Name, Super, HasClassVars) ->
     beamtalk_class_registry:ensure_pg_started(),
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_metadata:new(),
     beamtalk_class_registry:ensure_pid_table(),
     InstFun = fun(Self, _Args, State) -> {reply, inst_ok, State, Self} end,
     ClassFun = fun(_ClassSelf) -> class_ok end,
