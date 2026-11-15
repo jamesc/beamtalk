@@ -1,0 +1,54 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4919: a field write whose right-hand side is a send that runs user code,
+// as the last and as a non-last statement of an actor method; and class
+// methods that thread a local through non-last constructs.
+// See fixtures/bt4919last_field_write_*.bt and
+// fixtures/bt4919class_method_threading_class.bt.
+
+TestCase subclass: Bt4919LastFieldWriteTest
+
+  testLastPositionFieldWriteFromASend =>
+    h := Bt4919LastFieldWriteHelper spawn
+    a := Bt4919LastFieldWriteActor spawn
+    self assert: (a doubleLast: h and: 21) equals: 42
+    self assert: a last equals: 42
+    self assert: h calls equals: 1
+
+  testLastPositionFieldWriteAccumulates =>
+    h := Bt4919LastFieldWriteHelper spawn
+    a := Bt4919LastFieldWriteActor spawn
+    a doubleLast: h and: 1
+    self assert: (a doubleLast: h and: 5) equals: 10
+    self assert: a last equals: 10
+    self assert: h calls equals: 2
+
+  testNonLastPositionFieldWriteFromASend =>
+    h := Bt4919LastFieldWriteHelper spawn
+    a := Bt4919LastFieldWriteActor spawn
+    self assert: (a doubleThenOther: h and: 4) equals: 9
+    self assert: a last equals: 8
+    self assert: a other equals: 9
+
+  testClassMethodLoopThreadsLocal =>
+    self assert: (Bt4919ClassMethodThreadingClass loopSum: 4) equals: 10
+
+  testClassMethodDoThreadsLocal =>
+    self assert: (Bt4919ClassMethodThreadingClass doSum: #(1, 2, 3)) equals: 6
+
+  testClassMethodFoldThreadsLocal =>
+    self assert: (Bt4919ClassMethodThreadingClass foldSum: #(1, 2, 3)) equals: 6
+
+  testClassMethodConditionalThreadsLocal =>
+    self assert: (Bt4919ClassMethodThreadingClass conditional: true) equals: 5
+    self assert: (Bt4919ClassMethodThreadingClass conditional: false) equals: 0
+
+  testClassMethodWhileThreadsLocal =>
+    self assert: (Bt4919ClassMethodThreadingClass whileCount: 3) equals: 3
+
+  testClassMethodOnDoThreadsLocalWithoutRaise =>
+    self assert: Bt4919ClassMethodThreadingClass handledQuietly equals: 1
+
+  testClassMethodOnDoThreadsLocalFromHandler =>
+    self assert: Bt4919ClassMethodThreadingClass handledRaise equals: 7

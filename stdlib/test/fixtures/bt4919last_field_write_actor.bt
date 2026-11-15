@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4919: `self.f := <send that runs user code>` as the LAST statement of an
+// actor method, and as a non-last one. Both positions lower the write through
+// `lower_field_assignment_bind` (the sync-site bracket included).
+
+Actor subclass: Bt4919LastFieldWriteActor
+  state: last = 0
+  state: other = 0
+
+  doubleLast: helper and: n => self.last := helper double: n
+
+  doubleThenOther: helper and: n =>
+    self.last := helper double: n
+    self.other := self.last + 1
+    self.other
+
+  last => self.last
+
+  other => self.other
