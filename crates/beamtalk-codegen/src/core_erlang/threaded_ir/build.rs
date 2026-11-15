@@ -153,10 +153,12 @@ pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
 /// proptest and agreement corpora), with the backfill instrumented to log every
 /// gap it closed:
 ///
-/// - [`ScopeKind::ClassMethod`] produced **no** gap in any of ~3000 verified
+/// - [`ScopeKind::ClassMethod`] (a class-side method body or an actor cell
+///   closure — both thread no actor `State`; the measurement covers every body
+///   verified under this scope) produced **no** gap in any of ~3000 verified
 ///   bodies once BT-4919 made field writes real `Bind`s, so it backfills
-///   nothing: an unexplained `State` version bump in a class-side method body
-///   is a [`VerifyError::UnboundVersion`], not a gap.
+///   nothing: an unexplained version bump there is a
+///   [`VerifyError::UnboundVersion`], not a gap.
 /// - [`ScopeKind::Instance`] still has gaps: a conditional/loop with state
 ///   mutations (`_CfTuple`/`_SD…` dispatch) and Tier 2 helper calls mint
 ///   `State{N}` inside one opaque `Statement` (no `Bind` node for that step).
@@ -167,12 +169,14 @@ pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
 /// - [`ScopeKind::Repl`] still has gaps: an input's prelude is verified as a
 ///   slice that starts at a `State` version an earlier opaque statement
 ///   already minted.
-fn opaque_gap_families(scope: ScopeKind) -> &'static [VersionPrefix] {
+pub(in crate::core_erlang) fn opaque_gap_families(scope: ScopeKind) -> &'static [VersionPrefix] {
     match scope {
         ScopeKind::ClassMethod => &[],
-        ScopeKind::Instance | ScopeKind::ValueType | ScopeKind::Repl => {
-            &[VersionPrefix::State, VersionPrefix::SelfVt]
-        }
+        // Each remaining scope backfills only the family its measured gaps
+        // were in: every `Instance` and `Repl` gap was `State`, every
+        // `ValueType` gap was `SelfVt`.
+        ScopeKind::Instance | ScopeKind::Repl => &[VersionPrefix::State],
+        ScopeKind::ValueType => &[VersionPrefix::SelfVt],
     }
 }
 

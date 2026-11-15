@@ -74,8 +74,8 @@ mod ir;
 mod verify;
 
 pub(super) use build::{
-    backfill_opaque_version_gaps, build_tuple_acc_unpack, verify_body_with_opaque_version_gaps,
-    verify_simple_bind,
+    backfill_opaque_version_gaps, build_tuple_acc_unpack, opaque_gap_families,
+    verify_body_with_opaque_version_gaps, verify_simple_bind,
 };
 // ADR 0131: the local-rebind prelude nodes' builders and types. Phase 2's
 // `local_threading_producer` (BT-3749) is the first production caller of

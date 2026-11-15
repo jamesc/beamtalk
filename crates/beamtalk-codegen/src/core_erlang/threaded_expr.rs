@@ -2715,7 +2715,7 @@ impl CoreErlangGenerator {
         let backfilled = threaded_ir::backfill_opaque_version_gaps(
             &prelude,
             FrameId::ROOT,
-            &[VersionPrefix::State, VersionPrefix::SelfVt],
+            threaded_ir::opaque_gap_families(self.threaded_scope()),
         );
         let checked = [threaded_ir::build_method_body(
             FrameId::ROOT,
