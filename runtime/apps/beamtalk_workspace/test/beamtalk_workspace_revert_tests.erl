@@ -884,7 +884,9 @@ recover_prev_from_disk_resolves_remove_method_entry_via_entry_side(#{
     %% Simulate the rotation/cleanup race: the recorded prior-body file is gone,
     %% but the class's own on-disk source (still containing `build`, since the
     %% removal was never flushed) is untouched.
-    SourcesDir = filename:join(beamtalk_workspace_changelog:changes_dir(WorkspaceId), "sources"),
+    SourcesDir = filename:join(
+        beamtalk_workspace_changelog_log:changes_dir(WorkspaceId), "sources"
+    ),
     PrevBodyPath = filename:join(SourcesDir, binary_to_list(PrevRef)),
     ok = file:delete(PrevBodyPath),
     Result = beamtalk_workspace_changelog:find_revert_target(ClassName, <<"build">>),
@@ -1063,7 +1065,9 @@ revert_remove_class_entry_recovers_prev_source_from_disk_when_changelog_copy_mis
     %% Simulate the rotation/cleanup race: the recorded prior-body file is
     %% gone, but the class's own on-disk source (untouched, since the removal
     %% was never flushed) is still there.
-    SourcesDir = filename:join(beamtalk_workspace_changelog:changes_dir(WorkspaceId), "sources"),
+    SourcesDir = filename:join(
+        beamtalk_workspace_changelog_log:changes_dir(WorkspaceId), "sources"
+    ),
     PrevBodyPath = filename:join(SourcesDir, binary_to_list(PrevRef)),
     ok = file:delete(PrevBodyPath),
     Result = beamtalk_workspace_changelog:find_revert_target(ClassName, <<"new-class">>),
