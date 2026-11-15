@@ -34,7 +34,7 @@ Return the Beamtalk global config directory (`~/.beamtalk`), or `undefined`
 when no home directory can be determined (BT-3680).
 
 This is the single Erlang resolver for every `~/.beamtalk/*` path; the Rust
-counterpart is `beamtalk_home::beamtalk_root_dir`. Resolution, in order:
+counterpart is `beamtalk_env::beamtalk_root_dir`. Resolution, in order:
 
 1. `BEAMTALK_HOME` (non-empty) — explicit override, used for hermetic tests.
 2. `home_dir()` joined with `.beamtalk`.
