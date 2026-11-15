@@ -3026,7 +3026,7 @@ impl CoreErlangGenerator {
                 // immediately above: same `BindOp::Direct` shape with
                 // `maps:remove` in place of `maps:put` and no value argument
                 // to thread. Returns `Self` (`clearField: -> Self`,
-                // `generate_self_clear_field_open`'s own convention) rather
+                // `lower_stmt_self_clear_field`'s own convention) rather
                 // than a written value.
                 BodyExprKind::SelfClearField => {
                     self.lower_stmt_self_clear_field(
@@ -3333,12 +3333,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    // Not shared with the actor-method walker (`lower_reply_tier2_value_call`). An arm rebinds the
-    // locals this construct threads in place (`construct_locals_in_place`) or
-    // slot-writes them into `StateAcc` and routes the call's `NewState`
-    // through a Gensym state; a method body re-extracts them from the returned
-    // state with `maps:get` and advances the `State` version directly. See
-    // `lower_arm_local_assign`.
+    // Not shared with the method walker (`lower_reply_tier2_value_call`); see `lower_arm_local_assign`.
     fn lower_arm_tier2_value_call(
         &mut self,
         cx: StmtCx<'_>,
@@ -3443,12 +3438,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    // Not shared with the actor-method walker (`lower_reply_control_flow_with_mutations`). An arm rebinds the
-    // locals this construct threads in place (`construct_locals_in_place`) or
-    // slot-writes them into `StateAcc` and routes the call's `NewState`
-    // through a Gensym state; a method body re-extracts them from the returned
-    // state with `maps:get` and advances the `State` version directly. See
-    // `lower_arm_local_assign`.
+    // Not shared with the method walker (`lower_reply_control_flow_with_mutations`); see `lower_arm_local_assign`.
     fn lower_arm_control_flow_with_mutations(
         &mut self,
         cx: StmtCx<'_>,
@@ -3529,12 +3519,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    // Not shared with the actor-method walker (`lower_reply_control_flow_with_mutations`). An arm rebinds the
-    // locals this construct threads in place (`construct_locals_in_place`) or
-    // slot-writes them into `StateAcc` and routes the call's `NewState`
-    // through a Gensym state; a method body re-extracts them from the returned
-    // state with `maps:get` and advances the `State` version directly. See
-    // `lower_arm_local_assign`.
+    // Not shared with the method walker (`lower_reply_control_flow_with_mutations`); see `lower_arm_local_assign`.
     fn lower_arm_control_flow_producer(
         &mut self,
         cx: StmtCx<'_>,
@@ -3562,12 +3547,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    // Not shared with the actor-method walker (`lower_reply_destructure_assignment_control_flow`). An arm rebinds the
-    // locals this construct threads in place (`construct_locals_in_place`) or
-    // slot-writes them into `StateAcc` and routes the call's `NewState`
-    // through a Gensym state; a method body re-extracts them from the returned
-    // state with `maps:get` and advances the `State` version directly. See
-    // `lower_arm_local_assign`.
+    // Not shared with the method walker (`lower_reply_destructure_assignment_control_flow`); see `lower_arm_local_assign`.
     fn lower_arm_destructure_assignment_control_flow(
         &mut self,
         cx: StmtCx<'_>,
@@ -3629,12 +3609,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    // Not shared with the actor-method walker (`lower_reply_destructure_assignment_control_flow`). An arm rebinds the
-    // locals this construct threads in place (`construct_locals_in_place`) or
-    // slot-writes them into `StateAcc` and routes the call's `NewState`
-    // through a Gensym state; a method body re-extracts them from the returned
-    // state with `maps:get` and advances the `State` version directly. See
-    // `lower_arm_local_assign`.
+    // Not shared with the method walker (`lower_reply_destructure_assignment_control_flow`); see `lower_arm_local_assign`.
     fn lower_arm_destructure_assignment_producer(
         &mut self,
         cx: StmtCx<'_>,
@@ -3679,12 +3654,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    // Not shared with the actor-method walker (`lower_reply_self_field_at_put_control_flow`). An arm rebinds the
-    // locals this construct threads in place (`construct_locals_in_place`) or
-    // slot-writes them into `StateAcc` and routes the call's `NewState`
-    // through a Gensym state; a method body re-extracts them from the returned
-    // state with `maps:get` and advances the `State` version directly. See
-    // `lower_arm_local_assign`.
+    // Not shared with the method walker (`lower_reply_self_field_at_put_control_flow`); see `lower_arm_local_assign`.
     fn lower_arm_self_field_at_put_control_flow(
         &mut self,
         cx: StmtCx<'_>,
@@ -3762,12 +3732,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    // Not shared with the actor-method walker (`lower_reply_field_assignment_control_flow`). An arm rebinds the
-    // locals this construct threads in place (`construct_locals_in_place`) or
-    // slot-writes them into `StateAcc` and routes the call's `NewState`
-    // through a Gensym state; a method body re-extracts them from the returned
-    // state with `maps:get` and advances the `State` version directly. See
-    // `lower_arm_local_assign`.
+    // Not shared with the method walker (`lower_reply_field_assignment_control_flow`); see `lower_arm_local_assign`.
     fn lower_arm_field_assignment_control_flow(
         &mut self,
         cx: StmtCx<'_>,

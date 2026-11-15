@@ -1426,7 +1426,7 @@ impl CoreErlangGenerator {
                         //
                         // Method-body-level state threading is handled by
                         // lower_body_exprs_with_reply via is_self_field_at_put/
-                        // generate_self_field_at_put_open, which intercepts before
+                        // lower_stmt_self_field_at_put, which intercepts before
                         // expression_doc is called. This intrinsic path is a
                         // deadlock-avoidance fallback for contexts where method-body
                         // threading is unavailable (e.g., inside blocks). It delegates
@@ -1647,7 +1647,7 @@ impl CoreErlangGenerator {
                         // context. Avoids sync_send(self()) → deadlock.
                         // Method-body-level state threading is handled by
                         // `lower_body_exprs_with_reply`/`is_self_clear_field`/
-                        // `generate_self_clear_field_open`, which intercepts
+                        // `lower_stmt_self_clear_field`, which intercepts
                         // before `expression_doc` is called. This intrinsic
                         // path is a deadlock-avoidance fallback for contexts
                         // where method-body threading is unavailable (e.g.,

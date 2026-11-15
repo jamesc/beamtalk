@@ -931,9 +931,8 @@ impl CoreErlangGenerator {
     /// own NON-TAIL statements (its local writes thread exactly as this
     /// already gives every other block body) rather than re-deriving the
     /// same classification — see `generate_stateful_while_condition`.
-    // Deliberately a separate classifier from `classify_body_expr` /
-    // `classify_vt_body_expr` / `classify_block_expr`: each classifies for a
-    // different frame (actor method body, value-type `Self` body, plain
+    // Deliberately a separate classifier from `classify_body_expr` and `classify_vt_body_expr`: each classifies
+    // for a different frame (actor method body, value-type `Self` body, plain
     // closure body), with different kind enums and predicates (loop-threading
     // `is_*_with_vt_local_threading` vs `control_flow_has_mutations`;
     // `is_last`-driven). Only the leading shapes (`^`, field assignment, local

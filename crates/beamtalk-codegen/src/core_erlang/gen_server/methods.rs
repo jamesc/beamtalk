@@ -456,9 +456,8 @@ impl CoreErlangGenerator {
     ///
     /// The order of checks matters: more specific patterns (e.g. field assignment)
     /// must come before general ones (e.g. pure expression).
-    // Deliberately a separate classifier from `classify_body_expr` /
-    // `classify_vt_body_expr` / `classify_block_expr`: each classifies for a
-    // different frame (actor method body, value-type `Self` body, plain
+    // Deliberately a separate classifier from `classify_vt_body_expr` and `classify_block_expr`: each classifies
+    // for a different frame (actor method body, value-type `Self` body, plain
     // closure body), with different kind enums and predicates (loop-threading
     // `is_*_with_vt_local_threading` vs `control_flow_has_mutations`;
     // `is_last`-driven). Only the leading shapes (`^`, field assignment, local
@@ -685,9 +684,9 @@ impl CoreErlangGenerator {
     /// [`threaded_ir::ThreadedStmt::Statement`] built by the SAME codegen
     /// call production ran before this migration (byte-identity: only the
     /// container changed, from `Vec<Document>` to `Vec<ThreadedStmt>`).
-    /// Version steps hidden inside shared multi-module helpers
-    /// (`generate_field_assignment_open`,
-    /// `generate_self_field_at_put_open`) remain inside their `Statement`s —
+    /// Field writes are real `Bind`s (`lower_field_assignment_bind`,
+    /// `lower_stmt_self_field_at_put`); version steps hidden inside a
+    /// remaining shared multi-module helper stay inside their `Statement`s —
     /// see `verify_body_with_opaque_version_gaps`'s backfill accounting.
     ///
     /// Classification happens exactly once per statement (`classify_body_expr`),
@@ -1054,12 +1053,7 @@ impl CoreErlangGenerator {
     }
 
     // Self.field := expr where RHS is control flow returning {Value, State}
-    // Not shared with the conditional-arm walker (`lower_arm_field_assignment_control_flow`). A method body
-    // re-extracts the locals this construct threads out of its returned state
-    // with `maps:get(<local key>, State)` and advances the `State` version
-    // directly; an arm rebinds them in place (`construct_locals_in_place`) or
-    // slot-writes them into `StateAcc`, which carries them out of the
-    // conditional. See `lower_reply_local_assign_pure`.
+    // Not shared with the arm walker (`lower_arm_field_assignment_control_flow`); see `lower_reply_local_assign_pure`.
     #[expect(
         clippy::too_many_lines,
         reason = "one statement kind (FieldAssignmentControlFlow) of the statement walker"
@@ -1220,12 +1214,7 @@ impl CoreErlangGenerator {
     // instead (ADR 0111 Addendum 4's type-level rule: a
     // version-mutating statement must be a `Bind`, never a
     // `Statement`, but `Bind`'s `op` may still be opaque).
-    // Not shared with the conditional-arm walker (`lower_arm_self_field_at_put_control_flow`). A method body
-    // re-extracts the locals this construct threads out of its returned state
-    // with `maps:get(<local key>, State)` and advances the `State` version
-    // directly; an arm rebinds them in place (`construct_locals_in_place`) or
-    // slot-writes them into `StateAcc`, which carries them out of the
-    // conditional. See `lower_reply_local_assign_pure`.
+    // Not shared with the arm walker (`lower_arm_self_field_at_put_control_flow`); see `lower_reply_local_assign_pure`.
     fn lower_reply_self_field_at_put_control_flow(
         &mut self,
         cx: StmtCx<'_>,
@@ -1338,12 +1327,7 @@ impl CoreErlangGenerator {
     // Element 2 of the RHS tuple becomes the next real `State` Bind
     // (Direct — the RHS is a computed map, not a static field Put);
     // the tuple unpack and threaded-local rebinds stay opaque Statements.
-    // Not shared with the conditional-arm walker (`lower_arm_destructure_assignment_control_flow`). A method body
-    // re-extracts the locals this construct threads out of its returned state
-    // with `maps:get(<local key>, State)` and advances the `State` version
-    // directly; an arm rebinds them in place (`construct_locals_in_place`) or
-    // slot-writes them into `StateAcc`, which carries them out of the
-    // conditional. See `lower_reply_local_assign_pure`.
+    // Not shared with the arm walker (`lower_arm_destructure_assignment_control_flow`); see `lower_reply_local_assign_pure`.
     fn lower_reply_destructure_assignment_control_flow(
         &mut self,
         cx: StmtCx<'_>,
@@ -1788,12 +1772,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    // Not shared with the conditional-arm walker (`lower_arm_tier2_value_call`). A method body
-    // re-extracts the locals this construct threads out of its returned state
-    // with `maps:get(<local key>, State)` and advances the `State` version
-    // directly; an arm rebinds them in place (`construct_locals_in_place`) or
-    // slot-writes them into `StateAcc`, which carries them out of the
-    // conditional. See `lower_reply_local_assign_pure`.
+    // Not shared with the arm walker (`lower_arm_tier2_value_call`); see `lower_reply_local_assign_pure`.
     fn lower_reply_tier2_value_call(
         &mut self,
         cx: StmtCx<'_>,
@@ -1878,12 +1857,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    // Not shared with the conditional-arm walker (`lower_arm_control_flow_with_mutations`). A method body
-    // re-extracts the locals this construct threads out of its returned state
-    // with `maps:get(<local key>, State)` and advances the `State` version
-    // directly; an arm rebinds them in place (`construct_locals_in_place`) or
-    // slot-writes them into `StateAcc`, which carries them out of the
-    // conditional. See `lower_reply_local_assign_pure`.
+    // Not shared with the arm walker (`lower_arm_control_flow_with_mutations`); see `lower_reply_local_assign_pure`.
     fn lower_reply_control_flow_with_mutations(
         &mut self,
         cx: StmtCx<'_>,

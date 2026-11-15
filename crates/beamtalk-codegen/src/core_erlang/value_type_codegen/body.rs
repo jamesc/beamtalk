@@ -300,13 +300,16 @@ impl CoreErlangGenerator {
     ///
     /// The order of checks matters: more specific patterns (e.g. field assignment,
     /// `do:` with local threading) must come before general ones (e.g. pure).
-    // Deliberately a separate classifier from `classify_body_expr` /
-    // `classify_vt_body_expr` / `classify_block_expr`: each classifies for a
-    // different frame (actor method body, value-type `Self` body, plain
+    // Deliberately a separate classifier from `classify_body_expr` and `classify_block_expr`: each classifies
+    // for a different frame (actor method body, value-type `Self` body, plain
     // closure body), with different kind enums and predicates (loop-threading
     // `is_*_with_vt_local_threading` vs `control_flow_has_mutations`;
     // `is_last`-driven). Only the leading shapes (`^`, field assignment, local
     // assignment, destructure) coincide.
+    //
+    // Class methods reuse this classifier for their non-last statements
+    // (`generate_class_method_non_last_expr`), so a change to its predicate
+    // order changes class-method codegen too.
     pub(in crate::core_erlang) fn classify_vt_body_expr(
         &self,
         expr: &Expression,
