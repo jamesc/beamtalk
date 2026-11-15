@@ -63,7 +63,7 @@ pub(crate) struct TestCaseClass {
     /// Superclass name (e.g., `TestCase`).
     #[allow(dead_code)] // populated during discovery for future diagnostic use
     pub(crate) superclass_name: String,
-    /// Module name for the compiled BEAM module (e.g., `bt@counter_test`).
+    /// Module name for the compiled BEAM module (e.g., `bt@my_pkg@test@counter_test`).
     pub(crate) module_name: String,
     /// Methods whose names start with `test`.
     pub(crate) test_methods: Vec<String>,
@@ -1440,10 +1440,9 @@ fn initialize_pipeline(
     let discovered_packages = discover_packages_with_manifests(&test_path, &test_files)?;
 
     // Map from package root -> package name for test module naming.
-    // Used to prefix test module names with the package name when multiple
-    // packages are in scope, preventing module collisions (e.g. two packages
-    // that both define a `SmokeTest` class would otherwise both compile to
-    // `bt@smoke_test.beam` in the shared temp build dir).
+    // `test_file_module_name` puts the owning package in every test module name
+    // (`bt@{package}@test@{path}`, BT-4868), so two packages that both define a
+    // `SmokeTest` class never collide in the shared temp build dir.
     let pkg_root_to_name: HashMap<Utf8PathBuf, String> = discovered_packages
         .iter()
         .map(|(root, pkg)| (root.clone(), pkg.name.clone()))

@@ -574,7 +574,9 @@ fn test_raw_mfa_shows_raw_frames_bt_4821() {
         .assert()
         .failure()
         .stderr(contains("deep boom"))
-        .stderr(contains("[bt@deep_fail_test:testDeep/1]"))
+        .stderr(contains(
+            "[bt@cli_subprocess_fixture@test@deep_fail_test:testDeep/1]",
+        ))
         .stderr(contains("[beamtalk_test_case:run_test_method/5]"))
         .stderr(contains("--raw-mfa shows all").not());
 }
@@ -727,7 +729,9 @@ fn test_full_traces_is_a_deprecated_alias_for_raw_mfa_bt_4821() {
         .assert()
         .failure()
         .stderr(contains("`--full-traces` is deprecated; use `--raw-mfa`"))
-        .stderr(contains("[bt@deep_fail_test:testDeep/1]"));
+        .stderr(contains(
+            "[bt@cli_subprocess_fixture@test@deep_fail_test:testDeep/1]",
+        ));
 
     // The alias is hidden from help; the new flag is documented.
     cli_common::beamtalk()
