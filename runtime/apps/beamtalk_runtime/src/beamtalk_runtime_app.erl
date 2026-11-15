@@ -26,13 +26,10 @@ start(_StartType, _StartArgs) ->
     %% Initialize extension registry ETS tables
     beamtalk_extensions:init(),
 
-    %% Create class hierarchy ETS table at app startup so it's owned
+    %% Create the unified class metadata ETS table (hierarchy, module and
+    %% method-selector columns share one row) at app startup so it's owned
     %% by the application master (survives individual class process crashes).
-    beamtalk_class_registry:ensure_hierarchy_table(),
-
-    %% Create class module ETS table at app startup for the same
-    %% reason — owned by the application master, not a transient class process.
-    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_metadata:new(),
 
     %% Create pid reverse index ETS table at app startup so it's owned
     %% by the application master (survives individual class process crashes).
