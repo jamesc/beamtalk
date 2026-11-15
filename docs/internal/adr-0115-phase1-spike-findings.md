@@ -13,8 +13,9 @@ code — neither runs in CI):
   change; the proposed functions live inside the escript.
   `cd runtime && escript perf/bench_recv_type_spike.escript`
 - `crates/beamtalk-core/tests/bt3216_spike_probe.rs` — `#[ignore]`d reporting
-  probe measuring `TypeMap` receiver-span coverage across `stdlib/src`.
-  `cargo test -p beamtalk-core --test bt3216_spike_probe -- --ignored --nocapture`
+  probe measuring `TypeMap` receiver-span coverage across `stdlib/src`. It
+  asserted nothing and was deleted in BT-4886; the numbers below are the
+  record (recover the file from git history before that commit to re-run it).
 
 Timings below are from an unloaded dev container, reported as the range across
 three runs. They are order-of-magnitude evidence, not a regression baseline.

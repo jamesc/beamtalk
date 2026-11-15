@@ -37,7 +37,7 @@
 //! The runtime answers are `BUnit` cells:
 //! `stdlib/test/bt3947inline_block_loop_test.bt`.
 
-use super::{assert_compiles_through_erlc, codegen, erlc_available, verifier_report};
+use super::{assert_all_compile_through_erlc, codegen, erlc_available, verifier_report};
 use crate::core_erlang::fault::Fault;
 use std::sync::OnceLock;
 
@@ -244,6 +244,7 @@ fn inline_block_local_in_loop_corpus_has_no_bt3948_rejection() {
 fn every_accepted_inline_block_local_in_loop_corpus_cell_compiles() {
     let grid = grid();
     let erlc = erlc_available();
+    let mut rows = Vec::new();
     for &context in CONTEXTS {
         for (host, template) in HOSTS.iter().enumerate() {
             let methods: String = grid
@@ -258,10 +259,11 @@ fn every_accepted_inline_block_local_in_loop_corpus_cell_compiles() {
             let src = module(context, &methods);
             assert_eq!(verifier_report(&src, None), None, "{context:?} {template}");
             if erlc {
-                assert_compiles_through_erlc("test", &codegen(&src));
+                rows.push((format!("{context:?} {template}"), codegen(&src)));
             }
         }
     }
+    assert_all_compile_through_erlc(&rows);
 }
 
 /// The BT-3948 repro, as a corpus cell.

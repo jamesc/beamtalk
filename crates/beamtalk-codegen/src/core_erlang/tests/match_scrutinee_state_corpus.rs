@@ -23,7 +23,7 @@
 //! value-type and plain-object methods, and the REPL.
 
 use super::while_condition_binding_corpus::repl_report;
-use super::{assert_compiles_through_erlc, codegen};
+use super::{assert_all_compile_through_erlc, codegen};
 // Only the `#[cfg(debug_assertions)]` verifier test uses these (the verifier
 // itself is a debug-build check), so gate the imports the same way.
 #[cfg(debug_assertions)]
@@ -331,6 +331,7 @@ const INLINE_HEADERS: &[&str] = &[
 /// any seed that continues a `State` reads the newest one.
 #[test]
 fn inline_path_producer_matches_compile() {
+    let mut rows = Vec::new();
     for header in INLINE_HEADERS {
         for scrutinee in SCRUTINEES {
             for arms in ARMS {
@@ -341,11 +342,12 @@ fn inline_path_producer_matches_compile() {
                     let src = format!("{header}    t := 0\n    u := 0\n    {body}\n");
                     let out = codegen(&src);
                     check_seeds(&src, &out);
-                    assert_compiles_through_erlc("test", &out);
+                    rows.push((src, out));
                 }
             }
         }
     }
+    assert_all_compile_through_erlc(&rows);
 }
 
 /// BT-4206: the REPL (the inline path over the bindings map): a producer

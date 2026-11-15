@@ -28,7 +28,7 @@
 //! `CONDITIONALS`, `ARM_FRAMES`, `ARM_CONSTRUCTS`), compiled through the
 //! verifier in every position and method context.
 
-use super::{assert_compiles_through_erlc, codegen, erlc_available, verifier_report};
+use super::{assert_all_compile_through_erlc, codegen, erlc_available, verifier_report};
 use crate::core_erlang::fault::Fault;
 
 /// The BT-4263 repro table: a row name and a method body (after `t := 0`).
@@ -93,14 +93,16 @@ fn sources(body: &str) -> [String; 3] {
 
 #[test]
 fn every_repro_row_compiles_through_the_verifier_and_erlc_in_every_context() {
+    let mut rows = Vec::new();
     for (row, body) in ROWS {
-        for src in sources(body) {
+        for (i, src) in sources(body).into_iter().enumerate() {
             assert_eq!(verifier_report(&src, None), None, "{row}\n{src}");
             if erlc_available() {
-                assert_compiles_through_erlc("test", &codegen(&src));
+                rows.push((format!("{row} #{i}"), codegen(&src)));
             }
         }
     }
+    assert_all_compile_through_erlc(&rows);
 }
 
 /// The parameter that shadows the outer `t` never enters the threaded set: the

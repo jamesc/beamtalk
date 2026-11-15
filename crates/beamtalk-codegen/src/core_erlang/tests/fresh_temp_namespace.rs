@@ -43,7 +43,9 @@
 //! [`HAND_WRITTEN_CAPITALIZED`] audits the capitalized names the corpus emits
 //! (`State`, `StateAcc`, `Args`, `ClassSelf`, …).
 
-use super::{assert_compiles_through_erlc, codegen, corpus_files, repo_root};
+use super::{
+    assert_all_compile_through_erlc, assert_compiles_through_erlc, codegen, corpus_files, repo_root,
+};
 use crate::core_erlang::variable_context::{TEMP_MARKER, VariableContext, text_mentions_var};
 use std::collections::BTreeSet;
 
@@ -55,6 +57,7 @@ const SWEEP: std::ops::RangeInclusive<usize> = 1..=40;
 /// variable: the module compiles and the arm body returns the user binding.
 #[test]
 fn user_wildcard_name_beside_wildcard_is_distinct_in_pattern() {
+    let mut rows = Vec::new();
     for n in SWEEP {
         let user = format!("_Wildcard{n}");
         let src = format!(
@@ -71,14 +74,16 @@ fn user_wildcard_name_beside_wildcard_is_distinct_in_pattern() {
             text_mentions_var(&out, &core_user),
             "user `{user}` must stay bound (as `{core_user}`).\nCore:\n{out}"
         );
-        assert_compiles_through_erlc("test", &out);
+        rows.push((user, out));
     }
+    assert_all_compile_through_erlc(&rows);
 }
 
 /// A user `_WildcardN` bound before a match is not shadowed by a `_` in an
 /// arm's pattern: the arm's tuple pattern never binds the user's name.
 #[test]
 fn user_wildcard_name_outside_match_is_not_shadowed() {
+    let mut rows = Vec::new();
     for n in SWEEP {
         let user = format!("_Wildcard{n}");
         let src = format!(
@@ -90,8 +95,9 @@ fn user_wildcard_name_outside_match_is_not_shadowed() {
             !out.contains(&pattern),
             "`_` shadowed user `{user}` in an arm pattern.\nCore:\n{out}"
         );
-        assert_compiles_through_erlc("test", &out);
+        rows.push((user, out));
     }
+    assert_all_compile_through_erlc(&rows);
 }
 
 /// The disjointness argument, checked at both ends: every temp carries the
@@ -848,15 +854,20 @@ fn assert_spellings_stay_distinct(spellings: &[String]) {
 /// every other name.
 #[test]
 fn reachable_spellings_compile_through_erlc() {
+    let mut rows = Vec::new();
     for shape in SHAPES {
         let mut names = vec!["_Unit", "_BuilderState0"];
         if shape.starts_with("Actor") {
             names.extend(["state", "state1", "stateAcc", "stateAcc1"]);
         }
         for name in names {
-            assert_compiles_through_erlc("test", &codegen(&shape.replace("{n}", name)));
+            rows.push((
+                format!("{shape} / {name}"),
+                codegen(&shape.replace("{n}", name)),
+            ));
         }
     }
+    assert_all_compile_through_erlc(&rows);
 }
 
 /// The one reachable site, pinned by shape: the Tier 1 block body's discarded
