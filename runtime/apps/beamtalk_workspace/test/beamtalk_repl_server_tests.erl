@@ -1089,18 +1089,18 @@ tcp_clone_uniqueness_test(Port) ->
 %%% validate_actor_pid/1 tests
 
 validate_actor_pid_invalid_format_test() ->
-    ?assertEqual({error, invalid_pid}, beamtalk_repl_ops_actors:validate_actor_pid("not_a_pid")).
+    ?assertEqual({error, invalid_pid}, beamtalk_repl_params:validate_actor_pid("not_a_pid")).
 
 validate_actor_pid_unknown_actor_test() ->
     %% Valid PID format but not registered as an actor
     PidStr = pid_to_list(self()),
-    ?assertEqual({error, unknown_actor}, beamtalk_repl_ops_actors:validate_actor_pid(PidStr)).
+    ?assertEqual({error, unknown_actor}, beamtalk_repl_params:validate_actor_pid(PidStr)).
 
 %%% is_known_actor/1 tests
 
 is_known_actor_no_registry_test() ->
     %% When no registry is running, should return false
-    ?assertEqual(false, beamtalk_repl_ops_actors:is_known_actor(self())).
+    ?assertEqual(false, beamtalk_repl_params:is_known_actor(self())).
 
 %%% get_completions/1 tests
 

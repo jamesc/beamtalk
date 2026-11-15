@@ -89,13 +89,10 @@ make(Kind, Source, Message, Hint) ->
 Safely convert a binary to an existing atom, returning error instead of creating new atoms.
 """.
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
-safe_to_existing_atom(<<>>) ->
-    {error, badarg};
 safe_to_existing_atom(Bin) when is_binary(Bin) ->
-    try binary_to_existing_atom(Bin, utf8) of
-        Atom -> {ok, Atom}
-    catch
-        error:badarg -> {error, badarg}
+    case beamtalk_text:to_existing_atom(Bin) of
+        {ok, _} = Ok -> Ok;
+        error -> {error, badarg}
     end;
 safe_to_existing_atom(_) ->
     {error, badarg}.

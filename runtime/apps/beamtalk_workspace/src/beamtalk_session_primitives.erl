@@ -614,18 +614,15 @@ raise_name_type_error(Other) ->
 -spec to_existing_name_atom(term()) -> {ok, atom()} | error.
 to_existing_name_atom(Name) when is_atom(Name) ->
     {ok, Name};
-to_existing_name_atom(Name) when is_binary(Name) ->
-    try
-        {ok, binary_to_existing_atom(Name, utf8)}
-    catch
-        error:badarg -> error
-    end;
-to_existing_name_atom(Name) when is_list(Name) ->
-    try
-        {ok, binary_to_existing_atom(unicode:characters_to_binary(Name), utf8)}
-    catch
-        _:_ -> error
-    end;
+%% The empty name is the one text `beamtalk_text:to_existing_atom/1` rejects but a
+%% binding can legitimately be keyed by (the atom `''`, always interned): keep it
+%% resolvable so `bindings at: ''` still finds a binding written under it.
+to_existing_name_atom(<<>>) ->
+    {ok, ''};
+to_existing_name_atom([]) ->
+    {ok, ''};
+to_existing_name_atom(Name) when is_binary(Name); is_list(Name) ->
+    beamtalk_text:to_existing_atom(Name);
 to_existing_name_atom(Other) ->
     Err0 = beamtalk_error:new(type_error, 'BindingsView'),
     beamtalk_error:raise(
