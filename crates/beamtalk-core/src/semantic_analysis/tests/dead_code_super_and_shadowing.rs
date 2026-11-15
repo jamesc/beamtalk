@@ -424,7 +424,7 @@ fn test_super_in_class_scope_gives_error() {
 
 /// The cascade-on-`super` errors `analyse` reports for `src`.
 fn super_cascade_errors(src: &str) -> Vec<Diagnostic> {
-    analyse(&parse_module(src))
+    analyse(&parse_bt(src))
         .diagnostics
         .into_iter()
         .filter(|d| d.message.contains("cascade cannot be sent to `super`"))
@@ -477,7 +477,7 @@ fn separate_super_sends_and_other_cascades_are_not_errors() {
 fn super_value_errors(kind: &str, class_side: bool, body: &str) -> Vec<Diagnostic> {
     let side = if class_side { "class " } else { "" };
     let src = format!("{kind} subclass: Probe\n  {side}run => {body}");
-    analyse(&parse_module(&src))
+    analyse(&parse_bt(&src))
         .diagnostics
         .into_iter()
         .filter(|d| {
@@ -532,7 +532,7 @@ fn a_cast_to_super_is_an_error() {
             ] {
                 let side = if class_side { "class " } else { "" };
                 let src = format!("{kind} subclass: Probe\n  {side}run => {body}");
-                let errors: Vec<Diagnostic> = analyse(&parse_module(&src))
+                let errors: Vec<Diagnostic> = analyse(&parse_bt(&src))
                     .diagnostics
                     .into_iter()
                     .filter(|d| d.message.contains("cannot be sent to `super`"))
@@ -555,7 +555,7 @@ fn a_cast_to_super_is_an_error() {
     }
     // A synchronous `super` send stays clean.
     assert!(
-        analyse(&parse_module(
+        analyse(&parse_bt(
             "Actor subclass: Probe\n  run => super printString"
         ))
         .diagnostics
@@ -611,7 +611,7 @@ fn super_as_a_receiver_is_not_a_value_error() {
 fn super_outside_a_method_reports_only_the_scope_error() {
     // At module level the existing scope error stands alone; the position
     // error is not stacked on top of it.
-    let result = analyse(&parse_module("x := super"));
+    let result = analyse(&parse_bt("x := super"));
     let messages: Vec<_> = result
         .diagnostics
         .iter()

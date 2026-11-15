@@ -12,7 +12,7 @@ use std::fmt::Write as _;
 
 fn adr0131_diagnostics_with(src: &str, known_vars: &[&str]) -> Vec<Diagnostic> {
     let ctx = AnalysisContext::default().with_known_vars(known_vars);
-    analyse_full(&parse_module(src), ctx)
+    analyse_full(&parse_bt(src), ctx)
         .diagnostics
         .into_iter()
         .filter(|d| {
@@ -239,7 +239,7 @@ fn block_passed_to_a_shadowed_class_escapes_to_a_class_method() {
             "dep",
             "Object subclass: CvA\n  class onEvent: b => b value\n",
         ));
-    let diags = analyse_full(&parse_module(&src), ctx).diagnostics;
+    let diags = analyse_full(&parse_bt(&src), ctx).diagnostics;
     let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
     assert_eq!(s6.len(), 1, "{diags:?}");
     assert_eq!(
@@ -326,7 +326,7 @@ fn value_position_write_in_an_escaping_block_is_reported_once() {
         in_class("b := [CvA ap: (t := 1)]\nt"),
         in_value("b := [CvA ap: (t := 1)]\nt"),
     ] {
-        let all = analyse_full(&parse_module(&src), AnalysisContext::default()).diagnostics;
+        let all = analyse_full(&parse_bt(&src), AnalysisContext::default()).diagnostics;
         let errors: Vec<_> = all
             .iter()
             // (`in_value` has two classes in one module, an uncategorised error.)
@@ -660,7 +660,7 @@ fn adr0133_rejected_fixtures_report_the_escaping_assignment() {
     for name in names {
         let src =
             std::fs::read_to_string(root.join(&name)).unwrap_or_else(|e| panic!("{name}: {e}"));
-        let module = parse_module(&src);
+        let module = parse_bt(&src);
         let diags = adr0131_diagnostics(&src);
         let class = &module.classes[0];
         let mut probes = 0;
@@ -1926,7 +1926,7 @@ fn field_write_in_a_value_type_is_still_a_hard_error() {
     // A value type cannot write `self.n :=` (ADR 0042), so codegen never sees
     // a field-write value site in one.
     let src = "Value subclass: Vt\n  field: n = 0\n\n  probe =>\n    t := 0\n    self.n := (#(1, 2) collect: [:x | t := t + x]) size\n    t\n";
-    let diags = analyse_full(&parse_module(src), AnalysisContext::default()).diagnostics;
+    let diags = analyse_full(&parse_bt(src), AnalysisContext::default()).diagnostics;
     assert!(
         diags
             .iter()
@@ -2853,7 +2853,7 @@ fn section6_field_stored_literal_is_an_error_in_every_context() {
     let body = "self.n := [t := t + 1]\nnil";
     assert_eq!(section6_errors(&in_class(body)), 1);
     for src in [in_value(body), in_actor(body)] {
-        let all = analyse_full(&parse_module(&src), AnalysisContext::default()).diagnostics;
+        let all = analyse_full(&parse_bt(&src), AnalysisContext::default()).diagnostics;
         let reported = all.iter().filter(|d| {
             d.severity == Severity::Error
                 && d.message.contains("cannot mutate captured variable 't'")
@@ -4010,7 +4010,7 @@ fn a_tier2_call_with_a_producer_argument_in_an_arm_is_rejected_in_methods() {
 /// uncategorised error.)
 fn analysis_errors(src: &str, known_vars: &[&str]) -> Vec<Diagnostic> {
     let ctx = AnalysisContext::default().with_known_vars(known_vars);
-    analyse_full(&parse_module(src), ctx)
+    analyse_full(&parse_bt(src), ctx)
         .diagnostics
         .into_iter()
         .filter(|d| d.severity == Severity::Error && d.category.is_some())
@@ -4045,7 +4045,7 @@ fn a_value_position_local_assignment_is_accepted_in_every_context() {
 fn a_match_arm_write_to_an_outer_local_is_reported_once() {
     // (A subject-position `match:` is not a producer site: one error per write.)
     let src = in_class("x := (3 match: [3 -> t := 7; _ -> 0]) match: [_ -> 1]\nt");
-    let diags = analyse_full(&parse_module(&src), AnalysisContext::default()).diagnostics;
+    let diags = analyse_full(&parse_bt(&src), AnalysisContext::default()).diagnostics;
     let at_arm: Vec<_> = diags
         .iter()
         .filter(|d| {

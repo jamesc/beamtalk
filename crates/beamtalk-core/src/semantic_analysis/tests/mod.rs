@@ -34,8 +34,9 @@
 //! - [`typed_params_knowledge_scope_and_cross_file`] — typed block
 //!   parameters, `KnowledgeScope`, and cross-file extension visibility
 
-use super::test_helpers::{parse_module, test_span};
+use super::test_helpers::test_span;
 use super::*;
+use crate::test_helpers::test_support::parse_bt;
 
 use crate::ast::{
     Block, BlockParameter, ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword,
@@ -50,7 +51,7 @@ use crate::test_helpers::test_support::bare;
 /// The classes `src` declares, as `package` exports them: the cross-file
 /// declarations a build hands `analyse_full` for a dependency (BT-4283).
 fn declared_by(package: &str, src: &str) -> Vec<class_hierarchy::ClassInfo> {
-    let mut infos = ClassHierarchy::extract_class_infos(&parse_module(src));
+    let mut infos = ClassHierarchy::extract_class_infos(&parse_bt(src));
     ClassHierarchy::stamp_package_on_infos(&mut infos, package);
     infos
 }
