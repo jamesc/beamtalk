@@ -89,6 +89,7 @@ use beamtalk_core::ast::{
     BinarySegment, Expression, Identifier, MessageSelector, MethodDefinition, Module, Pattern,
     TypeAnnotation,
 };
+use beamtalk_core::ast_walker::{CursorBound, children_in_source_order};
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use beamtalk_core::source_analysis::{Lexer, Span, Token, TokenKind};
 use camino::Utf8PathBuf;
@@ -1494,8 +1495,7 @@ impl SimpleLanguageService {
         offset: ByteOffset,
     ) -> Option<(Identifier, Span, IdentifierContext)> {
         let offset_val = offset.get();
-        let span = expr.span();
-        if offset_val < span.start() || offset_val >= span.end() {
+        if !CursorBound::Within.contains(expr.span(), offset_val) {
             return None;
         }
 
@@ -1514,54 +1514,21 @@ impl SimpleLanguageService {
                     None
                 }
             }
-            Expression::Assignment { target, value, .. } => {
-                Self::find_identifier_in_expr(target, offset)
-                    .or_else(|| Self::find_identifier_in_expr(value, offset))
+            Expression::FieldAccess { field, .. }
+                if offset_val >= field.span.start() && offset_val < field.span.end() =>
+            {
+                Some((field.clone(), field.span, IdentifierContext::Expression))
             }
-            Expression::MessageSend {
-                receiver,
-                arguments,
-                ..
-            } => Self::find_identifier_in_expr(receiver, offset).or_else(|| {
-                arguments
-                    .iter()
-                    .find_map(|arg| Self::find_identifier_in_expr(arg, offset))
-            }),
-            Expression::Block(block) => block
-                .body
-                .iter()
-                .find_map(|stmt| Self::find_identifier_in_expr(&stmt.expression, offset)),
-            Expression::Return { value, .. } => Self::find_identifier_in_expr(value, offset),
-            Expression::Parenthesized { expression, .. } => {
-                Self::find_identifier_in_expr(expression, offset)
-            }
-            Expression::FieldAccess {
-                receiver, field, ..
-            } => {
-                if offset_val >= field.span.start() && offset_val < field.span.end() {
-                    Some((field.clone(), field.span, IdentifierContext::Expression))
-                } else {
-                    Self::find_identifier_in_expr(receiver, offset)
-                }
-            }
-            Expression::Cascade {
-                receiver, messages, ..
-            } => Self::find_identifier_in_expr(receiver, offset).or_else(|| {
-                messages.iter().find_map(|msg| {
-                    msg.arguments
-                        .iter()
-                        .find_map(|arg| Self::find_identifier_in_expr(arg, offset))
-                })
-            }),
+            // A match arm also holds a pattern, which is not an expression and
+            // so is not among `children_in_source_order`: walk pattern, guard,
+            // and body so that goto-definition on a class name inside a
+            // constructor pattern (`Result ok: v`) or inside a `when:` guard
+            // navigates to the class declaration. Keeps parity with
+            // `references_provider::collect_class_refs` which already walks all
+            // three.
             Expression::Match { value, arms, .. } => Self::find_identifier_in_expr(value, offset)
                 .or_else(|| {
                     arms.iter().find_map(|arm| {
-                        // Walk pattern, guard, and body so that
-                        // goto-definition on a class name inside a constructor
-                        // pattern (`Result ok: v`) or inside a `when:` guard
-                        // navigates to the class declaration. Keeps parity with
-                        // `references_provider::collect_class_refs` which
-                        // already walks all three.
                         Self::find_identifier_in_pattern(&arm.pattern, offset_val)
                             .or_else(|| {
                                 arm.guard
@@ -1571,22 +1538,11 @@ impl SimpleLanguageService {
                             .or_else(|| Self::find_identifier_in_expr(&arm.body, offset))
                     })
                 }),
-            Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
-                if let beamtalk_core::ast::StringSegment::Interpolation(expr) = seg {
-                    Self::find_identifier_in_expr(expr, offset)
-                } else {
-                    None
-                }
-            }),
-            Expression::BinaryConstruction { segments, .. } => segments
-                .iter()
-                .flat_map(BinarySegment::sub_expressions)
-                .find_map(|expr| Self::find_identifier_in_expr(expr, offset)),
-            Expression::ArrayLiteral { elements, .. }
-            | Expression::TupleLiteral { elements, .. } => elements
-                .iter()
-                .find_map(|e| Self::find_identifier_in_expr(e, offset)),
-            _ => None,
+            // Everything else is a container: descend into whichever child
+            // holds the offset.
+            _ => children_in_source_order(expr)
+                .into_iter()
+                .find_map(|child| Self::find_identifier_in_expr(child, offset)),
         }
     }
 

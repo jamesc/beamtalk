@@ -28,7 +28,8 @@
 use crate::queries::cursor_context::find_class_context;
 use crate::{Location, ProjectIndex};
 use beamtalk_core::ast::normalize::canonical_operand;
-use beamtalk_core::ast::{BinarySegment, Expression, MessageSelector, Module};
+use beamtalk_core::ast::{Expression, MessageSelector, Module};
+use beamtalk_core::ast_walker::{CursorBound, children_in_source_order};
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use beamtalk_core::semantic_analysis::{ClassHierarchy, InferredType, infer_types};
 use beamtalk_core::source_analysis::Span;
@@ -630,8 +631,7 @@ pub fn find_selector_in_expr(expr: &Expression, offset: u32) -> Option<(EcoStrin
 /// Unlike [`find_selector_in_expr`], this API keeps receiver metadata so
 /// callers can resolve class-side/instance-side selector targets.
 pub fn find_selector_lookup_in_expr(expr: &Expression, offset: u32) -> Option<SelectorLookup> {
-    let span = expr.span();
-    if offset < span.start() || offset >= span.end() {
+    if !CursorBound::Within.contains(expr.span(), offset) {
         return None;
     }
 
@@ -646,63 +646,9 @@ pub fn find_selector_lookup_in_expr(expr: &Expression, offset: u32) -> Option<Se
         Expression::Cascade {
             receiver, messages, ..
         } => find_selector_lookup_in_cascade(receiver, messages, offset),
-        Expression::Assignment { target, value, .. } => {
-            find_selector_lookup_in_expr(target, offset)
-                .or_else(|| find_selector_lookup_in_expr(value, offset))
-        }
-        Expression::Block(block) => block
-            .body
-            .iter()
-            .find_map(|s| find_selector_lookup_in_expr(&s.expression, offset)),
-        Expression::Return { value, .. } => find_selector_lookup_in_expr(value, offset),
-        Expression::Parenthesized { expression, .. } => {
-            find_selector_lookup_in_expr(expression, offset)
-        }
-        Expression::FieldAccess { receiver, .. } => find_selector_lookup_in_expr(receiver, offset),
-        Expression::Match { value, arms, .. } => {
-            if let Some(result) = find_selector_lookup_in_expr(value, offset) {
-                return Some(result);
-            }
-            for arm in arms {
-                if let Some(guard) = &arm.guard
-                    && let Some(result) = find_selector_lookup_in_expr(guard, offset)
-                {
-                    return Some(result);
-                }
-                if let Some(result) = find_selector_lookup_in_expr(&arm.body, offset) {
-                    return Some(result);
-                }
-            }
-            None
-        }
-        Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
-            if let beamtalk_core::ast::StringSegment::Interpolation(expr) = seg {
-                find_selector_lookup_in_expr(expr, offset)
-            } else {
-                None
-            }
-        }),
-        Expression::BinaryConstruction { segments, .. } => segments
-            .iter()
-            .flat_map(BinarySegment::sub_expressions)
-            .find_map(|expr| find_selector_lookup_in_expr(expr, offset)),
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            elements
-                .iter()
-                .find_map(|e| find_selector_lookup_in_expr(e, offset))
-        }
-        Expression::ListLiteral { elements, tail, .. } => elements
-            .iter()
-            .find_map(|e| find_selector_lookup_in_expr(e, offset))
-            .or_else(|| {
-                tail.as_ref()
-                    .and_then(|t| find_selector_lookup_in_expr(t, offset))
-            }),
-        Expression::MapLiteral { pairs, .. } => pairs.iter().find_map(|pair| {
-            find_selector_lookup_in_expr(&pair.key, offset)
-                .or_else(|| find_selector_lookup_in_expr(&pair.value, offset))
-        }),
-        _ => None,
+        _ => children_in_source_order(expr)
+            .into_iter()
+            .find_map(|child| find_selector_lookup_in_expr(child, offset)),
     }
 }
 
@@ -1023,97 +969,25 @@ pub fn check_ffi_call(module: &Module, offset: u32) -> Option<FfiCallInfo> {
 /// Recursively search for an FFI call pattern at the given offset.
 fn find_ffi_call_in_expr(expr: &Expression, offset: u32) -> Option<FfiCallInfo> {
     let span = expr.span();
-    if offset < span.start() || offset >= span.end() {
+    if !CursorBound::Within.contains(span, offset) {
         return None;
     }
 
-    match expr {
-        Expression::MessageSend {
-            receiver,
-            selector,
-            arguments,
-            ..
-        } => {
-            // First check arguments and receiver recursively
-            for arg in arguments {
-                if let Some(info) = find_ffi_call_in_expr(arg, offset) {
-                    return Some(info);
-                }
-            }
-            if let Some(info) = find_ffi_call_in_expr(receiver, offset) {
-                return Some(info);
-            }
-
-            // Check if cursor is on the FFI selector or module name
-            check_ffi_message_send(receiver, selector, arguments, span, offset)
-        }
-        Expression::Assignment { target, value, .. } => {
-            find_ffi_call_in_expr(target, offset).or_else(|| find_ffi_call_in_expr(value, offset))
-        }
-        Expression::Block(block) => block
-            .body
-            .iter()
-            .find_map(|s| find_ffi_call_in_expr(&s.expression, offset)),
-        Expression::Return { value, .. } => find_ffi_call_in_expr(value, offset),
-        Expression::Parenthesized { expression, .. } => find_ffi_call_in_expr(expression, offset),
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            if let Some(info) = find_ffi_call_in_expr(receiver, offset) {
-                return Some(info);
-            }
-            for msg in messages {
-                for arg in &msg.arguments {
-                    if let Some(info) = find_ffi_call_in_expr(arg, offset) {
-                        return Some(info);
-                    }
-                }
-            }
-            None
-        }
-        Expression::FieldAccess { receiver, .. } => find_ffi_call_in_expr(receiver, offset),
-        Expression::Match { value, arms, .. } => {
-            if let Some(info) = find_ffi_call_in_expr(value, offset) {
-                return Some(info);
-            }
-            for arm in arms {
-                if let Some(guard) = &arm.guard
-                    && let Some(info) = find_ffi_call_in_expr(guard, offset)
-                {
-                    return Some(info);
-                }
-                if let Some(info) = find_ffi_call_in_expr(&arm.body, offset) {
-                    return Some(info);
-                }
-            }
-            None
-        }
-        Expression::StringInterpolation { segments, .. } => segments.iter().find_map(|seg| {
-            if let beamtalk_core::ast::StringSegment::Interpolation(expr) = seg {
-                find_ffi_call_in_expr(expr, offset)
-            } else {
-                None
-            }
-        }),
-        Expression::BinaryConstruction { segments, .. } => segments
-            .iter()
-            .flat_map(BinarySegment::sub_expressions)
-            .find_map(|expr| find_ffi_call_in_expr(expr, offset)),
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            elements
-                .iter()
-                .find_map(|e| find_ffi_call_in_expr(e, offset))
-        }
-        Expression::ListLiteral { elements, tail, .. } => elements
-            .iter()
-            .find_map(|e| find_ffi_call_in_expr(e, offset))
-            .or_else(|| tail.as_ref().and_then(|t| find_ffi_call_in_expr(t, offset))),
-        Expression::MapLiteral { pairs, .. } => pairs.iter().find_map(|pair| {
-            find_ffi_call_in_expr(&pair.key, offset)
-                .or_else(|| find_ffi_call_in_expr(&pair.value, offset))
-        }),
-        _ => None,
-    }
+    // Look inside the receiver and arguments first, so a nested FFI call wins;
+    // then, for a send, check whether the cursor is on this send's own FFI
+    // selector or module name.
+    children_in_source_order(expr)
+        .into_iter()
+        .find_map(|child| find_ffi_call_in_expr(child, offset))
+        .or_else(|| match expr {
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                ..
+            } => check_ffi_message_send(receiver, selector, arguments, span, offset),
+            _ => None,
+        })
 }
 
 /// Check if a `MessageSend` is an FFI call with the cursor on the selector or module name.
@@ -1200,6 +1074,25 @@ mod tests {
     use super::*;
     use crate::queries::parse_source;
     use beamtalk_core::semantic_analysis::ClassHierarchy;
+
+    #[test]
+    fn selector_lookup_cursor_at_end_of_selector_is_not_on_it() {
+        // Go-to-definition uses the `Within` rule: the offset just past the last
+        // character of the send is not on the selector; its last character is.
+        let module = parse_source("x size\ny := 1");
+        let send = &module.expressions[0].expression;
+        assert!(find_selector_lookup_in_expr(send, 5).is_some());
+        assert!(find_selector_lookup_in_expr(send, 6).is_none());
+    }
+
+    #[test]
+    fn selector_lookup_descends_into_list_literal_elements() {
+        let module = parse_source("#(1, x size)");
+        let offset = u32::try_from("#(1, x ".len()).unwrap();
+        let lookup = find_selector_lookup_in_expr(&module.expressions[0].expression, offset)
+            .expect("`size` inside a list literal");
+        assert_eq!(lookup.selector_name.as_str(), "size");
+    }
 
     #[test]
     fn find_definition_variable_assignment() {

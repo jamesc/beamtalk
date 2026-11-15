@@ -48,9 +48,10 @@
 //! contribute results. A completely unparseable source returns an empty list.
 //! Callers treat "no accesses found" identically to "could not parse".
 
-use beamtalk_core::ast::{BinarySegment, Expression, Pattern, StringSegment};
-use beamtalk_core::ast_walker::walk_pattern;
+use beamtalk_core::ast::Expression;
+use beamtalk_core::ast_walker::walk_expression;
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
+use std::collections::HashSet;
 
 /// Number of newlines in the synthetic class header that wraps the input.
 /// Used to translate line numbers from wrapped-source to input-source space.
@@ -128,61 +129,15 @@ fn collect_field_lines(method_source: &str, field_name: &str, kind: AccessKind) 
         .collect()
 }
 
-/// Collect a stand-alone `FieldAccess` (i.e. one that is NOT an assignment
-/// target). Outside an assignment target a `self.x` access is a read; it is
-/// never a write (writes only come from the `Assignment` arm). The receiver is
-/// walked so a nested access in the receiver is still found.
-fn collect_field_access(
-    receiver: &Expression,
-    field: &beamtalk_core::ast::Identifier,
-    span: Span,
-    field_name: &str,
-    kind: AccessKind,
-    source: &str,
-    lines: &mut Vec<u32>,
-) {
-    if kind == AccessKind::Read && field.name == field_name && receiver.is_self() {
-        lines.push(field_access_line(field.span, span, source));
-    }
-    collect_access_lines(receiver, field_name, kind, source, lines);
-}
-
-/// Collect an `Assignment`. The target is a write only — never also a read
-/// (Pharo precedent). When collecting writes, a target that is a `FieldAccess`
-/// with the matching field name is reported. The target's receiver is still
-/// walked (so a read embedded in the receiver is not lost), but the target
-/// field itself is never reported as a read — this is the rule that keeps
-/// `self.x := ...` from double-counting `x` as both a read and a write. Reads on
-/// the right-hand side count normally.
-fn collect_assignment(
-    target: &Expression,
-    value: &Expression,
-    field_name: &str,
-    kind: AccessKind,
-    source: &str,
-    lines: &mut Vec<u32>,
-) {
-    if let Expression::FieldAccess {
-        receiver,
-        field,
-        span,
-    } = target
-    {
-        if kind == AccessKind::Write && field.name == field_name && receiver.is_self() {
-            lines.push(field_access_line(field.span, *span, source));
-        }
-        // Walk the target's receiver only — NOT the target field as a read.
-        collect_access_lines(receiver, field_name, kind, source, lines);
-    } else {
-        // Non-field target (a local identifier or destructure): it cannot be an
-        // field write, so walk it normally.
-        collect_access_lines(target, field_name, kind, source, lines);
-    }
-    collect_access_lines(value, field_name, kind, source, lines);
-}
-
-/// Recursively collect line numbers of field accesses of `kind`
-/// matching `field_name`.
+/// Collect the line numbers of field accesses of `kind` matching `field_name`
+/// in `expr`.
+///
+/// A closure over [`walk_expression`]: an `Assignment` is visited before its
+/// target, so it is where a write is reported and where its target `FieldAccess`
+/// is marked as *not a read* — `self.x := ...` is a write only, never also a
+/// read of `x` (Pharo precedent). The target's receiver and the assigned value
+/// are still walked, so a read embedded in either is found. Any other
+/// `FieldAccess` is a read.
 fn collect_access_lines(
     expr: &Expression,
     field_name: &str,
@@ -190,116 +145,33 @@ fn collect_access_lines(
     source: &str,
     lines: &mut Vec<u32>,
 ) {
-    match expr {
+    let mut write_targets: HashSet<*const Expression> = HashSet::new();
+    walk_expression(expr, &mut |e| match e {
+        Expression::Assignment { target, .. } => {
+            if let Expression::FieldAccess {
+                receiver,
+                field,
+                span,
+            } = &**target
+            {
+                write_targets.insert(std::ptr::from_ref::<Expression>(target));
+                if kind == AccessKind::Write && field.name == field_name && receiver.is_self() {
+                    lines.push(field_access_line(field.span, *span, source));
+                }
+            }
+        }
         Expression::FieldAccess {
             receiver,
             field,
             span,
-        } => collect_field_access(receiver, field, *span, field_name, kind, source, lines),
-        Expression::Assignment { target, value, .. } => {
-            collect_assignment(target, value, field_name, kind, source, lines);
+        } if kind == AccessKind::Read
+            && !write_targets.contains(&std::ptr::from_ref(e))
+            && field.name == field_name
+            && receiver.is_self() =>
+        {
+            lines.push(field_access_line(field.span, *span, source));
         }
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            collect_access_lines(receiver, field_name, kind, source, lines);
-            for arg in arguments {
-                collect_access_lines(arg, field_name, kind, source, lines);
-            }
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            collect_access_lines(receiver, field_name, kind, source, lines);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    collect_access_lines(arg, field_name, kind, source, lines);
-                }
-            }
-        }
-        Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
-            collect_access_lines(value, field_name, kind, source, lines);
-        }
-        Expression::Block(block) => {
-            for stmt in &block.body {
-                collect_access_lines(&stmt.expression, field_name, kind, source, lines);
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            collect_access_lines(expression, field_name, kind, source, lines);
-        }
-        Expression::Match { value, arms, .. } => {
-            collect_access_lines(value, field_name, kind, source, lines);
-            for arm in arms {
-                collect_pattern_access_lines(&arm.pattern, field_name, kind, source, lines);
-                if let Some(guard) = &arm.guard {
-                    collect_access_lines(guard, field_name, kind, source, lines);
-                }
-                collect_access_lines(&arm.body, field_name, kind, source, lines);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for segment in segments {
-                if let StringSegment::Interpolation(inner) = segment {
-                    collect_access_lines(inner, field_name, kind, source, lines);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                collect_access_lines(inner, field_name, kind, source, lines);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for element in elements {
-                collect_access_lines(element, field_name, kind, source, lines);
-            }
-            if let Some(tail_expr) = tail {
-                collect_access_lines(tail_expr, field_name, kind, source, lines);
-            }
-        }
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for element in elements {
-                collect_access_lines(element, field_name, kind, source, lines);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                collect_access_lines(&pair.key, field_name, kind, source, lines);
-                collect_access_lines(&pair.value, field_name, kind, source, lines);
-            }
-        }
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::ClassReference { .. }
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. }
-        | Expression::Error { .. } => {}
-    }
-}
-
-/// Recursively collect line numbers of field accesses inside a
-/// [`Pattern`].
-///
-/// Patterns are name-binding/literal-matching constructs and carry no field
-/// accesses today — the only expression slot in the [`Pattern`] enum is a
-/// `BinarySegment::size`, which the parser restricts to an integer literal or a
-/// bare identifier. The walker is defensive (mirroring `senders_query`): it
-/// traverses container patterns and the binary-segment size expression so that
-/// loosening the parser later does not silently regress these queries.
-fn collect_pattern_access_lines(
-    pattern: &Pattern,
-    field_name: &str,
-    kind: AccessKind,
-    source: &str,
-    lines: &mut Vec<u32>,
-) {
-    walk_pattern(pattern, &mut |expr| {
-        collect_access_lines(expr, field_name, kind, source, lines);
+        _ => {}
     });
 }
 
