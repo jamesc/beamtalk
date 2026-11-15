@@ -30,7 +30,7 @@ use ecow::EcoString;
 
 use crate::ast::{Identifier, TypeAnnotation};
 use crate::semantic_analysis::string_utils::{
-    is_symbol_singleton_name, split_generic_base, split_top_level,
+    is_symbol_singleton_name, split_generic_base, split_top_level, union_members,
 };
 use crate::semantic_analysis::type_checker::InferredType;
 use crate::source_analysis::Span;
@@ -156,7 +156,7 @@ impl DeclaredType {
 
         // Split on top-level `|` first (respecting parens), matching
         // `resolve_type_string`'s union-first ordering.
-        let union_parts = split_top_level(trimmed, '|');
+        let union_parts = union_members(trimmed);
         if union_parts.len() > 1 {
             return DeclaredType::Union(union_parts.into_iter().map(DeclaredType::parse).collect());
         }
