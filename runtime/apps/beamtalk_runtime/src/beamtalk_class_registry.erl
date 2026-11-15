@@ -641,7 +641,7 @@ Returns false if the class is not in the hierarchy table (safe during bootstrap)
 Used by beamtalk_exception_handler for hierarchy-aware matching, and (via
 `beamtalk_class_derived_cache:inherits_from/2`) by `isKindOf:`.
 
-Walked with `beamtalk_hierarchy:walk_ancestors/3`, bounded by
+Walked with `beamtalk_hierarchy:walk_or_warn/4`, bounded by
 `?MAX_HIERARCHY_DEPTH` like every other ancestor walk: a superclass cycle in
 the metadata answers `false` (with a warning) rather than looping forever on
 a hot dispatch path.

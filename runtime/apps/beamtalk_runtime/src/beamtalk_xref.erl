@@ -662,7 +662,7 @@ drop every subclass-inherited or ancestor-narrowed dependent).
 Composed entirely from already-shipped hierarchy primitives — no new
 traversal: `beamtalk_class_registry:all_subclasses/1`'s existing transitive
 `direct_subclasses/1` closure for the descendant half, and
-`beamtalk_hierarchy:walk_ancestors/3` (the same generic
+`beamtalk_hierarchy:walk_or_warn/4` (the same generic
 depth-guarded superclass-chain walker `beamtalk_class_dispatch:
 find_class_side_method/3` already uses) over `beamtalk_class_metadata:
 lookup_superclass/1` reads for the ancestor half — pure ETS, no
@@ -687,7 +687,7 @@ hierarchy_related_classes(ChangedClass) ->
 
 %% Every strict ancestor of `ClassName` (order not significant — set
 %% membership is all `hierarchy_related_classes/1` needs). A thin
-%% `beamtalk_hierarchy:walk_ancestors/3` wrapper over
+%% `beamtalk_hierarchy:walk_or_warn/4` wrapper over
 %% `beamtalk_class_metadata:lookup_superclass/1`, riding the accumulator
 %% inside the walked node per the walker's own documented pattern (see e.g.
 %% `beamtalk_behaviour_intrinsics:walk_hierarchy/3`).

@@ -1934,7 +1934,7 @@ reachable via an actual hierarchy cycle or a legitimately
 `?MAX_HIERARCHY_DEPTH`-level-deep hierarchy.
 
 The walk itself (depth guard, cycle warning, advance-to-superclass)
-is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the
+is `beamtalk_hierarchy:walk_or_warn/4`; this function supplies only the
 per-ancestor registry lookup and threads Acc through the walk. Since
 `walk_ancestors/3` only threads a bare node id between steps (not a
 separate accumulator), Acc rides along inside the node as `{ClassName, Acc}`.
