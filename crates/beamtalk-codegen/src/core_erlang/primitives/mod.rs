@@ -329,6 +329,17 @@ fn owned_params(params: &[&str]) -> Vec<String> {
     params.iter().map(|p| (*p).to_string()).collect()
 }
 
+/// Shared report for the table drivers: panics listing every failed row.
+#[cfg(test)]
+fn assert_no_row_failures(failures: &[String]) {
+    assert!(
+        failures.is_empty(),
+        "{} row(s) failed:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
 /// Table driver (BT-4875): each row is `(name, selector, params, expected)`
 /// and asserts `gen(selector, params)` renders exactly `expected`. `name` is
 /// the former one-assert test's name, so a failing row is as easy to find as
@@ -344,12 +355,7 @@ pub(crate) fn assert_bif_table(generate: BifGen, rows: &[(&str, &str, &[&str], &
             })
         })
         .collect();
-    assert!(
-        failures.is_empty(),
-        "{} row(s) failed:\n{}",
-        failures.len(),
-        failures.join("\n")
-    );
+    assert_no_row_failures(&failures);
 }
 
 /// Table driver for selectors the generator must decline (`None`):
@@ -365,12 +371,7 @@ pub(crate) fn assert_bif_none_table(generate: BifGen, rows: &[(&str, &str, &[&st
             })
         })
         .collect();
-    assert!(
-        failures.is_empty(),
-        "{} row(s) failed:\n{}",
-        failures.len(),
-        failures.join("\n")
-    );
+    assert_no_row_failures(&failures);
 }
 
 /// Like [`assert_bif_table`] for [`generate_primitive_bif`], which also
@@ -380,18 +381,17 @@ pub(crate) fn assert_primitive_bif_table(rows: &[(&str, &str, &str, &[&str], &st
     let failures: Vec<String> = rows
         .iter()
         .filter_map(|(name, class, selector, params, expected)| {
-            let actual = doc_to_string(generate_primitive_bif(class, selector, &owned_params(params)));
+            let actual = doc_to_string(generate_primitive_bif(
+                class,
+                selector,
+                &owned_params(params),
+            ));
             (actual.as_deref() != Some(*expected)).then(|| {
                 format!("[{name}] {class}>>{selector} {params:?}\n  expected: {expected:?}\n  actual:   {actual:?}")
             })
         })
         .collect();
-    assert!(
-        failures.is_empty(),
-        "{} row(s) failed:\n{}",
-        failures.len(),
-        failures.join("\n")
-    );
+    assert_no_row_failures(&failures);
 }
 
 /// Like [`assert_bif_none_table`] for [`generate_primitive_bif`]:
@@ -413,12 +413,7 @@ pub(crate) fn assert_primitive_bif_none_table(rows: &[(&str, &str, &str, &[&str]
             })
         })
         .collect();
-    assert!(
-        failures.is_empty(),
-        "{} row(s) failed:\n{}",
-        failures.len(),
-        failures.join("\n")
-    );
+    assert_no_row_failures(&failures);
 }
 
 #[cfg(test)]
