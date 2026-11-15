@@ -139,13 +139,41 @@ pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
     scope: ScopeKind,
 ) -> Vec<VerifyError> {
     verify_in_scope(
-        &backfill_opaque_version_gaps(
-            ir,
-            FrameId::ROOT,
-            &[VersionPrefix::State, VersionPrefix::SelfVt],
-        ),
+        &backfill_opaque_version_gaps(ir, FrameId::ROOT, opaque_gap_families(scope)),
         scope,
     )
+}
+
+/// The version families an opaque statement may still advance invisibly in a
+/// method body of `scope` — what [`verify_body_with_opaque_version_gaps`]
+/// backfills (BT-4926).
+///
+/// Measured over the full corpus (stdlib, `bootstrap-test`, examples, the
+/// REPL protocol cases, the codegen/package-compiler/CLI test suites, the
+/// proptest and agreement corpora), with the backfill instrumented to log every
+/// gap it closed:
+///
+/// - [`ScopeKind::ClassMethod`] produced **no** gap in any of ~3000 verified
+///   bodies once BT-4919 made field writes real `Bind`s, so it backfills
+///   nothing: an unexplained `State` version bump in a class-side method body
+///   is a [`VerifyError::UnboundVersion`], not a gap.
+/// - [`ScopeKind::Instance`] still has gaps: a conditional/loop with state
+///   mutations (`_CfTuple`/`_SD…` dispatch) and Tier 2 helper calls mint
+///   `State{N}` inside one opaque `Statement` (no `Bind` node for that step).
+/// - [`ScopeKind::ValueType`] still has gaps: the legacy `*_open` let-chain
+///   builders (BT-4889) mint `Self{N}` inside opaque `Statement`s, and the
+///   `ThreadedResult` unpack after a mutating conditional rebinds `Self{N}`
+///   textually.
+/// - [`ScopeKind::Repl`] still has gaps: an input's prelude is verified as a
+///   slice that starts at a `State` version an earlier opaque statement
+///   already minted.
+fn opaque_gap_families(scope: ScopeKind) -> &'static [VersionPrefix] {
+    match scope {
+        ScopeKind::ClassMethod => &[],
+        ScopeKind::Instance | ScopeKind::ValueType | ScopeKind::Repl => {
+            &[VersionPrefix::State, VersionPrefix::SelfVt]
+        }
+    }
 }
 
 /// The fixture-building half of [`verify_body_with_opaque_version_gaps`]:

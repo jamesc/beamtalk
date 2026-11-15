@@ -638,11 +638,11 @@ impl CoreErlangGenerator {
         let Some(frame) = self.closure_frame else {
             return self.threaded_prelude_doc(prelude);
         };
-        let body = threaded_ir::backfill_opaque_version_gaps(
-            prelude,
-            frame,
-            &[threaded_ir::VersionPrefix::State],
-        );
+        // BT-4926: no backfill. A plain closure body's producers lower every
+        // version step as a real `Bind`/`LocalRebind` (measured: 0 gaps in
+        // ~15000 verified closure preludes), so a `State` version bump
+        // without a `Bind` here is a verifier error, not a gap.
+        let body = prelude.to_vec();
         let wrapper = [ThreadedStmt::MethodBody {
             frame,
             threads: Vec::new(),
