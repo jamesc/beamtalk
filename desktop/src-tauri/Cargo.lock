@@ -309,7 +309,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "beamtalk-home"
+name = "beamtalk-env"
 version = "0.5.0"
 dependencies = [
  "dirs 7.0.0",
@@ -319,7 +319,7 @@ dependencies = [
 name = "beamtalk-workspace"
 version = "0.5.0"
 dependencies = [
- "beamtalk-home",
+ "beamtalk-env",
  "libc",
  "miette",
  "sha2 0.11.0",

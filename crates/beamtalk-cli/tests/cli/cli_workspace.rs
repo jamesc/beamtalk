@@ -5,7 +5,7 @@
 //!
 //! `workspace create` (without `--background`) and a bare `workspace list`
 //! success path both write real state under the machine's `~/.beamtalk`
-//! directory. `beamtalk_home`'s `BEAMTALK_HOME` override now
+//! directory. `beamtalk_env`'s `BEAMTALK_HOME` override now
 //! exists, but redirecting these subprocess tests through it needs a
 //! serialization strategy shared with every other non-`#[serial]` test that
 //! touches the real directory, so this file still sticks to
