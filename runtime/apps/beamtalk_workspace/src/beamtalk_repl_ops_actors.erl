@@ -17,17 +17,7 @@ wrapper that encodes the term result via `beamtalk_repl_ops:encode/2`.
 
 -include_lib("kernel/include/logger.hrl").
 
--export([handle/4, handle_term/4, validate_actor_pid/1, is_known_actor/1]).
-
--spec invalid_pid_error(atom(), string()) -> beamtalk_error:error().
-invalid_pid_error(Reason, PidStr) ->
-    PidBin = list_to_binary(PidStr),
-    beamtalk_repl_errors:make(
-        Reason,
-        'Actor',
-        iolist_to_binary([<<"Invalid actor PID: ">>, PidBin]),
-        <<"Use :actors to list valid actor PIDs.">>
-    ).
+-export([handle/4, handle_term/4]).
 
 -doc """
 Handle actors/inspect/kill/interrupt ops for the WebSocket transport — encodes
@@ -52,12 +42,10 @@ handle_term(<<"actors">>, _Params, _Msg, _SessionPid) ->
             {actors, beamtalk_repl_actors:list_actors(RegistryPid)}
     end;
 handle_term(<<"inspect">>, Params, _Msg, _SessionPid) ->
-    PidStr = binary_to_list(maps:get(<<"actor">>, Params, <<>>)),
-    PidBin = list_to_binary(PidStr),
-    case validate_actor_pid(PidStr) of
-        {error, Reason} ->
-            {error, invalid_pid_error(Reason, PidStr)};
-        {ok, Pid} ->
+    case beamtalk_repl_params:actor_pid(Params) of
+        {error, _} = Err ->
+            Err;
+        {ok, Pid, PidBin} ->
             case is_process_alive(Pid) of
                 true ->
                     %% Keep the whole introspection inside the try body (not a
@@ -100,11 +88,10 @@ handle_term(<<"inspect">>, Params, _Msg, _SessionPid) ->
             end
     end;
 handle_term(<<"kill">>, Params, _Msg, _SessionPid) ->
-    PidStr = binary_to_list(maps:get(<<"actor">>, Params, <<>>)),
-    case validate_actor_pid(PidStr) of
-        {error, Reason} ->
-            {error, invalid_pid_error(Reason, PidStr)};
-        {ok, Pid} ->
+    case beamtalk_repl_params:actor_pid(Params) of
+        {error, _} = Err ->
+            Err;
+        {ok, Pid, _PidBin} ->
             exit(Pid, kill),
             {status, ok}
     end;
@@ -133,30 +120,4 @@ handle_term(<<"interrupt">>, _Params, Msg, SessionPid) ->
     catch
         exit:{noproc, _} ->
             {status, ok}
-    end.
-
-%%% Internal helpers
-
--spec validate_actor_pid(string()) -> {ok, pid()} | {error, invalid_pid | unknown_actor}.
-validate_actor_pid(PidStr) ->
-    try
-        Pid = list_to_pid(PidStr),
-        case is_known_actor(Pid) of
-            true -> {ok, Pid};
-            false -> {error, unknown_actor}
-        end
-    catch
-        _:_ -> {error, invalid_pid}
-    end.
-
--spec is_known_actor(pid()) -> boolean().
-is_known_actor(Pid) when is_pid(Pid) ->
-    case whereis(beamtalk_actor_registry) of
-        undefined ->
-            false;
-        RegistryPid ->
-            case beamtalk_repl_actors:get_actor(RegistryPid, Pid) of
-                {ok, _} -> true;
-                {error, not_found} -> false
-            end
     end.

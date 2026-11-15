@@ -217,7 +217,9 @@ handle_term(<<"reload-findings">>, _Params, _Msg, _SessionPid) ->
 handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
     %% Tab completion for `:h Erlang <module>` and `:h Erlang <mod> <fn>`.
     Prefix = maps:get(<<"prefix">>, Params, <<>>),
-    ModuleBin = nonempty_or_undefined(maps:get(<<"module">>, Params, undefined)),
+    ModuleBin = beamtalk_repl_params:nonempty_or_undefined(
+        maps:get(<<"module">>, Params, undefined)
+    ),
     Completions =
         case ModuleBin of
             undefined ->
@@ -227,8 +229,8 @@ handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
             _ ->
                 %% Complete function names within a module.
                 %% Use beamtalk_erlang_help to avoid triggering module autoload during completion.
-                try binary_to_existing_atom(ModuleBin, utf8) of
-                    Module ->
+                case beamtalk_text:to_existing_atom(ModuleBin) of
+                    {ok, Module} ->
                         %% get_object_code avoids autoload and on_load side effects.
                         case code:get_object_code(Module) of
                             {Module, _Binary, _Filename} ->
@@ -254,9 +256,9 @@ handle_term(<<"erlang-complete">>, Params, _Msg, _SessionPid) ->
                                 %% Module not loaded; fall back to empty completions
                                 %% to avoid triggering autoload during a read-only operation.
                                 []
-                        end
-                catch
-                    error:badarg -> []
+                        end;
+                    error ->
+                        []
                 end
         end,
     {completions, Completions};
@@ -264,7 +266,9 @@ handle_term(<<"erlang-help">>, Params, _Msg, _SessionPid) ->
     %% `:help Erlang <module>` and `:help Erlang <module> <function>`
     %% Delegates to beamtalk_erlang_help for formatting.
     ModuleBin = maps:get(<<"module">>, Params, <<>>),
-    FunctionBin = nonempty_or_undefined(maps:get(<<"function">>, Params, undefined)),
+    FunctionBin = beamtalk_repl_params:nonempty_or_undefined(
+        maps:get(<<"function">>, Params, undefined)
+    ),
     case ModuleBin of
         <<>> ->
             {error,
@@ -277,8 +281,8 @@ handle_term(<<"erlang-help">>, Params, _Msg, _SessionPid) ->
         _ ->
             %% Use binary_to_existing_atom to prevent atom table exhaustion
             %% from repeated queries with typos (atoms are never GC'd).
-            try binary_to_existing_atom(ModuleBin, utf8) of
-                Module ->
+            case beamtalk_text:to_existing_atom(ModuleBin) of
+                {ok, Module} ->
                     Result =
                         case FunctionBin of
                             undefined ->
@@ -313,9 +317,8 @@ handle_term(<<"erlang-help">>, Params, _Msg, _SessionPid) ->
                                         ])
                                 end,
                             erlang_not_found_error(What, Hint)
-                    end
-            catch
-                error:badarg ->
+                    end;
+                error ->
                     erlang_not_found_error(
                         iolist_to_binary([
                             <<"Erlang module '">>, ModuleBin, <<"'">>
@@ -328,9 +331,11 @@ handle_term(<<"show-codegen">>, Params, _Msg, SessionPid) ->
     %% Compile expression and return Core Erlang source without evaluating.
     %% Also accepts class+selector to inspect a loaded class method.
     %% `class` takes priority when both are present; empty string is treated as absent.
-    ClassBin = nonempty_or_undefined(maps:get(<<"class">>, Params, undefined)),
+    ClassBin = beamtalk_repl_params:nonempty_or_undefined(maps:get(<<"class">>, Params, undefined)),
     CodeBin = maps:get(<<"code">>, Params, undefined),
-    SelectorBin = nonempty_or_undefined(maps:get(<<"selector">>, Params, undefined)),
+    SelectorBin = beamtalk_repl_params:nonempty_or_undefined(
+        maps:get(<<"selector">>, Params, undefined)
+    ),
     %% Reject orphaned selector at the Erlang boundary, mirroring the Rust MCP guard,
     %% so behaviour is consistent regardless of which entry point is used.
     case {SelectorBin, ClassBin} of
@@ -459,7 +464,7 @@ handle_term(<<"list-classes">>, Params, _Msg, SessionPid) ->
                                 Doc =
                                     case gen_server:call(Pid, get_doc, 5000) of
                                         none -> null;
-                                        D when is_binary(D) -> first_line(D);
+                                        D when is_binary(D) -> beamtalk_repl_row:first_line(D);
                                         _ -> null
                                     end,
                                 IsSealed = beamtalk_runtime_api:is_sealed(Pid),
@@ -771,15 +776,6 @@ validate_selector_if_present(ClassBin, ClassAtom, ClassPid, SelectorBin) ->
                     ])
                 )}
     end.
-
--doc """
-Return the value if it is a non-empty binary, otherwise return undefined.
-Used to normalise optional params so that "" is treated the same as absent.
-""".
--spec nonempty_or_undefined(binary() | undefined) -> binary() | undefined.
-nonempty_or_undefined(<<>>) -> undefined;
-nonempty_or_undefined(undefined) -> undefined;
-nonempty_or_undefined(Bin) when is_binary(Bin) -> Bin.
 
 %%% Test op helpers
 
@@ -2123,17 +2119,6 @@ make_class_not_found_error(ClassName) ->
         iolist_to_binary([<<"Unknown class: ">>, NameBin]),
         <<"Use Workspace classes to see loaded classes.">>
     ).
-
--doc """
-Extract the first line of a binary string (up to the first newline).
-Used to produce one-line class descriptions from full doc strings.
-""".
--spec first_line(binary()) -> binary().
-first_line(Bin) when is_binary(Bin) ->
-    case binary:split(Bin, <<"\n">>) of
-        [First | _] -> First;
-        _ -> Bin
-    end.
 
 -doc """
 Resolve the per-class source file path for list-classes.

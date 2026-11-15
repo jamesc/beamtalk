@@ -304,7 +304,7 @@ nav_tests(_Pid) ->
             ok = beamtalk_xref:register_class('NavTestClass', nav_test_xref()),
             Msg = beamtalk_test_repl:make_msg(<<"nav-query">>, <<"t1">>, <<"s1">>),
             %% Atom does not exist in VM → binary_to_existing_atom catches badarg
-            %% → uses '__nav_query_unknown__' sentinel → senders returns []
+            %% → uses the shared unknown-name sentinel → senders returns []
             Response = beamtalk_repl_ops_nav:handle(
                 <<"nav-query">>,
                 #{<<"kind">> => <<"senders">>, <<"selector">> => <<"__does_not_exist_nav__">>},
