@@ -421,7 +421,10 @@ pub mod test_support {
     /// instead of silently skipping it.
     #[must_use]
     pub fn erlc_available() -> bool {
-        tool_available("erlc", "-v")
+        // `erlc -v` boots the Erlang VM; probe once per test process, not per
+        // call (hundreds of tests ask).
+        static ERLC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ERLC.get_or_init(|| tool_available("erlc", "-v"))
     }
 
     /// Whether both `erlc` and `erl` can be invoked.
