@@ -195,4 +195,24 @@ impl CoreErlangGenerator {
         }
         Ok(())
     }
+
+    /// `BodyExprKind::FieldAssignment`: `self.field := expr`.
+    ///
+    /// ADR 0118 phase 1a / ADR 0111 Addendum 15: the right-hand side's
+    /// state-effecting sub-expressions land in the body's IR as real `Bind`s
+    /// before the version snapshot, and the write is a real `Bind(Put)`
+    /// (`lower_field_assignment_bind`); a last statement answers the written
+    /// value.
+    pub(super) fn lower_stmt_field_assignment(
+        &mut self,
+        cx: StmtCx<'_>,
+        tail: &mut StmtTail<'_>,
+        stmts: &mut Vec<ThreadedStmt>,
+    ) -> Result<()> {
+        let val_var = self.lower_field_assignment_bind(cx.expr, cx.frame, cx.span, stmts)?;
+        if cx.is_last {
+            self.deliver_last_var(tail, val_var, cx.span, stmts)?;
+        }
+        Ok(())
+    }
 }

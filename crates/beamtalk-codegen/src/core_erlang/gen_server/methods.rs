@@ -806,7 +806,9 @@ impl CoreErlangGenerator {
             match kind {
                 BodyExprKind::SelfFieldAtPut => self.lower_reply_self_field_at_put(cx, &mut stmts),
                 BodyExprKind::SelfClearField => self.lower_reply_self_clear_field(cx, &mut stmts),
-                BodyExprKind::FieldAssignment => self.lower_reply_field_assignment(cx, &mut stmts),
+                BodyExprKind::FieldAssignment => {
+                    self.lower_stmt_field_assignment(cx, &mut StmtTail::Reply, &mut stmts)
+                }
                 BodyExprKind::FieldAssignmentControlFlow => {
                     self.lower_reply_field_assignment_control_flow(cx, &mut stmts)
                 }
@@ -1110,92 +1112,6 @@ impl CoreErlangGenerator {
                 span,
             ));
         }
-        Ok(())
-    }
-
-    fn lower_reply_field_assignment(
-        &mut self,
-        cx: StmtCx<'_>,
-        stmts: &mut Vec<threaded_ir::ThreadedStmt>,
-    ) -> Result<()> {
-        use threaded_ir::ThreadedStmt;
-        let StmtCx {
-            expr,
-            span,
-            is_last,
-            ..
-        } = cx;
-        // ADR 0118 phase 1a: `self.log := self.log ++ #(self
-        // getValue)`, `self.count := self.count + (self bump)` —
-        // the RHS's state-effecting sub-expressions land in this
-        // body's IR as real `Bind`s BEFORE `source_version` is
-        // read (the exact snapshot a reverted prototype once
-        // desynced) and before the shared open helper mints its
-        // own step; the RHS compile below substitutes the
-        // already-sequenced value.
-        let rhs_scope = match expr {
-            Expression::Assignment { value, .. } => {
-                self.thread_ahead(value, stmts, threaded_ir::FrameId::ROOT)?
-            }
-            _ => PrecompiledScope::new(),
-        };
-        if is_last {
-            if let Expression::Assignment { target, value, .. } = expr
-                && let Expression::FieldAccess { field, .. } = target.as_ref()
-            {
-                let val_var = self.fresh_temp_var("Val");
-                let source_version = self.state_version();
-                let value_str = self.expression_doc(value)?;
-                let new_state = self.next_state_var();
-                let target_version = self.state_version();
-                stmts.push(ThreadedStmt::Statement(
-                    docvec!["let ", leaf::var(val_var.clone()), " = ", value_str, " in ",],
-                    span,
-                ));
-                // BT-4369: every field write records itself.
-                self.note_field_write(&field.name, span);
-                // The real field mutation, as a real Bind —
-                // `render_bind`'s `BindOp::Put` arm is the
-                // single place the `maps:put` shape lives.
-                stmts.push(ThreadedStmt::Bind {
-                    target: threaded_ir::VersionedVar::new(
-                        threaded_ir::VersionPrefix::State,
-                        target_version,
-                        threaded_ir::FrameId::ROOT,
-                    ),
-                    source: threaded_ir::VersionedVar::new(
-                        threaded_ir::VersionPrefix::State,
-                        source_version,
-                        threaded_ir::FrameId::ROOT,
-                    ),
-                    op: threaded_ir::BindOp::Put {
-                        field: field.name.to_string(),
-                        value: threaded_ir::ValueRef::Var(val_var.clone()),
-                        // Unused placeholder — see
-                        // `lower_cf_field_assignment_binds`.
-                    },
-                    span,
-                });
-                stmts.push(ThreadedStmt::Statement(
-                    docvec![
-                        "{'reply', ",
-                        leaf::var(val_var),
-                        ", ",
-                        leaf::var(new_state),
-                        "}",
-                    ],
-                    span,
-                ));
-            }
-        } else {
-            // Shared helper (`generate_field_assignment_open`,
-            // also called from conditionals/exception_handling/
-            // list_ops/intrinsics): opaque Statement, version
-            // step backfilled at verify time.
-            let (doc, _val_var) = self.generate_field_assignment_open(expr)?;
-            stmts.push(ThreadedStmt::Statement(doc, span));
-        }
-        self.finish_precompiled_scope(rhs_scope)?;
         Ok(())
     }
 

@@ -2960,7 +2960,13 @@ impl CoreErlangGenerator {
             match kind {
                 // C1
                 BodyExprKind::FieldAssignment => {
-                    self.lower_arm_field_assignment(cx, &mut last_result, &mut stmts)?;
+                    self.lower_stmt_field_assignment(
+                        cx,
+                        &mut StmtTail::Arm {
+                            last_result: &mut last_result,
+                        },
+                        &mut stmts,
+                    )?;
                 }
                 // C2/C3/C4
                 BodyExprKind::LocalAssignPure
@@ -3925,27 +3931,6 @@ impl CoreErlangGenerator {
         } = cx;
         let val_var = self.lower_local_var_assignment_bind(expr, frame, span, stmts)?;
         if is_last {
-            *last_result = Some(ValueRef::Var(val_var));
-        }
-        Ok(())
-    }
-
-    fn lower_arm_field_assignment(
-        &mut self,
-        cx: StmtCx<'_>,
-        last_result: &mut Option<ValueRef>,
-        stmts: &mut Vec<ThreadedStmt>,
-    ) -> Result<()> {
-        let StmtCx {
-            expr,
-            span,
-            is_last,
-            frame,
-            ..
-        } = cx;
-        let val_var = self.lower_field_assignment_bind(expr, frame, span, stmts)?;
-        if is_last {
-            // val_var holds the assigned value variable
             *last_result = Some(ValueRef::Var(val_var));
         }
         Ok(())
