@@ -217,8 +217,8 @@ is_stdlib_module(_) ->
 
 -doc """
 Whether a module atom (or module-name binary, so callers holding names need
-not create atoms) is a compiler-generated class module (`bt@` prefix), stdlib
-or not. Single source of truth for the `bt@` prefix check.
+not create atoms) is a compiler-generated class module, stdlib or not. Single source of truth
+for the class-module prefix check.
 """.
 -spec is_class_module(term()) -> boolean().
 is_class_module(Module) when is_atom(Module) ->
@@ -228,8 +228,10 @@ is_class_module(<<"bt@", _/binary>>) ->
 is_class_module(_) ->
     false.
 
--doc "Whether a module atom (or module-name binary) is a user-defined class module\n"
-"(`bt@` but not `bt@stdlib@`).".
+-doc """
+Whether a module atom (or module-name binary) is a user-defined class module:
+a compiler-generated class module that is not part of the stdlib.
+""".
 -spec is_user_class_module(term()) -> boolean().
 is_user_class_module(Module) when is_atom(Module) ->
     is_user_class_module(atom_to_binary(Module, utf8));
