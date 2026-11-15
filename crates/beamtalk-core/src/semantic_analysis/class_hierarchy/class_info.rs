@@ -469,6 +469,48 @@ const PROCESS_BOUND_CLASS_SELECTORS: &[&str] = &[
 ];
 
 impl ClassInfo {
+    /// Test fixture: a plain, non-sealed, non-abstract class named `name`
+    /// extending `superclass`, with every other field at its neutral value
+    /// (no state, methods, package or type parameters).
+    ///
+    /// Tests override the fields they care about with struct-update syntax:
+    /// `ClassInfo { is_sealed: true, ..ClassInfo::test("Foo", Some("Object")) }`.
+    /// Deliberately not a `Default` impl: no production caller builds a
+    /// nameless `ClassInfo`. Compiled only for tests and the `test` feature
+    /// (dependent crates' dev-dependencies).
+    #[cfg(any(test, feature = "test"))]
+    #[must_use]
+    pub fn test(name: &str, superclass: Option<&str>) -> Self {
+        Self {
+            name: name.into(),
+            superclass: superclass.map(Into::into),
+            is_sealed: false,
+            is_abstract: false,
+            is_typed: false,
+            is_internal: false,
+            package: None,
+            is_value: false,
+            is_native: false,
+            auto_ctors: None,
+            handle_scope: None,
+            surface_incomplete: false,
+            in_caller_new1: false,
+            is_module_less: false,
+            state: Vec::new(),
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            state_kinds: HashMap::new(),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: Vec::new(),
+            class_methods: Vec::new(),
+            class_variables: Vec::new(),
+            type_params: Vec::new(),
+            type_param_bounds: Vec::new(),
+            superclass_type_args: Vec::new(),
+        }
+    }
+
     /// Whether this entry is a superclass-index stub inserted by
     /// `ClassHierarchy::add_external_superclasses`: it carries only a name and
     /// a superclass, so its class variables and method surface are unknown,

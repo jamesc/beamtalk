@@ -12,6 +12,7 @@
 
 use super::common::*;
 use crate::ast::MapPair;
+use crate::semantic_analysis::class_hierarchy::ClassInfo;
 
 // --- Fixtures --------------------------------------------------------------
 
@@ -335,33 +336,10 @@ fn parent_assigns_in_initialize_across_files_does_not_warn() {
     let (Ok(mut hierarchy), _) = ClassHierarchy::build(&module_ast) else {
         panic!("build should succeed");
     };
-    let parent_info = crate::semantic_analysis::class_hierarchy::ClassInfo {
-        name: "ParentActor".into(),
-        superclass: Some("Actor".into()),
-        is_sealed: false,
-        is_abstract: false,
+    let parent_info = ClassInfo {
         is_typed: true,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: std::collections::HashMap::new(),
         initialize_assigns: std::collections::BTreeSet::from(["count".into()]),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("ParentActor", Some("Actor"))
     };
     hierarchy.add_from_beam_meta(vec![parent_info]);
     let checker = check(&module_ast, &hierarchy);
@@ -384,33 +362,10 @@ fn ancestor_dynamic_field_writer_downgrades_severity_to_hint() {
     let (Ok(mut hierarchy), _) = ClassHierarchy::build(&module_ast) else {
         panic!("build should succeed");
     };
-    let parent_info = crate::semantic_analysis::class_hierarchy::ClassInfo {
-        name: "ParentWithWriter".into(),
-        superclass: Some("Actor".into()),
-        is_sealed: false,
-        is_abstract: false,
+    let parent_info = ClassInfo {
         is_typed: true,
-        is_internal: false,
-        package: None,
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        surface_incomplete: false,
-        in_caller_new1: false,
-        is_module_less: false,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: std::collections::HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
         has_dynamic_field_writer: true,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("ParentWithWriter", Some("Actor"))
     };
     hierarchy.add_from_beam_meta(vec![parent_info]);
     let checker = check(&module_ast, &hierarchy);
