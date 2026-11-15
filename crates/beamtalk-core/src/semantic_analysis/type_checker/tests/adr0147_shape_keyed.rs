@@ -10,9 +10,7 @@ fn messages(body: &str) -> Vec<String> {
     let source = format!(
         "Object subclass: Probe\n  takeString: s :: String => s\n  takeInteger: n :: Integer => n\n{body}\n"
     );
-    let tokens = crate::source_analysis::lex_with_eof(&source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(&source);
     crate::semantic_analysis::analyse(&module)
         .diagnostics
         .into_iter()

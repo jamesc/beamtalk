@@ -258,18 +258,19 @@ fn bt2741_is_kind_of_subclass_narrows_true_branch_to_subclass() {
 #[test]
 fn bt2741_class_eq_unrelated_class_true_branch_never_emits_hint() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    let mut checker = TypeChecker::new();
+    let mut session = InferSession::new();
+
     // `x := 42` — x's Integer type is inferred from actual value flow.
     // Integer and String are both sealed and hierarchy-unrelated.
     let assignment = assign("x", int_lit(42));
-    let _ = checker.infer_expr(&assignment, &hierarchy, &mut env, false);
+    let _ = session.infer(&assignment, &hierarchy);
     // `(x class =:= String) ifTrue: [nil]`
     let guard = class_eq("x", "String");
     let expr = if_true(guard, block_expr(vec![var("nil")]));
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let _ = session.infer(&expr, &hierarchy);
 
-    let hints: Vec<_> = checker
+    let hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("can never be true"))
@@ -278,7 +279,7 @@ fn bt2741_class_eq_unrelated_class_true_branch_never_emits_hint() {
         hints.len(),
         1,
         "expected exactly one impossibility hint for an unrelated-class test, got: {:?}",
-        checker.diagnostics()
+        session.checker.diagnostics()
     );
     assert!(
         hints[0].message.contains("Integer") && hints[0].message.contains("String"),
@@ -377,8 +378,8 @@ fn bt2741_declared_annotation_receiver_no_hint_true_branch_still_never() {
 #[test]
 fn bt2741_send_on_never_receiver_is_silent() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::known("Integer"));
+    let mut session = InferSession::new();
+    session.env.set_local("x", InferredType::known("Integer"));
     // `(x class =:= String) ifTrue: [x totallyBogusSelector]` — inside the
     // (unreachable, Never-typed) true branch, an otherwise-unknown selector
     // send must not add a second diagnostic beyond the guard's own hint.
@@ -391,10 +392,11 @@ fn bt2741_send_on_never_receiver_is_silent() {
             vec![],
         )]),
     );
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
 
-    let dnu: Vec<_> = checker
+    let _ = session.infer(&expr, &hierarchy);
+
+    let dnu: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("does not understand"))
@@ -416,8 +418,7 @@ fn bt2744_is_kind_of_subclass_narrows_false_branch_to_nominal_negation() {
     env.set_local("x", InferredType::known("Number"));
     let guard = is_kind_of("x", "Integer");
     let info = TypeChecker::detect_narrowing(&guard).expect("should detect isKindOf:");
-    let mut checker = TypeChecker::new();
-    let refined = checker.refine_class_narrowing(info, &env, &hierarchy, span());
+    let refined = refine_narrowing(info, &env, &hierarchy);
     assert_eq!(refined.true_type, InferredType::known("Integer"));
     assert_eq!(
         refined.false_type,
@@ -439,8 +440,7 @@ fn bt2744_is_kind_of_exact_match_narrows_false_branch_to_never() {
     env.set_local("x", InferredType::known("Integer"));
     let guard = is_kind_of("x", "Integer");
     let info = TypeChecker::detect_narrowing(&guard).expect("should detect isKindOf:");
-    let mut checker = TypeChecker::new();
-    let refined = checker.refine_class_narrowing(info, &env, &hierarchy, span());
+    let refined = refine_narrowing(info, &env, &hierarchy);
     assert_eq!(refined.true_type, InferredType::known("Integer"));
     assert_eq!(refined.false_type, Some(InferredType::Never));
 }
@@ -471,8 +471,7 @@ fn bt2744_class_eq_false_branch_stays_unnarrowed() {
         env.set_local("x", InferredType::known(current));
         let guard = class_eq("x", tested);
         let info = TypeChecker::detect_narrowing(&guard).expect("should detect class =:=");
-        let mut checker = TypeChecker::new();
-        let refined = checker.refine_class_narrowing(info, &env, &hierarchy, span());
+        let refined = refine_narrowing(info, &env, &hierarchy);
         assert!(
             refined.false_type.is_none(),
             "class =:= false branch must stay unnarrowed for {current} vs {tested}, got: {:?}",
@@ -499,11 +498,11 @@ fn bt2744_class_eq_false_branch_does_not_poison_nested_is_kind_of() {
             .any(|c| c == "Integer"),
         "fixture sanity check: Character should be a subclass of Integer"
     );
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
     // `x := self makeNumber` — value-flow inferred, so the impossible-class
     // hint's provenance gate is satisfied and would fire if the bug were
     // present.
-    env.set_local(
+    session.env.set_local(
         "x",
         InferredType::Known {
             class_name: "Number".into(),
@@ -519,10 +518,11 @@ fn bt2744_class_eq_false_branch_does_not_poison_nested_is_kind_of() {
         block_expr(vec![var("nil")]),
         block_expr(vec![nested]),
     );
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
 
-    let hints: Vec<_> = checker
+    let _ = session.infer(&expr, &hierarchy);
+
+    let hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("can never be true"))
@@ -546,8 +546,7 @@ fn bt2744_is_kind_of_unrelated_class_false_branch_unchanged() {
     env.set_local("x", InferredType::known("Integer"));
     let guard = is_kind_of("x", "String");
     let info = TypeChecker::detect_narrowing(&guard).expect("should detect isKindOf:");
-    let mut checker = TypeChecker::new();
-    let refined = checker.refine_class_narrowing(info, &env, &hierarchy, span());
+    let refined = refine_narrowing(info, &env, &hierarchy);
     assert_eq!(refined.true_type, InferredType::Never);
     assert_eq!(refined.false_type, Some(InferredType::known("Integer")));
 }
@@ -668,8 +667,8 @@ fn bt2744_negation_receiver_inherits_dnu_override_from_base() {
         hierarchy.has_instance_dnu_override("Erlang"),
         "fixture sanity check: Erlang should have an instance DNU override"
     );
-    let mut env = TypeEnv::new();
-    env.set_local(
+    let mut session = InferSession::new();
+    session.env.set_local(
         "x",
         InferredType::Negation {
             base: Box::new(InferredType::known("Erlang")),
@@ -677,15 +676,16 @@ fn bt2744_negation_receiver_inherits_dnu_override_from_base() {
             provenance: TypeProvenance::Inferred(Span::default()),
         },
     );
-    let mut checker = TypeChecker::new();
+
     let send = msg_send(
         var("x"),
         MessageSelector::Unary("totallyBogusSelector".into()),
         vec![],
     );
-    let _ = checker.infer_expr(&send, &hierarchy, &mut env, false);
+    let _ = session.infer(&send, &hierarchy);
 
-    let dnu: Vec<_> = checker
+    let dnu: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("does not understand"))
@@ -1172,8 +1172,10 @@ fn test_refine_singleton_eq_symbol_false_branch_is_negation() {
 #[test]
 fn bt2624_singleton_eq_impossible_member_emits_hint() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    env.set_local("d", InferredType::simple_union(&["#north", "#south"]));
+    let mut session = InferSession::new();
+    session
+        .env
+        .set_local("d", InferredType::simple_union(&["#north", "#south"]));
     // `(d =:= #west) ifTrue: [nil]` — the comparison is the guard receiver.
     let guard = msg_send(
         var("d"),
@@ -1181,9 +1183,10 @@ fn bt2624_singleton_eq_impossible_member_emits_hint() {
         vec![symbol_lit("west")],
     );
     let expr = if_true(guard, block_expr(vec![var("nil")]));
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    let hints: Vec<_> = checker
+
+    let _ = session.infer(&expr, &hierarchy);
+    let hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("can never be true"))
@@ -1192,7 +1195,7 @@ fn bt2624_singleton_eq_impossible_member_emits_hint() {
         hints.len(),
         1,
         "expected exactly one impossibility hint (no double-fire), got: {:?}",
-        checker.diagnostics()
+        session.checker.diagnostics()
     );
     assert!(
         hints[0].message.contains("#west") && hints[0].message.contains("#north | #south"),
@@ -1206,17 +1209,20 @@ fn bt2624_singleton_eq_impossible_member_emits_hint() {
 #[test]
 fn bt2624_singleton_inequality_impossible_member_always_true() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    env.set_local("d", InferredType::simple_union(&["#north", "#south"]));
+    let mut session = InferSession::new();
+    session
+        .env
+        .set_local("d", InferredType::simple_union(&["#north", "#south"]));
     let guard = msg_send(
         var("d"),
         MessageSelector::Binary("/=".into()),
         vec![symbol_lit("west")],
     );
     let expr = if_true(guard, block_expr(vec![var("nil")]));
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    let hints: Vec<_> = checker
+
+    let _ = session.infer(&expr, &hierarchy);
+    let hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("always true") && d.message.contains("#west"))
@@ -1225,7 +1231,7 @@ fn bt2624_singleton_inequality_impossible_member_always_true() {
         hints.len(),
         1,
         "expected exactly one 'always true' hint, got: {:?}",
-        checker.diagnostics()
+        session.checker.diagnostics()
     );
 }
 
@@ -1279,22 +1285,25 @@ fn bt2624_singleton_eq_possible_member_no_hint() {
 #[test]
 fn bt2631_standalone_singleton_eq_impossible_member_emits_hint() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["#north", "#south"]));
+    let mut session = InferSession::new();
+    session
+        .env
+        .set_local("x", InferredType::simple_union(&["#north", "#south"]));
     // `x =:= #west` — #west is not a member of `#north | #south`.
     let expr = msg_send(
         var("x"),
         MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("west")],
     );
-    let mut checker = TypeChecker::new();
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let ty = session.infer(&expr, &hierarchy);
     assert_eq!(
         ty,
         InferredType::known("Boolean"),
         "the comparison is still typed Boolean"
     );
-    let hints: Vec<_> = checker
+    let hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("can never be true"))
@@ -1303,7 +1312,7 @@ fn bt2631_standalone_singleton_eq_impossible_member_emits_hint() {
         hints.len(),
         1,
         "expected one standalone-send impossibility hint, got: {:?}",
-        checker.diagnostics()
+        session.checker.diagnostics()
     );
     assert!(
         hints[0].message.contains("#west") && hints[0].message.contains("#north | #south"),
@@ -1316,22 +1325,25 @@ fn bt2631_standalone_singleton_eq_impossible_member_emits_hint() {
 #[test]
 fn bt2631_standalone_singleton_inequality_impossible_member_always_true() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["#north", "#south"]));
+    let mut session = InferSession::new();
+    session
+        .env
+        .set_local("x", InferredType::simple_union(&["#north", "#south"]));
     let expr = msg_send(
         var("x"),
         MessageSelector::Binary("=/=".into()),
         vec![symbol_lit("west")],
     );
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+
+    let _ = session.infer(&expr, &hierarchy);
     assert!(
-        checker
+        session
+            .checker
             .diagnostics()
             .iter()
             .any(|d| d.message.contains("always true") && d.message.contains("#west")),
         "expected a standalone-send 'always true' hint, got: {:?}",
-        checker.diagnostics()
+        session.checker.diagnostics()
     );
 }
 
@@ -1341,17 +1353,20 @@ fn bt2631_standalone_singleton_inequality_impossible_member_always_true() {
 #[test]
 fn bt2631_standalone_singleton_eq_union_on_right_emits_hint() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["#north", "#south"]));
+    let mut session = InferSession::new();
+    session
+        .env
+        .set_local("x", InferredType::simple_union(&["#north", "#south"]));
     // `#west =:= x` — the union `x` is the argument, the singleton the receiver.
     let expr = msg_send(
         symbol_lit("west"),
         MessageSelector::Binary("=:=".into()),
         vec![var("x")],
     );
-    let mut checker = TypeChecker::new();
-    let _ = checker.infer_expr(&expr, &hierarchy, &mut env, false);
-    let hints: Vec<_> = checker
+
+    let _ = session.infer(&expr, &hierarchy);
+    let hints: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("can never be true"))
@@ -1360,7 +1375,7 @@ fn bt2631_standalone_singleton_eq_union_on_right_emits_hint() {
         hints.len(),
         1,
         "expected one hint for the union-on-right form, got: {:?}",
-        checker.diagnostics()
+        session.checker.diagnostics()
     );
 }
 
@@ -1412,11 +1427,12 @@ fn bt2631_standalone_singleton_eq_admitted_no_hint() {
 #[test]
 fn bt2764_singleton_eq_symbol_supertype_union_member_no_hint() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
     // `x :: ProtoObject | Integer` — the ProtoObject member could hold any
     // symbol value, so `x =:= #foo` is satisfiable.
-    env.set_local("x", InferredType::simple_union(&["ProtoObject", "Integer"]));
-    let mut checker = TypeChecker::new();
+    session
+        .env
+        .set_local("x", InferredType::simple_union(&["ProtoObject", "Integer"]));
 
     // Guarded form: `(x =:= #foo) ifTrue: [nil]`.
     let guard = msg_send(
@@ -1425,7 +1441,7 @@ fn bt2764_singleton_eq_symbol_supertype_union_member_no_hint() {
         vec![symbol_lit("foo")],
     );
     let guarded = if_true(guard, block_expr(vec![var("nil")]));
-    let _ = checker.infer_expr(&guarded, &hierarchy, &mut env, false);
+    let _ = session.infer(&guarded, &hierarchy);
 
     // Standalone form: `x =:= #foo`.
     let standalone = msg_send(
@@ -1433,15 +1449,15 @@ fn bt2764_singleton_eq_symbol_supertype_union_member_no_hint() {
         MessageSelector::Binary("=:=".into()),
         vec![symbol_lit("foo")],
     );
-    let _ = checker.infer_expr(&standalone, &hierarchy, &mut env, false);
+    let _ = session.infer(&standalone, &hierarchy);
 
     assert!(
-        !checker.diagnostics().iter().any(|d| {
+        !session.checker.diagnostics().iter().any(|d| {
             d.message.contains("can never be true") || d.message.contains("always true")
         }),
         "a ProtoObject union member admits every singleton — no impossibility \
          hint expected, got: {:?}",
-        checker.diagnostics()
+        session.checker.diagnostics()
     );
 }
 

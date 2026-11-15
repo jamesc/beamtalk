@@ -899,13 +899,11 @@ fn ffi_union_arg_incompatible_member_warns() {
     // member is incompatible, so a diagnostic must fire.
     let sig = single_param_sig(InferredType::known("String"));
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_ffi_argument_types(
+    let checker = check_ffi_args(
         "mymod",
         "fun",
         &sig,
         &[InferredType::simple_union(&["String", "Integer"])],
-        span(),
         &hierarchy,
     );
     assert_eq!(
@@ -923,13 +921,11 @@ fn ffi_union_arg_all_members_compatible_no_warning() {
     // declared `String` param, so no diagnostic should fire.
     let sig = single_param_sig(InferredType::known("String"));
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_ffi_argument_types(
+    let checker = check_ffi_args(
         "mymod",
         "fun",
         &sig,
         &[InferredType::simple_union(&["String", "String"])],
-        span(),
         &hierarchy,
     );
     assert!(
@@ -945,13 +941,11 @@ fn ffi_union_arg_object_param_accepts_any_member() {
     // mirrors the existing Known/Known Object shortcut.
     let sig = single_param_sig(InferredType::known("Object"));
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_ffi_argument_types(
+    let checker = check_ffi_args(
         "mymod",
         "fun",
         &sig,
         &[InferredType::simple_union(&["String", "Integer"])],
-        span(),
         &hierarchy,
     );
     assert!(
@@ -971,8 +965,7 @@ fn ffi_union_arg_singleton_symbol_members_compatible_with_symbol_param() {
     // so this must NOT warn.
     let sig = single_param_sig(InferredType::known("Symbol"));
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_ffi_argument_types(
+    let checker = check_ffi_args(
         "mymod",
         "fun",
         &sig,
@@ -986,7 +979,6 @@ fn ffi_union_arg_singleton_symbol_members_compatible_with_symbol_param() {
             "#info",
             "#debug",
         ])],
-        span(),
         &hierarchy,
     );
     assert!(
@@ -1008,13 +1000,11 @@ fn ffi_scalar_singleton_symbol_arg_compatible_with_symbol_param() {
     // must not warn where `#first | #last` doesn't either.
     let sig = single_param_sig(InferredType::known("Symbol"));
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_ffi_argument_types(
+    let checker = check_ffi_args(
         "mymod",
         "fun",
         &sig,
         &[InferredType::known("#first")],
-        span(),
         &hierarchy,
     );
     assert!(
@@ -1031,13 +1021,11 @@ fn ffi_scalar_symbol_arg_against_singleton_param_still_warns() {
     // must not make this direction pass too.
     let sig = single_param_sig(InferredType::known("#first"));
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_ffi_argument_types(
+    let checker = check_ffi_args(
         "mymod",
         "fun",
         &sig,
         &[InferredType::known("Symbol")],
-        span(),
         &hierarchy,
     );
     assert_eq!(
@@ -1056,13 +1044,11 @@ fn ffi_scalar_subclass_arg_compatible_with_superclass_param() {
     // would be a false positive here.
     let sig = single_param_sig(InferredType::known("Number"));
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_ffi_argument_types(
+    let checker = check_ffi_args(
         "mymod",
         "fun",
         &sig,
         &[InferredType::known("Integer")],
-        span(),
         &hierarchy,
     );
     assert!(
@@ -1078,13 +1064,11 @@ fn ffi_scalar_unrelated_class_arg_still_warns() {
     // classes — `Integer` where `String` is declared has no subtype relation.
     let sig = single_param_sig(InferredType::known("String"));
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_ffi_argument_types(
+    let checker = check_ffi_args(
         "mymod",
         "fun",
         &sig,
         &[InferredType::known("Integer")],
-        span(),
         &hierarchy,
     );
     assert_eq!(
@@ -1102,13 +1086,11 @@ fn ffi_dynamic_arg_unchanged_no_warning() {
     // ticket's Union arm was added.
     let sig = single_param_sig(InferredType::known("String"));
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_ffi_argument_types(
+    let checker = check_ffi_args(
         "mymod",
         "fun",
         &sig,
         &[InferredType::Dynamic(DynamicReason::Unknown)],
-        span(),
         &hierarchy,
     );
     assert!(
@@ -1124,13 +1106,11 @@ fn ffi_known_known_call_unchanged_no_regression() {
     // from restructuring the Dynamic/Known/Union match).
     let sig = single_param_sig(InferredType::known("String"));
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_ffi_argument_types(
+    let checker = check_ffi_args(
         "mymod",
         "fun",
         &sig,
         &[InferredType::known("String")],
-        span(),
         &hierarchy,
     );
     assert!(

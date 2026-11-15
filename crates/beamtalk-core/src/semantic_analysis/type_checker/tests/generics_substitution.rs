@@ -15,25 +15,20 @@ fn generic_substitution_unwrap_returns_concrete_type() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_result_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "r",
-        InferredType::Known {
-            class_name: eco_string("GenResult"),
-            type_args: vec![
-                InferredType::known("Integer"),
-                InferredType::known("IOError"),
-            ],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
-    let result_ty = checker.infer_expr(
+    let result_ty = infer_with_locals(
         &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
 
     assert_eq!(
@@ -49,25 +44,20 @@ fn generic_substitution_error_returns_concrete_type() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_result_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "r",
-        InferredType::Known {
-            class_name: eco_string("GenResult"),
-            type_args: vec![
-                InferredType::known("Integer"),
-                InferredType::known("IOError"),
-            ],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
-    let result_ty = checker.infer_expr(
+    let result_ty = infer_with_locals(
         &msg_send(var("r"), MessageSelector::Unary("error".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
 
     assert_eq!(
@@ -83,25 +73,20 @@ fn generic_substitution_non_generic_return_unchanged() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_result_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local(
-        "r",
-        InferredType::Known {
-            class_name: eco_string("GenResult"),
-            type_args: vec![
-                InferredType::known("Integer"),
-                InferredType::known("IOError"),
-            ],
-            provenance: TypeProvenance::Declared(span()),
-        },
-    );
-
-    let result_ty = checker.infer_expr(
+    let result_ty = infer_with_locals(
         &msg_send(var("r"), MessageSelector::Unary("isOk".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
+        &[(
+            "r",
+            InferredType::Known {
+                class_name: eco_string("GenResult"),
+                type_args: vec![
+                    InferredType::known("Integer"),
+                    InferredType::known("IOError"),
+                ],
+                provenance: TypeProvenance::Declared(span()),
+            },
+        )],
     );
 
     assert_eq!(
@@ -117,16 +102,12 @@ fn generic_no_type_args_returns_unsubstituted() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_result_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
     // Set r to bare GenResult (no type_args) — unparameterized
-    env.set_local("r", InferredType::known("GenResult"));
 
-    let result_ty = checker.infer_expr(
+    let result_ty = infer_with_locals(
         &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
+        &[("r", InferredType::known("GenResult"))],
     );
 
     // Without type_args, the return type "T" is returned as-is (known("T")).
@@ -217,8 +198,7 @@ fn check_return_type_handles_generic_declared_type() {
     };
 
     let body_type = InferredType::known("GenResult");
-    let mut checker = TypeChecker::new();
-    checker.check_return_type(&method, &body_type, &eco_string("MyClass"), &hierarchy);
+    let checker = check_return(&method, &body_type, "MyClass", &hierarchy);
 
     // Should NOT warn: GenResult is compatible with declared GenResult(Integer, Error)
     let type_warnings: Vec<_> = checker
@@ -307,19 +287,14 @@ fn constructor_inference_ok_infers_t_from_integer() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_result_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-
     // GenResult ok: 42
-    let result_ty = checker.infer_expr(
+    let result_ty = infer(
         &msg_send(
             class_ref("GenResult"),
             MessageSelector::Keyword(vec![KeywordPart::new("ok:", span())]),
             vec![int_lit(42)],
         ),
         &hierarchy,
-        &mut env,
-        false,
     );
 
     match &result_ty {
@@ -355,11 +330,8 @@ fn constructor_inference_error_infers_e_from_symbol() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_result_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-
     // GenResult error: #not_found
-    let result_ty = checker.infer_expr(
+    let result_ty = infer(
         &msg_send(
             class_ref("GenResult"),
             MessageSelector::Keyword(vec![KeywordPart::new("error:", span())]),
@@ -369,8 +341,6 @@ fn constructor_inference_error_infers_e_from_symbol() {
             )],
         ),
         &hierarchy,
-        &mut env,
-        false,
     );
 
     match &result_ty {
@@ -400,20 +370,16 @@ fn constructor_inference_error_infers_e_from_symbol() {
 #[test]
 fn constructor_inference_non_generic_class_no_type_args() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
 
     // Array new — Array is generic Array(E), so constructor with no args
     // produces Dynamic type_args since E cannot be inferred.
-    let result_ty = checker.infer_expr(
+    let result_ty = infer(
         &msg_send(
             class_ref("Array"),
             MessageSelector::Unary("new".into()),
             vec![],
         ),
         &hierarchy,
-        &mut env,
-        false,
     );
 
     match &result_ty {
@@ -431,8 +397,7 @@ fn constructor_inference_flows_to_instance_sends() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_result_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
 
     // r := GenResult ok: 42
     let assign_expr = Expression::Assignment {
@@ -445,14 +410,12 @@ fn constructor_inference_flows_to_instance_sends() {
         type_annotation: None,
         span: span(),
     };
-    checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
+    session.infer(&assign_expr, &hierarchy);
 
     // r unwrap — should return Integer via T substitution
-    let unwrap_ty = checker.infer_expr(
+    let unwrap_ty = session.infer(
         &msg_send(var("r"), MessageSelector::Unary("unwrap".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
     );
 
     assert_eq!(
@@ -469,8 +432,7 @@ fn constructor_inference_error_flows_to_error_accessor() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_generic_result_class(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
 
     // r := GenResult error: #not_found
     let assign_expr = Expression::Assignment {
@@ -486,14 +448,12 @@ fn constructor_inference_error_flows_to_error_accessor() {
         type_annotation: None,
         span: span(),
     };
-    checker.infer_expr(&assign_expr, &hierarchy, &mut env, false);
+    session.infer(&assign_expr, &hierarchy);
 
     // r error — should return Symbol via E substitution
-    let error_ty = checker.infer_expr(
+    let error_ty = session.infer(
         &msg_send(var("r"), MessageSelector::Unary("error".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
     );
 
     assert_eq!(

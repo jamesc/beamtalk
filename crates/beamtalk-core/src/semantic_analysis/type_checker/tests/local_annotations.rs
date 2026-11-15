@@ -10,8 +10,8 @@ use super::common::*;
 #[test]
 fn annotated_assignment_uses_declared_type() {
     // `x :: Integer := expr` should bind x as Integer, not Dynamic
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     let hierarchy = ClassHierarchy::with_builtins();
 
     let expr = Expression::Assignment {
@@ -20,9 +20,12 @@ fn annotated_assignment_uses_declared_type() {
         type_annotation: Some(TypeAnnotation::simple("Integer", span())),
         span: span(),
     };
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = session.infer(&expr, &hierarchy);
     assert_eq!(ty, InferredType::known("Integer"));
-    assert_eq!(env.get_local("x"), Some(InferredType::known("Integer")));
+    assert_eq!(
+        session.env.get_local("x"),
+        Some(InferredType::known("Integer"))
+    );
 }
 
 #[test]
@@ -62,9 +65,9 @@ fn annotated_assignment_with_chained_alias_records_transitive_referenced_aliases
         span: span(),
     });
 
-    let mut checker = TypeChecker::new();
-    checker.set_alias_registry(alias_registry);
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+    session.checker.set_alias_registry(alias_registry);
+
     let hierarchy = ClassHierarchy::with_builtins();
 
     let expr = Expression::Assignment {
@@ -76,9 +79,10 @@ fn annotated_assignment_with_chained_alias_records_transitive_referenced_aliases
         type_annotation: Some(TypeAnnotation::simple("Direction", span())),
         span: span(),
     };
-    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    session.infer(&expr, &hierarchy);
 
-    let mut referenced: Vec<_> = checker
+    let mut referenced: Vec<_> = session
+        .checker
         .take_referenced_aliases()
         .into_iter()
         .map(|n| n.to_string())
@@ -94,8 +98,8 @@ fn annotated_assignment_with_chained_alias_records_transitive_referenced_aliases
 #[test]
 fn annotated_assignment_dynamic_rhs_no_warning() {
     // Dynamic RHS (the primary use case) should be accepted silently
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     let hierarchy = ClassHierarchy::with_builtins();
 
     // someVar is unknown → Dynamic
@@ -105,9 +109,10 @@ fn annotated_assignment_dynamic_rhs_no_warning() {
         type_annotation: Some(TypeAnnotation::simple("String", span())),
         span: span(),
     };
-    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    session.infer(&expr, &hierarchy);
 
-    let type_warnings: Vec<_> = checker
+    let type_warnings: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("Type mismatch"))
@@ -123,12 +128,14 @@ fn annotated_assignment_narrowing_from_object_no_warning() {
     // `x :: Dictionary := <Object>` is the primary type-erasure use case:
     // callees like `Binary deserialize:` return Object, and the annotation is
     // the user's explicit assertion that the runtime type is more specific.
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     let hierarchy = ClassHierarchy::with_builtins();
 
     // Seed someVar with inferred type Object in the env
-    env.set_local("someVar", InferredType::known("Object"));
+    session
+        .env
+        .set_local("someVar", InferredType::known("Object"));
 
     let expr = Expression::Assignment {
         target: Box::new(var("x")),
@@ -136,9 +143,10 @@ fn annotated_assignment_narrowing_from_object_no_warning() {
         type_annotation: Some(TypeAnnotation::simple("Dictionary", span())),
         span: span(),
     };
-    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    session.infer(&expr, &hierarchy);
 
-    let type_warnings: Vec<_> = checker
+    let type_warnings: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("Type mismatch"))
@@ -153,11 +161,13 @@ fn annotated_assignment_narrowing_from_object_no_warning() {
 fn annotated_assignment_narrowing_to_parametric_type_no_warning() {
     // `dict :: Dictionary(Symbol, String) := <Object>` — narrowing to a
     // parametric type should also be silently accepted.
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     let hierarchy = ClassHierarchy::with_builtins();
 
-    env.set_local("someVar", InferredType::known("Object"));
+    session
+        .env
+        .set_local("someVar", InferredType::known("Object"));
 
     let dict_ann = TypeAnnotation::Generic {
         base: Identifier::new("Dictionary", span()),
@@ -173,9 +183,10 @@ fn annotated_assignment_narrowing_to_parametric_type_no_warning() {
         type_annotation: Some(dict_ann),
         span: span(),
     };
-    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    session.infer(&expr, &hierarchy);
 
-    let type_warnings: Vec<_> = checker
+    let type_warnings: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("Type mismatch"))
@@ -192,11 +203,13 @@ fn annotated_assignment_narrowing_to_union_from_object_no_warning() {
     // must be accepted silently, exactly like narrowing to a simple type
     // (`annotated_assignment_narrowing_from_object_no_warning`): the union
     // is more specific than (assignable to) the inferred `Object`.
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     let hierarchy = ClassHierarchy::with_builtins();
 
-    env.set_local("someVar", InferredType::known("Object"));
+    session
+        .env
+        .set_local("someVar", InferredType::known("Object"));
 
     let union_ann = TypeAnnotation::Union {
         types: vec![
@@ -211,9 +224,10 @@ fn annotated_assignment_narrowing_to_union_from_object_no_warning() {
         type_annotation: Some(union_ann),
         span: span(),
     };
-    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    session.infer(&expr, &hierarchy);
 
-    let type_warnings: Vec<_> = checker
+    let type_warnings: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("Type mismatch"))
@@ -241,9 +255,7 @@ typed Object subclass: Nv
     y :: Integer | Nil := self obj
     y isNil ifTrue: [0] ifFalse: [y + 1]
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -262,8 +274,8 @@ fn annotated_assignment_unrelated_union_still_warns() {
     // Negative guard for BT-4042: a union annotation unrelated to the RHS
     // in *both* directions must still warn — the fix only accepts unions
     // assignable to (more specific than) the inferred type.
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     let hierarchy = ClassHierarchy::with_builtins();
 
     // RHS is a String literal, declared as Integer | Nil → should warn
@@ -280,9 +292,10 @@ fn annotated_assignment_unrelated_union_still_warns() {
         type_annotation: Some(union_ann),
         span: span(),
     };
-    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    session.infer(&expr, &hierarchy);
 
-    let type_warnings: Vec<_> = checker
+    let type_warnings: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("Type mismatch"))
@@ -298,11 +311,11 @@ fn annotated_assignment_union_rhs_to_wider_declared_no_warning() {
     // Companion direction through the same BT-4042 helper fix: a union RHS
     // whose every member is a subtype of the declared type is assignable to
     // it (`x :: Object := <Integer | Nil>`), so no warning.
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     let hierarchy = ClassHierarchy::with_builtins();
 
-    env.set_local(
+    session.env.set_local(
         "someVar",
         InferredType::simple_union(&["Integer", "UndefinedObject"]),
     );
@@ -313,9 +326,10 @@ fn annotated_assignment_union_rhs_to_wider_declared_no_warning() {
         type_annotation: Some(TypeAnnotation::simple("Object", span())),
         span: span(),
     };
-    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    session.infer(&expr, &hierarchy);
 
-    let type_warnings: Vec<_> = checker
+    let type_warnings: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("Type mismatch"))
@@ -329,8 +343,8 @@ fn annotated_assignment_union_rhs_to_wider_declared_no_warning() {
 #[test]
 fn annotated_assignment_mismatch_warns() {
     // Known incompatible type should emit a warning
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     let hierarchy = ClassHierarchy::with_builtins();
 
     // RHS is Integer literal, declared as String → should warn
@@ -340,9 +354,10 @@ fn annotated_assignment_mismatch_warns() {
         type_annotation: Some(TypeAnnotation::simple("String", span())),
         span: span(),
     };
-    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    session.infer(&expr, &hierarchy);
 
-    let type_warnings: Vec<_> = checker
+    let type_warnings: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("Type mismatch"))
@@ -356,8 +371,8 @@ fn annotated_assignment_mismatch_warns() {
 #[test]
 fn annotated_assignment_compatible_type_no_warning() {
     // Compatible subtype should not warn
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+    let mut session = InferSession::new();
+
     let hierarchy = ClassHierarchy::with_builtins();
 
     // RHS is Integer literal, declared as Number (Integer's superclass) → no warning
@@ -367,9 +382,10 @@ fn annotated_assignment_compatible_type_no_warning() {
         type_annotation: Some(TypeAnnotation::simple("Number", span())),
         span: span(),
     };
-    checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    session.infer(&expr, &hierarchy);
 
-    let type_warnings: Vec<_> = checker
+    let type_warnings: Vec<_> = session
+        .checker
         .diagnostics()
         .iter()
         .filter(|d| d.message.contains("Type mismatch"))
@@ -396,9 +412,7 @@ Object subclass: Caller
     ms isNil ifTrue: [^nil]
     Receiver process: ms
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     // Filter by DiagnosticCategory::Type so argument-type warnings
@@ -426,9 +440,7 @@ Object subclass: Caller
     local :: Integer := ms
     local
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result
@@ -459,9 +471,7 @@ Object subclass: Caller
     ms isNil ifTrue: [^nil]
     r process: ms
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
 
     let result = crate::semantic_analysis::analyse(&module);
     let type_warnings: Vec<_> = result

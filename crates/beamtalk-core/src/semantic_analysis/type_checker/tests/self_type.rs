@@ -12,9 +12,7 @@ use super::common::*;
 fn test_self_return_type_parsed() {
     // `-> Self` parses to TypeAnnotation::SelfType
     let source = "Object subclass: Foo\n  clone -> Self => self";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let method = &module.classes[0].methods[0];
     assert!(
         matches!(method.return_type, Some(TypeAnnotation::SelfType { .. })),
@@ -27,12 +25,7 @@ fn test_self_return_type_parsed() {
 fn test_self_return_type_no_warning_when_body_returns_self() {
     // Method declares -> Self and body returns self (same class) — no warning
     let source = "Object subclass: Foo\n  clone -> Self => self";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
     let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
@@ -49,12 +42,7 @@ fn test_self_return_type_no_warning_when_body_returns_self() {
 fn test_self_return_type_warns_on_mismatch() {
     // Method declares -> Self but body returns a String — should warn
     let source = "Object subclass: Foo\n  clone -> Self => \"not-self\"";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
     let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
@@ -81,12 +69,7 @@ fn test_self_return_type_warns_on_mismatch() {
 fn test_self_in_param_position_emits_error() {
     // `clone: other: Self` — Self in param position is an error
     let source = "Object subclass: Foo\n  mergeWith: other :: Self => self";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
     let checker = check(&module, &hierarchy);
     let self_errors: Vec<_> = checker
         .diagnostics()
@@ -112,9 +95,7 @@ list := #(1, 2, 3)
 result := list collect: [:x | x]
 result first
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::with_builtins();
     let checker = check(&module, &hierarchy);
     // `result first` should be valid — `first` is List-specific, proving Self resolved to List
@@ -139,9 +120,7 @@ Object subclass: Foo
 result := List withAll: #(1, 2, 3)
 result first
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let module = parse_ok(source);
     let hierarchy = crate::semantic_analysis::ClassHierarchy::with_builtins();
     let checker = check(&module, &hierarchy);
     // `result first` should be valid — proves Self resolved to List, not Collection
@@ -182,12 +161,7 @@ c := C new
 result := c clone
 result onlyOnC
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
     let checker = check(&module, &hierarchy);
     // result.onlyOnC should be valid — proves Self resolved to C (not A or B)
     let dnu_warnings: Vec<_> = checker
@@ -223,12 +197,7 @@ Value subclass: User
     c := Counter new
     c getMyClass instanceCount
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
     let checker = check(&module, &hierarchy);
 
     // Verify `-> Self class` parses as SelfClass variant
@@ -272,12 +241,7 @@ typed Value subclass: Spec
     self.cls isNil ifTrue: [^false]
     self.cls isSupervisor
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
     let checker = check(&module, &hierarchy);
 
     // Verify the field annotation parses as Union(ClassOf(Actor), UndefinedObject).
@@ -354,12 +318,7 @@ Value subclass: Driver
     r := Sub lookup: #key
     r value onlyOnSub
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
     let checker = check(&module, &hierarchy);
 
     // No DNU warnings for `onlyOnSub` — that method is on `Sub`, not `Base`.
@@ -391,12 +350,7 @@ Value subclass: Base
 
 Base subclass: Sub
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     // Build a minimal method body `Sub lookup: #key` and infer its type.
     let probe_source = "
@@ -409,12 +363,7 @@ Value subclass: Driver
   probe =>
     Sub lookup: #key
 ";
-    let probe_tokens = crate::source_analysis::lex_with_eof(probe_source);
-    let (probe_module, probe_diags) = crate::source_analysis::parse(probe_tokens);
-    assert!(probe_diags.is_empty(), "Parse failed: {probe_diags:?}");
-    let probe_hierarchy = crate::semantic_analysis::ClassHierarchy::build(&probe_module)
-        .0
-        .unwrap();
+    let (probe_module, probe_hierarchy) = parse_and_build(probe_source);
 
     let driver = probe_module
         .classes
@@ -489,12 +438,7 @@ Value subclass: Driver
   probe =>
     Base lookup: #key
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes
@@ -561,12 +505,7 @@ Value subclass: Driver
     pool := FakeWorkerPool
     pool probeC
 ";
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
+    let (module, hierarchy) = parse_and_build(source);
 
     let driver = module
         .classes
@@ -584,13 +523,16 @@ Value subclass: Driver
         .expect("probe has at least one statement")
         .expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("self", InferredType::known("Driver"));
     // `pool` is a FakeWorkerPool instance (no receiver type args; the
     // binding of C flows from superclass_type_args on FakeWorkerPool).
-    env.set_local("pool", InferredType::known("FakeWorkerPool"));
-    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        expr,
+        &hierarchy,
+        &[
+            ("self", InferredType::known("Driver")),
+            ("pool", InferredType::known("FakeWorkerPool")),
+        ],
+    );
 
     match &ty {
         InferredType::Known {

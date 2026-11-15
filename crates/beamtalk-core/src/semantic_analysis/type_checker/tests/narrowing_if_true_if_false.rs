@@ -21,16 +21,17 @@ use super::common::*;
 #[test]
 fn bt_2020_if_true_if_false_integer_branches_yield_integer() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("cond", InferredType::known("Boolean"));
 
     let expr = if_true_if_false(
         var("cond"),
         block_expr(vec![int_lit(1)]),
         block_expr(vec![int_lit(2)]),
     );
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[("cond", InferredType::known("Boolean"))],
+    );
 
     assert_eq!(
         ty.as_known().map(EcoString::as_str),
@@ -44,20 +45,8 @@ fn bt_2020_if_true_if_false_integer_branches_yield_integer() {
 #[test]
 fn bt_2020_is_nil_if_true_if_false_preserves_integer_return() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     // x :: Integer | Nil
-    env.set_local(
-        "x",
-        InferredType::Union {
-            members: vec![
-                InferredType::known("Integer"),
-                InferredType::known("UndefinedObject"),
-            ],
-            provenance: super::super::TypeProvenance::Inferred(span()),
-        },
-    );
-    env.set_local("default", InferredType::known("Integer"));
 
     let expr = if_true_if_false(
         is_nil("x"),
@@ -69,7 +58,23 @@ fn bt_2020_is_nil_if_true_if_false_preserves_integer_return() {
             vec![int_lit(1)],
         )]),
     );
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[
+            (
+                "x",
+                InferredType::Union {
+                    members: vec![
+                        InferredType::known("Integer"),
+                        InferredType::known("UndefinedObject"),
+                    ],
+                    provenance: super::super::TypeProvenance::Inferred(span()),
+                },
+            ),
+            ("default", InferredType::known("Integer")),
+        ],
+    );
 
     assert_eq!(
         ty.as_known().map(EcoString::as_str),
@@ -86,16 +91,17 @@ fn bt_2020_is_nil_if_true_if_false_preserves_integer_return() {
 #[test]
 fn bt_2020_if_true_if_false_mixed_arms_yield_concrete_type() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("cond", InferredType::known("Boolean"));
 
     let expr = if_true_if_false(
         var("cond"),
         block_expr(vec![str_lit("hello")]),
         block_expr(vec![int_lit(1)]),
     );
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[("cond", InferredType::known("Boolean"))],
+    );
 
     assert!(
         !matches!(ty, InferredType::Dynamic(_)),
@@ -456,13 +462,15 @@ fn bt2624_singleton_union_narrowing_suppresses_branch_warning() {
 #[test]
 fn bt_2868_solo_if_true_unnarrowed_boolean_receiver_yields_boolean_or_r() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
+
     // cond :: Boolean, no narrowing info available (not from isNil/isKindOf/=)
-    env.set_local("cond", InferredType::known("Boolean"));
 
     let expr = if_true(var("cond"), block_expr(vec![int_lit(42)]));
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[("cond", InferredType::known("Boolean"))],
+    );
 
     let InferredType::Union { members, .. } = &ty else {
         panic!(
@@ -486,12 +494,13 @@ fn bt_2868_solo_if_true_unnarrowed_boolean_receiver_yields_boolean_or_r() {
 #[test]
 fn bt_2868_solo_if_false_unnarrowed_boolean_receiver_yields_boolean_or_r() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("cond", InferredType::known("Boolean"));
 
     let expr = if_false(var("cond"), block_expr(vec![str_lit("no")]));
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[("cond", InferredType::known("Boolean"))],
+    );
 
     let InferredType::Union { members, .. } = &ty else {
         panic!(
@@ -516,16 +525,17 @@ fn bt_2868_solo_if_false_unnarrowed_boolean_receiver_yields_boolean_or_r() {
 #[test]
 fn bt_2868_two_armed_if_true_if_false_unaffected() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("cond", InferredType::known("Boolean"));
 
     let expr = if_true_if_false(
         var("cond"),
         block_expr(vec![int_lit(1)]),
         block_expr(vec![int_lit(2)]),
     );
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[("cond", InferredType::known("Boolean"))],
+    );
 
     assert_eq!(
         ty.as_known().map(EcoString::as_str),
@@ -541,12 +551,9 @@ fn bt_2868_two_armed_if_true_if_false_unaffected() {
 #[test]
 fn bt_2868_narrowed_true_receiver_unaffected() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("cond", InferredType::known("True"));
 
     let expr = if_true(var("cond"), block_expr(vec![int_lit(42)]));
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(&expr, &hierarchy, &[("cond", InferredType::known("True"))]);
 
     assert_eq!(
         ty.as_known().map(EcoString::as_str),
@@ -561,12 +568,13 @@ fn bt_2868_narrowed_true_receiver_unaffected() {
 #[test]
 fn bt_2868_dynamic_receiver_unaffected() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("cond", InferredType::Dynamic(DynamicReason::Unknown));
 
     let expr = if_true(var("cond"), block_expr(vec![int_lit(42)]));
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &expr,
+        &hierarchy,
+        &[("cond", InferredType::Dynamic(DynamicReason::Unknown))],
+    );
 
     assert!(
         matches!(ty, InferredType::Dynamic(_)),
@@ -719,15 +727,15 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
         ..ClassInfo::test("Weird", Some("Object"))
     }]);
 
-    let mut checker = TypeChecker::new();
+    let mut session = InferSession::new();
     // Simulate being inside a `typed` class so the Dynamic-in-typed-class
     // lint has a context to warn on.
-    checker.typed_class_context = Some(eco_string("Repro"));
-    let mut env = TypeEnv::new();
-    env.set_local("recv", InferredType::known("Weird"));
+    session.checker.typed_class_context = Some(eco_string("Repro"));
+
+    session.env.set_local("recv", InferredType::known("Weird"));
 
     let expr = if_true(var("recv"), block_expr(vec![int_lit(42)]));
-    let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+    let ty = session.infer(&expr, &hierarchy);
 
     assert_eq!(
         ty,
@@ -737,13 +745,14 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
          got {ty:?}"
     );
     assert!(
-        checker
+        session
+            .checker
             .diagnostics()
             .iter()
             .any(|d| d.message.contains("inferred as Dynamic in typed class")
                 && d.message.contains("unannotated return")),
         "UnannotatedReturn is not in the Dynamic-in-typed-class suppression \
          list, so the warning should fire now that the reason is honest; got: {:?}",
-        checker.diagnostics()
+        session.checker.diagnostics()
     );
 }
