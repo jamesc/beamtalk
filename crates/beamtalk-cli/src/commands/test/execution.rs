@@ -369,7 +369,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     let (cover_preamble, cover_epilogue) = bunit_cover_fragments(&beam_paths, &runtime_dir);
 
     // `beamtalk test` runs no workspace supervisor, so nothing registers the
-    // workspace callback. Register `beamtalk_repl_eval` when its code is loadable so
+    // workspace callback. Register `beamtalk_workspace_callback_impl` when its code is loadable so
     // the runtime's pure classification/compile calls answer as they did before they
     // went through `beamtalk_workspace_callback`. This leaves a registered callback
     // with no recorded capabilities, a combination only `beamtalk test` produces; a
@@ -378,7 +378,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
         "{cover_preamble}\
          {{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
          application:set_env(beamtalk_stdlib, raw_mfa, {raw_mfa}), \
-         ok = beamtalk_workspace_callback:register_if_loaded(beamtalk_repl_eval), \
+         ok = beamtalk_workspace_callback:register_if_loaded(beamtalk_workspace_callback_impl), \
          {root_package_start}\
          {hex_deps_start_cmd}\
          {load_cmd}\
@@ -598,7 +598,7 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
     // `run_bunit_tests`.
     let eval_cmd = format!(
         "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
-         ok = beamtalk_workspace_callback:register_if_loaded(beamtalk_repl_eval), \
+         ok = beamtalk_workspace_callback:register_if_loaded(beamtalk_workspace_callback_impl), \
          {root_package_start}\
          {hex_deps_start_cmd}\
          Mods = [{module_list}], \

@@ -465,7 +465,7 @@ emit_rewrite_change_entry_case(#{counter_path := CounterPath, sub_counter_path :
         author => <<"sess-1">>,
         author_kind => agent
     },
-    ok = beamtalk_repl_loader:emit_rewrite_change_entry(Spec, RewriteResult),
+    ok = beamtalk_repl_loader_changelog_entries:emit_rewrite_change_entry(Spec, RewriteResult),
     [Entry] = beamtalk_workspace_changelog:entries(),
     Sites = beamtalk_workspace_changelog:entry_sites(Entry),
     [DefinitionSiteValue | _] = Sites,

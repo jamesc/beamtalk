@@ -2,7 +2,6 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 -module(beamtalk_repl_eval).
--behaviour(beamtalk_workspace_callback).
 
 %%% **DDD Context:** REPL Session Context
 
@@ -23,40 +22,26 @@ module loading to beamtalk_repl_loader.
     do_dispatch/5,
     dispatch_sync/3,
     validate_run_entry/3,
-    do_show_codegen/2,
-    handle_load/2, handle_load/3,
-    handle_load_source/3
+    do_show_codegen/2
 ]).
-%% ADR 0040 Phase 2 — stateless class reload (called from beamtalk_runtime via beamtalk_workspace_callback)
--export([reload_class_file/1, reload_class_file/2]).
-
 %% Cockpit reload-from-disk after a content-mutating git op. Reloads a
 %% reverted `.bt` file into the live image (image == disk) and repopulates the
 %% workspace_meta class-source cache. Called via RPC from the LiveView client.
 -export([reload_file/1]).
 
-%% ADR 0082 Phase 1 — new-class creation backing `Workspace newClass:at:'.
--export([new_class/2]).
--export([move_class/2]).
-
-%% ADR 0113 — `Workspace changes revert:` extension for a pending
-%% `'remove-class'` entry: recompiles and reinstalls the class from its
-%% recorded prior source, reusing new_class/2's own install chokepoint.
--export([revert_remove_class/2]).
-
 %% ADR 0095 Phase 2 — stateless evaluate-in-context for the Inspector's
 %% value `evaluate:`. Called from beamtalk_inspector
-%% (beamtalk_runtime) via beamtalk_workspace_callback.
+%% (beamtalk_runtime) via beamtalk_workspace_callback_impl.
 -export([eval_with_self/2]).
 
 %% ADR 0082 Phase 1 — stateless live method patch backing
 %% `Behaviour compile:source:' / `tryCompile:source:'. Called via
-%% beamtalk_workspace_callback from beamtalk_class_refactor.
+%% beamtalk_workspace_callback_impl from beamtalk_class_refactor.
 -export([compile_method/4, compile_method/6, compile_method/7]).
 
 %% ADR 0105 Phase 3 — stateless pre-save advisory precheck backing
 %% `Behaviour precheckCompile:source:'. Called via
-%% beamtalk_workspace_callback from beamtalk_class_refactor.
+%% beamtalk_workspace_callback_impl from beamtalk_class_refactor.
 -export([precheck_method/4]).
 
 %% ADR 0082 revert completeness — remove a live method (the
@@ -66,32 +51,6 @@ module loading to beamtalk_repl_loader.
 %% this SAME function rather than a forked copy; remove_method/3 keeps the
 %% revert-of-an-add caller's unchanged refuse-stdlib default.
 -export([remove_method/3, remove_method/4, remove_class/1]).
-
-%% ADR 0112 Phase 3 — best-effort ChangeLog append after a
-%% successful `removeSelector:` call. Called via
-%% beamtalk_workspace_callback from beamtalk_class_refactor; both are thin forwarding wrappers over
-%% beamtalk_repl_loader, which already owns the classification helpers
-%% (`class_source_file/1` / `classify_source_file/1`) these functions reuse.
--export([emit_remove_change_entry/5, emit_extension_remove_change_entry/7]).
-
-%% ADR 0114 — the shared multi-site rewrite mechanism generalizing
-%% remove_method/3,4 above, plus its best-effort ChangeLog append. Thin
-%% forwarding wrappers over beamtalk_repl_loader, reached from
-%% beamtalk_class_refactor and beamtalk_selector_refactor through
-%% beamtalk_workspace_callback (the rename pipelines).
--export([rewrite_sites/2, validate_sites/2, emit_rewrite_change_entry/2]).
-
-%% ADR 0114 Phase 4: `Workspace changes revert:` for a pending
-%% `'rename-class'`/`'rename-method'` entry — thin forwarding wrapper over
-%% `beamtalk_repl_loader_rewrite:revert_rename_sites/1`, called from `beamtalk_
-%% workspace_interface_primitives:revert_rename_entry/2`.
--export([revert_rename_sites/1]).
-
-%% Best-effort snapshot + ChangeLog append for a successful
-%% `removeFromSystem` (class removal). Called via
-%% beamtalk_workspace_callback from beamtalk_refactor_support; both are thin forwarding wrappers
-%% over beamtalk_repl_loader.
--export([capture_class_removal_snapshot/1, emit_remove_class_change_entry/4]).
 
 %% Workspace binding-mutation announcement with an explicit session id.
 %% Called from `beamtalk_repl_shell` for the clear / pending put/remove paths,
@@ -714,33 +673,6 @@ do_show_codegen(Expression, State) ->
             {error, Reason, [], NewState}
     end.
 
--doc "Load a Beamtalk file and register its classes.".
--spec handle_load(string(), beamtalk_repl_state:state()) ->
-    {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
-handle_load(Path, State) ->
-    beamtalk_repl_loader:handle_load(Path, State).
-
--doc "Load a Beamtalk file with pre-built class indexes.".
--spec handle_load(string(), beamtalk_repl_state:state(), map()) ->
-    {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
-handle_load(Path, State, PrebuiltIndexes) ->
-    beamtalk_repl_loader:handle_load(Path, State, PrebuiltIndexes).
-
--doc "Load Beamtalk source from an inline binary string (no file path).".
--spec handle_load_source(binary(), string(), beamtalk_repl_state:state()) ->
-    {ok, [map()], beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
-handle_load_source(SourceBin, Label, State) ->
-    beamtalk_repl_loader:handle_load_source(SourceBin, Label, State).
-
--doc "Compile and load a source file without REPL session state.".
--spec reload_class_file(string()) -> {ok, [map()]} | {error, term()}.
-reload_class_file(Path) ->
-    beamtalk_repl_loader:reload_class_file(Path).
-
--spec reload_class_file(string(), atom()) -> {ok, [map()]} | {error, term()}.
-reload_class_file(Path, ExpectedClassName) ->
-    beamtalk_repl_loader:reload_class_file(Path, ExpectedClassName).
-
 -doc """
 Reload a `.bt` file from disk into the live image, returning the names of the
 classes it defines.
@@ -814,37 +746,6 @@ class_name_binary(#{name := Atom}) when is_atom(Atom) -> atom_to_binary(Atom, ut
 class_name_binary(#{name := Bin}) when is_binary(Bin) -> Bin;
 class_name_binary(#{name := Str}) when is_list(Str) -> list_to_binary(Str);
 class_name_binary(_) -> undefined.
-
--doc """
-Create a brand-new class from a source String at a target path (ADR 0082 Phase 1).
-Delegates to `beamtalk_repl_loader_newclass:new_class/2`; see there for the
-validation contract. Returns `{ok, [ClassObject]}` or `{error, #beamtalk_error{}}`.
-""".
--spec new_class(binary() | string(), binary() | string()) ->
-    {ok, [tuple()]} | {error, term()}.
-new_class(Source, TargetPath) ->
-    beamtalk_repl_loader_newclass:new_class(Source, TargetPath).
-
--doc """
-Move a class's `.bt` file to a new path without changing its name (ADR 0114
-Phase 2). Thin forwarding wrapper — see
-`beamtalk_repl_loader_rewrite:move_class/2` for the full contract.
-""".
--spec move_class(atom(), binary()) -> ok | {error, term()}.
-move_class(ClassName, NewPathBin) ->
-    beamtalk_repl_loader_rewrite:move_class(ClassName, NewPathBin).
-
--doc """
-Recompile and reinstall a class from a recorded prior source (ADR 0113
-— `Workspace changes revert:` extension for a pending `'remove-class'`
-entry). Delegates to `beamtalk_repl_loader_newclass:revert_remove_class/2`; see there
-for the validation contract (same as `new_class/2` minus the target-must-not-
-exist check). Returns `{ok, [ClassObject]}` or `{error, #beamtalk_error{}}`.
-""".
--spec revert_remove_class(binary() | string(), binary() | string()) ->
-    {ok, [tuple()]} | {error, term()}.
-revert_remove_class(Source, TargetPath) ->
-    beamtalk_repl_loader_newclass:revert_remove_class(Source, TargetPath).
 
 -doc """
 Evaluate `Source` (a Beamtalk expression) with `self` bound to `Self`, returning
@@ -1172,113 +1073,6 @@ remove_method(ClassNameBin, Selector, Side, StdlibPolicy) ->
         {refuse_stdlib, none} ->
             beamtalk_repl_loader:remove_method(ClassNameBin, SelectorBin, Side)
     end.
-
--doc """
-Best-effort ChangeLog append for a completed local-method `removeSelector:`
-call (ADR 0112 Phase 3). Thin forwarding wrapper — see
-`beamtalk_repl_loader:emit_remove_change_entry/5` for the full contract.
-Routed through this module (rather than called directly from
-`beamtalk_runtime`) for the same compile-time-dependency reason
-`remove_method/3,4` already are.
-""".
--spec emit_remove_change_entry(
-    binary(), atom() | binary(), instance | class, binary(), human | agent
-) ->
-    ok.
-emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
-    beamtalk_repl_loader:emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind).
-
--doc """
-Rewrite a definition site plus N reference/sender sites transactionally, in
-memory (ADR 0114). Thin forwarding wrapper — see
-`beamtalk_repl_loader_rewrite:rewrite_sites/2` for the full contract, including the
-in-memory atomicity protocol.
-""".
--spec rewrite_sites(
-    beamtalk_repl_loader_rewrite:rewrite_site() | undefined, [
-        beamtalk_repl_loader_rewrite:rewrite_site()
-    ]
-) ->
-    {ok, beamtalk_repl_loader_rewrite:rewrite_result()} | {error, term()}.
-rewrite_sites(DefinitionSite, ReferenceSites) ->
-    beamtalk_repl_loader_rewrite:rewrite_sites(DefinitionSite, ReferenceSites).
-
--doc """
-Validate a `rewrite_sites/2` call without installing anything (ADR 0114).
-Thin forwarding wrapper — see
-`beamtalk_repl_loader_rewrite:validate_sites/2` for the full contract.
-""".
--spec validate_sites(
-    beamtalk_repl_loader_rewrite:rewrite_site() | undefined, [
-        beamtalk_repl_loader_rewrite:rewrite_site()
-    ]
-) -> ok | {error, term()}.
-validate_sites(DefinitionSite, ReferenceSites) ->
-    beamtalk_repl_loader_rewrite:validate_sites(DefinitionSite, ReferenceSites).
-
--doc """
-Best-effort ChangeLog append for a completed `rewrite_sites/2` call (ADR
-0114). Thin forwarding wrapper — see
-`beamtalk_repl_loader:emit_rewrite_change_entry/2` for the full contract.
-""".
--spec emit_rewrite_change_entry(map(), beamtalk_repl_loader_rewrite:rewrite_result()) -> ok.
-emit_rewrite_change_entry(Spec, RewriteResult) ->
-    beamtalk_repl_loader:emit_rewrite_change_entry(Spec, RewriteResult).
-
--doc """
-Revert a pending `'rename-class'`/`'rename-method'` ChangeEntry (ADR 0114
-Phase 4). Thin forwarding wrapper — see `beamtalk_repl_loader:
-revert_rename_sites/1` for the full contract.
-""".
--spec revert_rename_sites(beamtalk_workspace_changelog:entry()) ->
-    {ok, binary()} | {error, term()}.
-revert_rename_sites(Entry) ->
-    beamtalk_repl_loader_rewrite:revert_rename_sites(Entry).
-
--doc """
-Best-effort ChangeLog append for a completed extension-method `removeSelector:`
-call (ADR 0112 Phase 3). Thin forwarding wrapper — see
-`beamtalk_repl_loader:emit_extension_remove_change_entry/7` for the full
-contract.
-""".
--spec emit_extension_remove_change_entry(
-    binary(),
-    atom() | binary(),
-    instance | class,
-    atom() | undefined,
-    binary() | undefined,
-    binary(),
-    human | agent
-) -> ok.
-emit_extension_remove_change_entry(
-    ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
-) ->
-    beamtalk_repl_loader:emit_extension_remove_change_entry(
-        ClassNameBin, Selector, Side, Owner, PrevBody, Author, AuthorKind
-    ).
-
--doc """
-Best-effort snapshot of a class's current source + on-disk flushability
-classification, taken before its `removeFromSystem` proceeds. Thin
-forwarding wrapper — see
-`beamtalk_repl_loader:capture_class_removal_snapshot/1` for the full
-contract.
-""".
--spec capture_class_removal_snapshot(binary()) -> map().
-capture_class_removal_snapshot(ClassNameBin) ->
-    beamtalk_repl_loader:capture_class_removal_snapshot(ClassNameBin).
-
--doc """
-Best-effort ChangeLog append for a completed `classRemoveFromSystemByName/1`
-call. Thin forwarding wrapper — see
-`beamtalk_repl_loader:emit_remove_class_change_entry/4` for the full
-contract.
-""".
--spec emit_remove_class_change_entry(binary(), map(), binary(), human | agent) -> ok.
-emit_remove_class_change_entry(ClassNameBin, Snapshot, Author, AuthorKind) ->
-    beamtalk_repl_loader:emit_remove_class_change_entry(
-        ClassNameBin, Snapshot, Author, AuthorKind
-    ).
 
 -doc """
 Remove a live class from the system (a new-class revert case).

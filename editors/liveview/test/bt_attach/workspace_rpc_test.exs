@@ -796,7 +796,7 @@ defmodule BtAttach.WorkspaceRpcTest do
     end
 
     test "new_class/2 returns the target path on success" do
-      mock_rpc(%{{:beamtalk_repl_eval, :new_class} => {:ok, [:some_class_object]}})
+      mock_rpc(%{{:beamtalk_repl_loader_newclass, :new_class} => {:ok, [:some_class_object]}})
 
       assert Workspace.new_class("Object subclass: Greeter", "src/greeter.bt") ==
                {:ok, "src/greeter.bt"}
@@ -804,7 +804,7 @@ defmodule BtAttach.WorkspaceRpcTest do
 
     test "new_class/2 structures a raw error" do
       mock_rpc(%{
-        {:beamtalk_repl_eval, :new_class} => {:error, :name_clash},
+        {:beamtalk_repl_loader_newclass, :new_class} => {:error, :name_clash},
         {:beamtalk_repl_errors, :ensure_structured_error} => {:beamtalk_error, :name_clash}
       })
 
@@ -813,14 +813,14 @@ defmodule BtAttach.WorkspaceRpcTest do
     end
 
     test "new_class/2 surfaces a badrpc as unreachable" do
-      mock_rpc(%{{:beamtalk_repl_eval, :new_class} => {:badrpc, :mock_scripted}})
+      mock_rpc(%{{:beamtalk_repl_loader_newclass, :new_class} => {:badrpc, :mock_scripted}})
 
       assert Workspace.new_class("Object subclass: G", "src/g.bt") ==
                {:error, {:unreachable, :mock_scripted}}
     end
 
     test "new_class/2 degrades an unrecognised reply to unexpected_reply" do
-      mock_rpc(%{{:beamtalk_repl_eval, :new_class} => :odd})
+      mock_rpc(%{{:beamtalk_repl_loader_newclass, :new_class} => :odd})
 
       assert Workspace.new_class("Object subclass: G", "src/g.bt") ==
                {:error, {:unexpected_reply, :odd}}

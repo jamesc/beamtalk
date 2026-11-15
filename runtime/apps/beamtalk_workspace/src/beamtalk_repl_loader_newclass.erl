@@ -265,7 +265,11 @@ new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, D
 validate_target_path(TargetPath) ->
     case file:read_file_info(TargetPath) of
         {error, enoent} ->
-            case beamtalk_repl_loader:classify_source_file(list_to_binary(TargetPath)) of
+            case
+                beamtalk_repl_loader_changelog_entries:classify_source_file(
+                    list_to_binary(TargetPath)
+                )
+            of
                 {flushable, AbsPath} ->
                     {ok, AbsPath};
                 {not_flushable, _Reason} ->
@@ -388,7 +392,7 @@ validate_new_class(DeclaredName, TargetPath, Loaded) ->
 %% True iff a class of this name is currently registered in the runtime.
 -spec class_loaded(binary()) -> boolean().
 class_loaded(ClassNameBin) ->
-    case beamtalk_repl_server:safe_to_existing_atom(ClassNameBin) of
+    case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
         {ok, ClassName} ->
             is_pid(beamtalk_class_registry:whereis_class(ClassName));
         {error, _} ->
