@@ -555,17 +555,6 @@ impl InferredType {
         }
     }
 
-    /// Returns the protocol name of a
-    /// [`ProtocolMeta`](InferredType::ProtocolMeta) (`P class` → `Some("P")`),
-    /// or `None` for any other variant.
-    #[must_use]
-    pub fn as_protocol_meta(&self) -> Option<&EcoString> {
-        match self {
-            Self::ProtocolMeta { protocol_name, .. } => Some(protocol_name),
-            _ => None,
-        }
-    }
-
     /// The class an instance of this type dispatches as, with the type's
     /// provenance: the class of a `Known` type, or `Dictionary` for a map
     /// shape (ADR 0147: every send that is not shape-aware goes to the

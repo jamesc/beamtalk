@@ -229,10 +229,15 @@ pub fn save_workspace_cookie(workspace_id: &str, cookie: &str) -> Result<()> {
     write_secure_file(&cookie_path, cookie.as_bytes())
 }
 
-/// Read workspace cookie.
+/// Read the workspace cookie (trimmed) — delegates to
+/// `beamtalk_workspace::read_cookie_file`, the one cookie reader.
+///
+/// Errors if the cookie file is missing or empty.
 pub fn read_workspace_cookie(workspace_id: &str) -> Result<String> {
-    let cookie_path = workspace_dir(workspace_id)?.join("cookie");
-    fs::read_to_string(cookie_path).into_diagnostic()
+    beamtalk_workspace::read_cookie_file(workspace_id)?
+        .ok_or_else(|| miette!(
+            "Workspace cookie is missing or empty for {workspace_id}; restart workspace with `beamtalk repl`"
+        ))
 }
 
 /// Get node info for a workspace.

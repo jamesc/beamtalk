@@ -55,9 +55,10 @@ const FIELD_WRITE_SITES: &[(&str, usize, usize)] = &[
     // `lower_simple_field_write_bind`, the C6 non-producer two-hop, and
     // `lower_hybrid_field_rebind` (no `Put`).
     ("control_flow/conditionals.rs", 2, 3),
-    // The method-body field assignments: control-flow RHS and the two
-    // `FieldAssignment` bodies.
-    ("gen_server/methods.rs", 3, 3),
+    // The method-body field assignment with a control-flow right-hand side
+    // (`FieldAssignmentControlFlow`): the producer path and the two-hop.
+    // A plain `FieldAssignment` is the shared `lower_field_assignment_bind`.
+    ("gen_server/methods.rs", 2, 2),
 ];
 
 /// Field-shaped `Put`s that are not field writes, with how many each file
@@ -67,13 +68,14 @@ const NOT_FIELD_WRITES: &[(&str, usize)] = &[("threaded_ir/emit.rs", 1)];
 
 /// Every file that builds a dynamic-key field mutation or notes one, with how
 /// many of each: (path relative to `core_erlang/`, mutations, `"<dynamic>"`
-/// hook calls). `fieldAt:put:` and `clearField:` in the open-document
-/// lowering, in a conditional arm (three kinds) and in a control-flow method
-/// body.
+/// hook calls). `fieldAt:put:` and `clearField:` in the shared
+/// `statement_kinds.rs` lowerers (method body and conditional arm alike), and
+/// `fieldAt:put:` with a control-flow value, once in a conditional arm and once
+/// in a method body.
 const DYNAMIC_FIELD_WRITE_SITES: &[(&str, usize, usize)] = &[
-    ("control_flow/conditionals.rs", 3, 3),
-    ("dispatch_codegen/field_assignment.rs", 2, 2),
+    ("control_flow/conditionals.rs", 1, 1),
     ("gen_server/methods.rs", 1, 1),
+    ("statement_kinds.rs", 2, 2),
 ];
 
 fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {

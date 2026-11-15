@@ -10,12 +10,6 @@ Tests workspace supervisor behavior, child specifications, and startup.
 """.
 -include_lib("eunit/include/eunit.hrl").
 
-%% Exported for `logger:add_handler/3` to call back into
-%% (`release_mode_include_compiler_logs_boot_warning_test` et al. below) —
-%% eunit's auto-export parse transform only exports test functions, and a
-%% logger handler callback is invoked as an ordinary cross-module call.
--export([log/2]).
-
 %%====================================================================
 %% Tests
 %%====================================================================
@@ -755,52 +749,32 @@ capability_guard_clears_on_shutdown_test() ->
 release_mode_include_compiler_logs_boot_warning_test_() ->
     {timeout, 10, fun() ->
         with_capabilities_restored(fun() ->
-            Parent = self(),
-            HandlerId = release_include_compiler_warning_test_handler,
-            %% `apps/beamtalk_runtime/test/sys.config` sets the *primary*
-            %% logger level to `error` for clean test-suite output — a
-            %% WARNING event never reaches any handler, including this
-            %% test's own, unless the primary level is raised first. Same
-            %% pattern (and restore-to-`error`, not the pre-call value)
-            %% `beamtalk_shape_migration_tests` already uses for its own
-            %% stray-migration-warning assertions.
-            logger:set_primary_config(level, all),
-            ok = logger:add_handler(HandlerId, ?MODULE, #{config => Parent}),
-            try
+            beamtalk_test_log:with_capture(all, fun() ->
                 _ = child_ids((release_mode_config())#{include_compiler => true}),
                 ?assert(receive_include_compiler_warning(500))
-            after
-                _ = logger:remove_handler(HandlerId),
-                logger:set_primary_config(level, error)
-            end
+            end)
         end)
     end}.
 
 release_mode_without_include_compiler_logs_no_boot_warning_test() ->
     with_capabilities_restored(fun() ->
-        Parent = self(),
-        HandlerId = release_no_include_compiler_warning_test_handler,
-        %% Raise the primary level the same way the positive-case test
-        %% does, so this negative assertion actually exercises "no WARNING
-        %% is logged" rather than passing vacuously because the ambient
-        %% `error`-level primary config already drops it either way.
-        logger:set_primary_config(level, all),
-        ok = logger:add_handler(HandlerId, ?MODULE, #{config => Parent}),
-        try
+        beamtalk_test_log:with_capture(all, fun() ->
             _ = child_ids(release_mode_config()),
             ?assertNot(receive_include_compiler_warning(200))
-        after
-            _ = logger:remove_handler(HandlerId),
-            logger:set_primary_config(level, error)
-        end
+        end)
     end).
 
-%% Minimal logger handler callback (ADR 0125 §1.5 boot-warning test only):
-%% forwards every log event's formatted message to the test process.
--doc "logger handler callback — forwards formatted messages to `Config`.".
-log(#{msg := Msg} = Event, #{config := Parent}) ->
-    Parent ! {sup_log_event, format_msg(Msg, Event)},
-    ok.
+%% Wait for a captured log event whose formatted message contains Needle.
+%% One implementation for every boot-warning test in this suite (ADR 0125 §1.5's
+%% include-compiler warning and §1.6's non-loopback-bind warning below).
+receive_log_message_containing(Needle, Timeout) ->
+    Matches = fun(#{msg := Msg} = Event) ->
+        string:find(unicode:characters_to_list(format_msg(Msg, Event)), Needle) =/= nomatch
+    end,
+    beamtalk_test_log:await(Matches, Timeout) =/= timeout.
+
+receive_include_compiler_warning(Timeout) ->
+    receive_log_message_containing("include-compiler", Timeout).
 
 format_msg({string, Str}, _Event) ->
     Str;
@@ -811,25 +785,6 @@ format_msg({Format, Args}, _Event) ->
 format_msg(Msg, _Event) ->
     io_lib:format("~p", [Msg]).
 
-receive_include_compiler_warning(Timeout) ->
-    receive_log_message_containing("include-compiler", Timeout).
-
-%% Shared substring-matching wait, parameterised by the needle — one
-%% implementation for every boot-warning test in this suite (ADR 0125 §1.5's
-%% include-compiler warning and §1.6's non-loopback-bind warning below),
-%% not a second near-identical copy per warning (AGENTS.md's
-%% no-duplicate-implementations rule).
-receive_log_message_containing(Needle, Timeout) ->
-    receive
-        {sup_log_event, Msg} ->
-            case string:find(unicode:characters_to_list(Msg), Needle) of
-                nomatch -> receive_log_message_containing(Needle, Timeout);
-                _ -> true
-            end
-    after Timeout ->
-        false
-    end.
-
 %% ADR 0125 §1.6: a release console bound to a non-loopback address must log
 %% a boot warning naming ADR 0058 and the reverse-proxy alternative — never
 %% silently. Not a refusal: `child_ids/1` (and so `init/1`) must still
@@ -837,53 +792,32 @@ receive_log_message_containing(Needle, Timeout) ->
 release_mode_non_loopback_bind_logs_boot_warning_test_() ->
     {timeout, 10, fun() ->
         with_capabilities_restored(fun() ->
-            Parent = self(),
-            HandlerId = release_non_loopback_bind_warning_test_handler,
-            logger:set_primary_config(level, all),
-            ok = logger:add_handler(HandlerId, ?MODULE, #{config => Parent}),
-            try
+            beamtalk_test_log:with_capture(all, fun() ->
                 Config = (release_console_config())#{bind_addr => {0, 0, 0, 0}},
                 Ids = child_ids(Config),
                 ?assert(lists:member(beamtalk_repl_server, Ids)),
                 ?assert(receive_log_message_containing("non-loopback", 500))
-            after
-                _ = logger:remove_handler(HandlerId),
-                logger:set_primary_config(level, error)
-            end
+            end)
         end)
     end}.
 
 release_mode_loopback_bind_logs_no_boot_warning_test() ->
     with_capabilities_restored(fun() ->
-        Parent = self(),
-        HandlerId = release_loopback_bind_no_warning_test_handler,
-        logger:set_primary_config(level, all),
-        ok = logger:add_handler(HandlerId, ?MODULE, #{config => Parent}),
-        try
+        beamtalk_test_log:with_capture(all, fun() ->
             Config = (release_console_config())#{bind_addr => {127, 0, 0, 1}},
             _ = child_ids(Config),
             ?assertNot(receive_log_message_containing("non-loopback", 200))
-        after
-            _ = logger:remove_handler(HandlerId),
-            logger:set_primary_config(level, error)
-        end
+        end)
     end).
 
 %% Only `mode => release, console => true` is checked — a workspace-mode
 %% node bound non-loopback (a CLI-driven development node) logs nothing.
 workspace_mode_non_loopback_bind_logs_no_boot_warning_test() ->
-    Parent = self(),
-    HandlerId = workspace_non_loopback_bind_no_warning_test_handler,
-    logger:set_primary_config(level, all),
-    ok = logger:add_handler(HandlerId, ?MODULE, #{config => Parent}),
-    try
+    beamtalk_test_log:with_capture(all, fun() ->
         Config = (test_config())#{bind_addr => {0, 0, 0, 0}},
         _ = child_ids(Config),
         ?assertNot(receive_log_message_containing("non-loopback", 200))
-    after
-        _ = logger:remove_handler(HandlerId),
-        logger:set_primary_config(level, error)
-    end.
+    end).
 
 run_mode_no_tcp_port_required_test() ->
     %% Starting in run mode with no tcp_port should succeed.

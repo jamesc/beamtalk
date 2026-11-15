@@ -10,8 +10,9 @@ use std::fs;
 use tracing::info;
 
 use crate::beam_compiler::ClassHierarchyContext;
+use crate::commands::app_file;
 use crate::commands::util::to_forward_slash;
-use crate::commands::{app_file, manifest};
+use beamtalk_package::manifest;
 
 /// Collected build outputs needed for OTP application packaging.
 ///

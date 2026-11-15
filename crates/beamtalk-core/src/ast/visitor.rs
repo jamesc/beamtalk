@@ -178,11 +178,6 @@ pub(crate) fn walk_expr<'ast, V: Visitor<'ast>>(v: &mut V, expr: &'ast Expressio
 ///
 /// Call this from an overridden [`Visitor::visit_block`] to opt into
 /// descending through a nested block literal.
-///
-/// Currently only used by test helpers (e.g. `find_send_inferred_ty`), so
-/// permitted to be dead code in non-test builds. This is part of the
-/// trait's documented API — don't gate it behind `#[cfg(test)]`.
-#[allow(dead_code)]
 pub(crate) fn walk_block<'ast, V: Visitor<'ast>>(v: &mut V, block: &'ast Block) {
     for stmt in &block.body {
         v.visit_expr(&stmt.expression);

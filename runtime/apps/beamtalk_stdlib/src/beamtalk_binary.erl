@@ -91,9 +91,10 @@ Uses safe mode (`[safe]`) to prevent atom table exhaustion from untrusted
 input. Atoms not already in the atom table will cause an error.
 """.
 -spec deserialize(binary_or_string()) -> term().
-deserialize({beamtalk_string, Raw}) when is_binary(Raw) ->
-    deserialize(Raw);
-deserialize(Bin) when is_binary(Bin) ->
+deserialize(Arg) ->
+    Bin = beamtalk_text:unwrap_or_raise(
+        Arg, 'Binary', 'deserialize:', <<"Argument must be a Binary">>
+    ),
     try
         erlang:binary_to_term(Bin, [safe])
     catch
@@ -101,9 +102,7 @@ deserialize(Bin) when is_binary(Bin) ->
             beamtalk_error:raise_type_error(
                 'Binary', 'deserialize:', <<"Binary data is invalid or contains unknown atoms">>
             )
-    end;
-deserialize(_) ->
-    beamtalk_error:raise_type_error('Binary', 'deserialize:', <<"Argument must be a Binary">>).
+    end.
 
 -doc """
 Convert an iolist to a flat binary.
@@ -219,14 +218,11 @@ BT-4173: byte-level — a `String` self (e.g. via `super do:` from
 bytes, the Binary semantics the super-send asked for.
 """.
 -spec do(binary() | beamtalk_string:t(), fun((non_neg_integer()) -> any())) -> nil.
-do(Bin, Fun) when is_binary(Bin), is_function(Fun, 1) ->
-    do_loop(Bin, 0, erlang:byte_size(Bin), Fun);
-do({beamtalk_string, Raw}, Fun) when is_binary(Raw) ->
-    do(Raw, Fun);
-do(Bin, _Fun) when not is_binary(Bin) ->
-    beamtalk_error:raise_type_error('Binary', do, <<"Receiver must be a Binary">>);
-do(_Bin, _Fun) ->
-    beamtalk_error:raise_type_error('Binary', do, <<"Argument must be a 1-argument block">>).
+do(Arg, Fun) ->
+    Bin = receiver_bytes(Arg, do),
+    is_function(Fun, 1) orelse
+        beamtalk_error:raise_type_error('Binary', do, <<"Argument must be a 1-argument block">>),
+    do_loop(Bin, 0, erlang:byte_size(Bin), Fun).
 
 do_loop(_Bin, Pos, Size, _Fun) when Pos >= Size -> nil;
 do_loop(Bin, Pos, Size, Fun) ->
@@ -246,9 +242,10 @@ BT-4173: byte-level — a `String` self (e.g. via `super at:`) answers
 the byte at the index, the Binary semantics the super-send asked for.
 """.
 -spec at(binary() | beamtalk_string:t(), pos_integer()) -> non_neg_integer().
-at({beamtalk_string, Raw}, Index) when is_binary(Raw) ->
-    at(Raw, Index);
-at(Bin, Index) when is_binary(Bin), is_integer(Index) ->
+at(Arg, Index) ->
+    Bin = receiver_bytes(Arg, at),
+    is_integer(Index) orelse
+        beamtalk_error:raise_type_error('Binary', at, <<"Index must be an Integer">>),
     Size = erlang:byte_size(Bin),
     if
         Size =:= 0 andalso Index >= 1 ->
@@ -266,11 +263,7 @@ at(Bin, Index) when is_binary(Bin), is_integer(Index) ->
             beamtalk_error:raise(Error2);
         true ->
             binary:at(Bin, Index - 1)
-    end;
-at(Bin, _Index) when not is_binary(Bin) ->
-    beamtalk_error:raise_type_error('Binary', at, <<"Receiver must be a Binary">>);
-at(_Bin, _Index) ->
-    beamtalk_error:raise_type_error('Binary', at, <<"Index must be an Integer">>).
+    end.
 
 -doc """
 0-based byte access (Erlang-compatible). Returns Integer 0-255.
@@ -279,9 +272,10 @@ BT-4170: inherited unchanged by `String`, so a tagged `String` receiver
 unwraps here (a `String` is a `Binary` of its UTF-8 bytes).
 """.
 -spec byte_at(binary_or_string(), non_neg_integer()) -> non_neg_integer().
-byte_at({beamtalk_string, Raw}, Index) when is_binary(Raw) ->
-    byte_at(Raw, Index);
-byte_at(Bin, Index) when is_binary(Bin), is_integer(Index) ->
+byte_at(Arg, Index) ->
+    Bin = receiver_bytes(Arg, byte_at),
+    is_integer(Index) orelse
+        beamtalk_error:raise_type_error('Binary', byte_at, <<"Index must be an Integer">>),
     Size = erlang:byte_size(Bin),
     if
         Index < 0 orelse Index >= Size ->
@@ -298,17 +292,16 @@ byte_at(Bin, Index) when is_binary(Bin), is_integer(Index) ->
             beamtalk_error:raise(Error2);
         true ->
             binary:at(Bin, Index)
-    end;
-byte_at(Bin, _Index) when not is_binary(Bin) ->
-    beamtalk_error:raise_type_error('Binary', byte_at, <<"Receiver must be a Binary">>);
-byte_at(_Bin, _Index) ->
-    beamtalk_error:raise_type_error('Binary', byte_at, <<"Index must be an Integer">>).
+    end.
 
 -doc "Zero-copy slice via `binary:part/3`. Pos and Len are 0-based.".
 -spec part(binary_or_string(), non_neg_integer(), non_neg_integer()) -> binary().
-part({beamtalk_string, Raw}, Pos, Len) when is_binary(Raw) ->
-    part(Raw, Pos, Len);
-part(Bin, Pos, Len) when is_binary(Bin), is_integer(Pos), is_integer(Len) ->
+part(Arg, Pos, Len) ->
+    Bin = receiver_bytes(Arg, part),
+    (is_integer(Pos) andalso is_integer(Len)) orelse
+        beamtalk_error:raise_type_error(
+            'Binary', part, <<"Position and length must be Integers">>
+        ),
     try
         binary:part(Bin, Pos, Len)
     catch
@@ -326,11 +319,7 @@ part(Bin, Pos, Len) when is_binary(Bin), is_integer(Pos), is_integer(Len) ->
                     )
                 )
             )
-    end;
-part(Bin, _Pos, _Len) when not is_binary(Bin) ->
-    beamtalk_error:raise_type_error('Binary', part, <<"Receiver must be a Binary">>);
-part(_Bin, _Pos, _Len) ->
-    beamtalk_error:raise_type_error('Binary', part, <<"Position and length must be Integers">>).
+    end.
 
 -doc """
 Concatenate two binaries.
@@ -342,41 +331,28 @@ typed `Binary -> Binary`, so answering a Bitstring would break every
 byte-level send on its result; bits are joined from the Bitstring side.
 """.
 -spec concat(binary_or_string(), binary_or_string()) -> binary().
-concat({beamtalk_string, RawA}, B) when is_binary(RawA) ->
-    concat(RawA, B);
-concat(A, {beamtalk_string, RawB}) when is_binary(A), is_binary(RawB) ->
-    concat(A, RawB);
-concat(A, B) when is_binary(A), is_binary(B) ->
-    <<A/binary, B/binary>>;
-concat(A, _B) when not is_binary(A) ->
-    beamtalk_error:raise_type_error('Binary', concat, <<"Receiver must be a Binary">>);
-concat(_A, _B) ->
-    beamtalk_error:raise_type_error(
+concat(A, B) ->
+    BytesA = receiver_bytes(A, concat),
+    BytesB = beamtalk_text:unwrap_or_raise(
+        B,
         'Binary',
         concat,
         <<"Argument must be a Binary; join a Bitstring from the Bitstring side (Bitstring>>concat:)">>
-    ).
+    ),
+    <<BytesA/binary, BytesB/binary>>.
 
 -doc """
 Bit count of a binary: 8 times its byte count (ADR 0141). A `String`
 counts its UTF-8 bytes.
 """.
 -spec bitSize(binary_or_string()) -> non_neg_integer().
-bitSize({beamtalk_string, Raw}) when is_binary(Raw) ->
-    bit_size(Raw);
-bitSize(Bin) when is_binary(Bin) ->
-    bit_size(Bin);
-bitSize(_) ->
-    beamtalk_error:raise_type_error('Binary', bitSize, <<"Receiver must be a Binary">>).
+bitSize(Bin) ->
+    bit_size(receiver_bytes(Bin, bitSize)).
 
 -doc "Convert binary to list of byte integers.".
 -spec to_bytes(binary_or_string()) -> [non_neg_integer()].
-to_bytes({beamtalk_string, Raw}) when is_binary(Raw) ->
-    binary:bin_to_list(Raw);
-to_bytes(Bin) when is_binary(Bin) ->
-    binary:bin_to_list(Bin);
-to_bytes(_) ->
-    beamtalk_error:raise_type_error('Binary', to_bytes, <<"Receiver must be a Binary">>).
+to_bytes(Bin) ->
+    binary:bin_to_list(receiver_bytes(Bin, to_bytes)).
 
 -doc "Create binary from list of byte integers.".
 -spec from_bytes([non_neg_integer()]) -> binary().
@@ -440,50 +416,32 @@ as_string_unchecked(_) ->
 
 -doc "Encode as a standard (RFC 4648 §4) base64 string, with `=` padding.".
 -spec asBase64(binary_or_string()) -> beamtalk_string:t().
-asBase64({beamtalk_string, Raw}) when is_binary(Raw) ->
-    asBase64(Raw);
-asBase64(Bin) when is_binary(Bin) ->
+asBase64(Arg) ->
+    Bin = receiver_bytes(Arg, 'asBase64:'),
     %% base64 output is ASCII by construction — the wrap needs no validation.
-    beamtalk_primitive:string_from_binary(base64:encode(Bin));
-asBase64(_) ->
-    beamtalk_error:raise_type_error('Binary', 'asBase64:', <<"Receiver must be a Binary">>).
+    beamtalk_primitive:string_from_binary(base64:encode(Bin)).
 
 -doc """
 Encode as a URL-safe (RFC 4648 §5) base64 string, with `=` padding
 (`-`/`_` in place of `+`/`/`).
 """.
 -spec asBase64Url(binary_or_string()) -> beamtalk_string:t().
-asBase64Url({beamtalk_string, Raw}) when is_binary(Raw) ->
-    asBase64Url(Raw);
-asBase64Url(Bin) when is_binary(Bin) ->
-    beamtalk_primitive:string_from_binary(base64:encode(Bin, #{mode => urlsafe}));
-asBase64Url(_) ->
-    beamtalk_error:raise_type_error('Binary', 'asBase64Url:', <<"Receiver must be a Binary">>).
+asBase64Url(Arg) ->
+    Bin = receiver_bytes(Arg, 'asBase64Url:'),
+    beamtalk_primitive:string_from_binary(base64:encode(Bin, #{mode => urlsafe})).
 
 -doc "True if Needle occurs as a byte sequence in Bin. Empty needle is found.".
 -spec includes_substring(binary_or_string(), binary_or_string()) -> boolean().
-includes_substring({beamtalk_string, Raw}, Needle) when is_binary(Raw) ->
-    includes_substring(Raw, Needle);
-includes_substring(Bin, {beamtalk_string, Raw}) when is_binary(Bin), is_binary(Raw) ->
-    includes_substring(Bin, Raw);
-includes_substring(Bin, Needle) when is_binary(Bin), is_binary(Needle) ->
-    Needle =:= <<>> orelse binary:match(Bin, Needle) =/= nomatch;
-includes_substring(Bin, _Needle) when not is_binary(Bin) ->
-    beamtalk_error:raise_type_error(
-        'Binary', 'includesSubstring:', <<"Receiver must be a Binary">>
-    );
-includes_substring(_Bin, _Needle) ->
-    beamtalk_error:raise_type_error(
-        'Binary', 'includesSubstring:', <<"Argument must be a Binary">>
-    ).
+includes_substring(Arg, NeedleArg) ->
+    Bin = receiver_bytes(Arg, 'includesSubstring:'),
+    Needle = argument_bytes(NeedleArg, 'includesSubstring:'),
+    Needle =:= <<>> orelse binary:match(Bin, Needle) =/= nomatch.
 
 -doc "1-based byte index of the first occurrence of Needle, or nil. Empty needle yields nil.".
 -spec index_of(binary_or_string(), binary_or_string()) -> pos_integer() | nil.
-index_of({beamtalk_string, Raw}, Needle) when is_binary(Raw) ->
-    index_of(Raw, Needle);
-index_of(Bin, {beamtalk_string, Raw}) when is_binary(Bin), is_binary(Raw) ->
-    index_of(Bin, Raw);
-index_of(Bin, Needle) when is_binary(Bin), is_binary(Needle) ->
+index_of(Arg, NeedleArg) ->
+    Bin = receiver_bytes(Arg, 'indexOf:'),
+    Needle = argument_bytes(NeedleArg, 'indexOf:'),
     case Needle of
         <<>> ->
             nil;
@@ -492,24 +450,20 @@ index_of(Bin, Needle) when is_binary(Bin), is_binary(Needle) ->
                 nomatch -> nil;
                 {Pos, _Len} -> Pos + 1
             end
-    end;
-index_of(Bin, _Needle) when not is_binary(Bin) ->
-    beamtalk_error:raise_type_error('Binary', 'indexOf:', <<"Receiver must be a Binary">>);
-index_of(_Bin, _Needle) ->
-    beamtalk_error:raise_type_error('Binary', 'indexOf:', <<"Argument must be a Binary">>).
+    end.
 
 -doc "Encode as a lowercase hexadecimal string.".
 -spec asHex(binary_or_string()) -> beamtalk_string:t().
-asHex({beamtalk_string, Raw}) when is_binary(Raw) ->
-    asHex(Raw);
-asHex(Bin) when is_binary(Bin) ->
-    beamtalk_primitive:string_from_binary(binary:encode_hex(Bin, lowercase));
-asHex(_) ->
-    beamtalk_error:raise_type_error('Binary', 'asHex:', <<"Receiver must be a Binary">>).
+asHex(Arg) ->
+    Bin = receiver_bytes(Arg, 'asHex:'),
+    beamtalk_primitive:string_from_binary(binary:encode_hex(Bin, lowercase)).
 
 -doc "Printable representation: hex for non-UTF-8, quoted for valid UTF-8.".
 -spec print_string(binary() | beamtalk_string:t()) -> beamtalk_string:t().
-print_string(Bin) when is_binary(Bin) ->
+print_string(Arg) ->
+    %% BT-4173: a `String` self (e.g. via `super printString`) renders its
+    %% bytes — the Binary rendering the super-send asked for.
+    Bin = receiver_bytes(Arg, print_string),
     beamtalk_primitive:string_from_binary(
         case check_utf8(Bin) of
             {ok, _} ->
@@ -518,22 +472,15 @@ print_string(Bin) when is_binary(Bin) ->
             {error, _} ->
                 iolist_to_binary([<<"<<">>, bytes_to_hex(Bin), <<">>">>])
         end
-    );
-print_string({beamtalk_string, Raw}) when is_binary(Raw) ->
-    %% BT-4173: a `String` self (e.g. via `super printString`) renders its
-    %% bytes — the Binary rendering the super-send asked for.
-    print_string(Raw);
-print_string(_) ->
-    beamtalk_error:raise_type_error('Binary', print_string, <<"Receiver must be a Binary">>).
+    ).
 
 -doc """
 Deserialize binary using binary_to_term/2 with [safe, used].
 Returns {Value, BytesConsumed}.
 """.
 -spec deserialize_with_used(binary_or_string()) -> {term(), non_neg_integer()}.
-deserialize_with_used({beamtalk_string, Raw}) when is_binary(Raw) ->
-    deserialize_with_used(Raw);
-deserialize_with_used(Bin) when is_binary(Bin) ->
+deserialize_with_used(Arg) ->
+    Bin = receiver_bytes(Arg, deserialize_with_used),
     try
         erlang:binary_to_term(Bin, [safe, used])
     catch
@@ -543,15 +490,22 @@ deserialize_with_used(Bin) when is_binary(Bin) ->
                 deserialize_with_used,
                 <<"Binary data is invalid or contains unknown atoms">>
             )
-    end;
-deserialize_with_used(_) ->
-    beamtalk_error:raise_type_error(
-        'Binary', deserialize_with_used, <<"Receiver must be a Binary">>
-    ).
+    end.
 
 %%% ============================================================================
 %%% Internal Helpers
 %%% ============================================================================
+
+%% The bytes of a Binary receiver (a bare binary, or a tagged `String`, which
+%% is a Binary of its UTF-8 bytes), or a `type_error` for `Selector`.
+-spec receiver_bytes(term(), atom()) -> binary().
+receiver_bytes(Value, Selector) ->
+    beamtalk_text:unwrap_or_raise(Value, 'Binary', Selector, <<"Receiver must be a Binary">>).
+
+%% As `receiver_bytes/2`, for a Binary argument.
+-spec argument_bytes(term(), atom()) -> binary().
+argument_bytes(Value, Selector) ->
+    beamtalk_text:unwrap_or_raise(Value, 'Binary', Selector, <<"Argument must be a Binary">>).
 
 -doc """
 Validate UTF-8, returning the binary on success or the byte offset of the

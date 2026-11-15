@@ -19,8 +19,8 @@ use camino::{Utf8Path, Utf8PathBuf};
 use miette::Result;
 use tracing::debug;
 
-use super::build_layout::BuildLayout;
 use super::util::to_forward_slash;
+use beamtalk_core::build_layout::BuildLayout;
 
 /// Everything needed to set up a BEAM node for a Beamtalk project.
 ///

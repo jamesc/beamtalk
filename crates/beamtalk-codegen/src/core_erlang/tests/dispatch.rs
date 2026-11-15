@@ -36,14 +36,12 @@ fn test_generate_unary_message_send_creates_future() {
         .unwrap();
     let output = doc.to_pretty_string();
     // Unified dispatch via beamtalk_message_dispatch:send/3
-    assert!(
-        output.contains("beamtalk_message_dispatch':'send'("),
-        "Should dispatch via beamtalk_message_dispatch:send/3. Got: {output}"
+    assert_has(
+        "Should dispatch via beamtalk_message_dispatch:send/3",
+        &output,
+        &["beamtalk_message_dispatch':'send'("],
     );
-    assert!(
-        output.contains("'increment'"),
-        "Should include selector atom. Got: {output}"
-    );
+    assert_has("Should include selector atom", &output, &["'increment'"]);
 }
 
 #[test]
@@ -68,13 +66,15 @@ fn test_generate_keyword_message_send_creates_future() {
         .unwrap();
     let output = doc.to_pretty_string();
     // Unified dispatch via beamtalk_message_dispatch:send/3
-    assert!(
-        output.contains("beamtalk_message_dispatch':'send'("),
-        "Should dispatch via beamtalk_message_dispatch:send/3. Got: {output}"
+    assert_has(
+        "Should dispatch via beamtalk_message_dispatch:send/3",
+        &output,
+        &["beamtalk_message_dispatch':'send'("],
     );
-    assert!(
-        output.contains("'foo:bar:'"),
-        "Should include combined keyword selector. Got: {output}"
+    assert_has(
+        "Should include combined keyword selector",
+        &output,
+        &["'foo:bar:'"],
     );
 }
 
@@ -91,13 +91,15 @@ fn test_generate_await_message_uses_future_await() {
         .unwrap();
     let output = doc.to_pretty_string();
     // Special case: await uses beamtalk_future:await(), not the async protocol
-    assert!(
-        output.contains("beamtalk_future':'await'("),
-        "Should call beamtalk_future:await(). Got: {output}"
+    assert_has(
+        "Should call beamtalk_future:await()",
+        &output,
+        &["beamtalk_future':'await'("],
     );
-    assert!(
-        !output.contains("gen_server':'cast'"),
-        "Should NOT use gen_server:cast for await. Got: {output}"
+    assert_lacks(
+        "Should NOT use gen_server:cast for await",
+        &output,
+        &["gen_server':'cast'"],
     );
 }
 
@@ -118,17 +120,16 @@ fn test_generate_await_with_timeout() {
         .unwrap();
     let output = doc.to_pretty_string();
     // Should call beamtalk_future:await/2 with timeout
-    assert!(
-        output.contains("beamtalk_future':'await'("),
-        "Should call beamtalk_future:await(). Got: {output}"
+    assert_has(
+        "Should call beamtalk_future:await()",
+        &output,
+        &["beamtalk_future':'await'("],
     );
-    assert!(
-        output.contains("5000"),
-        "Should include timeout value. Got: {output}"
-    );
-    assert!(
-        !output.contains("gen_server':'cast'"),
-        "Should NOT use gen_server:cast for await. Got: {output}"
+    assert_has("Should include timeout value", &output, &["5000"]);
+    assert_lacks(
+        "Should NOT use gen_server:cast for await",
+        &output,
+        &["gen_server':'cast'"],
     );
 }
 
@@ -145,13 +146,15 @@ fn test_generate_await_forever() {
         .unwrap();
     let output = doc.to_pretty_string();
     // Should call beamtalk_future:await_forever/1
-    assert!(
-        output.contains("beamtalk_future':'await_forever'("),
-        "Should call beamtalk_future:await_forever(). Got: {output}"
+    assert_has(
+        "Should call beamtalk_future:await_forever()",
+        &output,
+        &["beamtalk_future':'await_forever'("],
     );
-    assert!(
-        !output.contains("gen_server':'cast'"),
-        "Should NOT use gen_server:cast for awaitForever. Got: {output}"
+    assert_lacks(
+        "Should NOT use gen_server:cast for awaitForever",
+        &output,
+        &["gen_server':'cast'"],
     );
 }
 
@@ -169,13 +172,11 @@ fn test_generate_binary_op_is_synchronous() {
         .unwrap();
     let output = doc.to_pretty_string();
     // Binary ops use erlang's built-in operators - synchronous
-    assert!(
-        output.contains("erlang':'+'("),
-        "Should use erlang:'+'. Got: {output}"
-    );
-    assert!(
-        !output.contains("beamtalk_future':'new'"),
-        "Binary ops should NOT create futures. Got: {output}"
+    assert_has("Should use erlang:'+'", &output, &["erlang':'+'("]);
+    assert_lacks(
+        "Binary ops should NOT create futures",
+        &output,
+        &["beamtalk_future':'new'"],
     );
 }
 
@@ -227,9 +228,10 @@ fn test_generate_spawn_message_send() {
         .generate_message_send(&receiver, &selector, &arguments)
         .unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("call 'bt@my_pkg@counter':'spawn'()"),
-        "spawn should use workspace-qualified module name. Got: {output}",
+    assert_has(
+        "spawn should use workspace-qualified module name",
+        &output,
+        &["call 'bt@my_pkg@counter':'spawn'()"],
     );
 }
 
@@ -254,14 +256,16 @@ fn test_generate_spawn_with_message_send() {
         .unwrap();
     let output = doc.to_pretty_string();
     // Should call spawn/1 with the argument using workspace-qualified name
-    assert!(
-        output.contains("call 'bt@my_pkg@counter':'spawn'(42)"),
-        "spawnWith: should generate spawn/1 call with package prefix. Got: {output}",
+    assert_has(
+        "spawnWith: should generate spawn/1 call with package prefix",
+        &output,
+        &["call 'bt@my_pkg@counter':'spawn'(42)"],
     );
     // Should NOT create a future (spawn is synchronous)
-    assert!(
-        !output.contains("beamtalk_future"),
-        "spawnWith: should NOT create futures. Got: {output}",
+    assert_lacks(
+        "spawnWith: should NOT create futures",
+        &output,
+        &["beamtalk_future"],
     );
 }
 
@@ -281,9 +285,10 @@ fn test_generate_spawn_monitored_message_send() {
         .generate_message_send(&receiver, &unary, &[])
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("call 'bt@my_pkg@counter':'spawn_monitored'()"),
-        "spawnMonitored should call spawn_monitored/0. Got: {output}",
+    assert_has(
+        "spawnMonitored should call spawn_monitored/0",
+        &output,
+        &["call 'bt@my_pkg@counter':'spawn_monitored'()"],
     );
 
     let keyword = MessageSelector::Keyword(vec![KeywordPart::new(
@@ -295,13 +300,15 @@ fn test_generate_spawn_monitored_message_send() {
         .generate_message_send(&receiver, &keyword, &arguments)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("call 'bt@my_pkg@counter':'spawn_monitored'(42)"),
-        "spawnMonitoredWith: should call spawn_monitored/1. Got: {output}",
+    assert_has(
+        "spawnMonitoredWith: should call spawn_monitored/1",
+        &output,
+        &["call 'bt@my_pkg@counter':'spawn_monitored'(42)"],
     );
-    assert!(
-        !output.contains("beamtalk_future") && !output.contains("class_send"),
-        "spawnMonitoredWith: must be a direct call. Got: {output}",
+    assert_lacks(
+        "spawnMonitoredWith: must be a direct call",
+        &output,
+        &["beamtalk_future", "class_send"],
     );
 }
 
@@ -322,17 +329,20 @@ fn test_generate_spawn_monitored_exports_and_functions() {
     let module = Module::new(vec![bare(value_assignment)], Span::new(0, 10));
     let code =
         generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
-    assert!(
-        code.contains("'spawn_monitored'/0, 'spawn_monitored'/1"),
-        "spawn_monitored/0,1 must be exported. Got: {code}"
+    assert_has(
+        "spawn_monitored/0,1 must be exported",
+        &code,
+        &["'spawn_monitored'/0, 'spawn_monitored'/1"],
     );
-    assert!(
-        code.contains("call 'beamtalk_actor':'safe_spawn_monitored'('counter', ~{}~)"),
-        "spawn_monitored/0 must use safe_spawn_monitored. Got: {code}"
+    assert_has(
+        "spawn_monitored/0 must use safe_spawn_monitored",
+        &code,
+        &["call 'beamtalk_actor':'safe_spawn_monitored'('counter', ~{}~)"],
     );
-    assert!(
-        code.contains("call 'beamtalk_actor':'safe_spawn_monitored'('counter', InitArgs)"),
-        "spawn_monitored/1 must use safe_spawn_monitored. Got: {code}"
+    assert_has(
+        "spawn_monitored/1 must use safe_spawn_monitored",
+        &code,
+        &["call 'beamtalk_actor':'safe_spawn_monitored'('counter', InitArgs)"],
     );
 }
 
@@ -351,9 +361,10 @@ fn test_generate_spawn_monitored_async_message_send() {
         .generate_message_send(&receiver, &unary, &[])
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("call 'bt@my_pkg@counter':'spawn_monitored_async'()"),
-        "spawnMonitoredAsync should call spawn_monitored_async/0. Got: {output}",
+    assert_has(
+        "spawnMonitoredAsync should call spawn_monitored_async/0",
+        &output,
+        &["call 'bt@my_pkg@counter':'spawn_monitored_async'()"],
     );
 
     let keyword = MessageSelector::Keyword(vec![KeywordPart::new(
@@ -365,13 +376,15 @@ fn test_generate_spawn_monitored_async_message_send() {
         .generate_message_send(&receiver, &keyword, &arguments)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("call 'bt@my_pkg@counter':'spawn_monitored_async'(42)"),
-        "spawnMonitoredAsyncWith: should call spawn_monitored_async/1. Got: {output}",
+    assert_has(
+        "spawnMonitoredAsyncWith: should call spawn_monitored_async/1",
+        &output,
+        &["call 'bt@my_pkg@counter':'spawn_monitored_async'(42)"],
     );
-    assert!(
-        !output.contains("beamtalk_future") && !output.contains("class_send"),
-        "spawnMonitoredAsyncWith: must be a direct call. Got: {output}",
+    assert_lacks(
+        "spawnMonitoredAsyncWith: must be a direct call",
+        &output,
+        &["beamtalk_future", "class_send"],
     );
 }
 
@@ -392,17 +405,20 @@ fn test_generate_spawn_monitored_async_exports_and_functions() {
     let module = Module::new(vec![bare(value_assignment)], Span::new(0, 10));
     let code =
         generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
-    assert!(
-        code.contains("'spawn_monitored_async'/0, 'spawn_monitored_async'/1"),
-        "spawn_monitored_async/0,1 must be exported. Got: {code}"
+    assert_has(
+        "spawn_monitored_async/0,1 must be exported",
+        &code,
+        &["'spawn_monitored_async'/0, 'spawn_monitored_async'/1"],
     );
-    assert!(
-        code.contains("call 'beamtalk_actor':'safe_spawn_monitored_async'('counter', ~{}~)"),
-        "spawn_monitored_async/0 must use safe_spawn_monitored_async. Got: {code}"
+    assert_has(
+        "spawn_monitored_async/0 must use safe_spawn_monitored_async",
+        &code,
+        &["call 'beamtalk_actor':'safe_spawn_monitored_async'('counter', ~{}~)"],
     );
-    assert!(
-        code.contains("call 'beamtalk_actor':'safe_spawn_monitored_async'('counter', InitArgs)"),
-        "spawn_monitored_async/1 must use safe_spawn_monitored_async. Got: {code}"
+    assert_has(
+        "spawn_monitored_async/1 must use safe_spawn_monitored_async",
+        &code,
+        &["call 'beamtalk_actor':'safe_spawn_monitored_async'('counter', InitArgs)"],
     );
 }
 
@@ -438,9 +454,10 @@ fn test_generate_spawn_function() {
     assert!(code.contains("call 'beamtalk_actor':'safe_spawn'('counter', InitArgs)"));
 
     // spawn uses safe_spawn for trap_exit + initialize sync
-    assert!(
-        code.contains("call 'beamtalk_actor':'safe_spawn'('counter', ~{}~)"),
-        "spawn/0 must use safe_spawn. Got: {code}"
+    assert_has(
+        "spawn/0 must use safe_spawn",
+        &code,
+        &["call 'beamtalk_actor':'safe_spawn'('counter', ~{}~)"],
     );
     assert!(code.contains("<{'ok', Pid}> when 'true' ->"));
 
@@ -457,16 +474,18 @@ fn test_generate_spawn_function() {
     assert!(code.contains("call 'beamtalk_error':'raise'(SpawnErr2)"));
 
     // class_name/0 replaces $beamtalk_class in init state: correct after hot-reload
-    assert!(
-        code.contains("'class_name'/0 = fun () -> 'Counter'"),
-        "class_name/0 must return the class atom. Got:\n{code}"
+    assert_has(
+        "class_name/0 must return the class atom.",
+        &code,
+        &["'class_name'/0 = fun () -> 'Counter'"],
     );
     // Check that init/1 creates the default state with fields and merges with InitArgs
     assert!(code.contains("'init'/1 = fun (InitArgs) ->"));
     assert!(code.contains("let DefaultState = ~{"));
-    assert!(
-        !code.contains("'$beamtalk_class' => 'Counter'"),
-        "$beamtalk_class must not appear in compiled actor init state. Got:\n{code}"
+    assert_lacks(
+        "$beamtalk_class must not appear in compiled actor init state.",
+        &code,
+        &["'$beamtalk_class' => 'Counter'"],
     );
     assert!(code.contains("'__class_mod__' => 'counter'"));
     assert!(code.contains("'value' => 0"));
@@ -617,13 +636,15 @@ fn test_bt906_class_module_index_overrides_heuristic_for_spawn() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("call 'bt@gang_of_four@observer@event_bus':'spawn'()"),
-        "class_module_index must override the heuristic for actor spawn. Got: {output}",
+    assert_has(
+        "class_module_index must override the heuristic for actor spawn",
+        &output,
+        &["call 'bt@gang_of_four@observer@event_bus':'spawn'()"],
     );
-    assert!(
-        !output.contains("call 'bt@my_pkg@event_bus':'spawn'()"),
-        "Heuristic module path must NOT appear when index is present. Got: {output}",
+    assert_lacks(
+        "Heuristic module path must NOT appear when index is present",
+        &output,
+        &["call 'bt@my_pkg@event_bus':'spawn'()"],
     );
 }
 
@@ -710,14 +731,16 @@ fn test_block_value_message_no_args() {
         .generate_message_send(&receiver, &selector, &[])
         .unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("let _Fun@1 = fun () -> 42 in apply _Fun@1 ()"),
-        "Should generate let binding with apply. Got: {output}"
+    assert_has(
+        "Should generate let binding with apply",
+        &output,
+        &["let _Fun@1 = fun () -> 42 in apply _Fun@1 ()"],
     );
     // Should NOT use async protocol
-    assert!(
-        !output.contains("beamtalk_future"),
-        "value message should NOT create futures. Got: {output}"
+    assert_lacks(
+        "value message should NOT create futures",
+        &output,
+        &["beamtalk_future"],
     );
 }
 
@@ -748,22 +771,22 @@ fn test_block_value_message_one_arg() {
         .generate_message_send(&receiver, &selector, &arguments)
         .unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("let _Fun"),
-        "Should use let binding for block evaluation. Got: {output}"
+    assert_has(
+        "Should use let binding for block evaluation",
+        &output,
+        &["let _Fun"],
     );
-    assert!(
-        output.contains("apply _Fun"),
-        "Should use apply on bound fun variable. Got: {output}"
+    assert_has(
+        "Should use apply on bound fun variable",
+        &output,
+        &["apply _Fun"],
     );
-    assert!(
-        output.contains("(5)"),
-        "Should pass argument 5 to the block. Got: {output}"
-    );
+    assert_has("Should pass argument 5 to the block", &output, &["(5)"]);
     // Binary ops no longer wrap operands with maybe_await (ADR-0043: all sends are sync)
-    assert!(
-        !output.contains("maybe_await"),
-        "value: binary ops should not wrap operands with maybe_await. Got: {output}"
+    assert_lacks(
+        "value: binary ops should not wrap operands with maybe_await",
+        &output,
+        &["maybe_await"],
     );
 }
 
@@ -797,13 +820,11 @@ fn test_block_value_message_two_args() {
         .generate_message_send(&receiver, &selector, &arguments)
         .unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("apply"),
-        "Should use apply for block evaluation. Got: {output}"
-    );
-    assert!(
-        output.contains("(3, 4)"),
-        "Should pass arguments 3, 4 to the block. Got: {output}"
+    assert_has("Should use apply for block evaluation", &output, &["apply"]);
+    assert_has(
+        "Should pass arguments 3, 4 to the block",
+        &output,
+        &["(3, 4)"],
     );
 }
 
@@ -836,17 +857,20 @@ fn test_value_keyword_erlang_ffi_receiver_routes_to_erlang_interop() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("beamtalk_erlang_proxy"),
-        "Should route through Erlang interop. Got: {output}"
+    assert_has(
+        "Should route through Erlang interop",
+        &output,
+        &["beamtalk_erlang_proxy"],
     );
-    assert!(
-        !output.contains("is_function"),
-        "Should not emit is_function guard for FFI receiver. Got: {output}"
+    assert_lacks(
+        "Should not emit is_function guard for FFI receiver",
+        &output,
+        &["is_function"],
     );
-    assert!(
-        !output.contains("apply"),
-        "Should not emit block apply for FFI receiver. Got: {output}"
+    assert_lacks(
+        "Should not emit block apply for FFI receiver",
+        &output,
+        &["apply"],
     );
 }
 
@@ -869,13 +893,15 @@ fn test_value_keyword_unknown_receiver_emits_is_function_guard() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("is_function"),
-        "Should emit erlang:is_function guard. Got: {output}"
+    assert_has(
+        "Should emit erlang:is_function guard",
+        &output,
+        &["is_function"],
     );
-    assert!(
-        output.contains("apply"),
-        "Should emit apply for the function path. Got: {output}"
+    assert_has(
+        "Should emit apply for the function path",
+        &output,
+        &["apply"],
     );
     assert!(
         output.contains("beamtalk_message_dispatch':'send'"),
@@ -887,9 +913,10 @@ fn test_value_keyword_unknown_receiver_emits_is_function_guard() {
         "Must not fall back to beamtalk_primitive:send (BT-3377): it does not \
          unwrap an actor's {{ok, Result}} gen_server reply. Got: {output}"
     );
-    assert!(
-        output.contains("'value:'"),
-        "Should pass 'value:' selector to send. Got: {output}"
+    assert_has(
+        "Should pass 'value:' selector to send",
+        &output,
+        &["'value:'"],
     );
 }
 
@@ -916,17 +943,16 @@ fn test_value_keyword_block_literal_receiver_still_uses_fast_apply() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("apply"),
-        "Block literal should use apply. Got: {output}"
+    assert_has("Block literal should use apply", &output, &["apply"]);
+    assert_lacks(
+        "Block literal should not emit is_function guard",
+        &output,
+        &["is_function"],
     );
-    assert!(
-        !output.contains("is_function"),
-        "Block literal should not emit is_function guard. Got: {output}"
-    );
-    assert!(
-        !output.contains("beamtalk_primitive':'send'"),
-        "Block literal should not use send fallback. Got: {output}"
+    assert_lacks(
+        "Block literal should not use send fallback",
+        &output,
+        &["beamtalk_primitive':'send'"],
     );
 }
 
@@ -961,17 +987,20 @@ fn test_value_value_keyword_erlang_ffi_receiver_routes_to_erlang_interop() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("beamtalk_erlang_proxy"),
-        "value:value: FFI receiver should route through Erlang interop. Got: {output}"
+    assert_has(
+        "value:value: FFI receiver should route through Erlang interop",
+        &output,
+        &["beamtalk_erlang_proxy"],
     );
-    assert!(
-        !output.contains("is_function"),
-        "Should not emit is_function guard for FFI receiver. Got: {output}"
+    assert_lacks(
+        "Should not emit is_function guard for FFI receiver",
+        &output,
+        &["is_function"],
     );
-    assert!(
-        !output.contains("apply"),
-        "Should not emit block apply for FFI receiver. Got: {output}"
+    assert_lacks(
+        "Should not emit block apply for FFI receiver",
+        &output,
+        &["apply"],
     );
 }
 
@@ -998,17 +1027,16 @@ fn test_value_value_value_keyword_unknown_receiver_emits_correct_selector() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("is_function"),
-        "Should emit is_function guard. Got: {output}"
+    assert_has("Should emit is_function guard", &output, &["is_function"]);
+    assert_has(
+        "Fallback send must use the full 'value:value:value:' selector atom",
+        &output,
+        &["'value:value:value:'"],
     );
-    assert!(
-        output.contains("'value:value:value:'"),
-        "Fallback send must use the full 'value:value:value:' selector atom. Got: {output}"
-    );
-    assert!(
-        output.contains("apply"),
-        "Should emit apply for the function path. Got: {output}"
+    assert_has(
+        "Should emit apply for the function path",
+        &output,
+        &["apply"],
     );
 }
 
@@ -1039,13 +1067,15 @@ fn test_value_keyword_class_protocol_receiver_uses_is_function_guard() {
 
     // (Erlang class) is a metaclass, not a module proxy — must use the is_function guard,
     // NOT fall through to Erlang interop.
-    assert!(
-        output.contains("is_function"),
-        "Class-protocol receiver should use is_function guard. Got: {output}"
+    assert_has(
+        "Class-protocol receiver should use is_function guard",
+        &output,
+        &["is_function"],
     );
-    assert!(
-        !output.contains("beamtalk_erlang_proxy"),
-        "Class-protocol receiver should not emit Erlang interop call. Got: {output}"
+    assert_lacks(
+        "Class-protocol receiver should not emit Erlang interop call",
+        &output,
+        &["beamtalk_erlang_proxy"],
     );
 }
 
@@ -1062,9 +1092,10 @@ fn test_non_block_message_uses_unified_dispatch() {
         .generate_message_send(&receiver, &selector, &[])
         .unwrap();
     let output = doc.to_pretty_string();
-    assert!(
-        output.contains("beamtalk_message_dispatch':'send'("),
-        "Non-block unary messages should use unified dispatch. Got: {output}"
+    assert_has(
+        "Non-block unary messages should use unified dispatch",
+        &output,
+        &["beamtalk_message_dispatch':'send'("],
     );
 }
 
@@ -1100,25 +1131,25 @@ fn test_cascade_unary_messages() {
     let output = doc.to_pretty_string();
 
     // Should bind the underlying receiver (x) once
-    assert!(
-        output.contains("let _Receiver@1 = call 'maps':'get'('x', State) in"),
-        "Should bind the underlying receiver x. Got: {output}"
+    assert_has(
+        "Should bind the underlying receiver x",
+        &output,
+        &["let _Receiver@1 = call 'maps':'get'('x', State) in"],
     );
 
     // Should send BOTH messages (negated AND abs) to the receiver via unified dispatch
-    assert!(
-        output.contains("'negated'"),
-        "Should send first message 'negated'. Got: {output}"
+    assert_has(
+        "Should send first message 'negated'",
+        &output,
+        &["'negated'"],
     );
-    assert!(
-        output.contains("'abs'"),
-        "Should send second message 'abs'. Got: {output}"
-    );
+    assert_has("Should send second message 'abs'", &output, &["'abs'"]);
 
     // Should use unified dispatch for cascade messages
-    assert!(
-        output.contains("call 'beamtalk_message_dispatch':'send'(_Receiver"),
-        "Should send messages via unified dispatch. Got: {output}"
+    assert_has(
+        "Should send messages via unified dispatch",
+        &output,
+        &["call 'beamtalk_message_dispatch':'send'(_Receiver"],
     );
 
     generator.pop_scope();
@@ -1176,20 +1207,19 @@ fn test_cascade_keyword_messages() {
     let output = doc.to_pretty_string();
 
     // Should bind the underlying receiver (collection) once
-    assert!(
-        output.contains("let _Receiver@1 = call 'maps':'get'('collection', State) in"),
-        "Should bind the underlying receiver collection. Got: {output}"
+    assert_has(
+        "Should bind the underlying receiver collection",
+        &output,
+        &["let _Receiver@1 = call 'maps':'get'('collection', State) in"],
     );
 
     // Should send all three messages
-    assert!(
-        output.contains("'at:put:'"),
-        "Should send keyword message 'at:put:'. Got: {output}"
+    assert_has(
+        "Should send keyword message 'at:put:'",
+        &output,
+        &["'at:put:'"],
     );
-    assert!(
-        output.contains("'size'"),
-        "Should send unary message 'size'. Got: {output}"
-    );
+    assert_has("Should send unary message 'size'", &output, &["'size'"]);
 
     generator.pop_scope();
 }
@@ -1286,23 +1316,22 @@ fn test_cascade_field_assignment_arg_hoisted() {
     // Correct pattern:
     //   let _Val@2 = 5 in let State1 = call 'maps':'put'('x', _Val@2, State) in
     //   let _ = call 'beamtalk_message_dispatch':'send'(..., [_Val@2]) in ...
-    assert!(
-        output.contains("let _Val@2 = 5 in let State1 = call 'maps':'put'('x', _Val@2, State) in"),
-        "State binding should be hoisted before send call. Got:\n{output}"
+    assert_has(
+        "State binding should be hoisted before send call.",
+        &output,
+        &["let _Val@2 = 5 in let State1 = call 'maps':'put'('x', _Val@2, State) in"],
     );
 
     // The argument to the send call should be the val var, not the full assignment
-    assert!(
-        output.contains("'msg1:', [_Val@2]"),
-        "Argument should be the val var _Val@2. Got:\n{output}"
+    assert_has(
+        "Argument should be the val var _Val@2.",
+        &output,
+        &["'msg1:', [_Val@2]"],
     );
 
     // The second message should be able to reference State1 (it's in scope)
     // Just verify the second message is generated
-    assert!(
-        output.contains("'msg2'"),
-        "Should have second message. Got:\n{output}"
-    );
+    assert_has("Should have second message.", &output, &["'msg2'"]);
 
     generator.pop_scope();
 }
@@ -1371,15 +1400,17 @@ fn test_cascade_multiple_field_assignments_state_threading() {
 
     // _Receiver@1 takes temp var 1, so val vars are _Val@2 and _Val@3.
     // First field assignment: State → State1
-    assert!(
-        output.contains("let State1 = call 'maps':'put'('x', _Val@2, State) in"),
-        "First assignment should produce State1. Got:\n{output}"
+    assert_has(
+        "First assignment should produce State1.",
+        &output,
+        &["let State1 = call 'maps':'put'('x', _Val@2, State) in"],
     );
 
     // Second field assignment: State1 → State2
-    assert!(
-        output.contains("let State2 = call 'maps':'put'('y', _Val@3, State1) in"),
-        "Second assignment should reference State1 and produce State2. Got:\n{output}"
+    assert_has(
+        "Second assignment should reference State1 and produce State2.",
+        &output,
+        &["let State2 = call 'maps':'put'('y', _Val@3, State1) in"],
     );
 
     generator.pop_scope();
@@ -1528,9 +1559,10 @@ fn test_bt2685_parenthesized_erlang_ffi_error_routes_to_proxy() {
     // The regression: error-signaling (`Object >> error:`) must NOT fire. It
     // routes to the Erlang FFI proxy instead (the parenthesized receiver compiles
     // to an `ErlangModule` proxy map dispatched at runtime to `beamtalk_console:error`).
-    assert!(
-        !output.contains("user_error") && !output.contains("with_message"),
-        "Must NOT generate the error-signaling intrinsic. Got: {output}"
+    assert_lacks(
+        "Must NOT generate the error-signaling intrinsic",
+        &output,
+        &["user_error", "with_message"],
     );
     assert!(
         output.contains("ErlangModule") || output.contains("beamtalk_erlang_proxy"),
@@ -1673,13 +1705,15 @@ fn test_erlang_interop_proxy_still_works_for_standalone() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("ErlangModule"),
-        "Standalone Erlang lists should still create proxy. Got: {output}"
+    assert_has(
+        "Standalone Erlang lists should still create proxy",
+        &output,
+        &["ErlangModule"],
     );
-    assert!(
-        output.contains("'module' => 'lists'"),
-        "Proxy should contain module name. Got: {output}"
+    assert_has(
+        "Proxy should contain module name",
+        &output,
+        &["'module' => 'lists'"],
     );
 }
 
@@ -1701,13 +1735,15 @@ fn test_erlang_interop_cached_proxy_uses_runtime_dispatch() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("beamtalk_message_dispatch"),
-        "Cached proxy should use runtime dispatch. Got: {output}"
+    assert_has(
+        "Cached proxy should use runtime dispatch",
+        &output,
+        &["beamtalk_message_dispatch"],
     );
-    assert!(
-        !output.contains("call 'lists'"),
-        "Cached proxy should not use direct call. Got: {output}"
+    assert_lacks(
+        "Cached proxy should not use direct call",
+        &output,
+        &["call 'lists'"],
     );
 }
 
@@ -1735,9 +1771,10 @@ fn test_erlang_interop_protocol_selectors_not_optimized() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        !output.contains("call 'lists':'printString'"),
-        "printString should not be optimized as direct Erlang call. Got: {output}"
+    assert_lacks(
+        "printString should not be optimized as direct Erlang call",
+        &output,
+        &["call 'lists':'printString'"],
     );
     assert!(
         output.contains("beamtalk_message_dispatch")
@@ -1809,13 +1846,15 @@ fn test_erlang_interop_bare_class_protocol_selector_falls_through() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        !output.contains("ErlangModule"),
-        "`Erlang class` must not build a module proxy. Got: {output}"
+    assert_lacks(
+        "`Erlang class` must not build a module proxy",
+        &output,
+        &["ErlangModule"],
     );
-    assert!(
-        !output.contains("'module' => 'class'"),
-        "`Erlang class` must not be treated as a module named 'class'. Got: {output}"
+    assert_lacks(
+        "`Erlang class` must not be treated as a module named 'class'",
+        &output,
+        &["'module' => 'class'"],
     );
 }
 
@@ -1839,9 +1878,10 @@ fn test_erlang_interop_package_qualified_not_treated_as_ffi() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        !output.contains("ErlangModule"),
-        "Package-qualified `Erlang` must not build an FFI module proxy. Got: {output}"
+    assert_lacks(
+        "Package-qualified `Erlang` must not build an FFI module proxy",
+        &output,
+        &["ErlangModule"],
     );
 }
 
@@ -1856,9 +1896,10 @@ fn test_cross_file_value_object_subclass_without_index() {
     assert!(result.is_ok());
     let code = result.unwrap();
     // Without index, defaults to actor (gen_server)
-    assert!(
-        code.contains("'gen_server'"),
-        "Without superclass index, unknown parent should default to actor. Got:\n{code}"
+    assert_has(
+        "Without superclass index, unknown parent should default to actor.",
+        &code,
+        &["'gen_server'"],
     );
 }
 
@@ -1878,9 +1919,10 @@ fn test_cross_file_value_object_subclass_with_index() {
     assert!(result.is_ok());
     let code = result.unwrap();
     // With index, should be value-type (no gen_server)
-    assert!(
-        !code.contains("'gen_server'"),
-        "With superclass index showing MyParent → Object, should generate value-type code. Got:\n{code}"
+    assert_lacks(
+        "With superclass index showing MyParent → Object, should generate value-type code.",
+        &code,
+        &["'gen_server'"],
     );
 }
 
@@ -1900,9 +1942,10 @@ fn test_cross_file_actor_subclass_with_index() {
     assert!(result.is_ok());
     let code = result.unwrap();
     // With index showing MyActor → Actor, should still be actor
-    assert!(
-        code.contains("'gen_server'"),
-        "With superclass index showing MyActor → Actor, should generate actor code. Got:\n{code}"
+    assert_has(
+        "With superclass index showing MyActor → Actor, should generate actor code.",
+        &code,
+        &["'gen_server'"],
     );
 }
 
@@ -1958,13 +2001,15 @@ fn test_bt855_erlang_interop_wrapper_pure_block_no_warning() {
     let output = doc.to_pretty_string();
 
     // Pure block — no wrapper, no extra let-binding for BtBlock
-    assert!(
-        output.contains("call 'beamtalk_erlang_proxy':'direct_call'('lists', 'map',"),
-        "Should emit proxy-routed Erlang call. Got: {output}"
+    assert_has(
+        "Should emit proxy-routed Erlang call",
+        &output,
+        &["call 'beamtalk_erlang_proxy':'direct_call'('lists', 'map',"],
     );
-    assert!(
-        !output.contains("BtBlock"),
-        "Pure block should not generate BtBlock wrapper. Got: {output}"
+    assert_lacks(
+        "Pure block should not generate BtBlock wrapper",
+        &output,
+        &["BtBlock"],
     );
     // No warnings emitted for pure blocks
     assert!(
@@ -2001,10 +2046,10 @@ Actor subclass: Processor
         generated.code
     );
     // No BtBlock wrapper for pure blocks
-    assert!(
-        !generated.code.contains("BtBlock"),
-        "Pure block should not have BtBlock wrapper. Got:\n{}",
-        generated.code
+    assert_lacks(
+        "Pure block should not have BtBlock wrapper.",
+        &generated.code,
+        &["BtBlock"],
     );
 }
 
@@ -2033,17 +2078,16 @@ fn test_bt855_generate_erlang_interop_block_pure_returns_tier1() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("fun ("),
-        "Should generate a fun. Got: {output}"
+    assert_has("Should generate a fun", &output, &["fun ("]);
+    assert_lacks(
+        "Pure block should not generate a BtBlock",
+        &output,
+        &["BtBlock"],
     );
-    assert!(
-        !output.contains("BtBlock"),
-        "Pure block should not generate a BtBlock. Got: {output}"
-    );
-    assert!(
-        !output.contains("StateAcc"),
-        "Pure block wrapper should not have StateAcc. Got: {output}"
+    assert_lacks(
+        "Pure block wrapper should not have StateAcc",
+        &output,
+        &["StateAcc"],
     );
 }
 
@@ -2161,18 +2205,21 @@ fn test_cast_send_in_actor_method_compiles() {
 
     eprintln!("Generated code for cast send in actor method:\n{code}");
 
-    assert!(
-        code.contains("beamtalk_message_dispatch':'cast'("),
-        "Should generate beamtalk_message_dispatch:cast/3 for cast send. Got:\n{code}"
+    assert_has(
+        "Should generate beamtalk_message_dispatch:cast/3 for cast send.",
+        &code,
+        &["beamtalk_message_dispatch':'cast'("],
     );
-    assert!(
-        code.contains("'increment'"),
-        "Should include 'increment' selector atom. Got:\n{code}"
+    assert_has(
+        "Should include 'increment' selector atom.",
+        &code,
+        &["'increment'"],
     );
     // Verify the cast send is non-last (wrapped in let binding to discard result)
-    assert!(
-        code.contains("let _seq"),
-        "Cast send should be wrapped in let to discard its result. Got:\n{code}"
+    assert_has(
+        "Cast send should be wrapped in let to discard its result.",
+        &code,
+        &["let _seq"],
     );
 }
 
@@ -2256,17 +2303,16 @@ sealed Object subclass: Bar
         "Absent module should emit a warning diagnostic"
     );
     let msg = &generated.warnings[0].message;
-    assert!(
-        msg.contains("bt@stdlib@foo"),
-        "Warning should mention the missing module. Got: {msg}"
+    assert_has(
+        "Warning should mention the missing module",
+        msg,
+        &["bt@stdlib@foo"],
     );
-    assert!(
-        msg.contains("doIt"),
-        "Warning should mention the selector. Got: {msg}"
-    );
-    assert!(
-        msg.contains("has not been compiled"),
-        "Warning should explain the issue. Got: {msg}"
+    assert_has("Warning should mention the selector", msg, &["doIt"]);
+    assert_has(
+        "Warning should explain the issue",
+        msg,
+        &["has not been compiled"],
     );
     // Verify the span points at the @primitive expression, not a dummy zero span.
     let primitive_span = match &module.classes[0].methods[0].body[0].expression {
@@ -2589,7 +2635,7 @@ fn test_field_operation_codegen_table() {
         },
         // `self clearField: name` inside an actor must NOT route through
         // sync_send (deadlock risk) — must thread state via maps:remove
-        // (`generate_self_clear_field_open`, mirroring `fieldAt:put:`'s
+        // (`lower_stmt_self_clear_field`, mirroring `fieldAt:put:`'s
         // `maps:put`; ADR 0124 §4f).
         FieldCase {
             label: "self clearField: does not sync_send and threads state via maps:remove",
@@ -2724,14 +2770,16 @@ fn test_block_value_keyword_field_assignment_arg_hoisted() {
     // State binding must appear before the apply, not nested inside it.
     // _Fun@1 = fun_var, _x@2 = block param (from receiver codegen), _Val@3 = hoisted val.
     // Receiver is evaluated first, then args are hoisted.
-    assert!(
-        output.contains("let _Val@3 = 5 in let State1 = call 'maps':'put'('y', _Val@3, State) in"),
-        "State binding should be hoisted before apply. Got:\n{output}"
+    assert_has(
+        "State binding should be hoisted before apply.",
+        &output,
+        &["let _Val@3 = 5 in let State1 = call 'maps':'put'('y', _Val@3, State) in"],
     );
     // The apply argument must be the val var, not the full assignment expression.
-    assert!(
-        output.contains("apply _Fun@1 (_Val@3)"),
-        "Apply argument should be val var _Val@3. Got:\n{output}"
+    assert_has(
+        "Apply argument should be val var _Val@3.",
+        &output,
+        &["apply _Fun@1 (_Val@3)"],
     );
     // Receiver must be evaluated before arguments: Fun binding precedes State binding.
     assert!(
@@ -2782,19 +2830,22 @@ fn test_value_keyword_guard_field_assignment_arg_hoisted() {
     // State binding must be hoisted before the _ValArgN binding.
     // _ValRecv@1 is first, _ValArg@2 allocated next (before field_assignment_open),
     // then _Val@3 + State1 from hoisting, then _ValArg@2 = _Val@3.
-    assert!(
-        output.contains("let _Val@3 = 5 in let State1 = call 'maps':'put'('y', _Val@3, State) in"),
-        "State binding should be hoisted before _ValArgN binding. Got:\n{output}"
+    assert_has(
+        "State binding should be hoisted before _ValArgN binding.",
+        &output,
+        &["let _Val@3 = 5 in let State1 = call 'maps':'put'('y', _Val@3, State) in"],
     );
     // The _ValArgN should be bound to the val var, not the full assignment expression.
-    assert!(
-        output.contains("let _ValArg@2 = _Val@3 in"),
-        "_ValArg@2 should be bound to _Val@3. Got:\n{output}"
+    assert_has(
+        "_ValArg@2 should be bound to _Val@3.",
+        &output,
+        &["let _ValArg@2 = _Val@3 in"],
     );
     // The is_function guard must reference _ValRecv@1.
-    assert!(
-        output.contains("call 'erlang':'is_function'(_ValRecv@1)"),
-        "Guard should check _ValRecv@1. Got:\n{output}"
+    assert_has(
+        "Guard should check _ValRecv@1.",
+        &output,
+        &["call 'erlang':'is_function'(_ValRecv@1)"],
     );
 
     generator.pop_scope();
@@ -2823,14 +2874,16 @@ fn test_self_call_non_last_threads_state() {
         "Self-call should use dispatch. Got:\n{code}"
     );
     // The state must be threaded: extract element(2, ...) into a new State var
-    assert!(
-        code.contains("'erlang':'element'(2,"),
-        "Self-call must extract NewState from dispatch result. Got:\n{code}"
+    assert_has(
+        "Self-call must extract NewState from dispatch result.",
+        &code,
+        &["'erlang':'element'(2,"],
     );
     // The field read (self.value) must reference the threaded state, not the original
-    assert!(
-        code.contains("'maps':'get'('value', State1)"),
-        "Field read after self-call must use threaded State1. Got:\n{code}"
+    assert_has(
+        "Field read after self-call must use threaded State1.",
+        &code,
+        &["'maps':'get'('value', State1)"],
     );
 }
 
@@ -2848,14 +2901,16 @@ fn test_self_call_as_last_expression_threads_state() {
     );
     let code = codegen_source(src);
     // The reply tuple must use the threaded state
-    assert!(
-        code.contains("'erlang':'element'(2,"),
-        "Last self-call must extract NewState. Got:\n{code}"
+    assert_has(
+        "Last self-call must extract NewState.",
+        &code,
+        &["'erlang':'element'(2,"],
     );
     // Reply should use element(1, ...) for the result
-    assert!(
-        code.contains("'erlang':'element'(1,"),
-        "Last self-call must extract result via element(1, ...). Got:\n{code}"
+    assert_has(
+        "Last self-call must extract result via element(1, ...).",
+        &code,
+        &["'erlang':'element'(1,"],
     );
 }
 
@@ -3038,9 +3093,10 @@ fn test_handle_call_error_arm_builds_the_caught_stack_bt_4850() {
         .is_match(&code),
         "handle_call's error arm must build a caught triple's stacktrace. Got:\n{code}"
     );
-    assert!(
-        code.contains("'maybe_reclassify_compiled_dispatch_error'(Args, BuiltError)"),
-        "handle_call must reclassify the built error. Got:\n{code}"
+    assert_has(
+        "handle_call must reclassify the built error.",
+        &code,
+        &["'maybe_reclassify_compiled_dispatch_error'(Args, BuiltError)"],
     );
 }
 
@@ -3144,21 +3200,25 @@ fn test_logger_call_site_routes_through_runtime_string_unwrap() {
         "    Logger warn: \"retry\" metadata: #{\"attempt\" => 2}\n",
     );
     let code = codegen_source(src);
-    assert!(
-        !code.contains("'logger':'log'"),
-        "Logger sends must not call logger:log directly (BT-4321). Got:\n{code}"
+    assert_lacks(
+        "Logger sends must not call logger:log directly (BT-4321).",
+        &code,
+        &["'logger':'log'"],
     );
-    assert!(
-        code.contains("call 'beamtalk_logging_config':'log'('error', "),
-        "Logger error: must lower to beamtalk_logging_config:log/3. Got:\n{code}"
+    assert_has(
+        "Logger error: must lower to beamtalk_logging_config:log/3.",
+        &code,
+        &["call 'beamtalk_logging_config':'log'('error', "],
     );
-    assert!(
-        code.contains("call 'beamtalk_logging_config':'log'('warning', "),
-        "Logger warn:metadata: must lower to beamtalk_logging_config:log/3. Got:\n{code}"
+    assert_has(
+        "Logger warn:metadata: must lower to beamtalk_logging_config:log/3.",
+        &code,
+        &["call 'beamtalk_logging_config':'log'('warning', "],
     );
-    assert!(
-        code.contains("'beamtalk_selector' => 'run'"),
-        "Injected metadata must still carry the caller's selector. Got:\n{code}"
+    assert_has(
+        "Injected metadata must still carry the caller's selector.",
+        &code,
+        &["'beamtalk_selector' => 'run'"],
     );
 }
 
@@ -3180,9 +3240,10 @@ fn test_logger_intrinsic_bodies_route_through_runtime_string_unwrap() {
         crate::core_erlang::CodegenOptions::new("bt@stdlib@logger").with_stdlib_mode(true),
     )
     .expect("logger.bt codegen should succeed");
-    assert!(
-        !code.contains("'logger':'log'"),
-        "Logger intrinsic bodies must not call logger:log directly (BT-4321). Got:\n{code}"
+    assert_lacks(
+        "Logger intrinsic bodies must not call logger:log directly (BT-4321).",
+        &code,
+        &["'logger':'log'"],
     );
     for level in ["debug", "info", "warning", "error"] {
         let needle = format!("call 'beamtalk_logging_config':'log'('{level}', ");
@@ -3219,9 +3280,10 @@ fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
 
     // Sanity: the Tier 2 stateful-block argument (StateAcc threading) is
     // present.
-    assert!(
-        code.contains("StateAcc"),
-        "Test setup must pass a Tier 2 stateful block argument. Got:\n{code}"
+    assert_has(
+        "Test setup must pass a Tier 2 stateful block argument.",
+        &code,
+        &["StateAcc"],
     );
     assert!(
         code.contains("call 'beamtalk_actor':'lookup_class'(call 'erlang':'self'())"),
@@ -3256,13 +3318,15 @@ fn test_class_literal_reads_static_call_map() {
         ),
         "class literal must read its {{class_ref, Tag}} entry. Got:\n{output}"
     );
-    assert!(
-        output.contains("call 'beamtalk_class_shadow_flags':'class_ref'('Point')"),
-        "a miss must ask the runtime, which installs the entry. Got:\n{output}"
+    assert_has(
+        "a miss must ask the runtime, which installs the entry.",
+        &output,
+        &["call 'beamtalk_class_shadow_flags':'class_ref'('Point')"],
     );
-    assert!(
-        output.contains("'class_not_found', 'Point'"),
-        "a missing class must still raise class_not_found. Got:\n{output}"
+    assert_has(
+        "a missing class must still raise class_not_found.",
+        &output,
+        &["'class_not_found', 'Point'"],
     );
     for gone in ["whereis", "module_name_safe", "{'beamtalk_object'"] {
         assert!(
@@ -3294,9 +3358,10 @@ fn test_builtin_class_literal_bakes_pinned_module() {
         &caps[1], &caps[2],
         "the class object carries the looked-up pid"
     );
-    assert!(
-        !output.contains("module_name_safe"),
-        "a pinned built-in must not look its module up. Got:\n{output}"
+    assert_lacks(
+        "a pinned built-in must not look its module up.",
+        &output,
+        &["module_name_safe"],
     );
 }
 
@@ -3361,17 +3426,20 @@ fn test_qualified_class_reference_uses_canonical_tag() {
         .generate_expression(&expr)
         .unwrap()
         .to_pretty_string();
-    assert!(
-        output.contains("'beamtalk_class_shadow_flags':'class_ref'('Parser')"),
-        "qualified reference must look up the bare class name. Got:\n{output}"
+    assert_has(
+        "qualified reference must look up the bare class name.",
+        &output,
+        &["'beamtalk_class_shadow_flags':'class_ref'('Parser')"],
     );
-    assert!(
-        output.contains("{'class_ref', 'Parser class'}"),
-        "qualified reference must carry the canonical tag. Got:\n{output}"
+    assert_has(
+        "qualified reference must carry the canonical tag.",
+        &output,
+        &["{'class_ref', 'Parser class'}"],
     );
-    assert!(
-        !output.contains("json@Parser"),
-        "no package-qualified tag may be emitted. Got:\n{output}"
+    assert_lacks(
+        "no package-qualified tag may be emitted.",
+        &output,
+        &["json@Parser"],
     );
 }
 
@@ -3390,13 +3458,15 @@ fn test_qualified_class_name_only_reference_uses_bare_name() {
         .class_name_only_reference(&expr)
         .expect("a compiled-context qualified literal takes the name-only path")
         .to_pretty_string();
-    assert!(
-        output.contains("'beamtalk_class_ParseError'") && output.contains("-> 'ParseError'"),
-        "qualified filter must resolve to the bare class name. Got:\n{output}"
+    assert_has(
+        "qualified filter must resolve to the bare class name",
+        &output,
+        &["'beamtalk_class_ParseError'", "-> 'ParseError'"],
     );
-    assert!(
-        !output.contains("json@"),
-        "no package-qualified atom may be emitted. Got:\n{output}"
+    assert_lacks(
+        "no package-qualified atom may be emitted.",
+        &output,
+        &["json@"],
     );
 }
 
@@ -3494,9 +3564,10 @@ fn test_unqualified_class_reference_unchanged() {
     let output = doc.to_pretty_string();
 
     // Unqualified spawn should use the existing heuristic module name
-    assert!(
-        output.contains("call 'bt@my_app@counter':'spawn'()"),
-        "Unqualified spawn should use package heuristic. Got:\n{output}"
+    assert_has(
+        "Unqualified spawn should use package heuristic.",
+        &output,
+        &["call 'bt@my_app@counter':'spawn'()"],
     );
 }
 
@@ -3705,9 +3776,10 @@ fn test_class_method_self_send_long_selector_uses_hashed_atom() {
     );
     // The self-send call in `go` must use the hashed 'class_kw_<hex>' form,
     // not the raw oversized atom. codegen_source uses module name "test".
-    assert!(
-        code.contains("call 'test':'class_kw_"),
-        "class method self-send must use hashed call target 'class_kw_<hex>'. Got:\n{code}"
+    assert_has(
+        "class method self-send must use hashed call target 'class_kw_<hex>'.",
+        &code,
+        &["call 'test':'class_kw_"],
     );
 }
 
@@ -3722,10 +3794,7 @@ fn test_value_type_long_class_method_selector_exports_hashed_atom() {
         !code.contains(&format!("class_{long_sel}")),
         "oversized 'class_<selector>' atom must not appear. Got:\n{code}"
     );
-    assert!(
-        code.contains("'class_kw_"),
-        "hashed export missing. Got:\n{code}"
-    );
+    assert_has("hashed export missing.", &code, &["'class_kw_"]);
     super::assert_compiles_through_erlc("test", &code);
 }
 
@@ -3795,9 +3864,10 @@ fn test_every_class_side_self_send_carries_the_guard() {
         "sealed Object subclass: OpenCls\n  class foo => 1\n\n  class bar => self foo\n",
     ] {
         let code = codegen_source(src);
-        assert!(
-            code.contains("'class_self_direct_ok'"),
-            "a class-side direct call must carry the guard. Got:\n{code}"
+        assert_has(
+            "a class-side direct call must carry the guard.",
+            &code,
+            &["'class_self_direct_ok'"],
         );
         assert!(
             code.contains("'class_self_send'(") || code.contains("'class_self_dispatch_local'("),
@@ -3814,13 +3884,15 @@ fn test_every_class_side_self_send_carries_the_guard() {
 fn test_class_method_explicit_class_reference_binds_the_named_class() {
     let src = "Object subclass: OpenCls\n  class foo => 1\n\n  class bar => OpenCls foo\n";
     let code = codegen_source(src);
-    assert!(
-        code.contains("'class_self_direct_ok'('OpenCls class', 'OpenCls class', 'OpenCls', 'foo')"),
-        "the guard does not depend on the receiver. Got:\n{code}"
+    assert_has(
+        "the guard does not depend on the receiver.",
+        &code,
+        &["'class_self_direct_ok'('OpenCls class', 'OpenCls class', 'OpenCls', 'foo')"],
     );
-    assert!(
-        code.contains("call 'test':'class_foo'(ClassSelf)"),
-        "the guarded arm passes the receiver, which is OpenCls in this arm. Got:\n{code}"
+    assert_has(
+        "the guarded arm passes the receiver, which is OpenCls in this arm.",
+        &code,
+        &["call 'test':'class_foo'(ClassSelf)"],
     );
     assert!(
         code.contains(
@@ -3855,22 +3927,29 @@ fn test_explicit_own_class_send_cases_on_the_receiver_tag() {
             .find("<_> when 'true' -> let _StaticSelf")
             .unwrap_or_else(|| panic!("the other arm is the literal class send. Got:\n{run}"));
     let own_arm = &run[tag_case..literal_arm];
-    assert!(
-        own_arm.contains("call 'test':'class_who:'(ClassSelf, ")
-            && own_arm.contains("'class_self_dispatch_local'('Base', 'who:', ["),
-        "the Base arm is the own-class direct path. Got:\n{own_arm}"
+    assert_has(
+        "the Base arm is the own-class direct path",
+        own_arm,
+        &[
+            "call 'test':'class_who:'(ClassSelf, ",
+            "'class_self_dispatch_local'('Base', 'who:', [",
+        ],
     );
-    assert!(
-        !own_arm.contains("'class_send'"),
-        "the Base arm never sends to its own class process. Got:\n{own_arm}"
+    assert_lacks(
+        "the Base arm never sends to its own class process.",
+        own_arm,
+        &["'class_send'"],
     );
     let literal = &run[literal_arm..];
-    assert!(
-        literal.contains("'class_who:', 'Base class'} := ")
-            && literal.contains("'static_call_target'(")
-            && literal.contains(":'class_who:'(_StaticSelf")
-            && literal.contains("'class_send'(_ClassPid"),
-        "the literal arm is the guarded direct call with Base's own reference. Got:\n{literal}"
+    assert_has(
+        "the literal arm is the guarded direct call with Base's own reference",
+        literal,
+        &[
+            "'class_who:', 'Base class'} := ",
+            "'static_call_target'(",
+            ":'class_who:'(_StaticSelf",
+            "'class_send'(_ClassPid",
+        ],
     );
     assert_eq!(
         run.matches("call 'erlang':'+'(").count(),
@@ -3920,13 +3999,15 @@ fn test_nested_own_class_sends_in_block_args_compile_once() {
 fn test_self_send_in_class_method_has_no_receiver_tag_case() {
     let src = "Object subclass: Base\n  class who => 1\n\n  class run => self who\n";
     let code = codegen_source(src);
-    assert!(
-        !code.contains("case call 'erlang':'element'(2, ClassSelf) of <'Base class'>"),
-        "self sends are not own-class literal sends. Got:\n{code}"
+    assert_lacks(
+        "self sends are not own-class literal sends.",
+        &code,
+        &["case call 'erlang':'element'(2, ClassSelf) of <'Base class'>"],
     );
-    assert!(
-        code.contains("'class_self_send'(ClassSelf, 'who', [])"),
-        "self who walks from the receiver. Got:\n{code}"
+    assert_has(
+        "self who walks from the receiver.",
+        &code,
+        &["'class_self_send'(ClassSelf, 'who', [])"],
     );
 }
 
@@ -3937,10 +4018,13 @@ fn test_self_send_in_class_method_has_no_receiver_tag_case() {
 fn test_actor_self_send_in_open_class_uses_instance_class_module() {
     let src = "Actor subclass: OpenActor\n  foo => 1\n\n  bar => self foo\n";
     let code = codegen_source(src);
-    assert!(
-        code.contains("call 'maps':'get'('__class_mod__', ")
-            && code.contains(":'safe_dispatch'('foo'"),
-        "open actor self-send must dispatch on the instance's class module. Got:\n{code}"
+    assert_has(
+        "open actor self-send must dispatch on the instance's class module",
+        &code,
+        &[
+            "call 'maps':'get'('__class_mod__', ",
+            ":'safe_dispatch'('foo'",
+        ],
     );
 }
 
@@ -3950,9 +4034,10 @@ fn test_actor_self_send_in_open_class_uses_instance_class_module() {
 fn test_actor_self_send_in_sealed_class_stays_static() {
     let src = "sealed Actor subclass: SealedActor\n  foo => 1\n\n  bar => self foo\n";
     let code = codegen_source(src);
-    assert!(
-        !code.contains("call 'maps':'get'('__class_mod__', "),
-        "sealed actor self-send must not look up the instance class module. Got:\n{code}"
+    assert_lacks(
+        "sealed actor self-send must not look up the instance class module.",
+        &code,
+        &["call 'maps':'get'('__class_mod__', "],
     );
 }
 
@@ -3962,71 +4047,40 @@ fn test_actor_self_send_in_sealed_class_stays_static() {
 fn test_abstract_actor_spawn_raises_instantiation_error() {
     // Abstract Actor subclasses must emit spawn/0 and spawn/1 as
     // instantiation_error stubs — not real safe_spawn calls.
-    use beamtalk_core::ast::*;
+    let code = codegen_named(
+        "abstract Actor subclass: AbstractQueue\n",
+        "bt@abstract_queue",
+    );
 
-    let class = ClassDefinition {
-        name: Identifier::new("AbstractQueue", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: true,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
-    let module = Module {
-        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
-        literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        classes: vec![class],
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        method_definitions: vec![],
-        protocols: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-    let code = generate_module(&module, CodegenOptions::new("bt@abstract_queue"))
-        .expect("codegen should succeed");
-
-    assert!(
-        code.contains("'spawn'/0 = fun () ->"),
-        "Abstract actor spawn/0 must have arity-0 fun signature. Got:\n{code}"
+    assert_has(
+        "Abstract actor spawn/0 must have arity-0 fun signature.",
+        &code,
+        &["'spawn'/0 = fun () ->"],
     );
-    assert!(
-        !code.contains("'beamtalk_actor':'safe_spawn'"),
-        "Abstract actor spawn must NOT call safe_spawn. Got:\n{code}"
+    assert_lacks(
+        "Abstract actor spawn must NOT call safe_spawn.",
+        &code,
+        &["'beamtalk_actor':'safe_spawn'"],
     );
-    assert!(
-        code.contains("call 'beamtalk_error':'new'('instantiation_error', 'AbstractQueue')"),
-        "Abstract actor spawn must raise instantiation_error for the class. Got:\n{code}"
+    assert_has(
+        "Abstract actor spawn must raise instantiation_error for the class.",
+        &code,
+        &["call 'beamtalk_error':'new'('instantiation_error', 'AbstractQueue')"],
     );
-    assert!(
-        code.contains("call 'beamtalk_error':'with_selector'(Error0, 'spawn')"),
-        "spawn/0 error stub must name selector 'spawn'. Got:\n{code}"
+    assert_has(
+        "spawn/0 error stub must name selector 'spawn'.",
+        &code,
+        &["call 'beamtalk_error':'with_selector'(Error0, 'spawn')"],
     );
-    assert!(
-        code.contains("'spawn'/1 = fun (_InitArgs) ->"),
-        "Abstract actor spawn/1 must discard InitArgs (_InitArgs). Got:\n{code}"
+    assert_has(
+        "Abstract actor spawn/1 must discard InitArgs (_InitArgs).",
+        &code,
+        &["'spawn'/1 = fun (_InitArgs) ->"],
     );
-    assert!(
-        code.contains("call 'beamtalk_error':'with_selector'(Error0, 'spawnWith:')"),
-        "spawn/1 error stub must name selector 'spawnWith:'. Got:\n{code}"
+    assert_has(
+        "spawn/1 error stub must name selector 'spawnWith:'.",
+        &code,
+        &["call 'beamtalk_error':'with_selector'(Error0, 'spawnWith:')"],
     );
     let abstract_hint = beamtalk_cerl_doc::binary::binary_string_literal(
         "Abstract classes cannot be instantiated. Subclass it first.",
@@ -4037,16 +4091,22 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
         "spawn, spawn_monitored and spawn_monitored_async /0,1 stubs must all include the abstract-class hint. Got:\n{code}"
     );
     // BT-4477: spawn_monitored_async/0,1 are abstract stubs too.
-    assert!(
-        code.contains("'spawn_monitored_async'/0 = fun () ->")
-            && code.contains("'spawn_monitored_async'/1 = fun (_InitArgs) ->"),
-        "Got:\n{code}"
+    assert_has(
+        "Abstract actor must emit spawn_monitored_async/0,1 stubs",
+        &code,
+        &[
+            "'spawn_monitored_async'/0 = fun () ->",
+            "'spawn_monitored_async'/1 = fun (_InitArgs) ->",
+        ],
     );
     // BT-4104: spawn_monitored/0,1 are abstract stubs too, naming their own selectors.
-    assert!(
-        code.contains("'spawn_monitored'/0 = fun () ->")
-            && code.contains("'spawn_monitored'/1 = fun (_InitArgs) ->"),
-        "Abstract actor must emit spawn_monitored/0,1 stubs. Got:\n{code}"
+    assert_has(
+        "Abstract actor must emit spawn_monitored/0,1 stubs",
+        &code,
+        &[
+            "'spawn_monitored'/0 = fun () ->",
+            "'spawn_monitored'/1 = fun (_InitArgs) ->",
+        ],
     );
     assert!(
         code.contains("call 'beamtalk_error':'with_selector'(Error0, 'spawnMonitored')")
@@ -4054,14 +4114,16 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
                 .contains("call 'beamtalk_error':'with_selector'(Error0, 'spawnMonitoredWith:')"),
         "spawn_monitored stubs must name the monitored selectors. Got:\n{code}"
     );
-    assert!(
-        !code.contains("'beamtalk_actor':'safe_spawn_monitored'"),
-        "Abstract actor must NOT call safe_spawn_monitored. Got:\n{code}"
+    assert_lacks(
+        "Abstract actor must NOT call safe_spawn_monitored.",
+        &code,
+        &["'beamtalk_actor':'safe_spawn_monitored'"],
     );
     // Abstract stubs must never emit an instance-registration call.
-    assert!(
-        !code.contains("'beamtalk_object_instances':'register'"),
-        "Abstract actor spawn stubs must not register instances. Got:\n{code}"
+    assert_lacks(
+        "Abstract actor spawn stubs must not register instances.",
+        &code,
+        &["'beamtalk_object_instances':'register'"],
     );
 }
 
@@ -4070,55 +4132,17 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
     // spawn/0 and spawn/1 ok-branches must register the new pid with
     // beamtalk_object_instances:register/2, wrapped in try-catch so a missing
     // registry (e.g. in stdlib unit tests) does not crash the spawn.
-    use beamtalk_core::ast::*;
+    let code = codegen_named("Actor subclass: Counter\n", "counter");
 
-    let class = ClassDefinition {
-        name: Identifier::new("Counter", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
-    let module = Module {
-        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
-        literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-    let code =
-        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
-
-    assert!(
-        code.contains("of _RegOk -> _RegOk"),
-        "instance registration success arm must return the ok value. Got:\n{code}"
+    assert_has(
+        "instance registration success arm must return the ok value.",
+        &code,
+        &["of _RegOk -> _RegOk"],
     );
-    assert!(
-        code.contains("catch <_RegT, _RegE, _RegS> -> 'ok'"),
-        "instance registration must swallow errors when registry is absent. Got:\n{code}"
+    assert_has(
+        "instance registration must swallow errors when registry is absent.",
+        &code,
+        &["catch <_RegT, _RegE, _RegS> -> 'ok'"],
     );
     // Check each spawn function independently so a missing registration in one
     // is reported precisely rather than as a count mismatch.
@@ -4153,63 +4177,27 @@ fn test_spawn_with_args_validates_map_argument() {
     // spawn/1 must guard InitArgs with erlang:is_map before calling
     // safe_spawn. A non-map raises type_error with the 'spawnWith:' selector
     // and a descriptive hint.
-    use beamtalk_core::ast::*;
+    let code = codegen_named("Actor subclass: Counter\n", "counter");
 
-    let class = ClassDefinition {
-        name: Identifier::new("Counter", Span::new(0, 0)),
-        superclass: Some(Identifier::new("Actor", Span::new(0, 0))),
-        superclass_package: None,
-        class_kind: ClassKind::Actor,
-        is_abstract: false,
-        is_sealed: false,
-        is_typed: false,
-        is_internal: false,
-        supervisor_kind: None,
-        state: vec![],
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        superclass_type_args: vec![],
-        uses: vec![],
-        comments: CommentAttachment::default(),
-        doc_comment: None,
-        backing_module: None,
-        handle_scope: None,
-        shape_version: None,
-        span: Span::new(0, 0),
-    };
-    let module = Module {
-        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
-        literal_comments: beamtalk_core::ast::LiteralComments::default(),
-        classes: vec![class],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: Vec::new(),
-        span: Span::new(0, 0),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-    let code =
-        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
-
-    assert!(
-        code.contains("case call 'erlang':'is_map'(InitArgs)"),
-        "spawn/1 must guard InitArgs with erlang:is_map. Got:\n{code}"
+    assert_has(
+        "spawn/1 must guard InitArgs with erlang:is_map.",
+        &code,
+        &["case call 'erlang':'is_map'(InitArgs)"],
     );
-    assert!(
-        code.contains("<'false'> when 'true' ->"),
-        "spawn/1 must have a false branch for non-map InitArgs. Got:\n{code}"
+    assert_has(
+        "spawn/1 must have a false branch for non-map InitArgs.",
+        &code,
+        &["<'false'> when 'true' ->"],
     );
-    assert!(
-        code.contains("call 'beamtalk_error':'new'('type_error', 'Counter')"),
-        "spawn/1 false-branch must raise type_error for the class. Got:\n{code}"
+    assert_has(
+        "spawn/1 false-branch must raise type_error for the class.",
+        &code,
+        &["call 'beamtalk_error':'new'('type_error', 'Counter')"],
     );
-    assert!(
-        code.contains("call 'beamtalk_error':'with_selector'(TypeErr0, 'spawnWith:')"),
-        "type_error must name selector 'spawnWith:'. Got:\n{code}"
+    assert_has(
+        "type_error must name selector 'spawnWith:'.",
+        &code,
+        &["call 'beamtalk_error':'with_selector'(TypeErr0, 'spawnWith:')"],
     );
     let dict_hint = beamtalk_cerl_doc::binary::binary_string_literal(
         "spawnWith: expects a Dictionary argument",
@@ -4231,17 +4219,20 @@ fn test_builder_class_var_mutation_is_an_in_place_put() {
                classVars: #{ #runs => 0 }; \
                classMethods: #{ #bump => [:self | self.runs := self.runs + 1] }; register";
     let code = try_codegen(src).expect("mutating classMethods block must compile");
-    assert!(
-        code.contains("call 'erlang':'put'(_CVKey") && code.contains("call 'maps':'put'('runs', "),
-        "builder class-method write should be an inlined in-place put. Got:\n{code}"
+    assert_has(
+        "builder class-method write should be an inlined in-place put",
+        &code,
+        &["call 'erlang':'put'(_CVKey", "call 'maps':'put'('runs', "],
     );
-    assert!(
-        code.contains("call 'beamtalk_class_vars':'put'(ClassSelf, 'runs', "),
-        "builder class-method write should fall back to the runtime helper. Got:\n{code}"
+    assert_has(
+        "builder class-method write should fall back to the runtime helper.",
+        &code,
+        &["call 'beamtalk_class_vars':'put'(ClassSelf, 'runs', "],
     );
-    assert!(
-        !code.contains("ClassVars") && !code.contains("class_var_result"),
-        "nothing is threaded or returned beside the result. Got:\n{code}"
+    assert_lacks(
+        "nothing is threaded or returned beside the result",
+        &code,
+        &["ClassVars", "class_var_result"],
     );
 }
 
@@ -4407,9 +4398,10 @@ fn test_builder_cascade_at_block_depth_still_lowers_in_place_access() {
         .expression_doc(&expr)
         .expect("mutating classMethods block must compile")
         .to_pretty_string();
-    assert!(
-        code.contains("call 'erlang':'put'(_CVKey"),
-        "builder fun lowered from inside a block should still write in place. Got:\n{code}"
+    assert_has(
+        "builder fun lowered from inside a block should still write in place.",
+        &code,
+        &["call 'erlang':'put'(_CVKey"],
     );
     assert_eq!(
         generator.block_depth, 1,
@@ -4475,13 +4467,15 @@ fn test_class_side_clear_and_has_field_lower_to_helper_calls_at_any_depth() {
         4,
         "every clearField: is a clear/2 helper call. Got:\n{code}"
     );
-    assert!(
-        code.contains("call 'beamtalk_class_vars':'has'(ClassSelf, "),
-        "hasField: is a has/2 helper call. Got:\n{code}"
+    assert_has(
+        "hasField: is a has/2 helper call.",
+        &code,
+        &["call 'beamtalk_class_vars':'has'(ClassSelf, "],
     );
-    assert!(
-        !code.contains("'maps':'remove'") && !code.contains("ClassVars"),
-        "no threaded map surgery on a ClassVars map. Got:\n{code}"
+    assert_lacks(
+        "no threaded map surgery on a ClassVars map",
+        &code,
+        &["'maps':'remove'", "ClassVars"],
     );
 }
 
@@ -4506,19 +4500,22 @@ fn test_class_side_field_at_lowers_to_in_place_helper_calls() {
         "  class orderedSum => (self fieldAt: #total put: 5) + (self fieldAt: #total)\n",
     );
     let code = codegen_source(src);
-    assert!(
-        code.contains("call 'beamtalk_class_vars':'field_at'(ClassSelf, "),
-        "a method-level fieldAt: is a field_at/2 helper call. Got:\n{code}"
+    assert_has(
+        "a method-level fieldAt: is a field_at/2 helper call.",
+        &code,
+        &["call 'beamtalk_class_vars':'field_at'(ClassSelf, "],
     );
-    assert!(
-        code.contains("call 'beamtalk_class_vars':'field_at_put'(ClassSelf, "),
-        "fieldAt:put: is a field_at_put/3 helper call. Got:\n{code}"
+    assert_has(
+        "fieldAt:put: is a field_at_put/3 helper call.",
+        &code,
+        &["call 'beamtalk_class_vars':'field_at_put'(ClassSelf, "],
     );
     // The `do:` block reads with `fieldAt:`, so it binds a capture and its
     // read is the 3-arity captured-fallback form.
-    assert!(
-        code.contains("call 'beamtalk_class_vars':'capture'(ClassSelf, "),
-        "a block that reads with fieldAt: binds a capture. Got:\n{code}"
+    assert_has(
+        "a block that reads with fieldAt: binds a capture.",
+        &code,
+        &["call 'beamtalk_class_vars':'capture'(ClassSelf, "],
     );
     let three_arity_read = code
         .split("call 'beamtalk_class_vars':'field_at'(ClassSelf, ")
@@ -4532,9 +4529,10 @@ fn test_class_side_field_at_lowers_to_in_place_helper_calls() {
         "the block's fieldAt: read passes its capture. Got:\n{code}"
     );
     // (The selectors still appear in the class's xref metadata.)
-    assert!(
-        !code.contains("'fieldAt:', [") && !code.contains("'fieldAt:put:', ["),
-        "no fieldAt: message send or state-threaded fieldAt:put:. Got:\n{code}"
+    assert_lacks(
+        "no fieldAt: message send or state-threaded fieldAt:put:",
+        &code,
+        &["'fieldAt:', [", "'fieldAt:put:', ["],
     );
 }
 
@@ -4726,9 +4724,10 @@ fn test_new_without_eligible_entry_falls_back_to_class_send() {
         .unwrap();
     let output = doc.to_pretty_string();
 
-    assert!(
-        output.contains("'beamtalk_object_class':'class_send'"),
-        "`new` with no eligibility entry must dispatch via class_send. Got:\n{output}"
+    assert_has(
+        "`new` with no eligibility entry must dispatch via class_send.",
+        &output,
+        &["'beamtalk_object_class':'class_send'"],
     );
 }
 
@@ -4741,13 +4740,15 @@ fn test_value_meta_bakes_direct_constructors() {
     // (BT-4301: no `direct_class_methods` table is baked any more).
     let src = "Value subclass: Pt\n  field: x = 0\n  field: y = 0\n";
     let code = codegen_source(src);
-    assert!(
-        code.contains("'direct_constructors' => ['new', 'new:']"),
-        "stateless Value must bake new/new: verdicts. Got:\n{code}"
+    assert_has(
+        "stateless Value must bake new/new: verdicts.",
+        &code,
+        &["'direct_constructors' => ['new', 'new:']"],
     );
-    assert!(
-        !code.contains("direct_class_methods"),
-        "no direct_class_methods table is baked (BT-4301). Got:\n{code}"
+    assert_lacks(
+        "no direct_class_methods table is baked (BT-4301).",
+        &code,
+        &["direct_class_methods"],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -4758,15 +4759,17 @@ fn test_value_meta_bakes_direct_constructors() {
 #[test]
 fn test_indirect_value_meta_bakes_direct_constructors() {
     let code = codegen_source("Collection subclass: MyBag\n  field: n = 0\n");
-    assert!(
-        code.contains("'direct_constructors' => ['new', 'new:']"),
-        "an indirect Value subclass must bake new/new: verdicts. Got:\n{code}"
+    assert_has(
+        "an indirect Value subclass must bake new/new: verdicts.",
+        &code,
+        &["'direct_constructors' => ['new', 'new:']"],
     );
     super::assert_compiles_through_erlc("test", &code);
     let test_case = codegen_source("TestCase subclass: MyTest\n  testOne => nil\n");
-    assert!(
-        test_case.contains("'direct_constructors' => ['new', 'new:']"),
-        "a TestCase subclass is an indirect Value subclass. Got:\n{test_case}"
+    assert_has(
+        "a TestCase subclass is an indirect Value subclass.",
+        &test_case,
+        &["'direct_constructors' => ['new', 'new:']"],
     );
 }
 
@@ -4776,14 +4779,16 @@ fn test_indirect_value_meta_bakes_direct_constructors() {
 #[test]
 fn test_meta_bakes_defines_user_class_new1() {
     let plain = codegen_source("Value subclass: Pt\n  field: x = 0\n");
-    assert!(
-        plain.contains("'defines_user_class_new1' => 'false'"),
-        "a class without a user `new:` bakes false. Got:\n{plain}"
+    assert_has(
+        "a class without a user `new:` bakes false.",
+        &plain,
+        &["'defines_user_class_new1' => 'false'"],
     );
     let custom = codegen_source("Object subclass: Custom\n\n  class new: m => m\n");
-    assert!(
-        custom.contains("'defines_user_class_new1' => 'true'"),
-        "a class with a user class-side `new:` bakes true. Got:\n{custom}"
+    assert_has(
+        "a class with a user class-side `new:` bakes true.",
+        &custom,
+        &["'defines_user_class_new1' => 'true'"],
     );
     super::assert_compiles_through_erlc("test", &plain);
 }
@@ -4794,14 +4799,16 @@ fn test_meta_bakes_defines_user_class_new1() {
 #[test]
 fn test_meta_bakes_defines_user_class_new0() {
     let plain = codegen_source("Value subclass: Pt\n  field: x = 0\n");
-    assert!(
-        plain.contains("'defines_user_class_new0' => 'false'"),
-        "a class without a user `new` bakes false. Got:\n{plain}"
+    assert_has(
+        "a class without a user `new` bakes false.",
+        &plain,
+        &["'defines_user_class_new0' => 'false'"],
     );
     let custom = codegen_source("Object subclass: Custom\n\n  class new => 1\n");
-    assert!(
-        custom.contains("'defines_user_class_new0' => 'true'"),
-        "a class with a user class-side `new` bakes true. Got:\n{custom}"
+    assert_has(
+        "a class with a user class-side `new` bakes true.",
+        &custom,
+        &["'defines_user_class_new0' => 'true'"],
     );
 }
 
@@ -4811,9 +4818,10 @@ fn test_value_with_custom_new_omits_it_from_baked_constructors() {
     // `new` from the baked verdicts.
     let src = "Value subclass: Custom\n  field: x = 0\n\n  class new => self x: 41\n";
     let code = codegen_source(src);
-    assert!(
-        !code.contains("'direct_constructors' => ['new'"),
-        "custom `new` must not bake a direct `new` verdict. Got:\n{code}"
+    assert_lacks(
+        "custom `new` must not bake a direct `new` verdict.",
+        &code,
+        &["'direct_constructors' => ['new'"],
     );
 }
 
@@ -4825,13 +4833,15 @@ fn test_value_with_custom_new_omits_it_from_baked_constructors() {
 fn test_explicit_ffi_class_new_bakes_direct_new() {
     let src = "sealed Object subclass: Tag\n\n  class sealed new -> Tag => (Erlang erlang) make_ref\n\n  class fresh -> Tag => Tag new\n";
     let code = codegen_source(src);
-    assert!(
-        code.contains("'direct_constructors' => ['new']"),
-        "an FFI-forward class `new` bakes a direct `new` verdict. Got:\n{code}"
+    assert_has(
+        "an FFI-forward class `new` bakes a direct `new` verdict.",
+        &code,
+        &["'direct_constructors' => ['new']"],
     );
-    assert!(
-        code.contains("'Tag class static calls', ~{}~) of <~{{'bt@tag', 'new', 'Tag class'}"),
-        "the module's own static `Tag new` uses the guarded constructor key. Got:\n{code}"
+    assert_has(
+        "the module's own static `Tag new` uses the guarded constructor key.",
+        &code,
+        &["'Tag class static calls', ~{}~) of <~{{'bt@tag', 'new', 'Tag class'}"],
     );
     super::assert_compiles_through_erlc("test", &code);
 
@@ -4855,9 +4865,10 @@ fn test_explicit_ffi_class_new_bakes_direct_new() {
 
     // A body that sends to `self` keeps the class process.
     let basic = codegen_source("Object subclass: Tag\n\n  class new => self basicNew\n");
-    assert!(
-        !basic.contains("'direct_constructors' => ['new'"),
-        "`self basicNew` must not bake a direct `new` verdict. Got:\n{basic}"
+    assert_lacks(
+        "`self basicNew` must not bake a direct `new` verdict.",
+        &basic,
+        &["'direct_constructors' => ['new'"],
     );
 }
 
@@ -4878,9 +4889,10 @@ fn test_explicit_forwarding_class_new1_is_not_process_bound() {
     );
     super::assert_compiles_through_erlc("test", &code);
     let basic = codegen_source("Object subclass: Tag\n\n  class new: xs => self basicNew\n");
-    assert!(
-        basic.contains(full),
-        "`self basicNew` keeps `new:` process-bound. Got:\n{basic}"
+    assert_has(
+        "`self basicNew` keeps `new:` process-bound",
+        &basic,
+        &[full],
     );
 }
 
@@ -5055,9 +5067,10 @@ fn test_actor_meta_omits_direct_constructors() {
     // baked at all (only eligible classes change).
     let src = "Actor subclass: Srv\n  state: value = 0\n";
     let code = codegen_source(src);
-    assert!(
-        !code.contains("direct_constructors"),
-        "actor modules must not bake a direct_constructors key. Got:\n{code}"
+    assert_lacks(
+        "actor modules must not bake a direct_constructors key.",
+        &code,
+        &["direct_constructors"],
     );
 }
 
@@ -5087,9 +5100,10 @@ fn test_long_keyword_ctor_bakes_hashed_meta_key() {
         !code.contains(&raw_kw),
         "over-long keyword ctor selector must not appear raw anywhere. Got:\n{code}"
     );
-    assert!(
-        code.contains("'kw_"),
-        "baked direct entry must use the hashed 'kw_<hash>' key. Got:\n{code}"
+    assert_has(
+        "baked direct entry must use the hashed 'kw_<hash>' key.",
+        &code,
+        &["'kw_"],
     );
     super::assert_compiles_through_erlc("test", &code);
 }
@@ -5106,13 +5120,15 @@ fn test_primitive_dispatch_3_targets_unprefixed_module_for_beamtalk_class() {
         "  doIt => @primitive \"doIt\"\n",
     );
     let code = codegen_source(src);
-    assert!(
-        code.contains("call 'beamtalk_runtime':'dispatch'(Selector, Args, Self)"),
-        "dispatch/3 must delegate to 'beamtalk_runtime'. Got:\n{code}"
+    assert_has(
+        "dispatch/3 must delegate to 'beamtalk_runtime'.",
+        &code,
+        &["call 'beamtalk_runtime':'dispatch'(Selector, Args, Self)"],
     );
-    assert!(
-        !code.contains("beamtalk_beamtalk_runtime"),
-        "module name must not be double-prefixed. Got:\n{code}"
+    assert_lacks(
+        "module name must not be double-prefixed.",
+        &code,
+        &["beamtalk_beamtalk_runtime"],
     );
 }
 
@@ -5123,8 +5139,9 @@ fn test_primitive_dispatch_3_targets_prefixed_module_for_plain_class() {
         "  doIt => @primitive \"doIt\"\n",
     );
     let code = codegen_source(src);
-    assert!(
-        code.contains("call 'beamtalk_http_router':'dispatch'(Selector, Args, Self)"),
-        "dispatch/3 must delegate to 'beamtalk_http_router'. Got:\n{code}"
+    assert_has(
+        "dispatch/3 must delegate to 'beamtalk_http_router'.",
+        &code,
+        &["call 'beamtalk_http_router':'dispatch'(Selector, Args, Self)"],
     );
 }

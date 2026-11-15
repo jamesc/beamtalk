@@ -108,7 +108,7 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
         return Vec::new();
     };
 
-    let pkg_manifest = match crate::commands::manifest::find_manifest(project_root_utf8) {
+    let pkg_manifest = match beamtalk_package::manifest::find_manifest(project_root_utf8) {
         Ok(Some(pkg)) => pkg,
         Ok(None) => return Vec::new(),
         Err(e) => {
@@ -121,7 +121,7 @@ fn auto_compile_package(project_root: &Path) -> Vec<PathBuf> {
     let options = beamtalk_core::CompilerOptions::default();
     match crate::commands::build::build(project_root_utf8.as_str(), &options, false) {
         Ok(()) => {
-            let repl_layout = crate::commands::build_layout::BuildLayout::new(project_root_utf8);
+            let repl_layout = beamtalk_core::build_layout::BuildLayout::new(project_root_utf8);
             let ebin_path = repl_layout.ebin_dir();
             // Count .beam files for summary
             let beam_count = std::fs::read_dir(&ebin_path).map_or(0, |entries| {
@@ -290,7 +290,7 @@ pub fn run(
     // The OTP app atom is the Erlang application name derived from the package name.
     let otp_app_name: Option<String> =
         camino::Utf8Path::from_path(&project_root).and_then(|root| {
-            let manifest = match crate::commands::manifest::find_manifest(root) {
+            let manifest = match beamtalk_package::manifest::find_manifest(root) {
                 Ok(Some(m)) => m,
                 Ok(None) => return None,
                 Err(e) => {
@@ -298,7 +298,7 @@ pub fn run(
                     return None;
                 }
             };
-            match crate::commands::manifest::find_application_config(root) {
+            match beamtalk_package::manifest::find_application_config(root) {
                 Ok(Some(_app)) => Some(manifest.name),
                 Ok(None) => None,
                 Err(e) => {
@@ -313,7 +313,7 @@ pub fn run(
     // bare `beamtalk repl` outside a project records none.
     let root_package: Option<String> = camino::Utf8Path::from_path(&project_root)
         .and_then(|root| {
-            crate::commands::manifest::find_manifest(root)
+            beamtalk_package::manifest::find_manifest(root)
                 .ok()
                 .flatten()
         })
@@ -455,9 +455,7 @@ pub fn run(
         }
 
         // Read workspace cookie for WebSocket authentication (ADR 0020)
-        let ws_cookie = workspace::read_workspace_cookie(&workspace_id)?
-            .trim()
-            .to_string();
+        let ws_cookie = workspace::read_workspace_cookie(&workspace_id)?;
 
         println!();
 

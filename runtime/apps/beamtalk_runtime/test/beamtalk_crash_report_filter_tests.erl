@@ -66,6 +66,8 @@ cleanup(Installed) ->
     beamtalk_test_class:stop_graceful('Bt4820Crasher'),
     beamtalk_test_module:unload(?MOD).
 
+%% Own handler kept (not beamtalk_test_log): it is installed alongside a primary
+%% filter under test, and events are routed by registered name across processes.
 %% EUnit runs `setup` in another process than the tests: each test claims
 %% the capture by registering itself (see drain/0).
 log(Event, _Config) ->

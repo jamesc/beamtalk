@@ -456,8 +456,9 @@ fn test_user_defined_initialize_chain_fallback_with_initialize() {
         "Fallback should return one entry for the initialize method"
     );
     assert_eq!(
-        chain[0].class_name, "TestActor",
-        "Chain entry should name the leaf class"
+        chain[0].module_name,
+        generator.compiled_module_name("TestActor"),
+        "Chain entry should target the leaf class's module"
     );
 }
 

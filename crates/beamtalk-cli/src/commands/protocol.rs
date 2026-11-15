@@ -589,6 +589,69 @@ pub fn format_reload_check_notice(data: &serde_json::Value) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    /// Every protocol request the CLI sends comes from `RequestBuilder`, whose
+    /// ops and params are checked against the server's op table in
+    /// `beamtalk-repl-protocol`. A hand-built `{"op": …}` literal in non-test
+    /// CLI code bypasses that check, so this scan fails on one.
+    #[test]
+    fn non_test_cli_code_builds_no_raw_op_literals() {
+        fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    rust_files(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        rust_files(&src, &mut files);
+        assert!(
+            !files.is_empty(),
+            "no sources found under {}",
+            src.display()
+        );
+
+        let mut offenders = Vec::new();
+        for path in files {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let in_tests_dir = path.components().any(|c| c.as_os_str() == "tests");
+            if in_tests_dir || name == "tests.rs" || name == "test_support.rs" {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            let lines: Vec<&str> = text.lines().collect();
+            for (n, line) in lines.iter().enumerate() {
+                let trimmed = line.trim();
+                // Everything from `#[cfg(test)] mod …` on is test code.
+                if trimmed == "#[cfg(test)]"
+                    && lines.get(n + 1).is_some_and(|next| {
+                        let next = next.trim_start();
+                        next.starts_with("mod ")
+                            || next.starts_with("pub mod ")
+                            || next.starts_with("pub(crate) mod ")
+                    })
+                {
+                    break;
+                }
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+                if trimmed.replace(' ', "").contains("\"op\":") {
+                    offenders.push(format!("{}:{}: {trimmed}", path.display(), n + 1));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "build requests with `RequestBuilder`, not a raw `{{\"op\": …}}` literal:\n{}",
+            offenders.join("\n")
+        );
+    }
+
     use super::format_transcript_chunk;
 
     mod protocol_client {

@@ -2960,7 +2960,13 @@ impl CoreErlangGenerator {
             match kind {
                 // C1
                 BodyExprKind::FieldAssignment => {
-                    self.lower_arm_field_assignment(cx, &mut last_result, &mut stmts)?;
+                    self.lower_stmt_field_assignment(
+                        cx,
+                        &mut StmtTail::Arm {
+                            last_result: &mut last_result,
+                        },
+                        &mut stmts,
+                    )?;
                 }
                 // C2/C3/C4
                 BodyExprKind::LocalAssignPure
@@ -3008,16 +3014,28 @@ impl CoreErlangGenerator {
                 // C7 — self fieldAt: name put: value. Dynamic field
                 // name ⇒ §Dynamic-field-puts option 1 (Direct, not Put).
                 BodyExprKind::SelfFieldAtPut => {
-                    self.lower_arm_self_field_at_put(cx, &mut last_result, &mut stmts)?;
+                    self.lower_stmt_self_field_at_put(
+                        cx,
+                        &mut StmtTail::Arm {
+                            last_result: &mut last_result,
+                        },
+                        &mut stmts,
+                    )?;
                 }
                 // C7b — self clearField: name (ADR 0124 §1/B4), mirroring C7
                 // immediately above: same `BindOp::Direct` shape with
                 // `maps:remove` in place of `maps:put` and no value argument
                 // to thread. Returns `Self` (`clearField: -> Self`,
-                // `generate_self_clear_field_open`'s own convention) rather
+                // `lower_stmt_self_clear_field`'s own convention) rather
                 // than a written value.
                 BodyExprKind::SelfClearField => {
-                    self.lower_arm_self_clear_field(cx, &mut last_result, &mut stmts)?;
+                    self.lower_stmt_self_clear_field(
+                        cx,
+                        &mut StmtTail::Arm {
+                            last_result: &mut last_result,
+                        },
+                        &mut stmts,
+                    )?;
                 }
                 // C8 — self fieldAt: name put: <control-flow-with-mutations>.
                 BodyExprKind::SelfFieldAtPutControlFlow => {
@@ -3315,6 +3333,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // Not shared with the method walker (`lower_reply_tier2_value_call`); see `lower_arm_local_assign`.
     fn lower_arm_tier2_value_call(
         &mut self,
         cx: StmtCx<'_>,
@@ -3419,6 +3438,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // Not shared with the method walker (`lower_reply_control_flow_with_mutations`); see `lower_arm_local_assign`.
     fn lower_arm_control_flow_with_mutations(
         &mut self,
         cx: StmtCx<'_>,
@@ -3499,6 +3519,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // Not shared with the method walker (`lower_reply_control_flow_with_mutations`); see `lower_arm_local_assign`.
     fn lower_arm_control_flow_producer(
         &mut self,
         cx: StmtCx<'_>,
@@ -3526,6 +3547,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // Not shared with the method walker (`lower_reply_destructure_assignment_control_flow`); see `lower_arm_local_assign`.
     fn lower_arm_destructure_assignment_control_flow(
         &mut self,
         cx: StmtCx<'_>,
@@ -3587,6 +3609,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // Not shared with the method walker (`lower_reply_destructure_assignment_control_flow`); see `lower_arm_local_assign`.
     fn lower_arm_destructure_assignment_producer(
         &mut self,
         cx: StmtCx<'_>,
@@ -3631,6 +3654,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // Not shared with the method walker (`lower_reply_self_field_at_put_control_flow`); see `lower_arm_local_assign`.
     fn lower_arm_self_field_at_put_control_flow(
         &mut self,
         cx: StmtCx<'_>,
@@ -3708,126 +3732,7 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    fn lower_arm_self_clear_field(
-        &mut self,
-        cx: StmtCx<'_>,
-        last_result: &mut Option<ValueRef>,
-        stmts: &mut Vec<ThreadedStmt>,
-    ) -> Result<()> {
-        let StmtCx {
-            expr,
-            span,
-            is_last,
-            frame,
-            ..
-        } = cx;
-        if let Expression::MessageSend { arguments, .. } = expr {
-            // BT-4369: a dynamic-key field write records itself for the loop checkout.
-            self.note_field_write("<dynamic>", span);
-            let scope = self.thread_send_arguments(expr, frame, stmts)?;
-            let name_var = self.fresh_var("Name");
-            let name_code = self.expression_doc(&arguments[0])?;
-            self.finish_precompiled_scope(scope)?;
-            let source_version = self.state_version();
-            let current_state_name = self.current_state_var();
-            stmts.push(ThreadedStmt::Statement(
-                docvec![
-                    "let ",
-                    leaf::var(name_var.clone()),
-                    " = ",
-                    name_code,
-                    " in ",
-                ],
-                span,
-            ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'maps':'remove'(",
-                    leaf::var(name_var),
-                    ", ",
-                    leaf::var(current_state_name),
-                    ")",
-                ])),
-                span,
-            });
-            if is_last {
-                *last_result = Some(ValueRef::Var("Self".to_string()));
-            }
-        }
-        Ok(())
-    }
-
-    fn lower_arm_self_field_at_put(
-        &mut self,
-        cx: StmtCx<'_>,
-        last_result: &mut Option<ValueRef>,
-        stmts: &mut Vec<ThreadedStmt>,
-    ) -> Result<()> {
-        let StmtCx {
-            expr,
-            span,
-            is_last,
-            frame,
-            ..
-        } = cx;
-        if let Expression::MessageSend { arguments, .. } = expr {
-            // BT-4369: a dynamic-key field write records itself for the loop checkout.
-            self.note_field_write("<dynamic>", span);
-            // BT-4310: the name and value are sequenced ahead of
-            // the put, so the `State` read below is the one after
-            // the value: a value's own change (a self-send, a
-            // nested field write, a State-only fold) survives the
-            // put, which before BT-4310 built on the state from
-            // before the value and dropped it.
-            let scope = self.thread_send_arguments(expr, frame, stmts)?;
-            let name_var = self.fresh_var("Name");
-            let val_var = self.fresh_temp_var("Val");
-            let name_code = self.expression_doc(&arguments[0])?;
-            let source_version = self.state_version();
-            let current_state_name = self.current_state_var();
-            let val_code = self.expression_doc(&arguments[1])?;
-            stmts.push(ThreadedStmt::Statement(
-                docvec![
-                    "let ",
-                    leaf::var(name_var.clone()),
-                    " = ",
-                    name_code,
-                    " in let ",
-                    leaf::var(val_var.clone()),
-                    " = ",
-                    val_code,
-                    " in ",
-                ],
-                span,
-            ));
-            let _ = self.next_state_var();
-            let target_version = self.state_version();
-            stmts.push(ThreadedStmt::Bind {
-                target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                op: BindOp::Direct(ValueRef::Doc(docvec![
-                    "call 'maps':'put'(",
-                    leaf::var(name_var),
-                    ", ",
-                    leaf::var(val_var.clone()),
-                    ", ",
-                    leaf::var(current_state_name),
-                    ")",
-                ])),
-                span,
-            });
-            self.finish_precompiled_scope(scope)?;
-            if is_last {
-                *last_result = Some(ValueRef::Var(val_var));
-            }
-        }
-        Ok(())
-    }
-
+    // Not shared with the method walker (`lower_reply_field_assignment_control_flow`); see `lower_arm_local_assign`.
     fn lower_arm_field_assignment_control_flow(
         &mut self,
         cx: StmtCx<'_>,
@@ -3925,27 +3830,6 @@ impl CoreErlangGenerator {
         } = cx;
         let val_var = self.lower_local_var_assignment_bind(expr, frame, span, stmts)?;
         if is_last {
-            *last_result = Some(ValueRef::Var(val_var));
-        }
-        Ok(())
-    }
-
-    fn lower_arm_field_assignment(
-        &mut self,
-        cx: StmtCx<'_>,
-        last_result: &mut Option<ValueRef>,
-        stmts: &mut Vec<ThreadedStmt>,
-    ) -> Result<()> {
-        let StmtCx {
-            expr,
-            span,
-            is_last,
-            frame,
-            ..
-        } = cx;
-        let val_var = self.lower_field_assignment_bind(expr, frame, span, stmts)?;
-        if is_last {
-            // val_var holds the assigned value variable
             *last_result = Some(ValueRef::Var(val_var));
         }
         Ok(())

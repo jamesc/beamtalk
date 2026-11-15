@@ -131,15 +131,16 @@ readAll({beamtalk_string, Path}) when is_binary(Path) ->
                         {ok, beamtalk_primitive:string_from_binary(Valid)}
                     );
                 {error, Offset} ->
-                    Error0 = beamtalk_error:new(parse_error, 'File'),
-                    Error1 = beamtalk_error:with_selector(Error0, 'readAll:'),
-                    Error2 = beamtalk_error:with_details(
-                        Error1, (path_detail(Path))#{offset => Offset}
+                    Error0 = beamtalk_error:new(
+                        parse_error,
+                        'File',
+                        'readAll:',
+                        <<"File contents are not valid UTF-8; use readBinary: for bytes">>
                     ),
-                    Error3 = beamtalk_error:with_hint(
-                        Error2, <<"File contents are not valid UTF-8; use readBinary: for bytes">>
+                    Error = beamtalk_error:with_details(
+                        Error0, (path_detail(Path))#{offset => Offset}
                     ),
-                    beamtalk_result:from_tagged_tuple({error, Error3})
+                    beamtalk_result:from_tagged_tuple({error, Error})
             end;
         {error, Reason} ->
             file_error_result(
@@ -160,9 +161,16 @@ Returns a Result ok map on success, Result error map on failure.
 -spec writeAll(
     beamtalk_string:t() | binary(), Contents :: beamtalk_string:t() | binary()
 ) -> beamtalk_result:t().
-writeAll({beamtalk_string, Path}, {beamtalk_string, Contents}) when
-    is_binary(Path), is_binary(Contents)
-->
+writeAll(Path, Contents) ->
+    write_all(
+        beamtalk_text:unwrap_or_raise(Path, 'File', 'writeAll:contents:', ?PATH_HINT),
+        beamtalk_text:unwrap_or_raise(
+            Contents, 'File', 'writeAll:contents:', <<"Contents must be a String">>
+        )
+    ).
+
+-spec write_all(binary(), binary()) -> beamtalk_result:t().
+write_all(Path, Contents) ->
     PathStr = unicode:characters_to_list(Path),
     %% Ensure directory exists
     Dir = filename:dirname(PathStr),
@@ -184,17 +192,7 @@ writeAll({beamtalk_string, Path}, {beamtalk_string, Contents}) when
                 [],
                 <<"Could not create directory">>
             )
-    end;
-writeAll(Path, Contents) when is_binary(Path), is_binary(Contents) ->
-    writeAll({beamtalk_string, Path}, {beamtalk_string, Contents});
-writeAll({beamtalk_string, _} = P, Contents) when is_binary(Contents) ->
-    writeAll(P, {beamtalk_string, Contents});
-writeAll(Path, {beamtalk_string, _} = C) when is_binary(Path) ->
-    writeAll({beamtalk_string, Path}, C);
-writeAll({beamtalk_string, _}, _) ->
-    beamtalk_error:raise_type_error('File', 'writeAll:contents:', <<"Contents must be a String">>);
-writeAll(_, _) ->
-    beamtalk_error:raise_type_error('File', 'writeAll:contents:', ?PATH_HINT).
+    end.
 
 %%% ============================================================================
 %%% Binary I/O
@@ -248,7 +246,12 @@ Returns a Result ok map on success, Result error map on failure.
 -spec writeBinary(
     beamtalk_string:t() | binary(), Contents :: beamtalk_binary:binary_or_string()
 ) -> beamtalk_result:t().
-writeBinary({beamtalk_string, Path}, Contents) when is_binary(Path) ->
+writeBinary(Path, Contents) ->
+    PathBin = beamtalk_text:unwrap_or_raise(Path, 'File', 'writeBinary:contents:', ?PATH_HINT),
+    do_writeBinary(PathBin, Contents).
+
+-spec do_writeBinary(binary(), beamtalk_binary:binary_or_string()) -> beamtalk_result:t().
+do_writeBinary(Path, Contents) ->
     %% BT-4170: contents admit a String (subclass) or a Binary; the path is text.
     RawContents = binary_contents('writeBinary:contents:', Contents),
     PathStr = unicode:characters_to_list(Path),
@@ -275,11 +278,7 @@ writeBinary({beamtalk_string, Path}, Contents) when is_binary(Path) ->
                 [],
                 <<"Could not create directory">>
             )
-    end;
-writeBinary(Path, Contents) when is_binary(Path) ->
-    writeBinary({beamtalk_string, Path}, Contents);
-writeBinary(_, _) ->
-    beamtalk_error:raise_type_error('File', 'writeBinary:contents:', ?PATH_HINT).
+    end.
 
 -doc """
 Append binary data to a file, creating it if it doesn't exist.
@@ -291,7 +290,12 @@ Returns a Result ok map on success, Result error map on failure.
 -spec appendBinary(
     beamtalk_string:t() | binary(), Contents :: beamtalk_binary:binary_or_string()
 ) -> beamtalk_result:t().
-appendBinary({beamtalk_string, Path}, Contents) when is_binary(Path) ->
+appendBinary(Path, Contents) ->
+    PathBin = beamtalk_text:unwrap_or_raise(Path, 'File', 'appendBinary:contents:', ?PATH_HINT),
+    do_appendBinary(PathBin, Contents).
+
+-spec do_appendBinary(binary(), beamtalk_binary:binary_or_string()) -> beamtalk_result:t().
+do_appendBinary(Path, Contents) ->
     %% BT-4170: contents admit a String (subclass) or a Binary; the path is text.
     RawContents = binary_contents('appendBinary:contents:', Contents),
     PathStr = unicode:characters_to_list(Path),
@@ -318,11 +322,7 @@ appendBinary({beamtalk_string, Path}, Contents) when is_binary(Path) ->
                 [],
                 <<"Could not create directory">>
             )
-    end;
-appendBinary(Path, Contents) when is_binary(Path) ->
-    appendBinary({beamtalk_string, Path}, Contents);
-appendBinary(_, _) ->
-    beamtalk_error:raise_type_error('File', 'appendBinary:contents:', ?PATH_HINT).
+    end.
 
 -doc "Check if FileHandle responds to the given selector.".
 -spec handle_has_method(atom()) -> boolean().
@@ -376,7 +376,16 @@ Returns a Result ok map with the result of the block.
 """.
 -spec 'open:do:'(beamtalk_string:t() | binary(), Do :: fun((map()) -> term())) ->
     beamtalk_result:t().
-'open:do:'({beamtalk_string, Path}, Block) when is_binary(Path), is_function(Block, 1) ->
+'open:do:'(Path, Block) ->
+    PathBin = beamtalk_text:unwrap_or_raise(Path, 'File', 'open:do:', ?PATH_HINT),
+    is_function(Block, 1) orelse
+        beamtalk_error:raise_type_error(
+            'File', 'open:do:', <<"Expected a Block with 1 argument">>
+        ),
+    open_do(PathBin, Block).
+
+-spec open_do(binary(), fun((map()) -> term())) -> beamtalk_result:t().
+open_do(Path, Block) ->
     case file:open(unicode:characters_to_list(Path), [read, binary]) of
         {ok, Fd} ->
             Handle = beamtalk_file_handle:new(Fd, read, Path),
@@ -390,12 +399,7 @@ Returns a Result ok map with the result of the block.
             file_error_result(
                 'open:do:', path_detail(Path), Reason, read_failures(), undefined
             )
-    end;
-'open:do:'(Path, Block) when is_binary(Path) -> 'open:do:'({beamtalk_string, Path}, Block);
-'open:do:'({beamtalk_string, _}, _) ->
-    beamtalk_error:raise_type_error('File', 'open:do:', <<"Expected a Block with 1 argument">>);
-'open:do:'(_, _) ->
-    beamtalk_error:raise_type_error('File', 'open:do:', ?PATH_HINT).
+    end.
 
 %%% ============================================================================
 %%% Incremental handle I/O
@@ -429,7 +433,14 @@ whenever a block scope will do.
 Returns a Result ok map holding the handle, or a Result error map.
 """.
 -spec 'open:mode:'(beamtalk_string:t() | binary(), atom()) -> beamtalk_result:t().
-'open:mode:'({beamtalk_string, Path}, Mode) when is_binary(Path), is_atom(Mode) ->
+'open:mode:'(Path, Mode) ->
+    PathBin = beamtalk_text:unwrap_or_raise(Path, 'File', 'open:mode:', ?PATH_HINT),
+    is_atom(Mode) orelse
+        beamtalk_error:raise_type_error('File', 'open:mode:', <<"Mode must be a Symbol">>),
+    open_mode(PathBin, Mode).
+
+-spec open_mode(binary(), atom()) -> beamtalk_result:t().
+open_mode(Path, Mode) ->
     Owner = resolve_owner(),
     Open = fun(PathStr, Options) -> open_for_owner(PathStr, Options, Owner) end,
     case do_open(Path, Mode, 'open:mode:', Open) of
@@ -438,12 +449,7 @@ Returns a Result ok map holding the handle, or a Result error map.
             beamtalk_result:from_tagged_tuple({ok, Handle});
         {error, Error} ->
             beamtalk_result:from_tagged_tuple({error, Error})
-    end;
-'open:mode:'(Path, Mode) when is_binary(Path) -> 'open:mode:'({beamtalk_string, Path}, Mode);
-'open:mode:'({beamtalk_string, _}, _) ->
-    beamtalk_error:raise_type_error('File', 'open:mode:', <<"Mode must be a Symbol">>);
-'open:mode:'(_, _) ->
-    beamtalk_error:raise_type_error('File', 'open:mode:', ?PATH_HINT).
+    end.
 
 -doc """
 Resolve the owner `open:mode:` registers its handle against.
@@ -542,9 +548,18 @@ file could not be opened.
 """.
 -spec open(beamtalk_string:t() | binary(), atom(), Do :: fun((map()) -> term())) ->
     beamtalk_result:t().
-open({beamtalk_string, Path}, Mode, Block) when
-    is_binary(Path), is_atom(Mode), is_function(Block, 1)
-->
+open(Path, Mode, Block) ->
+    PathBin = beamtalk_text:unwrap_or_raise(Path, 'File', 'open:mode:do:', ?PATH_HINT),
+    is_atom(Mode) orelse
+        beamtalk_error:raise_type_error('File', 'open:mode:do:', <<"Mode must be a Symbol">>),
+    is_function(Block, 1) orelse
+        beamtalk_error:raise_type_error(
+            'File', 'open:mode:do:', <<"Expected a Block with 1 argument">>
+        ),
+    open_mode_do(PathBin, Mode, Block).
+
+-spec open_mode_do(binary(), atom(), fun((map()) -> term())) -> beamtalk_result:t().
+open_mode_do(Path, Mode, Block) ->
     case do_open(Path, Mode, 'open:mode:do:', fun file:open/2) of
         {ok, Handle} ->
             try
@@ -554,17 +569,7 @@ open({beamtalk_string, Path}, Mode, Block) when
             end;
         {error, Error} ->
             beamtalk_result:from_tagged_tuple({error, Error})
-    end;
-open(Path, Mode, Block) when is_binary(Path) ->
-    open({beamtalk_string, Path}, Mode, Block);
-open({beamtalk_string, _}, Mode, _) when is_atom(Mode) ->
-    beamtalk_error:raise_type_error(
-        'File', 'open:mode:do:', <<"Expected a Block with 1 argument">>
-    );
-open({beamtalk_string, _}, _, _) ->
-    beamtalk_error:raise_type_error('File', 'open:mode:do:', <<"Mode must be a Symbol">>);
-open(_, _, _) ->
-    beamtalk_error:raise_type_error('File', 'open:mode:do:', ?PATH_HINT).
+    end.
 
 -doc """
 Shared open path for open:mode: and open:mode:do:. `Open` performs the actual
@@ -628,13 +633,13 @@ do_open(Path, Mode, Selector, Open) ->
                         )}
             end;
         error ->
-            Error0 = beamtalk_error:new(type_error, 'File'),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error2 = beamtalk_error:with_details(Error1, (path_detail(Path))#{mode => Mode}),
-            {error,
-                beamtalk_error:with_hint(
-                    Error2, <<"Mode must be #read, #write, #append, or #readWrite">>
-                )}
+            Error = beamtalk_error:new(
+                type_error,
+                'File',
+                Selector,
+                <<"Mode must be #read, #write, #append, or #readWrite">>
+            ),
+            {error, beamtalk_error:with_details(Error, (path_detail(Path))#{mode => Mode})}
     end.
 
 -doc """
@@ -764,10 +769,8 @@ file_error(Selector, Details, Reason, Classified, DefaultHint) ->
             {_, ClassifiedKind, ClassifiedHint} -> {ClassifiedKind, ClassifiedHint};
             false -> {io_error, DefaultHint}
         end,
-    Error0 = beamtalk_error:new(Kind, 'File'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_details(Error1, Details#{reason => Reason}),
-    beamtalk_error:with_hint(Error2, Hint).
+    Error = beamtalk_error:new(Kind, 'File', Selector, Hint),
+    beamtalk_error:with_details(Error, Details#{reason => Reason}).
 
 -doc "`file_error/5` as a `Result error:`.".
 -spec file_error_result(
@@ -913,11 +916,11 @@ listDirectory({beamtalk_string, Path}) when is_binary(Path) ->
     %% error on all platforms.
     case filelib:is_regular(PathStr) of
         true ->
-            Error0 = beamtalk_error:new(not_a_directory, 'File'),
-            Error1 = beamtalk_error:with_selector(Error0, 'listDirectory:'),
-            Error2 = beamtalk_error:with_details(Error1, path_detail(Path)),
-            Error3 = beamtalk_error:with_hint(Error2, <<"Path is not a directory">>),
-            beamtalk_result:from_tagged_tuple({error, Error3});
+            Error0 = beamtalk_error:new(
+                not_a_directory, 'File', 'listDirectory:', <<"Path is not a directory">>
+            ),
+            Error = beamtalk_error:with_details(Error0, path_detail(Path)),
+            beamtalk_result:from_tagged_tuple({error, Error});
         false ->
             case file:list_dir(PathStr) of
                 {ok, Entries} ->
@@ -1037,7 +1040,16 @@ Returns a Result ok map on success, Result error map on failure.
 """.
 -spec rename(beamtalk_string:t() | binary(), To :: beamtalk_string:t() | binary()) ->
     beamtalk_result:t().
-rename({beamtalk_string, From}, {beamtalk_string, To}) when is_binary(From), is_binary(To) ->
+rename(From, To) ->
+    do_rename(
+        beamtalk_text:unwrap_or_raise(From, 'File', 'rename:to:', ?PATH_HINT),
+        beamtalk_text:unwrap_or_raise(
+            To, 'File', 'rename:to:', <<"Destination must be a String">>
+        )
+    ).
+
+-spec do_rename(binary(), binary()) -> beamtalk_result:t().
+do_rename(From, To) ->
     case file:rename(unicode:characters_to_list(From), unicode:characters_to_list(To)) of
         ok ->
             beamtalk_result:from_tagged_tuple({ok, nil});
@@ -1052,17 +1064,7 @@ rename({beamtalk_string, From}, {beamtalk_string, To}) when is_binary(From), is_
                 ],
                 undefined
             )
-    end;
-rename(From, To) when is_binary(From), is_binary(To) ->
-    rename({beamtalk_string, From}, {beamtalk_string, To});
-rename({beamtalk_string, _} = F, To) when is_binary(To) ->
-    rename(F, {beamtalk_string, To});
-rename(From, {beamtalk_string, _} = T) when is_binary(From) ->
-    rename({beamtalk_string, From}, T);
-rename({beamtalk_string, _}, _) ->
-    beamtalk_error:raise_type_error('File', 'rename:to:', <<"Destination must be a String">>);
-rename(_, _) ->
-    beamtalk_error:raise_type_error('File', 'rename:to:', ?PATH_HINT).
+    end.
 
 -doc """
 Resolve a relative path to its absolute path.
@@ -1101,11 +1103,11 @@ if the file does not exist.
 lastModified({beamtalk_string, Path}) when is_binary(Path) ->
     case filelib:last_modified(unicode:characters_to_list(Path)) of
         0 ->
-            Error0 = beamtalk_error:new(file_not_found, 'File'),
-            Error1 = beamtalk_error:with_selector(Error0, 'lastModified:'),
-            Error2 = beamtalk_error:with_details(Error1, path_detail(Path)),
-            Error3 = beamtalk_error:with_hint(Error2, <<"Check that the file exists">>),
-            beamtalk_result:from_tagged_tuple({error, Error3});
+            Error0 = beamtalk_error:new(
+                file_not_found, 'File', 'lastModified:', <<"Check that the file exists">>
+            ),
+            Error = beamtalk_error:with_details(Error0, path_detail(Path)),
+            beamtalk_result:from_tagged_tuple({error, Error});
         LocalTime ->
             %% filelib:last_modified/1 returns local time; convert to UTC
             %% for consistency with DateTime now (which uses calendar:universal_time).

@@ -4,14 +4,14 @@
 //! ADR 0075: native FFI type-spec extraction and the binary's rendering of
 //! the stub-registry resolution chain (extracted -> distribution ->
 //! package-bundled -> project-local). The chain itself lives in the lib
-//! target ([`beamtalk_cli::ffi_type_registry`]) so MCP `lint` builds the
+//! target ([`beamtalk_package::ffi_type_registry`]) so MCP `lint` builds the
 //! same registry (BT-4643); this module adapts resolved dependencies to it
 //! and renders its stub diagnostics in the caller's output format.
 
 use camino::Utf8Path;
 
 use crate::commands::OutputFormat;
-use crate::commands::build_layout::BuildLayout;
+use beamtalk_core::build_layout::BuildLayout;
 
 /// ADR 0075 Phase 1: Extract type specs from OTP and dependency `.beam` files
 /// and cache them.
@@ -44,28 +44,22 @@ pub(crate) fn extract_type_specs(
     // FFI surface in runtime/stdlib/workspace ebins). Otherwise nothing to do.
     if !has_manifest {
         return if stdlib_mode {
-            crate::commands::build_stdlib::extract_stdlib_type_specs()
+            beamtalk_package::native_type_specs::extract_stdlib_type_specs()
         } else {
             None
         };
     }
 
-    // The manifest-backed extraction path lives in the
-    // `beamtalk_cli` lib crate (`native_type_specs`) so `beamtalk-mcp` can
+    // The manifest-backed extraction path lives in
+    // `beamtalk_package::native_type_specs` so `beamtalk-mcp` can
     // call the same single source of truth without reading a possibly-stale
     // on-disk cache. This is a thin delegation, not a duplicate.
-    beamtalk_cli::native_type_specs::extract_project_type_specs(layout)
+    beamtalk_package::native_type_specs::extract_project_type_specs(layout)
 }
 
-pub(crate) use beamtalk_cli::ffi_type_registry::ResolvedTypeRegistry;
-use beamtalk_cli::ffi_type_registry::StubReport;
-#[cfg(test)]
-pub(crate) use beamtalk_cli::ffi_type_registry::{
-    DependencyStubsDir, StubLayer, distribution_stubs_dir, load_dependency_stub_registries,
-    load_project_stub_registry,
-};
+use beamtalk_package::ffi_type_registry::{ResolvedTypeRegistry, StubReport};
 
-/// [`beamtalk_cli::ffi_type_registry::resolve_package_type_registry`] for a
+/// [`beamtalk_package::ffi_type_registry::resolve_package_type_registry`] for a
 /// package whose dependencies `resolved_deps` were resolved by this binary,
 /// rendering the stub tiers' diagnostics as it goes.
 ///
@@ -83,7 +77,7 @@ pub(crate) fn resolve_package_type_registry(
     resolved_deps: &[crate::commands::deps::path::ResolvedDependency],
     echo: Option<OutputFormat>,
 ) -> ResolvedTypeRegistry {
-    let resolved = beamtalk_cli::ffi_type_registry::resolve_package_type_registry(
+    let resolved = beamtalk_package::ffi_type_registry::resolve_package_type_registry(
         package_root,
         auto_extract,
         &dependency_stub_dirs(resolved_deps),
@@ -96,11 +90,11 @@ pub(crate) fn resolve_package_type_registry(
 /// layer 2), in their resolution order.
 pub(crate) fn dependency_stub_dirs(
     resolved_deps: &[crate::commands::deps::path::ResolvedDependency],
-) -> Vec<beamtalk_cli::ffi_type_registry::DependencyStubsDir> {
+) -> Vec<beamtalk_package::ffi_type_registry::DependencyStubsDir> {
     resolved_deps
         .iter()
         .filter_map(|dep| {
-            Some(beamtalk_cli::ffi_type_registry::DependencyStubsDir {
+            Some(beamtalk_package::ffi_type_registry::DependencyStubsDir {
                 package: dep.name.clone(),
                 stubs_dir: dep.stubs_dir.clone()?,
             })

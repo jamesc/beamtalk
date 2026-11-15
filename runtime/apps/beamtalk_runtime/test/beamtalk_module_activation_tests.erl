@@ -242,14 +242,11 @@ activate_module_register_class_crash_test() ->
             ]}
         ]}
     ],
-    {ok, Mod, Bin} = compile:forms(Forms),
-    {module, Mod} = code:load_binary(Mod, "bt_test_crashing_register.beam", Bin),
-    try
+    Mod = bt_test_crashing_register,
+    beamtalk_test_module:with_module(Mod, Forms, fun() ->
         Result = beamtalk_module_activation:activate_module(Mod),
         ?assertMatch({error, {error, register_class_boom}}, Result)
-    after
-        beamtalk_test_module:unload(bt_test_crashing_register)
-    end.
+    end).
 
 %%% ============================================================================
 %%% topo_sort/1 — circular dependency handling
