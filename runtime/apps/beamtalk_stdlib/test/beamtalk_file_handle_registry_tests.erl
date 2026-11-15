@@ -247,10 +247,7 @@ no_server_calls_are_safe_test() ->
     %% this server is supervised (one_for_one, permanent), so it may already
     %% be restarted by the time the assertions below run. Either way — freshly
     %% absent or freshly restarted-empty — every assertion holds.
-    case whereis(beamtalk_file_handle_registry) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_file_handle_registry),
     {Handle, TmpPath} = open_handle(),
     ?assertEqual(ok, beamtalk_file_handle_registry:register(Handle, undefined)),
     ?assertEqual(ok, beamtalk_file_handle_registry:unregister(Handle)),
@@ -279,10 +276,7 @@ open_handles_no_server_is_safe_test() ->
     %% and unregister/1 when the server is absent; this one covers open_handles/0.
     %% After gen_server:stop the registered name is gone (stop is synchronous);
     %% open_handles/0 must return [] rather than raise.
-    case whereis(beamtalk_file_handle_registry) of
-        undefined -> ok;
-        Pid -> gen_server:stop(Pid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_file_handle_registry),
     ?assertEqual([], beamtalk_file_handle_registry:open_handles()).
 
 unknown_call_returns_error_unknown_request_test_() ->

@@ -18,7 +18,9 @@ use sha2::{Digest, Sha256};
 use crate::server::params::{
     DocsParams, ListClassesParams, PackageClassesParams, SearchClassesParams, SearchExamplesParams,
 };
-use crate::server::{BeamtalkMcp, MCP_OUTPUT_MODE, ToolTimer, check_response, pretty_json};
+use crate::server::{
+    BeamtalkMcp, InternalErr, MCP_OUTPUT_MODE, ToolTimer, check_response, pretty_json,
+};
 use crate::server::{validate_class_name, validate_erlang_module_name, validate_selector};
 
 use beamtalk_repl_protocol::format as fmt;
@@ -182,7 +184,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<DocsParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("docs");
+        let mut timer = ToolTimer::start_quiet("docs");
         tracing::debug!(tool = "docs", class = ?params.class, erlang_module = ?params.erlang_module, selector = ?params.selector, "tool invoked");
 
         let expr = match (&params.class, &params.erlang_module) {
@@ -226,7 +228,7 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "No documentation found");
 
@@ -266,7 +268,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<SearchExamplesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("search_examples");
+        let mut timer = ToolTimer::start_quiet("search_examples");
         tracing::debug!(tool = "search_examples", limit = ?params.limit, "tool invoked");
         let start = std::time::Instant::now();
 
@@ -341,8 +343,7 @@ impl BeamtalkMcp {
             .collect::<Vec<_>>()
             .join("\n---\n\n");
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Search for Beamtalk classes by keyword or concept.
@@ -353,7 +354,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<SearchClassesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("search_classes");
+        let mut timer = ToolTimer::start_quiet("search_classes");
         tracing::debug!(tool = "search_classes", limit = ?params.limit, "tool invoked");
         let start = std::time::Instant::now();
 
@@ -398,10 +399,7 @@ impl BeamtalkMcp {
         );
 
         if results.is_empty() {
-            timer.mark_ok();
-            return Ok(CallToolResult::success(vec![ContentBlock::text(
-                "No classes found for that query. Try different keywords — e.g. 'http', 'collection', 'file', 'actor', 'subprocess'.",
-            )]));
+            return timer.ok_text("No classes found for that query. Try different keywords — e.g. 'http', 'collection', 'file', 'actor', 'subprocess'.",);
         }
 
         let text = results
@@ -449,8 +447,7 @@ impl BeamtalkMcp {
             .collect::<Vec<_>>()
             .join("\n---\n\n");
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// List all available Beamtalk classes with one-line descriptions.
@@ -461,21 +458,20 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<ListClassesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("list_classes");
+        let mut timer = ToolTimer::start_quiet("list_classes");
         tracing::debug!(tool = "list_classes", filter = ?params.filter, "tool invoked");
         let response = self
             .client
             .list_classes(params.filter.as_deref())
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to list classes");
 
         let classes = response.class_list.unwrap_or_default();
         let text = fmt::format_class_list(&classes, MCP_OUTPUT_MODE);
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// List all loaded Beamtalk packages with metadata.
@@ -483,24 +479,20 @@ impl BeamtalkMcp {
         description = "List all loaded Beamtalk packages with their versions, class counts, and dependencies. Returns package metadata from the runtime."
     )]
     pub(crate) async fn list_packages(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("list_packages");
-        tracing::debug!(tool = "list_packages", "tool invoked");
+        let mut timer = ToolTimer::start("list_packages");
 
         // Get list of package names via Package all
         let names_response = self
             .client
             .evaluate_with_options("Package all", false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(names_response, "Failed to list packages");
 
         let value = names_response.value_string();
         if value.is_empty() || value == "nil" {
-            timer.mark_ok();
-            return Ok(CallToolResult::success(vec![ContentBlock::text(
-                "No packages loaded",
-            )]));
+            return timer.ok_text("No packages loaded");
         }
 
         // For each package, get detailed info via a single Beamtalk expression
@@ -515,7 +507,7 @@ impl BeamtalkMcp {
                 false,
             )
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         let text = if detail_response.is_error() {
             // Fall back to just listing names
@@ -524,8 +516,7 @@ impl BeamtalkMcp {
             detail_response.value_string()
         };
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// List all classes belonging to a named package.
@@ -536,7 +527,7 @@ impl BeamtalkMcp {
         &self,
         Parameters(params): Parameters<PackageClassesParams>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("package_classes");
+        let mut timer = ToolTimer::start_quiet("package_classes");
         let pkg = &params.package;
         tracing::debug!(tool = "package_classes", package = %pkg, "tool invoked");
 
@@ -559,20 +550,18 @@ impl BeamtalkMcp {
             .client
             .evaluate_with_options(&expr, false)
             .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+            .internal_err()?;
 
         check_response!(response, "Failed to get package classes");
 
         let text = response.value_string();
         if text.is_empty() || text == "#()" || text == "nil" {
-            timer.mark_ok();
-            return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
+            return timer.ok_text(format!(
                 "No classes found in package '{pkg}' (package may not be loaded)"
-            ))]));
+            ));
         }
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
+        timer.ok_text(text)
     }
 
     /// Discover supported REPL operations and protocol version.
@@ -580,13 +569,8 @@ impl BeamtalkMcp {
         description = "Discover supported REPL operations and protocol version. Returns the list of available ops with their parameters, and version information."
     )]
     pub(crate) async fn describe(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let mut timer = ToolTimer::new("describe");
-        tracing::debug!(tool = "describe", "tool invoked");
-        let response = self
-            .client
-            .describe()
-            .await
-            .map_err(|e| rmcp::ErrorData::internal_error(e, None))?;
+        let mut timer = ToolTimer::start("describe");
+        let response = self.client.describe().await.internal_err()?;
 
         check_response!(response, "Describe failed");
 
@@ -609,7 +593,6 @@ impl BeamtalkMcp {
             parts.push(ContentBlock::text("No describe information available"));
         }
 
-        timer.mark_ok();
-        Ok(CallToolResult::success(parts))
+        timer.ok_parts(parts)
     }
 }

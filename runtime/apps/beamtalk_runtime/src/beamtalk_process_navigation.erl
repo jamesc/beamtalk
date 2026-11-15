@@ -351,19 +351,18 @@ on(#{'$beamtalk_class' := 'Node', name := Name}, Limit) ->
 -spec remote_default_snapshot(node(), non_neg_integer()) ->
     {ok, [node_map()]} | {error, #beamtalk_error{}}.
 remote_default_snapshot(Name, Limit) ->
-    try erpc:call(Name, ?MODULE, remote_snapshot_target, [Limit], ?REMOTE_SNAPSHOT_TIMEOUT) of
-        Snapshot when is_list(Snapshot) ->
-            {ok, [class_ref_in(N) || N <- Snapshot]}
-    catch
-        error:{erpc, noconnection} ->
+    case
+        beamtalk_call_failure:erpc(
+            Name, ?MODULE, remote_snapshot_target, [Limit], ?REMOTE_SNAPSHOT_TIMEOUT
+        )
+    of
+        {ok, Snapshot} when is_list(Snapshot) ->
+            {ok, [class_ref_in(N) || N <- Snapshot]};
+        {error, {node_down, _}} ->
             {error, on_node_down_error(Name)};
-        error:{erpc, timeout} ->
+        {error, timeout} ->
             {error, on_timeout_error(Name)};
-        error:{erpc, Reason} ->
-            {error, on_error(Name, Reason)};
-        error:{exception, Reason, _Stack} ->
-            {error, on_error(Name, Reason)};
-        exit:{exception, Reason} ->
+        {error, {other, Reason}} ->
             {error, on_error(Name, Reason)}
     end.
 

@@ -173,3 +173,57 @@ fn position_to_offset_roundtrip_with_offset_to_position() {
         );
     }
 }
+
+// ── LineIndex: UTF-16 surrogate pairs and CRLF ───────────
+
+#[test]
+fn line_index_surrogate_pair_columns() {
+    // '😀' is 4 UTF-8 bytes and 2 UTF-16 code units; 'é' is 2 bytes / 1 unit.
+    let source = "a😀é\nb";
+    let ix = LineIndex::new(source);
+    // After 'a' (1 byte, 1 unit) and '😀' (4 bytes, 2 units).
+    assert_eq!(ix.offset_to_position(5), Position::new(0, 3));
+    assert_eq!(ix.position_to_offset(Position::new(0, 3)), 5);
+    // After 'é'.
+    assert_eq!(ix.offset_to_position(7), Position::new(0, 4));
+    assert_eq!(ix.position_to_offset(Position::new(0, 4)), 7);
+    // A column inside the surrogate pair rounds up to the end of the char.
+    assert_eq!(ix.position_to_offset(Position::new(0, 2)), 5);
+    // beamtalk columns are byte offsets within the line.
+    assert_eq!(
+        ix.to_bt_position(Position::new(0, 3)),
+        beamtalk_language_service::Position::new(0, 5)
+    );
+    assert_eq!(
+        ix.to_bt_position(Position::new(1, 1)),
+        beamtalk_language_service::Position::new(1, 1)
+    );
+}
+
+#[test]
+fn line_index_crlf_lines_split_on_lf_only() {
+    let source = "ab\r\ncd\r\n";
+    let ix = LineIndex::new(source);
+    // '\r' is an ordinary trailing column of line 0.
+    assert_eq!(ix.offset_to_position(2), Position::new(0, 2));
+    assert_eq!(ix.offset_to_position(3), Position::new(0, 3));
+    // Offset just after "\r\n" starts line 1.
+    assert_eq!(ix.offset_to_position(4), Position::new(1, 0));
+    assert_eq!(ix.position_to_offset(Position::new(1, 1)), 5);
+    // Column past the end of the line clamps before the '\n'.
+    assert_eq!(ix.position_to_offset(Position::new(0, 99)), 3);
+    // Trailing empty line after the final "\r\n".
+    assert_eq!(ix.offset_to_position(source.len()), Position::new(2, 0));
+    assert_eq!(ix.position_to_offset(Position::new(2, 0)), source.len());
+    assert_eq!(ix.position_to_offset(Position::new(9, 0)), source.len());
+}
+
+#[test]
+fn line_index_roundtrips_every_char_boundary() {
+    let source = "x := '😀'.\r\n  é + 1\n\nlast";
+    let ix = LineIndex::new(source);
+    for offset in (0..=source.len()).filter(|&i| source.is_char_boundary(i)) {
+        let pos = ix.offset_to_position(offset);
+        assert_eq!(ix.position_to_offset(pos), offset, "offset {offset}");
+    }
+}

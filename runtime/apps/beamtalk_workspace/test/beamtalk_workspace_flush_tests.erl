@@ -188,12 +188,8 @@ rename_class_reload_test_() ->
         ]}}.
 
 reload_suite_setup() ->
-    {ok, _} = application:ensure_all_started(compiler),
+    beamtalk_test_boot:compiler(),
     ok = ensure_beamtalk_runtime_started(),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
     %% Let the runtime register bootstrap classes before compiling user code
     %% (mirrors beamtalk_workspace_revert_tests:suite_setup/0).
     ok = beamtalk_test_wait:class('Object'),
@@ -247,14 +243,9 @@ reload_suite_teardown(_) ->
     ok.
 
 reload_case_setup() ->
-    %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
-    Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary("test-ws-flush-reload-" ++ Unique),
-    Tmp = filename:join(beamtalk_test_fs:base_dir(), "bt-flush-reload-" ++ Unique),
+    {WorkspaceId, Tmp, OldHome} = beamtalk_test_fs:changelog_workspace(),
     ProjDir = filename:join(Tmp, "proj"),
     ok = filelib:ensure_path(filename:join(ProjDir, "src")),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", Tmp),
     {ok, ClogPid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     {ok, MetaPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WorkspaceId,
@@ -390,7 +381,7 @@ rename_class_sequential_rename_after_flush_succeeds(#{proj_dir := ProjDir}) ->
     ].
 
 setup() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     ProjDir = filename:join(TmpHome, "proj"),
     ok = filelib:ensure_path(filename:join(ProjDir, "src")),
@@ -996,7 +987,7 @@ mark_flushed_failure_is_reported(#{proj_dir := ProjDir, pid := Pid}) ->
 %% the seam — exercise them directly with synthetic entries.
 filter_shadowed_keeps_only_renamed_survivors() ->
     %% Set up via the real changelog so the entries have the right shape.
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         %% Two entries for (Counter, value): the survivor (newer) and a shadow.
@@ -1053,7 +1044,7 @@ filter_shadowed_keeps_only_renamed_survivors() ->
     end.
 
 filter_shadowed_drops_unrenamed_survivors() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         File2 = <<"/proj/src/widget.bt">>,
@@ -3324,7 +3315,7 @@ flush_kinds_two_rejects_non_boolean_confirm(_Ctx) ->
 %% Tier classification (ADR 0113): `'remove-class'` is Tier 2; every other
 %% kind (patch, `'new-class'`, `'remove-method'`) is Tier 1.
 entry_tier_classifies_remove_class_as_tier2() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         {ok, _} = beamtalk_workspace_changelog:append(
@@ -3341,7 +3332,7 @@ entry_tier_classifies_remove_class_as_tier2() ->
     end.
 
 entry_tier_classifies_other_kinds_as_tier1() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         {ok, _} = beamtalk_workspace_changelog:append(
@@ -3371,7 +3362,7 @@ entry_tier_classifies_other_kinds_as_tier1() ->
 %% ADR 0114 Phase 2: `'rename-class'` joins `'remove-class'` in
 %% Tier 2 — a destructive flush gate, since it moves (and unlinks) a file.
 entry_tier_classifies_rename_class_as_tier2() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         {ok, _} = beamtalk_workspace_changelog:append(
@@ -3395,7 +3386,7 @@ entry_tier_classifies_rename_class_as_tier2() ->
 %% `'rename-class'` in Tier 2 — a destructive flush gate, since it rewrites
 %% every confirmed sender site across the project, not just the definition.
 entry_tier_classifies_rename_method_as_tier2() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         {ok, _} = beamtalk_workspace_changelog:append(
@@ -3420,7 +3411,7 @@ entry_tier_classifies_rename_method_as_tier2() ->
 %% one — forward-compatible with a future producer (e.g. `moveClass:to:`)
 %% that records an explicit target path.
 resolve_new_path_prefers_recorded_value() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         {ok, _} = beamtalk_workspace_changelog:append(
@@ -3447,7 +3438,7 @@ resolve_new_path_prefers_recorded_value() ->
 %% `new_path => undefined`) — preserving an EXACT-match old basename style
 %% (`Counter.bt`) for the new one (`Accumulator.bt`), not forcing snake_case.
 resolve_new_path_derives_exact_style_from_old_path() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         Input = rename_class_input(
@@ -3471,7 +3462,7 @@ resolve_new_path_derives_exact_style_from_old_path() ->
 %% Same, but the old file used the snake_case convention (`counter.bt`) — the
 %% derived new path follows suit (`accumulator.bt`), not `Accumulator.bt`.
 resolve_new_path_derives_snake_case_style_from_old_path() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         Input = rename_class_input(
@@ -3499,7 +3490,7 @@ resolve_new_path_derives_snake_case_style_from_old_path() ->
 %% on any host, since the fix replaced `filename:join/2` with plain string
 %% concatenation that is not win32-mode-dependent.
 resolve_new_path_preserves_drive_letter_case() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         Input = rename_class_input(
@@ -3530,7 +3521,7 @@ resolve_new_path_preserves_drive_letter_case() ->
 %% `raw_dirname/1` recognizes both `/` and `\` as separators unconditionally
 %% rather than only when `os:type/0` reports `win32`.
 resolve_new_path_preserves_backslash_separators() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         Input = rename_class_input(
@@ -3554,7 +3545,7 @@ resolve_new_path_preserves_backslash_separators() ->
 %% `old_path` with no directory component (`filename:dirname/1` returns
 %% `"."`) derives a bare filename, not a `"./"`-prefixed one.
 resolve_new_path_derives_path_with_no_directory() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         Input = rename_class_input(
@@ -3576,7 +3567,7 @@ resolve_new_path_derives_path_with_no_directory() ->
 %% `old_path` at the filesystem root (`filename:dirname/1` returns the
 %% trailing-slash `"/"`) must not produce a doubled separator (`"//..."`).
 resolve_new_path_derives_path_at_filesystem_root() ->
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         Input = rename_class_input(
@@ -3613,7 +3604,7 @@ splice_at_end_of_file() ->
 group_by_file_preserves_seq_order() ->
     %% Append two entries against File1, one against File2; after grouping the
     %% File1 group should list them in seq-ascending order.
-    {WorkspaceId, TmpHome, OldHome} = fresh_workspace(),
+    {WorkspaceId, TmpHome, OldHome} = beamtalk_test_fs:changelog_workspace(),
     {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
         File1 = <<"/proj/src/counter.bt">>,
@@ -3837,19 +3828,6 @@ entry_flushed(Seq) ->
         beamtalk_workspace_changelog:entry_seq(E) =:= Seq
     ],
     beamtalk_workspace_changelog:entry_flushed(Entry).
-
-fresh_workspace() ->
-    %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`:
-    %% `beamtalk_workspace_changelog`'s own `load_from_disk` would otherwise
-    %% restore a prior run's leftover ChangeLog entries into this run's ETS
-    %% table.
-    Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary("test-ws-flush-" ++ Unique),
-    Tmp = filename:join(beamtalk_test_fs:base_dir(), "bt-flush-" ++ Unique),
-    ok = filelib:ensure_path(Tmp),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", Tmp),
-    {WorkspaceId, Tmp, OldHome}.
 
 stop(Pid) ->
     case is_process_alive(Pid) of

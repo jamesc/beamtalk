@@ -202,8 +202,8 @@ remote_spawn_erpc(Node, ClassName, NameOrUndefined, Selector, TargetFun, BuildEx
     node(), atom(), atom() | undefined, atom(), atom(), [term()]
 ) -> {ok, pid()} | {error, #beamtalk_error{}}.
 remote_spawn_erpc_call(Node, ClassName, NameOrUndefined, Selector, TargetFun, ExtraArgs) ->
-    try
-        erpc:call(
+    case
+        beamtalk_call_failure:erpc(
             Node,
             ?BT_ACTOR_WIRE_MODULE,
             TargetFun,
@@ -211,23 +211,17 @@ remote_spawn_erpc_call(Node, ClassName, NameOrUndefined, Selector, TargetFun, Ex
             ?BT_REMOTE_CALL_TIMEOUT
         )
     of
-        {ok, Pid} ->
+        {ok, {ok, Pid}} ->
             {ok, Pid};
-        {error, #beamtalk_error{} = Err} ->
+        {ok, {error, #beamtalk_error{} = Err}} ->
             {error, Err#beamtalk_error{class = ClassName, selector = Selector}};
-        {error, Reason} ->
-            {error, beamtalk_actor_ffi:generic_spawn_error(ClassName, Selector, Reason)}
-    catch
-        error:{erpc, noconnection} ->
-            {error, beamtalk_actor:node_down_error_record(Node, Selector)};
-        error:{erpc, timeout} ->
-            {error, remote_timeout_error_record(ClassName, Selector, false)};
-        error:{erpc, ErpcReason} ->
-            {error,
-                beamtalk_actor_ffi:generic_spawn_error(ClassName, Selector, {erpc, ErpcReason})};
-        error:{exception, Reason, _Stack} ->
+        {ok, {error, Reason}} ->
             {error, beamtalk_actor_ffi:generic_spawn_error(ClassName, Selector, Reason)};
-        exit:{exception, Reason} ->
+        {error, {node_down, _}} ->
+            {error, beamtalk_actor:node_down_error_record(Node, Selector)};
+        {error, timeout} ->
+            {error, remote_timeout_error_record(ClassName, Selector, false)};
+        {error, {other, Reason}} ->
             {error, beamtalk_actor_ffi:generic_spawn_error(ClassName, Selector, Reason)}
     end.
 
@@ -249,8 +243,8 @@ remote_named(Node, ReceiverClass, Name) ->
         {error, #beamtalk_error{} = Refused} ->
             {error, Refused#beamtalk_error{class = ReceiverClass, selector = Selector}};
         ok ->
-            try
-                erpc:call(
+            case
+                beamtalk_call_failure:erpc(
                     Node,
                     ?BT_ACTOR_WIRE_MODULE,
                     remote_named_target,
@@ -258,26 +252,12 @@ remote_named(Node, ReceiverClass, Name) ->
                     ?BT_REMOTE_CALL_TIMEOUT
                 )
             of
-                {ok, Obj} ->
+                {ok, {ok, Obj}} ->
                     {ok, qualify_registered_ref(Obj, Node)};
-                {error, #beamtalk_error{}} = Err ->
-                    Err
-            catch
-                error:{erpc, noconnection} ->
-                    {error, beamtalk_actor:node_down_error_record(Node, Selector)};
-                error:{erpc, timeout} ->
-                    {error, remote_timeout_error_record(ReceiverClass, Selector, true)};
-                error:{erpc, ErpcReason} ->
-                    {error,
-                        beamtalk_actor_ffi:generic_remote_error(
-                            ReceiverClass, Selector, {erpc, ErpcReason}
-                        )};
-                error:{exception, Reason, _Stack} ->
-                    {error,
-                        beamtalk_actor_ffi:generic_remote_error(ReceiverClass, Selector, Reason)};
-                exit:{exception, Reason} ->
-                    {error,
-                        beamtalk_actor_ffi:generic_remote_error(ReceiverClass, Selector, Reason)}
+                {ok, {error, #beamtalk_error{}} = Err} ->
+                    Err;
+                {error, Failure} ->
+                    {error, remote_failure_error(Failure, Node, ReceiverClass, Selector)}
             end
     end.
 
@@ -307,29 +287,33 @@ remote_all_registered(Node) ->
         {error, #beamtalk_error{} = Refused} ->
             {error, Refused#beamtalk_error{class = 'Actor', selector = Selector}};
         ok ->
-            try
-                erpc:call(
+            case
+                beamtalk_call_failure:erpc(
                     Node, ?BT_ACTOR_WIRE_MODULE, allRegistered, [undefined], ?BT_REMOTE_CALL_TIMEOUT
                 )
             of
-                List when is_list(List) ->
-                    {ok, [qualify_registered_ref(Obj, Node) || Obj <- List]}
-            catch
-                error:{erpc, noconnection} ->
-                    {error, beamtalk_actor:node_down_error_record(Node, Selector)};
-                error:{erpc, timeout} ->
-                    {error, remote_timeout_error_record('Actor', Selector, true)};
-                error:{erpc, ErpcReason} ->
-                    {error,
-                        beamtalk_actor_ffi:generic_remote_error(
-                            'Actor', Selector, {erpc, ErpcReason}
-                        )};
-                error:{exception, Reason, _Stack} ->
-                    {error, beamtalk_actor_ffi:generic_remote_error('Actor', Selector, Reason)};
-                exit:{exception, Reason} ->
-                    {error, beamtalk_actor_ffi:generic_remote_error('Actor', Selector, Reason)}
+                {ok, List} when is_list(List) ->
+                    {ok, [qualify_registered_ref(Obj, Node) || Obj <- List]};
+                {error, Failure} ->
+                    {error, remote_failure_error(Failure, Node, 'Actor', Selector)}
             end
     end.
+
+-doc """
+The `#beamtalk_error{}` for a failed `beamtalk_call_failure:erpc/5` call made by
+`Selector` against `Class` on `Node`: node-down, timeout, or the generic remote
+error. The two origin-side lookups here share it; `remote_spawn_erpc_call/6`
+builds spawn-specific errors for the generic case instead.
+""".
+-spec remote_failure_error(
+    beamtalk_call_failure:erpc_error(), node(), atom(), atom()
+) -> #beamtalk_error{}.
+remote_failure_error({node_down, _}, Node, _Class, Selector) ->
+    beamtalk_actor:node_down_error_record(Node, Selector);
+remote_failure_error(timeout, _Node, Class, Selector) ->
+    remote_timeout_error_record(Class, Selector, true);
+remote_failure_error({other, Reason}, _Node, Class, Selector) ->
+    beamtalk_actor_ffi:generic_remote_error(Class, Selector, Reason).
 
 -doc """
 Node-qualify a `#beamtalk_object{}` proxy returned by a remote lookup

@@ -493,15 +493,18 @@ validate_run_entry(_ClassBin, _SelectorBin, _RawArgs) ->
     ),
     {error, Err1}.
 
-%% True when `SelectorBin` has a valid run-entry shape — a unary selector (no
-%% `:`) or a single arity-1 keyword selector (exactly one `:`, trailing, e.g.
-%% `main:`). See `validate_run_entry/3`'s doc for callers.
+%% True when `SelectorBin` has a valid run-entry shape: an ASCII identifier
+%% (`[A-Za-z_][A-Za-z0-9_]*`) optionally followed by one trailing `:` — a unary
+%% selector (`run`) or a single arity-1 keyword selector (`main:`). Binary and
+%% multi-keyword selectors, spaces and non-ASCII are rejected (BT-4917). Stays
+%% in Erlang because release nodes may have no compiler (ADR 0125); pinned
+%% against Rust `is_valid_selector` by `run_entry_selector_corpus.json`. See
+%% `validate_run_entry/3`'s doc for callers.
 -spec is_valid_run_entry_selector(binary()) -> boolean().
 is_valid_run_entry_selector(SelectorBin) ->
-    case binary:matches(SelectorBin, <<":">>) of
-        [] -> true;
-        [{Pos, _Len}] -> Pos =:= byte_size(SelectorBin) - 1;
-        _ -> false
+    case re:run(SelectorBin, <<"^[A-Za-z_][A-Za-z0-9_]*:?\\z">>, [{capture, none}]) of
+        match -> true;
+        nomatch -> false
     end.
 
 -spec run_entry_args(term(), [binary()]) -> {ok, [binary()]} | error.
@@ -1375,14 +1378,16 @@ handle_method_definition(MethodInfo, Warnings, Expression, State) ->
     {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
 handle_protocol_definition(ProtocolInfo, Warnings, State) ->
-    #{binary := Binary, module_name := ModuleName, protocols := Protocols} = ProtocolInfo,
-    case code:load_binary(ModuleName, "", Binary) of
-        {module, ModuleName} ->
-            %% Call register_class/0 to register the protocol with the runtime
+    #{module_name := ModuleName, protocols := Protocols} = ProtocolInfo,
+    %% BT-4864: load through the loader's scoped load so a structured refusal
+    %% (`abi_mismatch`, `stdlib_shadowing`) parked by the module's -on_load hook
+    %% is drained, instead of a bare `code:load_binary/3` that never sees it.
+    case beamtalk_repl_loader:load_protocol_module(ProtocolInfo, undefined, State) of
+        {ok, _ProtocolClassNames, NewState} ->
+            %% The loader's activation swallows `register_class/0` failures;
+            %% the REPL surfaces them, so re-run it strictly (idempotent).
             case maybe_register_protocol_class(ModuleName) of
                 ok ->
-                    NewState = beamtalk_repl_state:add_loaded_module(ModuleName, State),
-                    %% Build display string: "Protocol Foo defined" or "Protocols Foo, Bar defined"
                     ProtocolNames = [binary_to_list(P) || P <- Protocols],
                     DisplayStr =
                         case ProtocolNames of
@@ -1401,8 +1406,9 @@ handle_protocol_definition(ProtocolInfo, Warnings, State) ->
                     cleanup_module(ModuleName, RegistryPid),
                     {error, RegError, <<>>, Warnings, State}
             end;
-        {error, Reason} ->
-            wrap_load_err(Reason, Warnings, State)
+        {error, Reason, ErrState} ->
+            Err = beamtalk_repl_errors:ensure_structured_error(Reason),
+            {error, Err, <<>>, Warnings, ErrState}
     end.
 
 -doc """

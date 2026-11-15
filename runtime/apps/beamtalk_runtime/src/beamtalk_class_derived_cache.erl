@@ -150,22 +150,9 @@ same process, at the same time, and with the same heir as the metadata table.
 -spec new() -> ok.
 new() ->
     ensure_generation(),
-    case ets:info(?TABLE, owner) of
-        undefined ->
-            try
-                _ = ets:new(
-                    ?TABLE,
-                    [set, public, named_table, {read_concurrency, true}] ++
-                        beamtalk_ets_heir:heir_option()
-                ),
-                ok
-            catch
-                error:badarg -> ok
-            end;
-        _ ->
-            beamtalk_ets_heir:maybe_set_heir(?TABLE),
-            ok
-    end.
+    beamtalk_ets_heir:ensure_shared_table(?TABLE, [
+        set, public, named_table, {read_concurrency, true}
+    ]).
 
 -doc """
 Invalidate every cached entry. Call *after* the metadata write that makes

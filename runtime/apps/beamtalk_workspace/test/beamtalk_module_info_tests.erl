@@ -23,11 +23,7 @@ both crashed with `undef` on `M:module_info(functions)` for a `bt@` module.
 >>).
 
 setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     ok = beamtalk_test_boot:boot_real_stdlib('Object'),
     {ok, Result} = beamtalk_compiler:compile(
         ?PKG_SOURCE, #{module_name => atom_to_binary(?PKG_MODULE)}

@@ -24,6 +24,7 @@
 use std::sync::Arc;
 
 use crate::queries::cursor_context::{ClassContext, resolve_receiver_class};
+use crate::queries::signature_text;
 use crate::queries::{protocols_for_module, type_of_parsed};
 use crate::{ParameterInfo, Position, SignatureHelp, SignatureInfo};
 use beamtalk_core::ast::{BinarySegment, Expression, MessageSelector, Module};
@@ -496,11 +497,7 @@ fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> Signature
     // `MethodInfo` types are structured `DeclaredType`s — render
     // once here (`Display` matches `TypeAnnotation::type_name` verbatim)
     // and hand the composer the text it contracts for.
-    let param_type_texts: Vec<Option<String>> = method
-        .param_types
-        .iter()
-        .map(|ty| ty.as_ref().map(ToString::to_string))
-        .collect();
+    let param_type_texts = signature_text::param_type_texts(&method.param_types);
     let defined_in = format!("Defined in `{}`", method.defined_in);
     let documentation = match method.doc.as_deref() {
         Some(doc) if !doc.trim().is_empty() => format!("{doc}\n\n{defined_in}"),
@@ -509,11 +506,7 @@ fn build_signature_help(method: &MethodInfo, active_parameter: u32) -> Signature
     signature_help_from_parts(
         &method.selector,
         &param_type_texts,
-        method
-            .return_type
-            .as_ref()
-            .map(ToString::to_string)
-            .as_deref(),
+        signature_text::type_text(method.return_type.as_ref()).as_deref(),
         &documentation,
         active_parameter,
     )
@@ -527,11 +520,7 @@ fn build_requirement_signature_help(
     protocol_name: &str,
     active_parameter: u32,
 ) -> SignatureHelp {
-    let param_type_texts: Vec<Option<String>> = requirement
-        .param_types
-        .iter()
-        .map(|ty| ty.as_ref().map(ToString::to_string))
-        .collect();
+    let param_type_texts = signature_text::param_type_texts(&requirement.param_types);
     signature_help_from_parts(
         &requirement.selector,
         &param_type_texts,
@@ -552,25 +541,12 @@ fn signature_help_from_parts(
     active_parameter: u32,
 ) -> SignatureHelp {
     use beamtalk_core::unparse::{
-        SignatureParam, SignatureRenderOptions, SignatureSelector, render_signature_text,
+        SignatureRenderOptions, SignatureSelector, render_signature_text,
     };
 
-    // Build parameter list from keyword parts (re-adding the trailing `:`
-    // the split strips) and param_types.
-    let keywords: Vec<String> = selector
-        .split(':')
-        .filter(|s| !s.is_empty())
-        .map(|part| format!("{part}:"))
-        .collect();
-    let sig_params: Vec<SignatureParam<'_>> = keywords
-        .iter()
-        .enumerate()
-        .map(|(i, keyword)| SignatureParam {
-            keyword,
-            name: None,
-            type_text: param_type_texts.get(i).and_then(Option::as_deref),
-        })
-        .collect();
+    // Build parameter list from keyword parts and param_types.
+    let keywords = signature_text::keyword_parts(selector);
+    let sig_params = signature_text::keyword_params(&keywords, param_type_texts);
 
     let parameters: Vec<ParameterInfo> = sig_params
         .iter()

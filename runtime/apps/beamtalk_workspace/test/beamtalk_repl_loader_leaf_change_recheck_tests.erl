@@ -23,6 +23,18 @@ an xref-filtered candidate set — see that function's doc).
 
 -include_lib("eunit/include/eunit.hrl").
 
+leaf_loader_setup() ->
+    beamtalk_test_recheck_fixtures:setup(fixture_opts()).
+
+leaf_loader_teardown(_) ->
+    beamtalk_test_recheck_fixtures:teardown(fixture_opts()).
+
+fixture_opts() ->
+    #{
+        workspace_id => <<"leaf_change_loader_test_ws">>,
+        restart => [beamtalk_workspace_shape_recheck_worker, beamtalk_workspace_findings_store]
+    }.
+
 %%====================================================================
 %% Pure helpers — superclasses_losing_leaf_status/1, was_leaf_class/1
 %%====================================================================
@@ -130,67 +142,6 @@ superclasses_losing_leaf_status_accepts_binary_superclass_test_() ->
 %%====================================================================
 %% Integration fixture: real compiler port + xref + workspace_meta + stores
 %%====================================================================
-
-leaf_loader_setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
-    application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
-    {ok, _} = beamtalk_workspace_meta:start_link(#{
-        workspace_id => <<"leaf_change_loader_test_ws">>,
-        project_path => undefined,
-        created_at => erlang:system_time(second),
-        mode => run
-    }),
-    beamtalk_test_repl:clear_xref(),
-    beamtalk_compiler_server:clear_classes(),
-    case whereis(beamtalk_workspace_shape_recheck_worker) of
-        undefined -> ok;
-        WorkerPid -> gen_server:stop(WorkerPid)
-    end,
-    {ok, _} = beamtalk_workspace_shape_recheck_worker:start_link(),
-    case whereis(beamtalk_workspace_findings_store) of
-        undefined -> ok;
-        FindingsPid -> gen_server:stop(FindingsPid)
-    end,
-    {ok, _} = beamtalk_workspace_findings_store:start_link(),
-    ok = beamtalk_announcements:ensure_started(),
-    ok.
-
-leaf_loader_teardown(_) ->
-    beamtalk_repl_subscriptions:unsubscribe(reload_check, self()),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
-    case whereis(beamtalk_workspace_shape_recheck_worker) of
-        undefined -> ok;
-        WorkerPid -> gen_server:stop(WorkerPid)
-    end,
-    case whereis(beamtalk_workspace_findings_store) of
-        undefined -> ok;
-        FindingsPid -> gen_server:stop(FindingsPid)
-    end,
-    beamtalk_test_repl:clear_xref(),
-    _ = application:stop(beamtalk_compiler),
-    ok.
-
-subscribe_self_to_reload_check() ->
-    ok = beamtalk_repl_subscriptions:subscribe(reload_check, self()).
-
-receive_reload_check_announcement() ->
-    receive
-        {beamtalk_announcement, _SubRef, 'ReloadCheckCompleted', _Handler, Event} ->
-            Event
-    after 2000 ->
-        error(timeout_waiting_for_reload_check_announcement)
-    end.
 
 %% Forces the (asynchronous, `beamtalk_workspace_shape_recheck_worker`-queued)
 %% leaf-change re-check to have run to completion before a test asserts on
@@ -319,13 +270,13 @@ reloading_the_same_subclass_again_does_not_refire_test_() ->
                     %% non-leaf before this call, so
                     %% `superclasses_losing_leaf_status/1` must find nothing
                     %% and no second re-check/announcement fires.
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
                     {ok, _, _State3} = beamtalk_repl_loader:handle_load(CirclePath, State2),
                     wait_for_leaf_change_worker(),
 
                     ?assertError(
                         timeout_waiting_for_reload_check_announcement,
-                        receive_reload_check_announcement()
+                        beamtalk_test_recheck_fixtures:receive_reload_check_announcement()
                     )
                 end)
             ]
@@ -347,7 +298,7 @@ clean_leaf_change_recheck_does_not_announce_test_() ->
         {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
 
                     %% `LeafRecheckCleanShape` — leaf, zero subclasses, and no
                     %% live class anywhere `match:`es on it, so the sweep
@@ -380,7 +331,7 @@ clean_leaf_change_recheck_does_not_announce_test_() ->
 
                     ?assertError(
                         timeout_waiting_for_reload_check_announcement,
-                        receive_reload_check_announcement()
+                        beamtalk_test_recheck_fixtures:receive_reload_check_announcement()
                     )
                 end)
             ]
@@ -425,7 +376,7 @@ leaf_change_recheck_announces_when_it_clears_a_stale_finding_test_() ->
                         OwnerBin, SuperclassBin, [StaleFinding]
                     ),
 
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
 
                     %% A clean sweep: no findings at all, but it checked the
                     %% owner above, so its store write clears that bucket.
@@ -443,7 +394,7 @@ leaf_change_recheck_announces_when_it_clears_a_stale_finding_test_() ->
                         SuperclassBin, CleanResult
                     ),
 
-                    Event = receive_reload_check_announcement(),
+                    Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
                     ?assertEqual(SuperclassBin, maps:get(changedClass, Event)),
                     ?assertEqual(leaf_change, maps:get(classification, Event)),
                     ?assertEqual([], maps:get(findings, Event)),
@@ -491,7 +442,7 @@ gaining_a_first_subclass_invalidates_a_matchexhaustive_proof_test_() ->
         {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
+                    beamtalk_test_recheck_fixtures:subscribe_self_to_reload_check(),
 
                     ShapePath = filename:join(
                         beamtalk_test_fs:base_dir(),
@@ -526,7 +477,7 @@ gaining_a_first_subclass_invalidates_a_matchexhaustive_proof_test_() ->
                     ok = file:write_file(CirclePath, exhaustive_circle_source()),
                     {ok, _, _State2} = beamtalk_repl_loader:handle_load(CirclePath, State1),
 
-                    Event = receive_reload_check_announcement(),
+                    Event = beamtalk_test_recheck_fixtures:receive_reload_check_announcement(),
                     ?assertEqual(
                         <<"LeafRecheckExhaustiveShape">>, maps:get(changedClass, Event)
                     ),

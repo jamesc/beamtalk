@@ -40,7 +40,7 @@ setup() ->
     end,
     clear_subscriptions(),
     beamtalk_test_boot:registry(),
-    beamtalk_class_registry:ensure_methods_table(),
+    beamtalk_class_metadata:new(),
     beamtalk_test_boot:registry(),
     beamtalk_class_registry:ensure_loaded_classes_table(),
     ok.

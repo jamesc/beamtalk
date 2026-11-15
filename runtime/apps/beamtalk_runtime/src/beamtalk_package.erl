@@ -161,10 +161,11 @@ Caveat: this calls `beamtalk_object_class:module_name_safe/1` rather than
 `module_name/1` because this function is reachable from inside an ADR 0109
 foreign-process block (directly, or via the unrestricted `Erlang <module>`
 FFI gateway), and an unsafe `gen_server:call` here would risk the same
-deadlock shape a prior fix here addressed. That means the `noproc`/`timeout` catch clauses
-below cannot detect a class process killed via an untrappable `kill` signal
-before `terminate/2` ran — see `module_name_safe/1`'s doc for the full
-explanation.
+deadlock shape a prior fix here addressed. That means the
+`beamtalk_call_failure:tolerate_gone/3` fallback below (dead, unreachable or
+timed-out class process) cannot detect a class process killed via an
+untrappable `kill` signal before `terminate/2` ran — see `module_name_safe/1`'s
+doc for the full explanation.
 """.
 -spec package_name(atom()) -> binary() | nil.
 package_name(ClassName) when is_atom(ClassName) ->
@@ -175,17 +176,20 @@ package_name(ClassName) when is_atom(ClassName) ->
             %% Class not registered — try scanning .app metadata
             package_name_from_app_metadata(ClassName);
         Pid ->
-            try beamtalk_object_class:module_name_safe(Pid) of
-                ModuleName ->
+            case
+                beamtalk_call_failure:tolerate_gone(
+                    fun() -> {ok, beamtalk_object_class:module_name_safe(Pid)} end,
+                    gone,
+                    #{timeout => true}
+                )
+            of
+                gone ->
+                    package_name_from_app_metadata(ClassName);
+                {ok, ModuleName} ->
                     case beamtalk_module_name:package_of(ModuleName) of
                         undefined -> nil;
                         Pkg -> Pkg
                     end
-            catch
-                exit:{noproc, _} ->
-                    package_name_from_app_metadata(ClassName);
-                exit:{timeout, _} ->
-                    package_name_from_app_metadata(ClassName)
             end
     end.
 

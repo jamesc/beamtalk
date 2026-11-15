@@ -16,7 +16,18 @@ hardcoded `/tmp`) and named with `beamtalk_test_unique:id/0`, so separate
 
 -include_lib("kernel/include/file.hrl").
 
--export([with_tmp_home/1, tmp_dir/1, rm_rf/1, base_dir/0, restore_home/1]).
+-export([
+    with_tmp_home/1,
+    tmp_dir/1,
+    rm_rf/1,
+    base_dir/0,
+    restore_home/1,
+    with_changelog_workspace/1,
+    changelog_workspace/0,
+    release_changelog_workspace/1,
+    start_changelog_workspace/0,
+    stop_changelog_workspace/1
+]).
 
 -doc """
 Create (and return) a fresh unique directory under the platform temp dir.
@@ -47,6 +58,71 @@ with_tmp_home(Fun) ->
         restore_home(Old),
         rm_rf(Dir)
     end.
+
+-doc """
+Run `Fun` (arity 1) inside an isolated ChangeLog workspace and always tear it
+down: `Fun` receives `#{workspace_id := binary(), home := file:filename()}`.
+See `changelog_workspace/0`. `Fun` starts (and stops) the
+`beamtalk_workspace_changelog` itself, since tests need different start
+options.
+""".
+-spec with_changelog_workspace(
+    fun((#{workspace_id := binary(), home := file:filename()}) -> T)
+) -> T when T :: term().
+with_changelog_workspace(Fun) ->
+    {WorkspaceId, Home, _OldHome} = Handle = changelog_workspace(),
+    try
+        Fun(#{workspace_id => WorkspaceId, home => Home})
+    after
+        release_changelog_workspace(Handle)
+    end.
+
+-doc """
+Set up an isolated ChangeLog workspace for a `setup`/`cleanup` pair: a
+unique workspace id plus a unique temp `HOME`, so the changelog resolves its
+`changes/` directory under our own tree. Returns `{WorkspaceId, Home,
+OldHome}`; hand it to `release_changelog_workspace/1` to restore `HOME` and
+delete the tree.
+
+The id and directory use `beamtalk_test_unique:id/0`, never a bare
+`erlang:unique_integer/1`: that counter resets on every fresh `rebar3 eunit`
+invocation, and `beamtalk_workspace_changelog`'s own `load_from_disk` would
+otherwise restore a prior run's leftover `changes.jsonl` entries into this
+run's ETS table.
+""".
+-spec changelog_workspace() -> {binary(), file:filename(), string() | false}.
+changelog_workspace() ->
+    Unique = beamtalk_test_unique:id(),
+    WorkspaceId = list_to_binary("test-ws-" ++ Unique),
+    Home = tmp_dir("changelog"),
+    OldHome = os:getenv("HOME"),
+    true = os:putenv("HOME", Home),
+    {WorkspaceId, Home, OldHome}.
+
+-doc "Undo `changelog_workspace/0`: restore `HOME` and delete the temp tree.".
+-spec release_changelog_workspace({binary(), file:filename(), string() | false}) -> ok.
+release_changelog_workspace({_WorkspaceId, Home, OldHome}) ->
+    restore_home(OldHome),
+    rm_rf(Home).
+
+-doc """
+`changelog_workspace/0` plus a freshly started `beamtalk_workspace_changelog`
+(any running one is stopped first) on its workspace id — the `setup` half of
+a fixture whose tests append real, persisted ChangeLog entries. Returns the
+handle for `stop_changelog_workspace/1`.
+""".
+-spec start_changelog_workspace() -> {binary(), file:filename(), string() | false}.
+start_changelog_workspace() ->
+    ok = beamtalk_test_proc:stop_registered(beamtalk_workspace_changelog),
+    {WorkspaceId, _Home, _OldHome} = Handle = changelog_workspace(),
+    {ok, _} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+    Handle.
+
+-doc "Undo `start_changelog_workspace/0`: stop the changelog, restore `HOME`, delete the tree.".
+-spec stop_changelog_workspace({binary(), file:filename(), string() | false}) -> ok.
+stop_changelog_workspace(Handle) ->
+    ok = beamtalk_test_proc:stop_registered(beamtalk_workspace_changelog),
+    release_changelog_workspace(Handle).
 
 -doc "Cross-platform absolute temp directory (never a hardcoded `/tmp`).".
 -spec base_dir() -> file:filename().

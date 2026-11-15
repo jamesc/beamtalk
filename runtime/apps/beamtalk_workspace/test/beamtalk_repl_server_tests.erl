@@ -2593,11 +2593,6 @@ http_ws_no_upgrade_test(Port) ->
 %% directory creation and PORT\nNONCE content formatting.
 %%====================================================================
 
-%% Cross-platform temp directory as a list path.
-wpf_temp_dir() ->
-    application:ensure_all_started(beamtalk_stdlib),
-    binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
-
 write_port_file_undefined_workspace_test() ->
     %% An undefined workspace id is a no-op (no HOME lookup, no file write).
     ?assertEqual(ok, beamtalk_repl_server:write_port_file(undefined, 1234, <<"abcdef0123456789">>)).
@@ -2605,14 +2600,7 @@ write_port_file_undefined_workspace_test() ->
 write_port_file_skipped_for_anonymous_foreground_id_test() ->
     %% BT-3672: anonymous foreground ids never get a port file (they report the
     %% port on stdout and must not appear as bogus "release" workspaces).
-    Unique = beamtalk_test_unique:id(),
-    FakeHome = filename:join(wpf_temp_dir(), "bt_wpf_fg_test_" ++ Unique),
-    ok = filelib:ensure_dir(filename:join(FakeHome, "placeholder")),
-    OrigHome = os:getenv("HOME"),
-    OrigUserprofile = os:getenv("USERPROFILE"),
-    try
-        os:putenv("HOME", FakeHome),
-        os:putenv("USERPROFILE", FakeHome),
+    with_fake_home(fun(FakeHome) ->
         WorkspaceId = beamtalk_workspace_meta:new_foreground_id(),
         ?assertEqual(ok, beamtalk_repl_server:write_port_file(WorkspaceId, 54321, <<"nonce">>)),
         ?assertNot(
@@ -2620,24 +2608,13 @@ write_port_file_skipped_for_anonymous_foreground_id_test() ->
                 filename:join([FakeHome, ".beamtalk", "workspaces", binary_to_list(WorkspaceId)])
             )
         )
-    after
-        restore_env("HOME", OrigHome),
-        restore_env("USERPROFILE", OrigUserprofile),
-        _ = file:del_dir_r(FakeHome)
-    end.
+    end).
 
 write_port_file_writes_port_and_nonce_test() ->
     %% Point HOME at a throwaway directory so the writer creates
     %% $HOME/.beamtalk/workspaces/<id>/port and writes PORT\nNONCE.
-    Unique = beamtalk_test_unique:id(),
-    FakeHome = filename:join(wpf_temp_dir(), "bt_wpf_test_" ++ Unique),
-    ok = filelib:ensure_dir(filename:join(FakeHome, "placeholder")),
-    OrigHome = os:getenv("HOME"),
-    OrigUserprofile = os:getenv("USERPROFILE"),
-    try
-        os:putenv("HOME", FakeHome),
-        os:putenv("USERPROFILE", FakeHome),
-        WorkspaceId = list_to_binary("ws-" ++ Unique),
+    with_fake_home(fun(FakeHome) ->
+        WorkspaceId = list_to_binary("ws-" ++ beamtalk_test_unique:id()),
         Nonce = <<"noncehex01234567">>,
         ?assertEqual(ok, beamtalk_repl_server:write_port_file(WorkspaceId, 54321, Nonce)),
         PortFile = filename:join([
@@ -2647,12 +2624,21 @@ write_port_file_writes_port_and_nonce_test() ->
         {ok, Content} = file:read_file(PortFile),
         %% Format is PORT, newline, NONCE (two lines for stale detection).
         ?assertEqual(<<"54321\nnoncehex01234567">>, Content)
-    after
-        restore_env("HOME", OrigHome),
-        restore_env("USERPROFILE", OrigUserprofile),
-        %% Best-effort cleanup of the throwaway home tree.
-        _ = file:del_dir_r(FakeHome)
-    end.
+    end).
+
+%% `HOME` (via `beamtalk_test_fs:with_tmp_home/1`) and `USERPROFILE` — the
+%% Windows analogue `home_dir/0` also consults — both point at a throwaway
+%% directory for the duration of `Fun`.
+with_fake_home(Fun) ->
+    beamtalk_test_fs:with_tmp_home(fun(FakeHome) ->
+        OrigUserprofile = os:getenv("USERPROFILE"),
+        os:putenv("USERPROFILE", FakeHome),
+        try
+            Fun(FakeHome)
+        after
+            restore_env("USERPROFILE", OrigUserprofile)
+        end
+    end).
 
 restore_env(Var, false) -> os:unsetenv(Var);
 restore_env(Var, Value) -> os:putenv(Var, Value).

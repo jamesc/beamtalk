@@ -38,31 +38,16 @@ no other test in the same `rebar3 eunit` run ever sees a faulted compiler.
 %%====================================================================
 
 setup() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:compiler(),
     application:ensure_all_started(beamtalk_runtime),
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     %% Same "real ChangeLog needs a resolvable HOME" wrinkle
     %% `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s own
     %% `setup_with_changelog/0` documents. Cross-invocation-unique
     %% — see `beamtalk_test_unique:id/0`.
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    Unique = beamtalk_test_unique:id(),
-    ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-reindent-fail-" ++ Unique),
-    ChangelogHome = filename:join(beamtalk_test_fs:base_dir(), "bt-reindent-fail-home-" ++ Unique),
-    ok = filelib:ensure_path(ProjDir),
-    ok = filelib:ensure_path(ChangelogHome),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", ChangelogHome),
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_changelog),
+    ProjDir = beamtalk_test_fs:tmp_dir("reindent-fail"),
+    ChangelogWs = beamtalk_test_fs:changelog_workspace(),
     GadgetPath = filename:join(ProjDir, "reindent_gadget.bt"),
     ok = file:write_file(
         GadgetPath,
@@ -80,9 +65,14 @@ setup() ->
     beamtalk_compiler_server:clear_classes(),
     State0 = beamtalk_repl_state:new(undefined, 0),
     {ok, _Classes, State1} = beamtalk_repl_loader:handle_load(GadgetPath, State0),
-    #{proj_dir => ProjDir, gadget_path => GadgetPath, state => State1, old_home => OldHome}.
+    #{
+        proj_dir => ProjDir,
+        gadget_path => GadgetPath,
+        state => State1,
+        changelog_ws => ChangelogWs
+    }.
 
-teardown(#{old_home := OldHome}) ->
+teardown(#{proj_dir := ProjDir, changelog_ws := ChangelogWs}) ->
     case beamtalk_class_registry:whereis_class('ReindentGadget') of
         undefined ->
             ok;
@@ -93,19 +83,10 @@ teardown(#{old_home := OldHome}) ->
                 _:_ -> ok
             end
     end,
-    case whereis(beamtalk_workspace_changelog) of
-        undefined -> ok;
-        LogPid -> gen_server:stop(LogPid)
-    end,
-    case whereis(beamtalk_workspace_meta) of
-        undefined -> ok;
-        MetaPid -> gen_server:stop(MetaPid)
-    end,
-    case OldHome of
-        false -> os:unsetenv("HOME");
-        _ -> os:putenv("HOME", OldHome)
-    end,
-    ok.
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_changelog),
+    beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
+    beamtalk_test_fs:release_changelog_workspace(ChangelogWs),
+    beamtalk_test_fs:rm_rf(ProjDir).
 
 setup_with_fault() ->
     Fixture = setup(),

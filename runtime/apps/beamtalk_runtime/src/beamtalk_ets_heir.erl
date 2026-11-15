@@ -33,8 +33,8 @@ tables of live restartable owners (trace store, announcements bus) are in the
 same position until those owners next restart, so the crash that triggers that
 restart loses their data. Recovery is a runtime restart.
 
-The shared helpers — `heir_option/0`, `maybe_set_heir/1` and
-`ensure_table/2` — are the one place the runtime decides a table's heir.
+The shared helpers — `heir_option/0`, `maybe_set_heir/1`, `ensure_table/2` and
+`ensure_shared_table/2` — are the one place the runtime decides a table's heir.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -47,7 +47,8 @@ The shared helpers — `heir_option/0`, `maybe_set_heir/1` and
     maybe_set_heir/1,
     adopt_owned_tables/0,
     reclaim/1,
-    ensure_table/2
+    ensure_table/2,
+    ensure_shared_table/2
 ]).
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2]).
@@ -155,13 +156,11 @@ reclaim(Table) ->
         HeirPid when HeirPid =:= self() ->
             {error, not_owner};
         _HeirPid ->
-            try
-                gen_server:call(?MODULE, {reclaim, Table})
-            catch
-                exit:{noproc, _} -> {error, no_heir};
-                exit:{normal, _} -> {error, no_heir};
-                exit:{shutdown, _} -> {error, no_heir}
-            end
+            beamtalk_call_failure:tolerate_gone(
+                fun() -> gen_server:call(?MODULE, {reclaim, Table}) end,
+                {error, no_heir},
+                #{stopping => true}
+            )
     end.
 
 -doc """
@@ -188,6 +187,33 @@ ensure_table(Name, Opts) ->
                     true -> ok;
                     false -> reclaim(Name)
                 end,
+            maybe_set_heir(Name)
+    end.
+
+-doc """
+Create a named table, or adopt one that already exists (BT-4891).
+
+For the boot tables that any process may create first and that are never
+reclaimed from the heir (class registry, metadata, protocol registry, ...).
+When `Name` does not exist it is created with `Opts` plus `heir_option/0`;
+losing a creation race to another process (`ets:new/2` raises `badarg`) is
+tolerated, because the winner's table is the same table. When it already
+exists the heir is set if the caller owns it and the heir is not already the
+running heir process (`maybe_set_heir/1`).
+
+Unlike `ensure_table/2` this never reclaims the table from the heir.
+""".
+-spec ensure_shared_table(atom(), [term()]) -> ok.
+ensure_shared_table(Name, Opts) ->
+    case ets:whereis(Name) of
+        undefined ->
+            try
+                _ = ets:new(Name, Opts ++ heir_option()),
+                ok
+            catch
+                error:badarg -> ok
+            end;
+        _Tid ->
             maybe_set_heir(Name)
     end.
 
