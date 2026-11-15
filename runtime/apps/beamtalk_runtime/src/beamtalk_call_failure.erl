@@ -114,9 +114,9 @@ else propagates, including every `error:` and `throw:`.
 
 **Contract:** `Fun` must be a call into another process (e.g. `gen_server:call/2,3`,
 `gen_server:stop/3`, or a module API that wraps one), never code that runs a
-Beamtalk block. The class-variable
-catcher audit (ADR 0130) marks this one `catch` `not-applicable-other-process`
-on that basis, and the lint cannot see a caller's `fun`.
+Beamtalk block. The class-variable catcher audit (ADR 0130) marks this one
+`catch` `not-applicable-other-process` on that basis, and the lint cannot see a
+caller's `fun`.
 
 Options keep deliberate differences explicit:
 
@@ -129,7 +129,7 @@ Options keep deliberate differences explicit:
 -spec tolerate_gone(fun(() -> T), D, gone_opts()) -> T | D when T :: term(), D :: term().
 tolerate_gone(Fun, Default, Opts) ->
     %% bt-catcher-audit: not-applicable-other-process - contract (see -doc): Fun is a call
-    %% into another process (gen_server:call/stop), never a Beamtalk block
+    %% into another process (or a module API wrapping one), never a Beamtalk block
     try
         Fun()
     catch
