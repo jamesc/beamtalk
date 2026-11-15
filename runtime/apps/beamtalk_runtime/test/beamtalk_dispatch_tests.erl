@@ -31,7 +31,10 @@ and beamtalk_object_class registry for realistic testing.
 setup() ->
     %% Just start the application to ensure ETS tables and registries are ready
     %% The beamtalk_runtime app should handle starting necessary supervisors
-    application:ensure_all_started(beamtalk_runtime),
+    %% Asserted (BT-4922): a failed start used to be ignored, leaving the node
+    %% without the class monitor and class supervisor, so the kill/restart tests
+    %% hung instead of reporting the real cause.
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
 
     %% Ensure stdlib classes are registered (may have been killed by
     %% earlier test teardowns since class processes are unlinked)
