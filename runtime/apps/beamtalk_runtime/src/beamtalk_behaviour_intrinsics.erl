@@ -1965,15 +1965,11 @@ walk_hierarchy(ClassName, Fun, Acc) ->
                 end
         end
     end,
-    case beamtalk_hierarchy:walk_ancestors({ClassName, Acc}, StepFun, ?MAX_HIERARCHY_DEPTH) of
+    Ctx = #{node_name => fun({Name, _Acc}) -> Name end},
+    case beamtalk_hierarchy:walk_or_warn({ClassName, Acc}, StepFun, walk_hierarchy, Ctx) of
         {found, {result, Result}} ->
             Result;
-        {max_depth_exceeded, {CycleClassName, PartialAcc}} ->
-            ?LOG_WARNING(
-                "walk_hierarchy: max hierarchy depth ~p exceeded at ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, CycleClassName],
-                #{domain => [beamtalk, runtime]}
-            ),
+        {cycle, {_CycleClassName, PartialAcc}} ->
             PartialAcc;
         not_found ->
             %% Unreachable: StepFun above always resolves to {found, _} — a

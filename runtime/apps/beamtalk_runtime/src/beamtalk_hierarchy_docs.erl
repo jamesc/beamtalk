@@ -65,34 +65,52 @@ and — in the cycle case only — logs a `?LOG_WARNING`.
 """.
 -spec find_defining_class(pid(), atom()) -> atom().
 find_defining_class(ClassPid, Selector) ->
+    find_defining(ClassPid, Selector, find_defining_class, fun(Pid) ->
+        beamtalk_object_class:instance_methods_safe(Pid)
+    end).
+
+-doc """
+Find which class in the hierarchy (starting at ClassPid) defines Selector as
+a class-side method. Same walk as `find_defining_class/2` (shared
+`find_defining/4`) for the class side — probes the published local
+class-method selectors at each level instead of the instance method table.
+""".
+-spec find_defining_class_method(pid(), atom()) -> atom().
+find_defining_class_method(ClassPid, Selector) ->
+    find_defining(ClassPid, Selector, find_defining_class_method, fun(Pid) ->
+        beamtalk_object_class:local_class_method_selectors_safe(Pid)
+    end).
+
+%% The one "which ancestor defines `Selector`?" walk behind both public
+%% finders. `SelectorsFun(Pid)` is the membership probe (the level's instance
+%% selectors, or its local class-method selectors); `Label` names the walk in
+%% the cycle warning. A level that does not define it advances to its
+%% superclass, and the chain's end (no superclass, or an unregistered one)
+%% answers the last level reached. A cycle answers the receiver's own class.
+-spec find_defining(pid(), atom(), atom(), fun((pid()) -> [atom()])) -> atom().
+find_defining(ClassPid, Selector, Label, SelectorsFun) ->
     ReceiverName = beamtalk_object_class:class_name_safe(ClassPid),
     StepFun = fun(CurrentPid, _Depth) ->
         CurrentName = beamtalk_object_class:class_name_safe(CurrentPid),
-        case lists:member(Selector, beamtalk_object_class:instance_methods_safe(CurrentPid)) of
-            false ->
-                case beamtalk_object_class:superclass_safe(CurrentPid) of
-                    none ->
-                        {found, CurrentName};
-                    SuperName ->
-                        case beamtalk_class_registry:whereis_class(SuperName) of
-                            undefined -> {found, CurrentName};
-                            SuperPid -> {next, SuperPid}
-                        end
-                end;
+        case lists:member(Selector, SelectorsFun(CurrentPid)) of
             true ->
-                {found, CurrentName}
+                {found, CurrentName};
+            false ->
+                case superclass_level(CurrentPid) of
+                    {SuperPid, _SuperName} -> {next, SuperPid};
+                    none -> {found, CurrentName}
+                end
         end
     end,
-    case beamtalk_hierarchy:walk_ancestors(ClassPid, StepFun, ?MAX_HIERARCHY_DEPTH) of
+    Ctx = #{
+        start => ReceiverName,
+        selector => Selector,
+        node_name => fun beamtalk_object_class:class_name_safe/1
+    },
+    case beamtalk_hierarchy:walk_or_warn(ClassPid, StepFun, Label, Ctx) of
         {found, DefiningClass} ->
             DefiningClass;
-        {max_depth_exceeded, CyclePid} ->
-            CycleClass = beamtalk_object_class:class_name_safe(CyclePid),
-            ?LOG_WARNING(
-                "find_defining_class: max hierarchy depth ~p exceeded at ~p (starting from ~p) for selector ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, CycleClass, ReceiverName, Selector],
-                #{domain => [beamtalk, runtime]}
-            ),
+        {cycle, _CyclePid} ->
             ReceiverName;
         not_found ->
             %% Unreachable: StepFun above always resolves to {found, _} — a
@@ -101,47 +119,18 @@ find_defining_class(ClassPid, Selector) ->
             erlang:error({unreachable, not_found, ReceiverName, Selector})
     end.
 
--doc """
-Find which class in the hierarchy (starting at ClassPid) defines Selector as
-a class-side method. Mirrors `find_defining_class/2` for the class side —
-walks the published local class-method selectors at each level instead of the
-instance method table.
-""".
--spec find_defining_class_method(pid(), atom()) -> atom().
-find_defining_class_method(ClassPid, Selector) ->
-    ReceiverName = beamtalk_object_class:class_name_safe(ClassPid),
-    StepFun = fun(CurrentPid, _Depth) ->
-        CurrentName = beamtalk_object_class:class_name_safe(CurrentPid),
-        LocalClassMethods = beamtalk_object_class:local_class_method_selectors_safe(CurrentPid),
-        case lists:member(Selector, LocalClassMethods) of
-            true ->
-                {found, CurrentName};
-            false ->
-                case beamtalk_object_class:superclass_safe(CurrentPid) of
-                    none ->
-                        {found, CurrentName};
-                    SuperName ->
-                        case beamtalk_class_registry:whereis_class(SuperName) of
-                            undefined -> {found, CurrentName};
-                            SuperPid -> {next, SuperPid}
-                        end
-                end
-        end
-    end,
-    case beamtalk_hierarchy:walk_ancestors(ClassPid, StepFun, ?MAX_HIERARCHY_DEPTH) of
-        {found, DefiningClass} ->
-            DefiningClass;
-        {max_depth_exceeded, CyclePid} ->
-            CycleClass = beamtalk_object_class:class_name_safe(CyclePid),
-            ?LOG_WARNING(
-                "find_defining_class_method: max hierarchy depth ~p exceeded at ~p (starting from ~p) for selector ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, CycleClass, ReceiverName, Selector],
-                #{domain => [beamtalk, runtime]}
-            ),
-            ReceiverName;
-        not_found ->
-            %% Unreachable: see find_defining_class/2.
-            erlang:error({unreachable, not_found, ReceiverName, Selector})
+%% A class process's superclass as `{Pid, Name}`, or `none` when it has no
+%% superclass or the superclass is not registered (the chain ends there).
+-spec superclass_level(pid()) -> {pid(), atom()} | none.
+superclass_level(ClassPid) ->
+    case beamtalk_object_class:superclass_safe(ClassPid) of
+        none ->
+            none;
+        SuperName ->
+            case beamtalk_class_registry:whereis_class(SuperName) of
+                undefined -> none;
+                SuperPid -> {SuperPid, SuperName}
+            end
     end.
 
 -doc """
@@ -158,41 +147,10 @@ naming the ancestor where the cycle was detected.
 """.
 -spec collect_flattened_methods(atom(), pid()) -> map().
 collect_flattened_methods(ClassName, ClassPid) ->
-    StepFun = fun({CurrentName, CurrentPid, AccMap}, _Depth) ->
-        LocalMethods = beamtalk_object_class:local_instance_method_infos_safe(CurrentPid),
-        LocalFlat = maps:map(fun(_Sel, Info) -> {CurrentName, Info} end, LocalMethods),
-        %% AccMap already reflects every closer (lower-depth) ancestor
-        %% winning over farther ones; putting it second keeps that
-        %% invariant as this (farther) level's LocalFlat is folded in.
-        NewAcc = maps:merge(LocalFlat, AccMap),
-        case beamtalk_object_class:superclass_safe(CurrentPid) of
-            none ->
-                {found, NewAcc};
-            SuperName ->
-                case beamtalk_class_registry:whereis_class(SuperName) of
-                    undefined -> {found, NewAcc};
-                    SuperPid -> {next, {SuperName, SuperPid, NewAcc}}
-                end
-        end
-    end,
-    case
-        beamtalk_hierarchy:walk_ancestors(
-            {ClassName, ClassPid, #{}}, StepFun, ?MAX_HIERARCHY_DEPTH
-        )
-    of
-        {found, Result} ->
-            Result;
-        {max_depth_exceeded, {CycleName, _CyclePid, PartialAcc}} ->
-            ?LOG_WARNING(
-                "collect_flattened_methods: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, CycleName, ClassName],
-                #{domain => [beamtalk, runtime]}
-            ),
-            PartialAcc;
-        not_found ->
-            %% Unreachable: see find_defining_class/2.
-            erlang:error({unreachable, not_found, ClassName})
-    end.
+    flatten_walk(ClassName, ClassPid, collect_flattened_methods, fun(Name, Pid) ->
+        Local = beamtalk_object_class:local_instance_method_infos_safe(Pid),
+        maps:map(fun(_Sel, Info) -> {Name, Info} end, Local)
+    end).
 
 -doc """
 Walk the class hierarchy collecting class-side methods.
@@ -205,46 +163,39 @@ ancestor where the cycle was detected.
 
 Moved here from `beamtalk_repl_docs` (its only prior caller) so
 `beamtalk_repl_ops_dev`'s "inherited-methods" ws op can reuse the same
-class-side walk instead of a second copy — mirrors `collect_flattened_methods/2`
-above, which made the same move for the instance side earlier.
+class-side walk instead of a second copy; it shares `flatten_walk/4` with
+`collect_flattened_methods/2`.
 """.
 -spec collect_flattened_class_methods(atom(), pid()) -> #{atom() => atom()}.
 collect_flattened_class_methods(ClassName, ClassPid) ->
+    flatten_walk(ClassName, ClassPid, collect_flattened_class_methods, fun(Name, Pid) ->
+        maps:from_list([
+            {Sel, Name}
+         || Sel <- beamtalk_object_class:local_class_method_selectors_safe(Pid)
+        ])
+    end).
+
+%% The one root-to-leaf fold behind both `collect_flattened_*` functions.
+%% `LocalFun(Name, Pid)` is one level's own contribution. The accumulator
+%% already reflects every closer (lower-depth) ancestor winning over farther
+%% ones, so it goes second in `maps:merge/2` as each farther level is folded in.
+-spec flatten_walk(atom(), pid(), atom(), fun((atom(), pid()) -> map())) -> map().
+flatten_walk(ClassName, ClassPid, Label, LocalFun) ->
     StepFun = fun({CurrentName, CurrentPid, AccMap}, _Depth) ->
-        LocalFlat = maps:from_list([
-            {Sel, CurrentName}
-         || Sel <- beamtalk_object_class:local_class_method_selectors_safe(CurrentPid)
-        ]),
-        %% AccMap already reflects every closer (lower-depth) ancestor
-        %% winning over farther ones; keep that invariant as this
-        %% (farther) level's LocalFlat is folded in.
-        NewAcc = maps:merge(LocalFlat, AccMap),
-        case beamtalk_object_class:superclass_safe(CurrentPid) of
-            none ->
-                {found, NewAcc};
-            SuperName ->
-                case beamtalk_class_registry:whereis_class(SuperName) of
-                    undefined -> {found, NewAcc};
-                    SuperPid -> {next, {SuperName, SuperPid, NewAcc}}
-                end
+        NewAcc = maps:merge(LocalFun(CurrentName, CurrentPid), AccMap),
+        case superclass_level(CurrentPid) of
+            {SuperPid, SuperName} -> {next, {SuperName, SuperPid, NewAcc}};
+            none -> {found, NewAcc}
         end
     end,
-    case
-        beamtalk_hierarchy:walk_ancestors(
-            {ClassName, ClassPid, #{}}, StepFun, ?MAX_HIERARCHY_DEPTH
-        )
-    of
+    Ctx = #{start => ClassName, node_name => fun({Name, _Pid, _Acc}) -> Name end},
+    case beamtalk_hierarchy:walk_or_warn({ClassName, ClassPid, #{}}, StepFun, Label, Ctx) of
         {found, Result} ->
             Result;
-        {max_depth_exceeded, {CycleName, _CyclePid, PartialAcc}} ->
-            ?LOG_WARNING(
-                "collect_flattened_class_methods: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, CycleName, ClassName],
-                #{domain => [beamtalk, runtime]}
-            ),
+        {cycle, {_CycleName, _CyclePid, PartialAcc}} ->
             PartialAcc;
         not_found ->
-            %% Unreachable: see find_defining_class/2.
+            %% Unreachable: the step always resolves to {found, _} or {next, _}.
             erlang:error({unreachable, not_found, ClassName})
     end.
 

@@ -123,10 +123,6 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
 %% finish rather than raising a spurious `timeout`.
 -define(REMOTE_SNAPSHOT_TIMEOUT, 20000).
 
-%% Process-dictionary key for `cached_live_class_entries/0`'s per-walk memo —
-%% see that function's doc for why the walk needs it.
--define(LIVE_CLASS_ENTRIES_CACHE_KEY, '$beamtalk_pn_live_class_entries_cache').
-
 %% Bounded timeout (ms) for the lazy `sys:get_status/1` fetch. A busy, wedged, or
 %% non-`sys`-compliant process must yield `nil`, never block the caller
 %% (ADR 0092 §5).
@@ -209,9 +205,7 @@ cap (`Limit`). See `default_snapshot/0`.
 """.
 -spec default_snapshot(non_neg_integer()) -> [node_map()].
 default_snapshot(Limit) ->
-    with_live_class_entries_cache(fun() ->
-        snapshot_from_pids(default_root_pids(), default, Limit)
-    end).
+    snapshot_from_pids(default_root_pids(), default, Limit).
 
 -doc """
 Return the flat `system`-scope supervision snapshot — everything, including
@@ -232,9 +226,7 @@ cap (`Limit`). See `system_snapshot/0`.
 """.
 -spec system_snapshot(non_neg_integer()) -> [node_map()].
 system_snapshot(Limit) ->
-    with_live_class_entries_cache(fun() ->
-        snapshot_from_pids(system_root_pids(), system, Limit)
-    end).
+    snapshot_from_pids(system_root_pids(), system, Limit).
 
 -doc """
 Root a snapshot at a user-supplied `Root` — a Beamtalk `Supervisor` handle
@@ -264,10 +256,7 @@ from(Root, Limit) ->
         {ok, Pid} ->
             case erlang:is_process_alive(Pid) of
                 true ->
-                    {ok,
-                        with_live_class_entries_cache(fun() ->
-                            snapshot_from_pids([Pid], system, Limit)
-                        end)};
+                    {ok, snapshot_from_pids([Pid], system, Limit)};
                 false ->
                     {error, from_error(stale_handle, <<"the root process is not alive">>)}
             end;
@@ -994,20 +983,23 @@ supervisor_callback_module(Pid) ->
             nil
     end.
 
-%% Map a compiled module atom to its Beamtalk class name via the live class
+%% Map a compiled module atom to its Beamtalk class name via the class
 %% registry, or `nil` for a non-Beamtalk (foreign) module. Reliable: it matches
-%% the registry's recorded `module_name`, never reconstructs the name from text.
+%% the registry's recorded module, never reconstructs the name from text.
 %%
-%% Reads `cached_live_class_entries/0` — see that function's doc for why a
-%% snapshot walk must never call `beamtalk_class_registry:live_class_entries/0`
-%% directly here.
+%% `beamtalk_class_registry:class_name_for_module/1` is an ETS read of a
+%% memoised module->class map: no `gen_server:call` to a class process (this
+%% can run inside one, where such calls deadlock two classes against each
+%% other, BT-3820) and no per-call scan of every loaded class, however many
+%% supervisor-looking pids a snapshot walk meets (the fan-out BT-3605 hit
+%% inside a remote `erpc` worker).
 -spec class_name_for_module(module() | nil) -> atom() | nil.
 class_name_for_module(nil) ->
     nil;
 class_name_for_module(Module) ->
-    case lists:keyfind(Module, 2, cached_live_class_entries()) of
-        {Name, Module, _Pid} -> Name;
-        false -> nil
+    case beamtalk_class_registry:class_name_for_module(Module) of
+        {ok, Name} -> Name;
+        not_found -> nil
     end.
 
 %% A pid is a supervisor when the `which_children` hint says so, or — for a root
@@ -1366,67 +1358,6 @@ from_error(Kind, Hint) ->
 %%% ============================================================================
 %%% Internal helpers
 %%% ============================================================================
-
--doc """
-Run `Fun` (a snapshot walk's root-selection + tree walk) with
-`cached_live_class_entries/0`'s per-walk memo populated on first use and
-always cleared afterward (even on an exception) — the one place this cache's
-lifetime is scoped, wrapping every top-level entry point that classifies
-foreign-supervisor pids: `default_snapshot/1`, `system_snapshot/1`, `from/2`
-(and, transitively, a remote `on/1,2` snapshot, which runs `default_snapshot/1`
-on the target node via `erpc`).
-
-## Why this cache exists
-
-`class_name_for_module/1` (used by `beamtalk_supervisor_class/2`, called once
-per supervisor-*looking* pid the walk meets, both at root selection
-(`registered_beamtalk_supervisor_pids/0`) and during the recursive walk
-itself) resolves a module to its Beamtalk class name via
-`beamtalk_class_registry:live_class_entries/0`. That function is O(number of
-loaded classes) and reads each class's name/module from ETS metadata
-(BT-3820: it must not `gen_server:call` class processes — this runs inside a
-class process, so such calls deadlock two classes against each other).
-Calling it **fresh for every supervisor-looking pid** turns one snapshot into
-O(supervisor-looking-pids × loaded-classes) gen_server round trips — cheap
-enough locally to go unnoticed (a handful of pids × ~100 stdlib classes, each
-call sub-millisecond), but the same fan-out, run **inside a remote `erpc`
-worker** (`on/1,2`, ADR 0126 §8, Phase 7) against a real workspace node's
-full class set, multiplies into tens of seconds and can blow past
-`?REMOTE_SNAPSHOT_TIMEOUT` — a real user-visible bug this cache fixes, found
-by BT-3605's own two-node e2e test (no earlier two-node test exercised a
-snapshot against a *full* workspace peer with the stdlib actually loaded;
-every prior `beamtalk_dist_test_helper` peer runs bare `beamtalk_runtime`
-with zero loaded classes, which hid this cost entirely).
-
-Scoped per-walk, not process-lifetime: a long-lived REPL eval-worker process
-must never serve a *stale* class list to a later, unrelated eval after a
-class reloads — `erase/1` on the way out (via `try...after`) guarantees the
-next walk in this same process re-fetches fresh.
-""".
--spec with_live_class_entries_cache(fun(() -> Result)) -> Result when Result :: term().
-with_live_class_entries_cache(Fun) ->
-    try
-        Fun()
-    after
-        erase(?LIVE_CLASS_ENTRIES_CACHE_KEY)
-    end.
-
--doc """
-`beamtalk_class_registry:live_class_entries/0`, memoized for the lifetime of
-the enclosing `with_live_class_entries_cache/1` call — see that function's
-doc for why a snapshot walk must call this instead of the registry function
-directly.
-""".
--spec cached_live_class_entries() -> [{atom(), module(), pid()}].
-cached_live_class_entries() ->
-    case get(?LIVE_CLASS_ENTRIES_CACHE_KEY) of
-        undefined ->
-            Entries = beamtalk_class_registry:live_class_entries(),
-            put(?LIVE_CLASS_ENTRIES_CACHE_KEY, Entries),
-            Entries;
-        Entries ->
-            Entries
-    end.
 
 %% Guarded `count_children`: the cheap child counts (does not copy the child
 %% list out of the supervisor). Returns `{Active, Total}` — `Active` is the live

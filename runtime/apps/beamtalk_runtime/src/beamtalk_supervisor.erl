@@ -2278,6 +2278,9 @@ spawn_kind(ClassName) ->
                 not_found -> not_found
             end
     end,
+    %% Deliberately `walk_ancestors/3`, not `walk_or_warn/4`: `unknown` is a
+    %% documented answer (callers must not read it as "not spawnable"), and a
+    %% cycle is one of its ordinary causes next to a missing metadata row.
     case beamtalk_hierarchy:walk_ancestors(ClassName, Step, ?MAX_HIERARCHY_DEPTH) of
         {found, Kind} -> Kind;
         _ -> unknown

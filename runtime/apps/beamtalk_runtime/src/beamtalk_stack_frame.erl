@@ -496,9 +496,8 @@ a Beamtalk class, a `bt@...` module whose class is not loaded, or a table that
 does not exist yet (early boot). The renderer never guesses a class name from
 the module name (ADR 0139 decision 2).
 
-`class_name_for_module/1` scans the whole table on every call. A caller
-resolving many modules should build the map once with
-`beamtalk_class_registry:module_to_class_map/0`, as `wrap/1` does.
+`class_name_for_module/1` is an O(1) lookup in a memoised module->class map, so
+calling this once per frame is cheap; `wrap/1` fetches the map once per stack.
 """.
 -spec module_to_class(atom()) -> atom() | 'nil'.
 module_to_class(Module) when is_atom(Module) ->

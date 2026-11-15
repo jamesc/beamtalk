@@ -444,6 +444,9 @@ resolve_owner(ClassName, Selector) ->
     {cache, {owner, class_name(), module()}} | {nocache, miss}.
 compute_owner(ClassName, Selector) ->
     StepFun = fun(CurrentClass, _Depth) -> compute_step(CurrentClass, Selector) end,
+    %% Deliberately `walk_ancestors/3`, not `walk_or_warn/4`: a cycle is a
+    %% `miss`, which is not cached and sends the caller to
+    %% `walk_in_class_chain/5`, whose walk warns.
     case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
         {found, {owner, _, _} = Owner} -> {cache, Owner};
         _ -> {nocache, miss}
@@ -514,17 +517,11 @@ walk_in_class_chain(Selector, Args, Self, State, ClassName) ->
     StepFun = fun(CurrentClass, Depth) ->
         class_chain_step(Selector, Args, Self, State, CurrentClass, Depth)
     end,
-    case beamtalk_hierarchy:walk_ancestors(ClassName, StepFun, ?MAX_HIERARCHY_DEPTH) of
+    Ctx = #{start => ClassName, selector => Selector},
+    case beamtalk_hierarchy:walk_or_warn(ClassName, StepFun, walk_in_class_chain, Ctx) of
         {found, Result} ->
             Result;
-        {max_depth_exceeded, CycleClass} ->
-            ?LOG_WARNING("Max hierarchy depth exceeded — possible cycle", #{
-                max_depth => ?MAX_HIERARCHY_DEPTH,
-                class => ClassName,
-                cycle_detected_at => CycleClass,
-                selector => Selector,
-                domain => [beamtalk, runtime]
-            }),
+        {cycle, _CycleClass} ->
             {error,
                 beamtalk_error:new(
                     does_not_understand,

@@ -1132,15 +1132,11 @@ merge_ancestor_map(StartSuper, ReadOwnMapFun, AccSoFar) ->
             not_found -> {found, NewAcc}
         end
     end,
-    case beamtalk_hierarchy:walk_ancestors({StartSuper, AccSoFar}, StepFun, ?MAX_HIERARCHY_DEPTH) of
+    Ctx = #{node_name => fun({Name, _Acc}) -> Name end},
+    case beamtalk_hierarchy:walk_or_warn({StartSuper, AccSoFar}, StepFun, flatten_ancestor_map, Ctx) of
         {found, Result} ->
             Result;
-        {max_depth_exceeded, {CycleClass, Partial}} ->
-            ?LOG_WARNING(
-                "flatten_ancestor_map: max hierarchy depth ~p exceeded at ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, CycleClass],
-                #{domain => [beamtalk, runtime]}
-            ),
+        {cycle, {_CycleClass, Partial}} ->
             Partial;
         not_found ->
             %% Unreachable: StepFun above always resolves to {found, _} — a
@@ -1435,7 +1431,10 @@ chain_has_class_variables(Name) ->
                 {found, true}
         end
     end,
-    %% `not_found`: every fact up to the root is `false`.
+    %% `not_found`: every fact up to the root is `false`. A cycle also counts as
+    %% "has class variables" (the conservative answer) and is deliberately not
+    %% logged here: this is a per-send gate and nothing caches the cycle
+    %% answer, so a warning would repeat on every send.
     beamtalk_hierarchy:walk_ancestors(Name, StepFun, ?MAX_HIERARCHY_DEPTH) =/= not_found.
 
 -doc """
@@ -1669,7 +1668,10 @@ ancestors_have_user_new1(Start) ->
                 {found, true}
         end
     end,
-    %% `not_found`: every ancestor up to the root published `false`.
+    %% `not_found`: every ancestor up to the root published `false`. A cycle
+    %% counts as `true` (the conservative answer, same as above) and is
+    %% deliberately not logged: this is a per-send gate and nothing caches the
+    %% cycle answer, so a warning would repeat on every send.
     beamtalk_hierarchy:walk_ancestors(Start, StepFun, ?MAX_HIERARCHY_DEPTH) =/= not_found.
 
 -doc """
@@ -1764,7 +1766,8 @@ ancestors_have_user_new0(Start) ->
         end
     end,
     %% `not_found` (top of the chain) and `{max_depth_exceeded, _}` (a cycle)
-    %% both fail open.
+    %% both fail open. The cycle is deliberately not logged: this runs per
+    %% send and nothing caches the answer, so a warning would repeat each time.
     beamtalk_hierarchy:walk_ancestors(Start, StepFun, ?MAX_HIERARCHY_DEPTH) =:= {found, true}.
 
 -doc "Read a class's whole direct-construction eligibility set (`[]` when none or unknown).".

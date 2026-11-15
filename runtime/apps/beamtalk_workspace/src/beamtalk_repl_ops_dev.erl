@@ -1715,15 +1715,13 @@ collect_methods_with_fun(ClassName, _Depth, Fun) ->
                 end
         end
     end,
-    case beamtalk_hierarchy:walk_ancestors({ClassName, #{}}, StepFun, ?MAX_HIERARCHY_DEPTH) of
+    Ctx = #{start => ClassName, node_name => fun({Name, _Acc}) -> Name end},
+    case
+        beamtalk_hierarchy:walk_or_warn({ClassName, #{}}, StepFun, collect_methods_with_fun, Ctx)
+    of
         {found, ResultMap} ->
             maps:keys(ResultMap);
-        {max_depth_exceeded, {CycleClassName, PartialMap}} ->
-            ?LOG_WARNING(
-                "collect_methods_with_fun: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, CycleClassName, ClassName],
-                #{domain => [beamtalk, runtime]}
-            ),
+        {cycle, {_CycleClassName, PartialMap}} ->
             maps:keys(PartialMap);
         not_found ->
             %% Unreachable: StepFun above always resolves to {found, _} — an

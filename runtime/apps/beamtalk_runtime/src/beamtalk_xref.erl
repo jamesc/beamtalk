@@ -700,16 +700,10 @@ ancestor_classes(ClassName) ->
         end
     end,
     StartNode = {class_superclass_or_none(ClassName), []},
-    case beamtalk_hierarchy:walk_ancestors(StartNode, StepFun, ?MAX_HIERARCHY_DEPTH) of
-        {found, Acc} ->
-            Acc;
-        {max_depth_exceeded, {_LastAncestor, Acc}} ->
-            ?LOG_WARNING(
-                "hierarchy_related_classes: max hierarchy depth ~p exceeded walking ancestors of ~p — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, ClassName],
-                #{domain => [beamtalk, runtime]}
-            ),
-            Acc
+    Ctx = #{start => ClassName, node_name => fun({Ancestor, _Acc}) -> Ancestor end},
+    case beamtalk_hierarchy:walk_or_warn(StartNode, StepFun, hierarchy_related_classes, Ctx) of
+        {found, Acc} -> Acc;
+        {cycle, {_LastAncestor, Acc}} -> Acc
     end.
 
 -spec class_superclass_or_none(class_name()) -> class_name() | none.
