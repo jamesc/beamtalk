@@ -275,15 +275,8 @@ pub(crate) fn generate_set_bif(selector: &str, params: &[String]) -> Option<Docu
 #[cfg(test)]
 mod tests {
     use super::super::doc_to_string;
+    use super::super::{assert_bif_none_table, assert_bif_table};
     use super::*;
-
-    // generate_tuple_bif tests
-
-    #[test]
-    fn test_tuple_size() {
-        let result = doc_to_string(generate_tuple_bif("size", &[]));
-        assert_eq!(result, Some("call 'erlang':'tuple_size'(Self)".to_string()));
-    }
 
     #[test]
     fn test_tuple_at_with_param() {
@@ -304,11 +297,6 @@ mod tests {
     }
 
     #[test]
-    fn test_tuple_at_without_params_returns_none() {
-        assert_eq!(doc_to_string(generate_tuple_bif("at:", &[])), None);
-    }
-
-    #[test]
     fn test_tuple_is_ok() {
         let result = doc_to_string(generate_tuple_bif("isOk", &[]));
         let output = result.expect("isOk should produce code");
@@ -326,75 +314,6 @@ mod tests {
         assert!(output.contains("'false'"));
     }
 
-    #[test]
-    fn test_tuple_as_string() {
-        let result = doc_to_string(generate_tuple_bif("asString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_tuple':'as_string'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_tuple_do_with_param() {
-        let result = doc_to_string(generate_tuple_bif("do:", &["Block".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_tuple':'do'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_tuple_do_uses_default_when_no_param() {
-        let result = doc_to_string(generate_tuple_bif("do:", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_tuple':'do'(Self, _Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_tuple_at_random() {
-        let result = doc_to_string(generate_tuple_bif("atRandom", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_random':'atRandom'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_tuple_with_all_with_param() {
-        let result = doc_to_string(generate_tuple_bif("withAll:", &["TheList".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'list_to_tuple'(TheList)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_tuple_with_all_uses_default_when_no_param() {
-        let result = doc_to_string(generate_tuple_bif("withAll:", &[]));
-        assert_eq!(
-            result,
-            Some("call 'erlang':'list_to_tuple'(_List)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_tuple_unknown_returns_none() {
-        assert_eq!(
-            doc_to_string(generate_tuple_bif("unknownSelector", &[])),
-            None
-        );
-    }
-
-    // generate_proto_object_bif tests
-
-    #[test]
-    fn test_proto_object_unknown_returns_none() {
-        assert_eq!(doc_to_string(generate_proto_object_bif("size", &[])), None);
-    }
-
     // generate_object_bif tests
 
     #[test]
@@ -403,164 +322,209 @@ mod tests {
         assert_eq!(doc_to_string(generate_object_bif("size", &[])), None);
     }
 
-    // generate_value_bif tests
-
-    #[test]
-    fn test_value_print_string_uses_canonical_renderer() {
-        // ADR 0094: Value printString routes through the canonical structural
-        // renderer for byte-identical output with the runtime fallback.
-        let result = doc_to_string(generate_value_bif("printString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_object_printer':'structural_from_state'(Self))".to_string())
-        );
-    }
-
     #[test]
     fn test_value_unknown_selector_returns_none() {
         assert_eq!(doc_to_string(generate_value_bif("size", &[])), None);
         assert_eq!(doc_to_string(generate_value_bif("inspect", &[])), None);
     }
 
-    // generate_set_bif tests
-
     #[test]
-    fn test_set_from_list_with_param() {
-        let result = doc_to_string(generate_set_bif("fromList:", &["L".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_set':'from_list'(L)".to_string())
+    fn generate_tuple_bif_table() {
+        assert_bif_table(
+            generate_tuple_bif,
+            &[
+                // generate_tuple_bif tests
+                (
+                    "test_tuple_size",
+                    "size",
+                    &[],
+                    "call 'erlang':'tuple_size'(Self)",
+                ),
+                (
+                    "test_tuple_as_string",
+                    "asString",
+                    &[],
+                    "call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_tuple':'as_string'(Self))",
+                ),
+                (
+                    "test_tuple_do_with_param",
+                    "do:",
+                    &["Block"],
+                    "call 'beamtalk_tuple':'do'(Self, Block)",
+                ),
+                (
+                    "test_tuple_do_uses_default_when_no_param",
+                    "do:",
+                    &[],
+                    "call 'beamtalk_tuple':'do'(Self, _Block)",
+                ),
+                (
+                    "test_tuple_at_random",
+                    "atRandom",
+                    &[],
+                    "call 'beamtalk_random':'atRandom'(Self)",
+                ),
+                (
+                    "test_tuple_with_all_with_param",
+                    "withAll:",
+                    &["TheList"],
+                    "call 'erlang':'list_to_tuple'(TheList)",
+                ),
+                (
+                    "test_tuple_with_all_uses_default_when_no_param",
+                    "withAll:",
+                    &[],
+                    "call 'erlang':'list_to_tuple'(_List)",
+                ),
+            ],
         );
     }
 
     #[test]
-    fn test_set_with_all_aliases_from_list() {
-        let result = doc_to_string(generate_set_bif("withAll:", &["L".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_set':'from_list'(L)".to_string())
+    fn generate_tuple_bif_none_table() {
+        assert_bif_none_table(
+            generate_tuple_bif,
+            &[
+                ("test_tuple_at_without_params_returns_none", "at:", &[]),
+                ("test_tuple_unknown_returns_none", "unknownSelector", &[]),
+            ],
         );
     }
 
     #[test]
-    fn test_set_size() {
-        let result = doc_to_string(generate_set_bif("size", &[]));
-        assert_eq!(result, Some("call 'beamtalk_set':'size'(Self)".to_string()));
-    }
-
-    #[test]
-    fn test_set_is_empty() {
-        let result = doc_to_string(generate_set_bif("isEmpty", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_set':'is_empty'(Self)".to_string())
+    fn generate_proto_object_bif_none_table() {
+        assert_bif_none_table(
+            generate_proto_object_bif,
+            &[
+                // generate_proto_object_bif tests
+                ("test_proto_object_unknown_returns_none", "size", &[]),
+            ],
         );
     }
 
     #[test]
-    fn test_set_includes_with_param() {
-        let result = doc_to_string(generate_set_bif("includes:", &["Elem".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_set':'includes'(Self, Elem)".to_string())
+    fn generate_value_bif_table() {
+        assert_bif_table(
+            generate_value_bif,
+            &[
+                // generate_value_bif tests
+                // ADR 0094: Value printString routes through the canonical structural
+                // renderer for byte-identical output with the runtime fallback.
+                (
+                    "test_value_print_string_uses_canonical_renderer",
+                    "printString",
+                    &[],
+                    "call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_object_printer':'structural_from_state'(Self))",
+                ),
+            ],
         );
     }
 
     #[test]
-    fn test_set_add_with_param() {
-        let result = doc_to_string(generate_set_bif("add:", &["Elem".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_set':'add'(Self, Elem)".to_string())
+    fn generate_set_bif_table() {
+        assert_bif_table(
+            generate_set_bif,
+            &[
+                // generate_set_bif tests
+                (
+                    "test_set_from_list_with_param",
+                    "fromList:",
+                    &["L"],
+                    "call 'beamtalk_set':'from_list'(L)",
+                ),
+                (
+                    "test_set_with_all_aliases_from_list",
+                    "withAll:",
+                    &["L"],
+                    "call 'beamtalk_set':'from_list'(L)",
+                ),
+                (
+                    "test_set_size",
+                    "size",
+                    &[],
+                    "call 'beamtalk_set':'size'(Self)",
+                ),
+                (
+                    "test_set_is_empty",
+                    "isEmpty",
+                    &[],
+                    "call 'beamtalk_set':'is_empty'(Self)",
+                ),
+                (
+                    "test_set_includes_with_param",
+                    "includes:",
+                    &["Elem"],
+                    "call 'beamtalk_set':'includes'(Self, Elem)",
+                ),
+                (
+                    "test_set_add_with_param",
+                    "add:",
+                    &["Elem"],
+                    "call 'beamtalk_set':'add'(Self, Elem)",
+                ),
+                (
+                    "test_set_remove_with_param",
+                    "remove:",
+                    &["Elem"],
+                    "call 'beamtalk_set':'remove'(Self, Elem)",
+                ),
+                (
+                    "test_set_union_with_param",
+                    "union:",
+                    &["Other"],
+                    "call 'beamtalk_set':'union'(Self, Other)",
+                ),
+                (
+                    "test_set_intersection_with_param",
+                    "intersection:",
+                    &["Other"],
+                    "call 'beamtalk_set':'intersection'(Self, Other)",
+                ),
+                (
+                    "test_set_difference_with_param",
+                    "difference:",
+                    &["Other"],
+                    "call 'beamtalk_set':'difference'(Self, Other)",
+                ),
+                (
+                    "test_set_is_subset_of_with_param",
+                    "isSubsetOf:",
+                    &["Other"],
+                    "call 'beamtalk_set':'is_subset_of'(Self, Other)",
+                ),
+                (
+                    "test_set_as_list",
+                    "asList",
+                    &[],
+                    "call 'beamtalk_set':'as_list'(Self)",
+                ),
+                (
+                    "test_set_do_with_param",
+                    "do:",
+                    &["Block"],
+                    "call 'beamtalk_set':'do'(Self, Block)",
+                ),
+                (
+                    "test_set_print_string",
+                    "printString",
+                    &[],
+                    "call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))",
+                ),
+                (
+                    "test_set_stream",
+                    "stream",
+                    &[],
+                    "call 'beamtalk_stream':'on'(Self)",
+                ),
+            ],
         );
     }
 
     #[test]
-    fn test_set_remove_with_param() {
-        let result = doc_to_string(generate_set_bif("remove:", &["Elem".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_set':'remove'(Self, Elem)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_set_union_with_param() {
-        let result = doc_to_string(generate_set_bif("union:", &["Other".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_set':'union'(Self, Other)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_set_intersection_with_param() {
-        let result = doc_to_string(generate_set_bif("intersection:", &["Other".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_set':'intersection'(Self, Other)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_set_difference_with_param() {
-        let result = doc_to_string(generate_set_bif("difference:", &["Other".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_set':'difference'(Self, Other)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_set_is_subset_of_with_param() {
-        let result = doc_to_string(generate_set_bif("isSubsetOf:", &["Other".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_set':'is_subset_of'(Self, Other)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_set_as_list() {
-        let result = doc_to_string(generate_set_bif("asList", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_set':'as_list'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_set_do_with_param() {
-        let result = doc_to_string(generate_set_bif("do:", &["Block".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_set':'do'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_set_print_string() {
-        let result = doc_to_string(generate_set_bif("printString", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_primitive':'print_string'(Self))".to_string())
-        );
-    }
-
-    #[test]
-    fn test_set_stream() {
-        let result = doc_to_string(generate_set_bif("stream", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_stream':'on'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_set_unknown_returns_none() {
-        assert_eq!(
-            doc_to_string(generate_set_bif("unknownSelector", &[])),
-            None
+    fn generate_set_bif_none_table() {
+        assert_bif_none_table(
+            generate_set_bif,
+            &[("test_set_unknown_returns_none", "unknownSelector", &[])],
         );
     }
 }

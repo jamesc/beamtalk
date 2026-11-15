@@ -980,32 +980,11 @@ fn ambient_sealed_object(
 ) -> beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
     use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
     ClassInfo {
-        name: "AmbientWidget".into(),
-        superclass: Some("Object".into()),
         is_sealed: true,
-        is_abstract: false,
         is_typed: true,
-        is_internal: false,
         package: package.map(Into::into),
-        is_value: false,
-        is_native: false,
-        auto_ctors: None,
-        handle_scope: None,
-        surface_incomplete: false,
-        in_caller_new1: false,
         is_module_less: module_less,
-        state: vec![],
-        state_types: std::collections::HashMap::new(),
-        state_has_default: std::collections::HashMap::new(),
-        state_kinds: std::collections::HashMap::new(),
-        initialize_assigns: std::collections::BTreeSet::new(),
-        has_dynamic_field_writer: false,
-        methods: vec![],
-        class_methods: vec![],
-        class_variables: vec![],
-        type_params: vec![],
-        type_param_bounds: vec![],
-        superclass_type_args: vec![],
+        ..ClassInfo::test("AmbientWidget", Some("Object"))
     }
 }
 

@@ -233,375 +233,224 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
 
 #[cfg(test)]
 mod tests {
-    use super::super::doc_to_string;
+    use super::super::{assert_bif_none_table, assert_bif_table};
     use super::*;
 
-    // --- Behaviour / Class tower selectors ---
-
     #[test]
-    fn test_class_name() {
-        let result = doc_to_string(generate_tower_bif("className", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'className'(Self)".to_string())
+    #[allow(clippy::too_many_lines)] // one contiguous table; splitting hurts readability
+    fn generate_tower_bif_table() {
+        assert_bif_table(
+            generate_tower_bif,
+            &[
+                // --- Behaviour / Class tower selectors ---
+                (
+                    "test_class_name",
+                    "className",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'className'(Self)",
+                ),
+                (
+                    "test_class_class",
+                    "classClass",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classClass'(Self)",
+                ),
+                (
+                    "test_class_superclass",
+                    "classSuperclass",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classSuperclass'(Self)",
+                ),
+                (
+                    "test_class_subclasses",
+                    "classSubclasses",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classSubclasses'(Self)",
+                ),
+                (
+                    "test_class_all_subclasses",
+                    "classAllSubclasses",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classAllSubclasses'(Self)",
+                ),
+                (
+                    "test_class_local_methods",
+                    "classLocalMethods",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classLocalMethods'(Self)",
+                ),
+                (
+                    "test_class_includes_selector",
+                    "classIncludesSelector",
+                    &["Selector"],
+                    "call 'beamtalk_behaviour_intrinsics':'classIncludesSelector'(Self, Selector)",
+                ),
+                (
+                    "test_class_field_names",
+                    "classFieldNames",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classFieldNames'(Self)",
+                ),
+                (
+                    "test_class_all_field_names",
+                    "classAllFieldNames",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classAllFieldNames'(Self)",
+                ),
+                (
+                    "test_class_class_var_names",
+                    "classClassVarNames",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classClassVarNames'(Self)",
+                ),
+                (
+                    "test_class_all_class_var_names",
+                    "classAllClassVarNames",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classAllClassVarNames'(Self)",
+                ),
+                (
+                    "test_class_used_protocols",
+                    "classUsedProtocols",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classUsedProtocols'(Self)",
+                ),
+                (
+                    "test_class_doc",
+                    "classDoc",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classDoc'(Self)",
+                ),
+                (
+                    "test_class_set_doc",
+                    "classSetDoc",
+                    &["DocStr"],
+                    "call 'beamtalk_behaviour_intrinsics':'classSetDoc'(Self, DocStr)",
+                ),
+                (
+                    "test_class_set_method_doc",
+                    "classSetMethodDoc",
+                    &["Selector", "DocStr"],
+                    "call 'beamtalk_behaviour_intrinsics':'classSetMethodDoc'(Self, Selector, DocStr)",
+                ),
+                (
+                    "test_class_doc_for_method",
+                    "classDocForMethod",
+                    &["Selector"],
+                    "call 'beamtalk_behaviour_intrinsics':'classDocForMethod'(Self, Selector)",
+                ),
+                (
+                    "test_class_remove_from_system",
+                    "classRemoveFromSystem",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classRemoveFromSystem'(Self)",
+                ),
+                (
+                    "test_class_source_file",
+                    "classSourceFile",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classSourceFile'(Self)",
+                ),
+                (
+                    "test_class_reload",
+                    "classReload",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'classReload'(Self)",
+                ),
+                (
+                    "test_class_compile_source",
+                    "classCompileSource",
+                    &["Selector", "Source"],
+                    "call 'beamtalk_class_refactor':'classCompileSource'(Self, Selector, Source)",
+                ),
+                (
+                    "test_class_try_compile_source",
+                    "classTryCompileSource",
+                    &["Selector", "Source"],
+                    "call 'beamtalk_class_refactor':'classTryCompileSource'(Self, Selector, Source)",
+                ),
+                (
+                    "test_class_precheck_compile_source",
+                    "classPrecheckCompileSource",
+                    &["Selector", "Source"],
+                    "call 'beamtalk_class_refactor':'classPrecheckCompileSource'(Self, Selector, Source)",
+                ),
+                (
+                    "test_class_remove_selector",
+                    "classRemoveSelector",
+                    &["Selector"],
+                    "call 'beamtalk_class_refactor':'classRemoveSelector'(Self, Selector)",
+                ),
+                (
+                    "test_class_rename_to",
+                    "classRenameTo",
+                    &["NewName"],
+                    "call 'beamtalk_class_refactor':'classRenameTo'(Self, NewName)",
+                ),
+                (
+                    "test_class_remove_selector_if_absent",
+                    "classRemoveSelectorIfAbsent",
+                    &["Selector", "AbsentBlock"],
+                    "call 'beamtalk_class_refactor':'classRemoveSelectorIfAbsent'(Self, Selector, AbsentBlock)",
+                ),
+                (
+                    "test_method_lookup",
+                    "methodLookup",
+                    &["Selector"],
+                    "call 'beamtalk_method_resolver':'resolve'(Self, Selector)",
+                ),
+                // --- Metaclass tower selectors ---
+                (
+                    "test_metaclass_this_class",
+                    "metaclassThisClass",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'metaclassThisClass'(Self)",
+                ),
+                (
+                    "test_metaclass_superclass",
+                    "metaclassSuperclass",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'metaclassSuperclass'(Self)",
+                ),
+                (
+                    "test_metaclass_all_methods",
+                    "metaclassAllMethods",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'metaclassAllMethods'(Self)",
+                ),
+                (
+                    "test_metaclass_class_methods",
+                    "metaclassClassMethods",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'metaclassClassMethods'(Self)",
+                ),
+                (
+                    "test_metaclass_local_class_methods",
+                    "metaclassLocalClassMethods",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'metaclassLocalClassMethods'(Self)",
+                ),
+                (
+                    "test_metaclass_includes_selector",
+                    "metaclassIncludesSelector",
+                    &["Selector"],
+                    "call 'beamtalk_behaviour_intrinsics':'metaclassIncludesSelector'(Self, Selector)",
+                ),
+                (
+                    "test_metaclass_new",
+                    "metaclassNew",
+                    &[],
+                    "call 'beamtalk_behaviour_intrinsics':'metaclassNew'()",
+                ),
+            ],
         );
     }
 
     #[test]
-    fn test_class_class() {
-        let result = doc_to_string(generate_tower_bif("classClass", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classClass'(Self)".to_string())
+    fn generate_tower_bif_none_table() {
+        assert_bif_none_table(
+            generate_tower_bif,
+            &[("test_unknown_tower_selector", "unknownMethod", &[])],
         );
-    }
-
-    #[test]
-    fn test_class_superclass() {
-        let result = doc_to_string(generate_tower_bif("classSuperclass", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classSuperclass'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_subclasses() {
-        let result = doc_to_string(generate_tower_bif("classSubclasses", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classSubclasses'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_all_subclasses() {
-        let result = doc_to_string(generate_tower_bif("classAllSubclasses", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classAllSubclasses'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_local_methods() {
-        let result = doc_to_string(generate_tower_bif("classLocalMethods", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classLocalMethods'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_includes_selector() {
-        let result = doc_to_string(generate_tower_bif(
-            "classIncludesSelector",
-            &["Selector".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_behaviour_intrinsics':'classIncludesSelector'(Self, Selector)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_class_field_names() {
-        let result = doc_to_string(generate_tower_bif("classFieldNames", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classFieldNames'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_all_field_names() {
-        let result = doc_to_string(generate_tower_bif("classAllFieldNames", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classAllFieldNames'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_class_var_names() {
-        let result = doc_to_string(generate_tower_bif("classClassVarNames", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classClassVarNames'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_all_class_var_names() {
-        let result = doc_to_string(generate_tower_bif("classAllClassVarNames", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classAllClassVarNames'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_used_protocols() {
-        let result = doc_to_string(generate_tower_bif("classUsedProtocols", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classUsedProtocols'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_doc() {
-        let result = doc_to_string(generate_tower_bif("classDoc", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classDoc'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_set_doc() {
-        let result = doc_to_string(generate_tower_bif("classSetDoc", &["DocStr".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classSetDoc'(Self, DocStr)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_set_method_doc() {
-        let result = doc_to_string(generate_tower_bif(
-            "classSetMethodDoc",
-            &["Selector".to_string(), "DocStr".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_behaviour_intrinsics':'classSetMethodDoc'(Self, Selector, DocStr)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_class_doc_for_method() {
-        let result = doc_to_string(generate_tower_bif(
-            "classDocForMethod",
-            &["Selector".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_behaviour_intrinsics':'classDocForMethod'(Self, Selector)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_class_remove_from_system() {
-        let result = doc_to_string(generate_tower_bif("classRemoveFromSystem", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classRemoveFromSystem'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_source_file() {
-        let result = doc_to_string(generate_tower_bif("classSourceFile", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classSourceFile'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_reload() {
-        let result = doc_to_string(generate_tower_bif("classReload", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classReload'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_compile_source() {
-        let result = doc_to_string(generate_tower_bif(
-            "classCompileSource",
-            &["Selector".to_string(), "Source".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_class_refactor':'classCompileSource'(Self, Selector, Source)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_class_try_compile_source() {
-        let result = doc_to_string(generate_tower_bif(
-            "classTryCompileSource",
-            &["Selector".to_string(), "Source".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_class_refactor':'classTryCompileSource'(Self, Selector, Source)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_class_precheck_compile_source() {
-        let result = doc_to_string(generate_tower_bif(
-            "classPrecheckCompileSource",
-            &["Selector".to_string(), "Source".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_class_refactor':'classPrecheckCompileSource'(Self, Selector, Source)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_class_remove_selector() {
-        let result = doc_to_string(generate_tower_bif(
-            "classRemoveSelector",
-            &["Selector".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_class_refactor':'classRemoveSelector'(Self, Selector)".to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_class_rename_to() {
-        let result = doc_to_string(generate_tower_bif(
-            "classRenameTo",
-            &["NewName".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_class_refactor':'classRenameTo'(Self, NewName)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_class_remove_selector_if_absent() {
-        let result = doc_to_string(generate_tower_bif(
-            "classRemoveSelectorIfAbsent",
-            &["Selector".to_string(), "AbsentBlock".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_class_refactor':'classRemoveSelectorIfAbsent'(Self, Selector, AbsentBlock)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_method_lookup() {
-        let result = doc_to_string(generate_tower_bif(
-            "methodLookup",
-            &["Selector".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_method_resolver':'resolve'(Self, Selector)".to_string())
-        );
-    }
-
-    // --- Metaclass tower selectors ---
-
-    #[test]
-    fn test_metaclass_this_class() {
-        let result = doc_to_string(generate_tower_bif("metaclassThisClass", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'metaclassThisClass'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_metaclass_superclass() {
-        let result = doc_to_string(generate_tower_bif("metaclassSuperclass", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'metaclassSuperclass'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_metaclass_all_methods() {
-        let result = doc_to_string(generate_tower_bif("metaclassAllMethods", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'metaclassAllMethods'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_metaclass_class_methods() {
-        let result = doc_to_string(generate_tower_bif("metaclassClassMethods", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'metaclassClassMethods'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_metaclass_local_class_methods() {
-        let result = doc_to_string(generate_tower_bif("metaclassLocalClassMethods", &[]));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_behaviour_intrinsics':'metaclassLocalClassMethods'(Self)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_metaclass_includes_selector() {
-        let result = doc_to_string(generate_tower_bif(
-            "metaclassIncludesSelector",
-            &["Selector".to_string()],
-        ));
-        assert_eq!(
-            result,
-            Some(
-                "call 'beamtalk_behaviour_intrinsics':'metaclassIncludesSelector'(Self, Selector)"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn test_metaclass_new() {
-        let result = doc_to_string(generate_tower_bif("metaclassNew", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'metaclassNew'()".to_string())
-        );
-    }
-
-    #[test]
-    fn test_unknown_tower_selector() {
-        let result = doc_to_string(generate_tower_bif("unknownMethod", &[]));
-        assert!(result.is_none());
     }
 }
