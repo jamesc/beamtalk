@@ -18,10 +18,10 @@ fan-out machinery, which is why they live together.
 
 Extracted from `beamtalk_repl_loader` (BT-4702). It is a client of the
 loader's compile/install primitives (`compile_reload_source/4,5`,
-`install_reload_result/2`, …), which stay in `beamtalk_repl_loader` because
-the single-site class paths share them; the loader calls into this module from
-`reload_compile_and_load/4`, `install_method`, `reload_method_definition` and
-`remove_method`.
+`install_reload_result/2`, …, in `beamtalk_repl_loader_reload`), which the
+single-site class paths share; the loader modules call into this module from
+`reload_compile_and_load/4` (`_reload`), `install_method` and `remove_method`
+(`_methods`) and `reload_method_definition` (`beamtalk_repl_loader`).
 """.
 
 -export([
@@ -302,8 +302,8 @@ install_protocol_fanout(
         {NameBin, beamtalk_workspace_meta:get_protocol_source(NameBin)}
      || NameBin <- ProtocolNameBins
     ]),
-    %% A remote call into `beamtalk_repl_loader` (where `install_reload_result/2`
-    %% lives) so this install can be intercepted by `meck` — see
+    %% A remote call into `beamtalk_repl_loader_reload` (where
+    %% `install_reload_result/2` lives) so this install can be intercepted by `meck` — see
     %% `beamtalk_repl_loader_tests.erl`'s
     %% `t_protocol_reload_rollback_merges_ambient_protocol_sources`.
     case beamtalk_repl_loader_reload:install_reload_result(ProtocolResult, Path) of

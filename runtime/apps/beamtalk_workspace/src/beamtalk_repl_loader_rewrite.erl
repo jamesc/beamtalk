@@ -17,8 +17,8 @@ ChangeLog entry's sites in reverse.
 
 Extracted from `beamtalk_repl_loader` (BT-4702). It is a client of the loader's
 compile/install/source-tracking primitives (`compile_reload_source/5`,
-`install_reload_result/2`, `patch_module_target/1`, …), which stay in
-`beamtalk_repl_loader`; the loader makes no runtime calls into this module — it
+`install_reload_result/2` in `beamtalk_repl_loader_reload`; `patch_module_target/1`,
+… in `beamtalk_repl_loader_support`); the loader makes no runtime calls into this module — it
 only references the exported rewrite types (`rewrite_span()`, `rewrite_result()`,
 `installed_rewrite_site()`).
 """.
@@ -193,7 +193,7 @@ function's answer, per the ADR's own steer:
    install comes up). Rather than a distributed lock (explicitly out of
    scope — this is detect-and-reject, not a mutex), each group re-checks its
    own class's CURRENT tracked source against its snapshot immediately
-   before `?MODULE:install_reload_result/2` starts for that group. A
+   before `beamtalk_repl_loader_reload:install_reload_result/2` starts for that group. A
    mismatch (or the class no longer having a tracked source at all) means
    some other write landed in the validate-or-earlier-install window;
    `rewrite_sites/2` reports `{error, {stale_snapshot, Class}}` for that
@@ -612,8 +612,8 @@ install_rewrite_groups([{Group, Compiled} | Rest], DefinitionSite, InstalledRev)
 install_rewrite_group(Group, Compiled, Rest, DefinitionSite, InstalledRev) ->
     #rewrite_class_group{class = Class, source_path = SourcePath, new_source = NewSource} = Group,
     LoadPath = beamtalk_repl_loader_support:source_path_or_empty(SourcePath),
-    %% A remote call into `beamtalk_repl_loader` (where `install_reload_result/2`
-    %% lives) so `beamtalk_repl_loader_rewrite_sites_tests.erl`'s
+    %% A remote call into `beamtalk_repl_loader_reload` (where
+    %% `install_reload_result/2` lives) so `beamtalk_repl_loader_rewrite_sites_tests.erl`'s
     %% `partial_install_failure` coverage can intercept it via
     %% `meck:new(beamtalk_repl_loader_reload, [passthrough])` — see that test module's
     %% own moduledoc for why.

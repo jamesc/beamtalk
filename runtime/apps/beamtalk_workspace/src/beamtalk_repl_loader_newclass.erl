@@ -14,10 +14,11 @@ ChangeLog entry (`new_class/2`), plus `revert_remove_class/2`, which reinstalls
 a removed class through the same compile+install chokepoint (ADR 0113).
 
 Extracted from `beamtalk_repl_loader` (BT-4702). It is a client of the loader's
-load/activate primitives (`load_class_binary/4`, `activate_module/4`,
-`maybe_autoflush/1`, …), which stay in `beamtalk_repl_loader` because the
-single-site install paths share them; the loader makes no calls into this
-module.
+load/activate primitives (`load_class_binary/4` in
+`beamtalk_repl_loader_support`, `activate_module/4` in
+`beamtalk_repl_loader_activate`, `maybe_autoflush/1` in
+`beamtalk_repl_loader_methods`, …), which the single-site install paths share;
+the loader makes no calls into this module.
 """.
 
 -export([
