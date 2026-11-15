@@ -126,34 +126,7 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
 
     let env = setup_build_environment(path)?;
 
-    // A package directory build walks every project source file
-    // (Pass 1) before any per-file analysis runs (Pass 2), so the injected
-    // cross-file knowledge is project-complete. Declare that to the
-    // receiver-knowledge classifier (ADR 0100 Rule 2 sequencing guard).
-    // A single-file build (`beamtalk build foo.bt`) sees only that file, and
-    // a manifest-less directory build skips Pass 1 entirely — both keep the
-    // conservative `ModuleOnly` default.
-    let mut options = options.clone();
-    // Pre-WS3 dependency guard: until dependency extensions are loaded, a
-    // package with dependencies has no receiver whose method surface is
-    // provably complete. Start conservative (on whenever there are
-    // dependencies); analysis lifts it once Pass 1 has loaded every
-    // dependency's extensions (`ClassHierarchyContext::
-    // dependency_extensions_complete`; ADR 0070 WS3, BT-4608).
-    // Both flags come from the rule `lint`/`test` share.
-    let scope =
-        beamtalk_cli::manifest::PackageCheckerScope::for_manifest(env.full_manifest.as_ref());
-    options.dependency_extensions_unknown = scope.has_package_dependencies;
-    if Utf8Path::new(path).is_dir() {
-        options.knowledge_scope = scope.knowledge_scope;
-    }
-    // Set the current package so E0401/E0402 visibility checks
-    // (`check_class_visibility`/`check_alias_leaked_visibility`) actually run
-    // — they're gated on `current_package: Some(_)` and silently emit zero
-    // diagnostics otherwise. `None` for single-file/manifest-less builds,
-    // which have no package boundary to enforce.
-    options.current_package =
-        package_identity(env.pkg_manifest(), options.stdlib_mode).map(str::to_owned);
+    let options = prepare_options(&env, path, options);
     let options = &options;
 
     let dep_ctx = resolve_and_validate_dependencies(&env, options)?;
@@ -170,6 +143,151 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     post_process_package_artifacts(&env, &dep_ctx, &passes)?;
 
     Ok(())
+}
+
+/// Shape `options` for a build or check of `path`: the cross-file knowledge
+/// flags and the package identity, which depend on the manifest and on whether
+/// `path` is a package directory. Shared by `build` and `check`, which must
+/// analyse identically.
+pub(crate) fn prepare_options(
+    env: &BuildEnvironment,
+    path: &str,
+    options: &beamtalk_core::CompilerOptions,
+) -> beamtalk_core::CompilerOptions {
+    // A package directory build walks every project source file
+    // (Pass 1) before any per-file analysis runs (Pass 2), so the injected
+    // cross-file knowledge is project-complete. Declare that to the
+    // receiver-knowledge classifier (ADR 0100 Rule 2 sequencing guard).
+    // A single-file build (`beamtalk build foo.bt`) sees only that file, and
+    // a manifest-less directory build skips Pass 1 entirely — both keep the
+    // conservative `ModuleOnly` default.
+    let mut options = options.clone();
+    // Pre-WS3 dependency guard: until dependency extensions are loaded, a
+    // package with dependencies has no receiver whose method surface is
+    // provably complete. Start conservative (on whenever there are
+    // dependencies); analysis lifts it once Pass 1 has loaded every
+    // dependency's extensions (`ClassHierarchyContext::
+    // dependency_extensions_complete`; ADR 0070 WS3, BT-4608).
+    // Both flags come from the rule `lint`/`test` share.
+    let scope =
+        crate::commands::manifest::PackageCheckerScope::for_manifest(env.full_manifest.as_ref());
+    options.dependency_extensions_unknown = scope.has_package_dependencies;
+    if Utf8Path::new(path).is_dir() {
+        options.knowledge_scope = scope.knowledge_scope;
+    }
+    // Set the current package so E0401/E0402 visibility checks
+    // (`check_class_visibility`/`check_alias_leaked_visibility`) actually run
+    // — they're gated on `current_package: Some(_)` and silently emit zero
+    // diagnostics otherwise. `None` for single-file/manifest-less builds,
+    // which have no package boundary to enforce.
+    options.current_package =
+        package_identity(env.pkg_manifest(), options.stdlib_mode).map(str::to_owned);
+    options
+}
+
+/// Everything Pass 2 (per-file analysis) needs beyond Pass 1's class index,
+/// shared by `build` and `check`.
+pub(crate) struct Pass2Inputs {
+    /// `options` plus the project-known Erlang modules for `unresolved_ffi`.
+    pub(crate) options: beamtalk_core::CompilerOptions,
+    /// `stubs/` diagnostics (skipped signatures, version drift, errors).
+    pub(crate) stub_diagnostics: Vec<beamtalk_core::source_analysis::Diagnostic>,
+    /// The ADR 0075 FFI type registry.
+    pub(crate) native_type_registry:
+        Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>>,
+    /// Hash of the stub inputs, for the incremental build graph (unused by
+    /// `check`, which is always cold).
+    pub(crate) stub_inputs_hash: String,
+}
+
+/// Resolve the Pass 2 inputs: the project-known Erlang modules (BT-4022) and
+/// the ADR 0075 type registry with its stub diagnostics. Call it after native
+/// compilation so freshly compiled native modules and dependency ebins are
+/// visible; `check` calls it without compiling anything and reads only
+/// already-built artifacts.
+pub(crate) fn pass2_inputs(
+    env: &BuildEnvironment,
+    dep_ctx: &DependencyContext,
+    options: &beamtalk_core::CompilerOptions,
+) -> Pass2Inputs {
+    let options = beamtalk_core::CompilerOptions {
+        known_erlang_modules: beamtalk_core::ffi_type_specs::collect_known_erlang_modules(
+            &env.project_root,
+        ),
+        ..options.clone()
+    };
+
+    // ADR 0075: Extract type specs from OTP and dependency .beam files.
+    // Results are cached in _build/type_cache/ - incremental builds read zero
+    // .beam files when the cache is fresh.
+    let auto_extract_registry = extract_type_specs(
+        &env.layout,
+        env.pkg_manifest().is_some(),
+        options.stdlib_mode,
+    );
+    // ADR 0075 full resolution chain over the auto-extracted registry.
+    let resolved_registry = resolve_package_type_registry(
+        &env.project_root,
+        auto_extract_registry,
+        &dep_ctx.resolved_deps,
+        Some(OutputFormat::Text),
+    );
+    let stub_diagnostics: Vec<_> = resolved_registry.diagnostics().cloned().collect();
+    let ResolvedTypeRegistry {
+        registry,
+        stub_inputs_hash,
+        ..
+    } = resolved_registry;
+    Pass2Inputs {
+        options,
+        stub_diagnostics,
+        native_type_registry: registry.map(std::sync::Arc::new),
+        stub_inputs_hash,
+    }
+}
+
+/// The per-file compile context for Pass 2, built from Pass 1's `index`.
+/// Shared by `build` and `check`.
+pub(crate) fn new_compile_context<'a>(
+    env: &BuildEnvironment,
+    index: &'a class_index::ClassIndexResult,
+    native_type_registry: Option<
+        std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+    >,
+) -> CompileContext<'a> {
+    CompileContext {
+        hierarchy: ClassHierarchyContext {
+            class_module_index: index.class_module_index.clone(),
+            class_superclass_index: index.class_superclass_index.clone(),
+            pre_loaded_classes: index.all_class_infos.clone(),
+            pre_loaded_protocols: index.all_protocol_infos.clone(),
+            pre_loaded_protocol_defs: index.all_protocol_defs.clone(),
+            pre_loaded_protocol_sources: index.all_protocol_sources.clone(),
+            pre_loaded_aliases: index.all_alias_infos.clone(),
+            extension_index: index.extension_index.clone(),
+            dependency_extensions_complete: index.dependency_extensions_complete,
+        },
+        dep_registry: if index.dep_registry.is_empty() {
+            None
+        } else {
+            Some(&index.dep_registry)
+        },
+        strict_deps: env
+            .full_manifest
+            .as_ref()
+            .is_some_and(|m| m.package.strict_deps),
+        native_type_registry,
+        // ADR 0100 Rule 3: the package's `[diagnostics]` severity-override
+        // table, empty when there's no manifest or no `[diagnostics]` section.
+        diagnostics_overrides: env
+            .full_manifest
+            .as_ref()
+            .map(|m| m.diagnostics.clone())
+            .unwrap_or_default(),
+        // ADR 0127 §3: a provision shared by several users is reported once,
+        // against its protocol's file, after every file has been compiled.
+        provision_sink: crate::beam_compiler::ProvisionSink::collecting(),
+    }
 }
 
 /// When compiling a file failed, prints the provision diagnostics gathered so
@@ -200,53 +318,28 @@ fn execute_build_passes(
     // toolchain-version mismatch forces a full rebuild regardless of mtime.
     let force = force || provenance_requires_rebuild(env);
 
-    let index = build_class_index(env, dep_ctx, options, force)?;
+    let mut index = build_class_index(env, dep_ctx, options, force)?;
     let force = if index.force_pass2 { true } else { force };
 
     let native_result = compile_native_sources(env, dep_ctx, &index.class_module_index)?;
 
-    // BT-4022: collect the package's project-known Erlang modules (compiled
-    // hex-dep/native ebin dirs + own `native/*.erl`) *after* native
-    // compilation, so a fresh checkout — where rebar3 has only just produced
-    // the dep ebins this build — already sees them during Pass 2 analysis.
-    // Shadow `options` so every Pass 2 `compile_file` (and only Pass 2;
-    // Pass 1 never runs `analyse_full`) carries the set into the
-    // `unresolved_ffi` check via `AnalysisContext::with_options`.
-    let pass2_options = beamtalk_core::CompilerOptions {
-        known_erlang_modules: beamtalk_core::ffi_type_specs::collect_known_erlang_modules(
-            &env.project_root,
-        ),
-        ..options.clone()
-    };
-    let options = &pass2_options;
-
-    // ADR 0075: Extract type specs from OTP and dependency .beam files after
-    // native compilation so freshly compiled native modules are included.
-    // Results are cached in _build/type_cache/ — incremental builds read zero
-    // .beam files when the cache is fresh.
-    let auto_extract_registry = extract_type_specs(
-        &env.layout,
-        env.pkg_manifest().is_some(),
-        options.stdlib_mode,
-    );
-    // ADR 0075 full resolution chain over the auto-extracted registry.
-    let resolved_registry = resolve_package_type_registry(
-        &env.project_root,
-        auto_extract_registry,
-        &dep_ctx.resolved_deps,
-        Some(OutputFormat::Text),
-    );
-    let stub_diagnostics: Vec<_> = resolved_registry.diagnostics().cloned().collect();
-    let ResolvedTypeRegistry {
-        registry: native_type_registry,
+    // BT-4022: resolve the Pass 2 inputs *after* native compilation, so a
+    // fresh checkout - where rebar3 has only just produced the dep ebins this
+    // build - already sees them during Pass 2 analysis. Shadow `options` so every
+    // Pass 2 `compile_file` (and only Pass 2; Pass 1 never runs `analyse_full`)
+    // carries them.
+    let Pass2Inputs {
+        options: pass2_options,
+        stub_diagnostics,
+        native_type_registry,
         stub_inputs_hash,
-        ..
-    } = resolved_registry;
+    } = pass2_inputs(env, dep_ctx, options);
+    let options = &pass2_options;
     // BT-4485: inline FFI calls the FFI type table proves need no coercion
     // compile to direct calls, so the set of proved functions shapes the
     // generated code: fold it into every file's cache key with the stub inputs.
-    let stub_inputs_hash = fold_direct_ffi_proofs(stub_inputs_hash, native_type_registry.as_ref());
-    let native_type_registry = native_type_registry.map(std::sync::Arc::new);
+    let stub_inputs_hash =
+        fold_direct_ffi_proofs(stub_inputs_hash, native_type_registry.as_deref());
 
     let file_module_pairs = compute_file_module_pairs(env)?;
 
@@ -314,23 +407,13 @@ fn execute_build_passes(
     // Pass 2: compile each file with the full class → module index.
     // Reuse cached ASTs from Pass 1 to avoid re-reading and re-parsing.
     // Only compile files that have changed since last build.
-    let mut cached_asts = index.cached_asts;
+    let mut cached_asts = std::mem::take(&mut index.cached_asts);
     let mut core_files = Vec::new();
     let mut module_names = Vec::new();
-    let strict_deps = env
-        .full_manifest
-        .as_ref()
-        .is_some_and(|m| m.package.strict_deps);
-    // ADR 0100 Rule 3: the package's `[diagnostics]` severity-override
-    // table, empty when there's no manifest or no `[diagnostics]` section.
-    let diagnostics_overrides = env
-        .full_manifest
-        .as_ref()
-        .map(|m| m.diagnostics.clone())
-        .unwrap_or_default();
+    let compile_ctx = new_compile_context(env, &index, native_type_registry);
 
     // BT-4550: a broken `stubs/` file yields error-severity diagnostics
-    // (stub files are parsed too) — fail the build on those instead of
+    // (stub files are parsed too) - fail the build on those instead of
     // merely counting them in the summary while exiting 0. A wrong stub
     // silently skews FFI typing for every file. Warning-severity stub
     // diagnostics (e.g. drift warnings) still pass, via the shared gate
@@ -338,37 +421,11 @@ fn execute_build_passes(
     if crate::beam_compiler::diagnostics_are_errors(
         &stub_diagnostics,
         options,
-        &diagnostics_overrides,
+        &compile_ctx.diagnostics_overrides,
     ) {
         error!("Build failed for stub declarations");
         miette::bail!("build failed: stub declarations contain errors");
     }
-
-    let registry_ref = if index.dep_registry.is_empty() {
-        None
-    } else {
-        Some(&index.dep_registry)
-    };
-    let compile_ctx = CompileContext {
-        hierarchy: ClassHierarchyContext {
-            class_module_index: index.class_module_index.clone(),
-            class_superclass_index: index.class_superclass_index.clone(),
-            pre_loaded_classes: index.all_class_infos.clone(),
-            pre_loaded_protocols: index.all_protocol_infos.clone(),
-            pre_loaded_protocol_defs: index.all_protocol_defs.clone(),
-            pre_loaded_protocol_sources: index.all_protocol_sources.clone(),
-            pre_loaded_aliases: index.all_alias_infos.clone(),
-            extension_index: index.extension_index.clone(),
-            dependency_extensions_complete: index.dependency_extensions_complete,
-        },
-        dep_registry: registry_ref,
-        strict_deps,
-        native_type_registry,
-        diagnostics_overrides,
-        // ADR 0127 §3: a provision shared by several users is reported once,
-        // against its protocol's file, after every file has compiled.
-        provision_sink: crate::beam_compiler::ProvisionSink::collecting(),
-    };
     // Collect diagnostics from all compiled files for the summary.
     // Seed with stubs/ diagnostics (skipped signatures, version drift).
     let mut all_build_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = stub_diagnostics;
