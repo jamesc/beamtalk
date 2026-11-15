@@ -787,3 +787,73 @@ encode_diagnostics_empty_list_test() ->
     Decoded = json:decode(Result),
     ?assertEqual([], maps:get(<<"diagnostics">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+%%% BT-4901: the top-level response key set is pinned by
+%%% tests/repl-protocol/response_keys.json. The Rust `ReplResponse` struct is
+%%% checked against `rust_keys` there; every encoder in this module must emit
+%%% only keys listed in `rust_keys` or `erlang_only_keys` (keys the struct does
+%%% not model, which clients read from the raw JSON), and every
+%%% `erlang_only_keys` entry must still be emitted by some encoder.
+
+response_keys_fixture() ->
+    beamtalk_test_corpus:load_json_fixture(["tests", "repl-protocol", "response_keys.json"]).
+
+%% One decoded response from every exported top-level encoder, with its
+%% optional fields populated so their keys appear.
+all_encoder_responses() ->
+    Msg = beamtalk_test_repl:make_msg(<<"x">>, <<"id-1">>, <<"sess-1">>),
+    TJ = fun identity/1,
+    Warn = [#{message => <<"w">>, hint => <<"h">>}],
+    Meta = #{<<"line">> => 3, <<"hint">> => <<"h">>, <<"frames">> => []},
+    Results = #{
+        '$beamtalk_class' => 'TestResult',
+        total => 1,
+        passed => 1,
+        failed => 0,
+        skipped => 0,
+        duration => 0,
+        tests => [#{name => t, status => pass}]
+    },
+    Encoded = [
+        beamtalk_repl_protocol:encode_result(1, Msg, TJ, <<"out">>, Warn, fun(_) -> <<"integer">> end),
+        beamtalk_repl_protocol:encode_script_exit(0, Msg, <<"out">>, Warn),
+        beamtalk_repl_protocol:encode_error(boom, Msg, fun format_err/1, <<"out">>, Warn, Meta),
+        beamtalk_repl_protocol:encode_status(ok, Msg, TJ),
+        beamtalk_repl_protocol:encode_out(<<"chunk">>, Msg, <<"out">>),
+        beamtalk_repl_protocol:encode_need_input(<<"prompt">>, Msg),
+        beamtalk_repl_protocol:encode_loaded([#{name => "Counter"}], Msg, TJ, Warn),
+        beamtalk_repl_protocol:encode_actors([], Msg, TJ),
+        beamtalk_repl_protocol:encode_sessions([], Msg, TJ),
+        beamtalk_repl_protocol:encode_inspect(<<"state">>, Msg),
+        beamtalk_repl_protocol:encode_docs(<<"docs">>, Msg),
+        beamtalk_repl_protocol:encode_describe(#{}, #{}, Msg),
+        beamtalk_repl_protocol:encode_test_results(Results, Msg),
+        beamtalk_repl_protocol:encode_trace_result([{<<"1">>, 1}], Msg, TJ, <<"out">>, Warn),
+        beamtalk_repl_protocol:encode_completions([<<"c">>], Msg),
+        beamtalk_repl_protocol:encode_diagnostics([], Msg),
+        beamtalk_repl_protocol:encode_codegen(<<"core">>, Warn, Msg),
+        beamtalk_repl_protocol:encode_methods([], [], Msg),
+        beamtalk_repl_protocol:encode_inherited_methods([], Msg),
+        beamtalk_repl_protocol:encode_class_list([], Msg),
+        beamtalk_repl_protocol:encode_health(<<"ws">>, <<"nonce">>, Msg),
+        beamtalk_repl_protocol:encode_load_project([], [], <<"summary">>, Warn, Msg)
+    ],
+    [json:decode(E) || E <- Encoded].
+
+response_keys_emitted() ->
+    lists:usort(lists:append([maps:keys(R) || R <- all_encoder_responses()])).
+
+response_keys_are_all_declared_test() ->
+    #{<<"rust_keys">> := RustKeys, <<"erlang_only_keys">> := ErlangOnly} =
+        response_keys_fixture(),
+    Declared = lists:usort(RustKeys ++ ErlangOnly),
+    ?assertEqual([], response_keys_emitted() -- Declared).
+
+response_keys_erlang_only_entries_are_still_emitted_test() ->
+    #{<<"erlang_only_keys">> := ErlangOnly} = response_keys_fixture(),
+    ?assertEqual([], lists:usort(ErlangOnly) -- response_keys_emitted()).
+
+response_keys_erlang_only_entries_are_not_rust_keys_test() ->
+    #{<<"rust_keys">> := RustKeys, <<"erlang_only_keys">> := ErlangOnly} =
+        response_keys_fixture(),
+    ?assertEqual([], [K || K <- ErlangOnly, lists:member(K, RustKeys)]).

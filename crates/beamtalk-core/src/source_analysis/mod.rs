@@ -461,6 +461,17 @@ mod selector_shape_conformance_tests {
                 kind != "invalid",
                 "is_valid_selector({sel:?}) with kind {kind}"
             );
+            if kind != "invalid" {
+                // The shape the corpus names, derived from the character rules.
+                let derived = if sel.chars().all(is_binary_selector_char) {
+                    "binary"
+                } else if sel.ends_with(':') {
+                    "keyword"
+                } else {
+                    "unary"
+                };
+                assert_eq!(derived, kind, "kind of selector {sel:?}");
+            }
         }
     }
 }
