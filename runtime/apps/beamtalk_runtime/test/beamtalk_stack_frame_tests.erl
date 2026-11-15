@@ -1053,3 +1053,28 @@ hidden_note_matches_shared_fixture_test() ->
         end,
         Cases
     ).
+
+%%% ===================================================================
+%%% relative_to/3 (BT-4839): Windows path spellings
+%%% ===================================================================
+
+relative_to_windows_test_() ->
+    Cwd = "D:\\a\\proj",
+    R = fun(File) -> beamtalk_stack_frame:relative_to(File, Cwd, true) end,
+    [
+        {"mixed-case drive and backslashes", ?_assertEqual("src/Main.bt", R("d:\\a\\proj\\src\\Main.bt"))},
+        {"forward slashes against backslash cwd", ?_assertEqual("src/Main.bt", R("D:/a/proj/src/Main.bt"))},
+        {"case-insensitive directories", ?_assertEqual("src/Main.bt", R("D:\\A\\PROJ\\src\\Main.bt"))},
+        {"outside cwd falls back to basename", ?_assertEqual("Main.bt", R("D:\\other\\src\\Main.bt"))},
+        {"sibling sharing a name prefix is not under cwd", ?_assertEqual("Main.bt", R("D:\\a\\proj2\\Main.bt"))},
+        {"relative path unchanged", ?_assertEqual("src\\Main.bt", R("src\\Main.bt"))}
+    ].
+
+relative_to_posix_test_() ->
+    [
+        ?_assertEqual("src/Main.bt", beamtalk_stack_frame:relative_to("/w/p/src/Main.bt", "/w/p", false)),
+        ?_assertEqual("Main.bt", beamtalk_stack_frame:relative_to("/x/Main.bt", "/w/p", false)),
+        %% POSIX paths are case-sensitive.
+        ?_assertEqual("Main.bt", beamtalk_stack_frame:relative_to("/W/p/Main.bt", "/w/p", false)),
+        ?_assertEqual("src/Main.bt", beamtalk_stack_frame:relative_to("src/Main.bt", "/w/p", false))
+    ].
