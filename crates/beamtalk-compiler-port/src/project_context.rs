@@ -183,7 +183,7 @@ impl RequestScope {
                 known_erlang_modules: installed_erlang_modules(),
                 ..ProjectAnalysisContext::default()
             },
-            own_file: source_path.and_then(|path| std::fs::canonicalize(path).ok()),
+            own_file: source_path.and_then(|path| beamtalk_core::paths::canonicalize(path).ok()),
         }
     }
 

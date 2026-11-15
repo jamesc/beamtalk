@@ -63,8 +63,7 @@ pub fn run(
     // stored path resolves against whichever process later reads it, not
     // wherever `beamtalk run .` was originally invoked from, which lets an
     // unrelated later invocation collide with a stale workspace.
-    let project_root = Utf8PathBuf::from(".")
-        .canonicalize_utf8()
+    let project_root = beamtalk_core::paths::canonicalize_utf8(Utf8PathBuf::from("."))
         .map_err(|e| miette!("Failed to resolve current directory: {e}"))?;
 
     let Some(pkg) = manifest::find_manifest(&project_root)? else {
@@ -249,11 +248,12 @@ fn prepare_eval_environment(
     // and OTP app names. All commands use BeamEnvironment instead of ad-hoc assembly.
     let beam_env = BeamEnvironment::from_layout(&layout, project_root)?;
 
-    let project_path_escaped =
-        crate::beam_compiler::escape_erlang_string(&project_root.canonicalize().map_or_else(
+    let project_path_escaped = crate::beam_compiler::escape_erlang_string(
+        &beamtalk_core::paths::canonicalize(project_root).map_or_else(
             |_| project_root.to_string(),
             |p| p.to_string_lossy().into_owned(),
-        ));
+        ),
+    );
 
     // Use PID-scoped workspace ID so that if the workspace metadata or bootstrap
     // produce any per-id artifacts, concurrent invocations don't collide.

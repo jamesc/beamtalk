@@ -200,7 +200,7 @@ fn build_beam_test_command(
     // spelled differently (on Windows CI, `TMP` is the 8.3 short form
     // `C:\Users\RUNNER~1\...`), which made every frame fall back to its
     // basename.
-    if let Ok(cwd) = std::fs::canonicalize(".") {
+    if let Ok(cwd) = beamtalk_core::paths::canonicalize(".") {
         cmd.current_dir(cwd);
     }
     cmd.arg("-noshell");

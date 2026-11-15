@@ -302,8 +302,7 @@ fn extract_to_btscript_files(
                 );
             }
             // Canonicalise so the path works regardless of CWD at compile time.
-            let abs_path = fixture_path
-                .canonicalize_utf8()
+            let abs_path = beamtalk_core::paths::canonicalize_utf8(&fixture_path)
                 .into_diagnostic()
                 .wrap_err_with(|| {
                     format!("Failed to canonicalise fixture path '{fixture_path}'")

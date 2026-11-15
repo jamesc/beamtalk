@@ -336,7 +336,7 @@ fn assemble_escript(
         .into_diagnostic()
         .wrap_err("Failed to write escript builder")?;
 
-    let output_abs = std::fs::canonicalize(".")
+    let output_abs = beamtalk_core::paths::canonicalize(".")
         .into_diagnostic()?
         .join(output.as_std_path());
 

@@ -302,8 +302,8 @@ fn build_list_rows(
             let is_current = ws.project_path.as_deref().is_some_and(|ws_path| {
                 current_project_root.is_some_and(|root| {
                     // Compare canonicalized paths to handle symlinks/relative paths
-                    let root_canon = root.canonicalize().ok();
-                    let ws_canon = ws_path.canonicalize().ok();
+                    let root_canon = beamtalk_core::paths::canonicalize(root).ok();
+                    let ws_canon = beamtalk_core::paths::canonicalize(ws_path).ok();
                     match (root_canon, ws_canon) {
                         (Some(a), Some(b)) => a == b,
                         _ => root == ws_path,

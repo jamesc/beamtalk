@@ -713,9 +713,11 @@ mod tests {
         // differ. `find_package_root` canonicalises internally, so the expected
         // value must do the same to match.
         let root_utf8 =
-            camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(root).unwrap()).unwrap();
+            camino::Utf8PathBuf::from_path_buf(beamtalk_core::paths::canonicalize(root).unwrap())
+                .unwrap();
         let src_utf8 =
-            camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(&src).unwrap()).unwrap();
+            camino::Utf8PathBuf::from_path_buf(beamtalk_core::paths::canonicalize(&src).unwrap())
+                .unwrap();
 
         // From subdir, should find parent
         assert_eq!(find_package_root(&src_utf8), Some(root_utf8.clone()));
@@ -740,7 +742,8 @@ mod tests {
         let file_utf8 = camino::Utf8PathBuf::from_path_buf(src.join("foo.bt")).unwrap();
         // Canonicalise root — see find_package_root_from_subdir for rationale.
         let root_utf8 =
-            camino::Utf8PathBuf::from_path_buf(std::fs::canonicalize(root).unwrap()).unwrap();
+            camino::Utf8PathBuf::from_path_buf(beamtalk_core::paths::canonicalize(root).unwrap())
+                .unwrap();
 
         assert_eq!(find_package_root(&file_utf8), Some(root_utf8));
     }
@@ -777,7 +780,9 @@ mod tests {
         let found = find_package_root(&relative);
         std::env::set_current_dir(prev_cwd).unwrap();
 
-        let expected = camino::Utf8PathBuf::from_path_buf(root.canonicalize().unwrap()).unwrap();
+        let expected =
+            camino::Utf8PathBuf::from_path_buf(beamtalk_core::paths::canonicalize(root).unwrap())
+                .unwrap();
         assert_eq!(found, Some(expected));
     }
 
@@ -786,7 +791,9 @@ mod tests {
         // Canonical root: the pipeline reports the canonical spelling of
         // package files (`/private/var/...` on macOS, `\\?\C:\...` with
         // long names on Windows), so expected paths must start from it.
-        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(temp.path()).unwrap()).unwrap();
+        let root =
+            Utf8PathBuf::from_path_buf(beamtalk_core::paths::canonicalize(temp.path()).unwrap())
+                .unwrap();
         std::fs::write(
             root.join("beamtalk.toml"),
             "[package]\nname = \"pkg\"\nversion = \"0.1.0\"\n",

@@ -300,7 +300,7 @@ impl FileWalker {
         // `None` (gitignore handling off, or a root that cannot be
         // canonicalised) means nothing is ignored.
         let canonical_root = if self.respect_gitignore {
-            fs::canonicalize(path).ok()
+            crate::paths::canonicalize(path).ok()
         } else {
             None
         };

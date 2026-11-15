@@ -44,7 +44,10 @@ fn is_global_config_dir(candidate: &Path) -> bool {
             return true;
         }
 
-        match (fs::canonicalize(candidate), fs::canonicalize(&global)) {
+        match (
+            beamtalk_core::paths::canonicalize(candidate),
+            beamtalk_core::paths::canonicalize(&global),
+        ) {
             (Ok(candidate), Ok(global)) => candidate == global,
             _ => false,
         }

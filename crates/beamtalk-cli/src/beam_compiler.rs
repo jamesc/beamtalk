@@ -243,8 +243,7 @@ impl BeamCompiler {
             )
         })?;
 
-        let runtime_dir = runtime_dir
-            .canonicalize()
+        let runtime_dir = beamtalk_core::paths::canonicalize(&runtime_dir)
             .into_diagnostic()
             .wrap_err_with(|| {
                 format!("{RUNTIME_UNAVAILABLE_PREFIX} a resolvable runtime directory")
@@ -481,7 +480,7 @@ fn format_compilation_input(
     output_dir: &Utf8PathBuf,
     core_files: &[Utf8PathBuf],
 ) -> Result<String> {
-    let abs_output_dir = std::fs::canonicalize(output_dir)
+    let abs_output_dir = beamtalk_core::paths::canonicalize(output_dir)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to canonicalize output directory '{output_dir}'"))?;
     let abs_output_dir_str = abs_output_dir.to_string_lossy();
@@ -489,7 +488,7 @@ fn format_compilation_input(
     let core_files_str: Vec<String> = core_files
         .iter()
         .map(|p| {
-            match std::fs::canonicalize(p.as_std_path()) {
+            match beamtalk_core::paths::canonicalize(p.as_std_path()) {
                 Ok(abs_path) => {
                     format!("\"{}\"", escape_erlang_string(&abs_path.to_string_lossy()))
                 }
