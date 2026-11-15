@@ -52,9 +52,7 @@ only references the exported rewrite types (`rewrite_span()`, `rewrite_result()`
 -endif.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
-%% ChangeLog entry construction lives in its own module (BT-4683).
--define(ENTRIES, beamtalk_repl_loader_changelog_entries).
+-include("beamtalk_repl_loader.hrl").
 
 %%% ----------------------------------------------------------------------------
 %%% Multi-site rewrite types (ADR 0114) — see rewrite_sites/2's doc.

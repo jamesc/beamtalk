@@ -34,9 +34,7 @@ the single-site class paths share them; the loader calls into this module from
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
-%% ChangeLog entry construction lives in its own module (BT-4683).
--define(ENTRIES, beamtalk_repl_loader_changelog_entries).
+-include("beamtalk_repl_loader.hrl").
 
 %%% ----------------------------------------------------------------------------
 %%% ADR 0127 §11 / BT-3593: atomic protocol reload fan-out

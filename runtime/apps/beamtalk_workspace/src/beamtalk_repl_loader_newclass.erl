@@ -41,9 +41,7 @@ module.
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
-%% ChangeLog entry construction lives in its own module (BT-4683).
--define(ENTRIES, beamtalk_repl_loader_changelog_entries).
+-include("beamtalk_repl_loader.hrl").
 
 %%% ----------------------------------------------------------------------------
 %%% New-class creation (ADR 0082 Phase 1)

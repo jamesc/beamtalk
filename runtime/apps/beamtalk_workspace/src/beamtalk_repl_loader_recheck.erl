@@ -64,9 +64,7 @@ loader only for `normalize_class_source_key/1`.
 
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
-
-%% ChangeLog entry construction lives in its own module (BT-4683).
--define(ENTRIES, beamtalk_repl_loader_changelog_entries).
+-include("beamtalk_repl_loader.hrl").
 
 %% The outcome of a best-effort signature-store capture (ADR 0105 Phase 1):
 %% `{captured, Prev, Classification}` when the store call succeeded

@@ -31,13 +31,6 @@ Shared leaf helpers for the loader modules: class-name atom extraction, scoped b
     safe_atom_result/1
 ]).
 
-%% Exported for testing (only in test builds)
--ifdef(TEST).
--export([
-    maybe_add_loaded_module/2
-]).
--endif.
-
 -doc """
 ADR 0107 Phase A caller-discipline hardening: load a class-defining module's
 compiled `Binary` and compute `superclasses_losing_leaf_status/1` against
