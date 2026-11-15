@@ -12,8 +12,8 @@ use ecow::EcoString;
 
 // ── Diagnostic facts ──────────────────────────────────────────────────────
 //
-// A shared leaf between `inference/` and `validation/` (this module is a
-// dependency of both already, via `InferredType`/`DynamicReason`): each
+// A shared leaf between `inference/` and `validation/` (this module sits
+// below both in the dependency graph; each imports it directly): each
 // struct below is a plain data record of something an `inference/` site
 // *detected*, with no `Diagnostic`/message-formatting logic of its own.
 // `inference/` constructs one and hands it to the matching `validation/`
