@@ -110,9 +110,14 @@ Run `Fun` (a call to another process); if the callee is gone, return `Default`.
 
 The base policy is `classify/2`: `exit` reasons classified `dead` (`noproc`)
 or `{unreachable, _}` (`nodedown`, `noconnection`) are tolerated. Everything
-else propagates, including every `error:` and `throw:`. Sites whose callee may
-legitimately be mid-shutdown or slow say so with an option rather than
-growing a private ladder:
+else propagates, including every `error:` and `throw:`.
+
+**Contract:** `Fun` must be a call into another process (`gen_server:call/2,3`,
+`gen_server:stop/3`), never code that runs a Beamtalk block. The class-variable
+catcher audit (ADR 0130) marks this one `catch` `not-applicable-other-process`
+on that basis, and the lint cannot see a caller's `fun`.
+
+Options keep deliberate differences explicit:
 
 - `stopping => true` also tolerates the callee exiting normally or shutting
   down during the call (`normal`, `shutdown`, `{normal, _}`, `{shutdown, _}`,
@@ -122,8 +127,8 @@ growing a private ladder:
 """.
 -spec tolerate_gone(fun(() -> T), D, gone_opts()) -> T | D when T :: term(), D :: term().
 tolerate_gone(Fun, Default, Opts) ->
-    %% bt-catcher-audit: not-applicable-other-process - every caller passes a gen_server
-    %% call (or pg/other-process call) to a separate process, never a Beamtalk block
+    %% bt-catcher-audit: not-applicable-other-process - contract (see -doc): Fun is a call
+    %% into another process (gen_server:call/stop), never a Beamtalk block
     try
         Fun()
     catch
