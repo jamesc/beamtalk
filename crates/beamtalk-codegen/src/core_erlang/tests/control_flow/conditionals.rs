@@ -14,12 +14,7 @@ fn test_if_true_with_field_mutation_generates_inline_case() {
     // true branch, returning {Result, NewState} so the outer method body can
     // update its state chain.
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  increment: flag =>\n    flag ifTrue: [self.count := self.count + 1].\n    self.count\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("ctr_if_true"))
-        .expect("codegen should succeed");
-
-    eprintln!("Generated code for ifTrue: with field mutation:\n{code}");
+    let code = codegen_named(src, "ctr_if_true");
 
     // Should use inline case expression — the only runtime `ifTrue:` send is
     // the non-Boolean receiver's fallback (BT-4244). (The untyped
@@ -57,12 +52,7 @@ fn test_if_false_with_field_mutation_generates_inline_case() {
     // `flag ifFalse: [self.count := self.count - 1]` should compile to
     // an inline case expression with state threading in the false branch.
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  decrement: flag =>\n    flag ifFalse: [self.count := self.count - 1].\n    self.count\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("ctr_if_false"))
-        .expect("codegen should succeed");
-
-    eprintln!("Generated code for ifFalse: with field mutation:\n{code}");
+    let code = codegen_named(src, "ctr_if_false");
 
     assert!(
         code.contains("case "),
@@ -83,12 +73,7 @@ fn test_if_true_if_false_with_field_mutation_generates_inline_case() {
     // `flag ifTrue: [...] ifFalse: [...]` with field mutations in both
     // branches should compile to an inline case with two state-threading branches.
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  toggle: flag =>\n    flag ifTrue: [self.count := self.count + 10]\n         ifFalse: [self.count := self.count - 1].\n    self.count\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("ctr_if_true_if_false"))
-        .expect("codegen should succeed");
-
-    eprintln!("Generated code for ifTrue:ifFalse: with field mutations:\n{code}");
+    let code = codegen_named(src, "ctr_if_true_if_false");
 
     assert!(
         code.contains("case "),
@@ -119,12 +104,7 @@ fn test_if_true_without_mutation_uses_pure_inline_case() {
     // matching dynamic dispatch exactly.
     use super::pure_conditionals::{arm_between, boolean_arms, case_scope, cond_var};
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  check: flag =>\n    flag ifTrue: [42]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("ctr_no_mutation"))
-        .expect("codegen should succeed");
-
-    eprintln!("Generated code for ifTrue: without mutation:\n{code}");
+    let code = codegen_named(src, "ctr_no_mutation");
 
     let scope = case_scope(&code);
     let cond = cond_var(scope).to_string();
@@ -154,12 +134,7 @@ fn test_nested_if_true_with_field_mutation_threads_state() {
     // correctly unpack the inner {Result, State} tuple so the outer branch
     // threads state from the inner conditional.
     let src = "Actor subclass: Ctr\n  state: count = 0\n\n  nested: a and: b =>\n    a ifTrue: [\n      b ifTrue: [self.count := self.count + 100]\n    ].\n    self.count\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    let code = generate_module(&module, CodegenOptions::new("ctr_nested"))
-        .expect("codegen should succeed");
-
-    eprintln!("Generated code for nested ifTrue: with field mutation:\n{code}");
+    let code = codegen_named(src, "ctr_nested");
 
     // Should generate inline case expressions (at least two)
     let case_count = code.matches("case ").count();

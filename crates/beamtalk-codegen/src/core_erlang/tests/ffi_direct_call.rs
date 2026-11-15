@@ -7,6 +7,7 @@
 //! (`beamtalk_erlang_proxy:ffi_call_raised/8`, `/9` for a binary or map argument). Anything the FFI type table
 //! cannot prove keeps `beamtalk_erlang_proxy:direct_call/4`.
 
+use super::codegen_named;
 use beamtalk_core::semantic_analysis::type_checker::{
     FunctionSignature, NativeTypeRegistry, ParamType,
 };
@@ -331,13 +332,7 @@ fn function_without_spec_stays_on_proxy() {
 #[test]
 fn no_registry_stays_on_proxy() {
     let src = "Object subclass: Probe\n  class run: n :: Integer =>\n    Erlang erlang phash2: n\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let code = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("probe"),
-    )
-    .expect("codegen should succeed");
+    let code = codegen_named(src, "probe");
     assert_proxied(&code, "erlang", "phash2");
 }
 

@@ -179,6 +179,45 @@ receiver_literal_class_matches_shared_corpus_test() ->
         Cases
     ).
 
+%% BT-4927: the receiver token ending each source must classify as the lexer's
+%% last token does. See
+%% `source_analysis::lexer::tests::completion_negative_literal_context_matches_shared_corpus`.
+negative_literal_context_matches_shared_corpus_test() ->
+    Cases = load_fixture("completion_negative_literal_context_corpus.json"),
+    lists:foreach(
+        fun(#{<<"source">> := Source, <<"receiver_token">> := Token, <<"class">> := Class}) ->
+            Last = list_to_binary(lists:last(string:tokens(binary_to_list(Source), " \t"))),
+            ?assertEqual(Token, Last, {receiver_token, Source}),
+            Expected =
+                case Class of
+                    null -> undefined;
+                    Name -> binary_to_atom(Name, utf8)
+                end,
+            ?assertEqual(
+                Expected,
+                beamtalk_repl_editor_context:receiver_literal_class(Token),
+                {corpus_mismatch, Source}
+            )
+        end,
+        Cases
+    ).
+
+spaced_minus_is_a_binary_send_not_a_negative_literal_test() ->
+    %% `a - 5 ab`: the receiver of the prefix is the expression `a - 5`, whose
+    %% last token `5` is positive; `a -5 ab` ends in the literal `-5`.
+    ?assertEqual(
+        {expression, <<"a - 5">>, <<"ab">>},
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"a - 5 ab">>)
+    ),
+    ?assertEqual(
+        {expression, <<"a -5">>, <<"ab">>},
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"a -5 ab">>)
+    ),
+    ?assertEqual(
+        {<<"-5">>, <<"ab">>},
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"-5 ab">>)
+    ).
+
 %%====================================================================
 %% Moved from beamtalk_repl_server_tests / beamtalk_repl_ops_dev_tests (BT-4900)
 %%====================================================================

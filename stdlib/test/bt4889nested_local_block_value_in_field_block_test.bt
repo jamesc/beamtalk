@@ -1,0 +1,21 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4889: a local-only `[x := x + 1] value` nested as a NON-LAST statement inside a
+// field-writing block value must keep its write to `x`: the outer block writes a field,
+// the inner one only a local. Pinned so the lowering for that nested shape cannot be
+// removed as unreachable.
+
+TestCase subclass: Bt4889NestedLocalBlockValueInFieldBlockTest
+  field: n = 0
+
+  nestedLocalBlockInFieldBlock =>
+    x := 0
+    [
+      [x := x + 1] value
+      self.n := x
+    ] value
+    x + self.n
+
+  testNestedLocalWriteSurvivesAndFeedsTheFieldWrite =>
+    self assert: self nestedLocalBlockInFieldBlock equals: 2

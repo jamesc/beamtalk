@@ -17,7 +17,7 @@ pub(super) fn case_scope(code: &str) -> &str {
     let marker = " in case _Cond";
     let start = code
         .find(marker)
-        .expect("expected a pure-inline `in case _Cond@N of`");
+        .unwrap_or_else(|| panic!("expected a pure-inline `in case _Cond@N of`. Got:\n{code}"));
     &code[start..]
 }
 
@@ -26,7 +26,7 @@ pub(super) fn cond_var(scope: &str) -> &str {
     let marker = " in case ";
     let start = scope
         .find(marker)
-        .expect("expected a pure-inline case scrutinee")
+        .unwrap_or_else(|| panic!("expected a pure-inline case scrutinee. Got:\n{scope}"))
         + marker.len();
     let rest = &scope[start..];
     let end = rest
@@ -40,12 +40,12 @@ pub(super) fn cond_var(scope: &str) -> &str {
 pub(super) fn arm_between(scope: &str, start_marker: &str, end_marker: &str) -> String {
     let start = scope
         .find(start_marker)
-        .unwrap_or_else(|| panic!("expected arm marker {start_marker:?}"))
+        .unwrap_or_else(|| panic!("expected arm marker {start_marker:?}. Got:\n{scope}"))
         + start_marker.len();
     let rest = &scope[start..];
-    let end = rest
-        .find(end_marker)
-        .unwrap_or_else(|| panic!("expected arm end {end_marker:?} after {start_marker:?}"));
+    let end = rest.find(end_marker).unwrap_or_else(|| {
+        panic!("expected arm end {end_marker:?} after {start_marker:?}. Got:\n{scope}")
+    });
     rest[..end].chars().filter(|c| !c.is_whitespace()).collect()
 }
 
@@ -54,7 +54,7 @@ pub(super) fn arm_between(scope: &str, start_marker: &str, end_marker: &str) -> 
 pub(super) fn boolean_arms(scope: &str) -> &str {
     let end = scope
         .find("CondNoMatch")
-        .expect("expected a CondNoMatch fallback arm");
+        .unwrap_or_else(|| panic!("expected a CondNoMatch fallback arm. Got:\n{scope}"));
     &scope[..end]
 }
 
@@ -64,7 +64,6 @@ fn if_true_pure_answers_receiver_on_false_branch() {
     // (matching `False>>ifTrue: => self`), `_ -> send`.
     let src = "Value subclass: Probe\n  check: flag =>\n    flag ifTrue: [1]\n";
     let code = codegen_named(src, "bt@probe_if_true_pure");
-    eprintln!("ifTrue: pure:\n{code}");
     let scope = case_scope(&code);
 
     let cond = cond_var(scope).to_string();
@@ -97,7 +96,6 @@ fn if_true_pure_answers_receiver_on_false_branch() {
 fn if_false_pure_answers_receiver_on_true_branch() {
     let src = "Value subclass: Probe\n  check: flag =>\n    flag ifFalse: [2]\n";
     let code = codegen_named(src, "bt@probe_if_false_pure");
-    eprintln!("ifFalse: pure:\n{code}");
     let scope = case_scope(&code);
 
     let cond = cond_var(scope).to_string();
@@ -123,7 +121,6 @@ fn if_true_if_false_pure_inlines_both_branches() {
     // The issue's repro shape: `(x =:= 1) ifTrue: [1] ifFalse: [2]`.
     let src = "typed Value subclass: ProbeTyped\n  c: x :: Integer -> Integer =>\n    (x =:= 1) ifTrue: [1] ifFalse: [2]\n";
     let code = codegen_named(src, "bt@probe_if_true_if_false_pure");
-    eprintln!("ifTrue:ifFalse: pure:\n{code}");
     let scope = case_scope(&code);
 
     assert_eq!(
@@ -157,7 +154,6 @@ fn if_true_if_false_pure_inlines_both_branches() {
 fn and_pure_short_circuits_to_literal_false() {
     let src = "Value subclass: Probe\n  check: flag =>\n    flag and: [flag]\n";
     let code = codegen_named(src, "bt@probe_and_pure");
-    eprintln!("and: pure:\n{code}");
     let scope = case_scope(&code);
 
     assert_eq!(
@@ -180,7 +176,6 @@ fn and_pure_short_circuits_to_literal_false() {
 fn or_pure_short_circuits_to_literal_true() {
     let src = "Value subclass: Probe\n  check: flag =>\n    flag or: [flag]\n";
     let code = codegen_named(src, "bt@probe_or_pure");
-    eprintln!("or: pure:\n{code}");
     let scope = case_scope(&code);
 
     assert_eq!(
@@ -205,7 +200,6 @@ fn pure_inline_in_actor_method() {
     // actor method with pure blocks inlines (plain value, no tuple).
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  check: flag =>\n    flag ifTrue: [42]\n";
     let code = codegen_named(src, "ctr_pure_actor");
-    eprintln!("actor ifTrue: pure:\n{code}");
     let scope = case_scope(&code);
 
     let cond = cond_var(scope).to_string();
@@ -229,7 +223,6 @@ fn pure_inline_in_class_method() {
         "    flag ifTrue: [1] ifFalse: [2]\n",
     );
     let code = codegen_named(src, "bt@klassed_pure");
-    eprintln!("class-method ifTrue:ifFalse: pure:\n{code}");
     let scope = case_scope(&code);
 
     assert_eq!(
@@ -271,7 +264,6 @@ fn pure_inline_at_repl() {
         .map(beamtalk_cerl_doc::Document::to_pretty_string)
         .collect::<Vec<_>>()
         .join("\n");
-    eprintln!("repl ifTrue:ifFalse: pure:\n{code}");
 
     assert!(
         code.contains("case "),
@@ -289,7 +281,6 @@ fn arity_1_block_keeps_runtime_dispatch() {
     // no inline case, a plain dynamic send.
     let src = "Value subclass: Probe\n  check: flag =>\n    flag ifTrue: [:x | x]\n";
     let code = codegen_named(src, "bt@probe_arity_1");
-    eprintln!("arity-1 ifTrue::\n{code}");
 
     assert!(
         !code.contains("CondNoMatch"),
@@ -309,7 +300,6 @@ fn parenthesized_block_inlines_like_a_literal_block() {
     // `flag ifTrue: [1]`.
     let src = "Value subclass: Probe\n  check: flag =>\n    flag ifTrue: ([1])\n";
     let code = codegen_named(src, "bt@probe_paren_block");
-    eprintln!("parenthesized-block ifTrue::\n{code}");
 
     assert!(
         code.contains("CondNoMatch"),
@@ -323,7 +313,6 @@ fn block_variable_keeps_runtime_dispatch() {
     // `cond ifTrue: b` (a block held in a variable) stays dynamic.
     let src = "Value subclass: Probe\n  check: flag =>\n    b := [1].\n    flag ifTrue: b\n";
     let code = codegen_named(src, "bt@probe_block_var");
-    eprintln!("block-variable ifTrue::\n{code}");
 
     assert!(
         !code.contains("CondNoMatch"),
@@ -339,7 +328,6 @@ fn self_receiver_keeps_self_dispatch() {
     // class-side call does (a runtime send there could deadlock).
     let actor_src = "Actor subclass: Ctr\n  state: x = 0\n\n  check =>\n    self ifTrue: [1]\n";
     let actor_code = codegen_named(actor_src, "ctr_self_recv");
-    eprintln!("actor self ifTrue::\n{actor_code}");
     assert!(
         !actor_code.contains("CondNoMatch"),
         "actor self-receiver must not pure-inline. Got:\n{actor_code}"
@@ -351,7 +339,6 @@ fn self_receiver_keeps_self_dispatch() {
         "    self ifTrue: [1]\n",
     );
     let class_code = codegen_named(class_src, "bt@klassed_self_recv");
-    eprintln!("class-method self ifTrue::\n{class_code}");
     assert!(
         !class_code.contains("CondNoMatch"),
         "class-method self-receiver must not pure-inline. Got:\n{class_code}"
@@ -367,7 +354,6 @@ fn class_reference_receiver_keeps_class_dispatch() {
         "    Klassed ifTrue: [1]\n",
     );
     let code = codegen_named(src, "bt@klassed_ref_recv");
-    eprintln!("class-reference ifTrue::\n{code}");
     assert!(
         !code.contains("CondNoMatch"),
         "class-reference receiver must not pure-inline. Got:\n{code}"
@@ -382,7 +368,6 @@ fn receiver_evaluated_once() {
     // per arm.
     let src = "Value subclass: Probe\n  check: counter =>\n    counter next ifTrue: [1]\n";
     let code = codegen_named(src, "bt@probe_recv_once");
-    eprintln!("receiver-once ifTrue::\n{code}");
 
     assert!(
         code.contains("CondNoMatch"),
@@ -420,7 +405,6 @@ fn nonlocal_return_in_pure_branch_throws() {
         "    0\n",
     );
     let code = codegen_named(src, "ctr_pure_nlr");
-    eprintln!("nlr ifTrue: pure:\n{code}");
 
     assert!(
         code.contains("CondNoMatch"),
@@ -452,7 +436,6 @@ fn block_local_temp_does_not_leak_past_case() {
         "    99\n",
     );
     let code = codegen_named(src, "bt@probe_temp_scope");
-    eprintln!("temp-scope ifTrue: pure:\n{code}");
 
     assert!(
         code.contains("CondNoMatch"),
@@ -478,7 +461,6 @@ fn guarded_operator_in_actor_arm_stays_dynamic() {
     // Fixture: `stdlib/test/fixtures/actor_nlr_computed.bt`.
     let src = "Actor subclass: ActorNlrComputed\n  state: x = 0\n\n  doubleIfPositive: n =>\n    n > 0 ifTrue: [^n * 2]\n    0\n";
     let code = codegen_named(src, "bt@nlrcomputed");
-    eprintln!("guarded-op actor arm:\n{code}");
 
     assert!(
         !code.contains("CondNoMatch"),
@@ -499,7 +481,6 @@ fn guarded_operator_in_actor_receiver_still_inlines() {
     let src =
         "Actor subclass: Ctr\n  state: x = 0\n\n  check: n =>\n    (n * 2) > 10 ifTrue: [1]\n";
     let code = codegen_named(src, "ctr_guarded_recv");
-    eprintln!("guarded-op actor receiver:\n{code}");
 
     let scope = case_scope(&code);
     let fallback = &scope[scope.find("CondNoMatch").unwrap()..];
@@ -525,7 +506,6 @@ fn stateful_while_condition_tail_pure_inlines() {
         "    0\n",
     );
     let code = codegen_named(src, "bt@probe_splice_while_carry");
-    eprintln!("inline while-carry:\n{code}");
 
     assert!(
         code.contains("CondNoMatch"),
@@ -547,7 +527,6 @@ fn stateful_while_condition_full_shape_compiles() {
         "    [^loc0] value\n",
     );
     let code = codegen_named(src, "bt@probe_splice_while_full");
-    eprintln!("inline while-full:\n{code}");
 
     assert!(
         code.contains("CondNoMatch"),
@@ -570,7 +549,6 @@ fn stateful_while_condition_plain_tuple_pure_inlines() {
         "    t\n",
     );
     let code = codegen_named(src, "bt@probe_splice_while_plain");
-    eprintln!("inline while-plain:\n{code}");
 
     assert!(
         code.contains("CondNoMatch"),
@@ -592,7 +570,6 @@ fn mutation_arm_tail_still_inlines() {
         "    self.x\n",
     );
     let code = codegen_named(src, "ctr_splice_arm_tail");
-    eprintln!("inline arm-tail:\n{code}");
 
     let scope = case_scope(&code);
     let fallback = &scope[scope.find("CondNoMatch").unwrap()..];
@@ -615,7 +592,6 @@ fn vt_arm_tail_still_inlines() {
         "    x\n",
     );
     let code = codegen_named(src, "bt@probe_splice_vt_arm");
-    eprintln!("inline vt-arm:\n{code}");
 
     let scope = case_scope(&code);
     let fallback = &scope[scope.find("CondNoMatch").unwrap()..];
@@ -640,7 +616,6 @@ fn tuple_splice_fold_tail_with_field_write_compiles() {
         "      e =:= 1 ifTrue: [a + 1] ifFalse: [a]]\n",
     );
     let code = codegen_named(src, "bt@probe_splice_fold");
-    eprintln!("splice fold:\n{code}");
 
     assert_compiles_through_erlc("bt@probe_splice_fold", &code);
 }
@@ -661,7 +636,6 @@ fn operand_positions_with_pure_case_compile() {
         "    x + y\n",
     );
     let code = codegen_named(src, "bt@probe_splice_operands");
-    eprintln!("splice operands:\n{code}");
 
     assert_compiles_through_erlc("bt@probe_splice_operands", &code);
 }
@@ -672,7 +646,6 @@ fn guarded_operator_in_value_type_arm_still_inlines() {
     // inlines there.
     let src = "Value subclass: Probe\n  check: flag n: n =>\n    flag ifTrue: [n * 2]\n";
     let code = codegen_named(src, "bt@probe_vt_op_arm");
-    eprintln!("guarded-op value-type arm:\n{code}");
 
     let scope = case_scope(&code);
     let fallback = &scope[scope.find("CondNoMatch").unwrap()..];

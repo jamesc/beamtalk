@@ -2821,10 +2821,18 @@ startChild_announces_child_added_test() ->
     %% SupervisionChildAdded system announcement carrying the supervisor and
     %% child class. Subscribe a fun handler on the bus, start a child, and assert
     %% delivery with the right payload.
-    case whereis(beamtalk_announcements) of
-        undefined -> {ok, _} = beamtalk_announcements:start_link();
-        _ -> ok
-    end,
+    %% BT-4922: a bus this test starts must not outlive it. A leftover
+    %% standalone `beamtalk_announcements` makes `application:start(beamtalk_runtime)`
+    %% fail with `already_started`, so every later module that boots the runtime
+    %% (e.g. beamtalk_dispatch_tests) runs with no class monitor or class supervisor.
+    StartedBus =
+        case whereis(beamtalk_announcements) of
+            undefined ->
+                {ok, BusPid} = beamtalk_announcements:start_link(),
+                BusPid;
+            _ ->
+                undefined
+        end,
     Collector = self(),
     Handler = fun(Event) -> Collector ! {child_added, Event} end,
     {ok, SubRef} = beamtalk_announcements:subscribe(
@@ -2847,7 +2855,8 @@ startChild_announces_child_added_test() ->
     after
         beamtalk_announcements:unsubscribe(SubRef),
         ChildClassPid ! stop,
-        gen_server:stop(SupPid)
+        gen_server:stop(SupPid),
+        beamtalk_test_proc:stop(StartedBus)
     end.
 
 startChild_arity2_success_test() ->
