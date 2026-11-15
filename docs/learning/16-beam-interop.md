@@ -171,7 +171,10 @@ TestCase subclass: Ch16PracticalPatterns
 
 ## 5. Error handling at the Erlang boundary
 
-Erlang exceptions (error, exit, throw) are caught as Beamtalk `RuntimeError`:
+Erlang exceptions (error, exit, throw) are caught with `on:do:`. A call that
+fails because the function does not exist raises `RuntimeError`; a call whose
+arguments are the wrong type (a `badarg`, or no clause matching) raises
+`TypeError`. Both are an `Error`, so `on: Error do:` catches either:
 
 ```beamtalk
 TestCase subclass: Ch16ErrorHandling
@@ -183,11 +186,18 @@ TestCase subclass: Ch16ErrorHandling
     ] on: RuntimeError do: [:e | #caught]
     self assert: result equals: #caught
 
-  testErlangBadargCaught =>
-    // Wrong argument type raises RuntimeError:
+  testErlangWrongTypeCaught =>
+    // No clause of lists:reverse/1 matches 42 (not a list): TypeError
     result := [
       Erlang lists reverse: 42    // 42 is not a list
-    ] on: RuntimeError do: [:e | #caught]
+    ] on: TypeError do: [:e | #caught]
+    self assert: result equals: #caught
+
+  testErlangBadargCaught =>
+    // A BIF rejecting its argument (badarg) is also a TypeError:
+    result := [
+      Erlang erlang atom_to_list: 42    // 42 is not an atom
+    ] on: TypeError do: [:e | #caught]
     self assert: result equals: #caught
 ```
 
@@ -224,7 +234,7 @@ Type mapping is transparent — no wrapping or conversion needed.
 Beamtalk actors are gen_servers — callable from any BEAM language with
 `gen_server:call(Pid, message)`.
 
-Erlang exceptions → Beamtalk `RuntimeError` (catchable with `on:do:`).
+Erlang exceptions → Beamtalk `Error` subclasses (catchable with `on:do:`): `TypeError` for wrong-type arguments, `RuntimeError` for a missing function.
 
 ## Exercises
 
@@ -266,7 +276,7 @@ result := [Erlang lists bogus_function: 42] on: RuntimeError do: [:e | #caught]
 // result => #caught
 ```
 
-Erlang exceptions (error, exit, throw) are caught as `RuntimeError` in Beamtalk.
+A missing function raises `RuntimeError`; wrong-type arguments raise `TypeError`. Both are caught by `on: Error do:`.
 </details>
 
 Next: Chapter 17 — OTP Supervisors
