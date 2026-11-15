@@ -94,6 +94,43 @@ fn paint(mode: OutputMode, color: &str, text: &str) -> String {
 /// * Objects render as `{k: v, ...}`.
 #[must_use]
 pub fn format_value(value: &serde_json::Value, mode: OutputMode) -> String {
+    format_value_typed(value, None, mode)
+}
+
+/// Like [`format_value`], but prefers the server's top-level `value_type`
+/// tag (BT-4912) over inspecting the rendered text.
+///
+/// The tag decides the colour of a top-level `String` value, so a user
+/// `printString` that answers `3.14` (tag `object`) is no longer painted as a
+/// number. An absent or unrecognised tag, or a tag that does not describe the
+/// JSON shape (e.g. `string` on an array), falls back to the heuristic.
+/// Elements of an array are always coloured heuristically: the protocol tags
+/// only the top-level value.
+#[must_use]
+pub fn format_value_typed(
+    value: &serde_json::Value,
+    value_type: Option<&str>,
+    mode: OutputMode,
+) -> String {
+    match value {
+        serde_json::Value::String(s) => {
+            let color = match value_type {
+                Some("string" | "symbol" | "character" | "error") => Some(GREEN),
+                Some("integer" | "float") => Some(YELLOW),
+                Some("boolean" | "nil") => Some(BOLD_BLUE),
+                Some("block" | "actor" | "future" | "class" | "object") => Some(CYAN),
+                _ => None,
+            };
+            match color {
+                Some(color) => paint(mode, color, s),
+                None => format_value_heuristic(value, mode),
+            }
+        }
+        _ => format_value_heuristic(value, mode),
+    }
+}
+
+fn format_value_heuristic(value: &serde_json::Value, mode: OutputMode) -> String {
     match value {
         serde_json::Value::String(s) => {
             if (s.starts_with('#') && s.contains('<')) || s == "Block" || s.starts_with("Block/") {

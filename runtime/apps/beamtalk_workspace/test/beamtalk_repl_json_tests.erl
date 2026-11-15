@@ -1010,3 +1010,52 @@ term_to_json_future_completed_test() ->
     end,
     Result = beamtalk_repl_json:term_to_json({beamtalk_future, Pid}),
     ?assertEqual(<<"#Future<completed>">>, Result).
+
+%%% BT-4912: value_type/1 classifies the raw value, not its rendered text
+
+value_type_scalars_test() ->
+    ?assertEqual(<<"integer">>, beamtalk_repl_json:value_type(42)),
+    ?assertEqual(<<"float">>, beamtalk_repl_json:value_type(3.14)),
+    ?assertEqual(<<"boolean">>, beamtalk_repl_json:value_type(true)),
+    ?assertEqual(<<"nil">>, beamtalk_repl_json:value_type(nil)),
+    ?assertEqual(<<"symbol">>, beamtalk_repl_json:value_type(foo)),
+    ?assertEqual(<<"character">>, beamtalk_repl_json:value_type({beamtalk_character, 65})).
+
+value_type_string_test() ->
+    ?assertEqual(<<"string">>, beamtalk_repl_json:value_type({beamtalk_string, <<"3.14">>})),
+    ?assertEqual(<<"string">>, beamtalk_repl_json:value_type(<<"hi">>)).
+
+value_type_list_test() ->
+    ?assertEqual(<<"list">>, beamtalk_repl_json:value_type([])),
+    ?assertEqual(<<"list">>, beamtalk_repl_json:value_type([1, 2, 3])).
+
+value_type_block_test() ->
+    ?assertEqual(<<"block">>, beamtalk_repl_json:value_type(fun(X) -> X end)).
+
+value_type_future_test() ->
+    ?assertEqual(<<"future">>, beamtalk_repl_json:value_type({future_rejected, boom})).
+
+value_type_error_and_object_test() ->
+    ?assertEqual(
+        <<"error">>, beamtalk_repl_json:value_type(beamtalk_error:new(type_error, 'Integer'))
+    ),
+    %% A caught exception is the wrapper map, not the bare record.
+    ?assertEqual(
+        <<"error">>,
+        beamtalk_repl_json:value_type(
+            beamtalk_exception_handler:wrap(beamtalk_error:new(type_error, 'Integer'))
+        )
+    ),
+    %% Non-UTF-8 Binaries render as hex: no tag.
+    ?assertEqual(undefined, beamtalk_repl_json:value_type(<<255, 254>>)),
+    %% Untagged shapes carry no tag: the client keeps its text heuristic.
+    ?assertEqual(undefined, beamtalk_repl_json:value_type(#{a => 1})),
+    ?assertEqual(undefined, beamtalk_repl_json:value_type({1, 2})).
+
+%% The main BT-4912 case: a tagged value object (whose text comes from a user
+%% `printString`, possibly `3.14`) is an `object`, never a `float`.
+value_type_tagged_value_object_test() ->
+    ?assertEqual(
+        <<"object">>,
+        beamtalk_repl_json:value_type(#{'$beamtalk_class' => 'Point', x => 1, y => 2})
+    ).

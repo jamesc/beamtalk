@@ -25,6 +25,7 @@ Uses OTP `json` module (OTP 27+) for encoding/decoding.
 -export([
     format_error/1,
     term_to_json/1,
+    value_type/1,
     element_to_json/1,
     format_error_message/1,
     parse_json/1,
@@ -244,6 +245,83 @@ term_to_json(Value) ->
     beamtalk_transcript_stream:ensure_utf8(
         beamtalk_error:chars_to_binary(io_lib:format("~tp", [Value]))
     ).
+
+-doc """
+Classify a raw eval result for the optional top-level `value_type` tag
+(BT-4912), so a client can colour the rendered `value` without guessing from
+its text (a user `printString` answering `3.14` is an `object`, not a
+`float`).
+
+The tag names the kind of the *value*, not the text `term_to_json/1` produced:
+`string`, `integer`, `float`, `boolean`, `nil`, `symbol`, `character`, `list`,
+`block`, `actor`, `future`, `class`, `error`, `object` (a tagged value
+object). Shapes with no useful tag (plain Dictionary, tuple, bitstring) answer
+`undefined` and the field is omitted. The set is open: a
+client treats an unknown tag as absent and falls back to its heuristic.
+Element types inside a `list` are not tagged (they would change the shape of
+`value`).
+""".
+-spec value_type(term()) -> binary() | undefined.
+value_type(nil) ->
+    <<"nil">>;
+value_type(Value) when is_boolean(Value) -> <<"boolean">>;
+value_type(Value) when is_atom(Value) -> <<"symbol">>;
+value_type(Value) when is_integer(Value) -> <<"integer">>;
+value_type(Value) when is_float(Value) -> <<"float">>;
+value_type({beamtalk_string, Bin}) when is_binary(Bin) -> <<"string">>;
+value_type(Value) when is_binary(Value) ->
+    case unicode:characters_to_binary(Value, utf8, utf8) of
+        Bin when is_binary(Bin) -> <<"string">>;
+        %% A non-UTF-8 Binary renders as `<<AB CD>>` hex; no useful tag.
+        _ -> undefined
+    end;
+value_type({beamtalk_character, _}) ->
+    <<"character">>;
+value_type([]) ->
+    <<"list">>;
+value_type(Value) when is_list(Value) ->
+    %% `term_to_json/1` renders a printable Erlang charlist as a string.
+    case io_lib:printable_list(Value) of
+        true -> <<"string">>;
+        false -> <<"list">>
+    end;
+value_type(Value) when is_function(Value) -> <<"block">>;
+value_type({beamtalk_future, Pid}) when is_pid(Pid) -> <<"future">>;
+value_type({future_timeout, _}) ->
+    <<"future">>;
+value_type({future_rejected, _}) ->
+    <<"future">>;
+value_type(Value) when is_pid(Value) ->
+    case beamtalk_runtime_api:pid_label(Value) of
+        <<"#Future", _/binary>> -> <<"future">>;
+        _ -> <<"actor">>
+    end;
+value_type(#beamtalk_error{}) ->
+    <<"error">>;
+value_type(#beamtalk_object{class = 'Metaclass'}) ->
+    <<"class">>;
+value_type(#beamtalk_object{class = Class}) ->
+    case beamtalk_runtime_api:is_class_name(Class) of
+        true -> <<"class">>;
+        false -> <<"actor">>
+    end;
+value_type({beamtalk_supervisor, _, _, _}) ->
+    <<"actor">>;
+value_type(#{'$beamtalk_class' := _, error := #beamtalk_error{}}) ->
+    %% A caught exception: `ensure_wrapped/1` wraps the record in a tagged map,
+    %% which the generic clause below would call an `object`.
+    <<"error">>;
+value_type(Value) when is_map(Value) ->
+    %% Only tagged value objects (user classes, which `term_to_json/1`
+    %% renders through their `printString`) are `object`. A plain Dictionary
+    %% and the remaining shapes (tuples, bitstrings) are left untagged so the
+    %% client keeps colouring their text as before.
+    case beamtalk_runtime_api:tagged_map_class_of(Value) of
+        undefined -> undefined;
+        _ -> <<"object">>
+    end;
+value_type(_) ->
+    undefined.
 
 -doc """
 Render an element nested inside a List (BT-4203).

@@ -52,6 +52,15 @@ kind_to_class_does_not_understand_test() ->
 kind_to_class_arity_mismatch_test() ->
     ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(arity_mismatch)).
 
+%% BT-4912: kinds emitted by codegen classify as RuntimeError, not bare Error.
+kind_to_class_uninitialized_state_error_test() ->
+    ?assertEqual(
+        'RuntimeError', beamtalk_exception_handler:kind_to_class(uninitialized_state_error)
+    ).
+
+kind_to_class_stateful_block_dispatch_test() ->
+    ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(stateful_block_dispatch)).
+
 kind_to_class_pattern_mismatch_test() ->
     ?assertEqual('RuntimeError', beamtalk_exception_handler:kind_to_class(pattern_mismatch)).
 
