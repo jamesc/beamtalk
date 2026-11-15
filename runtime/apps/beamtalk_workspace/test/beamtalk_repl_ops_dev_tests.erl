@@ -214,17 +214,17 @@ list_class_methods_for_ws_empty_binary_test() ->
 %%====================================================================
 
 get_completions_empty_returns_empty_test() ->
-    ?assertEqual([], beamtalk_repl_ops_dev:get_completions(<<>>)).
+    ?assertEqual([], beamtalk_repl_ops_dev_complete:get_completions(<<>>)).
 
 %%====================================================================
 %% get_context_completions/1 and /2 -- empty paths
 %%====================================================================
 
 get_context_completions_empty_test() ->
-    ?assertEqual([], beamtalk_repl_ops_dev:get_context_completions(<<>>)).
+    ?assertEqual([], beamtalk_repl_ops_dev_complete:get_context_completions(<<>>)).
 
 get_context_completions_with_bindings_empty_test() ->
-    ?assertEqual([], beamtalk_repl_ops_dev:get_context_completions(<<>>, #{})).
+    ?assertEqual([], beamtalk_repl_ops_dev_complete:get_context_completions(<<>>, #{})).
 
 %%====================================================================
 %% handle/4 -- describe op (no runtime needed)
@@ -608,32 +608,32 @@ handle_hover_empty_code_test() ->
 hover_docs_empty_trailing_token_is_empty_test() ->
     %% `{Receiver, <<>>}` — a line ending in whitespace. Defensive: the JS
     %% client never sends this shape, but the code path exists.
-    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer ">>, <<>>, #{})).
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"Integer ">>, <<>>, #{})).
 
 hover_docs_multitoken_expression_hovers_the_trailing_word_test() ->
     %% `{expression, _, Word}` — a multi-token receiver expression; only the
     %% trailing word is offered for hover (full receiver inference is future
     %% work), and a lowercase word with no binding degrades to `<<>>`.
     ?assertEqual(
-        <<>>, beamtalk_repl_ops_dev:hover_docs(<<>>, <<"\"hello\" size c">>, <<>>, #{})
+        <<>>, beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"\"hello\" size c">>, <<>>, #{})
     ).
 
 hover_docs_bare_class_name_test() ->
     %% `{undefined, Word}` where Word classifies as a class — hover_class/2's
     %% `{class, ClassName}` branch. Whatever format_class_docs/1 returns for
     %% the real bootstrap `Integer` class, the result is always a binary.
-    Docs = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer">>, <<>>, #{}),
+    Docs = beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"Integer">>, <<>>, #{}),
     ?assert(is_binary(Docs)).
 
 hover_docs_bare_lowercase_token_is_empty_test() ->
     %% A bare lowercase token (an instance/binding) is intentionally NOT
     %% hovered in v1 — hover_class/2's non-class fallback clause.
-    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_docs(<<>>, <<"count">>, <<>>, #{})).
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"count">>, <<>>, #{})).
 
 hover_docs_class_side_method_test() ->
     %% `{Receiver, Word}` with an uppercase class receiver — hover_method/3's
     %% `{class, ClassName}` branch (format_method_doc_class_side/2).
-    Docs = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer new">>, <<>>, #{}),
+    Docs = beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"Integer new">>, <<>>, #{}),
     ?assert(is_binary(Docs)).
 
 hover_docs_instance_side_method_test() ->
@@ -641,14 +641,15 @@ hover_docs_instance_side_method_test() ->
     %% instance — hover_method/3's `{instance, ClassName}` branch
     %% (format_method_doc/2), via classify_by_binding/2's primitive_class_of
     %% path.
-    Docs = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"n printString">>, <<>>, #{n => 5}),
+    Docs = beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"n printString">>, <<>>, #{n => 5}),
     ?assert(is_binary(Docs)).
 
 hover_docs_unclassifiable_receiver_method_is_empty_test() ->
     %% hover_method/3's `undefined` branch: a lowercase receiver with no
     %% matching binding.
     ?assertEqual(
-        <<>>, beamtalk_repl_ops_dev:hover_docs(<<>>, <<"nosuchbinding printString">>, <<>>, #{})
+        <<>>,
+        beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"nosuchbinding printString">>, <<>>, #{})
     ).
 
 %%====================================================================
@@ -674,13 +675,13 @@ hover_markdown_method_keeps_doc_comment_markdown_test() ->
             "## Options\n"
             "- `timeout` - milliseconds"
         >>,
-        beamtalk_repl_ops_dev:hover_markdown(method, Help)
+        beamtalk_repl_ops_dev_complete:hover_markdown(method, Help)
     ).
 
 hover_markdown_method_without_doc_is_all_preformatted_test() ->
     ?assertEqual(
         <<"    == Integer >> foo ==\n    (inherited from Number)\n      foo">>,
-        beamtalk_repl_ops_dev:hover_markdown(
+        beamtalk_repl_ops_dev_complete:hover_markdown(
             method, <<"== Integer >> foo ==\n(inherited from Number)\n  foo">>
         )
     ).
@@ -690,15 +691,15 @@ hover_markdown_class_is_all_preformatted_test() ->
     %% by line, so the whole text stays preformatted — blank lines stay blank.
     ?assertEqual(
         <<"    == Counter < Object ==\n    A counter.\n\n    More.\n    Instance methods:\n      increment">>,
-        beamtalk_repl_ops_dev:hover_markdown(
+        beamtalk_repl_ops_dev_complete:hover_markdown(
             class,
             <<"== Counter < Object ==\nA counter.\n\nMore.\nInstance methods:\n  increment">>
         )
     ).
 
 hover_markdown_empty_is_empty_test() ->
-    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_markdown(method, <<>>)),
-    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_markdown(class, <<>>)).
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev_complete:hover_markdown(method, <<>>)),
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev_complete:hover_markdown(class, <<>>)).
 
 hover_markdown_pins_the_help_method_layout_test() ->
     %% hover_markdown/2 relies on beamtalk_repl_docs:format_method_output/4
@@ -713,7 +714,7 @@ hover_markdown_pins_the_help_method_layout_test() ->
         'Object',
         {<<"fetch: url options: opts">>, DocText, true, true}
     ),
-    Md = beamtalk_repl_ops_dev:hover_markdown(method, Help),
+    Md = beamtalk_repl_ops_dev_complete:hover_markdown(method, Help),
     [Head, Doc] = binary:split(Md, <<"\n\n">>),
     HeadLines = binary:split(Head, <<"\n">>, [global]),
     ?assertEqual(4, length(HeadLines)),
@@ -867,11 +868,13 @@ keyword_in_string_or_comment_is_none_test() ->
 hover_docs_keyword_send_unclassifiable_receiver_is_empty_test() ->
     ?assertEqual(
         <<>>,
-        beamtalk_repl_ops_dev:hover_docs(<<>>, <<"nosuchbinding at:">>, <<" 1 put: 2">>, #{})
+        beamtalk_repl_ops_dev_complete:hover_docs(
+            <<>>, <<"nosuchbinding at:">>, <<" 1 put: 2">>, #{}
+        )
     ).
 
 hover_docs_keyword_send_class_receiver_test() ->
-    Docs = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer max:">>, <<" 3">>, #{}),
+    Docs = beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"Integer max:">>, <<" 3">>, #{}),
     ?assert(is_binary(Docs)).
 
 %%====================================================================
@@ -881,11 +884,11 @@ hover_docs_keyword_send_class_receiver_test() ->
 classify_receiver_self_resolves_against_edited_class_test() ->
     ?assertEqual(
         {instance, 'Integer'},
-        beamtalk_repl_ops_dev:classify_receiver(<<"self">>, #{}, {'Integer', instance})
+        beamtalk_repl_ops_dev_complete:classify_receiver(<<"self">>, #{}, {'Integer', instance})
     ),
     ?assertEqual(
         {class, 'Integer'},
-        beamtalk_repl_ops_dev:classify_receiver(<<"self">>, #{}, {'Integer', class})
+        beamtalk_repl_ops_dev_complete:classify_receiver(<<"self">>, #{}, {'Integer', class})
     ).
 
 classify_receiver_super_resolves_against_superclass_test() ->
@@ -893,48 +896,54 @@ classify_receiver_super_resolves_against_superclass_test() ->
     ?assert(is_atom(Super) andalso Super =/= none),
     ?assertEqual(
         {instance, Super},
-        beamtalk_repl_ops_dev:classify_receiver(<<"super">>, #{}, {'Integer', instance})
+        beamtalk_repl_ops_dev_complete:classify_receiver(<<"super">>, #{}, {'Integer', instance})
     ),
     ?assertEqual(
         {class, Super},
-        beamtalk_repl_ops_dev:classify_receiver(<<"super">>, #{}, {'Integer', class})
+        beamtalk_repl_ops_dev_complete:classify_receiver(<<"super">>, #{}, {'Integer', class})
     ).
 
 classify_receiver_super_of_root_class_is_undefined_test() ->
     ?assertEqual(
         undefined,
-        beamtalk_repl_ops_dev:classify_receiver(<<"super">>, #{}, {'ProtoObject', instance})
+        beamtalk_repl_ops_dev_complete:classify_receiver(
+            <<"super">>, #{}, {'ProtoObject', instance}
+        )
     ).
 
 classify_receiver_self_without_context_is_an_ordinary_name_test() ->
-    ?assertEqual(undefined, beamtalk_repl_ops_dev:classify_receiver(<<"self">>, #{})),
+    ?assertEqual(undefined, beamtalk_repl_ops_dev_complete:classify_receiver(<<"self">>, #{})),
     ?assertEqual(
-        undefined, beamtalk_repl_ops_dev:classify_receiver(<<"self">>, #{}, undefined)
+        undefined, beamtalk_repl_ops_dev_complete:classify_receiver(<<"self">>, #{}, undefined)
     ).
 
 hover_docs_self_unary_and_keyword_match_a_literal_receiver_test() ->
     Ctx = {'Integer', instance},
     %% Unary: `self factorial` hovers exactly what `42 factorial` does.
-    Expected = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"42 factorial">>, <<>>, #{}),
+    Expected = beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"42 factorial">>, <<>>, #{}),
     ?assertNotEqual(<<>>, Expected),
     ?assertEqual(
         Expected,
-        beamtalk_repl_ops_dev:hover_docs(<<>>, <<"self factorial">>, <<>>, #{}, Ctx)
+        beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"self factorial">>, <<>>, #{}, Ctx)
     ),
     %% Keyword: `self max:` resolves like `42 max:`.
-    ExpectedKw = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"42 max:">>, <<" 3">>, #{}),
+    ExpectedKw = beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"42 max:">>, <<" 3">>, #{}),
     ?assertEqual(
         ExpectedKw,
-        beamtalk_repl_ops_dev:hover_docs(<<>>, <<"self max:">>, <<" 3">>, #{}, Ctx)
+        beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"self max:">>, <<" 3">>, #{}, Ctx)
     ),
     %% No editor class: `self` stays unresolved.
-    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_docs(<<>>, <<"self factorial">>, <<>>, #{})).
+    ?assertEqual(
+        <<>>, beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"self factorial">>, <<>>, #{})
+    ).
 
 hover_docs_class_side_self_hovers_class_methods_test() ->
-    Expected = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer new">>, <<>>, #{}),
+    Expected = beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"Integer new">>, <<>>, #{}),
     ?assertEqual(
         Expected,
-        beamtalk_repl_ops_dev:hover_docs(<<>>, <<"self new">>, <<>>, #{}, {'Integer', class})
+        beamtalk_repl_ops_dev_complete:hover_docs(
+            <<>>, <<"self new">>, <<>>, #{}, {'Integer', class}
+        )
     ).
 
 %%====================================================================
@@ -945,12 +954,12 @@ hover_docs_class_side_self_hovers_class_methods_test() ->
 %%====================================================================
 
 classify_receiver_empty_is_undefined_test() ->
-    ?assertEqual(undefined, beamtalk_repl_ops_dev:classify_receiver(<<>>, #{})).
+    ?assertEqual(undefined, beamtalk_repl_ops_dev_complete:classify_receiver(<<>>, #{})).
 
 classify_receiver_uppercase_unknown_and_unbound_is_undefined_test() ->
     ?assertEqual(
         undefined,
-        beamtalk_repl_ops_dev:classify_receiver(<<"NoSuchClassBt3337Dev">>, #{})
+        beamtalk_repl_ops_dev_complete:classify_receiver(<<"NoSuchClassBt3337Dev">>, #{})
     ).
 
 classify_receiver_lowercase_never_interned_is_undefined_test() ->
@@ -958,7 +967,7 @@ classify_receiver_lowercase_never_interned_is_undefined_test() ->
     %% has never been interned as an atom anywhere in the VM.
     ?assertEqual(
         undefined,
-        beamtalk_repl_ops_dev:classify_receiver(
+        beamtalk_repl_ops_dev_complete:classify_receiver(
             <<"__bt3337_never_interned_lowercase_token__">>, #{}
         )
     ).
@@ -966,12 +975,12 @@ classify_receiver_lowercase_never_interned_is_undefined_test() ->
 classify_receiver_non_integer_digit_leading_is_undefined_test() ->
     %% Guards against a float literal (`3.14`) being misclassified as Integer
     %% — the whole token must be digits.
-    ?assertEqual(undefined, beamtalk_repl_ops_dev:classify_receiver(<<"3.14">>, #{})).
+    ?assertEqual(undefined, beamtalk_repl_ops_dev_complete:classify_receiver(<<"3.14">>, #{})).
 
 classify_receiver_unresolvable_qualified_name_is_undefined_test() ->
     ?assertEqual(
         undefined,
-        beamtalk_repl_ops_dev:classify_receiver(<<"nosuchpkg3337@Foo">>, #{})
+        beamtalk_repl_ops_dev_complete:classify_receiver(<<"nosuchpkg3337@Foo">>, #{})
     ).
 
 %%====================================================================
@@ -994,16 +1003,16 @@ handle_methods_unknown_class_test() ->
 
 resolve_chain_type_no_registry_test() ->
     %% With no class registry running, all type lookups return undefined
-    Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"x size">>, #{}),
+    Result = beamtalk_repl_ops_dev_complete:resolve_chain_type(<<"x size">>, #{}),
     ?assertEqual(undefined, Result).
 
 resolve_chain_type_keyword_send_test() ->
     %% Keyword sends cannot be parsed as unary chains
-    Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"list inject: 0 into:">>, #{}),
+    Result = beamtalk_repl_ops_dev_complete:resolve_chain_type(<<"list inject: 0 into:">>, #{}),
     ?assertEqual(undefined, Result).
 
 resolve_chain_type_single_token_test() ->
-    Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"Integer">>, #{}),
+    Result = beamtalk_repl_ops_dev_complete:resolve_chain_type(<<"Integer">>, #{}),
     ?assertEqual(undefined, Result).
 
 %%====================================================================
@@ -1171,7 +1180,7 @@ walk_mixed_chain_class_unknown_selector_test() ->
 
 resolve_chain_type_binary_chain_no_registry_test() ->
     %% Binary chain parses OK but no registry → walk returns undefined
-    Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"counter value + 1">>, #{}),
+    Result = beamtalk_repl_ops_dev_complete:resolve_chain_type(<<"counter value + 1">>, #{}),
     ?assertEqual(undefined, Result).
 
 %% The `docs` op was hard-removed from `beamtalk_repl_ops_dev:handle/4`.
@@ -1738,7 +1747,7 @@ collect_all_methods_dedups_override() ->
     %% (see setup_dev_runtime/0). Local-overrides-wins shadowing means the
     %% overridden selector must appear exactly once — never once from
     %% WidgetDev's own local methods and again from WidgetDevBase's.
-    Result = beamtalk_repl_ops_dev:collect_all_methods('WidgetDev', 0),
+    Result = beamtalk_repl_ops_dev_complete:collect_all_methods('WidgetDev', 0),
     Occurrences = [S || S <- Result, S =:= 'inheritedGreet'],
     ?assertEqual(1, length(Occurrences)),
     %% Sanity: non-overridden local and inherited methods are still present.
@@ -1790,7 +1799,7 @@ inherited_methods_op_handle() ->
 context_completion_expression_empty_prefix() ->
     %% "WidgetDev create " — resolved instance receiver with empty prefix returns
     %% all instance methods (filter_by_prefix empty-prefix usort branch).
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev create ">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"WidgetDev create ">>),
     ?assert(lists:member(<<"render">>, Result)),
     ?assert(lists:member(<<"resize">>, Result)),
     ?assert(lists:member(<<"next">>, Result)).
@@ -1801,14 +1810,16 @@ classify_uppercase_binding() ->
     %% The binding holds an integer (primitive_class_of → 'Integer'), and the
     %% Integer fixture class is registered, so completion offers Integer methods.
     Bindings = #{'BtBindingProbe' => 99},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"BtBindingProbe ab">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(
+        <<"BtBindingProbe ab">>, Bindings
+    ),
     ?assert(lists:member(<<"abs">>, Result)).
 
 context_completion_qualified_receiver() ->
     %% "test@WidgetDev re" — the @-qualified receiver resolves to WidgetDev (a
     %% class object), so class-side completions are offered. Exercises the
     %% resolve_qualified_class_name branch inside classify_receiver/2.
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"test@WidgetDev cr">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"test@WidgetDev cr">>),
     ?assert(lists:member(<<"create">>, Result)).
 
 list_classes_user_filter_includes() ->
@@ -1872,7 +1883,7 @@ resolve_chain_type_instance_chain() ->
     %% "WidgetDev create next" — class create → instance, then next → instance.
     ?assertEqual(
         {ok, 'WidgetDev', instance},
-        beamtalk_repl_ops_dev:resolve_chain_type(<<"WidgetDev create next">>, #{})
+        beamtalk_repl_ops_dev_complete:resolve_chain_type(<<"WidgetDev create next">>, #{})
     ).
 
 test_op_known_class_returns_response() ->
@@ -2022,47 +2033,48 @@ complete_no_cursor_class_prefix_returns_class() ->
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 get_completions_matches_class() ->
-    Result = beamtalk_repl_ops_dev:get_completions(<<"WidgetD">>),
+    Result = beamtalk_repl_ops_dev_complete:get_completions(<<"WidgetD">>),
     ?assert(lists:member(<<"WidgetDev">>, Result)),
     %% A non-matching prefix yields no class names.
     ?assertEqual(
-        false, lists:member(<<"WidgetDev">>, beamtalk_repl_ops_dev:get_completions(<<"Zzz">>))
+        false,
+        lists:member(<<"WidgetDev">>, beamtalk_repl_ops_dev_complete:get_completions(<<"Zzz">>))
     ).
 
 get_completions_includes_keyword() ->
     %% "sel" should match the builtin keyword "self".
-    Result = beamtalk_repl_ops_dev:get_completions(<<"sel">>),
+    Result = beamtalk_repl_ops_dev_complete:get_completions(<<"sel">>),
     ?assert(lists:member(<<"self">>, Result)).
 
 context_completion_class_receiver() ->
     %% "WidgetDev cr" -> class-side method "create" plus ProtoObject methods.
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev cr">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"WidgetDev cr">>),
     ?assert(lists:member(<<"create">>, Result)).
 
 context_completion_class_empty_prefix() ->
     %% "WidgetDev " (empty prefix) -> all class-side methods.
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev ">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"WidgetDev ">>),
     ?assert(lists:member(<<"create">>, Result)).
 
 context_completion_integer_literal() ->
     %% Integer literal receiver -> instance methods of Integer ("abs").
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"42 ab">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"42 ab">>),
     ?assert(lists:member(<<"abs">>, Result)).
 
 context_completion_string_literal() ->
     %% String literal receiver -> String instance methods ("uppercase").
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"\"hi\" up">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"\"hi\" up">>),
     ?assert(lists:member(<<"uppercase">>, Result)).
 
 context_completion_binding_receiver() ->
     %% A lowercase binding holding an integer classifies as Integer instance.
     Bindings = #{n => 7},
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"n ab">>, Bindings),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"n ab">>, Bindings),
     ?assert(lists:member(<<"abs">>, Result)).
 
 context_completion_unknown_lowercase() ->
     %% A lowercase identifier with no binding -> no receiver classification -> [].
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"undefinedvar re">>, #{}),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"undefinedvar re">>, #{}),
     ?assertEqual([], Result).
 
 methods_op_returns_methods() ->
@@ -2262,47 +2274,47 @@ validate_selector_unknown() ->
 get_methods_for_receiver_class() ->
     %% A class-name receiver with empty prefix returns class-side methods plus
     %% ProtoObject instance methods, via get_context_completions.
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev ">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"WidgetDev ">>),
     ?assert(lists:member(<<"create">>, Result)),
     %% Instance-only methods (render) must NOT appear for a class-object receiver.
     ?assertEqual(false, lists:member(<<"render">>, Result)).
 
 resolve_chain_type_class_side() ->
     %% "WidgetDev create" — class-side send returning WidgetDev (instance).
-    Result = beamtalk_repl_ops_dev:resolve_chain_type(<<"WidgetDev create">>, #{}),
+    Result = beamtalk_repl_ops_dev_complete:resolve_chain_type(<<"WidgetDev create">>, #{}),
     ?assertEqual({ok, 'WidgetDev', instance}, Result).
 
 completions_exclude_cross_package_internal() ->
     %% HiddenDevWidget is internal and lives in the named package "test"; the
     %% REPL's implicit nil package means it must be filtered from completions.
     %% WidgetDev (public, package "test") is still offered.
-    Result = beamtalk_repl_ops_dev:get_completions(<<"">>),
+    Result = beamtalk_repl_ops_dev_complete:get_completions(<<"">>),
     %% Empty prefix short-circuits to []; use a matching prefix instead.
     ?assertEqual([], Result),
-    Hidden = beamtalk_repl_ops_dev:get_completions(<<"HiddenDev">>),
+    Hidden = beamtalk_repl_ops_dev_complete:get_completions(<<"HiddenDev">>),
     ?assertEqual(false, lists:member(<<"HiddenDevWidget">>, Hidden)),
     %% Sanity: the public class with the same package prefix IS offered.
-    Public = beamtalk_repl_ops_dev:get_completions(<<"WidgetD">>),
+    Public = beamtalk_repl_ops_dev_complete:get_completions(<<"WidgetD">>),
     ?assert(lists:member(<<"WidgetDev">>, Public)).
 
 context_completion_expression_instance_methods() ->
     %% Multi-token receiver "WidgetDev create" resolves (class-side create returns
     %% a WidgetDev instance) → complete_instance_methods filters by "re".
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev create re">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"WidgetDev create re">>),
     ?assert(lists:member(<<"render">>, Result)),
     ?assert(lists:member(<<"resize">>, Result)).
 
 context_completion_expression_class_methods() ->
     %% "WidgetDev class cr" — `class` keeps the chain on the class side, so
     %% complete_class_methods offers the class-side selector "create".
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev class cr">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"WidgetDev class cr">>),
     ?assert(lists:member(<<"create">>, Result)).
 
 context_completion_expression_unresolvable() ->
     %% A multi-token receiver whose type cannot be resolved (unknown selector,
     %% no compiler) yields []. `WidgetDev render` — render has no return-type
     %% annotation, so the chain breaks → undefined → [].
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"WidgetDev render xy">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"WidgetDev render xy">>),
     ?assertEqual([], Result).
 
 type_annotation_completion_class_name_spaced() ->
@@ -2310,7 +2322,7 @@ type_annotation_completion_class_name_spaced() ->
     %% {expression, <<"policy ::">>, <<"Widg">>}; ends_with_double_colon detects
     %% annotation position and class_name_completions offers WidgetDev, matching
     %% the static LSP path's class-name-in-annotation-position behaviour.
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"policy :: Widg">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"policy :: Widg">>),
     ?assert(lists:member(<<"WidgetDev">>, Result)),
     %% Instance/class methods must NOT leak into annotation-position completions.
     ?assertEqual(false, lists:member(<<"create">>, Result)).
@@ -2319,7 +2331,7 @@ type_annotation_completion_class_name_attached() ->
     %% "policy ::Widg" (no space before the prefix) — parse_receiver_and_prefix
     %% returns {<<"policy">>, <<"::Widg">>}; type_annotation_prefix/1 strips the
     %% leading "::" via strip_double_colon_prefix/1.
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"policy ::Widg">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"policy ::Widg">>),
     ?assert(lists:member(<<"WidgetDev">>, Result)).
 
 type_annotation_completion_class_name_attached_keyword_receiver() ->
@@ -2335,7 +2347,7 @@ type_annotation_completion_class_name_attached_keyword_receiver() ->
     %% a keyword-send receiver) and silently returned [] instead of offering
     %% class names — exactly the annotation position a method's keyword
     %% parameter list types are declared in.
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"deposit: amount ::Widg">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"deposit: amount ::Widg">>),
     ?assert(lists:member(<<"WidgetDev">>, Result)).
 
 type_annotation_completion_class_name_spaced_keyword_receiver() ->
@@ -2346,7 +2358,7 @@ type_annotation_completion_class_name_spaced_keyword_receiver() ->
     %% expression itself ends in "::", so this exercises ends_with_double_colon/1
     %% on a multi-token expression (previously only single-token "policy :: Widg"
     %% covered that path).
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"deposit: amount :: Widg">>),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"deposit: amount :: Widg">>),
     ?assert(lists:member(<<"WidgetDev">>, Result)).
 
 type_annotation_completion_alias_name() ->
@@ -2354,7 +2366,7 @@ type_annotation_completion_alias_name() ->
     %% annotation position alongside class names — the live-REPL counterpart to
     %% completion_provider.rs's add_alias_name_completions.
     AliasNames = [<<"RestartStrategy">>, <<"OtherAlias">>],
-    Result = beamtalk_repl_ops_dev:get_context_completions(
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(
         <<"policy :: Restart">>, #{}, AliasNames
     ),
     ?assert(lists:member(<<"RestartStrategy">>, Result)),
@@ -2365,7 +2377,9 @@ type_annotation_completion_empty_prefix() ->
     %% "policy :: " (nothing typed yet) — empty prefix matches every class and
     %% every live alias name, not [] (unlike get_completions/1's <<>> short-circuit).
     AliasNames = [<<"RestartStrategy">>],
-    Result = beamtalk_repl_ops_dev:get_context_completions(<<"policy :: ">>, #{}, AliasNames),
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(
+        <<"policy :: ">>, #{}, AliasNames
+    ),
     ?assert(lists:member(<<"WidgetDev">>, Result)),
     ?assert(lists:member(<<"RestartStrategy">>, Result)).
 
@@ -2374,7 +2388,7 @@ single_colon_not_annotation_position() ->
     %% NOT be mistaken for annotation position; type_annotation_prefix/1 only
     %% fires on a literal double colon. Falls through to ordinary
     %% receiver-method completion, so the alias name must not appear.
-    Result = beamtalk_repl_ops_dev:get_context_completions(
+    Result = beamtalk_repl_ops_dev_complete:get_context_completions(
         <<"policy at:">>, #{}, [<<"RestartStrategy">>]
     ),
     ?assertEqual(false, lists:member(<<"RestartStrategy">>, Result)).
@@ -2683,7 +2697,7 @@ load_word_boundary_corpus() ->
 builtin_keywords_covers_shared_vocabulary_corpus_test() ->
     Corpus = load_keyword_vocabulary_corpus(),
     ?assert(length(Corpus) > 0),
-    Keywords = beamtalk_repl_ops_dev:builtin_keywords(),
+    Keywords = beamtalk_repl_ops_dev_complete:builtin_keywords(),
     lists:foreach(
         fun(Keyword) ->
             ?assert(
