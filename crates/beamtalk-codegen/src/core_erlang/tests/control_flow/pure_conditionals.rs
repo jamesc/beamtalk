@@ -17,7 +17,7 @@ pub(super) fn case_scope(code: &str) -> &str {
     let marker = " in case _Cond";
     let start = code
         .find(marker)
-        .expect("expected a pure-inline `in case _Cond@N of`");
+        .unwrap_or_else(|| panic!("expected a pure-inline `in case _Cond@N of`. Got:\n{code}"));
     &code[start..]
 }
 
@@ -26,7 +26,7 @@ pub(super) fn cond_var(scope: &str) -> &str {
     let marker = " in case ";
     let start = scope
         .find(marker)
-        .expect("expected a pure-inline case scrutinee")
+        .unwrap_or_else(|| panic!("expected a pure-inline case scrutinee. Got:\n{scope}"))
         + marker.len();
     let rest = &scope[start..];
     let end = rest
@@ -40,12 +40,12 @@ pub(super) fn cond_var(scope: &str) -> &str {
 pub(super) fn arm_between(scope: &str, start_marker: &str, end_marker: &str) -> String {
     let start = scope
         .find(start_marker)
-        .unwrap_or_else(|| panic!("expected arm marker {start_marker:?}"))
+        .unwrap_or_else(|| panic!("expected arm marker {start_marker:?}. Got:\n{scope}"))
         + start_marker.len();
     let rest = &scope[start..];
-    let end = rest
-        .find(end_marker)
-        .unwrap_or_else(|| panic!("expected arm end {end_marker:?} after {start_marker:?}"));
+    let end = rest.find(end_marker).unwrap_or_else(|| {
+        panic!("expected arm end {end_marker:?} after {start_marker:?}. Got:\n{scope}")
+    });
     rest[..end].chars().filter(|c| !c.is_whitespace()).collect()
 }
 
@@ -54,7 +54,7 @@ pub(super) fn arm_between(scope: &str, start_marker: &str, end_marker: &str) -> 
 pub(super) fn boolean_arms(scope: &str) -> &str {
     let end = scope
         .find("CondNoMatch")
-        .expect("expected a CondNoMatch fallback arm");
+        .unwrap_or_else(|| panic!("expected a CondNoMatch fallback arm. Got:\n{scope}"));
     &scope[..end]
 }
 
