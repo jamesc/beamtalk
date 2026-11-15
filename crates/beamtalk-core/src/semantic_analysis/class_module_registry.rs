@@ -163,7 +163,7 @@ pub enum ClassModuleRegistryError {
     /// ASCII alphanumerics and underscores (mirrors `to_module_name`'s
     /// input contract).
     #[error(
-        "invalid directory name '{segment}' in source path '{path}': must contain only \
+        "invalid path segment '{segment}' in source path '{path}': must contain only \
          alphanumeric characters and underscores"
     )]
     InvalidPathSegment {

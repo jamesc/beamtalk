@@ -3,7 +3,7 @@
 ## Unreleased
 
 - **Module names come from one path rule (BT-4868).**
-  - Changed: test files are named `bt@{package}@test@{path}` by `beamtalk test` and the REPL alike (before, `beamtalk test` named them after the class; a test file under `src/` is named like any `src/` file, `bt@{package}@{path}`); `beamtalk test` fixtures and `@load` targets must now use only letters, digits and underscores in their names (`my-helper.bt` used to be normalised to `bt@my_helper`); a directory named `test` directly under `src/` is rejected (its modules would collide with `test/`); and the REPL now rejects a path segment outside `[A-Za-z0-9_]` the way `beamtalk build` does. A packaged workspace that loaded `my-class.bt` or `foo.v2.bt` now gets `invalid_path_segment`.
+  - Changed: test files are named `bt@{package}@test@{path}` by `beamtalk test` and the REPL alike (before, `beamtalk test` named them after the class; a test file under `src/` is named like any `src/` file, `bt@{package}@{path}`); `beamtalk test` fixtures and `@load` targets must now use only letters, digits and underscores in their names (`my-helper.bt` used to be normalised to `bt@my_helper`); a directory named `test` directly under `src/` is rejected (its modules would collide with `test/`); and the REPL now rejects a path segment outside `[A-Za-z0-9_]` the way `beamtalk build` does. A packaged workspace that loaded `my-class.bt` or `foo.v2.bt` now gets a compile error saying the path segment is invalid (`invalid path segment 'my-class' …`).
   - Do: rename such files to letters, digits and underscores. A loose test file outside a package's `test/` is named `bt@{stem}`, so two with the same stem in different directories collide; rename one.
 
 ## 0.5.0 — 2026-11-15
