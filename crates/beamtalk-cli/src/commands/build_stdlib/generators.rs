@@ -157,12 +157,7 @@ pub(super) fn generate_app_src_file(
     );
 
     let app_src_file = src_dir.join("beamtalk_stdlib.app.src");
-    fs::write(&app_src_file, &app_src_content)
-        .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to write '{app_src_file}'"))?;
-
-    debug!("Generated {}", app_src_file);
-    Ok(())
+    write_generated_file_if_changed(&app_src_file, &app_src_content)
 }
 
 /// Default path for generated builtins file (relative to project root).
@@ -358,9 +353,9 @@ pub(super) fn generate_builtins_rs(
 /// are emitted from the exact same `class_metadata` list computed earlier in
 /// `build_stdlib()`, so they cannot drift the way the old hand-typed
 /// `beamtalk_class_metadata:all_builtins/0` list did. `beamtalk_class_metadata.erl`
-/// includes this header and prepends the one runtime-only exception
-/// (`'Future'`, no `stdlib/src/Future.bt` source — mirrors `builtins.rs`'s
-/// `is_builtin_class` on the Rust side).
+/// includes this header and prepends `?BEAMTALK_RUNTIME_ONLY_BUILTIN_CLASSES`,
+/// emitted here from `ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES` (e.g.
+/// `'Future'`, no `.bt` source), so Rust and Erlang share one list.
 pub(super) fn generate_erlang_builtins_hrl(class_metadata: &[ClassMeta]) -> Result<()> {
     let sorted_meta = sorted_by_class_name(class_metadata);
 
@@ -391,7 +386,18 @@ pub(super) fn generate_erlang_builtins_hrl(class_metadata: &[ClassMeta]) -> Resu
         let _ = writeln!(code, "    '{}'{sep}", meta.class_name);
     }
 
-    code.push_str("]).\n\n-endif.\n");
+    code.push_str("]).\n\n");
+
+    let runtime_only = beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES
+        .iter()
+        .map(|n| format!("'{n}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let _ = writeln!(
+        code,
+        "%% Runtime-only built-ins (no .bt source); from ClassHierarchy::RUNTIME_ONLY_BUILTIN_CLASSES.\n\
+         -define(BEAMTALK_RUNTIME_ONLY_BUILTIN_CLASSES, [{runtime_only}]).\n\n-endif."
+    );
 
     let dest = Utf8PathBuf::from(GENERATED_BUILTINS_HRL_PATH);
     write_generated_file_if_changed(&dest, &code)
