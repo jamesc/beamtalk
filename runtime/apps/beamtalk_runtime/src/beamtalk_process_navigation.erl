@@ -984,7 +984,9 @@ supervisor_callback_module(Pid) ->
     end.
 
 %% Map a compiled module atom to its Beamtalk class name via the class
-%% registry, or `nil` for a non-Beamtalk (foreign) module. Reliable: it matches
+%% registry's metadata rows, or `nil` for a non-Beamtalk (foreign) module. A
+%% class whose process is down but whose row remains still resolves (the old
+%% live-class-entries read skipped it). Reliable: it matches
 %% the registry's recorded module, never reconstructs the name from text.
 %%
 %% `beamtalk_class_registry:class_name_for_module/1` reads a memoised

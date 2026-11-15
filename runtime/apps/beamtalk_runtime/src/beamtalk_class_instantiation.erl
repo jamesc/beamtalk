@@ -430,8 +430,11 @@ declared_fields(Class, BaseState) ->
 
 %% The superclass-chain walk behind `declared_fields/2`: ride the names
 %% accumulated so far inside the walked node (`{Class, Acc}`, the walker's
-%% documented accumulator pattern). A cycle answers `not_found` (and warns,
-%% via `walk_or_warn/4`), so the caller falls back to the state keys.
+%% documented accumulator pattern). A cycle answers `not_found`, so the caller
+%% falls back to the state keys. Deliberately `walk_ancestors/3`, not
+%% `walk_or_warn/4`: `declared_fields/2` does not cache `not_found`, so a
+%% warning would repeat on every `new:`/`spawnWith:` of a cyclic class (the
+%% walk was silent before this was a shared walker, too).
 -spec declared_fields_walk(class_name()) -> {ok, [term()]} | not_found.
 declared_fields_walk(Class) ->
     StepFun = fun({Level, Acc}, _Depth) ->
@@ -462,11 +465,10 @@ declared_fields_walk(Class) ->
                 not_found
         end
     end,
-    Ctx = #{node_name => fun({Level, _Acc}) -> Level end},
-    case beamtalk_hierarchy:walk_or_warn({Class, []}, StepFun, declared_fields_walk, Ctx) of
+    case beamtalk_hierarchy:walk_ancestors({Class, []}, StepFun, ?MAX_HIERARCHY_DEPTH) of
         {found, Walked} -> Walked;
         not_found -> not_found;
-        {cycle, _} -> not_found
+        {max_depth_exceeded, _} -> not_found
     end.
 
 %% One level's own declared names. The published instance variables are the

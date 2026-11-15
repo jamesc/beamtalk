@@ -38,6 +38,8 @@ Keys are caller-chosen terms; namespace them with a leading tag
 `{class_method_owner, ClassPid, Selector}`,
 `{inherited_target, Class, Selector}`, `{declared_fields, Class}`,
 `{chain_has_user_new1, Class}`, `{chain_has_user_new0, Class}`,
+`module_to_class_map` (a bare atom: the whole module -> class-name map behind
+`beamtalk_class_registry:class_name_for_module/1`),
 `{direct_constructor, ClassPid, Selector}`).
 `chain_has_user_new1` is whether an ancestor of `Class` defines a user
 class-side `new:` (`beamtalk_class_metadata:chain_has_user_new1/1`, BT-4409);
