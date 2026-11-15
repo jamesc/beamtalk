@@ -32,7 +32,7 @@ pub mod exit_codes {
 /// `what` is a gerund-free noun phrase used in both messages, e.g.
 /// `"strip release beams"` -> "Failed to run erl to strip release beams" and
 /// "strip release beams failed:\n<output>". Callers that interpret the exit
-/// status themselves (erlfmt, `generate stubs`, the EUnit runner) build their
+/// status themselves (erlfmt, `generate stubs`, the `EUnit` runner) build their
 /// own command instead.
 ///
 /// # Errors
