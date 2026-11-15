@@ -719,8 +719,8 @@ AGENTS.md's "No duplicate implementations" rule). The package name is read from
 Returns an empty map (no entries, never a crash) when the package name cannot be
 determined or `src/` is absent — the caller then falls back to the live registry
 alone, exactly the previous behaviour. A single file that fails to index (an
-`invalid_path_segment` from a filename outside `[A-Za-z0-9_]`, or a transport
-failure) is skipped with a logged warning rather than failing the whole index —
+`invalid_path_segment` from a filename outside `[A-Za-z0-9_]`,
+`reserved_test_directory` for a `src/test/` file, or a transport failure) is skipped with a logged warning rather than failing the whole index —
 the same best-effort contract the previous implementation had.
 """.
 -spec build_source_class_module_index(string(), binary() | undefined) ->

@@ -252,7 +252,9 @@ pub enum ModuleRootKind {
     /// `bt@{package}@{path}`.
     Src,
     /// The path is relative to the package's `test/` directory:
-    /// `bt@{package}@test@{path}`.
+    /// `bt@{package}@test@{path}`. A file in a directory named `fixtures` (at
+    /// any depth, the directories `beamtalk test` skips when it looks for test
+    /// files) is a fixture and is named `bt@{stem}`, like an out-of-tree file.
     Test,
     /// The file is under neither root (`examples/`, a fixture, a loose
     /// file): `bt@{stem}` from the file name alone.
@@ -314,6 +316,14 @@ pub fn module_name_for_path(
         return Err(ClassModuleRegistryError::ReservedTestDirectory {
             path: path.to_string(),
         });
+    }
+    // A fixture under `test/` is `bt@{stem}`, whatever its depth.
+    if root == ModuleRootKind::Test
+        && segments[..segments.len() - 1]
+            .iter()
+            .any(|s| s == "fixtures")
+    {
+        return Ok(format!("bt@{}", segments[segments.len() - 1]));
     }
     let joined = segments.join("@");
     Ok(match root {
@@ -865,6 +875,20 @@ mod tests {
                 "{path:?} {kind:?} should be rejected"
             );
         }
+    }
+
+    #[test]
+    fn module_name_for_path_names_test_fixtures_by_stem() {
+        let test = |p: &str| module_name_for_path(Utf8Path::new(p), "web", ModuleRootKind::Test);
+        assert_eq!(test("fixtures/Helper.bt").unwrap(), "bt@helper");
+        assert_eq!(test("http1/fixtures/Helper.bt").unwrap(), "bt@helper");
+        // A file called fixtures.bt, or a src/ file in a fixtures directory, is not one.
+        assert_eq!(test("fixtures.bt").unwrap(), "bt@web@test@fixtures");
+        assert_eq!(
+            module_name_for_path(Utf8Path::new("fixtures/a.bt"), "web", ModuleRootKind::Src)
+                .unwrap(),
+            "bt@web@fixtures@a"
+        );
     }
 
     #[test]

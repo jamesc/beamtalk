@@ -2219,7 +2219,8 @@ compute_package_module_name(Path) ->
 
 %% Which root `AbsPath` is under, and its `/`-joined path relative to it:
 %% `src/`, then `test/`, else `none` (the whole path; the port uses only the
-%% file name). The directory itself is not a file to name a module after.
+%% file name). Which `test/` files are fixtures is the port's call, not this
+%% module's. The directory itself is not a file to name a module after.
 -spec module_root_and_relative_path(string(), string()) -> {src | test | none, string()}.
 module_root_and_relative_path(AbsPath, ProjectRoot) ->
     case relative_below(AbsPath, ProjectRoot, "src") of
@@ -2227,24 +2228,10 @@ module_root_and_relative_path(AbsPath, ProjectRoot) ->
             {src, Rel};
         undefined ->
             case relative_below(AbsPath, ProjectRoot, "test") of
-                {ok, Rel} ->
-                    %% `beamtalk test` names a fixture (any file in a directory
-                    %% named `fixtures` under test/) by its stem, like any
-                    %% out-of-tree file, so the loader does too.
-                    case in_fixtures_dir(Rel) of
-                        true -> {none, AbsPath};
-                        false -> {test, Rel}
-                    end;
-                undefined ->
-                    {none, AbsPath}
+                {ok, Rel} -> {test, Rel};
+                undefined -> {none, AbsPath}
             end
     end.
-
-%% Whether a `/`-joined path relative to `test/` has a directory named `fixtures`
-%% (the directory `beamtalk test` treats as fixtures), at any depth.
--spec in_fixtures_dir(string()) -> boolean().
-in_fixtures_dir(Rel) ->
-    lists:member("fixtures", lists:droplast(string:split(Rel, "/", all))).
 
 -spec relative_below(string(), string(), string()) -> {ok, string()} | undefined.
 relative_below(AbsPath, ProjectRoot, SubDir) ->
