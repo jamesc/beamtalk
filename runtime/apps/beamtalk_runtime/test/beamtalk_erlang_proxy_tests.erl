@@ -2534,6 +2534,8 @@ selector_result_to_string({error, Bin}) -> unicode:characters_to_list(Bin).
 %%% BT-4866: `function_clause` classification and nested-String retry
 %%% ===================================================================
 
+%% The module is named `beamtalk_*`, so its derived mode is `beamtalk`: every
+%% call here passes `stock` (or `beamtalk`) explicitly.
 fc_tagged(Bin) -> {beamtalk_string, Bin}.
 
 function_clause_at_target_head_is_type_error_test() ->
@@ -2544,10 +2546,10 @@ function_clause_at_target_head_is_type_error_test() ->
         fun(#beamtalk_error{} = Inner) ->
             ?assertMatch(#{erlang_error := function_clause}, Inner#beamtalk_error.details),
             Msg = Inner#beamtalk_error.message,
-            ?assert(beamtalk_test_assert:contains(Msg, <<"no clause">>)),
+            ?assert(beamtalk_test_assert:contains(Msg, <<"No clause">>)),
             ?assert(beamtalk_test_assert:contains(Msg, <<"fc_sizes/1">>))
         end,
-        beamtalk_erlang_proxy:direct_call(?MODULE, fc_sizes, [[1]])
+        beamtalk_erlang_proxy:direct_call(?MODULE, fc_sizes, [[1]], stock)
     ).
 
 function_clause_deeper_in_callee_is_runtime_error_test() ->
@@ -2557,27 +2559,27 @@ function_clause_deeper_in_callee_is_runtime_error_test() ->
         'ErlangModule',
         _,
         #{erlang_error := function_clause},
-        beamtalk_erlang_proxy:direct_call(?MODULE, fc_wrap, [[1]])
+        beamtalk_erlang_proxy:direct_call(?MODULE, fc_wrap, [[1]], stock)
     ).
 
 function_clause_wrong_arity_is_still_arity_mismatch_test() ->
     ?assertBtError(
-        arity_mismatch, beamtalk_erlang_proxy:direct_call(?MODULE, fc_sizes, [[1], extra])
+        arity_mismatch, beamtalk_erlang_proxy:direct_call(?MODULE, fc_sizes, [[1], extra], stock)
     ).
 
 function_clause_nested_string_retries_unwrapped_test() ->
     Args = [[fc_tagged(<<"ab">>), fc_tagged(<<"cde">>)]],
-    ?assertEqual([2, 3], beamtalk_erlang_proxy:direct_call(?MODULE, fc_sizes, Args)),
+    ?assertEqual([2, 3], beamtalk_erlang_proxy:direct_call(?MODULE, fc_sizes, Args, stock)),
     ?assertEqual(
         [2, 3],
-        beamtalk_erlang_proxy:native_call(?MODULE, fc_sizes, Args, {'Fixture', 'sizes:'})
+        beamtalk_erlang_proxy:native_call(?MODULE, fc_sizes, Args, {'Fixture', 'sizes:'}, stock)
     ).
 
 function_clause_nested_string_retry_through_wrapper_test() ->
     %% The failure is deeper than the target; the retry still applies.
     ?assertEqual(
         [2],
-        beamtalk_erlang_proxy:direct_call(?MODULE, fc_wrap, [[fc_tagged(<<"ab">>)]])
+        beamtalk_erlang_proxy:direct_call(?MODULE, fc_wrap, [[fc_tagged(<<"ab">>)]], stock)
     ).
 
 function_clause_beamtalk_mode_does_not_retry_test() ->
@@ -2594,12 +2596,12 @@ function_clause_retries_only_when_a_nested_string_exists_test() ->
     %% exactly once.
     erlang:erase(fc_calls),
     ?assertBtError(
-        runtime_error, beamtalk_erlang_proxy:direct_call(?MODULE, fc_counted, [not_a_binary])
+        runtime_error, beamtalk_erlang_proxy:direct_call(?MODULE, fc_counted, [not_a_binary], stock)
     ),
     ?assertEqual(1, erlang:get(fc_calls)),
     %% A nested String: one failed attempt, one unwrapped retry.
     erlang:erase(fc_calls),
     ?assertEqual(
-        2, beamtalk_erlang_proxy:direct_call(?MODULE, fc_counted, [[fc_tagged(<<"ab">>)]])
+        2, beamtalk_erlang_proxy:direct_call(?MODULE, fc_counted, [[fc_tagged(<<"ab">>)]], stock)
     ),
     ?assertEqual(2, erlang:get(fc_calls)).
