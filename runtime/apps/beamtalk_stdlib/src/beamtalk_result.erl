@@ -19,11 +19,11 @@ Provides two entry points:
   `{ok, V} | {error, R}`, for native Erlang code that receives a `Result`
   from a Beamtalk send (BT-4556).
 
-- `tryDo:/1` — Implements the `Result tryDo: block` class method.
+- `tryDo/1` — Implements the `Result tryDo: block` class method.
   Evaluates a block (Erlang fun), catching any exception and returning
   it as a `Result error:`.
 
-- `tryDo:/2` — The Tier 2 twin of `tryDo:/1` (ADR 0131 §5). Evaluates a
+- `tryDo/2` — The Tier 2 twin of `tryDo/1` (ADR 0131 §5). Evaluates a
   stateful block (`fun(StateAcc) -> {Value, StateAcc1}`) that writes outer
   locals, answering `{Result, StateAcc}` so codegen can rebind them.
 

@@ -874,12 +874,12 @@ The catch boundary stays in the runtime; codegen only chooses the arity.
 `beamtalk_result` gains one clause:
 
 ```erlang
-%% ADR 0131: the Tier 2 twin of 'tryDo:'/1. `Block` is fun(StateAcc) ->
+%% ADR 0131: the Tier 2 twin of 'tryDo'/1. `Block` is fun(StateAcc) ->
 %% {Value, StateAcc1}. A raise inside the block discards its local writes
 %% (the StateAcc the caller passed in is returned) exactly as it discards
 %% its class-variable writes (protect/1), and as on:do: does.
--spec 'tryDo:'(fun((map()) -> {term(), map()}), map()) -> {t(), map()}.
-'tryDo:'(Block, StateAcc) when is_function(Block, 1) ->
+-spec 'tryDo'(fun((map()) -> {term(), map()}), map()) -> {t(), map()}.
+'tryDo'(Block, StateAcc) when is_function(Block, 1) ->
     try beamtalk_class_vars:protect(fun() -> Block(StateAcc) end) of
         {Value, StateAcc1} -> {from_tagged_tuple({ok, Value}), StateAcc1}
     catch
@@ -891,13 +891,13 @@ The catch boundary stays in the runtime; codegen only chooses the arity.
 ```
 
 `protect/1`, `?IS_NLR`, `ensure_wrapped` and `from_tagged_tuple` are the
-same calls `'tryDo:'/1` makes, so the Tier 1 and Tier 2 paths share one
+same calls `'tryDo'/1` makes, so the Tier 1 and Tier 2 paths share one
 implementation of the boundary rather than a copy across the Rust/Erlang
 line (CLAUDE.md § No duplicate implementations). Codegen, when the argument
 is a Tier 2 block literal, emits `call 'beamtalk_result':'tryDo'(Block,
 StateAcc)` and treats the result as a `StateAcc`-carrying construct tuple:
 it is a §1 producer exactly like a `StateAcc`-mode loop, with no new
-`OnDoCatch` clause shape. `'tryDo:'/1` is unchanged for Tier 1 blocks and
+`OnDoCatch` clause shape. `'tryDo'/1` is unchanged for Tier 1 blocks and
 dynamic sends. A runtime ↔ codegen conformance fixture (a `.bt` that
 exercises both arities and asserts identical `Result`s, class-variable
 state and local state on the raising and non-raising paths) is the
@@ -924,7 +924,7 @@ write. The block is lowered as a `BranchArm` frame over the fun's `StateAcc`
 parameter, with the same rule as a conditional arm
 (`conditional_arms_lower_as_producer`), so a loop, fold, conditional or
 `on:do:` inside it rebinds its locals into that frame. In the REPL the fun
-runs over the bindings map itself, so `'tryDo:'/2` answers the `{Value,
+runs over the bindings map itself, so `'tryDo'/2` answers the `{Value,
 Bindings}` tuple the REPL assembler unpacks.
 
 ### 6. A Tier 2 block with no return channel is a compile error

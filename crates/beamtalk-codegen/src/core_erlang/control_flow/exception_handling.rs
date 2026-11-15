@@ -853,7 +853,7 @@ impl CoreErlangGenerator {
     /// the bindings map under their plain names (the REPL's inlined arm
     /// statements read and write plain keys, as an `on:do:` arm does). The
     /// block body is the inlined arm over a `StateAcc` that is the bindings
-    /// map itself, so `tryDo:/2` answers the `{Value, Bindings}` tuple the REPL
+    /// map itself, so `tryDo/2` answers the `{Value, Bindings}` tuple the REPL
     /// assembler unpacks, with the entry bindings on a raise:
     ///
     /// ```erlang

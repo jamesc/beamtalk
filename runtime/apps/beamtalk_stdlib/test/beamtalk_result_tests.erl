@@ -398,7 +398,7 @@ unwrap_error_shim_raises_signal_test() ->
     end.
 
 %%% ============================================================================
-%%% tryDo:/2 — the Tier 2 twin (ADR 0131 §5, BT-3750)
+%%% tryDo/2 — the Tier 2 twin (ADR 0131 §5, BT-3750)
 %%% ============================================================================
 
 try_do_2_success_keeps_local_writes_test() ->
@@ -465,7 +465,7 @@ try_do_2_nlr_passes_through_test() ->
 try_do_2_non_fun_raises_type_error_test() ->
     try
         beamtalk_result:tryDo(fun() -> ok end, #{}),
-        ?assert(false, "tryDo:/2 should have raised a type_error")
+        ?assert(false, "tryDo/2 should have raised a type_error")
     catch
         error:Caught ->
             #{error := Inner} = Caught,
