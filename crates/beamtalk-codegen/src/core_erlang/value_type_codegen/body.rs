@@ -492,9 +492,9 @@ impl CoreErlangGenerator {
     ///   element 1 is the meaningful collected/folded result.
     ///
     /// Used both to unwrap such a construct as a method's last expression
-    /// ([`Self::emit_vt_last_expr`]) and to detect a threading-construct assignment RHS. All branches use the same predicates
-    /// that route these to their `VtBodyExprKind`, so detection and the open-extraction path
-    /// stay consistent.
+    /// ([`Self::emit_vt_last_expr`]) and to detect a threading-construct assignment
+    /// RHS. All branches use the same predicates that route these to their
+    /// `VtBodyExprKind`, so detection and the open-extraction path stay consistent.
     ///
     /// `do:` is excluded — its value-type codegen already returns a bare `nil`.
     pub(in crate::core_erlang) fn expr_yields_vt_threaded_tuple(&self, expr: &Expression) -> bool {
@@ -1398,9 +1398,10 @@ impl CoreErlangGenerator {
     /// construct that yields a `{value, StateAcc}` tuple (a `whileTrue:`/`whileFalse:` or
     /// counted loop, or a `collect:`/`select:`/`reject:`/`inject:into:` foldl list-op).
     ///
-    /// Used to rebind the threaded locals
-    /// after extracting them from the `StateAcc`. Returns the same set the construct's
-    /// codegen packed into the `StateAcc` (`loop_threaded_locals`).
+    /// Used by the callers of [`Self::emit_vt_loop_open_extraction`] (the loop / fold opens and
+    /// the conditional branch builder) to rebind the threaded locals after extracting them
+    /// from the `StateAcc`. Returns the same set the construct's codegen packed into the
+    /// `StateAcc` (`loop_threaded_locals`).
     pub(in crate::core_erlang) fn vt_construct_threaded_locals(
         &self,
         expr: &Expression,
