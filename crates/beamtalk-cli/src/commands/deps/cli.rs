@@ -563,6 +563,7 @@ pub(super) fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<
             &manifest,
             old_lock.as_ref(),
             &graph::Unlock::Subtree(target_name),
+            false,
         )?;
     } else {
         // Update all git and registry deps
@@ -570,18 +571,16 @@ pub(super) fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<
             println!("No git, registry, or native dependencies to update");
             return Ok(());
         }
+        // Native locks are cleared in the same write, so the next build
+        // re-resolves them via rebar3.
         relock(
             project_root,
             &manifest,
             old_lock.as_ref(),
             &graph::Unlock::All,
+            has_native_locks,
         )?;
-
-        // Clear native package locks so the next build re-resolves via rebar3
         if has_native_locks {
-            let mut lockfile = Lockfile::read(project_root)?.unwrap_or_default();
-            lockfile.clear_native_packages();
-            lockfile.write(project_root)?;
             println!("Cleared native package locks — next build will re-resolve via rebar3");
         }
     }
@@ -599,6 +598,7 @@ fn relock(
     manifest: &manifest::ParsedManifest,
     old_lock: Option<&Lockfile>,
     unlock: &graph::Unlock<'_>,
+    clear_native_locks: bool,
 ) -> Result<()> {
     let has_registry_locks =
         old_lock.is_some_and(|l| l.packages.values().any(|e| e.registry_version.is_some()));
@@ -615,7 +615,10 @@ fn relock(
         registry::ensure_index(&registry_location, project_root, true)?;
     }
 
-    let relocked = graph::relock_dependency_graph(project_root, unlock)?;
+    let mut relocked = graph::relock_dependency_graph(project_root, unlock)?;
+    if clear_native_locks {
+        relocked.lockfile.clear_native_packages();
+    }
     relocked.lockfile.write(project_root)?;
 
     let old_packages = old_lock.map(|l| &l.packages);
