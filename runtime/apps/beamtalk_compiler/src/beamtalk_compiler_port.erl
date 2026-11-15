@@ -35,7 +35,9 @@ verification that BEAM can invoke the Rust compiler via a port.
     find_selector_send_spans/4,
     find_definition_selector_spans/6,
     build_class_module_index_in_source/4,
-    close/1
+    close/1,
+    port_roundtrip/6,
+    add_compile_options/2
 ]).
 
 -ifdef(TEST).
@@ -49,11 +51,122 @@ verification that BEAM can invoke the Rust compiler via a port.
 
 -include_lib("kernel/include/logger.hrl").
 
+%% Default per-request budget for a port round trip.
+-define(PORT_TIMEOUT_MS, 30000).
+%% Completion lookups run on the REPL keystroke path, so they get a shorter
+%% budget — latency budget per ADR 0045.
+-define(COMPLETION_TIMEOUT_MS, 5000).
+%% Re-indenting a single method body is a small, bounded request.
+-define(REINDENT_TIMEOUT_MS, 5000).
+
 %% A compiler warning as the port sends it (BT-4449): the diagnostic's
 %% message, plus its hint as a separate field when it has one. Never folded
 %% into one string here — each REPL surface renders the hint itself.
 -type warning() :: #{message := binary(), hint => binary()}.
 -export_type([warning/0]).
+
+-type transport_failure() :: malformed | exited | timeout | unavailable.
+-type shape() :: diag | port | unknown | fun((transport_failure()) -> term()).
+
+%%% ----------------------------------------------------------------------
+%%% Shared port transport
+%%% ----------------------------------------------------------------------
+
+-doc """
+Send `Request' to the compiler port and decode the reply.
+
+Owns the whole transport: ETF-encode, `port_command', receive, safe decode,
+timeout, closing the port on timeout (so a late response cannot poison the
+next request) and logging. `Tag' names the command in log messages.
+`HandleFun' maps the decoded response to the command's result. `Shape' picks
+how transport failures are reported to the caller:
+
+* `diag'    — `{error, [#{message => Msg}]}'
+* `port'    — `{error, port_error, Msg}'
+* `unknown' — `{error, type_unknown}'
+* a fun   — called with the failure kind (`malformed | exited | timeout |
+  unavailable') to build a bespoke result
+""".
+-spec port_roundtrip(port(), map(), term(), timeout(), fun((term()) -> term()), shape()) -> term().
+port_roundtrip(Port, Request, Tag, TimeoutMs, HandleFun, Shape) ->
+    try port_command(Port, term_to_binary(Request)) of
+        true ->
+            receive
+                {Port, {data, ResponseBin}} ->
+                    try binary_to_term(ResponseBin, [safe]) of
+                        Response -> HandleFun(Response)
+                    catch
+                        error:badarg:Stack ->
+                            ?LOG_ERROR("Compiler port decode error", #{
+                                domain => [beamtalk, runtime],
+                                command => Tag,
+                                port => Port,
+                                response_size => byte_size(ResponseBin),
+                                stacktrace => Stack
+                            }),
+                            transport_error(Shape, malformed)
+                    end;
+                {Port, {exit_status, Status}} ->
+                    ?LOG_ERROR("Compiler port exited", #{
+                        domain => [beamtalk, runtime], command => Tag, status => Status
+                    }),
+                    transport_error(Shape, exited)
+            after TimeoutMs ->
+                ?LOG_ERROR("Compiler port timeout", #{
+                    domain => [beamtalk, runtime], command => Tag, port => Port
+                }),
+                %% Close the port so any late response cannot poison the next request.
+                (try
+                    port_close(Port)
+                catch
+                    _:_ -> ok
+                end),
+                transport_error(Shape, timeout)
+            end
+    catch
+        error:badarg:Stack ->
+            ?LOG_ERROR("Compiler port not available", #{
+                domain => [beamtalk, runtime], command => Tag, port => Port, stacktrace => Stack
+            }),
+            transport_error(Shape, unavailable)
+    end.
+
+-spec transport_error(shape(), transport_failure()) -> term().
+transport_error(Fun, Failure) when is_function(Fun, 1) -> Fun(Failure);
+transport_error(diag, Failure) -> {error, [#{message => transport_message(Failure)}]};
+transport_error(port, Failure) -> {error, port_error, transport_message(Failure)};
+transport_error(unknown, _Failure) -> {error, type_unknown}.
+
+-spec transport_message(transport_failure()) -> binary().
+transport_message(malformed) -> <<"Compiler port response is malformed">>;
+transport_message(exited) -> <<"Compiler port exited unexpectedly">>;
+transport_message(timeout) -> <<"Compiler port timed out">>;
+transport_message(unavailable) -> <<"Compiler port is not available">>.
+
+-doc """
+Shared `#{status := error, reason := R}' tail for `{error, Reason, Message}'
+handlers: the message defaults to the reason's name.
+""".
+-spec reason_error(#{status := error, reason := atom(), _ => _}) -> {error, atom(), binary()}.
+reason_error(#{status := error, reason := Reason} = Resp) ->
+    {error, Reason, maps:get(message, Resp, atom_to_binary(Reason, utf8))}.
+
+-doc "Shared \"Unexpected response\" tail for `{error, port_error, Message}' handlers.".
+-spec unexpected_port_response(term(), term()) -> {error, port_error, binary()}.
+unexpected_port_response(Fmt, Other) ->
+    log_unexpected(Fmt, Other),
+    {error, port_error, <<"Unexpected compiler response">>}.
+
+-doc "Shared \"Unexpected response\" tail for `{error, [Diagnostic]}' handlers.".
+-spec unexpected_diag_response(term(), term()) -> {error, [map()]}.
+unexpected_diag_response(Fmt, Other) ->
+    log_unexpected(Fmt, Other),
+    {error, [#{message => <<"Unexpected compiler response">>}]}.
+
+log_unexpected({Fmt, Args}, Other) ->
+    ?LOG_ERROR(Fmt, Args, #{domain => [beamtalk, runtime], response => Other});
+log_unexpected(Fmt, Other) ->
+    ?LOG_ERROR(Fmt, #{domain => [beamtalk, runtime], response => Other}).
 
 -doc """
 Open a port to the compiler binary.
@@ -117,99 +230,52 @@ from already-loaded files.
     | {ok, type_alias_definition, map()}
     | {error, [map()]}.
 compile_expression(Port, Source, ModuleName, KnownVars, Options) ->
-    SuperclassIndex = maps:get(class_superclass_index, Options, #{}),
-    ModuleIndex = maps:get(class_module_index, Options, #{}),
     Request0 = #{
         command => compile_expression,
         source => Source,
         module => ModuleName,
         known_vars => KnownVars
     },
-    %% Include superclass index only when non-empty to keep the
-    %% protocol backward-compatible with older port binaries.
-    Request1 =
-        case map_size(SuperclassIndex) of
-            0 -> Request0;
-            _ -> Request0#{class_superclass_index => SuperclassIndex}
-        end,
-    %% Include module index for correct cross-directory class references.
-    Request2 =
-        case map_size(ModuleIndex) of
-            0 -> Request1;
-            _ -> Request1#{class_module_index => ModuleIndex}
-        end,
-    %% ADR 0050 Phase 4: Forward class hierarchy to the Rust compiler port.
-    ClassHierarchy = maps:get(class_hierarchy, Options, #{}),
-    Request3 =
-        case map_size(ClassHierarchy) of
-            0 -> Request2;
-            _ -> Request2#{class_hierarchy => ClassHierarchy}
-        end,
-    %% Forward the ambient protocol cache alongside `class_hierarchy'
-    %% above — see `beamtalk_compiler_server:handle_call/3`'s
-    %% `{compile_expression, ...}` clause for why both ride the same
-    %% unconditional injection.
-    ProtocolRegistry = maps:get(protocol_registry, Options, #{}),
-    Request3a =
-        case map_size(ProtocolRegistry) of
-            0 -> Request3;
-            _ -> Request3#{protocol_registry => ProtocolRegistry}
-        end,
     %% Forward module_name override for inline class definitions
     %% so package-mode produces consistent module names across all paths.
-    ModuleNameOverride = maps:get(module_name, Options, undefined),
-    Request4 =
-        case ModuleNameOverride of
-            undefined -> Request3a;
-            _ -> Request3a#{module_name => ModuleNameOverride}
-        end,
-    %% ADR 0108 Phase 8: forward earlier-turn alias declarations.
-    KnownTypeAliases = maps:get(known_type_aliases, Options, []),
     Request =
-        case KnownTypeAliases of
-            [] -> Request4;
-            _ -> Request4#{known_type_aliases => KnownTypeAliases}
+        case maps:get(module_name, Options, undefined) of
+            undefined ->
+                add_compile_options(Request0, Options);
+            ModuleNameOverride ->
+                (add_compile_options(Request0, Options))#{module_name => ModuleNameOverride}
         end,
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response ->
-                            handle_response(Response)
-                    catch
-                        error:badarg:Stack ->
-                            ?LOG_ERROR("Compiler port decode error", #{
-                                domain => [beamtalk, runtime],
-                                port => Port,
-                                response_size => byte_size(ResponseBin),
-                                stacktrace => Stack
-                            }),
-                            {error, [#{message => <<"Compiler port response is malformed">>}]}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout", #{domain => [beamtalk, runtime], port => Port}),
-                %% Close the port so any late response cannot poison the next request.
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, [#{message => <<"Compiler port timed out">>}]}
+    port_roundtrip(
+        Port, Request, compile_expression, ?PORT_TIMEOUT_MS, fun handle_response/1, diag
+    ).
+
+%% Forward the optional compile-time context shared by `compile_expression/5',
+%% `compile_expression_trace/5' and the server's file/method compiles. Each field rides along only when
+%% non-empty, keeping the protocol backward-compatible with older port
+%% binaries:
+%%   class_superclass_index / class_module_index — cross-file inheritance and
+%%     cross-directory module names;
+%%   class_hierarchy (ADR 0050 Phase 4) / protocol_registry — the ambient
+%%     caches (see `beamtalk_compiler_server:inject_ambient/2');
+%%   known_type_aliases (ADR 0108 Phase 8) — aliases declared in earlier turns.
+-spec add_compile_options(map(), map()) -> map().
+add_compile_options(Request, Options) ->
+    lists:foldl(
+        fun({Key, Empty}, Acc) ->
+            case maps:get(Key, Options, Empty) of
+                Empty -> Acc;
+                Value -> Acc#{Key => Value}
             end
-    catch
-        error:badarg:Stack ->
-            ?LOG_ERROR("Compiler port not available", #{
-                domain => [beamtalk, runtime], port => Port, stacktrace => Stack
-            }),
-            {error, [#{message => <<"Compiler port is not available">>}]}
-    end.
+        end,
+        Request,
+        [
+            {class_superclass_index, #{}},
+            {class_module_index, #{}},
+            {class_hierarchy, #{}},
+            {protocol_registry, #{}},
+            {known_type_aliases, []}
+        ]
+    ).
 
 -doc """
 Compile a REPL expression in trace mode.
@@ -228,85 +294,16 @@ compile_expression_trace(Port, Source, ModuleName, KnownVars) ->
 -spec compile_expression_trace(port(), binary(), binary(), [binary()], map()) ->
     {ok, binary(), [warning()]} | {error, [map()]}.
 compile_expression_trace(Port, Source, ModuleName, KnownVars, Options) ->
-    SuperclassIndex = maps:get(class_superclass_index, Options, #{}),
-    ModuleIndex = maps:get(class_module_index, Options, #{}),
-    ClassHierarchy = maps:get(class_hierarchy, Options, #{}),
     Request0 = #{
         command => compile_expression_trace,
         source => Source,
         module => ModuleName,
         known_vars => KnownVars
     },
-    Request1 =
-        case map_size(SuperclassIndex) of
-            0 -> Request0;
-            _ -> Request0#{class_superclass_index => SuperclassIndex}
-        end,
-    Request2 =
-        case map_size(ModuleIndex) of
-            0 -> Request1;
-            _ -> Request1#{class_module_index => ModuleIndex}
-        end,
-    Request3 =
-        case map_size(ClassHierarchy) of
-            0 -> Request2;
-            _ -> Request2#{class_hierarchy => ClassHierarchy}
-        end,
-    %% Forward the ambient protocol cache, mirroring
-    %% `compile_expression/5` above.
-    ProtocolRegistry = maps:get(protocol_registry, Options, #{}),
-    Request3a =
-        case map_size(ProtocolRegistry) of
-            0 -> Request3;
-            _ -> Request3#{protocol_registry => ProtocolRegistry}
-        end,
-    %% ADR 0108 Phase 8: forward earlier-turn/ambient alias
-    %% declarations, mirroring `compile_expression/5` above — without this,
-    %% `::` annotations in traced expressions can never resolve an alias
-    %% declared in an earlier REPL turn.
-    KnownTypeAliases = maps:get(known_type_aliases, Options, []),
-    Request =
-        case KnownTypeAliases of
-            [] -> Request3a;
-            _ -> Request3a#{known_type_aliases => KnownTypeAliases}
-        end,
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (trace)", #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, [#{message => <<"Compiler port response is malformed">>}]}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during trace compile", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (trace)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, [#{message => <<"Compiler port timed out">>}]}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (trace)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, [#{message => <<"Compiler port is not available">>}]}
-    end.
+    Request = add_compile_options(Request0, Options),
+    port_roundtrip(
+        Port, Request, compile_expression_trace, ?PORT_TIMEOUT_MS, fun handle_response/1, diag
+    ).
 
 -doc """
 Resolve the type of an expression for REPL completion fallback.
@@ -330,42 +327,14 @@ resolve_completion_type(Port, Expression, ClassHierarchy) ->
             0 -> Request0;
             _ -> Request0#{class_hierarchy => ClassHierarchy}
         end,
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response ->
-                            handle_resolve_response(Response)
-                    catch
-                        error:badarg ->
-                            {error, type_unknown}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during completion type resolution", #{
-                        domain => [beamtalk, runtime],
-                        status => Status
-                    }),
-                    {error, type_unknown}
-            after 5000 ->
-                %% Use a shorter timeout for completion — latency budget per ADR 0045.
-                ?LOG_ERROR("Compiler port timeout during completion type resolution", #{
-                    domain => [beamtalk, runtime],
-                    port => Port
-                }),
-                %% Close the port so any late response cannot poison the next request.
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, type_unknown}
-            end
-    catch
-        error:badarg ->
-            {error, type_unknown}
-    end.
+    port_roundtrip(
+        Port,
+        Request,
+        completion_type,
+        ?COMPLETION_TIMEOUT_MS,
+        fun handle_resolve_response/1,
+        unknown
+    ).
 
 -doc """
 Find call sites of a selector in a single method's source.
@@ -392,43 +361,7 @@ find_senders_in_source(Port, Source, Selector) when
         source => Source,
         selector => SelectorBin
     },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_senders_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (senders)", #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, [#{message => <<"Compiler port response is malformed">>}]}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during senders query", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (senders)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, [#{message => <<"Compiler port timed out">>}]}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (senders)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, [#{message => <<"Compiler port is not available">>}]}
-    end;
+    port_roundtrip(Port, Request, senders, ?PORT_TIMEOUT_MS, fun handle_senders_response/1, diag);
 find_senders_in_source(_Port, _Source, _Selector) ->
     {error, [
         #{
@@ -456,43 +389,9 @@ find_all_sends_in_source(Port, Source) when is_binary(Source) ->
         command => find_all_sends_in_source,
         source => Source
     },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_all_sends_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (all sends)", #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, [#{message => <<"Compiler port response is malformed">>}]}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during all-sends query", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (all sends)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, [#{message => <<"Compiler port timed out">>}]}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (all sends)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, [#{message => <<"Compiler port is not available">>}]}
-    end;
+    port_roundtrip(
+        Port, Request, all_sends, ?PORT_TIMEOUT_MS, fun handle_all_sends_response/1, diag
+    );
 find_all_sends_in_source(_Port, _Source) ->
     {error, [
         #{
@@ -519,43 +418,9 @@ find_announce_sites_in_source(Port, Source) when is_binary(Source) ->
         command => find_announce_sites_in_source,
         source => Source
     },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_announce_sites_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (announce sites)", #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, [#{message => <<"Compiler port response is malformed">>}]}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during announce-sites query", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (announce sites)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, [#{message => <<"Compiler port timed out">>}]}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (announce sites)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, [#{message => <<"Compiler port is not available">>}]}
-    end;
+    port_roundtrip(
+        Port, Request, announce_sites, ?PORT_TIMEOUT_MS, fun handle_announce_sites_response/1, diag
+    );
 find_announce_sites_in_source(_Port, _Source) ->
     {error, [
         #{
@@ -591,43 +456,9 @@ find_references_to_in_source(Port, Source, ClassName) when
         source => Source,
         class_name => ClassNameBin
     },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_references_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (references)", #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, [#{message => <<"Compiler port response is malformed">>}]}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during references query", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (references)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, [#{message => <<"Compiler port timed out">>}]}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (references)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, [#{message => <<"Compiler port is not available">>}]}
-    end;
+    port_roundtrip(
+        Port, Request, references, ?PORT_TIMEOUT_MS, fun handle_references_response/1, diag
+    );
 find_references_to_in_source(_Port, _Source, _ClassName) ->
     {error, [
         #{
@@ -690,43 +521,14 @@ field_access_query(Port, Command, Source, Field, Label) when
         source => Source,
         field => IVarBin
     },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_field_response(Response, Label)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (~s)", [Label], #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, [#{message => <<"Compiler port response is malformed">>}]}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during ~s query", [Label], #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (~s)", [Label], #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, [#{message => <<"Compiler port timed out">>}]}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (~s)", [Label], #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, [#{message => <<"Compiler port is not available">>}]}
-    end;
+    port_roundtrip(
+        Port,
+        Request,
+        Label,
+        ?PORT_TIMEOUT_MS,
+        fun(Response) -> handle_field_response(Response, Label) end,
+        diag
+    );
 field_access_query(_Port, Command, _Source, _IVar, _Label) ->
     {error, [
         #{
@@ -776,43 +578,9 @@ find_ffi_sites_in_source(Port, Source, Module, Function, Arity) when
             any -> BaseRequest;
             N when is_integer(N), N >= 0 -> BaseRequest#{arity => N}
         end,
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_ffi_sites_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (ffi sites)", #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, [#{message => <<"Compiler port response is malformed">>}]}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during ffi-sites query", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, [#{message => <<"Compiler port exited unexpectedly">>}]}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (ffi sites)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, [#{message => <<"Compiler port timed out">>}]}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (ffi sites)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, [#{message => <<"Compiler port is not available">>}]}
-    end;
+    port_roundtrip(
+        Port, Request, ffi_sites, ?PORT_TIMEOUT_MS, fun handle_ffi_sites_response/1, diag
+    );
 find_ffi_sites_in_source(_Port, _Source, _Module, _Function, _Arity) ->
     {error, [
         #{
@@ -858,43 +626,9 @@ resolve_method_span(Port, Source, ClassName, Selector, Side) when
         selector => to_binary(Selector),
         side => Side
     },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_method_span_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (method span)", #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, port_error, <<"Compiler port response is malformed">>}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during method-span query", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, port_error, <<"Compiler port exited unexpectedly">>}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (method span)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, port_error, <<"Compiler port timed out">>}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (method span)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, port_error, <<"Compiler port is not available">>}
-    end;
+    port_roundtrip(
+        Port, Request, method_span, ?PORT_TIMEOUT_MS, fun handle_method_span_response/1, port
+    );
 resolve_method_span(_Port, _Source, _ClassName, _Selector, _Side) ->
     {error, bad_argument, <<
         "resolve_method_span: source/class/selector must be binary or atom, "
@@ -908,14 +642,10 @@ handle_method_span_response(#{
     status := ok, span := #{start := Start, 'end' := End}, prev_source := PrevSource
 }) when is_integer(Start), is_integer(End), is_binary(PrevSource) ->
     {ok, #{start => Start, 'end' => End}, PrevSource};
-handle_method_span_response(#{status := error, reason := Reason} = Resp) ->
-    Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
-    {error, Reason, Message};
+handle_method_span_response(#{status := error, reason := _} = Resp) ->
+    reason_error(Resp);
 handle_method_span_response(Other) ->
-    ?LOG_ERROR("Unexpected method-span response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, port_error, <<"Unexpected compiler response">>}.
+    unexpected_port_response("Unexpected method-span response", Other).
 
 -doc """
 Resolve the byte span of a class's header + state declarations in `Source'
@@ -946,43 +676,9 @@ resolve_class_span(Port, Source, ClassName) when
         source => Source,
         class_name => to_binary(ClassName)
     },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_method_span_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (class span)", #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, port_error, <<"Compiler port response is malformed">>}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during class-span query", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, port_error, <<"Compiler port exited unexpectedly">>}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (class span)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, port_error, <<"Compiler port timed out">>}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (class span)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, port_error, <<"Compiler port is not available">>}
-    end;
+    port_roundtrip(
+        Port, Request, class_span, ?PORT_TIMEOUT_MS, fun handle_method_span_response/1, port
+    );
 resolve_class_span(_Port, _Source, _ClassName) ->
     {error, bad_argument, <<"resolve_class_span: source/class must be binary or atom">>}.
 
@@ -1027,43 +723,14 @@ find_selector_send_spans(Port, MethodSource, OldSelector, NewSelector) when
         old_selector => to_binary(OldSelector),
         new_selector => to_binary(NewSelector)
     },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_selector_send_spans_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (selector send spans)", #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, port_error, <<"Compiler port response is malformed">>}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during selector-send-spans query", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, port_error, <<"Compiler port exited unexpectedly">>}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (selector send spans)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, port_error, <<"Compiler port timed out">>}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (selector send spans)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, port_error, <<"Compiler port is not available">>}
-    end;
+    port_roundtrip(
+        Port,
+        Request,
+        selector_send_spans,
+        ?PORT_TIMEOUT_MS,
+        fun handle_selector_send_spans_response/1,
+        port
+    );
 find_selector_send_spans(_Port, _MethodSource, _OldSelector, _NewSelector) ->
     {error, bad_argument, <<
         "find_selector_send_spans: method_source must be binary, "
@@ -1078,10 +745,7 @@ handle_selector_send_spans_response(#{status := ok, occurrences := Occurrences})
 ->
     {ok, [decode_selector_send_spans(Spans) || Spans <- Occurrences]};
 handle_selector_send_spans_response(Other) ->
-    ?LOG_ERROR("Unexpected selector-send-spans response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, port_error, <<"Unexpected compiler response">>}.
+    unexpected_port_response("Unexpected selector-send-spans response", Other).
 
 -doc """
 Resolve `ClassName''s `(OldSelector, Side)' method DEFINITION's own bare
@@ -1124,43 +788,14 @@ find_definition_selector_spans(Port, Source, ClassName, OldSelector, NewSelector
         new_selector => to_binary(NewSelector),
         side => Side
     },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_definition_selector_spans_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (definition selector spans)", #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, port_error, <<"Compiler port response is malformed">>}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during definition-selector-spans query", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, port_error, <<"Compiler port exited unexpectedly">>}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (definition selector spans)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, port_error, <<"Compiler port timed out">>}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (definition selector spans)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, port_error, <<"Compiler port is not available">>}
-    end;
+    port_roundtrip(
+        Port,
+        Request,
+        definition_selector_spans,
+        ?PORT_TIMEOUT_MS,
+        fun handle_definition_selector_spans_response/1,
+        port
+    );
 find_definition_selector_spans(
     _Port, _Source, _ClassName, _OldSelector, _NewSelector, _Side
 ) ->
@@ -1174,14 +809,10 @@ find_definition_selector_spans(
     | {error, atom(), binary()}.
 handle_definition_selector_spans_response(#{status := ok, spans := Spans}) when is_list(Spans) ->
     {ok, decode_selector_send_spans(Spans)};
-handle_definition_selector_spans_response(#{status := error, reason := Reason} = Resp) ->
-    Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
-    {error, Reason, Message};
+handle_definition_selector_spans_response(#{status := error, reason := _} = Resp) ->
+    reason_error(Resp);
 handle_definition_selector_spans_response(Other) ->
-    ?LOG_ERROR("Unexpected definition-selector-spans response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, port_error, <<"Unexpected compiler response">>}.
+    unexpected_port_response("Unexpected definition-selector-spans response", Other).
 
 %% Shared decoder for both selector-rename span commands' `#{start, 'end',
 %% new_text}' map lists — filters out any malformed element defensively
@@ -1235,43 +866,14 @@ categorize_methods(Port, Source, ClassName) when
         source => Source,
         class_name => to_binary(ClassName)
     },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_categorize_methods_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (categorize methods)", #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, port_error, <<"Compiler port response is malformed">>}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during categorize-methods query", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, port_error, <<"Compiler port exited unexpectedly">>}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (categorize methods)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, port_error, <<"Compiler port timed out">>}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (categorize methods)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, port_error, <<"Compiler port is not available">>}
-    end;
+    port_roundtrip(
+        Port,
+        Request,
+        categorize_methods,
+        ?PORT_TIMEOUT_MS,
+        fun handle_categorize_methods_response/1,
+        port
+    );
 categorize_methods(_Port, _Source, _ClassName) ->
     {error, bad_argument, <<"categorize_methods: source/class must be binary or atom">>}.
 
@@ -1280,14 +882,10 @@ handle_categorize_methods_response(#{status := ok, categories := Categories}) wh
     is_list(Categories)
 ->
     normalize_categories(Categories);
-handle_categorize_methods_response(#{status := error, reason := Reason} = Resp) ->
-    Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
-    {error, Reason, Message};
+handle_categorize_methods_response(#{status := error, reason := _} = Resp) ->
+    reason_error(Resp);
 handle_categorize_methods_response(Other) ->
-    ?LOG_ERROR("Unexpected categorize-methods response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, port_error, <<"Unexpected compiler response">>}.
+    unexpected_port_response("Unexpected categorize-methods response", Other).
 
 %% A category or method map missing an expected key (or carrying an
 %% unrecognized `side`) must not raise `function_clause` — that would crash
@@ -1376,45 +974,14 @@ class_state_field_defaults(Port, Source, ClassName) when
         source => Source,
         class_name => to_binary(ClassName)
     },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_class_state_field_defaults_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR(
-                                "Compiler port decode error (class state field defaults)", #{
-                                    domain => [beamtalk, runtime], port => Port
-                                }
-                            ),
-                            {error, port_error, <<"Compiler port response is malformed">>}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during class-state-field-defaults query", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, port_error, <<"Compiler port exited unexpectedly">>}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (class state field defaults)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, port_error, <<"Compiler port timed out">>}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (class state field defaults)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, port_error, <<"Compiler port is not available">>}
-    end;
+    port_roundtrip(
+        Port,
+        Request,
+        class_state_field_defaults,
+        ?PORT_TIMEOUT_MS,
+        fun handle_class_state_field_defaults_response/1,
+        port
+    );
 class_state_field_defaults(_Port, _Source, _ClassName) ->
     {error, bad_argument, <<
         "class_state_field_defaults: source/class must be binary or atom"
@@ -1426,14 +993,10 @@ handle_class_state_field_defaults_response(#{status := ok, field_defaults := Fie
     is_map(FieldDefaults)
 ->
     {ok, FieldDefaults};
-handle_class_state_field_defaults_response(#{status := error, reason := Reason} = Resp) ->
-    Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
-    {error, Reason, Message};
+handle_class_state_field_defaults_response(#{status := error, reason := _} = Resp) ->
+    reason_error(Resp);
 handle_class_state_field_defaults_response(Other) ->
-    ?LOG_ERROR("Unexpected class-state-field-defaults response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, port_error, <<"Unexpected compiler response">>}.
+    unexpected_port_response("Unexpected class-state-field-defaults response", Other).
 
 -doc """
 Build the class→module-name index for a single `src/**/*.bt` file.
@@ -1471,43 +1034,14 @@ build_class_module_index_in_source(Port, Source, RelativePath, PackageName) when
         relative_path => RelativePath,
         package_name => PackageName
     },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_build_class_module_index_in_source_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (class module index)", #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, port_error, <<"Compiler port response is malformed">>}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during class-module-index query", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, port_error, <<"Compiler port exited unexpectedly">>}
-            after 30000 ->
-                ?LOG_ERROR("Compiler port timeout (class module index)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, port_error, <<"Compiler port timed out">>}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (class module index)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, port_error, <<"Compiler port is not available">>}
-    end;
+    port_roundtrip(
+        Port,
+        Request,
+        build_class_module_index,
+        ?PORT_TIMEOUT_MS,
+        fun handle_build_class_module_index_in_source_response/1,
+        port
+    );
 build_class_module_index_in_source(_Port, _Source, _RelativePath, _PackageName) ->
     {error, bad_argument, <<
         "build_class_module_index_in_source: source/relative_path/package_name must be binaries"
@@ -1519,14 +1053,10 @@ handle_build_class_module_index_in_source_response(
     #{status := ok, module_name := ModuleName, classes := Classes}
 ) when is_binary(ModuleName), is_list(Classes) ->
     {ok, ModuleName, Classes};
-handle_build_class_module_index_in_source_response(#{status := error, reason := Reason} = Resp) ->
-    Message = maps:get(message, Resp, atom_to_binary(Reason, utf8)),
-    {error, Reason, Message};
+handle_build_class_module_index_in_source_response(#{status := error, reason := _} = Resp) ->
+    reason_error(Resp);
 handle_build_class_module_index_in_source_response(Other) ->
-    ?LOG_ERROR("Unexpected class-module-index response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, port_error, <<"Unexpected compiler response">>}.
+    unexpected_port_response("Unexpected class-module-index response", Other).
 
 -doc """
 Re-indent a canonical (column-0) method body to `BaseIndent'.
@@ -1548,47 +1078,9 @@ reindent_method_source(Port, Source, BaseIndent) when
         source => Source,
         base_indent => BaseIndent
     },
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    try binary_to_term(ResponseBin, [safe]) of
-                        Response -> handle_reindent_response(Response)
-                    catch
-                        error:badarg ->
-                            ?LOG_ERROR("Compiler port decode error (reindent)", #{
-                                domain => [beamtalk, runtime], port => Port
-                            }),
-                            {error, port_error, <<"Compiler port response is malformed">>}
-                    end;
-                {Port, {exit_status, Status}} ->
-                    ?LOG_ERROR("Compiler port exited during reindent query", #{
-                        domain => [beamtalk, runtime], status => Status
-                    }),
-                    {error, port_error, <<"Compiler port exited unexpectedly">>}
-            after 5000 ->
-                %% Shorter than the 30s used by the parse/search commands: this
-                %% is a pure in-memory string reshape, so a stall means a wedged
-                %% port, not a slow operation. Fail fast to limit the blast radius
-                %% on the shared compiler gen_server during a live-patch install.
-                ?LOG_ERROR("Compiler port timeout (reindent)", #{
-                    domain => [beamtalk, runtime], port => Port
-                }),
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                {error, port_error, <<"Compiler port timed out">>}
-            end
-    catch
-        error:badarg ->
-            ?LOG_ERROR("Compiler port not available (reindent)", #{
-                domain => [beamtalk, runtime], port => Port
-            }),
-            {error, port_error, <<"Compiler port is not available">>}
-    end;
+    port_roundtrip(
+        Port, Request, reindent, ?REINDENT_TIMEOUT_MS, fun handle_reindent_response/1, port
+    );
 reindent_method_source(_Port, _Source, _BaseIndent) ->
     {error, bad_argument, <<"reindent_method_source: source and base_indent must be binary">>}.
 
@@ -1596,10 +1088,7 @@ reindent_method_source(_Port, _Source, _BaseIndent) ->
 handle_reindent_response(#{status := ok, source := Source}) when is_binary(Source) ->
     {ok, Source};
 handle_reindent_response(Other) ->
-    ?LOG_ERROR("Unexpected reindent response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, port_error, <<"Unexpected compiler response">>}.
+    unexpected_port_response("Unexpected reindent response", Other).
 
 %% Normalise an atom-or-binary identifier to a binary.
 %%
@@ -1750,8 +1239,7 @@ handle_response(#{status := ok, core_erlang := CoreErlang, warnings := Warnings}
 handle_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_response(Other) ->
-    ?LOG_ERROR("Unexpected compiler response", #{domain => [beamtalk, runtime], response => Other}),
-    {error, [#{message => <<"Unexpected compiler response">>}]}.
+    unexpected_diag_response("Unexpected compiler response", Other).
 
 -doc """
 Handle ETF response from a resolve_completion_type request.
@@ -1778,10 +1266,7 @@ handle_senders_response(#{status := ok, lines := Lines}) when is_list(Lines) ->
 handle_senders_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_senders_response(Other) ->
-    ?LOG_ERROR("Unexpected senders response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, [#{message => <<"Unexpected compiler response">>}]}.
+    unexpected_diag_response("Unexpected senders response", Other).
 
 -doc """
 Handle ETF response from a find_all_sends_in_source request.
@@ -1797,10 +1282,7 @@ handle_all_sends_response(#{status := ok, sends := Sends}) when is_list(Sends) -
 handle_all_sends_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_all_sends_response(Other) ->
-    ?LOG_ERROR("Unexpected all-sends response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, [#{message => <<"Unexpected compiler response">>}]}.
+    unexpected_diag_response("Unexpected all-sends response", Other).
 
 -doc """
 Handle ETF response from a find_announce_sites_in_source request.
@@ -1814,10 +1296,7 @@ handle_announce_sites_response(#{status := ok, sites := Sites}) when is_list(Sit
 handle_announce_sites_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_announce_sites_response(Other) ->
-    ?LOG_ERROR("Unexpected announce-sites response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, [#{message => <<"Unexpected compiler response">>}]}.
+    unexpected_diag_response("Unexpected announce-sites response", Other).
 
 -doc """
 Handle ETF response from a find_references_to_in_source request.
@@ -1829,10 +1308,7 @@ handle_references_response(#{status := ok, lines := Lines}) when is_list(Lines) 
 handle_references_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_references_response(Other) ->
-    ?LOG_ERROR("Unexpected references response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, [#{message => <<"Unexpected compiler response">>}]}.
+    unexpected_diag_response("Unexpected references response", Other).
 
 -doc """
 Handle ETF response from a find_field_readers/writers_in_source request.
@@ -1845,10 +1321,7 @@ handle_field_response(#{status := ok, lines := Lines}, _Label) when is_list(Line
 handle_field_response(#{status := error, diagnostics := Diagnostics}, _Label) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_field_response(Other, Label) ->
-    ?LOG_ERROR("Unexpected ~s response", [Label], #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, [#{message => <<"Unexpected compiler response">>}]}.
+    unexpected_diag_response({"Unexpected ~s response", [Label]}, Other).
 
 -doc """
 Handle ETF response from a find_ffi_sites_in_source request.
@@ -1860,10 +1333,7 @@ handle_ffi_sites_response(#{status := ok, lines := Lines}) when is_list(Lines) -
 handle_ffi_sites_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, normalize_diagnostics(Diagnostics)};
 handle_ffi_sites_response(Other) ->
-    ?LOG_ERROR("Unexpected ffi-sites response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, [#{message => <<"Unexpected compiler response">>}]}.
+    unexpected_diag_response("Unexpected ffi-sites response", Other).
 
 -doc """
 Normalize a list of diagnostics to a uniform list of maps. The port

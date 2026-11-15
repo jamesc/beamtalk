@@ -46,21 +46,11 @@ removed. Use the Beamtalk-native message sends instead:
     get_port/0,
     get_nonce/0,
     handle_protocol_request/2,
-    generate_session_id/0,
-    safe_to_existing_atom/1
+    generate_session_id/0
 ]).
 -ifdef(TEST).
 -export([
     generate_nonce/0,
-    validate_actor_pid/1,
-    is_known_actor/1,
-    get_completions/1,
-    resolve_class_to_module/1,
-    ensure_structured_error/2,
-    make_class_not_found_error/1,
-    format_name/1,
-    base_protocol_response/1,
-    resolve_module_atoms/2,
     handle_op/4,
     write_port_file/3
 ]).
@@ -357,40 +347,3 @@ handle_op(Op, Params, Msg, SessionPid) ->
     beamtalk_repl_ops:encode(
         beamtalk_repl_ops:dispatch(Op, Params, Msg, SessionPid), Msg
     ).
-
-%%% Delegated helpers
-%%%
-%%% These functions have been extracted to domain-specific ops modules.
-%%% Thin delegates are kept here so existing TEST exports and callers
-%%% continue to work without modification.
-
--ifdef(TEST).
--doc "Delegate to beamtalk_repl_ops_dev.".
-base_protocol_response(Msg) -> beamtalk_repl_ops_dev:base_protocol_response(Msg).
-
--doc "Delegate to beamtalk_repl_ops_actors.".
-validate_actor_pid(PidStr) -> beamtalk_repl_ops_actors:validate_actor_pid(PidStr).
-is_known_actor(Pid) -> beamtalk_repl_ops_actors:is_known_actor(Pid).
-
--doc "Delegate to beamtalk_repl_ops_load.".
-resolve_class_to_module(ClassName) -> beamtalk_repl_ops_load:resolve_class_to_module(ClassName).
-resolve_module_atoms(ModuleAtom, Classes) ->
-    beamtalk_repl_ops_load:resolve_module_atoms(ModuleAtom, Classes).
-
--doc "Delegate to beamtalk_repl_ops_dev.".
-get_completions(Prefix) -> beamtalk_repl_ops_dev:get_completions(Prefix).
-make_class_not_found_error(ClassName) ->
-    beamtalk_repl_ops_dev:make_class_not_found_error(ClassName).
-
--doc "Delegate to beamtalk_repl_errors .".
-ensure_structured_error(Reason, Class) ->
-    beamtalk_repl_errors:ensure_structured_error(Reason, Class).
-format_name(Name) -> beamtalk_repl_errors:format_name(Name).
--endif.
-
--doc """
-Safely convert a binary to an existing atom, returning error instead of creating new atoms.
-Implementation lives in beamtalk_repl_errors .
-""".
--spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
-safe_to_existing_atom(Bin) -> beamtalk_repl_errors:safe_to_existing_atom(Bin).

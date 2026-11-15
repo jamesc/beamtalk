@@ -20,6 +20,16 @@ to avoid temp files on disk.
 
 -include_lib("kernel/include/logger.hrl").
 
+%% Default `gen_server:call' budget for requests that reach the compiler port.
+-define(CALL_TIMEOUT_MS, 30000).
+%% Budget for cheap, cache-only or latency-sensitive calls.
+-define(QUICK_CALL_TIMEOUT_MS, 5000).
+%% `safe_call/4' fallbacks, one pair per result shape.
+-define(DIAG_DOWN, {error, [#{message => <<"Compiler server is not available">>}]}).
+-define(DIAG_TIMEOUT, {error, [#{message => <<"Compiler server timed out">>}]}).
+-define(SPAN_DOWN, {error, noproc, <<"Compiler server is not available">>}).
+-define(SPAN_TIMEOUT, {error, timeout, <<"Compiler server timed out">>}).
+
 %% Public API
 -export([
     start_link/0, start_link/1,
@@ -195,7 +205,7 @@ Options:
     | {error, [map()]}.
 compile_expression(Source, ModuleName, KnownVars, Options) ->
     gen_server:call(
-        ?MODULE, {compile_expression, Source, ModuleName, KnownVars, Options}, 30000
+        ?MODULE, {compile_expression, Source, ModuleName, KnownVars, Options}, ?CALL_TIMEOUT_MS
     ).
 
 -doc "Compile a REPL expression in trace mode.".
@@ -208,7 +218,9 @@ compile_expression_trace(Source, ModuleName, KnownVars) ->
     {ok, binary(), [beamtalk_compiler_port:warning()]} | {error, [map()]}.
 compile_expression_trace(Source, ModuleName, KnownVars, Options) ->
     gen_server:call(
-        ?MODULE, {compile_expression_trace, Source, ModuleName, KnownVars, Options}, 30000
+        ?MODULE,
+        {compile_expression_trace, Source, ModuleName, KnownVars, Options},
+        ?CALL_TIMEOUT_MS
     ).
 
 -doc """
@@ -233,7 +245,7 @@ or `{error, Diagnostics}'.
 -spec compile(binary(), map()) ->
     {ok, map()} | {ok, protocol_definition, map()} | {error, [map()]}.
 compile(Source, Options) ->
-    gen_server:call(?MODULE, {compile, Source, Options}, 30000).
+    gen_server:call(?MODULE, {compile, Source, Options}, ?CALL_TIMEOUT_MS).
 
 -doc """
 Structured single-method compile (the live-image write-surface idiom).
@@ -251,7 +263,9 @@ method_source, merged_class_source, warnings}}' or `{error, Diagnostics}'.
 """.
 -spec compile_method(binary(), binary(), map()) -> {ok, map()} | {error, [map()]}.
 compile_method(ClassSource, MethodSource, Options) ->
-    gen_server:call(?MODULE, {compile_method, ClassSource, MethodSource, Options}, 30000).
+    gen_server:call(
+        ?MODULE, {compile_method, ClassSource, MethodSource, Options}, ?CALL_TIMEOUT_MS
+    ).
 
 -doc "Get diagnostics for source code (no code generation).".
 -spec diagnostics(binary()) ->
@@ -314,12 +328,12 @@ Options:
 -spec diagnostics(binary(), binary(), map()) ->
     {ok, [map()]} | {error, [binary()]}.
 diagnostics(Source, Mode, Options) ->
-    gen_server:call(?MODULE, {diagnostics, Source, Mode, Options}, 30000).
+    gen_server:call(?MODULE, {diagnostics, Source, Mode, Options}, ?CALL_TIMEOUT_MS).
 
 -doc "Get compiler version.".
 -spec version() -> {ok, binary()} | {error, term()}.
 version() ->
-    gen_server:call(?MODULE, version, 5000).
+    gen_server:call(?MODULE, version, ?QUICK_CALL_TIMEOUT_MS).
 
 -ifdef(TEST).
 -doc """
@@ -332,7 +346,7 @@ compile sees all three caches empty.
 """.
 -spec clear_classes() -> ok.
 clear_classes() ->
-    gen_server:call(?MODULE, clear_classes, 5000).
+    gen_server:call(?MODULE, clear_classes, ?QUICK_CALL_TIMEOUT_MS).
 
 -doc """
 Force the *next* `diagnostics/3' call to fail with `{error, [#{message =>
@@ -354,7 +368,7 @@ one consumed — are unaffected.
 """.
 -spec inject_diagnostics_failure(binary()) -> ok.
 inject_diagnostics_failure(Reason) ->
-    gen_server:call(?MODULE, {inject_diagnostics_failure, Reason}, 5000).
+    gen_server:call(?MODULE, {inject_diagnostics_failure, Reason}, ?QUICK_CALL_TIMEOUT_MS).
 
 -doc """
 Force the *next* `diagnostics/3' call to exit instead of returning a value at
@@ -393,8 +407,20 @@ sites that *do* `application:stop(beamtalk_compiler)` between test groups
 """.
 -spec inject_diagnostics_exit() -> ok.
 inject_diagnostics_exit() ->
-    gen_server:call(?MODULE, inject_diagnostics_exit, 5000).
+    gen_server:call(?MODULE, inject_diagnostics_exit, ?QUICK_CALL_TIMEOUT_MS).
 -endif.
+
+%% `gen_server:call/3' that degrades instead of exiting: `OnDown' is returned
+%% when the server is not running, `OnTimeout' when it does not reply in time.
+-spec safe_call(term(), timeout(), Down, Timeout) -> term() | Down | Timeout when
+    Down :: term(), Timeout :: term().
+safe_call(Request, TimeoutMs, OnDown, OnTimeout) ->
+    try
+        gen_server:call(?MODULE, Request, TimeoutMs)
+    catch
+        exit:{noproc, _} -> OnDown;
+        exit:{timeout, _} -> OnTimeout
+    end.
 
 -doc """
 Resolve the type of an expression for REPL completion fallback.
@@ -409,12 +435,12 @@ is unavailable.
 """.
 -spec resolve_completion_type(binary()) -> {ok, atom()} | {error, type_unknown}.
 resolve_completion_type(Expression) ->
-    try
-        gen_server:call(?MODULE, {resolve_completion_type, Expression}, 5000)
-    catch
-        exit:{noproc, _} -> {error, type_unknown};
-        exit:{timeout, _} -> {error, type_unknown}
-    end.
+    safe_call(
+        {resolve_completion_type, Expression},
+        ?QUICK_CALL_TIMEOUT_MS,
+        {error, type_unknown},
+        {error, type_unknown}
+    ).
 
 -doc """
 Find call sites of a selector in a single method's source.
@@ -427,14 +453,9 @@ found; returns `{error, Diagnostics}' if the compiler port is unavailable.
 -spec find_senders_in_source(binary(), atom() | binary()) ->
     {ok, [pos_integer()]} | {error, [map()]}.
 find_senders_in_source(Source, Selector) ->
-    try
-        gen_server:call(?MODULE, {find_senders_in_source, Source, Selector}, 30000)
-    catch
-        exit:{noproc, _} ->
-            {error, [#{message => <<"Compiler server is not available">>}]};
-        exit:{timeout, _} ->
-            {error, [#{message => <<"Compiler server timed out">>}]}
-    end.
+    safe_call(
+        {find_senders_in_source, Source, Selector}, ?CALL_TIMEOUT_MS, ?DIAG_DOWN, ?DIAG_TIMEOUT
+    ).
 
 -doc """
 Find every message send in a single method's source.
@@ -447,14 +468,7 @@ returns `{error, Diagnostics}' if the compiler port is unavailable.
 -spec find_all_sends_in_source(binary()) ->
     {ok, [map()]} | {error, [map()]}.
 find_all_sends_in_source(Source) ->
-    try
-        gen_server:call(?MODULE, {find_all_sends_in_source, Source}, 30000)
-    catch
-        exit:{noproc, _} ->
-            {error, [#{message => <<"Compiler server is not available">>}]};
-        exit:{timeout, _} ->
-            {error, [#{message => <<"Compiler server timed out">>}]}
-    end.
+    safe_call({find_all_sends_in_source, Source}, ?CALL_TIMEOUT_MS, ?DIAG_DOWN, ?DIAG_TIMEOUT).
 
 -doc """
 Find every `announce:' emission in a single method's source.
@@ -469,14 +483,7 @@ emissions; returns `{error, Diagnostics}' if the compiler port is unavailable.
 -spec find_announce_sites_in_source(binary()) ->
     {ok, [map()]} | {error, [map()]}.
 find_announce_sites_in_source(Source) ->
-    try
-        gen_server:call(?MODULE, {find_announce_sites_in_source, Source}, 30000)
-    catch
-        exit:{noproc, _} ->
-            {error, [#{message => <<"Compiler server is not available">>}]};
-        exit:{timeout, _} ->
-            {error, [#{message => <<"Compiler server timed out">>}]}
-    end.
+    safe_call({find_announce_sites_in_source, Source}, ?CALL_TIMEOUT_MS, ?DIAG_DOWN, ?DIAG_TIMEOUT).
 
 -doc """
 Find references to a class in a single method's source.
@@ -490,14 +497,12 @@ is unavailable.
 -spec find_references_to_in_source(binary(), atom() | binary()) ->
     {ok, [pos_integer()]} | {error, [map()]}.
 find_references_to_in_source(Source, ClassName) ->
-    try
-        gen_server:call(?MODULE, {find_references_to_in_source, Source, ClassName}, 30000)
-    catch
-        exit:{noproc, _} ->
-            {error, [#{message => <<"Compiler server is not available">>}]};
-        exit:{timeout, _} ->
-            {error, [#{message => <<"Compiler server timed out">>}]}
-    end.
+    safe_call(
+        {find_references_to_in_source, Source, ClassName},
+        ?CALL_TIMEOUT_MS,
+        ?DIAG_DOWN,
+        ?DIAG_TIMEOUT
+    ).
 
 -doc """
 Find reads of an field in a single method's source.
@@ -511,14 +516,9 @@ unavailable.
 -spec find_field_readers_in_source(binary(), atom() | binary()) ->
     {ok, [pos_integer()]} | {error, [map()]}.
 find_field_readers_in_source(Source, Field) ->
-    try
-        gen_server:call(?MODULE, {find_field_readers_in_source, Source, Field}, 30000)
-    catch
-        exit:{noproc, _} ->
-            {error, [#{message => <<"Compiler server is not available">>}]};
-        exit:{timeout, _} ->
-            {error, [#{message => <<"Compiler server timed out">>}]}
-    end.
+    safe_call(
+        {find_field_readers_in_source, Source, Field}, ?CALL_TIMEOUT_MS, ?DIAG_DOWN, ?DIAG_TIMEOUT
+    ).
 
 -doc """
 Find writes of an field in a single method's source.
@@ -532,14 +532,9 @@ unavailable.
 -spec find_field_writers_in_source(binary(), atom() | binary()) ->
     {ok, [pos_integer()]} | {error, [map()]}.
 find_field_writers_in_source(Source, Field) ->
-    try
-        gen_server:call(?MODULE, {find_field_writers_in_source, Source, Field}, 30000)
-    catch
-        exit:{noproc, _} ->
-            {error, [#{message => <<"Compiler server is not available">>}]};
-        exit:{timeout, _} ->
-            {error, [#{message => <<"Compiler server timed out">>}]}
-    end.
+    safe_call(
+        {find_field_writers_in_source, Source, Field}, ?CALL_TIMEOUT_MS, ?DIAG_DOWN, ?DIAG_TIMEOUT
+    ).
 
 -doc """
 Find Erlang FFI call sites in a single method's source.
@@ -556,16 +551,12 @@ are found; returns `{error, Diagnostics}' if the compiler port is unavailable.
 ) ->
     {ok, [pos_integer()]} | {error, [map()]}.
 find_ffi_sites_in_source(Source, Module, Function, Arity) ->
-    try
-        gen_server:call(
-            ?MODULE, {find_ffi_sites_in_source, Source, Module, Function, Arity}, 30000
-        )
-    catch
-        exit:{noproc, _} ->
-            {error, [#{message => <<"Compiler server is not available">>}]};
-        exit:{timeout, _} ->
-            {error, [#{message => <<"Compiler server timed out">>}]}
-    end.
+    safe_call(
+        {find_ffi_sites_in_source, Source, Module, Function, Arity},
+        ?CALL_TIMEOUT_MS,
+        ?DIAG_DOWN,
+        ?DIAG_TIMEOUT
+    ).
 
 -doc """
 Resolve the byte span of a method definition in `Source' (ADR 0082 Phase 1).
@@ -581,16 +572,12 @@ return `{error, Reason, Message}'; transport failures return
     {ok, #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()}
     | {error, atom(), binary()}.
 resolve_method_span(Source, ClassName, Selector, Side) ->
-    try
-        gen_server:call(
-            ?MODULE, {resolve_method_span, Source, ClassName, Selector, Side}, 30000
-        )
-    catch
-        exit:{noproc, _} ->
-            {error, noproc, <<"Compiler server is not available">>};
-        exit:{timeout, _} ->
-            {error, timeout, <<"Compiler server timed out">>}
-    end.
+    safe_call(
+        {resolve_method_span, Source, ClassName, Selector, Side},
+        ?CALL_TIMEOUT_MS,
+        ?SPAN_DOWN,
+        ?SPAN_TIMEOUT
+    ).
 
 -doc """
 Resolve the byte span of a class's header + state declarations in `Source'
@@ -609,14 +596,7 @@ the bytes currently occupying it. Resolution failures return
     {ok, #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()}
     | {error, atom(), binary()}.
 resolve_class_span(Source, ClassName) ->
-    try
-        gen_server:call(?MODULE, {resolve_class_span, Source, ClassName}, 30000)
-    catch
-        exit:{noproc, _} ->
-            {error, noproc, <<"Compiler server is not available">>};
-        exit:{timeout, _} ->
-            {error, timeout, <<"Compiler server timed out">>}
-    end.
+    safe_call({resolve_class_span, Source, ClassName}, ?CALL_TIMEOUT_MS, ?SPAN_DOWN, ?SPAN_TIMEOUT).
 
 -doc """
 Resolve the exact byte span(s) of every self/super-directed send of
@@ -632,16 +612,12 @@ match's keyword arity mismatched); transport failures return
     {ok, [[#{start := non_neg_integer(), 'end' := non_neg_integer(), new_text := binary()}]]}
     | {error, atom(), binary()}.
 find_selector_send_spans(MethodSource, OldSelector, NewSelector) ->
-    try
-        gen_server:call(
-            ?MODULE, {find_selector_send_spans, MethodSource, OldSelector, NewSelector}, 30000
-        )
-    catch
-        exit:{noproc, _} ->
-            {error, noproc, <<"Compiler server is not available">>};
-        exit:{timeout, _} ->
-            {error, timeout, <<"Compiler server timed out">>}
-    end.
+    safe_call(
+        {find_selector_send_spans, MethodSource, OldSelector, NewSelector},
+        ?CALL_TIMEOUT_MS,
+        ?SPAN_DOWN,
+        ?SPAN_TIMEOUT
+    ).
 
 -doc """
 Resolve `ClassName''s `(OldSelector, Side)' method DEFINITION's own bare
@@ -659,18 +635,12 @@ ambiguous) return `{error, Reason, Message}'; transport failures return
     {ok, [#{start := non_neg_integer(), 'end' := non_neg_integer(), new_text := binary()}]}
     | {error, atom(), binary()}.
 find_definition_selector_spans(Source, ClassName, OldSelector, NewSelector, Side) ->
-    try
-        gen_server:call(
-            ?MODULE,
-            {find_definition_selector_spans, Source, ClassName, OldSelector, NewSelector, Side},
-            30000
-        )
-    catch
-        exit:{noproc, _} ->
-            {error, noproc, <<"Compiler server is not available">>};
-        exit:{timeout, _} ->
-            {error, timeout, <<"Compiler server timed out">>}
-    end.
+    safe_call(
+        {find_definition_selector_spans, Source, ClassName, OldSelector, NewSelector, Side},
+        ?CALL_TIMEOUT_MS,
+        ?SPAN_DOWN,
+        ?SPAN_TIMEOUT
+    ).
 
 -doc """
 Group a class's methods by its `// === Name ===' section dividers
@@ -684,14 +654,7 @@ failure.
 -spec categorize_methods(binary(), atom() | binary()) ->
     {ok, [map()]} | {error, atom(), binary()}.
 categorize_methods(Source, ClassName) ->
-    try
-        gen_server:call(?MODULE, {categorize_methods, Source, ClassName}, 30000)
-    catch
-        exit:{noproc, _} ->
-            {error, noproc, <<"Compiler server is not available">>};
-        exit:{timeout, _} ->
-            {error, timeout, <<"Compiler server timed out">>}
-    end.
+    safe_call({categorize_methods, Source, ClassName}, ?CALL_TIMEOUT_MS, ?SPAN_DOWN, ?SPAN_TIMEOUT).
 
 -doc """
 Build the class→module-name index for a single `src/**/*.bt` file
@@ -706,18 +669,12 @@ full wire shape. Backs the REPL/workspace cold-load fallback for
 -spec build_class_module_index_in_source(binary(), binary(), binary()) ->
     {ok, binary(), [binary()]} | {error, atom(), binary()}.
 build_class_module_index_in_source(Source, RelativePath, PackageName) ->
-    try
-        gen_server:call(
-            ?MODULE,
-            {build_class_module_index_in_source, Source, RelativePath, PackageName},
-            30000
-        )
-    catch
-        exit:{noproc, _} ->
-            {error, noproc, <<"Compiler server is not available">>};
-        exit:{timeout, _} ->
-            {error, timeout, <<"Compiler server timed out">>}
-    end.
+    safe_call(
+        {build_class_module_index_in_source, Source, RelativePath, PackageName},
+        ?CALL_TIMEOUT_MS,
+        ?SPAN_DOWN,
+        ?SPAN_TIMEOUT
+    ).
 
 -doc """
 Field-level default-value presence for `ClassName''s `state:'/`field:'
@@ -733,14 +690,9 @@ return `{error, port_error | noproc | timeout, Message}'.
 -spec class_state_field_defaults(binary(), atom() | binary()) ->
     {ok, #{binary() => boolean()}} | {error, atom(), binary()}.
 class_state_field_defaults(Source, ClassName) ->
-    try
-        gen_server:call(?MODULE, {class_state_field_defaults, Source, ClassName}, 30000)
-    catch
-        exit:{noproc, _} ->
-            {error, noproc, <<"Compiler server is not available">>};
-        exit:{timeout, _} ->
-            {error, timeout, <<"Compiler server timed out">>}
-    end.
+    safe_call(
+        {class_state_field_defaults, Source, ClassName}, ?CALL_TIMEOUT_MS, ?SPAN_DOWN, ?SPAN_TIMEOUT
+    ).
 
 -doc """
 Re-indent a canonical (column-0) method body to `BaseIndent'.
@@ -753,14 +705,9 @@ Produces the on-disk byte-span shape from the compiler's canonical
 -spec reindent_method_source(binary(), binary()) ->
     {ok, binary()} | {error, atom(), binary()}.
 reindent_method_source(Source, BaseIndent) ->
-    try
-        gen_server:call(?MODULE, {reindent_method_source, Source, BaseIndent}, 30000)
-    catch
-        exit:{noproc, _} ->
-            {error, noproc, <<"Compiler server is not available">>};
-        exit:{timeout, _} ->
-            {error, timeout, <<"Compiler server timed out">>}
-    end.
+    safe_call(
+        {reindent_method_source, Source, BaseIndent}, ?CALL_TIMEOUT_MS, ?SPAN_DOWN, ?SPAN_TIMEOUT
+    ).
 
 -doc """
 Register a class with its metadata in the compiler server cache.
@@ -816,12 +763,7 @@ mirroring `register_class/2`'s degrade-silently contract.
 """.
 -spec get_classes() -> #{atom() => map()}.
 get_classes() ->
-    try
-        gen_server:call(?MODULE, get_classes, 5000)
-    catch
-        exit:{noproc, _} -> #{};
-        exit:{timeout, _} -> #{}
-    end.
+    safe_call(get_classes, ?QUICK_CALL_TIMEOUT_MS, #{}, #{}).
 
 -doc """
 Register a protocol with its metadata in the compiler server cache,
@@ -869,12 +811,7 @@ not running, mirroring `register_class/2`'s degrade-silently contract.
 """.
 -spec get_protocols() -> #{atom() => map()}.
 get_protocols() ->
-    try
-        gen_server:call(?MODULE, get_protocols, 5000)
-    catch
-        exit:{noproc, _} -> #{};
-        exit:{timeout, _} -> #{}
-    end.
+    safe_call(get_protocols, ?QUICK_CALL_TIMEOUT_MS, #{}, #{}).
 
 -doc """
 Merge `AliasSources` — one reparseable `type Name = <expansion>` line per
@@ -900,12 +837,7 @@ running, matching every other ambient-cache API in this module.
 """.
 -spec register_aliases([binary()]) -> ok.
 register_aliases(AliasSources) when is_list(AliasSources) ->
-    try
-        gen_server:call(?MODULE, {register_aliases, AliasSources}, 5000)
-    catch
-        exit:{noproc, _} -> ok;
-        exit:{timeout, _} -> ok
-    end.
+    safe_call({register_aliases, AliasSources}, ?QUICK_CALL_TIMEOUT_MS, ok, ok).
 
 -doc """
 Return the current ambient alias cache — every currently-registered alias's
@@ -917,12 +849,7 @@ it reads `get_classes/0`'s cache. Also used directly by tests. Returns `[]`
 """.
 -spec get_aliases() -> [binary()].
 get_aliases() ->
-    try
-        gen_server:call(?MODULE, get_aliases, 5000)
-    catch
-        exit:{noproc, _} -> [];
-        exit:{timeout, _} -> []
-    end.
+    safe_call(get_aliases, ?QUICK_CALL_TIMEOUT_MS, [], []).
 
 -doc """
 Compile Core Erlang source to BEAM bytecode in memory.
@@ -1047,13 +974,7 @@ handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From,
     %% injection as `class_hierarchy` — see `handle_call({compile, ...})`'s
     %% identical addition below for why this can't stay opt-in the way
     %% diagnostics/3's is.
-    Options1 = maps:merge(
-        #{known_type_aliases => alias_source_list(State#state.aliases)},
-        Options#{
-            class_hierarchy => State#state.classes,
-            protocol_registry => State#state.protocols
-        }
-    ),
+    Options1 = inject_ambient_defaulting_aliases(Options, State),
     Result = beamtalk_compiler_port:compile_expression(
         State#state.port, Source, ModuleName, KnownVars, Options1
     ),
@@ -1061,13 +982,7 @@ handle_call({compile_expression, Source, ModuleName, KnownVars, Options}, _From,
 handle_call({compile_expression_trace, Source, ModuleName, KnownVars, Options}, _From, State) ->
     %% See the identical `maps:merge/2` backstop on the
     %% `compile_expression` clause above — same reasoning applies here.
-    Options1 = maps:merge(
-        #{known_type_aliases => alias_source_list(State#state.aliases)},
-        Options#{
-            class_hierarchy => State#state.classes,
-            protocol_registry => State#state.protocols
-        }
-    ),
+    Options1 = inject_ambient_defaulting_aliases(Options, State),
     Result = beamtalk_compiler_port:compile_expression_trace(
         State#state.port, Source, ModuleName, KnownVars, Options1
     ),
@@ -1090,20 +1005,12 @@ handle_call({compile, Source, Options}, _From, State) ->
     %% whose method signature references a cross-file protocol needs it for
     %% the same nominal-mismatch/Dnu escape hatch wired for
     %% diagnostics/3.
-    Options1 = Options#{
-        class_hierarchy => State#state.classes,
-        protocol_registry => State#state.protocols,
-        known_type_aliases => alias_source_list(State#state.aliases)
-    },
+    Options1 = inject_ambient(Options, State),
     Result = do_compile(State#state.port, Source, Options1),
     {reply, Result, State};
 handle_call({compile_method, ClassSource, MethodSource, Options}, _From, State) ->
     %% See `handle_call({compile, ...})`'s identical comment above.
-    Options1 = Options#{
-        class_hierarchy => State#state.classes,
-        protocol_registry => State#state.protocols,
-        known_type_aliases => alias_source_list(State#state.aliases)
-    },
+    Options1 = inject_ambient(Options, State),
     Result = do_compile_method(State#state.port, ClassSource, MethodSource, Options1),
     {reply, Result, State};
 handle_call({resolve_completion_type, Expression}, _From, State) ->
@@ -1426,124 +1333,68 @@ open_port() ->
             error(Err)
     end.
 
-%% Send a request via the port and receive the response.
-%%
-%% Returns:
-%%   {ok, Response}         — decoded ETF response from the port
-%%   {exit_status, Status}  — port exited before responding
-%%   timeout                — port did not respond within Timeout ms
-%%   port_not_available     — port is closed (badarg from port_command)
-%%   decode_error           — response could not be decoded (unexpected atoms)
--spec send_port_request(port(), map(), timeout()) ->
-    {ok, term()} | {exit_status, non_neg_integer()} | timeout | port_not_available | decode_error.
-send_port_request(Port, Request, Timeout) ->
-    Command = maps:get(command, Request, unknown),
-    T0 = erlang:monotonic_time(millisecond),
-    RequestBin = term_to_binary(Request),
-    try port_command(Port, RequestBin) of
-        true ->
-            receive
-                {Port, {data, ResponseBin}} ->
-                    Elapsed = erlang:monotonic_time(millisecond) - T0,
-                    try binary_to_term(ResponseBin, [safe]) of
-                        %% [safe] prevents atom exhaustion: all response atoms are
-                        %% literals in this module and guaranteed to exist.
-                        Response ->
-                            {ok, Response}
-                    catch
-                        error:badarg:Stack ->
-                            ?LOG_ERROR("Compiler port decode error", #{
-                                domain => [beamtalk, runtime],
-                                port => Port,
-                                elapsed_ms => Elapsed,
-                                stacktrace => Stack
-                            }),
-                            decode_error
-                    end;
-                {Port, {exit_status, ExitStatus}} ->
-                    Elapsed = erlang:monotonic_time(millisecond) - T0,
-                    ?LOG_DEBUG("Port exit during request", #{
-                        domain => [beamtalk, runtime],
-                        command => Command,
-                        exit_status => ExitStatus,
-                        elapsed_ms => Elapsed
-                    }),
-                    {exit_status, ExitStatus}
-            after Timeout ->
-                %% Close the port so any late response cannot poison the next request.
-                (try
-                    port_close(Port)
-                catch
-                    _:_ -> ok
-                end),
-                timeout
+%% Set `Key' on `Request' from `Options' only when the option is present.
+-spec put_defined_opts(map(), map(), [atom()]) -> map().
+put_defined_opts(Request, Options, Keys) ->
+    lists:foldl(
+        fun(Key, Acc) ->
+            case maps:get(Key, Options, undefined) of
+                undefined -> Acc;
+                Value -> Acc#{Key => Value}
             end
-    catch
-        error:badarg ->
-            port_not_available
-    end.
+        end,
+        Request,
+        Keys
+    ).
+
+%% The ambient caches the server accumulates (ADR 0050 Phase 4 class
+%% hierarchy, the protocol registry, ADR 0108 session type aliases), keyed
+%% by the option names the port request carries.
+-spec ambient(#state{}) ->
+    #{class_hierarchy => map(), protocol_registry => map(), known_type_aliases => [binary()]}.
+ambient(State) ->
+    #{
+        class_hierarchy => State#state.classes,
+        protocol_registry => State#state.protocols,
+        known_type_aliases => alias_source_list(State#state.aliases)
+    }.
+
+%% Inject all three ambient caches into `Options', unconditionally
+%% overwriting any caller-supplied value. Used by `compile' and
+%% `compile_method': every caller installing a class/protocol into the live
+%% image needs the session's class, protocol and alias context (unlike
+%% diagnostics/3's `class_hierarchy => true' opt-in).
+-spec inject_ambient(map(), #state{}) -> map().
+inject_ambient(Options, State) ->
+    maps:merge(Options, ambient(State)).
+
+%% As `inject_ambient/2', but `known_type_aliases' is only a backstop: an
+%% explicit caller-supplied value wins. `do_eval/3' (the only production
+%% caller reaching class/protocol-definition responses) threads the *full*
+%% session alias list (session-declared plus stdlib-seeded) itself; the
+%% ambient cache only reflects session-declared aliases, so overwriting would
+%% silently drop the stdlib ones. Used by `compile_expression' and its trace
+%% variant.
+-spec inject_ambient_defaulting_aliases(map(), #state{}) -> map().
+inject_ambient_defaulting_aliases(Options, State) ->
+    #{known_type_aliases := Aliases} = Ambient = ambient(State),
+    maps:merge(
+        #{known_type_aliases => Aliases},
+        maps:merge(Options, maps:remove(known_type_aliases, Ambient))
+    ).
 
 %% Send a compile (file) request via the port.
 do_compile(Port, Source, Options) ->
-    StdlibMode = maps:get(stdlib_mode, Options, false),
-    %% Optional module_name override for package-qualified naming
-    ModuleName = maps:get(module_name, Options, undefined),
-    %% Optional source file path for beamtalk_source attribute
-    SourcePath = maps:get(source_path, Options, undefined),
-    %% Optional class superclass index for cross-file value-object inheritance
-    ClassSuperclassIndex = maps:get(class_superclass_index, Options, #{}),
-    %% Optional class module index for correct cross-directory module names
-    ClassModuleIndex = maps:get(class_module_index, Options, #{}),
     Request0 = #{
         command => compile,
         source => Source,
-        stdlib_mode => StdlibMode
+        stdlib_mode => maps:get(stdlib_mode, Options, false)
     },
-    Request1 =
-        case ModuleName of
-            undefined -> Request0;
-            _ -> Request0#{module_name => ModuleName}
-        end,
-    Request2 =
-        case SourcePath of
-            undefined -> Request1;
-            _ -> Request1#{source_path => SourcePath}
-        end,
-    Request3 =
-        case map_size(ClassSuperclassIndex) of
-            0 -> Request2;
-            _ -> Request2#{class_superclass_index => ClassSuperclassIndex}
-        end,
-    Request4 =
-        case map_size(ClassModuleIndex) of
-            0 -> Request3;
-            _ -> Request3#{class_module_index => ClassModuleIndex}
-        end,
-    %% ADR 0050 Phase 4: Inject accumulated class metadata into the port request.
-    Classes = maps:get(class_hierarchy, Options, #{}),
-    Request5 =
-        case map_size(Classes) of
-            0 -> Request4;
-            _ -> Request4#{class_hierarchy => Classes}
-        end,
-    %% Likewise inject the ambient protocol cache, mirroring
-    %% `Classes' above — see handle_call({compile, ...})'s doc for why this
-    %% is unconditional (not opt-in like diagnostics/3's).
-    Protocols = maps:get(protocol_registry, Options, #{}),
-    Request6 =
-        case map_size(Protocols) of
-            0 -> Request5;
-            _ -> Request5#{protocol_registry => Protocols}
-        end,
-    %% ADR 0108 hot-reload re-check trigger: likewise inject the
-    %% ambient session alias cache — see handle_call({compile, ...})'s doc
-    %% for why this is unconditional (not opt-in like diagnostics/3's).
-    Aliases = maps:get(known_type_aliases, Options, []),
-    Request7 =
-        case Aliases of
-            [] -> Request6;
-            _ -> Request6#{known_type_aliases => Aliases}
-        end,
+    %% Optional module_name override (package-qualified naming) and source
+    %% file path (`beamtalk_source' attribute).
+    Request7 = beamtalk_compiler_port:add_compile_options(
+        put_defined_opts(Request0, Options, [module_name, source_path]), Options
+    ),
     %% ADR 0127 §10a / BT-3593: an explicit, per-call, full-source carrier
     %% for `uses:` flattening — unlike `Protocols` above (the ambient,
     %% signature-only cache every compile gets unconditionally), this is
@@ -1581,101 +1432,32 @@ do_compile(Port, Source, Options) ->
             ProjectBatch when is_binary(ProjectBatch) -> Request8b#{project_batch => ProjectBatch};
             _ -> Request8b
         end,
-    case send_port_request(Port, RequestFinal, 30000) of
-        {ok, Response} ->
-            handle_compile_response(Response);
-        {exit_status, Status} ->
-            ?LOG_ERROR("Compiler port exited during compile", #{
-                domain => [beamtalk, runtime], status => Status
-            }),
-            {error, [#{message => <<"Compiler port exited unexpectedly">>}]};
-        timeout ->
-            {error, [#{message => <<"Compiler port timed out">>}]};
-        port_not_available ->
-            {error, [#{message => <<"Compiler port is not available">>}]};
-        decode_error ->
-            {error, [#{message => <<"Compiler port response is malformed">>}]}
-    end.
+    beamtalk_compiler_port:port_roundtrip(
+        Port, RequestFinal, compile, ?CALL_TIMEOUT_MS, fun handle_compile_response/1, diag
+    ).
 
 %% Send a structured single-method compile request via the port. Mirrors
 %% do_compile/3 but carries class_source + method_source + the method side, and
 %% the response also yields the recovered selector + canonical method source.
 do_compile_method(Port, ClassSource, MethodSource, Options) ->
-    StdlibMode = maps:get(stdlib_mode, Options, false),
-    IsClassMethod = maps:get(is_class_method, Options, false),
-    ClassName = maps:get(class_name, Options, undefined),
-    ModuleName = maps:get(module_name, Options, undefined),
-    SourcePath = maps:get(source_path, Options, undefined),
-    ClassSuperclassIndex = maps:get(class_superclass_index, Options, #{}),
-    ClassModuleIndex = maps:get(class_module_index, Options, #{}),
-    Request0a = #{
+    Request0 = #{
         command => compile_method,
         class_source => ClassSource,
         method_source => MethodSource,
-        is_class_method => IsClassMethod,
-        stdlib_mode => StdlibMode
+        is_class_method => maps:get(is_class_method, Options, false),
+        stdlib_mode => maps:get(stdlib_mode, Options, false)
     },
-    Request0 =
-        case ClassName of
-            undefined -> Request0a;
-            _ -> Request0a#{class_name => ClassName}
-        end,
-    Request1 =
-        case ModuleName of
-            undefined -> Request0;
-            _ -> Request0#{module_name => ModuleName}
-        end,
-    Request2 =
-        case SourcePath of
-            undefined -> Request1;
-            _ -> Request1#{source_path => SourcePath}
-        end,
-    Request3 =
-        case map_size(ClassSuperclassIndex) of
-            0 -> Request2;
-            _ -> Request2#{class_superclass_index => ClassSuperclassIndex}
-        end,
-    Request4 =
-        case map_size(ClassModuleIndex) of
-            0 -> Request3;
-            _ -> Request3#{class_module_index => ClassModuleIndex}
-        end,
-    Classes = maps:get(class_hierarchy, Options, #{}),
-    Request5 =
-        case map_size(Classes) of
-            0 -> Request4;
-            _ -> Request4#{class_hierarchy => Classes}
-        end,
-    %% See do_compile/3's identical addition.
-    Protocols = maps:get(protocol_registry, Options, #{}),
-    Request6 =
-        case map_size(Protocols) of
-            0 -> Request5;
-            _ -> Request5#{protocol_registry => Protocols}
-        end,
-    %% ADR 0108 hot-reload re-check trigger: see do_compile/3's
-    %% identical addition.
-    Aliases = maps:get(known_type_aliases, Options, []),
-    RequestFinal =
-        case Aliases of
-            [] -> Request6;
-            _ -> Request6#{known_type_aliases => Aliases}
-        end,
-    case send_port_request(Port, RequestFinal, 30000) of
-        {ok, Response} ->
-            handle_compile_method_response(Response);
-        {exit_status, Status} ->
-            ?LOG_ERROR("Compiler port exited during compile_method", #{
-                domain => [beamtalk, runtime], status => Status
-            }),
-            {error, [#{message => <<"Compiler port exited unexpectedly">>}]};
-        timeout ->
-            {error, [#{message => <<"Compiler port timed out">>}]};
-        port_not_available ->
-            {error, [#{message => <<"Compiler port is not available">>}]};
-        decode_error ->
-            {error, [#{message => <<"Compiler port response is malformed">>}]}
-    end.
+    RequestFinal = beamtalk_compiler_port:add_compile_options(
+        put_defined_opts(Request0, Options, [class_name, module_name, source_path]), Options
+    ),
+    beamtalk_compiler_port:port_roundtrip(
+        Port,
+        RequestFinal,
+        compile_method,
+        ?CALL_TIMEOUT_MS,
+        fun handle_compile_method_response/1,
+        diag
+    ).
 
 %% Send a diagnostics request via the port. `Mode' selects the parse grammar:
 %% `<<"expression">>' (default, top-level script) or `<<"method">>'
@@ -1702,37 +1484,26 @@ do_diagnostics(Port, Source, Mode, Classes, Aliases, Protocols, SourcePath) ->
             Path when is_binary(Path) -> Request0#{source_path => Path};
             _ -> Request0
         end,
-    case send_port_request(Port, Request, 30000) of
-        {ok, Response} ->
-            handle_diagnostics_response(Response);
-        {exit_status, Status} ->
-            ?LOG_ERROR("Compiler port exited during diagnostics", #{
-                domain => [beamtalk, runtime], status => Status
-            }),
-            {error, [#{message => <<"Compiler port exited unexpectedly">>}]};
-        timeout ->
-            {error, [#{message => <<"Compiler port timed out">>}]};
-        port_not_available ->
-            {error, [#{message => <<"Compiler port is not available">>}]};
-        decode_error ->
-            {error, [#{message => <<"Compiler port response is malformed">>}]}
-    end.
+    beamtalk_compiler_port:port_roundtrip(
+        Port, Request, diagnostics, ?CALL_TIMEOUT_MS, fun handle_diagnostics_response/1, diag
+    ).
 
 %% Send a version request via the port.
 do_version(Port) ->
     Request = #{command => version},
-    case send_port_request(Port, Request, 5000) of
-        {ok, Response} ->
-            handle_version_response(Response);
-        {exit_status, _} ->
-            {error, port_exited};
-        timeout ->
-            {error, timeout};
-        port_not_available ->
-            {error, port_not_available};
-        decode_error ->
-            {error, decode_error}
-    end.
+    beamtalk_compiler_port:port_roundtrip(
+        Port,
+        Request,
+        version,
+        ?QUICK_CALL_TIMEOUT_MS,
+        fun handle_version_response/1,
+        fun
+            (exited) -> {error, port_exited};
+            (timeout) -> {error, timeout};
+            (unavailable) -> {error, port_not_available};
+            (malformed) -> {error, decode_error}
+        end
+    ).
 
 %% Handle response from compile command.
 handle_compile_response(

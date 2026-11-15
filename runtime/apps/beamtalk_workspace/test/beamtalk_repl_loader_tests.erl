@@ -507,18 +507,18 @@ store_class_sources_with_classes_list_name_test() ->
 %%====================================================================
 
 is_path_inside_direct_child_test() ->
-    ?assert(beamtalk_repl_loader:is_path_inside("/proj", "/proj/src/Counter.bt")).
+    ?assert(beamtalk_workspace_file:path_inside("/proj", "/proj/src/Counter.bt")).
 
 is_path_inside_root_itself_test() ->
-    ?assert(beamtalk_repl_loader:is_path_inside("/proj", "/proj")).
+    ?assert(beamtalk_workspace_file:path_inside("/proj", "/proj")).
 
 is_path_inside_sibling_prefix_not_inside_test() ->
     %% "/proj-other" must NOT count as inside "/proj" — component-wise prefix,
     %% not a raw string prefix.
-    ?assertNot(beamtalk_repl_loader:is_path_inside("/proj", "/proj-other/src/X.bt")).
+    ?assertNot(beamtalk_workspace_file:path_inside("/proj", "/proj-other/src/X.bt")).
 
 is_path_inside_outside_tree_test() ->
-    ?assertNot(beamtalk_repl_loader:is_path_inside("/proj", "/elsewhere/X.bt")).
+    ?assertNot(beamtalk_workspace_file:path_inside("/proj", "/elsewhere/X.bt")).
 
 %%====================================================================
 %% method_source_binary/1 (ADR 0082 Phase 1)
@@ -526,30 +526,35 @@ is_path_inside_outside_tree_test() ->
 
 method_source_binary_prefers_method_source_test() ->
     Info = #{method_source => <<"increment => 1">>, expression => <<"Counter >> increment => 1">>},
-    ?assertEqual(<<"increment => 1">>, beamtalk_repl_loader:method_source_binary(Info)).
+    ?assertEqual(
+        <<"increment => 1">>, beamtalk_repl_loader_changelog_entries:method_source_binary(Info)
+    ).
 
 method_source_binary_accepts_list_test() ->
     Info = #{method_source => "doubled => 2"},
-    ?assertEqual(<<"doubled => 2">>, beamtalk_repl_loader:method_source_binary(Info)).
+    ?assertEqual(
+        <<"doubled => 2">>, beamtalk_repl_loader_changelog_entries:method_source_binary(Info)
+    ).
 
 method_source_binary_falls_back_to_expression_test() ->
     Info = #{expression => <<"Counter >> noop => self">>},
     ?assertEqual(
-        <<"Counter >> noop => self">>, beamtalk_repl_loader:method_source_binary(Info)
+        <<"Counter >> noop => self">>,
+        beamtalk_repl_loader_changelog_entries:method_source_binary(Info)
     ).
 
 method_source_binary_empty_when_absent_test() ->
-    ?assertEqual(<<>>, beamtalk_repl_loader:method_source_binary(#{})).
+    ?assertEqual(<<>>, beamtalk_repl_loader_changelog_entries:method_source_binary(#{})).
 
 %%====================================================================
 %% patch_side/1 (ADR 0082 Phase 1)
 %%====================================================================
 
 patch_side_instance_test() ->
-    ?assertEqual(instance, beamtalk_repl_loader:patch_side(false)).
+    ?assertEqual(instance, beamtalk_repl_loader_changelog_entries:patch_side(false)).
 
 patch_side_class_test() ->
-    ?assertEqual(class, beamtalk_repl_loader:patch_side(true)).
+    ?assertEqual(class, beamtalk_repl_loader_changelog_entries:patch_side(true)).
 
 %%====================================================================
 %% span_error_entry/3 (ADR 0082 Phase 1)
@@ -560,7 +565,9 @@ span_error_entry_other_error_downgrades_test() ->
     %% memory-only with a reason. The brand-new-method (`selector_not_found')
     %% case no longer routes here — it is handled by new_method_entry/3.
     Base = #{class => <<"Counter">>},
-    Entry = beamtalk_repl_loader:span_error_entry(Base, <<"src/counter.bt">>, ambiguous),
+    Entry = beamtalk_repl_loader_changelog_entries:span_error_entry(
+        Base, <<"src/counter.bt">>, ambiguous
+    ),
     ?assertEqual(false, maps:get(flushable, Entry)),
     ?assertEqual(<<"span_unresolved:ambiguous">>, maps:get(not_flushable_reason, Entry)).
 
@@ -575,7 +582,7 @@ span_error_entry_other_error_downgrades_test() ->
 sibling_method_indent_two_space_member_test() ->
     %% A 2-space-indented method/field is the typical stdlib convention.
     Disk = <<"Object subclass: Counter\n  value => 0\n  step => 1\n">>,
-    ?assertEqual(<<"  ">>, beamtalk_repl_loader:sibling_method_indent(Disk)).
+    ?assertEqual(<<"  ">>, beamtalk_repl_loader_changelog_entries:sibling_method_indent(Disk)).
 
 sibling_method_indent_skips_leading_comments_test() ->
     %% Doc/line comments above the first member do not set the indentation step;
@@ -587,24 +594,24 @@ sibling_method_indent_skips_leading_comments_test() ->
     >>,
     %% The comment line is itself indented 2 spaces, so the step is still 2 —
     %% but the helper must reach a member line, not stop on the class header.
-    ?assertEqual(<<"  ">>, beamtalk_repl_loader:sibling_method_indent(Disk)).
+    ?assertEqual(<<"  ">>, beamtalk_repl_loader_changelog_entries:sibling_method_indent(Disk)).
 
 sibling_method_indent_four_space_member_test() ->
     %% A non-standard 4-space body is honoured (we copy the sibling, not a
     %% hard-coded 2).
     Disk = <<"Object subclass: Counter\n    value => 0\n">>,
-    ?assertEqual(<<"    ">>, beamtalk_repl_loader:sibling_method_indent(Disk)).
+    ?assertEqual(<<"    ">>, beamtalk_repl_loader_changelog_entries:sibling_method_indent(Disk)).
 
 sibling_method_indent_empty_body_falls_back_test() ->
     %% A class with no indented member yet falls back to the 2-space default.
     Disk = <<"Object subclass: Counter\n">>,
-    ?assertEqual(<<"  ">>, beamtalk_repl_loader:sibling_method_indent(Disk)).
+    ?assertEqual(<<"  ">>, beamtalk_repl_loader_changelog_entries:sibling_method_indent(Disk)).
 
 sibling_method_indent_skips_unindented_comment_test() ->
     %% A column-0 line comment is not a member; the indented member below it sets
     %% the step.
     Disk = <<"// header\nObject subclass: Counter\n  value => 0\n">>,
-    ?assertEqual(<<"  ">>, beamtalk_repl_loader:sibling_method_indent(Disk)).
+    ?assertEqual(<<"  ">>, beamtalk_repl_loader_changelog_entries:sibling_method_indent(Disk)).
 
 %%====================================================================
 %% declared_class_name/1 (ADR 0082 Phase 1)
@@ -706,7 +713,10 @@ new_class_non_string_args_type_error_test() ->
 method_source_binary_falls_back_to_list_expression_test() ->
     %% No method_source key; expression is a string (list) — converted to binary.
     Info = #{expression => "Counter >> tick => self"},
-    ?assertEqual(<<"Counter >> tick => self">>, beamtalk_repl_loader:method_source_binary(Info)).
+    ?assertEqual(
+        <<"Counter >> tick => self">>,
+        beamtalk_repl_loader_changelog_entries:method_source_binary(Info)
+    ).
 
 %%====================================================================
 %% Integration fixture: real compile + load + activate
