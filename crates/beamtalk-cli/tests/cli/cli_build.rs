@@ -744,3 +744,126 @@ fn list_tree(root: &std::path::Path, depth: usize) -> Vec<std::path::PathBuf> {
     walk(root, depth, &mut out);
     out
 }
+
+// ---------------------------------------------------------------------------
+// ADR 0070 Phase 2: `pkg@Class` qualifiers must name a known package
+// ---------------------------------------------------------------------------
+
+/// A package `qualifier_consumer` that declares one path dependency
+/// (`qualifier_dep`) and whose `src/App.bt` references `{qualified}`.
+fn qualifier_project(qualified: &str) -> tempfile::TempDir {
+    let root = tempfile::tempdir().expect("create tempdir");
+
+    let dep = root.path().join("qualifier_dep");
+    std::fs::create_dir_all(dep.join("src")).unwrap();
+    std::fs::write(
+        dep.join("beamtalk.toml"),
+        "[package]\nname = \"qualifier_dep\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dep.join("src/Widget.bt"),
+        "Object subclass: Widget\n  size => 1\n",
+    )
+    .unwrap();
+
+    let app = root.path().join("app");
+    std::fs::create_dir_all(app.join("src")).unwrap();
+    std::fs::write(
+        app.join("beamtalk.toml"),
+        "[package]\nname = \"qualifier_consumer\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\n\
+         qualifier_dep = { path = \"../qualifier_dep\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("src/App.bt"),
+        format!("Object subclass: App\n  make => {qualified} new\n"),
+    )
+    .unwrap();
+    root
+}
+
+#[test]
+fn build_and_check_reject_unknown_package_qualifier() {
+    let root = qualifier_project("nosuchpkg@Widget");
+    let app = root.path().join("app");
+    for command in ["build", "check"] {
+        cli_common::beamtalk()
+            .current_dir(&app)
+            .arg(command)
+            .assert()
+            .failure()
+            // miette escapes the quotes, so match the unquoted parts.
+            .stderr(contains("Unknown package").and(contains("nosuchpkg@Widget")));
+    }
+}
+
+#[test]
+fn lint_reports_unknown_package_qualifier() {
+    // `lint` prints compile-class errors but keeps its own exit-code rule
+    // (non-zero only for lint findings), so assert the diagnostic, not the
+    // exit status.
+    let root = qualifier_project("nosuchpkg@Widget");
+    cli_common::beamtalk()
+        .current_dir(root.path().join("app"))
+        .arg("lint")
+        .assert()
+        .stderr(contains("Unknown package").and(contains("nosuchpkg@Widget")));
+}
+
+#[test]
+fn build_check_and_lint_accept_declared_current_and_stdlib_package_qualifiers() {
+    for qualified in [
+        "qualifier_dep@Widget",
+        "qualifier_consumer@App",
+        "stdlib@Object",
+    ] {
+        let root = qualifier_project(qualified);
+        let app = root.path().join("app");
+        for args in [&["build"][..], &["check"][..], &["lint"][..]] {
+            cli_common::beamtalk()
+                .current_dir(&app)
+                .args(args)
+                .assert()
+                .stderr(contains("Unknown package").not());
+        }
+    }
+}
+
+#[test]
+fn dependency_qualifiers_are_checked_against_the_dependencys_own_packages() {
+    // root `app` -> `mid` -> `leaf`. `mid` names `leaf@Leaf` (its own
+    // dependency, which the root does not declare), `mid@Mid` and
+    // `stdlib@Object`; none may fail the root's build.
+    let root = tempfile::tempdir().expect("create tempdir");
+    let package = |name: &str, class: &str, deps: &str, source: &str| {
+        let dir = root.path().join(name);
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(
+            dir.join("beamtalk.toml"),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n\n[dependencies]\n{deps}"),
+        )
+        .unwrap();
+        std::fs::write(dir.join(format!("src/{class}.bt")), source).unwrap();
+    };
+    package("leaf", "Leaf", "", "Object subclass: Leaf\n  size => 1\n");
+    package(
+        "mid",
+        "Mid",
+        "leaf = { path = \"../leaf\" }\n",
+        "Object subclass: Mid\n  a => leaf@Leaf\n  b => mid@Mid\n  c => stdlib@Object\n",
+    );
+    package(
+        "app",
+        "App",
+        "mid = { path = \"../mid\" }\n",
+        "Object subclass: App\n  make => mid@Mid\n",
+    );
+
+    cli_common::beamtalk()
+        .current_dir(root.path().join("app"))
+        .arg("build")
+        .assert()
+        .success();
+}

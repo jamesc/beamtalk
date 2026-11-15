@@ -25,6 +25,14 @@ capture crash reports.
 
 -define(R, <<"[redacted]">>).
 
+%% Secret markers for the compiled-actor tests. Deliberately long and
+%% non-numeric: the `~p` dumps they are searched in also hold pids and refs,
+%% whose digits would match a short numeric secret by chance (BT-4855).
+-define(UNLOCK_ARG_STR, "zqxv-unlock-arg-marker").
+-define(UNLOCK_ARG, {beamtalk_string, <<?UNLOCK_ARG_STR>>}).
+-define(UNLOCK_REPLY_STR, "reply-for-zqxv-unlock-arg-marker").
+-define(UNLOCK_REPLY, {beamtalk_string, <<?UNLOCK_REPLY_STR>>}).
+
 %%% ----------------------------------------------------------------------
 %%% The throwaway actor
 %%% ----------------------------------------------------------------------
@@ -218,13 +226,16 @@ compiled_actor_get_status_redacts_test() ->
     Pid = element(4, 'bt@secret_vault_actor':spawn()),
     try
         ok = sys:log(Pid, true),
-        ?assertEqual({ok, 62674}, gen_server:call(Pid, {'unlock:', [31337], #{}})),
+        ?assertEqual(
+            {ok, ?UNLOCK_REPLY},
+            gen_server:call(Pid, {'unlock:', [?UNLOCK_ARG], #{}})
+        ),
         ?assertEqual({ok, 7}, gen_server:call(Pid, {count, [], #{}})),
         {status, Pid, {module, gen_server}, [_PDict, _SysState, _Parent, _Debug, Misc]} =
             sys:get_status(Pid),
         Text = lists:flatten(io_lib:format("~p", [Misc])),
-        ?assertEqual(nomatch, string:find(Text, "31337")),
-        ?assertEqual(nomatch, string:find(Text, "62674")),
+        ?assertEqual(nomatch, string:find(Text, ?UNLOCK_ARG_STR)),
+        ?assertEqual(nomatch, string:find(Text, ?UNLOCK_REPLY_STR)),
         ?assertEqual(nomatch, string:find(Text, "vault-s3cret")),
         ?assertNotEqual(nomatch, string:find(Text, "unlock:")),
         ?assertNotEqual(nomatch, string:find(Text, "{ok,7}"))
@@ -323,7 +334,7 @@ compiled_actor_proc_lib_report_redacts_queued_send_test() ->
         %% is still in the mailbox when proc_lib writes its crash report.
         true = erlang:suspend_process(Pid),
         gen_server:cast(Pid, {cast, 'explode:', [1], #{}}),
-        Pid ! {'$gen_call', {self(), make_ref()}, {'unlock:', [31337], #{}}},
+        Pid ! {'$gen_call', {self(), make_ref()}, {'unlock:', [?UNLOCK_ARG], #{}}},
         true = erlang:resume_process(Pid),
         receive
             {'DOWN', MRef, process, Pid, _} -> ok
@@ -332,7 +343,9 @@ compiled_actor_proc_lib_report_redacts_queued_send_test() ->
         Info = await_proc_lib_report(Pid),
         Messages = proplists:get_value(messages, Info),
         ?assertMatch([{'$gen_call', _, {'unlock:', ?R, _}}], Messages),
-        ?assertEqual(nomatch, string:find(lists:flatten(io_lib:format("~p", [Info])), "31337"))
+        ?assertEqual(
+            nomatch, string:find(lists:flatten(io_lib:format("~p", [Info])), ?UNLOCK_ARG_STR)
+        )
     after
         beamtalk_test_log:stop_capture(Capture)
     end.
@@ -347,7 +360,7 @@ async_spawned_actor_proc_lib_report_redacts_queued_send_test() ->
     try
         true = erlang:suspend_process(Pid),
         gen_server:cast(Pid, {cast, 'explode:', [1], #{}}),
-        Pid ! {'$gen_call', {self(), make_ref()}, {'unlock:', [31337], #{}}},
+        Pid ! {'$gen_call', {self(), make_ref()}, {'unlock:', [?UNLOCK_ARG], #{}}},
         true = erlang:resume_process(Pid),
         receive
             {'DOWN', MonRef, process, Pid, _} -> ok
@@ -356,7 +369,9 @@ async_spawned_actor_proc_lib_report_redacts_queued_send_test() ->
         Info = await_proc_lib_report(Pid),
         Messages = proplists:get_value(messages, Info),
         ?assertMatch([{'$gen_call', _, {'unlock:', ?R, _}}], Messages),
-        ?assertEqual(nomatch, string:find(lists:flatten(io_lib:format("~p", [Info])), "31337"))
+        ?assertEqual(
+            nomatch, string:find(lists:flatten(io_lib:format("~p", [Info])), ?UNLOCK_ARG_STR)
+        )
     after
         beamtalk_test_log:stop_capture(Capture)
     end.
