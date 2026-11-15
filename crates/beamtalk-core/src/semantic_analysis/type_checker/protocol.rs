@@ -687,18 +687,17 @@ impl TypeChecker {
                                     InferredType::class_name_for_diagnostic(expected_ty.as_str());
                                 let arg_display =
                                     InferredType::class_name_for_diagnostic(arg_str.as_str());
+                                let message = format!(
+                                    "Argument {param_pos} of '{sel_name}' on {class_name} expects {expected_display}, got {arg_display}"
+                                );
+                                let hint = format!(
+                                    "Type arguments are not compatible: expected {expected_display}, got {arg_display}"
+                                );
                                 self.diagnostics.push(
-                                                    Diagnostic::warning(
-                                                        format!(
-                                                            "Argument {param_pos} of '{sel_name}' on {class_name} expects {expected_display}, got {arg_display}"
-                                                        ),
-                                                        *span,
-                                                    )
-                                                    .with_category(DiagnosticCategory::Type)
-                                                    .with_hint(format!(
-                                                        "Type arguments are not compatible: expected {expected_display}, got {arg_display}"
-                                                    )),
-                                                );
+                                    Diagnostic::warning(message, *span)
+                                        .with_category(DiagnosticCategory::Type)
+                                        .with_hint(hint),
+                                );
                             }
                         }
                     }
