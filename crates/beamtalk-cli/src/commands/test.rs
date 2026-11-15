@@ -1837,7 +1837,7 @@ fn compile_single_test_file(
     let test_file_package = pipeline.current_package_for(test_file);
     let module_name = test_file_module_name(test_file, &pipeline.pkg_root_to_name)?;
     for tc in &mut test_classes {
-        tc.module_name = module_name.clone();
+        tc.module_name.clone_from(&module_name);
     }
 
     // Build hierarchy once for all compilations within this test file.
