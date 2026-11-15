@@ -13,13 +13,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 ///
 /// Panics if the system clock is set before the Unix epoch.
 pub fn unique_temp_dir(prefix: &str) -> PathBuf {
+    // The counter keeps names unique between threads of one process that read
+    // the same clock tick (coarse clocks on Windows/macOS).
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time")
         .as_nanos();
-    // The counter keeps names unique between threads of one process that read
-    // the same clock tick (coarse clocks on Windows/macOS).
-    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     std::env::temp_dir().join(format!("{prefix}_{}_{}_{n}", std::process::id(), nanos))
 }
