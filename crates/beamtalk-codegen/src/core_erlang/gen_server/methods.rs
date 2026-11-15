@@ -456,6 +456,13 @@ impl CoreErlangGenerator {
     ///
     /// The order of checks matters: more specific patterns (e.g. field assignment)
     /// must come before general ones (e.g. pure expression).
+    // Deliberately a separate classifier from `classify_body_expr` /
+    // `classify_vt_body_expr` / `classify_block_expr`: each classifies for a
+    // different frame (actor method body, value-type `Self` body, plain
+    // closure body), with different kind enums and predicates (loop-threading
+    // `is_*_with_vt_local_threading` vs `control_flow_has_mutations`;
+    // `is_last`-driven). Only the leading shapes (`^`, field assignment, local
+    // assignment, destructure) coincide.
     pub(in crate::core_erlang) fn classify_body_expr(&self, expr: &Expression) -> BodyExprKind {
         // Early return — `^ value`
         if matches!(expr, Expression::Return { .. }) {
@@ -1047,6 +1054,12 @@ impl CoreErlangGenerator {
     }
 
     // Self.field := expr where RHS is control flow returning {Value, State}
+    // Not shared with the conditional-arm walker (`lower_arm_field_assignment_control_flow`). A method body
+    // re-extracts the locals this construct threads out of its returned state
+    // with `maps:get(<local key>, State)` and advances the `State` version
+    // directly; an arm rebinds them in place (`construct_locals_in_place`) or
+    // slot-writes them into `StateAcc`, which carries them out of the
+    // conditional. See `lower_reply_local_assign_pure`.
     #[expect(
         clippy::too_many_lines,
         reason = "one statement kind (FieldAssignmentControlFlow) of the statement walker"
@@ -1207,6 +1220,12 @@ impl CoreErlangGenerator {
     // instead (ADR 0111 Addendum 4's type-level rule: a
     // version-mutating statement must be a `Bind`, never a
     // `Statement`, but `Bind`'s `op` may still be opaque).
+    // Not shared with the conditional-arm walker (`lower_arm_self_field_at_put_control_flow`). A method body
+    // re-extracts the locals this construct threads out of its returned state
+    // with `maps:get(<local key>, State)` and advances the `State` version
+    // directly; an arm rebinds them in place (`construct_locals_in_place`) or
+    // slot-writes them into `StateAcc`, which carries them out of the
+    // conditional. See `lower_reply_local_assign_pure`.
     fn lower_reply_self_field_at_put_control_flow(
         &mut self,
         cx: StmtCx<'_>,
@@ -1319,6 +1338,12 @@ impl CoreErlangGenerator {
     // Element 2 of the RHS tuple becomes the next real `State` Bind
     // (Direct — the RHS is a computed map, not a static field Put);
     // the tuple unpack and threaded-local rebinds stay opaque Statements.
+    // Not shared with the conditional-arm walker (`lower_arm_destructure_assignment_control_flow`). A method body
+    // re-extracts the locals this construct threads out of its returned state
+    // with `maps:get(<local key>, State)` and advances the `State` version
+    // directly; an arm rebinds them in place (`construct_locals_in_place`) or
+    // slot-writes them into `StateAcc`, which carries them out of the
+    // conditional. See `lower_reply_local_assign_pure`.
     fn lower_reply_destructure_assignment_control_flow(
         &mut self,
         cx: StmtCx<'_>,
@@ -1763,6 +1788,12 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // Not shared with the conditional-arm walker (`lower_arm_tier2_value_call`). A method body
+    // re-extracts the locals this construct threads out of its returned state
+    // with `maps:get(<local key>, State)` and advances the `State` version
+    // directly; an arm rebinds them in place (`construct_locals_in_place`) or
+    // slot-writes them into `StateAcc`, which carries them out of the
+    // conditional. See `lower_reply_local_assign_pure`.
     fn lower_reply_tier2_value_call(
         &mut self,
         cx: StmtCx<'_>,
@@ -1847,6 +1878,12 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
+    // Not shared with the conditional-arm walker (`lower_arm_control_flow_with_mutations`). A method body
+    // re-extracts the locals this construct threads out of its returned state
+    // with `maps:get(<local key>, State)` and advances the `State` version
+    // directly; an arm rebinds them in place (`construct_locals_in_place`) or
+    // slot-writes them into `StateAcc`, which carries them out of the
+    // conditional. See `lower_reply_local_assign_pure`.
     fn lower_reply_control_flow_with_mutations(
         &mut self,
         cx: StmtCx<'_>,
