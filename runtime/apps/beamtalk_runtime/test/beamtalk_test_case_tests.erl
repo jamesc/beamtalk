@@ -162,7 +162,7 @@ test_case_setup() ->
     beamtalk_test_boot:registry(),
     beamtalk_extensions:init(),
     {ok, _} = beamtalk_bootstrap:start_link(),
-    beamtalk_stdlib:init(),
+    beamtalk_test_boot:boot_real_stdlib('Integer'),
     ok.
 
 test_case_teardown(_) ->

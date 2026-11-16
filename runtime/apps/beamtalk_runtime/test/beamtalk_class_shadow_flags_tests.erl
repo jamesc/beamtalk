@@ -16,7 +16,7 @@ register and unregister on the same class concurrently).
 
 setup_runtime() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-    ok = beamtalk_stdlib:init(),
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     ok.
 
 teardown_runtime(_) ->
