@@ -198,6 +198,22 @@ pub(in crate::core_erlang) fn runtime_send_doc(
     form::call("beamtalk_message_dispatch", "send", call_args)
 }
 
+/// The argument documents of a `send/3`/`cast/3` call over sequenced operand
+/// documents: the receiver (first operand), the selector atom, and the rest
+/// as a literal argument list.
+pub(in crate::core_erlang) fn runtime_send_args(
+    selector_atom: &str,
+    operands: Vec<Document<'static>>,
+) -> Vec<Document<'static>> {
+    let mut operands = operands.into_iter();
+    let receiver = operands.next().expect("receiver operand");
+    vec![
+        receiver,
+        leaf::atom(selector_atom),
+        send_arg_list_doc(operands.collect()),
+    ]
+}
+
 /// `[a, b, …]` — the literal argument list of a runtime `send`.
 pub(in crate::core_erlang) fn send_arg_list_doc(
     arg_docs: Vec<Document<'static>>,
@@ -387,21 +403,13 @@ impl CoreErlangGenerator {
         for arg in arguments {
             all_exprs.push(arg);
         }
-        let mut seq = self.sequence_call(&all_exprs, "Cast")?;
-        let actual_receiver = seq.next();
-        let args_doc = Self::join_docs_with_commas(seq.rest());
-
-        let call_doc = docvec![
-            "call 'beamtalk_message_dispatch':'cast'(",
-            actual_receiver,
-            ", ",
-            leaf::atom(selector_atom),
-            ", [",
-            args_doc,
-            "])",
-        ];
-
-        Ok(seq.close(self, call_doc, "CastRes"))
+        self.sequenced_runtime_call(
+            "beamtalk_message_dispatch",
+            "cast",
+            &all_exprs,
+            "Cast",
+            |operands| runtime_send_args(&selector_atom, operands),
+        )
     }
 
     /// BT-4070: the `beamtalk_message_dispatch:send/3` call itself, over

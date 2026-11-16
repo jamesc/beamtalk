@@ -14,6 +14,7 @@ use super::{
     MessageSelector, PERFORM_WITH_ARGS_TIMEOUT, Result, WellKnownSelector, class_var_fn, docvec,
     leaf, not_nil_apply, primitives, validate_if_not_nil_block,
 };
+use crate::core_erlang::dispatch_codegen::runtime_send_args;
 use beamtalk_cerl_doc::form;
 
 /// The `beamtalk_behaviour_intrinsics` functions the `isKindOf:` lowerings
@@ -126,26 +127,13 @@ impl CoreErlangGenerator {
         // self-dispatched into `ProtoObject`'s method body instead. Matched
         // by name, like `asType:`: it is not a `WellKnownSelector`.
         if selector.name() == PERFORM_WITH_ARGS_TIMEOUT && arguments.len() == 3 {
-            let mut seq = self.sequence_call(
+            return Ok(Some(self.sequenced_runtime_call(
+                "beamtalk_message_dispatch",
+                "send",
                 &[receiver, &arguments[0], &arguments[1], &arguments[2]],
                 "PerfTo",
-            )?;
-            let recv_doc = seq.next();
-            let sel_doc = seq.next();
-            let args_doc = seq.next();
-            let timeout_doc = seq.next();
-            let call_doc = docvec![
-                "call 'beamtalk_message_dispatch':'send'(",
-                recv_doc,
-                ", ",
-                sel_doc,
-                ", ",
-                args_doc,
-                ", ",
-                timeout_doc,
-                ")",
-            ];
-            return Ok(Some(seq.close(self, call_doc, "PerfToRes")));
+                |operands| operands,
+            )?));
         }
 
         // `perform:` family routes through the `WellKnownSelector` enum;
@@ -155,57 +143,43 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::PerformWithArgs) => {
                 debug_assert_eq!(arguments.len(), 2);
                 // Hoist open-scope receiver + args (e.g. class method self-sends).
-                let mut seq =
-                    self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "Perf")?;
-                let recv_doc = seq.next();
-                let sel_doc = seq.next();
-                let args_doc = seq.next();
-                let call_doc = docvec![
-                    "call 'beamtalk_message_dispatch':'send'(",
-                    recv_doc,
-                    ", ",
-                    sel_doc,
-                    ", ",
-                    args_doc,
-                    ")",
-                ];
-                Ok(Some(seq.close(self, call_doc, "PerfRes")))
+                self.sequenced_runtime_call(
+                    "beamtalk_message_dispatch",
+                    "send",
+                    &[receiver, &arguments[0], &arguments[1]],
+                    "Perf",
+                    |operands| operands,
+                )
+                .map(Some)
             }
             // Execute a class method in the caller's process,
             // bypassing the class object's gen_server.
             Some(WellKnownSelector::PerformLocallyWithArgs) => {
                 debug_assert_eq!(arguments.len(), 2);
                 // Hoist open-scope receiver + args (e.g. class method self-sends).
-                let mut seq =
-                    self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "PerfLoc")?;
-                let recv_doc = seq.next();
-                let sel_doc = seq.next();
-                let args_doc = seq.next();
-                let call_doc = docvec![
-                    "call 'beamtalk_object_class':'local_call'(",
-                    recv_doc,
-                    ", ",
-                    sel_doc,
-                    ", ",
-                    args_doc,
-                    ")",
-                ];
-                Ok(Some(seq.close(self, call_doc, "PerfLocRes")))
+                self.sequenced_runtime_call(
+                    "beamtalk_object_class",
+                    "local_call",
+                    &[receiver, &arguments[0], &arguments[1]],
+                    "PerfLoc",
+                    |operands| operands,
+                )
+                .map(Some)
             }
             Some(WellKnownSelector::Perform) => {
                 debug_assert_eq!(arguments.len(), 1);
                 // Hoist open-scope receiver + selector arg.
-                let mut seq = self.sequence_call(&[receiver, &arguments[0]], "Perf")?;
-                let recv_doc = seq.next();
-                let sel_doc = seq.next();
-                let call_doc = docvec![
-                    "call 'beamtalk_message_dispatch':'send'(",
-                    recv_doc,
-                    ", ",
-                    sel_doc,
-                    ", [])",
-                ];
-                Ok(Some(seq.close(self, call_doc, "PerfRes")))
+                self.sequenced_runtime_call(
+                    "beamtalk_message_dispatch",
+                    "send",
+                    &[receiver, &arguments[0]],
+                    "Perf",
+                    |mut operands| {
+                        operands.push(Document::Str("[]"));
+                        operands
+                    },
+                )
+                .map(Some)
             }
             _ => Ok(None),
         }
@@ -1596,17 +1570,14 @@ impl CoreErlangGenerator {
                         // `#beamtalk_object{}` receivers, BT-4148), so
                         // `classify_receiver`'s actor/class/value
                         // distinction lives in exactly one place.
-                        let mut seq = self.sequence_call(&[receiver, &arguments[0]], "HasF")?;
-                        let recv_doc = seq.next();
-                        let name_doc = seq.next();
-                        let call_doc = docvec![
-                            "call 'beamtalk_message_dispatch':'send'(",
-                            recv_doc,
-                            ", 'hasField:', [",
-                            name_doc,
-                            "])",
-                        ];
-                        Ok(Some(seq.close(self, call_doc, "HasFRes")))
+                        self.sequenced_runtime_call(
+                            "beamtalk_message_dispatch",
+                            "send",
+                            &[receiver, &arguments[0]],
+                            "HasF",
+                            |operands| runtime_send_args("hasField:", operands),
+                        )
+                        .map(Some)
                     }
                     // ADR 0124 §1/§4f/B4: `clearField:` — returns a `late`
                     // slot to unassigned. A write; lowers exactly as
@@ -1684,17 +1655,14 @@ impl CoreErlangGenerator {
                         // — see `generate_primitive_dispatch`), so no
                         // hand-rolled error construction is needed here
                         // either.
-                        let mut seq = self.sequence_call(&[receiver, &arguments[0]], "ClrF")?;
-                        let recv_doc = seq.next();
-                        let name_doc = seq.next();
-                        let call_doc = docvec![
-                            "call 'beamtalk_message_dispatch':'send'(",
-                            recv_doc,
-                            ", 'clearField:', [",
-                            name_doc,
-                            "])",
-                        ];
-                        Ok(Some(seq.close(self, call_doc, "ClrFRes")))
+                        self.sequenced_runtime_call(
+                            "beamtalk_message_dispatch",
+                            "send",
+                            &[receiver, &arguments[0]],
+                            "ClrF",
+                            |operands| runtime_send_args("clearField:", operands),
+                        )
+                        .map(Some)
                     }
                     _ => Ok(None),
                 }
