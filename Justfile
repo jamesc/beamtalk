@@ -944,7 +944,7 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names test-lint-stamp test-refresh-edge test-check-stdlib-class-beams test-vs-elixir-nightly
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names test-lint-stamp test-refresh-edge test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -979,6 +979,11 @@ test-check-stdlib-class-beams:
 [windows]
 test-check-stdlib-class-beams:
     @echo "test-check-stdlib-class-beams: skipped on Windows (covered by Linux CI)"
+
+# Test (BT-4939): the checkout-path normaliser behind `core-diff` snapshots,
+# including that a different relative path still shows as a difference.
+test-core-diff-normalise:
+    @cd scripts/ci && python3 -m unittest -q test_core_diff_normalise
 
 # Test (BT-4844): the parser and the 25% time gate of the nightly vs-elixir
 # subset (scripts/ci/vs_elixir_nightly.py).
@@ -1824,6 +1829,13 @@ core-diff-snapshot OUT_DIR MODE="snapshot-only": build-rust build-erlang
             -e 's#"(/[^"]*/)?stdlib/#"stdlib/#g' \
             -e "s/'beamtalk_version' => #\{[^}]*\}#/'beamtalk_version' => <<>>/g" \
             -e "s/'otp_release' => #\{[^}]*\}#/'otp_release' => <<>>/g"
+    # BT-4939: `'__beamtalk_method_lines'/0` (and the test fixtures' source
+    # paths) embed the absolute path as a binary literal, one
+    # `#<N>(8,1,'integer',...)` segment per byte, which the `sed` above cannot
+    # match. The script decodes those and rewrites them to the same
+    # `stdlib/...` form, and fails if the checkout root still appears anywhere
+    # (plain or encoded), so a new checkout-dependent encoding cannot slip in.
+    python3 scripts/ci/core_diff_normalise.py --root "$REPO_ROOT" "$OUT"
 
     count=$(find "$OUT" -name '*.core' | wc -l | tr -d ' ')
     echo "✅ Snapshot written to $OUT ($count .core files)"
@@ -1910,6 +1922,13 @@ core-diff BASE_REF="origin/main" BASE_SNAPSHOT="":
         just core-diff-base-snapshot "{{BASE_REF}}" "$BASE_DIR"
     fi
 
+    # BT-4939: a base snapshot built by an older `core-diff-snapshot` (or
+    # restored from the CI cache) may still carry its own checkout path in the
+    # byte-literal source paths. Normalising is idempotent, so re-apply it to
+    # both sides: the comparison then never depends on where either was built.
+    python3 scripts/ci/core_diff_normalise.py "$BASE_DIR"
+    python3 scripts/ci/core_diff_normalise.py "$HEAD_DIR"
+
     echo "🔬 Diffing {{BASE_REF}} (base) against HEAD ..."
     if diff -ru "$BASE_DIR" "$HEAD_DIR"; then
         echo "✅ core-diff: generated Core Erlang is byte-identical to {{BASE_REF}}"
@@ -1947,6 +1966,45 @@ core-diff-modes OUT_DIR="target/core-diff-modes":
         echo "✅ core-diff-modes: snapshot-only and full leave identical .core files"
     else
         echo "❌ core-diff-modes: snapshot-only and full .core outputs differ (see diff above) — a .core write likely moved after a snapshot-only early return" >&2
+        exit 1
+    fi
+
+# BT-4939: the self-check behind `core-diff:enforce`. Snapshots this checkout,
+# then snapshots a git worktree of the same commit at a different path, and
+# fails if the two differ — i.e. if any generated Core Erlang still depends on
+# the checkout directory. (`core-diff` compares a PR head against a base built
+# in `target/core-diff/_base-worktree`, so this is exactly its situation.)
+# Uncommitted changes are not in the worktree, so run it on a clean tree. The
+# worktree shares this checkout's cargo target dir, so only the workspace
+# crates rebuild. CI runs it in the `core-diff-modes` job.
+#
+# Linux only — see `core-diff-snapshot`'s own tag; this recipe calls it.
+[linux]
+core-diff-relocation OUT_DIR="target/core-diff-relocation":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    ROOT="$(pwd)"
+    mkdir -p "{{OUT_DIR}}"
+    OUT="$(cd "{{OUT_DIR}}" && pwd)"
+    WT="$OUT/_relocated-worktree/a/deliberately/different/checkout"
+    git worktree remove --force "$WT" >/dev/null 2>&1 || true
+    git worktree prune
+    rm -rf "$OUT/_relocated-worktree"
+    mkdir -p "$(dirname "$WT")"
+    git worktree add --detach --quiet "$WT" HEAD
+    trap 'git worktree remove --force "$WT" >/dev/null 2>&1 || true' EXIT
+    just core-diff-snapshot "$OUT/here" snapshot-only
+    (cd "$WT" && CARGO_TARGET_DIR="$ROOT/target" just core-diff-snapshot "$OUT/relocated" snapshot-only)
+    for d in here relocated; do
+        if [[ -z "$(find "$OUT/$d" -name '*.core' -print -quit)" ]]; then
+            echo "❌ core-diff-relocation: $d snapshot holds no .core files" >&2
+            exit 1
+        fi
+    done
+    if diff -r "$OUT/here" "$OUT/relocated"; then
+        echo "✅ core-diff-relocation: snapshots of one commit from two directories are identical"
+    else
+        echo "❌ core-diff-relocation: snapshots differ by checkout directory (see diff above) — extend scripts/ci/core_diff_normalise.py" >&2
         exit 1
     fi
 
