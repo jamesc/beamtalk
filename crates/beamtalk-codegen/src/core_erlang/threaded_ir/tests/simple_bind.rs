@@ -215,8 +215,10 @@ fn verify_body_with_opaque_version_gaps_rejects_an_unexplained_gap_in_a_class_me
 
 #[test]
 fn backfill_opaque_version_gaps_with_no_families_leaves_the_body_untouched() {
-    // BT-4926: the plain-closure-body prelude check passes no backfill, so its
-    // unexplained gap reaches the verifier.
+    // BT-4926: with no families (what `opaque_gap_families` returns for a
+    // class-method scope) the backfill is the identity, so an unexplained gap
+    // reaches the verifier. (`closure_prelude_doc` skips the backfill call
+    // entirely and verifies its prelude as-is.)
     let ir = opaque_state_gap_body();
     assert_eq!(
         backfill_opaque_version_gaps(&ir, FrameId::ROOT, &[]),
