@@ -161,24 +161,14 @@ sequence repeated across the integration suites.
 -spec compiler() -> ok.
 compiler() ->
     {ok, _} = application:ensure_all_started(compiler),
-    {ok, _} = application:ensure_all_started(beamtalk_compiler),
-    %% `beamtalk_xref:sends_from_source/1` guards on `erlang:function_exported/3`,
-    %% which is false for a module that is not loaded yet; starting the app does
-    %% not load the `beamtalk_compiler` facade in interactive mode (BT-4934).
-    {module, beamtalk_compiler} = code:ensure_loaded(beamtalk_compiler),
-    ok = load_runtime_modules(),
+    {ok, _} = start_app(beamtalk_compiler),
     ok.
 
-%% The compiler port decodes replies with `binary_to_term(Bin, [safe])`, which
-%% rejects any atom the VM has not seen yet. A reply names atoms that only the
-%% runtime's modules define (class and method metadata), so in a fresh node the
-%% compile fails with "Compiler port response is malformed" unless those
-%% modules are loaded first. In a release the runtime is always up; here the
-%% modules are loaded without starting any process (BT-4934).
 -doc """
-Load every `beamtalk_runtime` module (without starting any process) so the
-atoms they define exist; see the note above. Idempotent. For suites that open
-the compiler port directly rather than through `compiler/0`.
+Load every `beamtalk_runtime` module without starting any process. A release
+loads all modules at boot (embedded mode), a bare EUnit node loads them on first
+use, and each lazy load is a `code_server` call: suites that assert "no
+`code_server` call" preload with this first. Idempotent.
 """.
 -spec load_runtime_modules() -> ok.
 load_runtime_modules() ->

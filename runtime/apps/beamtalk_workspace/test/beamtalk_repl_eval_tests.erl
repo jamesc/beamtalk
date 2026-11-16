@@ -2555,7 +2555,7 @@ dispatch_sync_beamtalk_singleton() ->
 
 stdlib_gate_setup() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-    {ok, _} = application:ensure_all_started(beamtalk_stdlib),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_stdlib),
     %% Let the stdlib classes (ErlangModule, ...) register before patching.
     ok = beamtalk_test_wait:class('ErlangModule').
 

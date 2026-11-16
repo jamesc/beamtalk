@@ -123,7 +123,24 @@ setup() ->
 
 teardown(_) ->
     beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
+    %% `setup/0` loaded user classes named `Counter` and `SubCounter`, which
+    %% replace the compiled `Counter` fixture's class and module in this node.
+    %% Remove them and unload their modules so a later suite that loads the
+    %% fixture gets the fixture, not this suite's `Value subclass: Counter`
+    %% (BT-4934).
+    lists:foreach(fun remove_loaded_class/1, ['SubCounter', 'Counter']),
+    beamtalk_test_repl:clear_xref(),
     ok.
+
+remove_loaded_class(Name) ->
+    case beamtalk_class_registry:whereis_class(Name) of
+        Pid when is_pid(Pid) ->
+            Mod = beamtalk_object_class:module_name_safe(Pid),
+            ok = beamtalk_test_class:stop_graceful(Name),
+            beamtalk_test_module:unload(Mod);
+        _ ->
+            ok
+    end.
 
 %%====================================================================
 %% Word-boundary span helper (test-only — mirrors what a real site-discovery

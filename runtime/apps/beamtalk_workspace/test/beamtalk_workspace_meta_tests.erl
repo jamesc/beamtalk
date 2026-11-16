@@ -468,7 +468,7 @@ stale_metadata_project_path_does_not_override_launcher_test() ->
     ok = beamtalk_package:set_root_package(<<"mypkg">>),
     stop_if_running(),
     %% The module name comes from the compiler port (BT-4868).
-    {ok, _} = application:ensure_all_started(beamtalk_compiler),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_compiler),
     {ok, Pid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WsId,
         project_path => list_to_binary(RealDir),
