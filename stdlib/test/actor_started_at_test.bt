@@ -16,13 +16,13 @@ TestCase subclass: ActorStartedAtTest
     self assert: (Erlang erlang is_integer: t)
     a stop
 
-  testSubclassRecordsStartTimeOnce =>
-    // A subclass's init/1 calls the parent's as a state-building helper; the
-    // parent must not overwrite the leaf's single write.
-    a := Counter spawn
-    t1 := self startedAt: a
-    a increment
-    self assert: (self startedAt: a) equals: t1
+  testSubclassInitKeepsLeafClassMarkerAndRecordsStartTime =>
+    // InheritingCounter's init/1 calls Counter's as a state-building helper
+    // (`__skip_initialize__`). The key shares the marker's guard, so the
+    // parent must leave the leaf class name in place and the key must be set.
+    a := InheritingCounter spawn
+    self assert: (Erlang beamtalk_actor_registry pid_class_name: a pid) equals: #InheritingCounter
+    self assert: (Erlang erlang is_integer: (self startedAt: a))
     a stop
 
   testOlderActorHasSmallerStartTime =>

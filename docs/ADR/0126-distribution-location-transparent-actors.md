@@ -380,6 +380,14 @@ to a younger timed one, which is accepted: it is bounded by the upgrade window,
 and the loser is stopped gracefully, not killed. If neither side has a time,
 `random_exit_name/3` decides, as before.
 
+"Has no start time" means the read succeeded and found no key. A read that
+*failed* (an `erpc` timeout, `noconnection`, or a peer too old to export the
+read function) is reported as `unreachable`, not `undefined`, and always takes
+the `random_exit_name/3` fallback: it is a fact about the network, not about the
+actor, and it is most likely during the very partition heal this resolver runs
+in. Treating it as "no start time" would make the local candidate win every
+time the remote read failed, even when the remote actor is the older one.
+
 **Mesh side effects.** `global` keeps a fully connected mesh, and OTP 25+
 enables `prevent_overlapping_partitions` by default: on partial connectivity
 `global` actively disconnects nodes to restore a consistent view. Users of

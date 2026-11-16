@@ -745,8 +745,9 @@ impl CoreErlangGenerator {
     ///
     /// BT-4937: the same branch also writes `'$beamtalk_actor_started_at'`
     /// (`erlang:system_time(microsecond)`), the age `resolve_global_conflict/3`
-    /// compares. It is the only writer of that key now that the interpretive
-    /// `beamtalk_actor:init/1` is going away.
+    /// compares. It is the writer for compiled actors; the interpretive
+    /// `beamtalk_actor:init/1` also writes it until that path is removed
+    /// (BT-4871).
     ///
     /// BT-3596: when `traps_exit` is true (this class or an ancestor
     /// overrides `terminate:`, see `class_or_ancestor_overrides_terminate`),

@@ -57,3 +57,26 @@ both_have_times_keeps_the_older_test() ->
     ?assertEqual(Older, beamtalk_actor_registry:resolve_global_conflict(name, Older, Younger)),
     stop_proc(Older),
     stop_proc(Younger).
+
+%% A pid on a node this node cannot reach: an external pid term built by hand
+%% (NEW_PID_EXT, small UTF-8 atom node name).
+unreachable_pid() ->
+    Node = <<"bt4937_gone@nohost.invalid">>,
+    binary_to_term(
+        <<131, 88, 119, (byte_size(Node)), Node/binary, 1:32, 0:32, 1:32>>
+    ).
+
+failed_remote_read_takes_the_otp_fallback_not_the_local_side_test() ->
+    %% The remote read fails. Treating that as "no start time" would keep the
+    %% local pid every time. It must take OTP's fallback instead, which keeps
+    %% the pid on the lower-named node: the same answer on every node.
+    Local = start_proc(erlang:system_time(microsecond)),
+    Remote = unreachable_pid(),
+    Expected =
+        case node(Local) < node(Remote) of
+            true -> Local;
+            false -> Remote
+        end,
+    ?assertEqual(Expected, beamtalk_actor_registry:resolve_global_conflict(name, Local, Remote)),
+    ?assertEqual(Expected, beamtalk_actor_registry:resolve_global_conflict(name, Remote, Local)),
+    stop_proc(Local).
