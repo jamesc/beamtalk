@@ -15,7 +15,7 @@ use crate::core_erlang::expr_shape::is_character_typed_receiver;
 use crate::core_erlang::routing;
 use crate::core_erlang::{CodeGenError, CoreErlangGenerator, Result};
 
-use super::HANDLERS;
+use super::{HANDLERS, runtime_send_doc};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -892,15 +892,12 @@ impl CoreErlangGenerator {
         let args_list_doc = Self::join_docs_with_commas(
             arg_vars.iter().map(|var| leaf::var(var.clone())).collect(),
         );
-        let fallback_doc = self.annotate_current_send_call(docvec![
-            "call 'beamtalk_message_dispatch':'send'(",
+        let fallback_doc = self.annotate_current_send_call(runtime_send_doc(
             leaf::var(receiver_var.to_string()),
-            ", ",
             leaf::atom(selector_atom.to_string()),
-            ", [",
-            args_list_doc.clone(),
-            "])",
-        ]);
+            docvec!["[", args_list_doc.clone(), "]"],
+            None,
+        ));
         self.guard_around(
             target,
             selector_atom,

@@ -86,13 +86,7 @@ impl CoreErlangGenerator {
             ") <'false'> when 'true' -> ",
             // BT-4366: the fallback send is nested in the list-type `case`, so the
             // call node carries the send's line itself.
-            self.annotate_current_send_call(docvec![
-                "call 'beamtalk_message_dispatch':'send'(",
-                leaf::var(list_var),
-                ", 'reject:', [",
-                leaf::var(body_var),
-                "])"
-            ]),
+            self.runtime_send_call(leaf::var(list_var), "reject:", vec![leaf::var(body_var)]),
             " end",
         ])
     }

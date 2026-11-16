@@ -103,15 +103,12 @@ pub(crate) fn generate_proto_object_bif(
             let sel = param(params, 0, "_Selector");
             let args = param(params, 1, "_Args");
             let timeout = param(params, 2, "_Timeout");
-            Some(docvec![
-                "call 'beamtalk_message_dispatch':'send'(Self, ",
+            Some(crate::core_erlang::dispatch_codegen::runtime_send_doc(
+                Document::Str("Self"),
                 leaf::var(sel.to_string()),
-                ", ",
                 leaf::var(args.to_string()),
-                ", ",
-                leaf::var(timeout.to_string()),
-                ")",
-            ])
+                Some(leaf::var(timeout.to_string())),
+            ))
         }
         // Class objects only: any other receiver gets a structured
         // `type_error` from `local_call/3`.
