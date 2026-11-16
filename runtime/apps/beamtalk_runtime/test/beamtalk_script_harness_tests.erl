@@ -91,7 +91,9 @@ flush_loggers_skips_non_std_handler_test_() ->
             _ = logger:remove_handler(Id)
         end,
         fun(_Id) ->
-            [?_assertEqual(ok, beamtalk_script_harness:flush_loggers())]
+            %% Same worst case as flush_loggers_returns_ok_test_ (the std handlers'
+            %% filesync calls, 5 s each), so the same sized bound.
+            [{timeout, 20, fun flush_loggers_returns_ok/0}]
         end}.
 
 %% The decoupled case: a stop is requested from a process that is not on the
