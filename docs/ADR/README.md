@@ -177,6 +177,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0148](0148-checked-narrowing-casts.md) | Checked Narrowing Casts and the Trusted-Type Comparison Hole | Deferred (2026-11-14) | 2026-11-14 |
 | [0149](0149-eep48-doc-chunks-for-beamtalk-modules.md) | EEP-48 Doc Chunks for Beamtalk Modules | Deferred (2026-11-14) | 2026-11-14 |
 | [0150](0150-actor-registry-off-the-start-path.md) | Actor Registration Off the Start Path | Accepted (2026-11-16) | 2026-11-15 |
+| [0151](0151-elixir-interop-and-mix-backed-packages.md) | Elixir Interop and Mix-Backed Packages | Proposed (2026-11-16) | 2026-11-16 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 
