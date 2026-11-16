@@ -1736,10 +1736,9 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// Generates the pdict stash preamble for re-entrant self-sends.
-    /// Returns `let <old> = ... in` (a leading line break, then the install
-    /// of `state_var`) — the caller appends the dispatch body and must call
-    /// [`Self::pdict_restore_epilogue`] with the same `vars` after.
+    /// `let <old> = <install state_var> in body`: stashes `state_var` for
+    /// re-entrant self-sends around `body`, which must close the bracket with
+    /// [`Self::pdict_restore`] using the same `vars`.
     fn pdict_stash(
         vars: &PdictVars,
         state_var: &str,
@@ -1755,8 +1754,9 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// Generates the pdict restore epilogue. Must follow the dispatch
-    /// result binding (e.g., `let _DispatchResult = ... in`).
+    /// Wraps `body` in the uninstall of the stashed state and the erase of the
+    /// call stack. `body` follows the dispatch result binding (for example
+    /// `let _DispatchResult = ... in`).
     fn pdict_restore(vars: &PdictVars, body: Document<'static>) -> Document<'static> {
         bind(
             leaf::var(vars.restore.clone()),
