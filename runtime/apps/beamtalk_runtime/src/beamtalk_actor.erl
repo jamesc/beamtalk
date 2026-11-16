@@ -381,6 +381,8 @@ handle_getValue([], State) ->
 %% continuation — called by this module's own handle_call/handle_cast and by
 %% every compiled actor's generated ones (see mailbox_continuation_check/2).
 -export([mailbox_continuation_check/2, performed_selector/2]).
+%% Pdict cleanup after a callback; used by generated-shape hosts (and tests).
+-export([restore_dispatch_pdict/1]).
 
 %% exported so generated self-dispatch error breadcrumbs
 %% (dispatch_codegen.rs's generate_self_dispatch_error_clause) can resolve
