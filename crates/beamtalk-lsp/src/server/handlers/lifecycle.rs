@@ -280,6 +280,7 @@ impl Backend {
                 // `beamtalk.toml`) — the workspace folder may be a parent
                 // of it, leaving its dependencies unloaded.
                 self.ensure_package_root_loaded(&path).await;
+                self.load_stdlib_file_registry(&path).await;
             }
             self.publish_diagnostics(&uri).await;
         }

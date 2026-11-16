@@ -1487,6 +1487,36 @@ impl Backend {
         *guard = Some(handle);
     }
 
+    /// Gives `path` the FFI registry `build`, `test` and `lint` give it when it
+    /// is part of the beamtalk repo's `stdlib/` tree (BT-4967).
+    ///
+    /// The decision is the shared
+    /// [`beamtalk_package::ffi_type_registry::lint_type_registry`] with no
+    /// package root, not a copy of its rule. A file inside a package (nearest
+    /// `beamtalk.toml`) is left to its root's registry: that is how a user
+    /// project that merely has a folder named `stdlib` is told apart from the
+    /// beamtalk repo, whose stdlib tree has no manifest.
+    pub(in crate::server) async fn load_stdlib_file_registry(&self, path: &Utf8PathBuf) {
+        let in_package = beamtalk_project::package::find_package_root(path.as_std_path()).is_some();
+        let file = path.clone();
+        let registry = if in_package {
+            None
+        } else {
+            tokio::task::spawn_blocking(move || {
+                beamtalk_package::ffi_type_registry::lint_type_registry(
+                    None,
+                    std::slice::from_ref(&file),
+                    &[],
+                )
+                .registry
+            })
+            .await
+            .unwrap_or(None)
+        };
+        let mut svc = self.service.lock().expect("service lock poisoned");
+        svc.set_file_native_types(path, registry);
+    }
+
     pub(in crate::server) async fn publish_diagnostics(&self, uri: &Url) {
         // a didOpen/didChange/didSave racing the LSP's startup
         // workspace preload can compute diagnostics against a partially-
