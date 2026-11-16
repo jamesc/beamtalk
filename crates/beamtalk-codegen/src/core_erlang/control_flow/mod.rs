@@ -32,7 +32,9 @@
 //! - [`conditional_producers`] — solo-boolean / nil / `ifTrue:ifFalse:` / `match:` producers and pure boolean arms
 //! - [`conditional_arms`] — the conditional arm-statement walker and `render_branch_arm`
 //! - [`inline_control_flow`] — inline control-flow lowering and the field / local assignment binds
-//! - [`exception_handling`] — `on:do:`/`ensure:`
+//! - [`exception_handling`] — `on:do:`/`ensure:` shared arm/catch-boundary helpers and `on:do:` lowering
+//! - [`ensure`] — `ensure:` lowering (plain, mutation-threaded and relay forms)
+//! - [`exception_bodies`] — `on:do:` tier-1 try, the structural fallbacks (both `on:do:` and `ensure:`) and threaded exception-body lowering
 //! - [`lookups`] — `Dictionary` `at:ifAbsent:` / `at:ifPresent:` / `at:ifPresent:ifAbsent:` whose handler writes an outer local
 //! - [`loop_mode`] — [`LoopMode`], the generator's own loop-body context field
 //! - [`family_slots`] — ADR 0122 Decision 3: the unified storage-family
@@ -46,6 +48,8 @@ mod conditional_producers;
 mod conditionals;
 mod counted_loops;
 mod dict_ops;
+mod ensure;
+mod exception_bodies;
 mod exception_handling;
 pub(in crate::core_erlang) mod family_slots;
 mod inline_control_flow;

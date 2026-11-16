@@ -48,29 +48,21 @@
 //!     primop 'raw_raise'(_Type, _Error, _Stacktrace)
 //! ```
 
-use super::super::actor_state_access::{actor_state_call, actor_state_helper};
-use super::super::ensure_nlr_relay::EnsureCatchTriple;
 use super::super::erlang_types::ErlangVar;
-use super::super::intrinsics::{
-    STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact, validate_on_do_handler,
-};
+use super::super::intrinsics::{validate_block_arity_exact, validate_on_do_handler};
 use super::super::synced_call::ActorStateSource;
-use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
-    self, BindOp, CatchClause, CatchEntry, CatchStep, EnsureCleanup, EnsureForeignNlr,
-    EnsureNlrRelay, ForeignCleanupBody, FrameId, NlrCarry, NlrThrowShape, OnDoCatchVars,
-    RebindFrame, RebindFrameKind, RenderCtx, RethrowSlot, StateReadSite, ThreadedStmt, TryRegion,
-    ValueRef, VersionPrefix, VersionedVar,
+    self, CatchClause, CatchEntry, CatchStep, FrameId, NlrThrowShape, OnDoCatchVars, RenderCtx,
+    StateReadSite, ThreadedStmt, TryRegion, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result, block_analysis};
-use super::LocalWrite;
 use super::analysis::ThreadedFamilies;
 use super::conditionals::ArmFrame;
 use super::family_slots;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form::{self, Layout};
-use beamtalk_cerl_doc::{join, leaf};
+use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::block_facts::LocalThreadingFamily;
 
@@ -80,7 +72,7 @@ use beamtalk_core::semantic_analysis::block_facts::LocalThreadingFamily;
 /// threads none. A named alias (not a bare tuple type) purely
 /// so the several functions passing this shape around don't each spell out
 /// `Option<(VersionPrefix, usize)>` (clippy's `type_complexity`).
-type FamilySlot = Option<(VersionPrefix, usize)>;
+pub(super) type FamilySlot = Option<(VersionPrefix, usize)>;
 
 /// BT-3486/BT-3506 (ADR 0122): one inlined `on:do:`/`ensure:` arm (a try
 /// body, an `on:do:` handler, or one of `ensure:`'s two cleanup runs), as
@@ -94,11 +86,11 @@ type FamilySlot = Option<(VersionPrefix, usize)>;
 /// conditional's branch arms (BT-3159/BT-3484): an arm that did not itself
 /// mutate the family carries the construct's pre-`try` baseline in the slot
 /// instead, so both arms agree on the tuple shape.
-struct ExceptionArm {
-    doc: Document<'static>,
-    result_var: String,
-    state_version: usize,
-    family_mutated_version: FamilySlot,
+pub(super) struct ExceptionArm {
+    pub(super) doc: Document<'static>,
+    pub(super) result_var: String,
+    pub(super) state_version: usize,
+    pub(super) family_mutated_version: FamilySlot,
 }
 
 /// ADR 0131 §2 (Phase 3b): how an arm that does not inherit its locals
@@ -107,28 +99,28 @@ struct ExceptionArm {
 /// scope in its `of` clause: the arm reads the locals the construct threads back
 /// from the `StateAcc` the try body returned, through `LocalRebind`s of a
 /// construct tuple (the try body's result, `tuple_var`).
-struct ArmEntry {
+pub(super) struct ArmEntry {
     /// The variable bound to the try body's `{Result, StateAcc[, Family]}`
     /// tuple.
-    tuple_var: String,
+    pub(super) tuple_var: String,
     /// The locals the construct threads ([`CoreErlangGenerator::branch_threaded_locals`]
     /// over the try and cleanup blocks).
-    locals: Vec<String>,
+    pub(super) locals: Vec<String>,
 }
 
 /// The state an `on:do:` / `ensure:` / `tryDo:` scratch map starts from
 /// ([`CoreErlangGenerator::exception_body_outer_state`]).
-struct ExceptionOuterState {
+pub(super) struct ExceptionOuterState {
     /// Bound ahead of the construct's seed (the cell `take` of a bracketed
     /// region), else [`Document::Nil`].
-    prefix: Document<'static>,
+    pub(super) prefix: Document<'static>,
     /// The variable the scratch map starts from, or the empty map literal
     /// when it is private.
-    state: String,
+    pub(super) state: String,
     /// The scratch map is private (`~{}~`): the construct sits in a frame
     /// with no `State` chain (a class or value-type method, a direct-params
     /// loop body), so its writes to it die with the construct.
-    private_scratch: bool,
+    pub(super) private_scratch: bool,
 }
 
 impl ExceptionOuterState {
@@ -156,7 +148,7 @@ impl CoreErlangGenerator {
     /// unreachable here, since [`Self::exception_construct_families`] only
     /// ever answers with it (State is filtered out; see that function's doc
     /// comment).
-    fn family_version(&self, prefix: &VersionPrefix) -> usize {
+    pub(super) fn family_version(&self, prefix: &VersionPrefix) -> usize {
         match prefix {
             VersionPrefix::SelfVt => self.self_version(),
             other => unreachable!(
@@ -167,7 +159,7 @@ impl CoreErlangGenerator {
     }
 
     /// The write half of [`Self::family_version`].
-    fn set_family_version(&mut self, prefix: &VersionPrefix, version: usize) {
+    pub(super) fn set_family_version(&mut self, prefix: &VersionPrefix, version: usize) {
         match prefix {
             VersionPrefix::SelfVt => self.set_self_version(version),
             other => unreachable!(
@@ -183,7 +175,7 @@ impl CoreErlangGenerator {
     /// rendering a version-0 `VersionedVar`) only because
     /// [`Self::seed_exception_arm_family`] needs the BARE name as the shadow
     /// binding's own target identifier, not a value to render.
-    fn family_bare_var_name(prefix: &VersionPrefix) -> &'static str {
+    pub(super) fn family_bare_var_name(prefix: &VersionPrefix) -> &'static str {
         match prefix {
             VersionPrefix::SelfVt => "Self",
             other => unreachable!(
@@ -203,7 +195,7 @@ impl CoreErlangGenerator {
     /// neither family) — the generalization of BT-3486's
     /// `exception_self_slot` to any of [`ThreadedFamilies`]' members via
     /// [`ThreadedFamilies`] instead of a bare `bool`.
-    fn exception_family_slot(
+    pub(super) fn exception_family_slot(
         families: &ThreadedFamilies,
         outer_version: usize,
         arm: &ExceptionArm,
@@ -231,7 +223,7 @@ impl CoreErlangGenerator {
     /// cleanup is the one exception: it re-seeds from the try tuple's
     /// trailing slot rather than from `outer_version`, so it open-codes the
     /// same steps with that different seed.
-    fn push_exception_arm(
+    pub(super) fn push_exception_arm(
         &mut self,
         docs: &mut Vec<Document<'static>>,
         body: &Block,
@@ -258,7 +250,7 @@ impl CoreErlangGenerator {
     /// `slot` must be `Some` exactly when `families` is non-empty — the
     /// invariant [`Self::exception_family_slot`]'s own callers already
     /// maintain (it returns `None` only when `families` is empty).
-    fn close_exception_result_tuple(
+    pub(super) fn close_exception_result_tuple(
         &mut self,
         result_var: String,
         state_final: usize,
@@ -307,7 +299,7 @@ impl CoreErlangGenerator {
     /// statement in the same method already mutated the family, including a
     /// preceding `on:do:`/`ensure:` whose own mutation this issue threads
     /// out.
-    fn seed_exception_arm_family(
+    pub(super) fn seed_exception_arm_family(
         &mut self,
         families: &ThreadedFamilies,
         live: usize,
@@ -421,7 +413,7 @@ impl CoreErlangGenerator {
     /// Mints the Core Erlang variables of one compiled `on:do:`'s catch clause,
     /// plus the class-variable snapshot variable bound before its `try`.
     /// `ex_class_var` is the variable holding the exception class.
-    fn fresh_on_do_catch_vars(&mut self, ex_class_var: String) -> OnDoCatchVars {
+    pub(super) fn fresh_on_do_catch_vars(&mut self, ex_class_var: String) -> OnDoCatchVars {
         OnDoCatchVars {
             type_var: self.fresh_temp_var("Type"),
             error_var: self.fresh_temp_var("Error"),
@@ -477,7 +469,7 @@ impl CoreErlangGenerator {
     /// Every context gets the same obligation: with no live class invocation in
     /// the process `snapshot/0` answers `none` and `restore/1` is a no-op, so
     /// nothing here depends on the method context.
-    fn on_do_catch_boundary(
+    pub(super) fn on_do_catch_boundary(
         &mut self,
         vars: OnDoCatchVars,
         pre_region_state: &str,
@@ -704,7 +696,7 @@ impl CoreErlangGenerator {
 
     /// Validates the arity of an `ensure:`'s cleanup block (0). Shared by
     /// [`Self::generate_ensure`] and the producer.
-    fn validate_ensure_cleanup(cleanup: &Expression) -> Result<()> {
+    pub(super) fn validate_ensure_cleanup(cleanup: &Expression) -> Result<()> {
         // Validate cleanup block arity (must be 0-arg)
         validate_block_arity_exact(
             cleanup,
@@ -916,7 +908,7 @@ impl CoreErlangGenerator {
     /// brackets guarded operators) the plain closure's state is the cell,
     /// bound by the prefix (`let TakeOuter = take() in `), not the captured
     /// entry `State`. [`Document::Nil`] everywhere else.
-    fn exception_body_outer_state(
+    pub(super) fn exception_body_outer_state(
         &mut self,
         at: beamtalk_core::source_analysis::Span,
     ) -> ExceptionOuterState {
@@ -1137,1377 +1129,11 @@ impl CoreErlangGenerator {
 
         Ok(Document::Vec(docs))
     }
-
-    /// Generates `ensure:` — wraps block in try, always runs cleanup block.
-    ///
-    /// Analyzes both receiver and cleanup blocks for state mutations and chooses
-    /// the appropriate compilation strategy.
-    pub(in crate::core_erlang) fn generate_ensure(
-        &mut self,
-        receiver: &Expression,
-        cleanup: &Expression,
-    ) -> Result<Document<'static>> {
-        Self::validate_ensure_cleanup(cleanup)?;
-
-        if self.exception_construct_inlines(receiver, cleanup)
-            && let Some((recv_block, cleanup_block)) =
-                beamtalk_core::semantic_analysis::block_facts::inlined_exception_blocks(
-                    receiver, cleanup,
-                )
-        {
-            return self.generate_ensure_with_mutations(recv_block, cleanup_block, false);
-        }
-
-        // Simple case: no mutations
-        let block_var = self.fresh_temp_var("BlockFun");
-        let cleanup_var = self.fresh_temp_var("CleanupFun");
-        let try_result_var = self.fresh_temp_var("TryResult");
-        let result_var = self.fresh_temp_var("Result");
-        let type_var = self.fresh_temp_var("Type");
-        let error_var = self.fresh_temp_var("Error");
-        let stack_var = self.fresh_temp_var("Stack");
-
-        // Capture expression outputs (ADR 0018 bridge pattern)
-        let receiver_code = self.expression_doc(receiver)?;
-        let cleanup_code = self.expression_doc(cleanup)?;
-
-        // BT-4312: the cleanup closure threads no version; what it writes it
-        // writes in place, through the actor-state cell. Where the state a
-        // `^` of this scope carries is the cell, or an actor method's `State`
-        // (which the `^` stored to the cell before it threw), the throw resumes
-        // with the carried state under the cell as the cleanup left it
-        // (`ensure_nlr_relay`). The REPL's bindings and a value type's `Self`
-        // are not in the cell, and no closure can write them. A cleanup that
-        // is a block literal touching neither the actor's state nor user code
-        // writes nothing.
-        let carry = self.nlr_slot().carry();
-        let writes_cell = Self::extract_block_literal(cleanup)
-            .is_none_or(|block| self.block_touches_actor_state(block));
-        let relays = writes_cell
-            && matches!(carry, Some(NlrCarry::Live | NlrCarry::ActorState))
-            && self.scope_nlr_token().is_some();
-        let relay = relays.then(|| {
-            let cleanup_apply = self.annotate_current_send_call(docvec![
-                "apply ",
-                leaf::var(cleanup_var.clone()),
-                " ()"
-            ]);
-            EnsureNlrRelay {
-                seed: Document::Nil,
-                cleanup: form::let_header(leaf::var("_"), cleanup_apply),
-                cell_store: false,
-                rethrow: RethrowSlot::CellOverCarried,
-            }
-        });
-        let other = docvec![
-            "do ",
-            self.annotate_current_send_call(docvec![
-                "apply ",
-                leaf::var(cleanup_var.clone()),
-                " ()"
-            ]),
-            " ",
-            Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
-        ];
-        let catch = self.ensure_catch(
-            EnsureCatchTriple {
-                type_var,
-                error_var,
-                stack_var,
-                carried_var: None,
-            },
-            (carry, false, self.synced_calls_active()),
-            EnsureCleanup::Closure { writes_cell },
-            (relay, None),
-            other,
-            receiver.span(),
-        );
-
-        Ok(docvec![
-            form::let_prefix(leaf::var(block_var.clone()), receiver_code),
-            form::let_prefix(leaf::var(cleanup_var.clone()), cleanup_code),
-            // Not `form::try_of_catch`: `of R` is the bare spelling (not
-            // `of <R>`), and the `catch` clause arrives as a finished document.
-            "try ",
-            form::let_in(
-                leaf::var(try_result_var.clone()),
-                // BT-4366: each apply is nested in the `try`, so it carries the
-                // `ensure:` send's line itself.
-                self.annotate_current_send_call(docvec!["apply ", leaf::var(block_var), " ()"]),
-                leaf::var(try_result_var),
-                Layout::Flat,
-            ),
-            " of ",
-            leaf::var(result_var.clone()),
-            " -> ",
-            form::let_discard(self.annotate_current_send_call(docvec![
-                "apply ",
-                leaf::var(cleanup_var.clone()),
-                " ()"
-            ])),
-            leaf::var(result_var),
-            " ",
-            catch,
-        ])
-    }
-
-    /// The success path of `ensure:`'s `try ... of`: the cleanup runs after the
-    /// try body, starting from the `StateAcc` the body returned
-    /// (`state_after_try`'s element 2), and answers the try body's result with the
-    /// cleanup's final state (`{Result, StateAcc[, Family]}`). Pushes the `of`
-    /// clause and the cleanup arm onto `docs`.
-    ///
-    /// A local the body wrote must be read back from the returned `StateAcc`: the
-    /// cleanup's own reads of it are otherwise the pre-`try` binding, because a
-    /// binding made inside the `try` is not in scope in its `of` clause
-    /// (BT-3718). The cleanup arm reads the construct's `locals` as
-    /// `LocalRebind`s of the try body's tuple on entry ([`ArmEntry`]), lowered by
-    /// its frame (ADR 0131 §2).
-    #[allow(clippy::too_many_arguments)] // the pieces of one `try ... of` clause
-    fn push_ensure_success_cleanup(
-        &mut self,
-        docs: &mut Vec<Document<'static>>,
-        state_after_try: String,
-        cleanup_block: &Block,
-        families: &ThreadedFamilies,
-        outer_version: usize,
-        arm: Option<&ArmFrame>,
-        locals: Vec<String>,
-    ) -> Result<()> {
-        // Extract Result and State from {Result, State} tuple using element/N
-        let result_from_try = self.fresh_temp_var("TryResult");
-        docs.push(docvec![
-            "of ",
-            leaf::var(state_after_try.clone()),
-            " -> ",
-            form::let_prefix(
-                leaf::var(result_from_try.clone()),
-                form::element(1, leaf::var(state_after_try.clone())),
-            ),
-            form::let_prefix(
-                leaf::var("StateAcc"),
-                form::element(2, leaf::var(state_after_try.clone())),
-            ),
-        ]);
-        let entry = ArmEntry {
-            tuple_var: state_after_try.clone(),
-            locals,
-        };
-
-        // On the SUCCESS path the cleanup runs after the try body, so
-        // it must see the try body's mutation — but an Erlang binding made
-        // inside `try` is not in scope in the `of` arm, so the try's own
-        // version is unreachable here. Re-seed from the tuple's trailing
-        // slot, shadowing the *unversioned* bare name exactly as the
-        // `StateAcc = element(2, …)` line immediately above shadows `StateAcc`
-        // — and for the same reason: an arm's `ThreadedIr` frame treats
-        // version 0 as its implicit, always-bound entry parameter (see
-        // `check_use` in `threaded_ir/verify.rs`), so a cleanup arm handed a
-        // version > 0 baseline would consume a version its own frame never
-        // produces. Version 0 in, the arm's own version 1, 2, … out.
-        let cleanup_success_baseline = if let Some(prefix) = families.as_slice().first() {
-            let bare = Self::family_bare_var_name(prefix);
-            docs.push(docvec![form::let_prefix(
-                leaf::var(bare.to_string()),
-                form::element(3, leaf::var(state_after_try))
-            )]);
-            self.set_family_version(prefix, 0);
-            0
-        } else {
-            outer_version
-        };
-
-        let cleanup_success_arm = self.generate_exception_body_with_threading(
-            cleanup_block,
-            families,
-            arm,
-            Some(&entry),
-        )?;
-        let cleanup_success_slot =
-            Self::exception_family_slot(families, cleanup_success_baseline, &cleanup_success_arm);
-        docs.push(cleanup_success_arm.doc);
-        // Return try body result with cleanup's final state
-        docs.push(self.close_exception_result_tuple(
-            result_from_try,
-            cleanup_success_arm.state_version,
-            families,
-            &cleanup_success_slot,
-        ));
-        Ok(())
-    }
-
-    /// Generates `ensure:` with state mutation threading.
-    ///
-    /// Inlines receiver (try body) and cleanup block bodies with state threading.
-    /// On success, cleanup runs with the try body's final state.
-    /// On error, cleanup runs with the original state, then re-raises.
-    ///
-    /// Generated Core Erlang:
-    /// ```erlang
-    /// let StateAcc = <current_state> in
-    /// try
-    ///     <inlined try body with state threading>
-    ///     StateAccN
-    /// of StateAfterTry ->
-    ///     let StateAcc = StateAfterTry in
-    ///     <inlined cleanup with state threading>
-    ///     StateAccM
-    /// catch <Type, Error, Stack> ->
-    ///     <inlined cleanup with state threading from original StateAcc>
-    ///     primop 'raw_raise'(Type, Error, Stack)
-    /// ```
-    ///
-    /// ADR 0122 / BT-3506: when either block mutates the `SelfVt`
-    /// family the current context makes eligible, every returned tuple above
-    /// grows a trailing slot carrying that arm's own version — see
-    /// [`Self::exception_construct_families`].
-    fn generate_ensure_with_mutations(
-        &mut self,
-        receiver_block: &Block,
-        cleanup_block: &Block,
-        producer: bool,
-    ) -> Result<Document<'static>> {
-        if self.is_repl_mode() {
-            self.set_repl_loop_mutated(true);
-        }
-        // ADR 0131 §2 (Phase 3b): see `generate_on_do_with_mutations`. The try
-        // body and both cleanup runs are `BranchArm` frames.
-        let arm = self.exception_arm_frame(&[receiver_block, cleanup_block], producer);
-
-        let type_var = self.fresh_temp_var("Type");
-        let error_var = self.fresh_temp_var("Error");
-        let stack_var = self.fresh_temp_var("Stack");
-        let state_after_try = self.fresh_temp_var("StateAfterTry");
-
-        // Rename current state to StateAcc
-        let ExceptionOuterState {
-            prefix: outer_prefix,
-            state: current_state,
-            private_scratch,
-        } = self.exception_body_outer_state(receiver_block.span);
-        // seed `__local__` keys for outer locals mutated by the try
-        // (receiver) block or the cleanup block — mirrors `on:do:`'s seeding
-        // (see `generate_on_do_with_mutations`) so a local written only
-        // conditionally within one of the blocks (e.g. behind a nested
-        // `ifTrue:`) still has its key present for the method-body
-        // sequencer's extraction `maps:get/2`, even though the two blocks
-        // here run sequentially rather than as alternatives.
-        let (seed_doc, base_state) =
-            self.seed_conditional_locals(&[receiver_block, cleanup_block], &current_state);
-        let seed_doc = docvec![outer_prefix, seed_doc];
-        // ADR 0122 / BT-3506: see `generate_on_do_with_mutations` — decided
-        // from the AST up front so every arm's return tuple agrees on the
-        // shape.
-        let families = self.exception_construct_families(&[receiver_block, cleanup_block]);
-        // The construct's own live baselines — restored between arms and
-        // once more after the construct (see `generate_on_do_with_mutations`).
-        let outer_self = self.self_version();
-        let outer_version = families
-            .as_slice()
-            .first()
-            .map_or(0, |prefix| self.family_version(prefix));
-        // ADR 0137 §5: entering the `ensure:` stores the current `State` to the
-        // cell, so a closure the protected body runs reads it, and the cleanup an
-        // error runs starts from it.
-        let cell_boundary = self.synced_calls_active() && !private_scratch;
-        let entry_store = if cell_boundary {
-            form::let_discard(threaded_ir::cell_put_call(leaf::var("StateAcc")))
-        } else {
-            Document::Nil
-        };
-        let mut docs: Vec<Document<'static>> = vec![docvec![
-            seed_doc,
-            form::let_prefix(leaf::var("StateAcc"), leaf::var(base_state)),
-            entry_store,
-            "try ",
-        ]];
-
-        // Generate try body with state threading; every field write in it also
-        // stores to the cell (write-through).
-        self.ensure_write_through += usize::from(cell_boundary);
-        let try_arm = self.push_exception_arm(
-            &mut docs,
-            receiver_block,
-            &families,
-            outer_version,
-            arm.as_ref(),
-        );
-        self.ensure_write_through -= usize::from(cell_boundary);
-        let (try_result_var, try_final, try_slot) = try_arm?;
-        // Return {Result, State[, Family]} from try body
-        docs.push(self.close_exception_result_tuple(
-            try_result_var,
-            try_final,
-            &families,
-            &try_slot,
-        ));
-
-        // Success: run cleanup starting from try body's state
-        let entry_locals = self.branch_threaded_locals(&[receiver_block, cleanup_block]);
-        self.push_ensure_success_cleanup(
-            &mut docs,
-            state_after_try,
-            cleanup_block,
-            &families,
-            outer_version,
-            arm.as_ref(),
-            entry_locals,
-        )?;
-        // ADR 0122 / BT-3506: the error path below is a SIBLING of the whole
-        // `of` arm, not its successor, so it starts again from the
-        // construct's own pre-`try` baselines rather than from the success
-        // path's re-seed.
-        self.set_self_version(outer_self);
-
-        // ADR 0111 Addendum 5: sibling with_branch_context frames — the try
-        // body, the success-path cleanup run, the error-path cleanup run and
-        // the relay's (`cleanup_block` is compiled once per path, each its own
-        // arm) — each `generate_exception_body_with_threading` call mints its
-        // own fresh FrameId and `verify()`s its own real IR internally, so any
-        // two independently reaching the same StateAcc version number is
-        // correctly NOT a NonLinearVersion violation — see the matching
-        // comment in `generate_on_do_with_mutations`.
-        let catch = self.ensure_with_mutations_catch(
-            EnsureCatchTriple {
-                type_var,
-                error_var,
-                stack_var,
-                carried_var: None,
-            },
-            cleanup_block,
-            &families,
-            arm.as_ref(),
-            (cell_boundary, private_scratch),
-            outer_version,
-            receiver_block.span,
-        )?;
-        docs.push(catch);
-        // ADR 0122 / BT-3506: leave the method's live versions as found — see
-        // the matching restore at the end of `generate_on_do_with_mutations`.
-        self.set_self_version(outer_self);
-
-        Ok(Document::Vec(docs))
-    }
-
-    /// The catch of [`Self::generate_ensure_with_mutations`]: the error path
-    /// (the cleanup from the pre-`try` state, or the cell refresh where the
-    /// cell is live, then the re-raise) and, for a `^` of this scope, the
-    /// BT-4312 relay ([`Self::ensure_relay`]), as one
-    /// [`ThreadedStmt::EnsureCatch`]. `(cell_boundary, private_scratch)`:
-    /// whether the actor-state cell is live here, and whether the construct's
-    /// scratch map is private (`~{}~`). Leaves the `SelfVt` version at the
-    /// construct's own baseline.
-    #[allow(clippy::too_many_arguments)] // the pieces of one catch clause
-    fn ensure_with_mutations_catch(
-        &mut self,
-        triple: EnsureCatchTriple,
-        cleanup_block: &Block,
-        families: &ThreadedFamilies,
-        arm: Option<&ArmFrame>,
-        (cell_boundary, private_scratch): (bool, bool),
-        outer_version: usize,
-        span: beamtalk_core::source_analysis::Span,
-    ) -> Result<Document<'static>> {
-        let outer_self = self.self_version();
-        // Error: run cleanup for side effects (from original StateAcc), then
-        // re-raise. ADR 0137 §5: the cleanup of a failed body starts from the
-        // cell, which holds the state at entry plus the body's own writes made
-        // before the error, keeping the locals the arm's scratch map seeded.
-        let mut other: Vec<Document<'static>> = Vec::new();
-        if cell_boundary {
-            other.push(Self::ensure_cell_refresh_doc());
-        }
-        // The cleanup's state mutations are discarded (re-raise follows) —
-        // including any extra-family version it mints: this path re-raises
-        // rather than returning a tuple, so it has no trailing slot to carry
-        // one (BT-3486/BT-3506). It still gets the version-0 arm seed, since
-        // its own frame must verify like any other.
-        other.push(self.seed_exception_arm_family(families, outer_version));
-        let error_arm =
-            self.generate_exception_body_with_threading(cleanup_block, families, arm, None)?;
-        other.push(error_arm.doc);
-        other.push(docvec![
-            " ",
-            Self::emit_raw_raise(
-                triple.type_var.clone(),
-                triple.error_var.clone(),
-                triple.stack_var.clone()
-            ),
-        ]);
-        self.set_self_version(outer_self);
-
-        // BT-4312: a `^` of this scope carries its state to the boundary that
-        // answers it, so the cleanup it runs threads from that state and the
-        // throw resumes with the cleanup's result (`ensure_nlr_relay`). The
-        // carried family is what the scope's throw carries (`NlrSlot`), and
-        // nothing where this construct's scratch map is private (a
-        // direct-params loop body, a class method): its writes die with the
-        // scope whatever the boundary answers. The node records the carry and
-        // `private_scratch` as they are; the verifier applies the same rule.
-        let scope_carry = self.nlr_slot().carry();
-        let carry = scope_carry.filter(|carry| carry.writable_by_cleanup(private_scratch));
-        let cleanup_final = match carry {
-            Some(NlrCarry::Bindings | NlrCarry::ActorState) => {
-                (error_arm.state_version > 0).then_some(error_arm.state_version)
-            }
-            Some(NlrCarry::SelfVt) => error_arm.family_mutated_version.map(|(_, v)| v),
-            // A scope's own throw is never foreign: only the
-            // `Block>>ensure:` fallback relays a foreign one.
-            Some(NlrCarry::Live) | None => None,
-        };
-        let writes_cell = self.block_touches_actor_state(cleanup_block);
-        let relays = self.scope_nlr_token().is_some()
-            && (cleanup_final.is_some() || (carry == Some(NlrCarry::Live) && writes_cell));
-        let carried_var = relays.then(|| self.ensure_relay_carried_var());
-        let relay = match (carry, &carried_var) {
-            (Some(carry), Some(carried)) => Some(self.ensure_relay(
-                carry,
-                carried,
-                cleanup_block,
-                families,
-                arm,
-                cell_boundary,
-                outer_version,
-            )?),
-            _ => None,
-        };
-        self.set_self_version(outer_self);
-        // ADR 0146 R1: where the cell is live, a `^` the relay does not take
-        // (one of another method of this actor, from a block it passed in)
-        // must leave the cell holding the cleanup's final `StateAcc`: the
-        // error path runs the cleanup with write-through off, so its writes
-        // would die with the re-raise. A cleanup that threads no write has
-        // nothing to store.
-        //
-        // BT-4598: where the relay of the scope's own throw already runs the
-        // cleanup from the cell (`cell_store`), the foreign clause shares that
-        // one compiled body instead of compiling the cleanup once more: the
-        // two seeds are the same cell refresh, so their final `StateAcc`
-        // versions are the same too. Each extra copy multiplies a nested
-        // `ensure:` in the cleanup, so the cleanup is compiled 3^depth times,
-        // not 4^depth.
-        let foreign = match &relay {
-            _ if !cell_boundary || cleanup_final.is_none() => None,
-            Some(EnsureNlrRelay {
-                cell_store: true,
-                rethrow: RethrowSlot::Version(version),
-                ..
-            }) => Some(EnsureForeignNlr {
-                body: ForeignCleanupBody::SharedWithRelay,
-                store: Some(*version),
-            }),
-            _ => {
-                let (seed, cleanup) =
-                    self.ensure_cleanup_from_cell(cleanup_block, families, arm, outer_version)?;
-                self.set_self_version(outer_self);
-                Some(EnsureForeignNlr {
-                    body: ForeignCleanupBody::Own {
-                        seed,
-                        cleanup: cleanup.doc,
-                    },
-                    store: Some(cleanup.state_version),
-                })
-            }
-        };
-        Ok(self.ensure_catch(
-            EnsureCatchTriple {
-                carried_var,
-                ..triple
-            },
-            (scope_carry, private_scratch, cell_boundary),
-            EnsureCleanup::Inlined {
-                final_version: cleanup_final,
-                writes_cell,
-            },
-            (relay, foreign),
-            Document::Vec(other),
-            span,
-        ))
-    }
-
-    /// The cleanup of an inlined `ensure:` compiled once more, seeded from the
-    /// actor-state cell (ADR 0137 §5): the cell refresh into `StateAcc` and
-    /// the arm's family seed, then the cleanup's arm. Where a `^` unwinds
-    /// through the `ensure:` with the cell live, the cell holds the state at
-    /// the throw (a `^` stores before it throws, and every clause further in
-    /// stores its own result), so this is the cleanup's entry state for the
-    /// scope's own throw ([`Self::ensure_relay`]) and a foreign one alike.
-    fn ensure_cleanup_from_cell(
-        &mut self,
-        cleanup_block: &Block,
-        families: &ThreadedFamilies,
-        arm: Option<&ArmFrame>,
-        outer_version: usize,
-    ) -> Result<(Document<'static>, ExceptionArm)> {
-        let family_seed = self.seed_exception_arm_family(families, outer_version);
-        let cleanup =
-            self.generate_exception_body_with_threading(cleanup_block, families, arm, None)?;
-        Ok((
-            docvec![Self::ensure_cell_refresh_doc(), family_seed],
-            cleanup,
-        ))
-    }
-
-    /// ADR 0137 §5: `let StateAcc = refresh(Self, StateAcc) in`, the cell's
-    /// fields over the scratch map's locals: where an `ensure:` cleanup that
-    /// an error or a `^` runs starts from in an actor method (a `^` stores
-    /// its state to the cell before it throws).
-    fn ensure_cell_refresh_doc() -> Document<'static> {
-        form::let_prefix(
-            leaf::var("StateAcc"),
-            actor_state_call(
-                actor_state_helper::REFRESH,
-                [leaf::var("Self"), leaf::var("StateAcc")],
-            ),
-        )
-    }
-
-    /// BT-4312: the `$bt_nlr` relay of an `ensure:` with state threading
-    /// (`ensure_nlr_relay`): the cleanup compiled once more, seeded from the
-    /// state the scope's own throw carries (`carried`, the clause's pattern
-    /// variable), and the slot the throw resumes with.
-    ///
-    /// - [`NlrCarry::Bindings`] / [`NlrCarry::ActorState`]: the REPL's
-    ///   bindings map, or an actor method's `State`. Seeded from the carried
-    ///   map; where the actor-state
-    ///   cell is live, from the cell refresh the error path uses, which holds
-    ///   the carried state (a `^` stores it before it throws, and every relay
-    ///   further in stores its own result). Re-throws the cleanup's final
-    ///   `StateAcc`, stored to the cell first where it is live.
-    /// - [`NlrCarry::SelfVt`]: a value-type method's `Self`, seeded from the
-    ///   carried one; re-throws the cleanup's final `Self`.
-    /// - [`NlrCarry::Live`]: the state is the cell, which the cleanup writes
-    ///   in place; re-throws the carried state with the cell's fields over it
-    ///   ([`RethrowSlot::CellOverCarried`]), so the `__local__` keys a merged
-    ///   Tier 2 fun's `^` flushed keep the values they had at the `^`
-    ///   (BT-4122), not the ones bound at this `ensure:`.
-    #[allow(clippy::too_many_arguments)] // the pieces of one relay clause
-    fn ensure_relay(
-        &mut self,
-        carry: NlrCarry,
-        carried: &str,
-        cleanup_block: &Block,
-        families: &ThreadedFamilies,
-        arm: Option<&ArmFrame>,
-        cell_boundary: bool,
-        outer_version: usize,
-    ) -> Result<EnsureNlrRelay> {
-        let cell_seed = || {
-            if cell_boundary {
-                Self::ensure_cell_refresh_doc()
-            } else {
-                Document::Nil
-            }
-        };
-        let relay = match carry {
-            NlrCarry::Bindings | NlrCarry::ActorState => {
-                let (seed, cleanup) = if cell_boundary {
-                    self.ensure_cleanup_from_cell(cleanup_block, families, arm, outer_version)?
-                } else {
-                    let family_seed = self.seed_exception_arm_family(families, outer_version);
-                    let cleanup = self.generate_exception_body_with_threading(
-                        cleanup_block,
-                        families,
-                        arm,
-                        None,
-                    )?;
-                    (
-                        docvec![
-                            form::let_prefix(leaf::var("StateAcc"), leaf::var(carried.to_string())),
-                            family_seed
-                        ],
-                        cleanup,
-                    )
-                };
-                EnsureNlrRelay {
-                    seed,
-                    cleanup: cleanup.doc,
-                    cell_store: cell_boundary,
-                    rethrow: RethrowSlot::Version(cleanup.state_version),
-                }
-            }
-            NlrCarry::SelfVt => {
-                // The seed below binds the bare `Self` to the carried one, so
-                // the cleanup's arm mints `Self1`, `Self2`, … from there. Looked
-                // up by name: `families` is ordered, and `SelfVt` need not be
-                // its first member.
-                if families.contains(&VersionPrefix::SelfVt) {
-                    self.set_family_version(&VersionPrefix::SelfVt, 0);
-                }
-                let cleanup = self.generate_exception_body_with_threading(
-                    cleanup_block,
-                    families,
-                    arm,
-                    None,
-                )?;
-                EnsureNlrRelay {
-                    seed: docvec![
-                        cell_seed(),
-                        form::let_prefix(leaf::var("Self"), leaf::var(carried.to_string())),
-                    ],
-                    cleanup: cleanup.doc,
-                    cell_store: false,
-                    rethrow: RethrowSlot::Version(
-                        cleanup.family_mutated_version.map_or(0, |(_, v)| v),
-                    ),
-                }
-            }
-            NlrCarry::Live => {
-                let family_seed = self.seed_exception_arm_family(families, outer_version);
-                let cleanup = self.generate_exception_body_with_threading(
-                    cleanup_block,
-                    families,
-                    arm,
-                    None,
-                )?;
-                EnsureNlrRelay {
-                    seed: docvec![cell_seed(), family_seed],
-                    cleanup: cleanup.doc,
-                    cell_store: false,
-                    rethrow: RethrowSlot::CellOverCarried,
-                }
-            }
-        };
-        Ok(relay)
-    }
-
-    /// Builds the Tier 1 (pure protected block) `try`/`catch` body for
-    /// `generate_on_do_structural_fallback` — factored out to keep that
-    /// function under clippy's line-count limit. Reuses
-    /// `on_do_catch_boundary`'s NLR-passthrough + `matches_class` structure;
-    /// only the handler's tier (arity 0 = pure 0-arg, arity 1 = pure 1-arg,
-    /// anything else = stateful) is discriminated dynamically here, since it
-    /// isn't known statically the way `generate_on_do` knows it from the
-    /// literal block AST.
-    fn generate_on_do_tier1_try(
-        &mut self,
-        self_var: &'static str,
-        ex_class_param: String,
-        handler_param: String,
-        class_name: &str,
-    ) -> Document<'static> {
-        let result_var = self.fresh_temp_var("Result");
-        let catch_vars = self.fresh_on_do_catch_vars(ex_class_param);
-        let ex_obj_var = catch_vars.ex_obj_var.clone();
-
-        // arity 1 is ambiguous between a pure 1-arg handler and a stateful
-        // 0-arg handler — same documented ambiguity as Block's blockValue*
-        // family (deferred disambiguation); anything else is Tier 2.
-        let handler_stateful_error = self.generate_stateful_block_dispatch_error(
-            "on:do:",
-            class_name,
-            STATEFUL_BLOCK_DISPATCH_HINT,
-        );
-        let handler_dispatch = arity_dispatch_doc(
-            &leaf::var(handler_param.clone()),
-            // BT-4366: each apply is nested in the arity `case`.
-            self.annotate_current_send_call(docvec![
-                "apply ",
-                leaf::var(handler_param.clone()),
-                " ()"
-            ]),
-            self.annotate_current_send_call(docvec![
-                "apply ",
-                leaf::var(handler_param),
-                " (",
-                leaf::var(ex_obj_var.clone()),
-                ")"
-            ]),
-            handler_stateful_error,
-        );
-
-        // No source span: this is the generically-dispatched `onDo` body.
-        self.on_do_catch_boundary(
-            catch_vars,
-            "State",
-            TryRegion {
-                body: docvec![
-                    self.annotate_current_send_call(docvec![
-                        "apply ",
-                        Document::Str(self_var),
-                        " ()"
-                    ]),
-                    " "
-                ],
-                result_var,
-            },
-            beamtalk_core::source_analysis::Span::default(),
-            handler_dispatch,
-        )
-    }
-
-    /// Generates the fallback method body for `onDo` — Block's
-    /// `on:do:`. Reached only via generic dispatch bypassing the call-site
-    /// interception `generate_on_do` normally provides (e.g. `perform:`). See
-    /// `generate_block_value_structural_fallback` for the general
-    /// Tier 1/Tier 2 discrimination rationale.
-    ///
-    /// Reuses `on_do_catch_boundary`'s NLR-passthrough + `matches_class`
-    /// structure so the Tier 1 (pure) case stays behaviourally identical to
-    /// the AST-driven `generate_on_do` — only the receiver/handler *tier*
-    /// discrimination differs, since a generically dispatched handler's
-    /// declared arity (0 or 1) isn't known statically the way it is when
-    /// `generate_on_do` reads it straight off the literal block AST.
-    /// `current_method_params` are `[ExClass, Handler]` (the `on:`/`do:`
-    /// keyword arguments); `Self` is the protected block.
-    pub(in crate::core_erlang) fn generate_on_do_structural_fallback(
-        &mut self,
-        class_name: &str,
-    ) -> Document<'static> {
-        let self_var = if self.in_class_method() {
-            "ClassSelf"
-        } else {
-            "Self"
-        };
-        let ex_class_param = self
-            .current_method_params
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "ExClass".to_string());
-        let handler_param = self
-            .current_method_params
-            .get(1)
-            .cloned()
-            .unwrap_or_else(|| "Handler".to_string());
-
-        let runtime_module =
-            super::super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(
-                class_name,
-            );
-        let params_doc = join(
-            [
-                leaf::var(ex_class_param.clone()),
-                leaf::var(handler_param.clone()),
-            ],
-            &Document::Str(", "),
-        );
-        let placeholder_branch = docvec![
-            "call ",
-            leaf::atom(runtime_module),
-            ":'dispatch'('onDo', [",
-            params_doc,
-            "], ",
-            Document::Str(self_var),
-            ")",
-        ];
-
-        let tier1_try =
-            self.generate_on_do_tier1_try(self_var, ex_class_param, handler_param, class_name);
-
-        let self_stateful_error = self.generate_stateful_block_dispatch_error(
-            "on:do:",
-            class_name,
-            STATEFUL_BLOCK_DISPATCH_HINT,
-        );
-        arity_dispatch_doc(
-            &Document::Str(self_var),
-            tier1_try,
-            self_stateful_error,
-            placeholder_branch,
-        )
-    }
-
-    /// The catch of `Block>>ensure:`'s structural fallback, an
-    /// [`ThreadedStmt::EnsureCatch`](threaded_ir::ThreadedStmt::EnsureCatch)
-    /// with no relay: the cleanup, then the re-raise (BT-4536).
-    fn ensure_structural_fallback_catch(&mut self, cleanup_param: &str) -> Document<'static> {
-        let type_var = self.fresh_temp_var("Type");
-        let error_var = self.fresh_temp_var("Error");
-        let stack_var = self.fresh_temp_var("Stack");
-        // Every `^` that crosses this catch is foreign (this is the Block
-        // method's frame). The cleanup is a closure, which writes only the
-        // actor-state cell, in place, and the method a `^` returns from
-        // commits the cell (ADR 0146): the throw is re-raised as it came
-        // (`ensure_nlr_relay`). `note_unwound/1` tells the test-build commit
-        // check that the cell may be ahead of it now; for any other
-        // exception it does nothing.
-        let cleanup_apply = || docvec!["apply ", leaf::var(cleanup_param.to_string()), " ()"];
-        let other = docvec![
-            "do ",
-            self.annotate_current_send_call(cleanup_apply()),
-            " do ",
-            actor_state_call(
-                actor_state_helper::NOTE_UNWOUND,
-                [leaf::var(error_var.clone())],
-            ),
-            " ",
-            Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
-        ];
-        self.ensure_catch(
-            EnsureCatchTriple {
-                type_var,
-                error_var,
-                stack_var,
-                carried_var: None,
-            },
-            (None, false, false),
-            EnsureCleanup::Closure { writes_cell: true },
-            (None, None),
-            other,
-            beamtalk_core::source_analysis::Span::default(),
-        )
-    }
-
-    /// Generates the fallback method body for `ensure` — Block's
-    /// `ensure:`. Reached only via generic dispatch bypassing the call-site
-    /// interception `generate_ensure` normally provides (e.g. `perform:`).
-    /// See `generate_block_value_structural_fallback` for the
-    /// general Tier 1/Tier 2 discrimination rationale.
-    ///
-    /// Both receiver and cleanup block must be Tier 1 (pure, 0-arg funs) for
-    /// the generic try/catch below to be correct — Core Erlang's try/catch
-    /// mechanics don't themselves need the block's AST, only ADR-0041's
-    /// state-threading convention does, so the pure case is fully generic.
-    /// `current_method_params[0]` is the cleanup block; `Self` is the
-    /// protected block.
-    pub(in crate::core_erlang) fn generate_ensure_structural_fallback(
-        &mut self,
-        class_name: &str,
-    ) -> Document<'static> {
-        let self_var = if self.in_class_method() {
-            "ClassSelf"
-        } else {
-            "Self"
-        };
-        let cleanup_param = self
-            .current_method_params
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "CleanupBlock".to_string());
-
-        let runtime_module =
-            super::super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(
-                class_name,
-            );
-        let placeholder_branch = docvec![
-            "call ",
-            leaf::atom(runtime_module),
-            ":'dispatch'('ensure', [",
-            leaf::var(cleanup_param.clone()),
-            "], ",
-            Document::Str(self_var),
-            ")",
-        ];
-
-        let try_result_var = self.fresh_temp_var("TryResult");
-        let result_var = self.fresh_temp_var("Result");
-        let catch = self.ensure_structural_fallback_catch(&cleanup_param);
-        let cleanup_apply = || docvec!["apply ", leaf::var(cleanup_param.clone()), " ()"];
-        // Not `form::try_of_catch`: `of R` is the bare spelling (not
-        // `of <R>`), and the `catch` clause arrives as a finished document.
-        let tier1_try = docvec![
-            "try ",
-            form::let_in(
-                leaf::var(try_result_var.clone()),
-                self.annotate_current_send_call(docvec!["apply ", Document::Str(self_var), " ()"]),
-                leaf::var(try_result_var),
-                Layout::Flat,
-            ),
-            " of ",
-            leaf::var(result_var.clone()),
-            " -> ",
-            form::let_discard(self.annotate_current_send_call(cleanup_apply())),
-            leaf::var(result_var),
-            " ",
-            catch,
-        ];
-
-        let cleanup_stateful_error = self.generate_stateful_block_dispatch_error(
-            "ensure:",
-            class_name,
-            STATEFUL_BLOCK_DISPATCH_HINT,
-        );
-        let cleanup_tier_check = arity_dispatch_doc(
-            &leaf::var(cleanup_param),
-            tier1_try,
-            cleanup_stateful_error,
-            placeholder_branch.clone(),
-        );
-
-        let self_stateful_error = self.generate_stateful_block_dispatch_error(
-            "ensure:",
-            class_name,
-            STATEFUL_BLOCK_DISPATCH_HINT,
-        );
-        arity_dispatch_doc(
-            &Document::Str(self_var),
-            cleanup_tier_check,
-            self_stateful_error,
-            placeholder_branch,
-        )
-    }
-
-    /// Generates block body expressions with state mutation threading.
-    ///
-    /// Follows the same pattern as `generate_while_body_with_threading`:
-    /// - Sets `in_loop_body = true` so field reads/writes use `StateAcc`
-    /// - Resets `state_version` to 0 (`StateAcc` is version 0)
-    /// - Threads field assignments, self-sends, and local var assignments
-    /// - Returns an [`ExceptionArm`] — the Document holding the generated
-    ///   code, the variable holding the last expression's result, the final
-    ///   state version number, and (BT-3486/BT-3506) the arm's final version
-    ///   of whichever extra family `families` names, when it actually
-    ///   mutated it
-    ///
-    /// The caller must have already bound `StateAcc` to the current state
-    /// before calling this function.
-    ///
-    /// BT-3486/BT-3506: the extra family's version must be read from INSIDE
-    /// `with_branch_context` — that guard lets each arm inherit the outer
-    /// version on entry (so both arms are true siblings, both sourcing their
-    /// mutation chains from the same pre-`try` baseline) and restores it on
-    /// exit (so an arm's own in-`try` version, unreachable from outside the
-    /// Core Erlang `try`, never leaks into the enclosing method's live
-    /// version). That restore is exactly why the caller cannot read it back
-    /// afterwards, and why it is returned here.
-    fn generate_exception_body_with_threading(
-        &mut self,
-        body: &Block,
-        families: &ThreadedFamilies,
-        frame: Option<&ArmFrame>,
-        entry: Option<&ArmEntry>,
-    ) -> Result<ExceptionArm> {
-        let statements = super::super::util::collect_body_exprs(&body.body);
-        self.with_branch_context(|this| {
-            // ADR 0131 §2 (Phase 3b): a `BranchArm` frame of an exception
-            // producer. Registers the arm's `RebindFrame` and the arm
-            // statements' producer sites (the rule a conditional arm uses), so a
-            // loop, fold, conditional or `on:do:` in the arm is a producer whose
-            // `LocalRebind`s this frame lowers.
-            if let Some(arm) = frame {
-                let rebind = RebindFrame {
-                    frame: this.current_branch_frame(),
-                    kind: RebindFrameKind::BranchArm,
-                    threads: arm.threads.clone(),
-                };
-                return this.with_rebind_frame(rebind, |this| {
-                    this.with_body_producer_sites(&statements, false, true, |this| {
-                        this.generate_exception_body_with_threading_inner(
-                            body,
-                            families,
-                            Some(arm),
-                            entry,
-                        )
-                    })
-                });
-            }
-            // ADR 0133 Phase 3 (BT-3911): an arm of an `on:do:`/`ensure:` that
-            // is not a producer is a `BranchArm` frame too (see
-            // `generate_plain_arm`): it carries the locals its block threads
-            // and registers no producer sites.
-            if !this.is_repl_mode() {
-                let arm = ArmFrame {
-                    threads: this.branch_threaded_locals(&[body]),
-                };
-                let rebind = RebindFrame {
-                    frame: this.current_branch_frame(),
-                    kind: RebindFrameKind::BranchArm,
-                    threads: arm.threads.clone(),
-                };
-                return this.with_rebind_frame(rebind, |this| {
-                    this.generate_exception_body_with_threading_inner(
-                        body,
-                        families,
-                        Some(&arm),
-                        entry,
-                    )
-                });
-            }
-            // BT-3823: in the REPL the block is inlined over the bindings map,
-            // and a producer at one of its statements' sites adopts it
-            // (`with_repl_arm_producer_sites`).
-            this.with_repl_arm_rebind_frame(|this| {
-                this.with_repl_arm_producer_sites(&statements, |this| {
-                    this.generate_exception_body_with_threading_inner(body, families, None, entry)
-                })
-            })
-        })
-    }
-
-    /// The frame an arm entered after the try body ([`ArmEntry`]) lowers its
-    /// entry `LocalRebind`s by: the frame the arm itself is rendered as
-    /// (`render_branch_arm`), so the verifier's `LocalRebindModeMismatch`
-    /// reads the same cell of ADR 0131 §2's table. Outside the REPL that is
-    /// the `BranchArm` frame carrying the arm's `threads`. A REPL arm is not a
-    /// `BranchArm`: it runs over the bindings map (the `StateAcc` frame
-    /// [`Self::with_repl_arm_rebind_frame`] registers), where every binding is
-    /// a member (`RebindFrame::with_repl_binding`), so an entry rebind is a
-    /// `Put` of the binding's key (BT-4424: inside a REPL loop body, a binding
-    /// the body wrote before the `ensure:` is bound in the generated code and
-    /// threaded here, and was lowered as a plain `let`).
-    fn arm_entry_rebind_frame(
-        &self,
-        frame: FrameId,
-        arm: Option<&ArmFrame>,
-        locals: &[String],
-    ) -> Result<RebindFrame> {
-        if !self.is_repl_mode() {
-            return Ok(RebindFrame {
-                frame,
-                kind: RebindFrameKind::BranchArm,
-                threads: arm.map(|a| a.threads.clone()).unwrap_or_default(),
-            });
-        }
-        let repl_arm = self.rebind_frame_of(frame)?;
-        Ok(locals
-            .iter()
-            .fold(repl_arm, |frame, local| frame.with_repl_binding(local)))
-    }
-
-    /// The `BranchArm` frame shared by the arms of an `on:do:`/`ensure:` that
-    /// is a local-threading producer: the construct's seeded set
-    /// ([`Self::branch_threaded_locals`] over `blocks`). `None` for the legacy
-    /// statement lowering, whose arms are not frames.
-    fn exception_arm_frame(&self, blocks: &[&Block], producer: bool) -> Option<ArmFrame> {
-        (producer && !self.is_repl_mode()).then(|| ArmFrame {
-            threads: self.branch_threaded_locals(blocks),
-        })
-    }
-
-    /// Inner implementation called inside `with_branch_context`.
-    ///
-    /// ADR 0111 Addendum 5: this arm's mutation sequence is built
-    /// as real [`ThreadedStmt`]s — the E1–E7 per-shape decomposition table
-    /// (E1/E3 reuse `conditionals.rs`'s C1/C2 helpers,
-    /// `lower_field_assignment_bind`/`lower_local_var_assignment_bind`,
-    /// exactly — same shape, same mint order) — then `verify()`d and
-    /// `render()`d via `conditionals.rs`'s `render_branch_arm`.
-    /// Rule 2's separator divergence (this file inserts a literal `" "`
-    /// between SOURCE-level statements, `conditionals.rs` inserts none at
-    /// all) is reproduced by pushing that literal space as its own
-    /// `ThreadedStmt::Statement` at each source-statement boundary —
-    /// **not** by feeding the flat per-shape `Bind`/`Statement` sequence
-    /// through `render_loop_body_statements` (that function separates every
-    /// *raw* `ThreadedStmt` entry, which would inject a spurious extra
-    /// space inside any shape that itself decomposes into more than one
-    /// entry, e.g. E1's Statement+Bind pair — a real double-space bug, not
-    /// a cosmetic one).
-    /// `render_branch_arm`'s plain `render()` has no separator
-    /// of its own, so the manually-inserted space is the only one that
-    /// ends up in the output, at exactly the position this same
-    /// `if i > 0 { docs.push(" ") }` loop below has always put it — this
-    /// is the loop's own IR-producing form, not a match against some
-    /// other, deleted implementation.
-    #[allow(clippy::too_many_lines)]
-    fn generate_exception_body_with_threading_inner(
-        &mut self,
-        body: &Block,
-        families: &ThreadedFamilies,
-        arm: Option<&ArmFrame>,
-        entry: Option<&ArmEntry>,
-    ) -> Result<ExceptionArm> {
-        let frame = self.current_branch_frame();
-        // the baseline this arm inherits, for whichever extra family
-        // `families` names (see `generate_exception_body_with_threading`'s
-        // doc comment) — compared against the post-body version below to
-        // detect a mutation, exactly as `build_vt_conditional_branch_pieces_inner`
-        // does for a conditional arm's own `SelfVt` diff.
-        let family_before = families
-            .as_slice()
-            .first()
-            .map(|prefix| (prefix.clone(), self.family_version(prefix)));
-        // push a scope so a local-var assignment's `bind_var` rebind
-        // (from `lower_local_var_assignment_bind`) is scoped to this try
-        // body and doesn't leak into the enclosing method scope — matching the
-        // bracket `generate_conditional_branch_inline` already has (conditionals.rs).
-        self.push_scope();
-
-        let has_direct_field_assignments = body
-            .body
-            .iter()
-            .any(|s| self.is_field_assignment(&s.expression));
-
-        let mut result_var = "'nil'".to_string();
-        let mut stmts: Vec<ThreadedStmt> = Vec::new();
-        // BT-4310: the arm's loops and folds threading only `State` at an
-        // operand another lowering compiles, checked against the lowered arm.
-        let family_sites =
-            self.family_only_operand_sites_of(&super::super::util::collect_body_exprs(&body.body));
-
-        // ADR 0131 §2 (Phase 3b): an arm entered after the try body (the
-        // success-path cleanup of `ensure:`) reads the locals the try body
-        // wrote back from its returned tuple, as `LocalRebind`s lowered by the
-        // frame the arm is rendered as ([`Self::arm_entry_rebind_frame`]: a
-        // REPL arm `Put`s each binding over the bindings map, BT-4424).
-        if let Some(entry) = entry {
-            let enclosing = self.arm_entry_rebind_frame(frame, arm, &entry.locals)?;
-            let carrier = self.fresh_temp_var("ExEntry");
-            let prelude = self.construct_rebind_prelude(
-                &enclosing,
-                &carrier,
-                leaf::var(entry.tuple_var.clone()),
-                &entry.locals,
-                ProducerTail::Rebind,
-                Vec::new(),
-                frame,
-                body.span,
-            );
-            stmts.extend(prelude);
-        }
-
-        // BT-3687: `@expect` directives are compile-time-only annotations with no
-        // runtime value; lowering one as a statement would emit `let _ =  in`.
-        // `collect_body_exprs` is the canonical directive filter.
-        let body_exprs = super::super::util::collect_body_exprs(&body.body);
-        // BT-4461: a REPL arm's producer sites that write a binding the arm
-        // holds in a variable (`repl_frame_producer_sites`), read before each
-        // statement is lowered and checked once the arm is built.
-        let mut repl_sites: Vec<(beamtalk_core::source_analysis::Span, Vec<String>)> = Vec::new();
-        for (i, &expr) in body_exprs.iter().enumerate() {
-            let span = expr.span();
-            if arm.is_none() {
-                repl_sites.extend(self.repl_frame_producer_sites(expr));
-            }
-            if i > 0 {
-                // Rule 2: the literal space `generate_exception_body_with_threading_inner`
-                // has always inserted between source-level statements —
-                // modeled as its own opaque Statement so it renders exactly
-                // once per statement boundary, never inside a shape's own
-                // multi-entry decomposition.
-                stmts.push(ThreadedStmt::Statement(Document::Str(" "), span));
-            }
-            let is_last = i == body_exprs.len() - 1;
-            // A value-type `self.field := ...` write nested inside a further
-            // construct of this arm's own body — most notably another
-            // `on:do:`/`ensure:` — is not a bare top-level statement, so
-            // `block_writes_vt_self_field` (top-level-only, same reason as
-            // `loop_body_threads_value_self`) cannot see it and the
-            // enclosing construct's `Self` slot misses the mutation. Reject
-            // it with the same diagnostic
-            // [`CoreErlangGenerator::reject_unthreadable_value_self_field_write`]
-            // gives the identical loop-nesting shape. This single
-            // per-statement pass covers every exception-construct arm (try
-            // body, `on:do:` handler, `ensure:` cleanup), since all three
-            // lower through this function. A no-op outside value-type
-            // context, and a no-op for this statement when it is itself the
-            // bare top-level write `exception_construct_families`
-            // already threads.
-            self.reject_unthreadable_value_self_field_write(expr, self.is_field_assignment(expr))?;
-            if self.is_field_assignment(expr) {
-                // E1 — same shape/mint-order as C1; reused directly.
-                let val_var = self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
-                if is_last {
-                    // `:=` evaluates to the assigned value: a block that ends in
-                    // a field write answers it (`lower_field_assignment_bind`
-                    // bound it to `val_var`).
-                    result_var = val_var;
-                }
-            } else if self.is_actor_self_send(expr) {
-                let Expression::MessageSend {
-                    selector,
-                    arguments,
-                    ..
-                } = expr
-                else {
-                    unreachable!("is_actor_self_send guarantees a MessageSend");
-                };
-                // E2 — BT-3814: the one self-send-statement lowering
-                // (`sequenced_self_dispatch`, shared with
-                // `threaded_expression`'s producer, the Letrec body and the
-                // fold bodies): operands sequenced ahead, then the dispatch
-                // `Statement` + the `State` `Bind` (`element(2, _SD)`). This
-                // arm keeps its own `ExResult` epilogue below.
-                //
-                // `expr` stays on this path, NOT `threaded_expression`'s
-                // producer: `is_actor_self_send` (this arm's guard) is WIDER
-                // than `is_dispatching_actor_self_send` (the producer's
-                // gate) — it also matches a well-known selector (`self
-                // class`, `self hash`, …) that the dispatch call dispatches
-                // uniformly through `safe_dispatch` here (an `on:do:`/
-                // `ensure:` body's own long-standing behavior), where the
-                // producer would instead intercept it specially — a real
-                // behavior change this call site must not make.
-                let (prelude, dispatch_var) =
-                    self.sequenced_self_dispatch(selector, arguments, frame, span)?;
-                stmts.extend(prelude);
-                if is_last {
-                    // Self-dispatch result is in dispatch_var
-                    let rv = self.fresh_temp_var("ExResult");
-                    stmts.push(ThreadedStmt::Statement(
-                        docvec![form::let_prefix(
-                            leaf::var(rv.clone()),
-                            form::element(1, leaf::var(dispatch_var))
-                        )],
-                        span,
-                    ));
-                    result_var = rv;
-                }
-            } else if Self::is_local_var_assignment(expr) {
-                // E3 — same shape/mint-order as C2/C3/C4; reused directly.
-                let val_var =
-                    self.lower_local_var_assignment_bind(expr, frame, span, &mut stmts)?;
-                if is_last {
-                    // As above: the block's value is the assigned value.
-                    result_var = val_var;
-                }
-            } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {
-                // E4 — the right-hand side's own prelude is threaded ahead
-                // into this body (BT-4000), and each name is written to the
-                // body's slot as E3 writes `name := ...` (BT-4439).
-                let (rhs_var, _) =
-                    self.lower_destructure_bind(pattern, value, frame, span, &mut stmts, &|_| {
-                        LocalWrite::Slot
-                    })?;
-                if is_last {
-                    // BT-3889: the block answers the right-hand side.
-                    result_var = rhs_var;
-                }
-            } else if is_last {
-                if has_direct_field_assignments {
-                    // E6 — has_direct_field_assignments sub-branch.
-                    // ADR 0118 phase 2a: thread every
-                    // state-effecting sub-expression (`1 + (self bump)`) —
-                    // AND, since ADR 0118 phase 5b widened
-                    // `subexpr_needs_prelude` to recognize a class-var
-                    // producer too, a bare class-method self-send with no
-                    // enclosing assignment (e.g. `self bump` as this try
-                    // body's last statement) — as real `Bind`s ahead of the
-                    // compile, via `thread_ahead`. The plain compile below
-                    // then reads the already-threaded value back via
-                    // `precompiled_subexprs` substitution; no open let-chain
-                    // reaches this point any more.
-                    let hoist_scope = self.thread_ahead(expr, &mut stmts, frame)?;
-                    let rv = self.fresh_temp_var("ExResult");
-                    let expr_doc = self.expression_doc(expr)?;
-                    self.finish_precompiled_scope(hoist_scope)?;
-                    stmts.push(ThreadedStmt::Statement(
-                        form::let_header(leaf::var(rv.clone()), expr_doc),
-                        span,
-                    ));
-                    result_var = rv;
-                } else {
-                    // Last expression with no direct field assignments.
-                    // If this is a nested control flow construct returning {Result, State},
-                    // destructure it. Otherwise just capture the result.
-                    // A producer of this arm (a `BranchArm` frame, or a REPL arm,
-                    // BT-3823; a conditional whose receiver advances `State`, BT-4000) goes to
-                    // `thread_ahead` below instead.
-                    if self.control_flow_has_mutations(expr)
-                        && !self.arm_statement_is_producer(expr, arm.is_some())
-                    {
-                        // E5 — nested mutation construct returns {Result,
-                        // State} tuple; C10-last's shape with ExResult
-                        // naming. Legacy read the target state name via
-                        // `peek_next_state_var()` (no mint) before building
-                        // the expr doc purely to have the LHS text ready —
-                        // the Bind below re-derives the same rendered name
-                        // from the version number instead, so the peek call
-                        // itself is no longer needed (it never minted
-                        // anything; only the ordering of the real mints
-                        // around it matters, and that ordering — Tuple,
-                        // ExResult, expr doc's own mints, then the bump —
-                        // is unchanged below).
-                        let tuple_var = self.fresh_temp_var("Tuple");
-                        let rv = self.fresh_temp_var("ExResult");
-                        let expr_doc = self.expression_doc(expr)?;
-                        let source_version = self.state_version();
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                form::let_prefix(leaf::var(tuple_var.clone()), expr_doc),
-                                form::let_prefix(
-                                    leaf::var(rv.clone()),
-                                    form::element(1, leaf::var(tuple_var.clone()))
-                                )
-                            ],
-                            span,
-                        ));
-                        let _ = self.next_state_var();
-                        let target_version = self.state_version();
-                        stmts.push(ThreadedStmt::Bind {
-                            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
-                            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                            op: BindOp::Direct(ValueRef::Doc(docvec![form::element(
-                                2,
-                                leaf::var(tuple_var)
-                            )])),
-                            span,
-                        });
-                        result_var = rv;
-                    } else {
-                        // E6/E7 — plain expression, no direct field
-                        // assignments in this body. See the E6
-                        // has_direct_field_assignments sub-branch above.
-                        let hoist_scope = self.thread_ahead(expr, &mut stmts, frame)?;
-                        let rv = self.fresh_temp_var("ExResult");
-                        let expr_doc = self.expression_doc(expr)?;
-                        self.finish_precompiled_scope(hoist_scope)?;
-                        stmts.push(ThreadedStmt::Statement(
-                            form::let_header(leaf::var(rv.clone()), expr_doc),
-                            span,
-                        ));
-                        result_var = rv;
-                    }
-                }
-            } else {
-                // E7 — non-last plain expression. ADR 0118 phase 5b:
-                // `thread_ahead` threads any state-effecting producer into
-                // `stmts` as a real `Bind`, in the SAME frame every later
-                // statement in this body shares — visible to them by
-                // construction — so the plain compile below never has an
-                // open scope to propagate.
-                // ADR 0118 phase 2a: see the E6 sub-branch above.
-                let hoist_scope = self.thread_ahead(expr, &mut stmts, frame)?;
-                let expr_doc = self.expression_doc(expr)?;
-                self.finish_precompiled_scope(hoist_scope)?;
-                stmts.push(ThreadedStmt::Statement(
-                    form::let_header(leaf::var("_"), expr_doc),
-                    span,
-                ));
-            }
-        }
-        let final_state_version = self.state_version();
-        let family_mutated_version = family_before.and_then(|(prefix, before)| {
-            let after = self.family_version(&prefix);
-            (after != before).then_some((prefix, after))
-        });
-        self.pop_scope();
-        self.check_family_only_operand_sites(
-            &stmts,
-            &family_sites,
-            "`on:do:`/`ensure:` arm",
-            body.span,
-        );
-        self.check_repl_frame_producer_sites(&stmts, &repl_sites, body.span);
-        let (doc, _) = self.render_branch_arm(stmts, frame, final_state_version, body.span, arm);
-        Ok(ExceptionArm {
-            doc,
-            result_var,
-            state_version: final_state_version,
-            family_mutated_version,
-        })
-    }
-}
-
-/// The structural fallbacks' arity dispatch on a block `fun`:
-/// `case is_function(F, 0) of <'true'> -> zero_arity <'false'> -> case
-/// is_function(F, 1) of <'true'> -> one_arity <'false'> -> other end end`.
-fn arity_dispatch_doc(
-    fun: &Document<'static>,
-    zero_arity: Document<'static>,
-    one_arity: Document<'static>,
-    other: Document<'static>,
-) -> Document<'static> {
-    let arity_test =
-        |arity: i64| form::call("erlang", "is_function", [fun.clone(), leaf::int_lit(arity)]);
-    let on_true = |body| form::clause([leaf::atom("true")], None, body, Layout::Flat);
-    let on_false = |body| form::clause([leaf::atom("false")], None, body, Layout::Flat);
-    form::case_of(
-        arity_test(0),
-        [
-            on_true(zero_arity),
-            on_false(form::case_of(
-                arity_test(1),
-                [on_true(one_arity), on_false(other)],
-                Layout::Flat,
-            )),
-        ],
-        Layout::Flat,
-    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::super::threaded_ir::{self, ThreadingMode};
+    use super::super::super::threaded_ir::{self, BindOp, ThreadingMode, ValueRef};
     use super::super::StateAccFallbackReason;
     use super::*;
     use crate::core_erlang::tests::codegen;
