@@ -113,6 +113,29 @@ init(_) ->
         stop -> ok
     end.
 
+%% Remove the fake `native:` index row and kill every fake native process.
+%% Idempotent, so it is safe in both the test body and the `after` cleanup.
+drop_fake_natives() ->
+    ets:match_delete(beamtalk_backing_module_index, {?MODULE, '_', '_'}),
+    Fakes = [
+        P
+     || P <- erlang:processes(),
+        case erlang:process_info(P, dictionary) of
+            {dictionary, D} -> proplists:get_value('$initial_call', D) =:= {?MODULE, init, 1};
+            undefined -> false
+        end
+    ],
+    lists:foreach(
+        fun(P) ->
+            MRef = erlang:monitor(process, P),
+            exit(P, kill),
+            receive
+                {'DOWN', MRef, process, P, _} -> ok
+            end
+        end,
+        Fakes
+    ).
+
 hot_reload_scan_test_() ->
     {timeout, 60,
         {setup, fun setup/0, fun teardown/1, fun(_) ->
@@ -171,14 +194,11 @@ hot_reload_scan_test_() ->
                             ?assert(migrated(P1, extra)),
                             ?assert(migrated(Named, extra)),
                             ?assert(migrated(C1, extra)),
-                            %% The native process was neither suspended nor migrated.
+                            %% The native process was neither suspended nor migrated: it is
+                            %% alive and never received a system message.
                             ?assert(is_process_alive(Native)),
-                            ets:match_delete(beamtalk_backing_module_index, {?MODULE, '_', '_'}),
-                            MRef = erlang:monitor(process, Native),
-                            exit(Native, kill),
-                            receive
-                                {'DOWN', MRef, process, Native, _} -> ok
-                            end,
+                            ?assertEqual({messages, []}, erlang:process_info(Native, messages)),
+                            drop_fake_natives(),
 
                             %% Owner condition (a): readers re-scan, no stale list. An
                             %% instance made after the reload is seen immediately...
@@ -200,6 +220,7 @@ hot_reload_scan_test_() ->
                         end
                     after
                         %% Never leak actors into later tests, whatever failed above.
+                        drop_fake_natives(),
                         lists:foreach(
                             fun(C) ->
                                 lists:foreach(
