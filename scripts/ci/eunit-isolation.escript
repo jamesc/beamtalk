@@ -11,7 +11,7 @@
 %% earlier module) passes there and fails alone or in another order. This
 %% script runs the suites in the orders that expose those dependencies.
 %%
-%% Usage (from runtime/, after `just build-stdlib`; use `just test-runtime-isolation`):
+%% Usage (from runtime/, after `just build-stdlib`; use `just test-isolation`):
 %%
 %%   eunit-isolation.escript alone   [--jobs N] [--only M1,M2]
 %%   eunit-isolation.escript reverse [--only M1,M2]
@@ -210,6 +210,9 @@ run_ordered(Mods, Paths, Group) ->
 %% crashed.
 run_node(Mods, Paths, Tag) ->
     Dir = report_dir(Tag),
+    %% Start from an empty report directory: a `.status` or XML file left by an
+    %% earlier run would make a node that died before reporting look green.
+    _ = file:del_dir_r(Dir),
     ok = filelib:ensure_dir(filename:join(Dir, "x")),
     Eval = lists:flatten(
         io_lib:format(
