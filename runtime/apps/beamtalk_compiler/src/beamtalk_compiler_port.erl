@@ -16,6 +16,7 @@ verification that BEAM can invoke the Rust compiler via a port.
 """.
 
 -export([
+    reply_atoms/0,
     open/0, open/1,
     compile_expression/4, compile_expression/5,
     compile_expression_trace/4, compile_expression_trace/5,
@@ -1101,13 +1102,6 @@ handle_build_class_module_index_in_source_response(
     #{status := ok, module_name := ModuleName, classes := Classes}
 ) when is_binary(ModuleName), is_list(Classes) ->
     {ok, ModuleName, Classes};
-handle_build_class_module_index_in_source_response(#{status := error, reason := Reason} = Resp) when
-    Reason =:= invalid_path_segment; Reason =:= reserved_test_directory
-->
-    % Named here so the atom exists in this VM: `binary_to_term(.., [safe])`
-    % in `port_roundtrip/6` refuses a response carrying an atom it has never
-    % seen.
-    reason_error(Resp);
 handle_build_class_module_index_in_source_response(#{status := error, reason := _} = Resp) ->
     reason_error(Resp);
 handle_build_class_module_index_in_source_response(Other) ->
@@ -1161,17 +1155,106 @@ handle_module_name_for_path_response(#{status := ok, module_name := ModuleName})
     is_binary(ModuleName)
 ->
     {ok, ModuleName};
-handle_module_name_for_path_response(#{status := error, reason := Reason} = Resp) when
-    Reason =:= invalid_path_segment; Reason =:= reserved_test_directory
-->
-    % Named here so the atom exists in this VM: `binary_to_term(.., [safe])`
-    % in `port_roundtrip/6` refuses a response carrying an atom it has never
-    % seen.
-    reason_error(Resp);
 handle_module_name_for_path_response(#{status := error, reason := _} = Resp) ->
     reason_error(Resp);
 handle_module_name_for_path_response(Other) ->
     unexpected_port_response("Unexpected module-name-for-path response", Other).
+
+-doc """
+Every atom the Rust compiler port (`crates/beamtalk-compiler-port`) can put in
+a reply: status values, error reasons, map keys and enum-like values.
+
+`port_roundtrip/6` decodes replies with `binary_to_term(Bin, [safe])`, which
+refuses any atom the VM has never seen, so each of these has to exist in the
+atom table before the first reply is decoded. Listing them in the body of an
+exported function puts them in this module's literal table, which the
+compiler cannot merge or drop the way it does identical function clauses;
+loading the module (which `port_roundtrip/6` needs anyway) interns them all
+(BT-4938).
+
+The list is pinned in both directions to the shared fixture
+`test/fixtures/compiler_port_reply_atoms.json`: the Rust port's test fails if
+the port emits an atom the fixture lacks, and `beamtalk_compiler_port_atoms_tests`
+fails if an atom in the fixture is missing from this module's `atoms` chunk.
+""".
+-spec reply_atoms() -> [atom()].
+reply_atoms() ->
+    [
+        alias_name,
+        ambiguous,
+        announcement_class,
+        assigned_var,
+        categories,
+        category,
+        class,
+        class_definition,
+        class_name,
+        class_not_found,
+        classes,
+        core_erlang,
+        diagnostics,
+        divider_span,
+        doc_comment,
+        'end',
+        erlang_ffi,
+        error,
+        expansion,
+        'false',
+        field_defaults,
+        hint,
+        instance,
+        invalid_path_segment,
+        invalid_span,
+        is_class_method,
+        kind,
+        line,
+        lines,
+        merged_class_source,
+        message,
+        method_definition,
+        method_source,
+        methods,
+        module_name,
+        name,
+        native_refs,
+        new_text,
+        none,
+        not_found,
+        occurrences,
+        ok,
+        other,
+        param_types,
+        prev_source,
+        protocol_definition,
+        protocols,
+        reason,
+        recv,
+        referenced_aliases,
+        reserved_test_directory,
+        return_type,
+        selector,
+        selector_not_found,
+        self,
+        sends,
+        severity,
+        side,
+        sites,
+        source,
+        span,
+        spans,
+        start,
+        status,
+        step_assignments,
+        super,
+        superclass,
+        target_module,
+        trailing_core_erlang,
+        'true',
+        type_alias_definition,
+        undefined,
+        version,
+        warnings
+    ].
 
 -doc """
 Re-indent a canonical (column-0) method body to `BaseIndent'.
