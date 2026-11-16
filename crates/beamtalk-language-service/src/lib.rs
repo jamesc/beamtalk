@@ -185,6 +185,14 @@ pub struct SimpleLanguageService {
     /// workspace roots by the LSP server at startup (mirrors `native_types`).
     /// Default (unset) disables the check — no unresolved-module diagnostics.
     known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules,
+    /// Per-workspace-root package names a `pkg@Class` qualifier may name
+    /// (ADR 0070 Phase 2, BT-4928): each root's manifest `[dependencies]`,
+    /// the package itself and `stdlib`, built by
+    /// [`beamtalk_core::semantic_analysis::known_qualifier_packages`]. A file
+    /// is checked against the set of the most specific root containing it; a
+    /// file under no registered root (no manifest, unreadable manifest) is
+    /// never checked.
+    root_qualifier_packages: Vec<(Utf8PathBuf, std::collections::HashSet<String>)>,
     /// Whether workspace preload has completed with full coverage.
     ///
     /// When `true`, diagnostics are computed with
@@ -270,6 +278,7 @@ impl SimpleLanguageService {
             project_index: ProjectIndex::new(),
             native_types: None,
             known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
+            root_qualifier_packages: Vec::new(),
             project_complete: false,
             dependency_extensions_unknown: false,
             diagnostics_overrides:
@@ -289,6 +298,7 @@ impl SimpleLanguageService {
             project_index,
             native_types: None,
             known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
+            root_qualifier_packages: Vec::new(),
             project_complete: false,
             dependency_extensions_unknown: false,
             diagnostics_overrides:
@@ -406,6 +416,33 @@ impl SimpleLanguageService {
     #[must_use]
     pub fn known_erlang_modules(&self) -> &beamtalk_core::ffi_type_specs::KnownErlangModules {
         &self.known_erlang_modules
+    }
+
+    /// Sets the `pkg@Class` qualifier package set for each workspace root
+    /// (ADR 0070 Phase 2, BT-4928).
+    ///
+    /// Replaces the whole map — pass every root whose manifest yielded a set
+    /// (see [`beamtalk_core::semantic_analysis::known_qualifier_packages`]);
+    /// a root with a missing or unreadable manifest is omitted, so its files
+    /// are not checked rather than falsely flagged.
+    pub fn set_root_qualifier_packages(
+        &mut self,
+        root_packages: Vec<(Utf8PathBuf, std::collections::HashSet<String>)>,
+    ) {
+        self.root_qualifier_packages = root_packages;
+    }
+
+    /// The qualifier package set of the most specific registered root
+    /// containing `file`, or `None` when no root does.
+    fn known_qualifier_packages_for(
+        &self,
+        file: &camino::Utf8Path,
+    ) -> Option<std::collections::HashSet<String>> {
+        self.root_qualifier_packages
+            .iter()
+            .filter(|(root, _)| file.starts_with(root))
+            .max_by_key(|(root, _)| root.as_str().len())
+            .map(|(_, packages)| packages.clone())
     }
 
     /// Returns a reference to the project index.
@@ -1135,6 +1172,10 @@ impl LanguageService for SimpleLanguageService {
                 // `ProjectIndex::alias_package_for_file`'s doc.
                 options.current_package =
                     Some(self.project_index.alias_package_for_file(file).to_string());
+                // ADR 0070 Phase 2 (BT-4928): the file's root's manifest
+                // package set, so an undeclared `pkg@Class` qualifier shows
+                // the squiggle `beamtalk build` would. `None` skips the check.
+                options.known_packages = self.known_qualifier_packages_for(file);
                 // Cross-file extensions from the ProjectIndex are
                 // passed so a same-project `ClassName >> selector` defined in
                 // another file resolves instead of producing a false Dnu hint.
