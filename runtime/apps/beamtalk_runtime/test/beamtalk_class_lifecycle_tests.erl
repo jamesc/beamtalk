@@ -258,7 +258,10 @@ class_removed_purges_all_five_registries_together_test_() ->
 
                     ok = beamtalk_class_lifecycle:class_removed(ClassName, Module),
 
-                    ?assertEqual([], beamtalk_xref:implementors_of('bar')),
+                    %% Only this class's rows: other modules' classes may implement #bar.
+                    ?assertNot(
+                        lists:keymember(ClassName, 1, beamtalk_xref:implementors_of('bar'))
+                    ),
                     ?assertNot(beamtalk_extensions:has(ClassName, 'ext1')),
                     ?assertNot(beamtalk_extensions:has(ClassTag, 'ext2')),
                     ?assertNot(beamtalk_protocol_registry:is_protocol(ClassName)),
