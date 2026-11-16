@@ -464,5 +464,8 @@ ReactiveSubprocess sent the event.
 """.
 -spec cast_notify(map(), atom(), list()) -> ok.
 cast_notify(#{notify := Notify, self_ref := SelfRef}, Selector, Args) ->
-    NotifyPid = Notify#beamtalk_object.pid,
-    beamtalk_actor:cast_send(NotifyPid, Selector, Args ++ [SelfRef]).
+    %% The record already carries the notify actor's class (BT-4949), so the
+    %% send does not look it up from the pid.
+    beamtalk_actor:cast_send_known(
+        Notify#beamtalk_object.pid, Notify#beamtalk_object.class, Selector, Args ++ [SelfRef]
+    ).

@@ -34,7 +34,7 @@ impl CoreErlangGenerator {
     /// - `has_method/1` returns true for all declared selectors
     /// - `__beamtalk_meta/0` includes `native => true` and `backing_module => atom()`
     /// - `register_class/0` registers via `ClassBuilder` with `native:` metadata
-    /// - Dispatch functions route `self delegate` methods through `beamtalk_actor:sync_send/3`
+    /// - Dispatch functions route `self delegate` methods through `beamtalk_actor:sync_send_known/4`
     #[allow(clippy::too_many_lines)]
     pub(in crate::core_erlang) fn generate_native_facade_module(
         &mut self,
@@ -212,10 +212,17 @@ impl CoreErlangGenerator {
         // has_method/1
         docs.push(self.generate_has_method(module)?);
 
-        // Generate dispatch functions for self delegate methods
+        // Generate dispatch functions for self delegate methods. The facade
+        // passes its static class to the send (BT-4949, ADR 0150), so the send
+        // never looks the class up from the pid.
+        let class_name = module
+            .classes
+            .first()
+            .map(|c| c.name.name.to_string())
+            .unwrap_or_default();
         for method in &self_delegate_methods {
             docs.push(Document::Str("\n"));
-            docs.push(Self::generate_dispatch_function(method));
+            docs.push(Self::generate_dispatch_function(method, &class_name));
         }
 
         // Generate class-side method standalone functions
@@ -812,9 +819,12 @@ impl CoreErlangGenerator {
     /// ```erlang
     /// 'dispatch_writeLine:'/2 = fun (Data, Self) ->
     ///     let Pid = call 'erlang':'element'(4, Self) in
-    ///     call 'beamtalk_actor':'sync_send'(Pid, 'writeLine:', [Data])
+    ///     call 'beamtalk_actor':'sync_send_known'(Pid, 'Logger', 'writeLine:', [Data])
     /// ```
-    fn generate_dispatch_function(method: &MethodDefinition) -> Document<'static> {
+    fn generate_dispatch_function(
+        method: &MethodDefinition,
+        class_name: &str,
+    ) -> Document<'static> {
         let selector_name = method.selector.name();
         let dispatch_arity = method.selector.arity() + 1; // +1 for Self
 
@@ -852,7 +862,9 @@ impl CoreErlangGenerator {
                     line(),
                     "let Pid = call 'erlang':'element'(4, Self) in",
                     line(),
-                    "call 'beamtalk_actor':'sync_send'(Pid, ",
+                    "call 'beamtalk_actor':'sync_send_known'(Pid, ",
+                    leaf::atom(class_name.to_string()),
+                    ", ",
                     leaf::atom(selector_name.to_string()),
                     ", ",
                     args_list,
