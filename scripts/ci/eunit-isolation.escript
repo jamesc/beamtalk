@@ -248,7 +248,32 @@ status_word(_) -> "FAILED".
 run_ordered(Mods, Paths, Group) ->
     io:format("Group ~s: ~b modules in one node~n", [Group, length(Mods)]),
     Rs = run_node(Mods, Paths, atom_to_list(Group)),
+    leak_report(report_dir(atom_to_list(Group)), Mods),
     [R || R <- Rs].
+
+%% Informational: after each module of an ordered run, which actor instances
+%% (by class) were alive that were not alive after the previous module. A module
+%% that leaves actors running makes later "no actors" assertions (the tracing
+%% scans) order-dependent; this names the module. Does not affect the exit code.
+leak_report(Dir, Mods) ->
+    leak_report(Dir, Mods, []).
+
+leak_report(_Dir, [], _Prev) ->
+    ok;
+leak_report(Dir, [Mod | Rest], Prev) ->
+    Live =
+        case file:consult(filename:join(Dir, Mod ++ ".leaks")) of
+            {ok, [L]} when is_list(L) -> L;
+            _ -> Prev
+        end,
+    case Live -- Prev of
+        [] ->
+            ok;
+        New ->
+            Counts = [{C, length([X || X <- New, X =:= C])} || C <- lists:usort(New)],
+            io:format("  LEAK after ~s: ~w~n", [Mod, Counts])
+    end,
+    leak_report(Dir, Rest, Live).
 
 %% Runs Mods in order inside a single fresh node. The node loops over the
 %% modules and writes one surefire XML report per module, so the table has
@@ -270,7 +295,11 @@ run_node(Mods, Paths, Tag) ->
             "  R = (catch eunit:test(M, [{report, {eunit_surefire, [{dir, Dir}]}}])), "
             "  T1 = erlang:monotonic_time(millisecond), "
             "  ok = file:write_file(filename:join(Dir, atom_to_list(M) ++ \".status\"), "
-            "         io_lib:format(\"~~p.~~n~~p.~~n\", [R, T1 - T0])) "
+            "         io_lib:format(\"~~p.~~n~~p.~~n\", [R, T1 - T0])), "
+            "  Live = (catch lists:sort([C || {P, C} <- ets:tab2list(beamtalk_instance_class), "
+            "                                is_process_alive(P)])), "
+            "  ok = file:write_file(filename:join(Dir, atom_to_list(M) ++ \".leaks\"), "
+            "         io_lib:format(\"~~p.~~n\", [Live])) "
             "end, Mods), halt(0).",
             [Dir, [list_to_atom(M) || M <- Mods]]
         )
