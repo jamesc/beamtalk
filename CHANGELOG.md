@@ -26,6 +26,10 @@
 - **Module names come from one path rule (BT-4868).**
   - Changed: test files are named `bt@{package}@test@{path}` by `beamtalk test` and the REPL alike (before, `beamtalk test` named them after the class; a test file under `src/` is named like any `src/` file, `bt@{package}@{path}`); `beamtalk test` fixtures and `@load` targets must now use only letters, digits and underscores in their names (`my-helper.bt` used to be normalised to `bt@my_helper`); a directory named `test` directly under `src/` is rejected (its modules would collide with `test/`); and the REPL now rejects a path segment outside `[A-Za-z0-9_]` the way `beamtalk build` does. A packaged workspace that loaded `my-class.bt` or `foo.v2.bt` now gets a compile error saying the path segment is invalid (`invalid path segment 'my-class' …`).
   - Do: rename such files to letters, digits and underscores. A loose test file outside a package's `test/` is named `bt@{stem}`, so two with the same stem in different directories collide; rename one.
+- **REPL tab completion after radix and negative integer literal receivers (BT-4927).** `16rFF` and `-42` are now recognised as `Integer` receivers for completion and hover, matching the Rust lexer's recognition. Floats, exponent forms and negative radix literals are not yet classified.
+- **Fix: Windows diagnostics no longer show the `\\?\` verbatim prefix in file paths (BT-4914).** Canonicalised source paths on Windows now strip the extended-length prefix before recording, so diagnostics, LSP locations and `beamtalk_source` display short paths.
+- **Fix: REPL dev-ops commands no longer crash on wrong-typed request parameters (BT-4896).** `inspect`, `kill` and `pid-stats` now report a missing-or-invalid-pid error instead of crashing with `badarg` when the `actor` parameter is not a string.
+- **Fix: REPL loader errors now show structured messages (BT-4897).** `class_not_found`, `core_compile_error` and `method_span_unresolved` loader reasons now produce readable messages instead of raw Erlang term dumps.
 
 ## 0.5.0 — 2026-11-15
 
