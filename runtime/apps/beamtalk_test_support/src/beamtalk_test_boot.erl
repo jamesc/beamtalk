@@ -35,6 +35,7 @@ idempotent (a normal stdlib load skips a module whose on_load already ran).
     runtime/0,
     start_app/1,
     compiler/0,
+    extensions/0,
     no_compiler/0,
     telemetry/0,
     load_runtime_modules/0,
@@ -79,6 +80,37 @@ boot_real_stdlib(CanaryClass) ->
             wait_for_class(CanaryClass, 50)
     end,
     ok.
+
+-doc """
+Make sure the `beamtalk_extensions` ETS tables exist and outlive the caller.
+`beamtalk_extensions:init/0` makes the calling process the table owner, and an
+eunit setup process exits when its fixture ends, taking the tables with it; the
+next module then fails with `badarg` on `ets:lookup/2` (BT-4962). The runtime
+app creates them from its own long-lived process; this does the same from a
+parked process when the app did not (or the tables were dropped since).
+""".
+-spec extensions() -> ok.
+extensions() ->
+    case ets:info(beamtalk_extensions, owner) of
+        undefined ->
+            Self = self(),
+            Ref = make_ref(),
+            Owner = spawn(fun() ->
+                ok = beamtalk_extensions:init(),
+                Self ! {Ref, ready},
+                receive
+                    stop -> ok
+                end
+            end),
+            receive
+                {Ref, ready} -> ok
+            after 5000 ->
+                exit(Owner, kill),
+                error(extensions_tables_not_created)
+            end;
+        _ ->
+            ok
+    end.
 
 -spec wait_for_class(atom(), non_neg_integer()) -> ok.
 wait_for_class(ClassName, Retries) ->
