@@ -73,6 +73,14 @@ start_fixture(Prefix, Files) ->
     ),
     #{proj_dir => ProjDir}.
 
+%% `purge_class/1` is a call to the named xref server and exits `noproc` when an
+%% earlier suite stopped it; its rows are gone with the server then.
+purge_xref_rows(ClassName) ->
+    case whereis(beamtalk_xref) of
+        undefined -> ok;
+        _ -> beamtalk_xref:purge_class(ClassName)
+    end.
+
 stop_classes(ClassNames) ->
     lists:foreach(
         fun(ClassName) ->
@@ -89,7 +97,7 @@ stop_classes(ClassNames) ->
             %% The fixture's classes were indexed in the xref server; leaving
             %% their rows makes `implementors_of/1` in a later suite list them
             %% (BT-4934).
-            beamtalk_xref:purge_class(ClassName)
+            purge_xref_rows(ClassName)
         end,
         ClassNames
     ).
