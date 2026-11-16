@@ -331,18 +331,17 @@ unreadable_marker_frame_has_no_source_path_test() ->
 %% cache of a different depth (a CI cache mount); applied lexically, line 1
 %% climbs the wrong number of levels and misses `dep`.
 symlinked_build_dir_resolves_the_relative_line_from_the_real_path_test() ->
-    Base = filename:absname("bt4966_symlink"),
+    %% Canonical `Base`: the resolver canonicalises the whole path, so a
+    %% checkout under a symlinked directory (macOS `/var`) must not skew it.
+    Base0 = filename:absname("bt4966_symlink"),
+    ok = filelib:ensure_path(Base0),
+    Base = beamtalk_source_path:real_dir(Base0),
     Dep = filename:join(Base, "dep"),
     RealEbin = filename:join([Base, "cache", "x", "build", "deps", "dep", "ebin"]),
     ok = filelib:ensure_path(RealEbin),
-    [
-        begin
-            ok = filelib:ensure_path(filename:join(D, "src")),
-            ok = file:write_file(filename:join(D, "beamtalk.toml"), <<"[package]\n">>),
-            ok = file:write_file(filename:join([D, "src", "x.bt"]), <<>>)
-        end
-     || D <- [Dep]
-    ],
+    ok = filelib:ensure_path(filename:join(Dep, "src")),
+    ok = file:write_file(filename:join(Dep, "beamtalk.toml"), <<"[package]\n">>),
+    ok = file:write_file(filename:join([Dep, "src", "x.bt"]), <<>>),
     ok = filelib:ensure_path(filename:join(Base, "app")),
     ok = file:make_symlink(
         filename:join([Base, "cache", "x", "build"]), filename:join([Base, "app", "_build"])

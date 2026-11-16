@@ -45,7 +45,7 @@ relative; callers that open the file treat that as "not found".
 
 -export([find_package_root/1, resolve_strict/2, is_absolute/1]).
 -ifdef(TEST).
--export([normalize/1]).
+-export([normalize/1, real_dir/1]).
 -endif.
 
 -doc """
