@@ -576,9 +576,14 @@ assert_command_recognized(Command) ->
 module_name_for_path_matches_shared_corpus() ->
     Corpus = load_module_naming_corpus(),
     ?assert(length(Corpus) >= 10),
-    %% The port reply is decoded with `binary_to_term(_, [safe])`, which rejects
-    %% atoms the VM has not seen: intern every expected error reason before the
-    %% first call, not while comparing its result (BT-4934).
+    %% WORKAROUND for a production defect (BT-4934, see the Linear note): the
+    %% port reply is decoded with `binary_to_term(_, [safe])`, and the atoms
+    %% `invalid_path_segment` / `reserved_test_directory` are in no loaded beam
+    %% (the clause meant to name them in `beamtalk_compiler_port` is merged away
+    %% by the compiler), so a real reply fails as "response is malformed". The
+    %% expected atoms are interned here so the rest of the corpus is checked.
+    %% Remove this line when the production code makes the atoms real: the test
+    %% must then pass without it.
     [binary_to_atom(Reason) || #{<<"error">> := Reason} <- Corpus],
     lists:foreach(
         fun(#{<<"path">> := Path, <<"package">> := Pkg, <<"root">> := Root} = Case) ->

@@ -58,6 +58,7 @@ only useful if subscriber and receiver are the same process.
 """.
 -spec setup(opts()) -> ok.
 setup(Opts) ->
+    ok = beamtalk_test_class:snapshot_instances(?MODULE),
     beamtalk_test_boot:workspace(Opts#{announcements => true}).
 
 -doc """
@@ -68,6 +69,7 @@ and stop the compiler port.
 """.
 -spec teardown(opts()) -> ok.
 teardown(Opts) ->
+    ok = beamtalk_test_class:stop_instances_since(?MODULE),
     beamtalk_repl_subscriptions:unsubscribe(reload_check, self()),
     beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     [beamtalk_test_proc:stop_registered(Name) || Name <- maps:get(restart, Opts, [])],

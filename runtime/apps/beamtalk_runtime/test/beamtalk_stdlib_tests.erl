@@ -17,26 +17,20 @@
 
 %% Setup and teardown for stdlib tests
 stdlib_setup() ->
-    %% Ensure pg is running
-    beamtalk_test_boot:registry(),
+    %% Start the real runtime application (xref, ETS heir, bootstrap, pg, ...) the
+    %% way a release does, instead of hand-starting bare pieces. The class
+    %% registry's shared ETS tables (`beamtalk_class_pids`, ...) are created
+    %% by whichever process registers a class first; without the supervised
+    %% `beamtalk_ets_heir` they die with that short-lived owner, and every
+    %% class then reads as unregistered (BT-4934). xref and bootstrap come up
+    %% in their real order, ahead of stdlib, so the xref-indexing regression
+    %% test still sees a populated index.
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     %% Initialize extensions ETS table
     beamtalk_extensions:init(),
-    %% Initialize the protocol registry ETS table so protocol-only
-    %% modules (e.g. Printable) can register during stdlib load. Without this
-    %% their on_load `register_protocol/1` crashes on a missing ETS table and
-    %% the protocol class object (with its xref rows) is never created.
+    %% Protocol-only modules (e.g. Printable) register during stdlib load and
+    %% their on_load `register_protocol/1` crashes on a missing ETS table.
     beamtalk_protocol_registry:init(),
-    %% Start beamtalk_xref before loading stdlib so that class on_load
-    %% (`register_class/0`) and protocol registration forward their baked
-    %% method_xref rows into the index. In the real runtime xref is the first
-    %% supervisor child, ahead of bootstrap; mirror that ordering here so the
-    %% xref-indexing regression test sees a populated index.
-    case whereis(beamtalk_xref) of
-        undefined -> {ok, _} = beamtalk_xref:start_link();
-        _ -> ok
-    end,
-    %% Start bootstrap (starts pg) then load stdlib classes
-    {ok, _} = beamtalk_bootstrap:start_link(),
     beamtalk_stdlib:init(),
     ok.
 
