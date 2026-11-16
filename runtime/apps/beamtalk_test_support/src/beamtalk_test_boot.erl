@@ -161,7 +161,7 @@ sequence repeated across the integration suites.
 -spec compiler() -> ok.
 compiler() ->
     {ok, _} = application:ensure_all_started(compiler),
-    {ok, _} = application:ensure_all_started(beamtalk_compiler),
+    {ok, _} = start_app(beamtalk_compiler),
     %% `beamtalk_xref:sends_from_source/1` guards on `erlang:function_exported/3`,
     %% which is false for a module that is not loaded yet; starting the app does
     %% not load the `beamtalk_compiler` facade in interactive mode (BT-4934).
