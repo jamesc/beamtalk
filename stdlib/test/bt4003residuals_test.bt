@@ -41,6 +41,7 @@ TestCase subclass: Bt4003ResidualsTest
     t := 0
     [
       [
+        @expect lint "the pure `1 / 0` before the write is the ensure-raise-before-write shape under test"
         1 / 0
         t := 9
       ] ensure: [rec record: t]

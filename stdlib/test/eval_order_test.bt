@@ -21,6 +21,7 @@ TestCase subclass: EvalOrderTest
 
   testArrayLiteralWithParens =>
     a := EvalOrderActor spawn
+    @expect lint "the parenthesised send is the paren-transparency arm under test"
     self assert: #[(a bump), a n] equals: #[1, 1]
 
   testListLiteral =>
