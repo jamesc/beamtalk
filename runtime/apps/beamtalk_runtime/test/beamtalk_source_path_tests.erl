@@ -41,3 +41,60 @@ resolves_against_workspace_root_test() ->
 
 unresolvable_path_is_returned_unchanged_test() ->
     ?assertEqual("nope/zzz.bt", beamtalk_source_path:resolve(undefined, "nope/zzz.bt")).
+
+%% A beam in a directory with a `.beamtalk-source-root` marker (a path
+%% dependency under the consumer's `_build/deps/`) resolves against the root
+%% the marker names, never the consumer's, even when the consumer has a file
+%% at the same relative path.
+marker_root_wins_over_enclosing_package_test() ->
+    Base = filename:absname("bt4940_marker"),
+    App = filename:join(Base, "app"),
+    Dep = filename:join(Base, "dep"),
+    Ebin = filename:join([App, "_build", "deps", "dep", "ebin"]),
+    ok = filelib:ensure_path(Ebin),
+    ok = filelib:ensure_path(filename:join(App, "src")),
+    ok = filelib:ensure_path(filename:join(Dep, "src")),
+    ok = file:write_file(filename:join(App, "beamtalk.toml"), <<"[package]\n">>),
+    ok = file:write_file(filename:join(App, "src/x.bt"), <<>>),
+    DepFile = filename:join([Dep, "src", "x.bt"]),
+    ok = file:write_file(DepFile, <<>>),
+    ok = file:write_file(filename:join(Ebin, ".beamtalk-source-root"), list_to_binary(Dep)),
+    Mod = bt4940_marker_mod,
+    {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
+    BeamFile = filename:join(Ebin, "bt4940_marker_mod.beam"),
+    ok = file:write_file(BeamFile, Bin),
+    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
+    try
+        ?assertEqual(DepFile, beamtalk_source_path:resolve(Mod, "src/x.bt"))
+    after
+        code:purge(Mod),
+        code:delete(Mod),
+        file:del_dir_r(Base)
+    end.
+
+%% With a module root known, a missing file is reported under that root, not
+%% quietly found under another project's root.
+missing_file_is_not_taken_from_another_root_test() ->
+    Base = filename:absname("bt4940_noleak"),
+    Ws = filename:join(Base, "ws"),
+    Own = filename:join(Base, "own"),
+    ok = filelib:ensure_path(filename:join(Ws, "src")),
+    ok = filelib:ensure_path(filename:join(Own, "ebin")),
+    ok = file:write_file(filename:join(Ws, "src/y.bt"), <<>>),
+    ok = file:write_file(filename:join(Own, "beamtalk.toml"), <<"[package]\n">>),
+    Mod = bt4940_noleak_mod,
+    {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
+    BeamFile = filename:join([Own, "ebin", "bt4940_noleak_mod.beam"]),
+    ok = file:write_file(BeamFile, Bin),
+    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
+    application:set_env(beamtalk_runtime, workspace_project_root, list_to_binary(Ws)),
+    try
+        ?assertEqual(
+            filename:join(Own, "src/y.bt"), beamtalk_source_path:resolve(Mod, "src/y.bt")
+        )
+    after
+        application:unset_env(beamtalk_runtime, workspace_project_root),
+        code:purge(Mod),
+        code:delete(Mod),
+        file:del_dir_r(Base)
+    end.

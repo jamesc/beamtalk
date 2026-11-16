@@ -81,13 +81,27 @@ pub fn find_package_root(start: &Path) -> Option<PathBuf> {
 /// reach the embedded string.
 #[must_use]
 pub fn embedded_source_path(source: &Path) -> String {
+    embedded_source_path_in_package(source).unwrap_or_else(|| {
+        let canonical = try_canonicalize(source);
+        canonical.file_name().map_or_else(
+            || join_slash(&canonical),
+            |n| n.to_string_lossy().into_owned(),
+        )
+    })
+}
+
+/// [`embedded_source_path`] for a file inside a package; `None` when no
+/// ancestor holds a `beamtalk.toml`. One canonicalize and one walk, for callers
+/// that pick their own fallback (the compiler port keeps the absolute path).
+#[must_use]
+pub fn embedded_source_path_in_package(source: &Path) -> Option<String> {
     let canonical = try_canonicalize(source);
-    let relative = find_package_root(&canonical)
-        .and_then(|root| canonical.strip_prefix(&root).ok().map(Path::to_path_buf))
-        .or_else(|| canonical.file_name().map(PathBuf::from))
-        .unwrap_or_else(|| canonical.clone());
-    relative
-        .components()
+    let root = find_package_root(&canonical)?;
+    canonical.strip_prefix(&root).ok().map(join_slash)
+}
+
+fn join_slash(path: &Path) -> String {
+    path.components()
         .map(|c| c.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/")
@@ -323,6 +337,17 @@ pub fn resolve_extraction_files_with_errors(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn write_manifest(dir: &Path) {
+        fs::write(
+            dir.join("beamtalk.toml"),
+            "[package]\nname = \"t\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+    }
 
     #[test]
     fn embedded_source_path_is_package_relative_with_forward_slashes() {
@@ -356,17 +381,6 @@ mod tests {
             embedded_source_path(&a.path().join("src/a.bt")),
             embedded_source_path(&b.path().join("src/a.bt"))
         );
-    }
-    use super::*;
-    use std::fs;
-    use tempfile::TempDir;
-
-    fn write_manifest(dir: &Path) {
-        fs::write(
-            dir.join("beamtalk.toml"),
-            "[package]\nname = \"t\"\nversion = \"0.1.0\"\n",
-        )
-        .unwrap();
     }
 
     #[test]

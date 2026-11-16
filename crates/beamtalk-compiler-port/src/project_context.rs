@@ -716,10 +716,6 @@ fn resolve_project_context(root: PathBuf, batch: Option<&str>) -> Option<FilePro
 /// shipped `.beam`), and the runtime has no project root to resolve a bare
 /// file name against, so `reload`/`sourceFile` would otherwise lose the file.
 pub(crate) fn embedded_source_path(source_path: &str) -> String {
-    let path = std::path::Path::new(source_path);
-    if beamtalk_project::package::find_package_root(path).is_some() {
-        beamtalk_project::package::embedded_source_path(path)
-    } else {
-        source_path.to_string()
-    }
+    beamtalk_project::package::embedded_source_path_in_package(std::path::Path::new(source_path))
+        .unwrap_or_else(|| source_path.to_string())
 }

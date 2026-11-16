@@ -13,17 +13,26 @@ what a stack frame should show. Code that needs the file on disk (reload,
 flush, test discovery, the language service) calls `resolve/2` to turn it
 back into an absolute path at run time.
 
-Resolution order, first existing file wins:
+The module's own root is decided first, and when it is known it is the only
+root tried (a file missing under it is reported there, never silently taken
+from another project):
 
-1. the package root above the module's own `.beam` (`code:which/1`) — right
-   for a built project and for dependencies loaded from their own tree;
-2. the workspace's project root (`workspace_project_root` application env),
-   which covers modules compiled in memory by the REPL/`load_project`;
-3. the package root above the current directory.
+1. the root named by a `.beamtalk-source-root` marker beside the module's
+   `.beam` (written for a path dependency, whose beams live under the
+   consumer's `_build/deps/` and outside any package);
+2. else the package root above the module's `.beam` (`code:which/1`) — a built
+   project, or a git dependency checked out with its manifest.
+
+Only when the module has no root of its own (compiled in memory by the REPL or
+`load_project`, or a release layout) are these tried, first existing file wins:
+
+3. the workspace's project root (`workspace_project_root` application env);
+4. the package root above the current directory.
 
 An already-absolute path is returned as is (modules built before BT-4940).
-When nothing exists on disk the path is joined to the first root found, else
-returned unchanged.
+When nothing exists on disk the path is joined to the first root found; with no
+root at all it is returned unchanged, still relative. Callers that open the file
+treat that as "not found".
 """.
 
 -export([find_package_root/1, resolve/2, is_absolute/1]).
@@ -61,12 +70,12 @@ resolve(Module, Path) ->
 
 -spec candidate_roots(module() | undefined) -> [file:filename_all()].
 candidate_roots(Module) ->
-    Roots = [
-        R
-     || R <- [beam_root(Module), workspace_root(), cwd_root()],
-        R =/= undefined
-    ],
-    dedupe(Roots).
+    case beam_root(Module) of
+        undefined ->
+            dedupe([R || R <- [workspace_root(), cwd_root()], R =/= undefined]);
+        Root ->
+            [Root]
+    end.
 
 dedupe(L) -> dedupe(L, []).
 dedupe([], Acc) ->
@@ -82,8 +91,25 @@ beam_root(undefined) ->
     undefined;
 beam_root(Module) ->
     case code:which(Module) of
-        Beam when is_list(Beam), Beam =/= [] -> find_package_root(Beam);
-        _ -> undefined
+        Beam when is_list(Beam), Beam =/= [] ->
+            case read_marker(filename:dirname(Beam)) of
+                undefined -> find_package_root(Beam);
+                Root -> Root
+            end;
+        _ ->
+            undefined
+    end.
+
+-spec read_marker(file:filename_all()) -> file:filename_all() | undefined.
+read_marker(EbinDir) ->
+    case file:read_file(filename:join(EbinDir, ".beamtalk-source-root")) of
+        {ok, Bin} ->
+            case string:trim(unicode:characters_to_list(Bin)) of
+                [] -> undefined;
+                Root -> Root
+            end;
+        {error, _} ->
+            undefined
     end.
 
 -spec workspace_root() -> file:filename_all() | undefined.

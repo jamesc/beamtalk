@@ -557,7 +557,11 @@ impl ProcessManager {
     ///
     /// The project directory is owned by the caller (a `tempfile::TempDir`), so
     /// `stop` never removes it.
-    fn start_library_project(project_dir: &std::path::Path, root_package: &str) -> Self {
+    fn start_library_project(
+        project_dir: &std::path::Path,
+        root_package: &str,
+        extra_ebins: &[PathBuf],
+    ) -> Self {
         let debug_output = env::var("E2E_DEBUG").is_ok();
         eprintln!("E2E: Starting library-project BEAM REPL (package {root_package})...");
         let runtime = runtime_dir();
@@ -575,6 +579,10 @@ impl ProcessManager {
         let mut pa_args = repl_startup::beam_pa_args(&paths);
         pa_args.push("-pa".into());
         pa_args.push(project_dir.join("_build/dev/ebin").into_os_string());
+        for ebin in extra_ebins {
+            pa_args.push("-pa".into());
+            pa_args.push(ebin.clone().into_os_string());
+        }
         pa_args.push("-eval".into());
         pa_args.push(eval_cmd.into());
 
@@ -2283,7 +2291,7 @@ fn e2e_library_project_program_package_and_sync() {
         "build did not produce the library .app"
     );
 
-    let manager = ProcessManager::start_library_project(project_dir, package);
+    let manager = ProcessManager::start_library_project(project_dir, package, &[]);
     let mut client = ReplClient::connect(manager.port).expect("Could not connect to REPL");
 
     // `Program package` answers the root Package; `Package named:` succeeds.
@@ -2371,7 +2379,7 @@ fn e2e_built_project_source_path_survives_reload_and_sync() {
         .expect("Failed to run beamtalk build");
     assert!(status.success(), "beamtalk build failed");
 
-    let manager = ProcessManager::start_library_project(project_dir, package);
+    let manager = ProcessManager::start_library_project(project_dir, package, &[]);
     let mut client = ReplClient::connect(manager.port).expect("Could not connect to REPL");
 
     let expected_file = fs::canonicalize(&file).expect("canonicalize source");
@@ -2405,6 +2413,63 @@ fn e2e_built_project_source_path_survives_reload_and_sync() {
     assert!(!sync.is_error(), "sync errored: {sync:?}");
     assert_eq!(client.eval("ReloadThing new answer").unwrap(), "3");
     source_file(&mut client);
+}
+
+/// BT-4940: a path dependency's beams live under the consumer's
+/// `_build/deps/<name>/ebin` (outside any package) and embed a path relative
+/// to the dependency's own root. `sourceFile` must name the dependency's
+/// file, including when the consumer has a file at the same relative path.
+#[test]
+#[ignore = "slow test - run with `just test-repl-protocol`"]
+#[serial(e2e)]
+fn e2e_path_dependency_source_file_resolves_to_the_dependency() {
+    let tmp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let root = tmp_dir.path();
+    let dep_dir = root.join("dep_pkg");
+    let app_dir = root.join("app");
+    for dir in [&dep_dir, &app_dir] {
+        fs::create_dir_all(dir.join("src")).expect("mkdir src");
+    }
+    fs::write(
+        dep_dir.join("beamtalk.toml"),
+        "[package]\nname = \"dep_pkg\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let dep_file = dep_dir.join("src/DepThingBt4940.bt");
+    fs::write(&dep_file, "Value subclass: DepThingBt4940\n  answer => 1\n").unwrap();
+    fs::write(
+        app_dir.join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\ndep_pkg = { path = \"../dep_pkg\" }\n",
+    )
+    .unwrap();
+
+    fs::write(
+        app_dir.join("src/AppThingBt4940.bt"),
+        "Value subclass: AppThingBt4940\n  answer => 2\n",
+    )
+    .unwrap();
+
+    let status = Command::new(env!("CARGO_BIN_EXE_beamtalk"))
+        .args(["build", "."])
+        .current_dir(&app_dir)
+        .status()
+        .expect("Failed to run beamtalk build");
+    assert!(status.success(), "beamtalk build failed");
+
+    let dep_ebin = app_dir.join("_build/deps/dep_pkg/ebin");
+    let manager = ProcessManager::start_library_project(&app_dir, "app", &[dep_ebin]);
+    let mut client = ReplClient::connect(manager.port).expect("Could not connect to REPL");
+
+    let shown = client
+        .eval("DepThingBt4940 sourceFile")
+        .expect("sourceFile");
+    let resolved = fs::canonicalize(shown.trim_matches('"')).expect("sourceFile must exist");
+    assert_eq!(
+        resolved,
+        fs::canonicalize(&dep_file).unwrap(),
+        "dependency sourceFile must be the dependency's file, got {shown}"
+    );
 }
 
 /// Run explicitly with: `cargo test --test repl_protocol -- --ignored` or `just test-repl-protocol`

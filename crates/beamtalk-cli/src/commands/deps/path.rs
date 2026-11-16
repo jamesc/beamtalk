@@ -432,6 +432,13 @@ fn compile_dependency_with_context(
         .compile_batch(&core_files)
         .wrap_err_with(|| format!("Failed to compile dependency '{dep_name}' to BEAM bytecode"))?;
 
+    // BT-4940: the dependency's modules embed paths relative to its own
+    // package root, but its beams live under the consumer's `_build/deps/`,
+    // outside any package. Record where the sources are, beside (not inside)
+    // the beams, so the runtime can resolve `sourceFile` / `reload` to the
+    // dependency's file and never to the consumer's.
+    write_source_root_marker(&ebin_path, dep_root)?;
+
     // Generate .app file and corpus
     generate_dependency_app_file(
         dep_root,
@@ -512,6 +519,24 @@ impl OtpTypeSpecs {
             })
             .as_ref()
     }
+}
+
+/// Name of the file in a dependency's `ebin/` that holds the absolute path of
+/// its package root (BT-4940). Read by `beamtalk_source_path:beam_root/1`; keep
+/// the two spellings equal (`beamtalk_source_path_tests` pins the Erlang side
+/// and `dependency_beam_embeds_path_relative_to_its_own_package_root` this one).
+pub(crate) const SOURCE_ROOT_MARKER: &str = ".beamtalk-source-root";
+
+/// Write [`SOURCE_ROOT_MARKER`] into `ebin_path`, naming `dep_root` absolutely.
+fn write_source_root_marker(ebin_path: &Utf8Path, dep_root: &Utf8Path) -> Result<()> {
+    let root = beamtalk_core::paths::canonicalize(dep_root.as_std_path())
+        .unwrap_or_else(|_| dep_root.as_std_path().to_path_buf());
+    std::fs::write(
+        ebin_path.join(SOURCE_ROOT_MARKER),
+        root.to_string_lossy().as_bytes(),
+    )
+    .into_diagnostic()
+    .wrap_err_with(|| format!("Failed to write source-root marker in {ebin_path}"))
 }
 
 /// The FFI type registry a dependency compiles against (BT-4225): the

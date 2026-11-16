@@ -937,7 +937,7 @@ fn build_is_reproducible_across_directories_and_embeds_no_absolute_path() {
 }
 
 /// BT-4940: a path dependency embeds a path relative to *its own* package
-/// root (`src/Producer.bt`), not relative to the consuming project and not
+/// root (`src/DepThingBt4940.bt`), not relative to the consuming project and not
 /// absolute. Dependency beams are found by name under `_build`.
 #[test]
 fn dependency_beam_embeds_path_relative_to_its_own_package_root() {
@@ -988,6 +988,15 @@ fn dependency_beam_embeds_path_relative_to_its_own_package_root() {
     assert!(
         !contains(dep_bytes, "dep_pkg/src/DepThingBt4940.bt"),
         "{dep_name} must not be relative to the consuming project or absolute"
+    );
+    // The runtime finds the dependency's sources through a marker beside its
+    // beams (not inside them): it names the dependency's package root.
+    let marker = app_dir.join("_build/deps/dep_pkg/ebin/.beamtalk-source-root");
+    let recorded = std::fs::read_to_string(&marker).expect("source-root marker");
+    assert_eq!(
+        std::fs::canonicalize(recorded.trim()).unwrap(),
+        std::fs::canonicalize(&dep_dir).unwrap(),
+        "marker must name the dependency's package root"
     );
     let root_str = root.path().to_string_lossy().into_owned();
     for (name, bytes) in &beams {
