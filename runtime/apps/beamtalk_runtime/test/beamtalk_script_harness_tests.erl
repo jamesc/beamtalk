@@ -38,8 +38,47 @@ first_stop_request_wins_test_() ->
 %% so the first arm fires and calls logger_std_h:filesync/1. The second arm
 %% fires when a handler with a different module is present (e.g. the test-only
 %% beamtalk_noop_log_handler below).
-flush_loggers_returns_ok_test() ->
-    ?assertEqual(ok, beamtalk_script_harness:flush_loggers()).
+flush_loggers_returns_ok_test_() ->
+    %% flush_loggers/0 calls logger_std_h:filesync/1 on every logger_std_h
+    %% handler in turn. Each is a gen_server:call with OTP's own 5000 ms
+    %% timeout (a timeout comes back as {error, handler_busy}, which
+    %% flush_loggers ignores). The test sys.config has two such handlers
+    %% (console and warnings_file, which fsyncs), so the worst legitimate case
+    %% is about 2 x 5 s; eunit's default 5 s per-test timeout is below it.
+    %% Size the test from that: the flush gets 15 s of its own, the test 20 s.
+    {timeout, 20, fun flush_loggers_returns_ok/0}.
+
+flush_loggers_returns_ok() ->
+    {Pid, Ref} = spawn_monitor(fun() -> exit({flushed, beamtalk_script_harness:flush_loggers()}) end),
+    receive
+        {'DOWN', Ref, process, Pid, {flushed, Result}} ->
+            ?assertEqual(ok, Result);
+        {'DOWN', Ref, process, Pid, Reason} ->
+            erlang:error({flush_loggers_crashed, Reason})
+    after 15000 ->
+        Stack = erlang:process_info(Pid, current_stacktrace),
+        exit(Pid, kill),
+        %% Name what the flush was waiting on: each std handler's process,
+        %% its mailbox and what it is doing.
+        Handlers = [
+            {Id, Reg, handler_process_info(Reg)}
+         || #{id := Id, module := logger_std_h} <- logger:get_handler_config(),
+            Reg <- [list_to_atom(lists:concat([logger_std_h, "_", Id]))]
+        ],
+        erlang:error(
+            {flush_loggers_did_not_return, #{
+                flusher_stacktrace => Stack,
+                std_handlers => Handlers,
+                run_queue => erlang:statistics(run_queue)
+            }}
+        )
+    end.
+
+handler_process_info(Reg) ->
+    case whereis(Reg) of
+        undefined -> not_registered;
+        HPid -> erlang:process_info(HPid, [message_queue_len, status, current_stacktrace])
+    end.
 
 flush_loggers_skips_non_std_handler_test_() ->
     HandlerId = beamtalk_flush_loggers_noop_test_handler,
