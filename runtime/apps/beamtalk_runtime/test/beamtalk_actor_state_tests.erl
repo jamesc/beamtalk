@@ -258,13 +258,13 @@ wrapper_installs_cell_and_erases_it_test() ->
     },
     ?assertMatch(
         {reply, true, _},
-        beamtalk_actor:handle_call({probe, []}, {self(), make_ref()}, State)
+        test_actor_host:handle_call({probe, []}, {self(), make_ref()}, State)
     ),
     ?assertMatch(
         {reply, ok, #{n := 1}},
-        beamtalk_actor:handle_call({bump, []}, {self(), make_ref()}, State)
+        test_actor_host:handle_call({bump, []}, {self(), make_ref()}, State)
     ),
-    {reply, {error, oops}, Kept} = beamtalk_actor:handle_call(
+    {reply, {error, oops}, Kept} = test_actor_host:handle_call(
         {fail, []}, {self(), make_ref()}, State
     ),
     ?assertEqual(State, Kept),

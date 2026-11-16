@@ -172,11 +172,13 @@ pub fn resolve_package_type_registry(
 /// ([`resolve_package_type_registry`]) over the auto-extracted specs
 /// ([`crate::native_type_specs::extract_project_type_specs`], the extractor
 /// `beamtalk build` uses), with `dependency_stubs` as the package-bundled
-/// tier. Stdlib has no `beamtalk.toml`, so for a target under `stdlib/src`
-/// the registry is `beamtalk build-stdlib`'s own
-/// ([`crate::native_type_specs::extract_stdlib_type_specs`]) — without it
-/// every `(Erlang m) f:` call in `stdlib/src` would be reported as untyped.
-/// Otherwise empty.
+/// tier. Stdlib has no `beamtalk.toml`, so for a target anywhere under a
+/// `stdlib/` tree (`src/`, `test/`, ...) the registry is `beamtalk
+/// build-stdlib`'s own ([`crate::native_type_specs::extract_stdlib_type_specs`])
+/// — the same gate `beamtalk test` uses (`is_under_stdlib_dir`), so lint and
+/// test agree on which `@expect type` markers are needed (BT-4965). Without
+/// it every `(Erlang m) f:` call would be reported as untyped, and a needed
+/// `@expect type` as stale. Otherwise empty.
 #[must_use]
 pub fn lint_type_registry(
     package_root: Option<&Utf8Path>,
@@ -189,7 +191,7 @@ pub fn lint_type_registry(
         resolve_package_type_registry(root, auto_extract, dependency_stubs)
     } else if source_files
         .iter()
-        .any(|f| beamtalk_project::package::is_under_stdlib_src_dir(f.as_std_path()))
+        .any(|f| beamtalk_project::package::is_under_stdlib_dir(f.as_std_path()))
     {
         ResolvedTypeRegistry {
             registry: crate::native_type_specs::extract_stdlib_type_specs(),

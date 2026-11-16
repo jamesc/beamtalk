@@ -71,6 +71,7 @@ mod hierarchy_injection_and_singleton_types;
 mod local_threading;
 mod match_arm_analysis;
 mod match_arm_block;
+mod native_actor_subclass;
 mod paren_operand_spans;
 mod self_misuse_and_unused_variables;
 mod standalone_e0402;

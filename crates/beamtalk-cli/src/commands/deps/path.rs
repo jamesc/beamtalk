@@ -535,7 +535,11 @@ impl OtpTypeSpecs {
 pub(crate) const SOURCE_ROOT_MARKER: &str = ".beamtalk-source-root";
 
 /// Write [`SOURCE_ROOT_MARKER`] into `ebin_path`, naming `dep_root`.
-fn write_source_root_marker(ebin_path: &Utf8Path, dep_root: &Utf8Path) -> Result<()> {
+///
+/// Called on every build of a path dependency, compiled or fresh (BT-4958): a
+/// copied workspace keeps the original tree's absolute line until this runs.
+/// The file is left untouched when it already holds the right contents.
+pub(crate) fn write_source_root_marker(ebin_path: &Utf8Path, dep_root: &Utf8Path) -> Result<()> {
     let root = beamtalk_core::paths::canonicalize(dep_root.as_std_path())
         .unwrap_or_else(|_| dep_root.as_std_path().to_path_buf());
     let ebin = beamtalk_core::paths::canonicalize(ebin_path.as_std_path())
@@ -546,7 +550,11 @@ fn write_source_root_marker(ebin_path: &Utf8Path, dep_root: &Utf8Path) -> Result
         contents.push(b'\n');
     }
     contents.extend_from_slice(root.as_os_str().as_encoded_bytes());
-    std::fs::write(ebin_path.join(SOURCE_ROOT_MARKER), contents)
+    let marker = ebin_path.join(SOURCE_ROOT_MARKER);
+    if std::fs::read(&marker).is_ok_and(|current| current == contents) {
+        return Ok(());
+    }
+    std::fs::write(marker, contents)
         .into_diagnostic()
         .wrap_err_with(|| format!("Failed to write source-root marker in {ebin_path}"))
 }

@@ -45,6 +45,7 @@ TestCase subclass: ValueTypeFieldAssignmentValuePositionTest
 
   conditionalReturn =>
     #(1) do: [:e | e]
+    @expect lint "explicit trailing ^ is the return arm under test"
     ^((self.n := 5) > 3) ifTrue: [1] ifFalse: [2]
 
   testSendArgThenRead =>

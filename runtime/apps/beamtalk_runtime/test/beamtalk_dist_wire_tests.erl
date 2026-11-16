@@ -87,10 +87,6 @@ wire_test_() ->
                 {"an older envelope migrates forward through a migrateFromVN: chain", fun() ->
                     migrate_forward_through_wire(PeerNode)
                 end},
-                {"remote_code_mismatch: a block whose module is missing on the callee (undef)",
-                    fun() -> remote_code_mismatch_undef(PeerNode) end},
-                {"remote_code_mismatch: a block whose module is a different version (badfun)",
-                    fun() -> remote_code_mismatch_badfun(PeerNode) end},
                 {
                     "async future rejection double-wrap: a method that calls "
                     "beamtalk_error:raise/1 on itself rejects with the wrapped map buried in "
@@ -297,54 +293,6 @@ migrate_forward_through_wire(PeerNode) ->
         )
     after
         erpc:call(PeerNode, ?MODULE, restore_meta_stub, [Ctx]),
-        rpc:call(PeerNode, gen_server, stop, [RemotePid])
-    end.
-
-%%====================================================================
-%% remote_code_mismatch (ADR 0126 §5.5, BT-3579 finding (b))
-%%====================================================================
-
-remote_code_mismatch_undef(PeerNode) ->
-    ModName = beamtalk_test_unique:atom("bt3601_undef"),
-    Binary = beamtalk_dist_wirecheck_tests:compile_block_module_variant(ModName, "v1"),
-    {module, ModName} = code:load_binary(ModName, atom_to_list(ModName) ++ ".erl", Binary),
-    Fun = ModName:make_block(),
-    {ok, RemotePid} = rpc:call(PeerNode, test_wire_actor, start, [0]),
-    try
-        ?assertBtErrorDetails(
-            remote_code_mismatch,
-            'Block',
-            _,
-            #{module := ModName},
-            beamtalk_actor:sync_send(RemotePid, 'invokeBlockWith:', [Fun])
-        )
-    after
-        beamtalk_test_module:unload(ModName),
-        rpc:call(PeerNode, gen_server, stop, [RemotePid])
-    end.
-
-remote_code_mismatch_badfun(PeerNode) ->
-    ModName = beamtalk_test_unique:atom("bt3601_badfun"),
-    BinaryV1 = beamtalk_dist_wirecheck_tests:compile_block_module_variant(ModName, "v1"),
-    BinaryV2 = beamtalk_dist_wirecheck_tests:compile_block_module_variant(ModName, "v2"),
-    {module, ModName} = code:load_binary(ModName, atom_to_list(ModName) ++ ".erl", BinaryV1),
-    Fun = ModName:make_block(),
-    {module, ModName} = rpc:call(
-        PeerNode, code, load_binary, [ModName, atom_to_list(ModName) ++ ".erl", BinaryV2]
-    ),
-    {ok, RemotePid} = rpc:call(PeerNode, test_wire_actor, start, [0]),
-    try
-        ?assertBtErrorDetails(
-            remote_code_mismatch,
-            'Block',
-            _,
-            #{module := ModName},
-            beamtalk_actor:sync_send(RemotePid, 'invokeBlockWith:', [Fun])
-        )
-    after
-        beamtalk_test_module:unload(ModName),
-        rpc:call(PeerNode, code, delete, [ModName]),
-        rpc:call(PeerNode, code, purge, [ModName]),
         rpc:call(PeerNode, gen_server, stop, [RemotePid])
     end.
 

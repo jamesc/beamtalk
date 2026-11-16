@@ -485,6 +485,40 @@ fn lint_types_ffi_calls_into_stdlibs_own_backing_modules_bt_3597() {
         .stderr(contains("untyped FFI").not());
 }
 
+/// BT-4965: a file under `stdlib/test` gets the same FFI registry `beamtalk
+/// test` gives it (the runtime's own specs), so an `@expect type` that the
+/// build needs is not reported as stale by lint. Before the fix lint only
+/// gave `stdlib/src` that registry, the FFI type error never fired under
+/// lint, and the marker looked stale (a contributor following the warning
+/// broke the `test-bunit` compile).
+///
+/// Path-shape only, like the BT-3597 twin above: a hermetic
+/// `<tmp>/stdlib/test` exercises the same gate as the real tree.
+#[test]
+fn lint_does_not_report_needed_expect_type_stale_under_stdlib_test_bt_4965() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let stdlib_test = temp.path().join("stdlib").join("test");
+    std::fs::create_dir_all(&stdlib_test).unwrap();
+    std::fs::write(
+        stdlib_test.join("ffi_expect_test.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: FfiExpectTest\n\
+         \n\
+         \x20\x20bad =>\n\
+         \x20\x20\x20\x20@expect type\n\
+         \x20\x20\x20\x20Erlang beamtalk_character is_digit: #notAnInteger\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .args(["lint", stdlib_test.to_str().unwrap()])
+        .assert()
+        .success()
+        .stderr(contains("stale @expect").not());
+}
+
 #[test]
 fn lint_missing_path_exits_nonzero() {
     let project = cli_common::fixture_project();
@@ -1128,4 +1162,38 @@ fn lint_protocol_provided_method_qualifier_reported_once_with_users_in_other_fil
         .failure()
         .stderr(contains("Greets.bt"))
         .stderr(contains("1 error diagnostic found in"));
+}
+
+/// BT-4955: a directory listed in `.beamtalk-lint-exempt` is not reported on
+/// (and does not fail the run), while an identical finding elsewhere still
+/// fails, and the exempt files still feed cross-file context.
+#[test]
+fn lint_exempt_file_silences_listed_directory_only() {
+    let project = cli_common::fixture_project();
+    let body = "Object subclass: Shaped\n  go =>\n    ^1\n";
+    std::fs::create_dir_all(project.path().join("fixtures")).expect("mkdir fixtures");
+    std::fs::write(project.path().join("fixtures/shaped.bt"), body).expect("write fixture");
+    std::fs::write(
+        project.path().join(".beamtalk-lint-exempt"),
+        "# test\nfixtures/\n",
+    )
+    .expect("write exempt file");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success();
+
+    std::fs::write(
+        project.path().join("other.bt"),
+        body.replace("Shaped", "Other"),
+    )
+    .expect("write non-exempt file");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .failure()
+        .stderr(contains("redundant"));
 }
