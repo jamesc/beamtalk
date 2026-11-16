@@ -608,13 +608,12 @@ the fallback below. Falls back to OTP's own `global:random_exit_name/3`
 tie-break when the start times cannot be compared (neither side has one, or
 either read was `unreachable`) — `global_name_server` calls this synchronously
 and expects a decision back, never an exception, so this must always return
-one. Note
-this fallback (only reachable when ages genuinely cannot be compared, per
-ADR 0126 §4 "falling back to random_exit_name's choice") inherits
-`random_exit_name/3`'s own force-kill of the pid it does not return — the
-`stop_global_conflict_loser/1` call after it is then a harmless no-op on an
-already-dead pid. The comparable-ages path above never does this: it always
-resolves via a graceful stop, never a kill.
+one. Note this fallback (only reachable when ages genuinely cannot be
+compared, per ADR 0126 §4 "falling back to random_exit_name's choice")
+inherits `random_exit_name/3`'s own force-kill of the pid it does not
+return — the `stop_global_conflict_loser/1` call after it is then a harmless
+no-op on an already-dead pid. The comparable-ages path above never does
+this: it always resolves via a graceful stop, never a kill.
 """.
 -spec resolve_global_conflict(term(), pid(), pid()) -> pid().
 resolve_global_conflict(Name, Pid1, Pid2) ->
