@@ -906,7 +906,7 @@ new_on_primitive_not_double_wrapped_test_() ->
                 undefined -> beamtalk_bootstrap:start_link();
                 _ -> ok
             end,
-            beamtalk_stdlib:init()
+            beamtalk_test_boot:boot_real_stdlib('Integer')
         end,
         fun teardown/1, fun(_) ->
             [
