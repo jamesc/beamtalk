@@ -270,7 +270,7 @@ impl CoreErlangGenerator {
     /// [`Self::generate_self_dispatch_call_doc_for`] exactly as before; a
     /// caller that must sequence state-effecting *arguments* ahead of the
     /// dispatch (the ADR §Decision 3 rule) does so before calling this —
-    /// see `threaded_expression` (`util.rs`).
+    /// see `threaded_expression` (`threaded_prelude.rs`).
     ///
     /// `frame` is the [`FrameId`] the `Bind` belongs to — `FrameId::ROOT`
     /// for the flat Actor method body, a branch arm's own frame otherwise;
