@@ -85,7 +85,11 @@ stop_classes(ClassNames) ->
                     catch
                         _:_ -> ok
                     end
-            end
+            end,
+            %% The fixture's classes were indexed in the xref server; leaving
+            %% their rows makes `implementors_of/1` in a later suite list them
+            %% (BT-4934).
+            beamtalk_xref:purge_class(ClassName)
         end,
         ClassNames
     ).
