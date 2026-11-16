@@ -66,7 +66,9 @@ all_instances_reads_the_scan_test() ->
     B = marked('Bt4947Scan'),
     Other = marked('Bt4947Other'),
     try
-        ?assertEqual(lists:sort([A, B]), lists:sort(beamtalk_runtime_api:all_instances('Bt4947Scan'))),
+        ?assertEqual(
+            lists:sort([A, B]), lists:sort(beamtalk_runtime_api:all_instances('Bt4947Scan'))
+        ),
         ?assertEqual([Other], beamtalk_runtime_api:all_instances('Bt4947Other')),
         ?assertEqual([], beamtalk_runtime_api:all_instances('Bt4947None'))
     after

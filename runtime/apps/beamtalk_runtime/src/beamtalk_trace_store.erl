@@ -1878,7 +1878,10 @@ the node) per call. Non-actor processes never appear.
 do_bottlenecks(Limit) ->
     %% One `{Class, Pid}` per pid: a `native:` backing module shared by several
     %% classes is scanned once per class but must report once.
-    ByPid = maps:from_list([{Pid, {Class, Pid}} || {Pid, Class, _} <- beamtalk_actor_scan:scan_actors()]),
+    ByPid = maps:from_list([
+        {Pid, {Class, Pid}}
+     || {Pid, Class, _} <- beamtalk_actor_scan:scan_actors()
+    ]),
     Pairs = lists:sort(maps:values(ByPid)),
     %% Get queue depths for live processes
     WithQueue = lists:filtermap(
