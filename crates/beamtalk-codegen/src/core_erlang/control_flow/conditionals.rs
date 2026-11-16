@@ -1968,7 +1968,7 @@ impl CoreErlangGenerator {
     /// [`Self::inline_control_flow_producer`], reusing the exact same
     /// per-family predicates that producer dispatches on, so the two can
     /// never disagree. Called by
-    /// [`CoreErlangGenerator::subexpr_needs_prelude`] (`util.rs`) to decide
+    /// [`CoreErlangGenerator::subexpr_needs_prelude`] (`threaded_prelude.rs`) to decide
     /// whether compiling `expr` — receiver, argument, or any other
     /// sequenced position — would give it a non-empty prelude.
     pub(in crate::core_erlang) fn inline_control_flow_needs_threading(
