@@ -69,7 +69,8 @@ candidate_roots(Module) ->
     dedupe(Roots).
 
 dedupe(L) -> dedupe(L, []).
-dedupe([], Acc) -> lists:reverse(Acc);
+dedupe([], Acc) ->
+    lists:reverse(Acc);
 dedupe([H | T], Acc) ->
     case lists:member(H, Acc) of
         true -> dedupe(T, Acc);
