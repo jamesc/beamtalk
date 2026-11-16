@@ -974,7 +974,8 @@ fn lint_unknown_package_qualifier_exits_nonzero_bt_4942() {
         .assert()
         .failure()
         .stderr(contains("Unknown package 'nosuchpkg'"))
-        .stderr(contains("error diagnostic"));
+        .stderr(contains("1 error diagnostic found in"))
+        .stderr(contains("REPL load-project parity").not());
 }
 
 /// BT-4942: a known qualifier (the package's own name) stays clean.
