@@ -1371,13 +1371,10 @@ impl CoreErlangGenerator {
             BodyKind::FoldlCollect => {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![
-                        "{[",
-                        leaf::var(last_val.to_string()),
-                        " | AccList], ",
+                    form::tuple([
+                        docvec!["[", leaf::var(last_val.to_string()), " | AccList]"],
                         leaf::var(self.current_state_var()),
-                        "}",
-                    ],
+                    ]),
                     span,
                 ));
             }
@@ -1708,13 +1705,10 @@ impl CoreErlangGenerator {
                 };
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![
-                        "{[",
-                        leaf::var(rhs_var.to_string()),
-                        " | AccList], ",
+                    form::tuple([
+                        docvec!["[", leaf::var(rhs_var.to_string()), " | AccList]"],
                         leaf::var(fs),
-                        "}",
-                    ],
+                    ]),
                     span,
                 ));
             }
@@ -1888,7 +1882,10 @@ impl CoreErlangGenerator {
                         let vars_doc = plan.current_vars_doc(self);
                         stmts.push(Self::fold_accumulator(
                             plan.fold_carry(),
-                            docvec!["{[", leaf::var(result_var), " | AccList], ", vars_doc, "}",],
+                            form::tuple([
+                                docvec!["[", leaf::var(result_var), " | AccList]"],
+                                vars_doc,
+                            ]),
                             span,
                         ));
                     } else {
@@ -1899,13 +1896,10 @@ impl CoreErlangGenerator {
                         };
                         stmts.push(Self::fold_accumulator(
                             FoldCarry::StateMap,
-                            docvec![
-                                "{[",
-                                leaf::var(result_var),
-                                " | AccList], ",
+                            form::tuple([
+                                docvec!["[", leaf::var(result_var), " | AccList]"],
                                 leaf::var(fs),
-                                "}",
-                            ],
+                            ]),
                             span,
                         ));
                     }
@@ -1954,7 +1948,7 @@ impl CoreErlangGenerator {
                         let vars_doc = plan.current_vars_doc(self);
                         stmts.push(Self::fold_accumulator(
                             plan.fold_carry(),
-                            docvec!["{", leaf::var(acc_var), ", ", vars_doc, "}",],
+                            form::tuple([leaf::var(acc_var), vars_doc]),
                             span,
                         ));
                     } else {
