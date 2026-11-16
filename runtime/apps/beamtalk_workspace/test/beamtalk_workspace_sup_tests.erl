@@ -254,7 +254,7 @@ index_of(Elem, [_ | Rest], N) ->
 
 all_children_alive_test() ->
     %% Ensure runtime is started (workspace depends on it)
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
 
     %% The repl_server child boots a cowboy listener (`cowboy:start_clear`), which
     %% needs ranch/cowboy already running. When this suite runs as an isolated

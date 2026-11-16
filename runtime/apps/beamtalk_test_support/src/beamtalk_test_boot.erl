@@ -32,7 +32,10 @@ idempotent (a normal stdlib load skips a module whose on_load already ran).
     wait_for_class/2,
     registry/0,
     runtime/0,
+    start_app/1,
     compiler/0,
+    telemetry/0,
+    load_runtime_modules/0,
     workspace/1,
     clear_compiler_classes/0
 ]).
@@ -48,7 +51,7 @@ canary), without re-booting.
 """.
 -spec boot_real_stdlib(atom()) -> ok.
 boot_real_stdlib(CanaryClass) ->
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = start_app(beamtalk_runtime),
     case whereis(beamtalk_bootstrap) of
         undefined ->
             case beamtalk_bootstrap:start_link() of
@@ -104,13 +107,39 @@ registry() ->
     end.
 
 -doc """
+`application:ensure_all_started(App)` for a test setup: asserts the start, and
+recovers from the one failure an earlier test in the same node causes. A suite
+that starts a supervised server bare (`beamtalk_xref:start_link()`,
+`beamtalk_announcements`, ...) and leaves it running makes the application's
+own start fail with `{failed_to_start_child, _, {already_started, Pid}}`; the
+stray process is stopped and the start retried, so the app really comes up
+(BT-4922, BT-4934). Any other failure crashes the setup.
+""".
+-spec start_app(atom()) -> {ok, [atom()]}.
+start_app(App) ->
+    start_app(App, 8).
+
+start_app(App, Retries) ->
+    case application:ensure_all_started(App) of
+        {ok, _} = Ok ->
+            Ok;
+        {error, {_, {{shutdown, {failed_to_start_child, _Child, {already_started, Pid}}}, _}}} when
+            is_pid(Pid), Retries > 0
+        ->
+            ok = beamtalk_test_proc:stop(Pid),
+            start_app(App, Retries - 1);
+        {error, Reason} ->
+            error({app_start_failed, App, Reason})
+    end.
+
+-doc """
 Start the `beamtalk_runtime` application (and the bootstrap process, as
 `boot_real_stdlib/1` does) without loading stdlib. Returns a teardown handle
 that stops the application only if this call started it.
 """.
 -spec runtime() -> fun(() -> ok).
 runtime() ->
-    {ok, Started} = application:ensure_all_started(beamtalk_runtime),
+    {ok, Started} = start_app(beamtalk_runtime),
     fun() ->
         case lists:member(beamtalk_runtime, Started) of
             true -> application:stop(beamtalk_runtime);
@@ -127,11 +156,47 @@ sequence repeated across the integration suites.
 """.
 -spec compiler() -> ok.
 compiler() ->
-    application:ensure_all_started(compiler),
-    case application:ensure_all_started(beamtalk_compiler) of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end.
+    {ok, _} = application:ensure_all_started(compiler),
+    {ok, _} = application:ensure_all_started(beamtalk_compiler),
+    %% `beamtalk_xref:sends_from_source/1` guards on `erlang:function_exported/3`,
+    %% which is false for a module that is not loaded yet; starting the app does
+    %% not load the `beamtalk_compiler` facade in interactive mode (BT-4934).
+    {module, beamtalk_compiler} = code:ensure_loaded(beamtalk_compiler),
+    ok = load_runtime_modules(),
+    ok.
+
+%% The compiler port decodes replies with `binary_to_term(Bin, [safe])`, which
+%% rejects any atom the VM has not seen yet. A reply names atoms that only the
+%% runtime's modules define (class and method metadata), so in a fresh node the
+%% compile fails with "Compiler port response is malformed" unless those
+%% modules are loaded first. In a release the runtime is always up; here the
+%% modules are loaded without starting any process (BT-4934).
+-doc """
+Load every `beamtalk_runtime` module (without starting any process) so the
+atoms they define exist; see the note above. Idempotent. For suites that open
+the compiler port directly rather than through `compiler/0`.
+""".
+-spec load_runtime_modules() -> ok.
+load_runtime_modules() ->
+    case application:load(beamtalk_runtime) of
+        ok -> ok;
+        {error, {already_loaded, beamtalk_runtime}} -> ok
+    end,
+    {ok, Modules} = application:get_key(beamtalk_runtime, modules),
+    lists:foreach(fun(M) -> {module, M} = code:ensure_loaded(M) end, Modules).
+
+-doc """
+Start the `telemetry` and `telemetry_poller` applications that
+`beamtalk_runtime` lists as dependencies, for suites that start a supervisor
+(`beamtalk_runtime_sup`, `beamtalk_trace_store`) without going through
+`application:ensure_all_started(beamtalk_runtime)`. Asserts the start so a
+missing dependency fails here and not as a `noproc` inside a child (BT-4934).
+""".
+-spec telemetry() -> ok.
+telemetry() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    {ok, _} = application:ensure_all_started(telemetry_poller),
+    ok.
 
 -doc """
 Boot a fresh, isolated workspace for the integration suites that drive the
@@ -165,7 +230,7 @@ Idempotent; pair with `beamtalk_test_proc:stop_registered/1` in teardown.
 }) -> ok.
 workspace(#{workspace_id := WorkspaceId} = Opts) ->
     ok = compiler(),
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
     ok = beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     {ok, _} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WorkspaceId,

@@ -151,7 +151,7 @@ revert_e2e_test_() ->
 %% + runtime). Stopping/restarting them per case is slow and flaky.
 suite_setup() ->
     beamtalk_test_boot:compiler(),
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     %% Let the runtime register bootstrap classes before compiling user code.
     ok = beamtalk_test_wait:class('Object'),
     %% ADR 0129: workspace-only operations (rename/remove/revert) refuse with

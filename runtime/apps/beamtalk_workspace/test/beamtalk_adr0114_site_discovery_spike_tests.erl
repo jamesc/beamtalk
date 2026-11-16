@@ -230,7 +230,7 @@ live_patch_setup() ->
     %% `beamtalk_compiler` as a dependency). Started explicitly here so this
     %% test is deterministic in isolation, rather than relying on some other
     %% suite in the same EUnit VM having started it first.
-    {ok, _} = application:ensure_all_started(beamtalk_compiler),
+    ok = beamtalk_test_boot:compiler(),
     ClassInfo = #{
         name => 'BT3268LiveFixture',
         module => bt3268_live_fixture,

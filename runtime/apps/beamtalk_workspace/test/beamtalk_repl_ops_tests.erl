@@ -260,7 +260,7 @@ subscribe_single_stream_returns_ok_test() ->
 ensure_announcements_bus() ->
     case whereis(beamtalk_announcements) of
         undefined ->
-            {ok, _} = application:ensure_all_started(beamtalk_runtime),
+            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
             ok;
         _ ->
             ok

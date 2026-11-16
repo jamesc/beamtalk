@@ -55,7 +55,7 @@ heir_test_() ->
         ]}}.
 
 setup() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     delete_test_table(),
     ok.
 
@@ -328,7 +328,7 @@ boot_tables_name_heir() ->
     catch
         error:badarg -> ok
     end,
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     HeirPid = whereis(beamtalk_ets_heir),
     %% beamtalk_class_state_snapshot is created by beamtalk_runtime_app:start/2
     %% (owned by the application master), not by the first class gen_server,

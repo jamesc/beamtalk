@@ -65,7 +65,7 @@ teardown_pids(Pids) ->
 %% Pattern-match return values so setup failures produce clear errors
 %% rather than confusing downstream test failures.
 setup_runtime() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     ok = beamtalk_stdlib:init(),
     ok.
 

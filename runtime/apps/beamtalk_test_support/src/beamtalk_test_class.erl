@@ -98,16 +98,33 @@ ensure_fixture_loaded(ClassName, BeamPath) ->
 register_if_needed(ClassName, Module) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
-            case erlang:function_exported(Module, register_class, 0) of
-                true ->
-                    Module:register_class(),
-                    beamtalk_test_wait:class(ClassName);
-                false ->
-                    %% Registered by the module's own on_load, if at all.
-                    beamtalk_test_wait:class(ClassName)
-            end;
-        _ ->
-            ok
+            register_fixture(ClassName, Module);
+        Pid ->
+            %% A class of this name is registered. It is only the fixture if the
+            %% fixture module backs it; an earlier test may have left a
+            %% different definition under the same name (BT-4934), which would
+            %% make this a silent no-op and the caller's asserts fail on the
+            %% wrong class. Replace such a stray with the fixture.
+            case beamtalk_object_class:module_name_safe(Pid) of
+                Module ->
+                    ok;
+                _Other ->
+                    ok = stop_graceful(ClassName),
+                    ok = beamtalk_test_wait:until(fun() ->
+                        beamtalk_class_registry:whereis_class(ClassName) =:= undefined
+                    end),
+                    register_fixture(ClassName, Module)
+            end
+    end.
+
+register_fixture(ClassName, Module) ->
+    case erlang:function_exported(Module, register_class, 0) of
+        true ->
+            Module:register_class(),
+            beamtalk_test_wait:class(ClassName);
+        false ->
+            %% Registered by the module's own on_load, if at all.
+            beamtalk_test_wait:class(ClassName)
     end.
 
 -doc "Ensure the compiled `Counter` fixture (`bt@counter`) is loaded and registered.".

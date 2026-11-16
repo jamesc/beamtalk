@@ -232,7 +232,7 @@ ensure_beamtalk_runtime_started() ->
                             error(beamtalk_runtime_start_failed);
                         AnnouncementsPid ->
                             stop(AnnouncementsPid),
-                            {ok, _} = application:ensure_all_started(beamtalk_runtime),
+                            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
                             ok
                     end
             end

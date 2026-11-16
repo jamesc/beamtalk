@@ -49,7 +49,7 @@ setup() ->
     %% `beamtalk_announcements:start_link/0` made a later suite's
     %% `ensure_all_started(beamtalk_runtime)` fail with `already_started`
     %% when the dist suites run in isolation (BT-3938).
-    {ok, _Started} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _Started} = beamtalk_test_boot:start_app(beamtalk_runtime),
     {Peer, PeerNode}.
 
 cleanup({Peer, _PeerNode}) ->

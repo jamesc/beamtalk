@@ -21,7 +21,7 @@ rejection, and the dead-session liveness error.
 %%====================================================================
 
 setup() ->
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_session_table:new(),
     %% Clear any leftover process-dict session context from other tests.
     erase(beamtalk_session_pid),
@@ -260,6 +260,10 @@ bindings_view_read_unknown_name_is_safe_test_() ->
                 seed_context(Pid, <<"prim-bv-unknown">>),
                 Session = beamtalk_session_primitives:current(),
                 View = beamtalk_session_primitives:bindings(Session),
+                %% Warm the code path first: the first call loads modules and
+                %% interns their atoms, which is not what is under test (BT-4934).
+                nil = beamtalk_session_primitives:at(View, <<"warmup_unknown_bt4934_one">>),
+                nil = beamtalk_session_primitives:removeKey(View, <<"warmup_unknown_bt4934_two">>),
                 Before = erlang:system_info(atom_count),
                 %% A binary that has never been an atom must not become one.
                 ?assertEqual(

@@ -71,10 +71,15 @@ dispatch_unary_with_args_raises_arity_mismatch_test() ->
 %%====================================================================
 
 dispatch_object_protocol_responds_to_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        Result = beamtalk_erlang_class:dispatch('respondsTo:', ['class'], erlang_self()),
-        ?assertEqual(true, Result)
-    end}.
+    {setup,
+        fun() ->
+            ok = beamtalk_extensions:init(),
+            ok = beamtalk_test_boot:boot_real_stdlib('Erlang')
+        end,
+        fun(_) -> ok end, fun() ->
+            Result = beamtalk_erlang_class:dispatch('respondsTo:', ['class'], erlang_self()),
+            ?assertEqual(true, Result)
+        end}.
 
 dispatch_object_protocol_hash_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
