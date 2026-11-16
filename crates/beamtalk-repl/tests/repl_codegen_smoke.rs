@@ -1016,7 +1016,7 @@ fn test_class_method_call_generation() {
     // Spawn on ClassReference calls Module:spawn() directly; the REPL no
     // longer registers the pid anywhere (ADR 0150, BT-4951).
     assert!(
-        code3.contains("'initcounter':'spawn'"),
+        code3.contains("call 'bt@init_counter':'spawn'()"),
         "REPL spawn should use direct module spawn. Got:\n{code3}"
     );
     assert!(
