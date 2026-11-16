@@ -639,8 +639,8 @@ impl CoreErlangGenerator {
             return self.threaded_prelude_doc(prelude);
         };
         // BT-4926: no backfill. A plain closure body's producers lower every
-        // version step as a real `Bind`/`LocalRebind` (measured: 0 gaps in
-        // ~15000 verified closure preludes), so a `State` version bump
+        // version step as a real `Bind`/`LocalRebind` (measured: no gaps in
+        // the corpus, which `just test-corpus` enforces), so a `State` version bump
         // without a `Bind` here is a verifier error, not a gap.
         let body = prelude.to_vec();
         let wrapper = [ThreadedStmt::MethodBody {
@@ -2752,5 +2752,57 @@ impl CoreErlangGenerator {
             span,
         );
         self.threaded_prelude_doc(prelude)
+    }
+}
+
+#[cfg(test)]
+mod closure_prelude_tests {
+    use super::*;
+    use crate::core_erlang::threaded_ir::{BindOp, ValueRef, VersionPrefix, VersionedVar};
+
+    /// BT-4926: a plain closure body's producers lower every version step as a
+    /// real `Bind`, so `closure_prelude_doc` no longer backfills opaque gaps. A
+    /// prelude whose opaque `Statement` advanced `State` without a `Bind` is
+    /// reported (a `debug_assert!` in debug, an `internal:` warning in release).
+    fn gapped_closure_prelude(generator: &mut CoreErlangGenerator) {
+        let span = Span::default();
+        generator
+            .with_closure_body_frame(&[], |this| {
+                let frame = this.closure_frame.expect("closure frame is set");
+                let prelude = vec![
+                    ThreadedStmt::Statement(docvec!["<opaque, mints State1>"], span),
+                    ThreadedStmt::Bind {
+                        target: VersionedVar::new(VersionPrefix::State, 2, frame),
+                        source: VersionedVar::new(VersionPrefix::State, 1, frame),
+                        op: BindOp::Direct(ValueRef::Literal("'_'")),
+                        span,
+                    },
+                ];
+                let _ = this.closure_prelude_doc(&prelude, span);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "plain closure body local-threading prelude must be well-formed")]
+    fn closure_prelude_doc_reports_an_unexplained_version_gap() {
+        let mut generator = CoreErlangGenerator::new("test");
+        gapped_closure_prelude(&mut generator);
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn closure_prelude_doc_reports_an_unexplained_version_gap() {
+        let mut generator = CoreErlangGenerator::new("test");
+        gapped_closure_prelude(&mut generator);
+        assert!(
+            generator
+                .take_codegen_warnings()
+                .iter()
+                .any(|d| d.message.contains("plain closure body")),
+            "release builds report an internal warning"
+        );
     }
 }

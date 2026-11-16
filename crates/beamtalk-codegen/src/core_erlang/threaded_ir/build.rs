@@ -157,9 +157,9 @@ pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
 ///
 /// - [`ScopeKind::ClassMethod`] (a class-side method body or an actor cell
 ///   closure — both thread no actor `State`; the measurement covers every body
-///   verified under this scope) produced **no** gap in any of ~3000 verified
-///   bodies once BT-4919 made field writes real `Bind`s, so it backfills
-///   nothing: an unexplained version bump there is a
+///   verified under this scope) produced **no** gap anywhere in the corpus
+///   once BT-4919 made field writes real `Bind`s, so it backfills nothing
+///   (the corpus tier, `just test-corpus`, enforces this): an unexplained version bump there is a
 ///   [`VerifyError::UnboundVersion`], not a gap.
 /// - [`ScopeKind::Instance`] still has gaps: a conditional/loop with state
 ///   mutations (`_CfTuple`/`_SD…` dispatch) and Tier 2 helper calls mint
