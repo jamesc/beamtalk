@@ -38,7 +38,8 @@ uses too), so both lists agree on it.
 ## System actors
 
 An actor started by the runtime itself, such as `TranscriptStream`, is a
-child of `beamtalk_workspace_sup`; it is listed with `system => true` (on the
+child of `beamtalk_workspace_sup` (read from the process's own `'$ancestors'`,
+so no call into the supervisor); it is listed with `system => true` (on the
 wire the `system` key is present only when true). User actors, including
 `native:` ones a user spawned, are `system => false`. `kill` refuses a system
 actor (killing `Transcript` would drop its buffer and every subscriber);
@@ -60,6 +61,13 @@ double-count an actor that starts around it. The protocol:
 1. subscribe to `ActorSpawned` / `ActorStopped` (`beamtalk_repl_subscriptions`);
 2. take the snapshot (`list/0`) and `feed_new/1` from it;
 3. pass each announcement through `feed_event/2`.
+
+The feed covers marked actors only. `ActorSpawned` / `ActorStopped` come from
+the lifecycle telemetry of a compiled actor's `init/1` / `terminate/2`, which a
+`native:` backing gen_server does not run. A `native:` actor is in the snapshot
+taken at connect, but a later start or stop of one is not announced; a client
+sees it on its next `actors` call. System actors live as long as the workspace,
+so this only matters for user `native:` actors.
 
 An actor that started before the subscription is in the snapshot; one that
 started after the scan is announced and not in it; one that started in between
@@ -90,8 +98,7 @@ covers. The index lives in the subscriber, never in the runtime.
 -doc "Every live actor on this node: one scan, ordered by pid.".
 -spec list() -> [actor_metadata()].
 list() ->
-    System = system_pids(),
-    Metas = [meta(E, System) || E <- beamtalk_actor_scan:scan_actors_by_pid()],
+    Metas = [meta(E) || E <- beamtalk_actor_scan:scan_actors_by_pid()],
     lists:sort(fun(#{pid := A}, #{pid := B}) -> A =< B end, Metas).
 
 -doc """
@@ -101,7 +108,7 @@ process or a non-actor is `{error, not_found}`.
 -spec lookup(pid()) -> {ok, actor_metadata()} | {error, not_found}.
 lookup(Pid) when is_pid(Pid), node(Pid) =:= node() ->
     case beamtalk_actor_scan:one_per_pid(beamtalk_actor_scan:info(Pid)) of
-        [{Pid, _, _} = Entry] -> {ok, meta(Entry, system_pids())};
+        [{Pid, _, _} = Entry] -> {ok, meta(Entry)};
         [] -> {error, not_found}
     end;
 lookup(Pid) when is_pid(Pid) ->
@@ -134,26 +141,36 @@ feed_event(_Event, Feed) ->
 %%% Internal
 %%% ---------------------------------------------------------------------
 
--spec meta(beamtalk_actor_scan:entry(), [pid()]) -> actor_metadata().
-meta({Pid, Class, StartedAt}, System) ->
+-spec meta(beamtalk_actor_scan:entry()) -> actor_metadata().
+meta({Pid, Class, StartedAt}) ->
     #{
         pid => Pid,
         class => Class,
         module => module_of(Class),
         spawned_at => spawned_at(StartedAt),
-        system => lists:member(Pid, System)
+        system => is_system(Pid)
     }.
 
-%% The runtime's own actors: the children of the workspace supervisor
-%% (`Transcript`). One `which_children` call per list. `[]` when the workspace
-%% is not running (a bare runtime, or a unit test).
--spec system_pids() -> [pid()].
-system_pids() ->
-    try supervisor:which_children(beamtalk_workspace_sup) of
-        Children -> [Pid || {_Id, Pid, _Type, _Mods} <- Children, is_pid(Pid)]
-    catch
-        exit:_ -> []
+%% The runtime's own actors are the children of the workspace supervisor
+%% (`Transcript`). Read from the process itself: `proc_lib` records the parent
+%% first in `'$ancestors'` (the supervisor's registered name, or its pid when
+%% unnamed). No call into the supervisor, so a busy or restarting supervisor
+%% never stalls a pid check.
+-spec is_system(pid()) -> boolean().
+is_system(Pid) ->
+    case erlang:process_info(Pid, dictionary) of
+        {dictionary, Dict} ->
+            case proplists:get_value('$ancestors', Dict) of
+                [Parent | _] -> is_workspace_sup(Parent);
+                _ -> false
+            end;
+        undefined ->
+            false
     end.
+
+is_workspace_sup(beamtalk_workspace_sup) -> true;
+is_workspace_sup(Parent) when is_pid(Parent) -> Parent =:= whereis(beamtalk_workspace_sup);
+is_workspace_sup(_) -> false.
 
 spawned_at(undefined) -> null;
 spawned_at(Micros) -> Micros div 1000000.
