@@ -1624,7 +1624,8 @@ impl CoreErlangGenerator {
         .map(Some)
     }
 
-    /// `clearField:` — return a `late` field to unassigned (ADR 0124 §1/§4f/B4); lowers like `fieldAt:put:`.
+    /// `clearField:` — return a `late` field to unassigned (ADR 0124 §1/§4f/B4).
+    /// A write; shares `fieldAt:put:`'s class-side and actor-`self` fast paths.
     fn object_clear_field(
         &mut self,
         receiver: &Expression,
