@@ -29,11 +29,13 @@ idempotent (a normal stdlib load skips a module whose on_load already ran).
 
 -export([
     boot_real_stdlib/1,
+    reload_stdlib_modules/0,
     wait_for_class/2,
     registry/0,
     runtime/0,
     start_app/1,
     compiler/0,
+    no_compiler/0,
     telemetry/0,
     load_runtime_modules/0,
     workspace/1,
@@ -109,6 +111,13 @@ class_registered_within(ClassName, TimeoutMs) ->
         error:{class_not_registered, ClassName} -> false
     end.
 
+-doc """
+Unload every loaded `bt@stdlib@*` module so the next `beamtalk_stdlib:init/0`
+runs their `on_load` hooks again (class registration and baked xref rows).
+`init/0` skips a module that is already loaded, so a suite that asserts a cold
+stdlib boot calls this first.
+""".
+-spec reload_stdlib_modules() -> ok.
 reload_stdlib_modules() ->
     lists:foreach(
         fun beamtalk_test_module:unload/1,
@@ -264,6 +273,18 @@ missing dependency fails here and not as a `noproc` inside a child (BT-4934).
 telemetry() ->
     {ok, _} = application:ensure_all_started(telemetry),
     {ok, _} = application:ensure_all_started(telemetry_poller),
+    ok.
+
+-doc """
+Establish "no compiler running": stop the compiler application and wait until
+its server is gone. For tests of the no-compiler / `noproc` error paths: many
+suites start the compiler and leave it up, so those tests must set the
+precondition themselves instead of relying on suite order (BT-4934).
+""".
+-spec no_compiler() -> ok.
+no_compiler() ->
+    _ = application:stop(beamtalk_compiler),
+    ok = beamtalk_test_wait:until(fun() -> whereis(beamtalk_compiler_server) =:= undefined end),
     ok.
 
 -doc """

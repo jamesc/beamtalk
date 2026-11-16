@@ -34,6 +34,7 @@ stdlib_setup() ->
     %% Cold-boot semantics: `boot_real_stdlib/1` reloads the stdlib modules when
     %% an earlier suite left them loaded without their class processes or xref
     %% rows, so the registration and xref-index assertions below see a real boot.
+    ok = beamtalk_test_boot:reload_stdlib_modules(),
     ok = beamtalk_test_boot:boot_real_stdlib('Printable'),
     ok.
 

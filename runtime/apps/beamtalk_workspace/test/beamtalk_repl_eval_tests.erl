@@ -43,6 +43,7 @@ format_formatted_diagnostics_multiple_test() ->
 %%% State-based do_eval tests
 
 do_eval_increments_counter_test() ->
+    ok = beamtalk_test_boot:no_compiler(),
     %% Test that do_eval increments the eval counter
     State = beamtalk_repl_state:new(undefined, 0),
     InitialCounter = beamtalk_repl_state:get_eval_counter(State),
@@ -55,6 +56,7 @@ do_eval_increments_counter_test() ->
     ?assertEqual(InitialCounter + 1, NewCounter).
 
 do_eval_no_compiler_error_test() ->
+    ok = beamtalk_test_boot:no_compiler(),
     %% Without a running compiler server (port backend), should get compile_error
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval("1 + 1", State),
@@ -74,6 +76,7 @@ handle_load_file_not_found_test() ->
 %%% Additional do_eval tests
 
 do_eval_compile_error_no_server_test() ->
+    ok = beamtalk_test_boot:no_compiler(),
     %% Compilation fails without compiler server - load_binary is never reached
     State = beamtalk_repl_state:new(undefined, 0),
     {error, #beamtalk_error{}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 1", State),
@@ -103,6 +106,7 @@ wrap_load_err_preserves_warnings_test() ->
     ?assertEqual(Warnings, ReturnedWarnings).
 
 do_eval_preserves_bindings_on_error_test() ->
+    ok = beamtalk_test_boot:no_compiler(),
     %% Verify that existing bindings are preserved when eval fails
     State = beamtalk_repl_state:new(undefined, 0),
     InitialBindings = #{x => 42, y => 100},
@@ -620,6 +624,7 @@ handle_io_request_put_chars_mfa_error_test() ->
 %%% handle_load with real file but no compiler
 
 handle_load_valid_file_no_compiler_test() ->
+    ok = beamtalk_test_boot:no_compiler(),
     UniqueId = beamtalk_test_unique:id(),
     TempFile = filename:join(
         beamtalk_test_fs:base_dir(),
@@ -638,6 +643,7 @@ handle_load_valid_file_no_compiler_test() ->
 %%% do_eval with bindings and actor registry
 
 do_eval_with_registry_no_compiler_test() ->
+    ok = beamtalk_test_boot:no_compiler(),
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     State = beamtalk_repl_state:new(RegistryPid, 0),
     {error, #beamtalk_error{}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 2", State),
@@ -655,11 +661,13 @@ format_formatted_diagnostics_two_items_test() ->
 %% ===================================================================
 
 compile_expr_noproc_test() ->
+    ok = beamtalk_test_boot:no_compiler(),
     %% Covers exit:{noproc, _} clause (line 341-342)
     Result = beamtalk_repl_compiler:compile_expression_via_port("1+2", test_mod, #{}),
     ?assertMatch({error, <<"Compiler not available", _/binary>>}, Result).
 
 compile_expr_noproc_with_env_test() ->
+    ok = beamtalk_test_boot:no_compiler(),
     %% compile_expression_via_port calls beamtalk_compiler which isn't started,
     %% so it hits exit:{noproc, _} rather than the timeout path.
     %% This test verifies the function handles a missing compiler gracefully.
@@ -671,11 +679,13 @@ compile_expr_noproc_with_env_test() ->
 %% ===================================================================
 
 compile_file_noproc_test() ->
+    ok = beamtalk_test_boot:no_compiler(),
     %% Covers exit:{noproc, _} clause (line 380-381)
     Result = beamtalk_repl_compiler:compile_file_via_port("x := 1", "/test.bt", false, undefined),
     ?assertMatch({error, {compile_error, <<"Compiler not available", _/binary>>}}, Result).
 
 compile_file_noproc_stdlib_test() ->
+    ok = beamtalk_test_boot:no_compiler(),
     %% Covers stdlib_mode path too
     Result = beamtalk_repl_compiler:compile_file_via_port(
         "Object subclass: Foo", "/stdlib/src/Foo.bt", true, undefined
@@ -1155,6 +1165,7 @@ reload_class_file_not_found_test() ->
     ?assertEqual({error, {file_not_found, "/nonexistent/file.bt"}}, Result).
 
 reload_class_file_no_compiler_test() ->
+    ok = beamtalk_test_boot:no_compiler(),
     %% reload_class_file with a real file but no compiler available.
     %% This exercises the code path that now includes compute_package_module_name.
     UniqueId = beamtalk_test_unique:id(),
@@ -1203,6 +1214,7 @@ do_eval_trace_increments_counter_test() ->
     ?assertEqual(InitialCounter + 1, beamtalk_repl_state:get_eval_counter(NewState)).
 
 do_eval_trace_compile_error_without_server_test() ->
+    ok = beamtalk_test_boot:no_compiler(),
     %% Without compiler server, compile_expression_trace returns a structured compile_error
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:do_eval_trace("1 + 2", State),
