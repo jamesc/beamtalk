@@ -1224,6 +1224,9 @@ method_not_found_error_test_() ->
 method_not_found_error() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_test_wait:class('Actor', ?ACTOR_WAIT_MS),
+    %% The error names the `Counter` class, so it must be registered; an earlier
+    %% suite may have removed it (BT-4934).
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
 
