@@ -221,8 +221,11 @@ ensure_bootstrap_classes() ->
 
 -doc """
 Start the `beamtalk_runtime` application (and the bootstrap process, as
-`boot_real_stdlib/1` does) without loading stdlib. Returns a teardown handle
-that stops the application only if this call started it.
+`boot_real_stdlib/1` does) without loading stdlib on a normal start. Returns a
+teardown handle that stops the application only if this call started it.
+Started through `start_app/1`, so if an earlier suite left the app running
+without the bootstrap `Object` class it is restarted and the stdlib classes are
+reloaded (see `start_app/1`).
 """.
 -spec runtime() -> fun(() -> ok).
 runtime() ->
