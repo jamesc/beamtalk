@@ -1320,7 +1320,12 @@ impl ReplClient {
         }
         let entries: Vec<String> = actors
             .iter()
-            .map(|a| format!("{} ({})", a.class, a.pid))
+            .map(|a| {
+                beamtalk_repl_protocol::format::format_actor_summary(
+                    a,
+                    beamtalk_repl_protocol::format::OutputMode::Plain,
+                )
+            })
             .collect();
         Ok(entries.join("\n"))
     }

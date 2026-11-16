@@ -55,7 +55,7 @@ BT3575NoSuchClass >> foo => 1
 // A fresh workspace lists the runtime's own actor (BT-4960): `:actors` includes
 // `native:` and system actors, the same set `Node current actors` reports.
 :actors
-// => TranscriptStream (_)
+// => TranscriptStream (_) [system]
 
 :sessions
 // => _

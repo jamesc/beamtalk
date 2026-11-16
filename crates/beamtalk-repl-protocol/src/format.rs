@@ -361,12 +361,16 @@ pub fn format_test_result(results: &serde_json::Value, _mode: OutputMode) -> Str
 // format_actor_summary
 // ---------------------------------------------------------------------------
 
-/// Single-line actor summary in `<Class> (<pid>)` form. Used by the CLI REPL
-/// startup banner ("Available actors:") and the MCP `list_actors` tool.
+/// Single-line actor summary in `<Class> (<pid>)` form, with a trailing
+/// ` [system]` for an actor the runtime started itself (`ActorInfo::system`,
+/// BT-4971). User actors print without a marker. Used by the CLI REPL and
+/// `attach` startup banners ("Available actors:"), the MCP `list_actors` tool
+/// and the `.btscript` `:actors` harness.
 #[must_use]
 pub fn format_actor_summary(actor: &ActorInfo, mode: OutputMode) -> String {
     let class = paint(mode, CYAN, &actor.class);
-    format!("{class} ({})", actor.pid)
+    let marker = if actor.system { " [system]" } else { "" };
+    format!("{class} ({}){marker}", actor.pid)
 }
 
 /// Format a list of actors as one summary per line. Returns `"No actors running"`
@@ -697,6 +701,27 @@ mod tests {
         assert_eq!(
             format_actor_summary(&a, OutputMode::Plain),
             "Counter (<0.123.0>)"
+        );
+    }
+
+    #[test]
+    fn actor_summary_system_plain() {
+        let mut a = make_actor("TranscriptStream", "<0.9.0>");
+        a.system = true;
+        assert_eq!(
+            format_actor_summary(&a, OutputMode::Plain),
+            "TranscriptStream (<0.9.0>) [system]"
+        );
+    }
+
+    #[test]
+    fn actor_list_marks_only_system_actors() {
+        let mut sys = make_actor("TranscriptStream", "<0.9.0>");
+        sys.system = true;
+        let actors = vec![sys, make_actor("Counter", "<0.1.0>")];
+        assert_eq!(
+            format_actor_list(&actors, OutputMode::Plain),
+            "TranscriptStream (<0.9.0>) [system]\nCounter (<0.1.0>)"
         );
     }
 
