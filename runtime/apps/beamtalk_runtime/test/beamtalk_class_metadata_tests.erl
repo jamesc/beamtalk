@@ -671,22 +671,6 @@ with_no_subclass_index_table(Fun) ->
         ets:insert(?SUBCLASS_INDEX, SavedIndex)
     end.
 
-%% BT-4846: a node hot-upgraded from the old `bag` row shape must not keep the
-%% bag table. new/0 rebuilds it as an ordered_set, migrating the old
-%% {Superclass, ClassName, Owner} rows to {{Superclass, ClassName}, Owner}.
-new_rebuilds_legacy_bag_subclass_index_test() ->
-    with_no_subclass_index_table(fun() ->
-        ?SUBCLASS_INDEX = ets:new(?SUBCLASS_INDEX, [bag, public, named_table]),
-        ets:insert(?SUBCLASS_INDEX, [{'Object', 'Foo', undefined}, {'Foo', 'Bar', undefined}]),
-        ok = beamtalk_class_metadata:new(),
-        ?assertEqual(ordered_set, ets:info(?SUBCLASS_INDEX, type)),
-        ?assertEqual(
-            [{{'Foo', 'Bar'}, undefined}, {{'Object', 'Foo'}, undefined}],
-            lists:sort(ets:tab2list(?SUBCLASS_INDEX))
-        ),
-        ?assertEqual(['Foo'], beamtalk_class_metadata:match_subclasses('Object'))
-    end).
-
 %% match_subclasses/1 returns [] when the subclass index table does not exist.
 match_subclasses_when_table_absent_test() ->
     with_no_subclass_index_table(fun() ->

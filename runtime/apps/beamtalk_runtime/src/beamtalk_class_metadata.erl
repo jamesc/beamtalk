@@ -374,7 +374,15 @@ new() ->
     %% `ordered_set` keyed on the pair: insert/delete are O(log N) regardless of
     %% a superclass's subclass count, and a Superclass-prefix select reads just
     %% that superclass's edges.
-    ok = migrate_legacy_subclass_index(),
+    %%
+    %% BT-4846: upgrades are restart-only (ADR 0125 §2.1). Before BT-4840 this
+    %% table was a `bag` of `{Superclass, ClassName, Owner}`, and `ensure_table`
+    %% keeps an existing table, so hot-loading this module onto a node that
+    %% still holds the old bag would write the new row shape into it. There is
+    %% deliberately no in-place rebuild: `new/0` is called concurrently by class
+    %% gen_servers and the table is public, so a delete-and-recreate cannot be
+    %% made atomic and would lose or crash on concurrent edge writes. Restart
+    %% the node to pick up the new table shape.
     ensure_table(?SUBCLASS_INDEX, [
         ordered_set,
         public,
@@ -389,39 +397,6 @@ new() ->
         {read_concurrency, true}
     ]),
     ok.
-
-%% BT-4846: before BT-4840 the subclass index was a `bag` of
-%% `{Superclass, ClassName, Owner}`. `ensure_table` keeps an existing table, so a
-%% node hot-upgraded in place would otherwise keep the bag and write the new row
-%% shape into it (duplicates, wrong deletes). Rebuild it: read the old rows,
-%% drop the table, and re-insert them in the new shape once `ensure_table` has
-%% recreated it as an `ordered_set`. Only the table owner (or the heir that
-%% holds it) can delete it; if the delete is refused the old table stays and a
-%% node restart is needed.
--spec migrate_legacy_subclass_index() -> ok.
-migrate_legacy_subclass_index() ->
-    case ets:info(?SUBCLASS_INDEX, type) of
-        T when T =:= undefined; T =:= ordered_set ->
-            ok;
-        _Legacy ->
-            Old = [
-                {{Super, Class}, Owner}
-             || {Super, Class, Owner} <- ets:tab2list(?SUBCLASS_INDEX)
-            ],
-            try ets:delete(?SUBCLASS_INDEX) of
-                true ->
-                    ensure_table(?SUBCLASS_INDEX, [
-                        ordered_set,
-                        public,
-                        named_table,
-                        {read_concurrency, true}
-                    ]),
-                    ets:insert(?SUBCLASS_INDEX, Old),
-                    ok
-            catch
-                error:badarg -> ok
-            end
-    end.
 
 -spec ensure_table(atom(), [term()]) -> ok.
 ensure_table(Table, Opts) ->
