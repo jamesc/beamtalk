@@ -2542,6 +2542,51 @@ fn e2e_path_dependency_source_file_survives_a_moved_tree() {
     assert_eq!(resolved, fs::canonicalize(&dep_file).unwrap());
 }
 
+/// BT-4958: the workspace is copied (`cp -r`), not moved, and built again
+/// without touching the dependency. `sourceFile` must name the copy's file,
+/// not the original tree's.
+#[test]
+#[ignore = "slow test - run with `just test-repl-protocol`"]
+#[serial(e2e)]
+fn e2e_path_dependency_source_file_follows_a_copied_workspace() {
+    let tmp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let before = tmp_dir.path().join("before");
+    fs::create_dir_all(&before).unwrap();
+    let (_, original_file) = build_app_with_path_dependency(&before, "DepThingBt4958");
+
+    let after = tmp_dir.path().join("after");
+    let status = Command::new("cp")
+        .arg("-r")
+        .arg(&before)
+        .arg(&after)
+        .status()
+        .expect("copy the tree");
+    assert!(status.success(), "cp -r failed");
+    let app_dir = after.join("app");
+    let status = Command::new(env!("CARGO_BIN_EXE_beamtalk"))
+        .args(["build", "."])
+        .current_dir(&app_dir)
+        .status()
+        .expect("Failed to run beamtalk build");
+    assert!(status.success(), "beamtalk build failed in the copy");
+
+    let dep_ebin = app_dir.join("_build/deps/dep_pkg/ebin");
+    let manager = ProcessManager::start_library_project(&app_dir, "app", &[dep_ebin]);
+    let mut client = ReplClient::connect(manager.port).expect("Could not connect to REPL");
+
+    let shown = client
+        .eval("DepThingBt4958 sourceFile")
+        .expect("sourceFile");
+    let resolved = fs::canonicalize(shown.trim_matches('"'))
+        .unwrap_or_else(|e| panic!("sourceFile must exist ({shown}): {e}"));
+    assert_eq!(
+        resolved,
+        fs::canonicalize(after.join("dep_pkg/src/DepThingBt4958.bt")).unwrap(),
+        "sourceFile must name the copy's file, not {}",
+        original_file.display()
+    );
+}
+
 /// BT-4957: a marker that is not valid UTF-8 (a dependency root with
 /// non-UTF-8 bytes) gives no source file: `reload` raises `no_source_file`
 /// rather than opening a relative path that could be the consumer's file.
