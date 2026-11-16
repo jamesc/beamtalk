@@ -37,10 +37,14 @@ const NOTE_CALL: &str = ".note_field_write(";
 const NOTE_DYNAMIC_CALL: &str = ".note_field_write(\"<dynamic>\"";
 
 /// A dynamic-key field mutation: a `maps:put` or `maps:remove` on a name
-/// variable, matched with whitespace removed.
+/// variable, matched with whitespace removed. Each is spelled both as a
+/// literal call fragment and as the `form::call` constructor, so migrating a
+/// site between the two does not make the guard stop seeing it.
 const DYNAMIC_MUTATIONS: &[&str] = &[
     "'maps':'put'(\",leaf::var(name_var)",
     "'maps':'remove'(\",leaf::var(name_var)",
+    "form::call(\"maps\",\"put\",[leaf::var(name_var)",
+    "form::call(\"maps\",\"remove\",[leaf::var(name_var)",
 ];
 
 /// Production code ends where the inline test module starts.
