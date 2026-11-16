@@ -714,3 +714,47 @@ fn decoded_native_actor_does_not_thread_actor_state() {
     assert!(!decode(true).threads_actor_state("NatActor"));
     assert!(decode(false).threads_actor_state("NatActor"));
 }
+
+/// BT-4961: a `native:` actor that arrives only as compiled metadata (no source)
+/// is enough for the validator: a source subclass without `native:` is an error,
+/// one that redeclares `native:` is not, and a `.beam` built before the flag
+/// existed gets no check.
+#[test]
+fn decoded_native_actor_parent_rejects_a_subclass_without_native() {
+    use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
+    use eetf::List;
+
+    let analyse = |native: bool, src: &str| {
+        let mut m = Map::from([
+            (atom("class"), atom("Counter")),
+            (atom("superclass"), atom("Actor")),
+            (atom("fields"), Term::from(List::from(vec![]))),
+            (atom("class_fields"), Term::from(List::from(vec![]))),
+        ]);
+        if native {
+            m.map.insert(atom("native"), atom("true"));
+        }
+        let term = Term::from(Map::from([(atom("Counter"), Term::from(m))]));
+        let infos = parse_class_hierarchy_from_term(&term);
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+        let ctx = AnalysisContext::default()
+            .with_current_package("app")
+            .with_pre_loaded_classes(infos);
+        analyse_full(&module, ctx)
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains("must declare its own `native:`"))
+            .count()
+    };
+    let plain = "Counter subclass: Sub\n  extra => 1\n";
+    assert_eq!(analyse(true, plain), 1);
+    assert_eq!(
+        analyse(
+            true,
+            "Counter subclass: Sub native: other\n  more -> Integer => self delegate\n"
+        ),
+        0
+    );
+    assert_eq!(analyse(false, plain), 0);
+}

@@ -42,7 +42,7 @@ start(InitialValue) ->
     gen_server:start(?MODULE, InitialValue, []).
 
 init(InitialValue) ->
-    beamtalk_actor:init(#{
+    test_actor_host:init(#{
         '$beamtalk_class' => 'Counter',
         '__class_mod__' => 'counter',
         '__methods__' => #{
@@ -58,12 +58,12 @@ init(InitialValue) ->
         value => InitialValue
     }).
 
-handle_cast(Msg, State) -> beamtalk_actor:handle_cast(Msg, State).
-handle_call(Msg, From, State) -> beamtalk_actor:handle_call(Msg, From, State).
-handle_info(Msg, State) -> beamtalk_actor:handle_info(Msg, State).
-handle_continue(Continue, State) -> beamtalk_actor:handle_continue(Continue, State).
-code_change(OldVsn, State, Extra) -> beamtalk_actor:code_change(OldVsn, State, Extra).
-terminate(Reason, State) -> beamtalk_actor:terminate(Reason, State).
+handle_cast(Msg, State) -> test_actor_host:handle_cast(Msg, State).
+handle_call(Msg, From, State) -> test_actor_host:handle_call(Msg, From, State).
+handle_info(Msg, State) -> test_actor_host:handle_info(Msg, State).
+handle_continue(Continue, State) -> test_actor_host:handle_continue(Continue, State).
+code_change(OldVsn, State, Extra) -> test_actor_host:code_change(OldVsn, State, Extra).
+terminate(Reason, State) -> test_actor_host:terminate(Reason, State).
 
 %% Method implementations
 handle_increment([], State) ->

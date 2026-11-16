@@ -10,8 +10,10 @@ TestCase subclass: ClassSideMissingClassTest
 
   /// A class-side send to an unknown class raises `class_not_found`.
   testMissingClassSendRaisesClassNotFound =>
+    @expect unresolved_class "the missing class is the point of the test"
     self should: [BT3644NoSuchClass someMessage] raise: #class_not_found
 
   /// The same holds for a keyword send with arguments.
   testMissingClassKeywordSendRaisesClassNotFound =>
+    @expect unresolved_class "the missing class is the point of the test"
     self should: [BT3644NoSuchClass with: 1 and: 2] raise: #class_not_found

@@ -1,0 +1,165 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! BT-4961: a non-abstract actor that descends from a `native:` actor must
+//! declare its own `native:` backing module.
+//!
+//! A `native:` actor compiles to a facade module with no `init/1`. A subclass
+//! without `native:` compiles to a full `gen_server` whose `init/1` calls its
+//! superclass's `init/1`, so `Sub spawn` died on an undefined function.
+//! `docs/beamtalk-native-erlang.md` § Inheritance says the backing module is
+//! not inherited; this is the compile-time check for it.
+
+use super::*;
+use crate::source_analysis::{Diagnostic, Severity};
+
+const NATIVE_ACTOR: &str = "Actor subclass: Counter native: counter_backing\n  \
+                            get -> Integer => self delegate\n";
+
+fn same_package(src: &str) -> Vec<Diagnostic> {
+    analyse_full(&parse_bt(src), AnalysisContext::default()).diagnostics
+}
+
+/// `parent_src` is a dependency's class, `src` the module under analysis.
+fn from_dependency(parent_src: &str, src: &str) -> Vec<Diagnostic> {
+    let ctx = AnalysisContext::default()
+        .with_current_package("app")
+        .with_pre_loaded_classes(declared_by("dep", parent_src));
+    analyse_full(&parse_bt(src), ctx).diagnostics
+}
+
+fn missing_native(d: &[Diagnostic]) -> Vec<&Diagnostic> {
+    d.iter()
+        .filter(|d| d.message.contains("must declare its own `native:`"))
+        .collect()
+}
+
+fn assert_one_error(d: &[Diagnostic], parent: &str, sub: &str) {
+    let hits = missing_native(d);
+    assert_eq!(hits.len(), 1, "{d:?}");
+    assert_eq!(hits[0].severity, Severity::Error);
+    assert!(
+        hits[0].message.contains(&format!("`{sub}`"))
+            && hits[0].message.contains(&format!("`{parent}`")),
+        "{}",
+        hits[0].message
+    );
+    assert!(
+        hits[0]
+            .hint
+            .as_deref()
+            .is_some_and(|h| h.contains("native:")),
+        "{:?}",
+        hits[0].hint
+    );
+}
+
+// ---- forms that cannot work: errors ----
+
+#[test]
+fn same_package_subclass_without_native_is_an_error() {
+    let d = same_package(&format!(
+        "{NATIVE_ACTOR}Counter subclass: Sub\n  extra => 1\n"
+    ));
+    assert_one_error(&d, "Counter", "Sub");
+}
+
+#[test]
+fn subclass_of_a_dependency_native_actor_is_an_error() {
+    let d = from_dependency(NATIVE_ACTOR, "Counter subclass: Sub\n  extra => 1\n");
+    assert_one_error(&d, "Counter", "Sub");
+}
+
+#[test]
+fn grandchild_of_a_native_actor_is_an_error() {
+    // `Mid` redeclares `native:`, so it is fine; `Leaf` inherits Mid's facade.
+    let src = format!(
+        "{NATIVE_ACTOR}Counter subclass: Mid native: mid_backing\n  more -> Integer => self delegate\n\
+         Mid subclass: Leaf\n  extra => 1\n"
+    );
+    assert_one_error(&same_package(&src), "Mid", "Leaf");
+}
+
+#[test]
+fn concrete_child_of_an_abstract_non_native_middle_class_is_an_error() {
+    let src = format!(
+        "{NATIVE_ACTOR}abstract Counter subclass: Mid\n  extra => 1\nMid subclass: Leaf\n  more => 2\n"
+    );
+    assert_one_error(&same_package(&src), "Mid", "Leaf");
+}
+
+// ---- forms that work (or are not decided here): silent ----
+
+#[test]
+fn subclass_that_redeclares_native_is_silent() {
+    let d = same_package(&format!(
+        "{NATIVE_ACTOR}Counter subclass: Sub native: other_backing\n  more -> Integer => self delegate\n"
+    ));
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+    let d = from_dependency(
+        NATIVE_ACTOR,
+        "Counter subclass: Sub native: other_backing\n  more -> Integer => self delegate\n",
+    );
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn native_actor_itself_and_plain_actor_subclasses_are_silent() {
+    let d = same_package(&format!(
+        "{NATIVE_ACTOR}Actor subclass: Plain\n  go => 1\nPlain subclass: PlainChild\n  more => 2\n"
+    ));
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn abstract_subclass_of_a_native_actor_is_not_reported() {
+    // It can never be spawned itself, and a concrete child may redeclare `native:`.
+    let d = same_package(&format!(
+        "{NATIVE_ACTOR}abstract Counter subclass: Sub\n  extra => 1\n"
+    ));
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn abstract_non_native_middle_class_with_a_native_redeclaring_child_is_silent() {
+    // The abstract class is never spawned and the concrete child has its own facade.
+    let src = format!(
+        "{NATIVE_ACTOR}abstract Counter subclass: Mid\n  extra => 1\n\
+         Mid subclass: Leaf native: leaf_backing\n  more -> Integer => self delegate\n"
+    );
+    let d = same_package(&src);
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+/// KNOWN GAP (BT-4964, needs-spec): `Queue subclass: MyQ` compiles, but
+/// `MyQ new` answers a plain `Queue`, so `MyQ`'s own methods are unreachable.
+/// Whether this becomes "make it work" or a compile error is undecided; this
+/// pins today's behaviour (no diagnostic) and flips with that decision.
+#[test]
+fn value_and_object_subclasses_of_native_classes_are_not_reported() {
+    let src = "Value subclass: NVal native: nval_backing\n  size -> Integer => self delegate\n\
+               NVal subclass: SubVal\n  extra => 1\n\
+               Object subclass: NObj native: nobj_backing\n  size -> Integer => self delegate\n\
+               NObj subclass: SubObj\n  extra => 1\n";
+    let d = same_package(src);
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+    let d = from_dependency(
+        "Value subclass: NVal native: nval_backing\n  size -> Integer => self delegate\n",
+        "NVal subclass: SubVal\n  extra => 1\n",
+    );
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn dependency_class_without_the_native_flag_is_not_checked() {
+    // A `.beam` built before BT-4930 decodes as non-native: no error.
+    let mut infos = declared_by("dep", NATIVE_ACTOR);
+    for info in &mut infos {
+        info.is_native = false;
+    }
+    let ctx = AnalysisContext::default()
+        .with_current_package("app")
+        .with_pre_loaded_classes(infos);
+    let d = analyse_full(&parse_bt("Counter subclass: Sub\n  extra => 1\n"), ctx).diagnostics;
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
