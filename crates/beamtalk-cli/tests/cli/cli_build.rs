@@ -993,10 +993,25 @@ fn dependency_beam_embeds_path_relative_to_its_own_package_root() {
     // beams (not inside them): it names the dependency's package root.
     let marker = app_dir.join("_build/deps/dep_pkg/ebin/.beamtalk-source-root");
     let recorded = std::fs::read_to_string(&marker).expect("source-root marker");
+    // BT-4957: line 1 is relative to the ebin dir (survives a moved tree),
+    // line 2 absolute.
+    let mut lines = recorded.lines();
+    let (rel, abs) = (lines.next().unwrap(), lines.next().unwrap());
+    let want = std::fs::canonicalize(&dep_dir).unwrap();
+    let ebin = marker.parent().unwrap();
+    assert!(
+        std::path::Path::new(rel).is_relative(),
+        "line 1 must be relative: {rel}"
+    );
     assert_eq!(
-        std::fs::canonicalize(recorded.trim()).unwrap(),
-        std::fs::canonicalize(&dep_dir).unwrap(),
-        "marker must name the dependency's package root"
+        std::fs::canonicalize(ebin.join(rel)).unwrap(),
+        want,
+        "relative line must name the dependency's package root"
+    );
+    assert_eq!(
+        std::fs::canonicalize(abs).unwrap(),
+        want,
+        "absolute line must name the dependency's package root"
     );
     let root_str = root.path().to_string_lossy().into_owned();
     for (name, bytes) in &beams {

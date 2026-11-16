@@ -848,8 +848,14 @@ frame_source_path(#{module := Module} = Frame) ->
             %% A stdlib module embeds a bare file name with no package above
             %% it, so resolving it could pick a same-named user file: leave it.
             case beamtalk_module_name:is_stdlib_module(Module) of
-                true -> unicode:characters_to_binary(Path);
-                false -> unicode:characters_to_binary(beamtalk_source_path:resolve(Module, Path))
+                true ->
+                    unicode:characters_to_binary(Path);
+                false ->
+                    %% BT-4957: an unreadable source root is no file at all.
+                    case beamtalk_source_path:resolve_strict(Module, Path) of
+                        {ok, Resolved} -> unicode:characters_to_binary(Resolved);
+                        unresolvable -> nil
+                    end
             end
     end;
 frame_source_path(_) ->
