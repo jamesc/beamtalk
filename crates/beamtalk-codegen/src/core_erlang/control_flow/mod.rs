@@ -38,11 +38,14 @@
 
 pub(in crate::core_erlang) mod analysis;
 mod body;
+mod conditional_arms;
+mod conditional_producers;
 mod conditionals;
 mod counted_loops;
 mod dict_ops;
 mod exception_handling;
 pub(in crate::core_erlang) mod family_slots;
+mod inline_control_flow;
 mod list_ops;
 mod local_assign;
 pub(in crate::core_erlang) use local_assign::LocalWrite;
