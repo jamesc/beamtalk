@@ -282,13 +282,7 @@ impl CoreErlangGenerator {
                         docvec![
                             line(),
                             variant.ok_pattern(),
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    ok_body,
-                                ]
-                            ),
+                            nest(INDENT, docvec![line(), ok_body,]),
                             line(),
                             Self::spawn_error_arm_doc(&class_name, variant.selector()),
                         ]
@@ -407,13 +401,7 @@ impl CoreErlangGenerator {
                                         docvec![
                                             line(),
                                             variant.ok_pattern(),
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    ok_body,
-                                                ]
-                                            ),
+                                            nest(INDENT, docvec![line(), ok_body,]),
                                             line(),
                                             Self::spawn_error_arm_doc(&class_name, selector),
                                         ]
