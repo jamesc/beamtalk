@@ -433,16 +433,23 @@ impl SimpleLanguageService {
     }
 
     /// The qualifier package set of the most specific registered root
-    /// containing `file`, or `None` when no root does.
+    /// containing `file`, or `None` when no root does. A file in a fetched
+    /// dependency checkout (`_build/deps/<name>/…`) is checked only against
+    /// its own checkout's set - never inherited from the consumer root (the
+    /// CLI's `dependency_compile_options` rule) - so a checkout that is not
+    /// registered (stale, renamed, non-UTF-8) is skipped.
     fn known_qualifier_packages_for(
         &self,
         file: &camino::Utf8Path,
     ) -> Option<std::collections::HashSet<String>> {
-        self.root_qualifier_packages
-            .iter()
-            .filter(|(root, _)| file.starts_with(root))
-            .max_by_key(|(root, _)| root.as_str().len())
-            .map(|(_, packages)| packages.clone())
+        let (root, packages) =
+            project_index::most_specific_root(&self.root_qualifier_packages, file)?;
+        if project_index::is_dependency_checkout_file(file)
+            && !project_index::is_dependency_checkout_file(&root.join("src"))
+        {
+            return None;
+        }
+        Some(packages.clone())
     }
 
     /// Returns a reference to the project index.

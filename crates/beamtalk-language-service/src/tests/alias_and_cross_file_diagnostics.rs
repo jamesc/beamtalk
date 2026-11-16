@@ -849,3 +849,43 @@ fn package_qualifier_uses_the_most_specific_root_set() {
 
     assert!(unknown_package_messages(&service, &file).is_empty());
 }
+
+#[test]
+fn unregistered_dependency_checkout_is_not_checked_against_the_consumer_set() {
+    let mut service = SimpleLanguageService::new();
+    let root = Utf8PathBuf::from("proj");
+    let stale = root
+        .join("_build")
+        .join("deps")
+        .join("removed")
+        .join("src")
+        .join("Foo.bt");
+    service.set_root_qualifier_packages(vec![(
+        root,
+        beamtalk_core::semantic_analysis::known_qualifier_packages(Some("app"), []),
+    )]);
+    service.update_file(stale.clone(), QUALIFIED_REF_SOURCE.to_string());
+
+    assert!(unknown_package_messages(&service, &stale).is_empty());
+}
+
+#[test]
+fn registered_dependency_checkout_uses_its_own_set() {
+    let mut service = SimpleLanguageService::new();
+    let root = Utf8PathBuf::from("proj");
+    let dep_root = root.join("_build").join("deps").join("xmlpkg");
+    let file = dep_root.join("src").join("Foo.bt");
+    service.set_root_qualifier_packages(vec![
+        (
+            root,
+            beamtalk_core::semantic_analysis::known_qualifier_packages(Some("app"), []),
+        ),
+        (
+            dep_root,
+            beamtalk_core::semantic_analysis::known_qualifier_packages(Some("xmlpkg"), []),
+        ),
+    ]);
+    service.update_file(file.clone(), QUALIFIED_REF_SOURCE.to_string());
+
+    assert_eq!(unknown_package_messages(&service, &file).len(), 1);
+}
