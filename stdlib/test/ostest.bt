@@ -37,5 +37,5 @@ TestCase subclass: OSTest
     // printf '\\200' emits byte 0x80, which is not valid UTF-8 (BT-4170).
     // Only run on Unix; Windows printf does not support octal byte escapes.
     self.isUnix ifTrue: [
-        self should: [OS run: "printf '\\200'"] raise: #parse_error
+      self should: [OS run: "printf '\\200'"] raise: #parse_error
     ]
