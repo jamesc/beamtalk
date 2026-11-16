@@ -27,8 +27,10 @@ Only when the module has no root of its own (compiled in memory by the REPL or
 `load_project`, or a release layout) are these tried, first existing file wins:
 
 3. the workspace's project root (`workspace_project_root` application env);
-4. the package root above the current directory, then the current directory
-   itself (a cwd-relative path, as before BT-4940).
+4. the package root above the current directory.
+
+A path that exists relative to the current directory is answered as embedded,
+before any of these (a REPL `:load tests/x.bt`, as before BT-4940).
 
 An already-absolute path is returned as is (modules built before BT-4940).
 With a module root, the result is that root joined with the path (it may not
@@ -75,17 +77,17 @@ resolve(Module, Path) ->
 %% path keeps meaning what it always did.
 -spec resolve_without_root(file:filename_all()) -> file:filename_all().
 resolve_without_root(Path) ->
-    Roots = dedupe([R || R <- [workspace_root(), cwd_root(), cwd()], R =/= undefined]),
-    case [J || R <- Roots, J <- [filename:join(R, Path)], filelib:is_file(J)] of
-        [Found | _] -> Found;
-        [] -> Path
-    end.
-
--spec cwd() -> file:filename_all() | undefined.
-cwd() ->
-    case file:get_cwd() of
-        {ok, Cwd} -> Cwd;
-        _ -> undefined
+    case filelib:is_file(Path) of
+        %% Exists relative to the current directory: answer it as embedded,
+        %% exactly as before BT-4940 (a REPL `:load tests/x.bt`).
+        true ->
+            Path;
+        false ->
+            Roots = dedupe([R || R <- [workspace_root(), cwd_root()], R =/= undefined]),
+            case [J || R <- Roots, J <- [filename:join(R, Path)], filelib:is_file(J)] of
+                [Found | _] -> Found;
+                [] -> Path
+            end
     end.
 
 dedupe(L) -> dedupe(L, []).

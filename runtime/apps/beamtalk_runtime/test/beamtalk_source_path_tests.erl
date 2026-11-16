@@ -100,7 +100,8 @@ missing_file_is_not_taken_from_another_root_test() ->
     end.
 
 %% A module with no root of its own and a path relative to the current
-%% directory (a REPL `:load tests/x.bt` outside any package) resolves there,
+%% directory (a REPL `:load tests/x.bt` outside any package) is answered as
+%% embedded,
 %% even when the workspace has a project root that lacks the file.
 cwd_relative_path_resolves_without_a_package_test() ->
     Base = filename:absname("bt4940_cwdrel"),
@@ -114,7 +115,9 @@ cwd_relative_path_resolves_without_a_package_test() ->
     application:set_env(beamtalk_runtime, workspace_project_root, list_to_binary(Ws)),
     try
         ok = file:set_cwd(Cwd),
-        ?assertEqual(File, beamtalk_source_path:resolve(undefined, "fixtures/z.bt"))
+        %% Answered as embedded (relative), as before BT-4940.
+        ?assertEqual("fixtures/z.bt", beamtalk_source_path:resolve(undefined, "fixtures/z.bt")),
+        ?assert(filelib:is_file(File))
     after
         file:set_cwd(Old),
         application:unset_env(beamtalk_runtime, workspace_project_root),
