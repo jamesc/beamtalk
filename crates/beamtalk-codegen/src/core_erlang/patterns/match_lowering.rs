@@ -1476,13 +1476,11 @@ impl CoreErlangGenerator {
             leaf::var(nested_var.clone()),
             " = ",
             // BT-4366: nested in a `let`/`case`, so the call carries the line itself.
-            self.annotate_current_send_call(docvec![
-                "call 'beamtalk_message_dispatch':'send'(",
+            self.runtime_send_call(
                 leaf::var(outer_array_var.to_string()),
-                ", 'at:', [",
-                index_lit(one_based),
-                "])"
-            ]),
+                "at:",
+                vec![index_lit(one_based)]
+            ),
             " in ",
             "case call 'erlang':'is_map'(",
             leaf::var(nested_var.clone()),
@@ -1532,13 +1530,11 @@ impl CoreErlangGenerator {
             leaf::var(dup_var.clone()),
             " = ",
             // BT-4366: nested in a `let`/`case`, so the call carries the line itself.
-            self.annotate_current_send_call(docvec![
-                "call 'beamtalk_message_dispatch':'send'(",
+            self.runtime_send_call(
                 leaf::var(array_var.to_string()),
-                ", 'at:', [",
-                index_lit(one_based),
-                "])"
-            ]),
+                "at:",
+                vec![index_lit(one_based)]
+            ),
             " in ",
             "case call 'erlang':'=:='(",
             leaf::var(core_var),
@@ -1616,13 +1612,11 @@ impl CoreErlangGenerator {
                         leaf::var(core_var),
                         " = ",
                         // BT-4366: nested in a `let`/`case`, so the call carries the line itself.
-                        self.annotate_current_send_call(docvec![
-                            "call 'beamtalk_message_dispatch':'send'(",
+                        self.runtime_send_call(
                             leaf::var(array_var.to_string()),
-                            ", 'at:', [",
-                            index_lit(one_based),
-                            "])"
-                        ]),
+                            "at:",
+                            vec![index_lit(one_based)]
+                        ),
                         " in ",
                         next
                     ])

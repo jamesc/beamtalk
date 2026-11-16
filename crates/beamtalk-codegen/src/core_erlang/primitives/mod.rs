@@ -278,42 +278,6 @@ pub(crate) fn power_bif(params: &[String]) -> Option<Document<'static>> {
     ])
 }
 
-/// Builds the 4-step `new → with_selector → with_hint → raise` structured-error
-/// Document for the given error `kind`.
-///
-/// Produces the Core Erlang let-chain:
-/// ```text
-/// let Error0 = call 'beamtalk_error':'new'('<kind>', '<class>') in
-/// let Error1 = call 'beamtalk_error':'with_selector'(Error0, '<selector>') in
-/// let Error2 = call 'beamtalk_error':'with_hint'(Error1, <hint_binary>) in
-/// call 'beamtalk_error':'raise'(Error2)
-/// ```
-///
-/// `kind` must be a kind the runtime knows about — see
-/// `beamtalk_exception_handler:kind_to_class/1`, which maps it to the Beamtalk
-/// exception class users catch with `on:do:`.
-pub(crate) fn build_error_doc(
-    kind: impl Into<String>,
-    class: impl Into<String>,
-    selector: impl Into<String>,
-    hint: &str,
-) -> Document<'static> {
-    docvec![
-        "let Error0 = call 'beamtalk_error':'new'(",
-        leaf::atom(kind),
-        ", ",
-        leaf::atom(class),
-        ") in ",
-        "let Error1 = call 'beamtalk_error':'with_selector'(Error0, ",
-        leaf::atom(selector),
-        ") in ",
-        "let Error2 = call 'beamtalk_error':'with_hint'(Error1, ",
-        leaf::binary_lit(hint),
-        ") in ",
-        "call 'beamtalk_error':'raise'(Error2)",
-    ]
-}
-
 /// Converts an `Option<Document>` to an `Option<String>` for test assertions.
 #[cfg(test)]
 pub(crate) fn doc_to_string(doc: Option<Document<'_>>) -> Option<String> {

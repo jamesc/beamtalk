@@ -19,6 +19,7 @@
 //! [`super::dispatch_codegen`].
 
 use super::control_flow::{Closure, FieldWriteSite};
+use super::dispatch_codegen::{runtime_send_doc, send_arg_list_doc};
 use super::synced_call::ActorStateSource;
 use super::threaded_ir::{self, StateReadSite, ThreadedStmt, ValueRef};
 use super::{CodeGenError, CoreErlangGenerator, Result};
@@ -202,11 +203,7 @@ impl CoreErlangGenerator {
         } else {
             // BT-4596: the segment's `displayString` is a dynamic site.
             self.report_dynamic_site(expr, &display_string);
-            self.annotate_current_send_call(docvec![
-                "call 'beamtalk_message_dispatch':'send'(",
-                leaf::var(interp_var.clone()),
-                ", 'displayString', [])"
-            ])
+            self.runtime_send_call(leaf::var(interp_var.clone()), "displayString", vec![])
         };
         // Evaluate the expression
         let prefix = docvec![
@@ -654,17 +651,19 @@ impl CoreErlangGenerator {
         let err1 = self.fresh_temp_var("LateErr");
         let err2 = self.fresh_temp_var("LateErr");
         docvec![
-            super::errors::beamtalk_error_doc(
-                leaf::var(err0.clone()),
-                leaf::var(err0),
-                leaf::var(err1.clone()),
-                leaf::var(err1),
-                leaf::var(err2.clone()),
+            super::errors::BeamtalkErrorChain::new(
                 "uninitialized_state_error",
-                leaf::atom(class_name.to_string()),
-                leaf::atom(selector.to_string()),
-                leaf::binary_lit(hint_text),
-                Document::Str(" "),
+                leaf::atom(class_name.to_string())
+            )
+            .selector(leaf::atom(selector.to_string()))
+            .hint(leaf::binary_lit(hint_text))
+            .build(
+                vec![
+                    super::errors::ErrorBinding::plain(err0),
+                    super::errors::ErrorBinding::plain(err1),
+                    super::errors::ErrorBinding::plain(err2.clone())
+                ],
+                Document::Str(" ")
             ),
             "call 'beamtalk_error':'raise'(",
             leaf::var(err2),
@@ -1240,24 +1239,16 @@ impl CoreErlangGenerator {
             // BT-4596: every cascade message is a dynamic send, reported at
             // its own line.
             self.report_cascade_send(underlying_receiver, selector, msg_span);
-            let mut send: Vec<Document<'static>> = vec![docvec![
-                "call 'beamtalk_message_dispatch':'send'(",
+            let send = runtime_send_doc(
                 leaf::var(receiver_var.clone()),
-                ", ",
                 leaf::atom(selector_atom),
-                ", [",
-            ]];
-            for (j, arg_doc) in arg_docs.into_iter().enumerate() {
-                if j > 0 {
-                    send.push(Document::Str(", "));
-                }
-                send.push(arg_doc);
-            }
-            send.push(Document::Str("])"));
+                send_arg_list_doc(arg_docs),
+                None,
+            );
             // BT-4366: the send is bound by a `let` (or returned from the
             // cascade's `let` chain), so the call node carries its line.
             // BT-4392: each message carries its own line, not the receiver's.
-            let send = self.annotate_call_node_with_line(Document::Vec(send), msg_span);
+            let send = self.annotate_call_node_with_line(send, msg_span);
 
             if is_last {
                 return Ok((docs, send));

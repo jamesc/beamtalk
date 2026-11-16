@@ -10,6 +10,7 @@
 
 use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
+use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
 use super::super::value_accessors;
 use super::super::{CoreErlangGenerator, Result};
 use crate::core_erlang::sentinel_tags;
@@ -1005,16 +1006,17 @@ impl CoreErlangGenerator {
             leaf::atom(class_name.to_string()),
             " in",
             line(),
-            "let Error0 = call 'beamtalk_error':'new'('does_not_understand', ClassName) in",
-            line(),
-            "let Error1 = call 'beamtalk_error':'with_selector'(Error0, OtherSelector) in",
-            line(),
-            "let HintMsg = ",
-            leaf::binary_lit(hint),
-            " in",
-            line(),
-            "let Error = call 'beamtalk_error':'with_hint'(Error1, HintMsg) in",
-            line(),
+            BeamtalkErrorChain::new("does_not_understand", leaf::var("ClassName"))
+                .selector(leaf::var("OtherSelector"))
+                .hint_bound(ErrorBinding::plain("HintMsg"), leaf::binary_lit(hint))
+                .build(
+                    vec![
+                        ErrorBinding::plain("Error0"),
+                        ErrorBinding::plain("Error1"),
+                        ErrorBinding::plain("Error"),
+                    ],
+                    line(),
+                ),
             "{'error', Error, State}",
         ];
 

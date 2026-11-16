@@ -514,15 +514,8 @@ impl CoreErlangGenerator {
             bare_bif.clone()
         };
         // BT-4366: nested in the guard `case`, so the node carries the line.
-        let send_branch = self.annotate_current_send_call(docvec![
-            "call 'beamtalk_message_dispatch':'send'(",
-            var(left_var.clone()),
-            ", ",
-            atom(op.to_string()),
-            ", [",
-            var(right_var.clone()),
-            "])",
-        ]);
+        let send_branch =
+            self.runtime_send_call(var(left_var.clone()), op, vec![var(right_var.clone())]);
         let predicate = guard.predicate_doc(&left_var);
         // Explicit wildcard so this boolean `case` is statically
         // exhaustive — see this function's doc comment and

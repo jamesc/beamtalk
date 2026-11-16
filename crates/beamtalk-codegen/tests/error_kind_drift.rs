@@ -6,8 +6,8 @@
 //!
 //! Four hand-kept views of "which error kinds exist" must agree:
 //!
-//! 1. the kinds Rust codegen emits (`beamtalk_error_doc(.., "kind", ..)` and
-//!    the `beamtalk_error:new('kind', ..)` text in `intrinsics/object.rs`);
+//! 1. the kinds Rust codegen emits (`BeamtalkErrorChain::new("kind", ..)` and
+//!    any literal `beamtalk_error:new('kind', ..)` text left in codegen source);
 //! 2. `kind_to_class/1` in `beamtalk_exception_handler.erl` (the source of
 //!    truth for which kinds classify into the `Exception` hierarchy);
 //! 3. the kind list in the `#beamtalk_error{}` doc comment in `beamtalk.hrl`;
@@ -204,25 +204,17 @@ fn emitted_kinds() -> BTreeSet<String> {
     for file in files {
         let src = fs::read_to_string(&file).expect("read source");
         let src = non_test_source(&src);
-        for (idx, _) in src.match_indices("beamtalk_error_doc(") {
-            // Skip the definition itself (`fn beamtalk_error_doc(`) and docs.
-            if src[..idx].ends_with("fn ") || src[..idx].ends_with("//! ") {
-                continue;
-            }
-            let open = idx + "beamtalk_error_doc".len();
-            if let Some(kind) = string_literal_arg(src, open, 5) {
-                kinds.insert(kind);
-            }
-        }
-        // `primitives::build_error_doc(kind, ..)` takes the kind first.
-        for (idx, _) in src.match_indices("build_error_doc(") {
-            if src[..idx].ends_with("fn ") {
-                continue;
-            }
-            let open = idx + "build_error_doc".len();
-            if let Some(kind) = string_literal_arg(src, open, 0) {
-                kinds.insert(kind);
-            }
+        // `BeamtalkErrorChain::new(kind, ..)` (errors.rs) takes the kind first.
+        for (idx, _) in src.match_indices("BeamtalkErrorChain::new(") {
+            let open = idx + "BeamtalkErrorChain::new".len();
+            let kind = string_literal_arg(src, open, 0).unwrap_or_else(|| {
+                panic!(
+                    "`BeamtalkErrorChain::new` in {} takes a kind the drift scan cannot read; \
+                     pass it as an inline string literal of lowercase letters and `_`",
+                    file.display()
+                )
+            });
+            kinds.insert(kind);
         }
         for (idx, _) in src.match_indices("'beamtalk_error':'new'('") {
             let rest = &src[idx + "'beamtalk_error':'new'('".len()..];
@@ -255,7 +247,7 @@ fn scanners_find_the_known_anchors() {
     // Guard against a scanner silently matching nothing.
     let emitted = emitted_kinds();
     // `user_error` and `class_not_found` are emitted after a mid-file
-    // `#[cfg(test)]` item; `empty_collection` goes through `build_error_doc`.
+    // `#[cfg(test)]` item; `empty_collection` goes through `BeamtalkErrorChain` in `primitives/list.rs`.
     for k in [
         "user_error",
         "class_not_found",

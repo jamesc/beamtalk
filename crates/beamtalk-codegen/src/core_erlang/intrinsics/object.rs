@@ -14,6 +14,9 @@ use super::{
     MessageSelector, PERFORM_WITH_ARGS_TIMEOUT, Result, WellKnownSelector, class_var_fn, docvec,
     leaf, not_nil_apply, primitives, validate_if_not_nil_block,
 };
+use crate::core_erlang::dispatch_codegen::runtime_send_args;
+use crate::core_erlang::errors::{BeamtalkErrorChain, ErrorBinding};
+use beamtalk_cerl_doc::form;
 
 /// The `beamtalk_behaviour_intrinsics` functions the `isKindOf:` lowerings
 /// call. A typed set, so the runtime export contract
@@ -125,26 +128,13 @@ impl CoreErlangGenerator {
         // self-dispatched into `ProtoObject`'s method body instead. Matched
         // by name, like `asType:`: it is not a `WellKnownSelector`.
         if selector.name() == PERFORM_WITH_ARGS_TIMEOUT && arguments.len() == 3 {
-            let mut seq = self.sequence_call(
+            return Ok(Some(self.sequenced_runtime_call(
+                "beamtalk_message_dispatch",
+                "send",
                 &[receiver, &arguments[0], &arguments[1], &arguments[2]],
                 "PerfTo",
-            )?;
-            let recv_doc = seq.next();
-            let sel_doc = seq.next();
-            let args_doc = seq.next();
-            let timeout_doc = seq.next();
-            let call_doc = docvec![
-                "call 'beamtalk_message_dispatch':'send'(",
-                recv_doc,
-                ", ",
-                sel_doc,
-                ", ",
-                args_doc,
-                ", ",
-                timeout_doc,
-                ")",
-            ];
-            return Ok(Some(seq.close(self, call_doc, "PerfToRes")));
+                |operands| operands,
+            )?));
         }
 
         // `perform:` family routes through the `WellKnownSelector` enum;
@@ -154,57 +144,43 @@ impl CoreErlangGenerator {
             Some(WellKnownSelector::PerformWithArgs) => {
                 debug_assert_eq!(arguments.len(), 2);
                 // Hoist open-scope receiver + args (e.g. class method self-sends).
-                let mut seq =
-                    self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "Perf")?;
-                let recv_doc = seq.next();
-                let sel_doc = seq.next();
-                let args_doc = seq.next();
-                let call_doc = docvec![
-                    "call 'beamtalk_message_dispatch':'send'(",
-                    recv_doc,
-                    ", ",
-                    sel_doc,
-                    ", ",
-                    args_doc,
-                    ")",
-                ];
-                Ok(Some(seq.close(self, call_doc, "PerfRes")))
+                self.sequenced_runtime_call(
+                    "beamtalk_message_dispatch",
+                    "send",
+                    &[receiver, &arguments[0], &arguments[1]],
+                    "Perf",
+                    |operands| operands,
+                )
+                .map(Some)
             }
             // Execute a class method in the caller's process,
             // bypassing the class object's gen_server.
             Some(WellKnownSelector::PerformLocallyWithArgs) => {
                 debug_assert_eq!(arguments.len(), 2);
                 // Hoist open-scope receiver + args (e.g. class method self-sends).
-                let mut seq =
-                    self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "PerfLoc")?;
-                let recv_doc = seq.next();
-                let sel_doc = seq.next();
-                let args_doc = seq.next();
-                let call_doc = docvec![
-                    "call 'beamtalk_object_class':'local_call'(",
-                    recv_doc,
-                    ", ",
-                    sel_doc,
-                    ", ",
-                    args_doc,
-                    ")",
-                ];
-                Ok(Some(seq.close(self, call_doc, "PerfLocRes")))
+                self.sequenced_runtime_call(
+                    "beamtalk_object_class",
+                    "local_call",
+                    &[receiver, &arguments[0], &arguments[1]],
+                    "PerfLoc",
+                    |operands| operands,
+                )
+                .map(Some)
             }
             Some(WellKnownSelector::Perform) => {
                 debug_assert_eq!(arguments.len(), 1);
                 // Hoist open-scope receiver + selector arg.
-                let mut seq = self.sequence_call(&[receiver, &arguments[0]], "Perf")?;
-                let recv_doc = seq.next();
-                let sel_doc = seq.next();
-                let call_doc = docvec![
-                    "call 'beamtalk_message_dispatch':'send'(",
-                    recv_doc,
-                    ", ",
-                    sel_doc,
-                    ", [])",
-                ];
-                Ok(Some(seq.close(self, call_doc, "PerfRes")))
+                self.sequenced_runtime_call(
+                    "beamtalk_message_dispatch",
+                    "send",
+                    &[receiver, &arguments[0]],
+                    "Perf",
+                    |mut operands| {
+                        operands.push(Document::Str("[]"));
+                        operands
+                    },
+                )
+                .map(Some)
             }
             _ => Ok(None),
         }
@@ -471,13 +447,11 @@ impl CoreErlangGenerator {
         let send_class = self.fresh_temp_var("KindOfClass");
         // The call node carries the send's source line, as every dispatch
         // call does (`call_site_lines`).
-        let send_call = self.annotate_current_send_call(docvec![
-            "call 'beamtalk_message_dispatch':'send'(",
+        let send_call = self.runtime_send_call(
             leaf::var(recv_var.to_string()),
-            ", 'isKindOf:', [",
-            leaf::var(send_class.clone()),
-            "])"
-        ]);
+            "isKindOf:",
+            vec![leaf::var(send_class.clone())],
+        );
         docvec![
             "let ",
             leaf::var(send_class),
@@ -955,14 +929,14 @@ impl CoreErlangGenerator {
             // A class-method self-send runs where its method runs (ADR 0142),
             // never back through the class process.
             ErrorSignalReceiver::ClassSelf => self.class_side_error_guard(
-                "call 'beamtalk_class_dispatch':'class_self_send'(",
+                ("beamtalk_class_dispatch", "class_self_send"),
                 &recv_var,
                 &msg_var,
                 receiver,
                 raise_doc,
             ),
             ErrorSignalReceiver::Unknown => self.class_side_error_guard(
-                "call 'beamtalk_message_dispatch':'send'(",
+                ("beamtalk_message_dispatch", "send"),
                 &recv_var,
                 &msg_var,
                 receiver,
@@ -1004,17 +978,14 @@ impl CoreErlangGenerator {
             leaf::var(class_var.clone()),
             " = call 'beamtalk_primitive':'class_of'(",
             leaf::var(recv_var.to_string()),
-            ") in let ",
-            leaf::var(err0.clone()),
-            " = call 'beamtalk_error':'new'('user_error', ",
-            leaf::var(class_var),
-            ") in let ",
-            leaf::var(err1.clone()),
-            " = call 'beamtalk_error':'with_message'(",
-            leaf::var(err0),
-            ", ",
-            leaf::var(msg_var.to_string()),
-            ") in call 'beamtalk_error':'raise'(",
+            ") in ",
+            BeamtalkErrorChain::new("user_error", leaf::var(class_var))
+                .message(leaf::var(msg_var.to_string()))
+                .build(
+                    vec![ErrorBinding::plain(err0), ErrorBinding::plain(err1.clone()),],
+                    Document::Str(" "),
+                ),
+            "call 'beamtalk_error':'raise'(",
             leaf::var(err1),
             ")",
         ]
@@ -1026,22 +997,22 @@ impl CoreErlangGenerator {
     /// defines one, the `Object>>error:` raise otherwise.
     fn class_side_error_guard(
         &mut self,
-        send_fn: &'static str,
+        send_fn: (&'static str, &'static str),
         recv_var: &str,
         msg_var: &str,
         receiver: &Expression,
         raise_doc: Document<'static>,
     ) -> Document<'static> {
         let send_doc = self.annotate_call_node_with_line(
-            docvec![
-                send_fn,
-                leaf::var(recv_var.to_string()),
-                ", ",
-                leaf::atom("error:"),
-                ", [",
-                leaf::var(msg_var.to_string()),
-                "])"
-            ],
+            form::call(
+                send_fn.0,
+                send_fn.1,
+                [
+                    leaf::var(recv_var.to_string()),
+                    leaf::atom("error:"),
+                    docvec!["[", leaf::var(msg_var.to_string()), "]"],
+                ],
+            ),
             receiver.span(),
         );
         docvec![
@@ -1206,11 +1177,8 @@ impl CoreErlangGenerator {
             // Guessing "not a map ⇒ actor" here sent `element(4, R)` a
             // non-tuple and raised `badarg` (BT-4264). The call is nested in
             // a `let`, so it carries its own line annotation (BT-4356).
-            let dispatch_call = self.annotate_current_send_call(docvec![
-                "call 'beamtalk_message_dispatch':'send'(",
-                leaf::var(receiver_var.clone()),
-                ", 'fieldNames', [])",
-            ]);
+            let dispatch_call =
+                self.runtime_send_call(leaf::var(receiver_var.clone()), "fieldNames", vec![]);
             let call_doc = docvec![
                 "let ",
                 leaf::var(receiver_var),
@@ -1335,13 +1303,11 @@ impl CoreErlangGenerator {
                         //     primitive `fieldAt:` arm words it differently).
                         // The dispatch call is nested in a `case`, so it carries its
                         // own line annotation (BT-4356).
-                        let dispatch_call = self.annotate_current_send_call(docvec![
-                            "call 'beamtalk_message_dispatch':'send'(",
+                        let dispatch_call = self.runtime_send_call(
                             leaf::var(receiver_var.clone()),
-                            ", 'fieldAt:', [",
-                            leaf::var(name_var.clone()),
-                            "])",
-                        ]);
+                            "fieldAt:",
+                            vec![leaf::var(name_var.clone())],
+                        );
                         let call_doc = docvec![
                             "let ",
                             leaf::var(receiver_var.clone()),
@@ -1373,17 +1339,19 @@ impl CoreErlangGenerator {
                             " = call 'beamtalk_primitive':'class_of'(",
                             leaf::var(receiver_var),
                             ") in ",
-                            super::super::errors::beamtalk_error_doc(
-                                leaf::var(error_base.clone()),
-                                leaf::var(error_base),
-                                leaf::var(error_sel.clone()),
-                                leaf::var(error_sel),
-                                leaf::var(error_hint.clone()),
+                            super::super::errors::BeamtalkErrorChain::new(
                                 "immutable_value",
-                                leaf::var(class_var),
-                                Document::Str("'fieldAt:'"),
-                                hint,
-                                Document::Str(" "),
+                                leaf::var(class_var)
+                            )
+                            .selector(Document::Str("'fieldAt:'"))
+                            .hint(hint)
+                            .build(
+                                vec![
+                                    super::super::errors::ErrorBinding::plain(error_base),
+                                    super::super::errors::ErrorBinding::plain(error_sel),
+                                    super::super::errors::ErrorBinding::plain(error_hint.clone())
+                                ],
+                                Document::Str(" ")
                             ),
                             "call 'beamtalk_error':'raise'(",
                             leaf::var(error_hint),
@@ -1485,15 +1453,11 @@ impl CoreErlangGenerator {
                         // `beamtalk_message_dispatch:send/3` (BT-4148); anything
                         // else raises `immutable_value` inline. The dispatch call
                         // carries its own line annotation (BT-4356).
-                        let dispatch_call = self.annotate_current_send_call(docvec![
-                            "call 'beamtalk_message_dispatch':'send'(",
+                        let dispatch_call = self.runtime_send_call(
                             leaf::var(receiver_var.clone()),
-                            ", 'fieldAt:put:', [",
-                            leaf::var(name_var.clone()),
-                            ", ",
-                            leaf::var(value_var.clone()),
-                            "])",
-                        ]);
+                            "fieldAt:put:",
+                            vec![leaf::var(name_var.clone()), leaf::var(value_var.clone())],
+                        );
                         let call_doc = docvec![
                             "let ",
                             leaf::var(receiver_var.clone()),
@@ -1521,17 +1485,19 @@ impl CoreErlangGenerator {
                             " = call 'beamtalk_primitive':'class_of'(",
                             leaf::var(receiver_var),
                             ") in ",
-                            super::super::errors::beamtalk_error_doc(
-                                leaf::var(error_base.clone()),
-                                leaf::var(error_base),
-                                leaf::var(error_sel.clone()),
-                                leaf::var(error_sel),
-                                leaf::var(error_hint.clone()),
+                            super::super::errors::BeamtalkErrorChain::new(
                                 "immutable_value",
-                                leaf::var(class_var),
-                                Document::Str("'fieldAt:put:'"),
-                                hint,
-                                Document::Str(" "),
+                                leaf::var(class_var)
+                            )
+                            .selector(Document::Str("'fieldAt:put:'"))
+                            .hint(hint)
+                            .build(
+                                vec![
+                                    super::super::errors::ErrorBinding::plain(error_base),
+                                    super::super::errors::ErrorBinding::plain(error_sel),
+                                    super::super::errors::ErrorBinding::plain(error_hint.clone())
+                                ],
+                                Document::Str(" ")
                             ),
                             "call 'beamtalk_error':'raise'(",
                             leaf::var(error_hint),
@@ -1606,17 +1572,14 @@ impl CoreErlangGenerator {
                         // `#beamtalk_object{}` receivers, BT-4148), so
                         // `classify_receiver`'s actor/class/value
                         // distinction lives in exactly one place.
-                        let mut seq = self.sequence_call(&[receiver, &arguments[0]], "HasF")?;
-                        let recv_doc = seq.next();
-                        let name_doc = seq.next();
-                        let call_doc = docvec![
-                            "call 'beamtalk_message_dispatch':'send'(",
-                            recv_doc,
-                            ", 'hasField:', [",
-                            name_doc,
-                            "])",
-                        ];
-                        Ok(Some(seq.close(self, call_doc, "HasFRes")))
+                        self.sequenced_runtime_call(
+                            "beamtalk_message_dispatch",
+                            "send",
+                            &[receiver, &arguments[0]],
+                            "HasF",
+                            |operands| runtime_send_args("hasField:", operands),
+                        )
+                        .map(Some)
                     }
                     // ADR 0124 §1/§4f/B4: `clearField:` — returns a `late`
                     // slot to unassigned. A write; lowers exactly as
@@ -1694,17 +1657,14 @@ impl CoreErlangGenerator {
                         // — see `generate_primitive_dispatch`), so no
                         // hand-rolled error construction is needed here
                         // either.
-                        let mut seq = self.sequence_call(&[receiver, &arguments[0]], "ClrF")?;
-                        let recv_doc = seq.next();
-                        let name_doc = seq.next();
-                        let call_doc = docvec![
-                            "call 'beamtalk_message_dispatch':'send'(",
-                            recv_doc,
-                            ", 'clearField:', [",
-                            name_doc,
-                            "])",
-                        ];
-                        Ok(Some(seq.close(self, call_doc, "ClrFRes")))
+                        self.sequenced_runtime_call(
+                            "beamtalk_message_dispatch",
+                            "send",
+                            &[receiver, &arguments[0]],
+                            "ClrF",
+                            |operands| runtime_send_args("clearField:", operands),
+                        )
+                        .map(Some)
                     }
                     _ => Ok(None),
                 }

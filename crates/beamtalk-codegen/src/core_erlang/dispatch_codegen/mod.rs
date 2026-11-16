@@ -85,6 +85,7 @@ use crate::core_erlang::{CodeGenError, CoreErlangGenerator, Result};
 
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, MessageSelector};
 
@@ -179,6 +180,50 @@ pub(in crate::core_erlang) const HANDLERS: &[(&str, SendHandler)] = &[
         CoreErlangGenerator::try_handle_typed_guarded_send,
     ),
 ];
+
+/// The one construction of the runtime-dispatch call
+/// `call 'beamtalk_message_dispatch':'send'(Recv, Selector, Args[, Timeout])`
+/// (BT-4887). Every hand-written spelling of the call — `send/3` and the
+/// timeout-carrying `send/4` — goes through here; only the sourcing of the
+/// operand documents differs between callers. Unannotated: callers that need
+/// the send's line wrap it (`runtime_send_call`, `close_prelude`).
+pub(in crate::core_erlang) fn runtime_send_doc(
+    receiver: Document<'static>,
+    selector: Document<'static>,
+    args: Document<'static>,
+    timeout: Option<Document<'static>>,
+) -> Document<'static> {
+    let mut call_args = vec![receiver, selector, args];
+    call_args.extend(timeout);
+    form::call("beamtalk_message_dispatch", "send", call_args)
+}
+
+/// The argument documents of a `send/3`/`cast/3` call over sequenced operand
+/// documents: the receiver (first operand), the selector atom, and the rest
+/// as a literal argument list.
+pub(in crate::core_erlang) fn runtime_send_args(
+    selector_atom: &str,
+    operands: Vec<Document<'static>>,
+) -> Vec<Document<'static>> {
+    let mut operands = operands.into_iter();
+    let receiver = operands.next().expect("receiver operand");
+    vec![
+        receiver,
+        leaf::atom(selector_atom),
+        send_arg_list_doc(operands.collect()),
+    ]
+}
+
+/// `[a, b, …]` — the literal argument list of a runtime `send`.
+pub(in crate::core_erlang) fn send_arg_list_doc(
+    arg_docs: Vec<Document<'static>>,
+) -> Document<'static> {
+    docvec![
+        "[",
+        CoreErlangGenerator::join_docs_with_commas(arg_docs),
+        "]"
+    ]
+}
 
 impl CoreErlangGenerator {
     /// Rebinds `Self{N}` from an
@@ -358,21 +403,13 @@ impl CoreErlangGenerator {
         for arg in arguments {
             all_exprs.push(arg);
         }
-        let mut seq = self.sequence_call(&all_exprs, "Cast")?;
-        let actual_receiver = seq.next();
-        let args_doc = Self::join_docs_with_commas(seq.rest());
-
-        let call_doc = docvec![
-            "call 'beamtalk_message_dispatch':'cast'(",
-            actual_receiver,
-            ", ",
-            leaf::atom(selector_atom),
-            ", [",
-            args_doc,
-            "])",
-        ];
-
-        Ok(seq.close(self, call_doc, "CastRes"))
+        self.sequenced_runtime_call(
+            "beamtalk_message_dispatch",
+            "cast",
+            &all_exprs,
+            "Cast",
+            |operands| runtime_send_args(&selector_atom, operands),
+        )
     }
 
     /// BT-4070: the `beamtalk_message_dispatch:send/3` call itself, over
@@ -392,15 +429,12 @@ impl CoreErlangGenerator {
         selector_atom: &str,
         arg_docs: Vec<Document<'static>>,
     ) -> Document<'static> {
-        self.annotate_current_send_call(docvec![
-            "call 'beamtalk_message_dispatch':'send'(",
+        self.annotate_current_send_call(runtime_send_doc(
             receiver_doc,
-            ", ",
             leaf::atom(selector_atom),
-            ", [",
-            Self::join_docs_with_commas(arg_docs),
-            "])"
-        ])
+            send_arg_list_doc(arg_docs),
+            None,
+        ))
     }
 
     /// Generates unified runtime dispatch via `beamtalk_message_dispatch:send/3`.
