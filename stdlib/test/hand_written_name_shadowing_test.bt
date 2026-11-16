@@ -12,6 +12,7 @@ TestCase subclass: HandWrittenNameShadowingTest
     self
       assert: ([:y |
         _Unit := y
+        @expect lint "the discarded `+ 1` is the block-discard shape under test"
         y + 1
         _Unit
       ] value: 5)
@@ -21,6 +22,7 @@ TestCase subclass: HandWrittenNameShadowingTest
     self
       assert: ([:y |
         _Result := y
+        @expect lint "the discarded `+ 1` is the block-discard shape under test"
         y + 1
         _Result
       ] value: 6)
@@ -28,6 +30,7 @@ TestCase subclass: HandWrittenNameShadowingTest
     self
       assert: ([:y |
         _ExtArgs := y
+        @expect lint "the discarded `+ 1` is the block-discard shape under test"
         y + 1
         _ExtArgs
       ] value: 7)
@@ -35,6 +38,7 @@ TestCase subclass: HandWrittenNameShadowingTest
     self
       assert: ([:y |
         _Unit0 := y
+        @expect lint "the discarded `+ 1` is the block-discard shape under test"
         y + 1
         _Unit0
       ] value: 8)
@@ -44,6 +48,7 @@ TestCase subclass: HandWrittenNameShadowingTest
     self
       assert: ([
         _Unit := 3
+        @expect lint "the discarded `+ 1` is the block-discard shape under test"
         4 + 1
         _Unit
       ] on: Error do: [:e | 0])
@@ -53,6 +58,7 @@ TestCase subclass: HandWrittenNameShadowingTest
     self
       assert: ([
         _Unit := 9
+        @expect lint "the discarded `+ 1` is the block-discard shape under test"
         4 + 1
         _Unit
       ] ensure: [1 + 1])
