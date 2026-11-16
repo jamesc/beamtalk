@@ -71,14 +71,6 @@ impl ErrorBinding {
             reference: leaf::var(name),
         }
     }
-
-    /// The final link, whose reference no later step needs.
-    pub(super) fn terminal(binding: Document<'static>) -> Self {
-        Self {
-            reference: binding.clone(),
-            binding,
-        }
-    }
 }
 
 /// One link after `beamtalk_error:new/2` in a [`BeamtalkErrorChain`].

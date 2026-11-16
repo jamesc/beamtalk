@@ -1264,7 +1264,7 @@ impl CoreErlangGenerator {
                 vec![
                     super::super::errors::ErrorBinding::plain(error_base),
                     super::super::errors::ErrorBinding::plain(error_sel),
-                    super::super::errors::ErrorBinding::terminal(leaf::var(error_hint.clone()))
+                    super::super::errors::ErrorBinding::plain(error_hint.clone())
                 ],
                 Document::Str(" ")
             ),

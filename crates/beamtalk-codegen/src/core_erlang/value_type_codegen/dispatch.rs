@@ -938,7 +938,7 @@ impl CoreErlangGenerator {
                 vec![
                     super::super::errors::ErrorBinding::bracketed("ArErr0"),
                     super::super::errors::ErrorBinding::bracketed("ArErr1"),
-                    super::super::errors::ErrorBinding::terminal(Document::Str("<ArErr2>"))
+                    super::super::errors::ErrorBinding::bracketed("ArErr2")
                 ],
                 line()
             ),
@@ -966,7 +966,7 @@ impl CoreErlangGenerator {
                 vec![
                     super::super::errors::ErrorBinding::bracketed("TyErr0"),
                     super::super::errors::ErrorBinding::bracketed("TyErr1"),
-                    super::super::errors::ErrorBinding::terminal(Document::Str("<TyErr2>"))
+                    super::super::errors::ErrorBinding::bracketed("TyErr2")
                 ],
                 line()
             ),

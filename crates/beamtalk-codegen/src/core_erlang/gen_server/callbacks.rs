@@ -15,7 +15,7 @@ use super::super::exception_forms::{CatchVars, build_caught_triple_doc, wrap_and
 use super::super::{CoreErlangGenerator, Result};
 use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::form::Layout;
+use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{ClassDefinition, Expression, Module, SlotKind};
 use ecow::EcoString;
@@ -221,17 +221,17 @@ fn log_and_stop_arm(arm: LogAndStop<'_>) -> Document<'static> {
         docvec![
             "let ",
             leaf::var(arm.msg_var.clone()),
-            " = call 'beamtalk_error':'format_safe'(",
-            arm.format_safe_args,
-            ") in",
+            " = ",
+            form::call("beamtalk_error", "format_safe", [arm.format_safe_args]),
+            " in",
         ],
         line(),
         docvec![
             "let ",
             leaf::var(arm.class_name_var.clone()),
-            " = call ",
-            leaf::atom(arm.module_name.to_string()),
-            ":'class_name'() in",
+            " = ",
+            form::call(arm.module_name, "class_name", []),
+            " in",
         ],
         line(),
     ];
@@ -239,28 +239,32 @@ fn log_and_stop_arm(arm: LogAndStop<'_>) -> Document<'static> {
         parts.push(docvec![
             "let ",
             leaf::var(var),
-            " = call 'beamtalk_error':'format'(",
-            arg,
-            ") in",
+            " = ",
+            form::call("beamtalk_error", "format", [arg]),
+            " in",
         ]);
         parts.push(line());
     }
-    let mut log = vec![
-        Document::Str("let _ = call 'logger':'error'("),
-        leaf::var(arm.msg_var),
-        Document::Str(", ~{'class' => "),
+    let mut log_map = vec![
+        Document::Str("~{'class' => "),
         leaf::var(arm.class_name_var),
         Document::Str(", 'reason' => "),
         arm.reason,
     ];
     if let Some(stack) = arm.stacktrace {
-        log.push(Document::Str(", 'stacktrace' => "));
-        log.push(stack);
+        log_map.push(Document::Str(", 'stacktrace' => "));
+        log_map.push(stack);
     }
-    log.push(Document::Str(
-        ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
-    ));
-    parts.push(Document::Vec(log));
+    log_map.push(Document::Str(", 'domain' => ['beamtalk'|['runtime'|[]]]}~"));
+    parts.push(docvec![
+        "let _ = ",
+        form::call(
+            "logger",
+            "error",
+            [leaf::var(arm.msg_var), Document::Vec(log_map)]
+        ),
+        " in",
+    ]);
     parts.push(line());
     parts.push(docvec![
         "{'stop', ",

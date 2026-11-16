@@ -42,7 +42,7 @@ fn empty_list_raise_doc(selector: &'static str) -> Document<'static> {
                 vec![
                     ErrorBinding::plain("Error0"),
                     ErrorBinding::plain("Error1"),
-                    ErrorBinding::terminal(leaf::var("Error2")),
+                    ErrorBinding::plain("Error2"),
                 ],
                 Document::Str(" "),
             ),

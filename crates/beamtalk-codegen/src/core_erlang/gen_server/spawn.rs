@@ -217,9 +217,7 @@ impl CoreErlangGenerator {
                                         vec![
                                             super::super::errors::ErrorBinding::plain("SpawnErr0"),
                                             super::super::errors::ErrorBinding::plain("SpawnErr1"),
-                                            super::super::errors::ErrorBinding::terminal(
-                                                Document::Str("SpawnErr2")
-                                            )
+                                            super::super::errors::ErrorBinding::plain("SpawnErr2")
                                         ],
                                         line()
                                     ),
@@ -410,9 +408,7 @@ impl CoreErlangGenerator {
                                         vec![
                                             super::super::errors::ErrorBinding::plain("TypeErr0"),
                                             super::super::errors::ErrorBinding::plain("TypeErr1"),
-                                            super::super::errors::ErrorBinding::terminal(
-                                                Document::Str("TypeErr2")
-                                            )
+                                            super::super::errors::ErrorBinding::plain("TypeErr2")
                                         ],
                                         line()
                                     ),
@@ -595,7 +591,7 @@ impl CoreErlangGenerator {
                 vec![
                     super::super::errors::ErrorBinding::plain("Error0"),
                     super::super::errors::ErrorBinding::plain("Error1"),
-                    super::super::errors::ErrorBinding::terminal(Document::Str("Error2"))
+                    super::super::errors::ErrorBinding::plain("Error2")
                 ],
                 line()
             ),
