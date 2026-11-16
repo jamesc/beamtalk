@@ -21,8 +21,9 @@ from another project):
    `.beam` (written for a path dependency, whose beams live under the
    consumer's `_build/deps/` and outside any package). Line 1 is the root
    relative to the marker's directory, so a consumer + dependency tree moved
-   together (BT-4957) still resolves; line 2 is the absolute root, used when
-   the relative one holds no package (a dependency outside the moved tree);
+   together (BT-4957) still resolves; line 2 is the absolute root, preferred
+   while it still holds a package (the relative one is used once the old
+   location is gone);
 2. else the package root above the module's `.beam` (`code:which/1`) — a built
    project, or a git dependency checked out with its manifest.
 
@@ -65,7 +66,7 @@ doc for the search order.
 resolve(Module, Path) ->
     case resolve_strict(Module, Path) of
         {ok, Resolved} -> Resolved;
-        %% For display only; callers that open the file use `resolve_strict/2`.
+        %% For display only; every caller that opens the file uses `resolve_strict/2`.
         unresolvable -> Path
     end.
 
@@ -147,8 +148,8 @@ beam_root(Module) ->
 %% `absent`: no marker. `unreadable`: a marker names a root that cannot be
 %% decoded as text, so the package walk (which would find the consumer's root
 %% for a path dependency) must not run. Otherwise the root as a string: line 1
-%% (relative to `EbinDir`) when it holds a package, else line 2 (absolute),
-%% else whichever is present.
+%% (absolute) when it still holds a package, else line 1 (relative to
+%% `EbinDir`) when it does, else line 2.
 -spec read_marker(file:filename_all()) -> file:filename_all() | unreadable | absent.
 read_marker(EbinDir) ->
     case file:read_file(filename:join(EbinDir, ".beamtalk-source-root")) of
@@ -170,11 +171,21 @@ marker_root(EbinDir, Lines) ->
         [Only] ->
             marker_candidate(EbinDir, Only);
         [Rel, Abs | _] ->
-            Cand = marker_candidate(EbinDir, Rel),
-            case filelib:is_file(filename:join(Cand, "beamtalk.toml")) of
-                true -> Cand;
-                false -> Abs
+            %% The recorded absolute root wins while it still holds a package:
+            %% a consumer moved next to a different same-named package must not
+            %% resolve into it. After a move together the old root is gone and
+            %% the relative line (from `code:which/1`'s directory) takes over.
+            case filelib:is_file(filename:join(Abs, "beamtalk.toml")) of
+                true -> Abs;
+                false -> marker_candidate_or(EbinDir, Rel, Abs)
             end
+    end.
+
+marker_candidate_or(EbinDir, Rel, Abs) ->
+    Cand = marker_candidate(EbinDir, Rel),
+    case filelib:is_file(filename:join(Cand, "beamtalk.toml")) of
+        true -> Cand;
+        false -> Abs
     end.
 
 %% A relative root is relative to the marker's directory.

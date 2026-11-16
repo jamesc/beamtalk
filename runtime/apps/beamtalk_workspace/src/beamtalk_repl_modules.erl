@@ -161,8 +161,13 @@ resolve_source_path(ModName) ->
     try
         Attrs = erlang:get_module_info(ModName, attributes),
         case proplists:get_value(beamtalk_source, Attrs) of
-            [Path] when is_list(Path), Path =/= "" -> beamtalk_source_path:resolve(ModName, Path);
-            _ -> "unknown"
+            [Path] when is_list(Path), Path =/= "" ->
+                case beamtalk_source_path:resolve_strict(ModName, Path) of
+                    {ok, Resolved} -> Resolved;
+                    unresolvable -> "unknown"
+                end;
+            _ ->
+                "unknown"
         end
     catch
         _:_ -> "unknown"

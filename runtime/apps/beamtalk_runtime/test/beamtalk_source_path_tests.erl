@@ -198,8 +198,8 @@ relative_marker_survives_a_moved_tree_test() ->
         file:del_dir_r(Moved)
     end.
 
-%% A dependency outside the moved tree: the relative root no longer holds a
-%% package, so the recorded absolute root (line 2) is used.
+%% A dependency outside the moved tree (or a relative line that holds no
+%% package): the recorded absolute root (line 2) is used.
 absolute_marker_line_covers_a_dependency_outside_the_moved_tree_test() ->
     Base = filename:absname("bt4957_outside"),
     Dep = filename:join(Base, "dep"),
@@ -249,6 +249,66 @@ non_utf8_marker_is_unresolvable_and_source_file_is_nil_test() ->
     try
         ?assertEqual(unresolvable, beamtalk_source_path:resolve_strict(Mod, "src/a.bt")),
         ?assertEqual(nil, beamtalk_reflection:source_file_from_module(Mod))
+    after
+        code:purge(Mod),
+        code:delete(Mod),
+        file:del_dir_r(Base)
+    end.
+
+%% Only the consumer moved next to a different package at the same relative
+%% spot: the still-valid absolute root wins over the relative line.
+absolute_root_wins_over_a_lookalike_relative_package_test() ->
+    Base = filename:absname("bt4957_lookalike"),
+    Dep = filename:join(Base, "realdep"),
+    Other = filename:join(Base, "dep"),
+    Ebin = filename:join([Base, "app", "_build", "deps", "dep", "ebin"]),
+    ok = filelib:ensure_path(Ebin),
+    [
+        begin
+            ok = filelib:ensure_path(filename:join(D, "src")),
+            ok = file:write_file(filename:join(D, "beamtalk.toml"), <<"[package]\n">>),
+            ok = file:write_file(filename:join([D, "src", "x.bt"]), <<>>)
+        end
+     || D <- [Dep, Other]
+    ],
+    ok = file:write_file(
+        filename:join(Ebin, ".beamtalk-source-root"),
+        iolist_to_binary(["../../../../../dep\n", Dep])
+    ),
+    Mod = bt4957_lookalike_mod,
+    {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
+    BeamFile = filename:join(Ebin, "bt4957_lookalike_mod.beam"),
+    ok = file:write_file(BeamFile, Bin),
+    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
+    try
+        ?assertEqual(
+            filename:join([Dep, "src", "x.bt"]), beamtalk_source_path:resolve(Mod, "src/x.bt")
+        )
+    after
+        code:purge(Mod),
+        code:delete(Mod),
+        file:del_dir_r(Base)
+    end.
+
+%% A stack frame of a module whose marker is unreadable has no snippet source,
+%% even when the consumer has a file at the same relative path.
+unreadable_marker_frame_has_no_source_path_test() ->
+    Base = filename:absname("bt4957_frame"),
+    Ebin = filename:join([Base, "_build", "deps", "dep", "ebin"]),
+    ok = filelib:ensure_path(Ebin),
+    ok = filelib:ensure_path(filename:join(Base, "src")),
+    ok = file:write_file(filename:join(Base, "beamtalk.toml"), <<"[package]\n">>),
+    ok = file:write_file(filename:join([Base, "src", "a.bt"]), <<>>),
+    ok = file:write_file(filename:join(Ebin, ".beamtalk-source-root"), <<255, 254, 253>>),
+    Mod = bt4957_frame_mod,
+    {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
+    BeamFile = filename:join(Ebin, "bt4957_frame_mod.beam"),
+    ok = file:write_file(BeamFile, Bin),
+    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
+    try
+        ?assertEqual(
+            nil, beamtalk_stack_frame:frame_source_path(#{module => Mod, file => <<"src/a.bt">>})
+        )
     after
         code:purge(Mod),
         code:delete(Mod),
