@@ -52,10 +52,11 @@ const TEST_MODULE: &str = "#[cfg(test)]modtests";
 /// `lower_hybrid_field_rebind` calls the hook for a rebind that is a `Direct`
 /// bind, not a `Put`.
 const FIELD_WRITE_SITES: &[(&str, usize, usize)] = &[
-    // `lower_simple_field_write_bind`, the C6 non-producer two-hop, and
-    // `lower_hybrid_field_rebind` (no `Put`).
+    // The C6 non-producer two-hop.
     ("control_flow/conditional_arms.rs", 1, 1),
+    // `lower_simple_field_write_bind`.
     ("control_flow/conditionals.rs", 1, 1),
+    // `lower_hybrid_field_rebind` (no `Put`).
     ("control_flow/inline_control_flow.rs", 0, 1),
     // The method-body field assignment with a control-flow right-hand side
     // (`FieldAssignmentControlFlow`): the producer path and the two-hop.
