@@ -350,6 +350,36 @@ choice) and **stops** the other with `gen_server:stop(Loser,
 `ActorStopped` announcement carries `reason: #globalNameConflict` and its
 `terminate` runs. User-supplied resolvers are future work.
 
+**The start time (BT-4937).** The age is the `'$beamtalk_actor_started_at'`
+process-dictionary key (`erlang:system_time(microsecond)`), read with
+`actor_started_at/1`, over `erpc` when the candidate is on the other node. It
+is written by the **generated** `init/1` of the leaf class, once, in the same
+`__skip_initialize__`-guarded branch as the `'$beamtalk_actor'` marker (so a
+parent's `init/1`, called as a state-building helper, never overwrites it). It
+is written for every compiled actor, whatever its scope, because scope is a
+spawn-time choice made after `init/1` has run. Every start path goes through
+that `init/1`: plain `spawn`, `spawnMonitored`, `spawnMonitoredAsync`,
+supervised children and named children (local and global). It does not cover
+`native:` actors (ADR 0056): their process is the backing module's own, with no
+generated `init/1`, and a key can only be written from inside the process. They
+can be registered `#global`, so they have no start time; this is a known gap.
+
+OTP's `random_exit_name/3`, the fallback, is not random: it keeps the pid on
+the node with the lower name, and on the same node its second argument. Before
+BT-4937 it decided every compiled-actor conflict, so the "older registrant"
+rule above did not hold.
+
+**One side has no start time.** This happens in a rolling upgrade (ADR 0125),
+when a node still on a runtime older than BT-4937 started one of the
+candidates, and for a `native:` actor. The side that has a start time is kept
+and the other is stopped. The alternative, falling back to `random_exit_name/3`
+whenever either time is missing, would decide by node name for the whole
+upgrade window; keeping the side with a time is the only choice that is
+decided by a fact about the actors. A side that is older but untimed can lose
+to a younger timed one, which is accepted: it is bounded by the upgrade window,
+and the loser is stopped gracefully, not killed. If neither side has a time,
+`random_exit_name/3` decides, as before.
+
 **Mesh side effects.** `global` keeps a fully connected mesh, and OTP 25+
 enables `prevent_overlapping_partitions` by default: on partial connectivity
 `global` actively disconnects nodes to restore a consistent view. Users of

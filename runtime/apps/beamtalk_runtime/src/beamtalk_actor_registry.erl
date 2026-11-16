@@ -599,8 +599,10 @@ reading the `'$beamtalk_actor_started_at'` process-dictionary marker
 `init/1` sets — possibly on the *other* node, via `erpc`) and keeps the
 older one, stopping the younger with `stop_global_conflict_loser/1`.
 
-Falls back to OTP's own `global:random_exit_name/3` tie-break when a start
-time cannot be read for either side (e.g. a raw, non-Beamtalk process
+When exactly one side has a readable start time, that side is kept (BT-4937:
+an actor started by an older runtime during a rolling upgrade, ADR 0125, never
+wrote one). Falls back to OTP's own `global:random_exit_name/3` tie-break when
+a start time cannot be read for either side (e.g. a raw, non-Beamtalk process
 happens to hold the conflicting registration, or the actor terminated in
 the narrow window between the conflict being detected and this function
 running) — `global_name_server` calls this synchronously and expects a
@@ -623,6 +625,15 @@ resolve_global_conflict(Name, Pid1, Pid2) ->
                 end,
             stop_global_conflict_loser(Loser),
             Winner;
+        {T1, undefined} when is_integer(T1) ->
+            %% BT-4937 mixed case: only Pid1 has a start time (Pid2 was started
+            %% by an older runtime that never wrote one, or is a `native:`
+            %% backing process). Keep the one that has a time (ADR 0126 §4).
+            stop_global_conflict_loser(Pid2),
+            Pid1;
+        {undefined, T2} when is_integer(T2) ->
+            stop_global_conflict_loser(Pid1),
+            Pid2;
         _ ->
             %% `global:random_exit_name/3` always returns one of its two
             %% candidate pids (never `none`) per its own typespec.

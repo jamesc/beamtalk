@@ -1,0 +1,88 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4937: every compiled actor records '$beamtalk_actor_started_at' in its own
+// init/1, so `beamtalk_actor_registry:resolve_global_conflict/3` (ADR 0126 §4)
+// keeps the OLDER registrant instead of falling back to a random force-kill.
+
+TestCase subclass: ActorStartedAtTest
+  startedAt: actor :: Actor -> Integer =>
+    Erlang beamtalk_actor_registry started_at_from_dictionary: actor pid
+
+  testPlainSpawnRecordsStartTime =>
+    a := Counter spawn
+    t := self startedAt: a
+    self assert: (Erlang erlang is_integer: t)
+    a stop
+
+  testSubclassRecordsStartTimeOnce =>
+    // A subclass's init/1 calls the parent's as a state-building helper; the
+    // parent must not overwrite the leaf's single write.
+    a := Counter spawn
+    t1 := self startedAt: a
+    a increment
+    self assert: (self startedAt: a) equals: t1
+    a stop
+
+  testOlderActorHasSmallerStartTime =>
+    older := Counter spawn
+    Timer sleep: 5
+    younger := Counter spawn
+    self assert: (self startedAt: older) < (self startedAt: younger)
+    older stop
+    younger stop
+
+  // === Every start path writes the key ===
+
+  testSpawnMonitoredRecordsStartTime =>
+    pair := Counter spawnMonitored
+    a := pair at: 1
+    self assert: (Erlang erlang is_integer: (self startedAt: a))
+    a stop
+
+  testSpawnMonitoredAsyncRecordsStartTime =>
+    pair := Counter spawnMonitoredAsync
+    a := pair at: 1
+    // A synchronous send is ordered after init/1, which the async spawn does not wait for.
+    a getValue
+    self assert: (Erlang erlang is_integer: (self startedAt: a))
+    a stop
+
+  testSupervisedChildRecordsStartTime =>
+    sup := Bt3966PoolSup spawn
+    child := sup children first asType: Actor
+    self assert: (Erlang erlang is_integer: (self startedAt: child))
+    sup stop
+
+  testNamedLocalChildRecordsStartTime =>
+    name := #bt4937LocalName
+    a := (NamedCounter spawnAs: name scope: #local) unwrap
+    self assert: (Erlang erlang is_integer: (self startedAt: a))
+    a stop
+
+  testNamedGlobalChildRecordsStartTime =>
+    name := #bt4937GlobalName
+    a := (NamedCounter spawnAs: name scope: #global) unwrap
+    self assert: (Erlang erlang is_integer: (self startedAt: a))
+    a stop
+
+  // `global:random_exit_name/3` (the fallback when no start time is readable) is
+  // not random: on one node it keeps its SECOND pid argument. So both argument
+  // orders are checked, otherwise one of them passes by accident.
+  testResolveGlobalConflictKeepsOlderWhenOlderIsFirst =>
+    older := Counter spawn
+    Timer sleep: 5
+    younger := Counter spawn
+    winner := Erlang beamtalk_actor_registry resolve_global_conflict: #bt4937First pid1: older pid pid2: younger pid
+    self assert: winner equals: older pid
+    older stop
+    younger stop
+
+  testResolveGlobalConflictKeepsOlderWhenOlderIsSecond =>
+    older := Counter spawn
+    Timer sleep: 5
+    younger := Counter spawn
+    winner := Erlang beamtalk_actor_registry resolve_global_conflict: #bt4937Second pid1: younger pid pid2: older pid
+    self assert: winner equals: older pid
+    older stop
+    younger stop
