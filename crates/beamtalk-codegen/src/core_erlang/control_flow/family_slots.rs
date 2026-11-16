@@ -63,7 +63,7 @@ use super::super::threaded_ir::{
 };
 use super::analysis::ThreadedFamilies;
 use super::plan::{LoopFamilyParam, ThreadingPlan};
-use beamtalk_cerl_doc::Document;
+use beamtalk_cerl_doc::{Document, form};
 use beamtalk_cerl_doc::{docvec, leaf};
 use beamtalk_core::source_analysis::Span;
 
@@ -404,14 +404,9 @@ impl FoldFamilySlots {
     }
 
     fn element_binding(var: &str, tuple_var: &str, index: usize) -> Document<'static> {
-        docvec![
-            "let ",
+        form::let_prefix(
             leaf::var(var.to_string()),
-            " = call 'erlang':'element'(",
-            leaf::int_lit(i64::try_from(index).unwrap_or(i64::MAX)),
-            ", ",
-            leaf::var(tuple_var.to_string()),
-            ") in ",
-        ]
+            form::element(index, leaf::var(tuple_var.to_string())),
+        )
     }
 }
