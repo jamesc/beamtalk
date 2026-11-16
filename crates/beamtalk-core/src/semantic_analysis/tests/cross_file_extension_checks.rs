@@ -190,3 +190,128 @@ fn cross_file_native_delegate_extension_is_not_hinted() {
     );
     assert_eq!(nested_string_hints(&d), 0, "{d:?}");
 }
+
+// ---- BT-4930: `Foo >> sel => self delegate` on a `native:` class ----
+//
+// Codegen compiles a cross-file extension as a foreign extension fun, where
+// `self delegate` is a plain send that never reaches the backing module and
+// raises at run time. So the definition is a compile error, and the native
+// delegate checks (return type, reserved word) do not run for it. Inline and
+// same-file forms are folded into the class body and keep those checks.
+
+const NATIVE_VALUE: &str = "Value subclass: Host native: host_backing\n  \
+                            ping -> Integer => self delegate\n";
+
+fn has(d: &[Diagnostic], needle: &str) -> bool {
+    d.iter().any(|d| d.message.contains(needle))
+}
+
+fn cross_file_delegate_errors(d: &[Diagnostic]) -> Vec<&Diagnostic> {
+    d.iter()
+        .filter(|d| d.message.contains("will not reach the backing module"))
+        .collect()
+}
+
+#[test]
+fn cross_file_self_delegate_on_native_class_is_one_error() {
+    let d = cross_file(NATIVE_VALUE, "Host >> cross => self delegate\n");
+    let hits = cross_file_delegate_errors(&d);
+    assert_eq!(hits.len(), 1, "{d:?}");
+    assert_eq!(hits[0].severity, crate::source_analysis::Severity::Error);
+    assert!(hits[0].message.contains("`cross`"), "{}", hits[0].message);
+    assert!(
+        hits[0]
+            .hint
+            .as_deref()
+            .is_some_and(|h| h.contains("same file")),
+        "{:?}",
+        hits[0].hint
+    );
+}
+
+#[test]
+fn cross_file_self_delegate_does_not_get_the_native_delegate_checks() {
+    // No return-type warning, and no reserved-word error for `case:`: only the
+    // new error fires, once per method.
+    let d = cross_file(
+        NATIVE_VALUE,
+        "Host >> cross => self delegate\nHost >> case: x :: Integer -> Integer => self delegate\n",
+    );
+    assert_eq!(cross_file_delegate_errors(&d).len(), 2, "{d:?}");
+    assert!(!has(&d, "without a return type annotation"), "{d:?}");
+    assert!(!has(&d, "reserved word"), "{d:?}");
+}
+
+#[test]
+fn cross_file_class_side_self_delegate_on_native_class_is_an_error() {
+    let d = cross_file(
+        NATIVE_VALUE,
+        "Host class >> make -> Integer => self delegate\n",
+    );
+    assert_eq!(cross_file_delegate_errors(&d).len(), 1, "{d:?}");
+}
+
+#[test]
+fn cross_file_non_delegate_extension_on_native_class_is_silent() {
+    let d = cross_file(NATIVE_VALUE, "Host >> plain -> Integer => 1\n");
+    assert!(cross_file_delegate_errors(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn cross_file_self_delegate_on_non_native_class_is_silent() {
+    // `delegate` on a non-native class is a plain send everywhere.
+    let d = cross_file(
+        "Value subclass: Plain\n  ping => 1\n",
+        "Plain >> cross => self delegate\nPlain >> case: x :: Integer -> Integer => self delegate\n",
+    );
+    assert!(!has(&d, "self delegate"), "{d:?}");
+}
+
+#[test]
+fn same_file_self_delegate_keeps_the_native_checks_and_gets_no_new_error() {
+    // Same-file is folded into the class and codegen lowers it through the
+    // backing module, so the return-type warning stays and the new error does not fire.
+    let src = format!("{NATIVE_VALUE}Host >> cross => self delegate\n");
+    let d = analyse_full(&parse_bt(&src), AnalysisContext::default()).diagnostics;
+    assert!(
+        has(
+            &d,
+            "Method `cross` uses `self delegate` without a return type"
+        ),
+        "{d:?}"
+    );
+    assert!(cross_file_delegate_errors(&d).is_empty(), "{d:?}");
+
+    let src = format!("{NATIVE_VALUE}Host >> case: x :: Integer -> Integer => self delegate\n");
+    let d = analyse_full(&parse_bt(&src), AnalysisContext::default()).diagnostics;
+    assert!(has(&d, "lowers to the Erlang function `case`"), "{d:?}");
+    assert!(cross_file_delegate_errors(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn binary_only_native_class_is_native_when_the_flag_is_carried() {
+    // `decode.rs` now reads the native flag from `__beamtalk_meta`, so a class
+    // that arrives from a compiled dependency (`is_native: true`) gets the
+    // same verdict as one declared in source.
+    let infos = declared_by("app", NATIVE_VALUE);
+    assert!(infos.iter().any(|i| i.is_native));
+    let ctx = AnalysisContext::default()
+        .with_current_package("app")
+        .with_pre_loaded_classes(infos);
+    let d = analyse_full(&parse_bt("Host >> cross => self delegate\n"), ctx).diagnostics;
+    assert_eq!(cross_file_delegate_errors(&d).len(), 1, "{d:?}");
+}
+
+#[test]
+fn binary_only_class_without_the_native_flag_is_not_native() {
+    // Old `.beam` files carry no flag and decode as non-native: no checks.
+    let mut infos = declared_by("app", NATIVE_VALUE);
+    for info in &mut infos {
+        info.is_native = false;
+    }
+    let ctx = AnalysisContext::default()
+        .with_current_package("app")
+        .with_pre_loaded_classes(infos);
+    let d = analyse_full(&parse_bt("Host >> cross => self delegate\n"), ctx).diagnostics;
+    assert!(!has(&d, "self delegate"), "{d:?}");
+}
