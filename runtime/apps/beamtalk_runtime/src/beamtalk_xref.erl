@@ -479,6 +479,10 @@ reject for over-long inputs.
 """.
 -spec sends_from_source(term()) -> [send_entry()].
 sends_from_source(Source) when is_binary(Source), Source =/= <<>> ->
+    %% `function_exported/3` is false for a module that is not loaded yet, which
+    %% in interactive code-loading mode is the case until something calls the
+    %% facade (BT-4938). Loading it first makes the guard mean "available".
+    _ = code:ensure_loaded(beamtalk_compiler),
     case erlang:function_exported(beamtalk_compiler, find_all_sends_in_source, 1) of
         false ->
             [];

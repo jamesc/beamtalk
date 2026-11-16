@@ -191,13 +191,11 @@ impl CoreErlangGenerator {
                                 leaf::var(core_var.clone()),
                                 " = ",
                                 // BT-4366: nested in a `let`/`case`, so the call carries the line itself.
-                                self.annotate_current_send_call(docvec![
-                                    "call 'beamtalk_message_dispatch':'send'(",
+                                self.runtime_send_call(
                                     leaf::var(rhs_var.to_string()),
-                                    ", 'at:', [",
-                                    one_based,
-                                    "])"
-                                ]),
+                                    "at:",
+                                    vec![one_based]
+                                ),
                                 terminator,
                             ]);
                             bound_pairs.push((id.name.to_string(), core_var));
@@ -215,13 +213,11 @@ impl CoreErlangGenerator {
                                 leaf::var(elem_var.clone()),
                                 " = ",
                                 // BT-4366: nested in a `let`/`case`, so the call carries the line itself.
-                                self.annotate_current_send_call(docvec![
-                                    "call 'beamtalk_message_dispatch':'send'(",
+                                self.runtime_send_call(
                                     leaf::var(rhs_var.to_string()),
-                                    ", 'at:', [",
-                                    one_based,
-                                    "])"
-                                ]),
+                                    "at:",
+                                    vec![one_based]
+                                ),
                                 terminator,
                             ]);
                             let mismatch_raise = self.pattern_mismatch_raise_doc(

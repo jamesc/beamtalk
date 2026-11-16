@@ -10,11 +10,12 @@
 //! and `terminate/2`.
 
 use super::super::actor_state_access::{actor_state_call, actor_state_helper};
+use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
 use super::super::exception_forms::{CatchVars, build_caught_triple_doc, wrap_and_reraise_doc};
 use super::super::{CoreErlangGenerator, Result};
 use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::form::Layout;
+use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{ClassDefinition, Expression, Module, SlotKind};
 use ecow::EcoString;
@@ -185,6 +186,94 @@ impl PdictVars {
             clear: format!("_ClearStack{idx}"),
         }
     }
+}
+
+/// The pieces that vary between the three "log the error, then stop" arms
+/// of the generated `init/1` (BT-4887).
+struct LogAndStop<'a> {
+    /// Variable bound to `beamtalk_error:format_safe/1,2`'s message.
+    msg_var: String,
+    /// Variable bound to the class's `class_name/0`.
+    class_name_var: String,
+    /// The class module whose `class_name/0` is called.
+    module_name: &'a str,
+    /// The arguments of `format_safe` (one error, or `{Type, Reason}, Stack`).
+    format_safe_args: Document<'static>,
+    /// An extra `let <var> = beamtalk_error:format(<arg>) in` between the
+    /// class-name and the logger call (the uninitialized-field arm stops with
+    /// the formatted error rather than the raw one).
+    formatted_var: Option<(String, Document<'static>)>,
+    /// The logger's `'reason'` value.
+    reason: Document<'static>,
+    /// The logger's optional `'stacktrace'` value.
+    stacktrace: Option<Document<'static>>,
+    /// The first element after `'stop'`.
+    stop_reason: Document<'static>,
+    /// The state element of the `{'stop', Reason, State}` tuple.
+    stop_state: Document<'static>,
+}
+
+/// BT-4887: the one "`format_safe` + `class_name` + `logger:error` + `{'stop', …}`"
+/// arm shared by the generated `init/1`'s uninitialized-field check and its
+/// two `{'error', …}` result clauses.
+fn log_and_stop_arm(arm: LogAndStop<'_>) -> Document<'static> {
+    let mut parts: Vec<Document<'static>> = vec![
+        docvec![
+            "let ",
+            leaf::var(arm.msg_var.clone()),
+            " = ",
+            form::call("beamtalk_error", "format_safe", [arm.format_safe_args]),
+            " in",
+        ],
+        line(),
+        docvec![
+            "let ",
+            leaf::var(arm.class_name_var.clone()),
+            " = ",
+            form::call(arm.module_name, "class_name", []),
+            " in",
+        ],
+        line(),
+    ];
+    if let Some((var, arg)) = arm.formatted_var {
+        parts.push(docvec![
+            "let ",
+            leaf::var(var),
+            " = ",
+            form::call("beamtalk_error", "format", [arg]),
+            " in",
+        ]);
+        parts.push(line());
+    }
+    let mut log_map = vec![
+        Document::Str("~{'class' => "),
+        leaf::var(arm.class_name_var),
+        Document::Str(", 'reason' => "),
+        arm.reason,
+    ];
+    if let Some(stack) = arm.stacktrace {
+        log_map.push(Document::Str(", 'stacktrace' => "));
+        log_map.push(stack);
+    }
+    log_map.push(Document::Str(", 'domain' => ['beamtalk'|['runtime'|[]]]}~"));
+    parts.push(docvec![
+        "let _ = ",
+        form::call(
+            "logger",
+            "error",
+            [leaf::var(arm.msg_var), Document::Vec(log_map)]
+        ),
+        " in",
+    ]);
+    parts.push(line());
+    parts.push(docvec![
+        "{'stop', ",
+        arm.stop_reason,
+        ", ",
+        arm.stop_state,
+        "}"
+    ]);
+    Document::Vec(parts)
 }
 
 impl CoreErlangGenerator {
@@ -849,53 +938,36 @@ impl CoreErlangGenerator {
                             INDENT,
                             docvec![
                                 line(),
-                                "let ",
-                                leaf::var(err_var0.clone()),
-                                " = call 'beamtalk_error':'new'('uninitialized_state_error', ",
-                                leaf::atom(owning_class.to_string()),
-                                ") in",
-                                line(),
-                                "let ",
-                                leaf::var(err_var1.clone()),
-                                " = call 'beamtalk_error':'with_hint'(",
-                                leaf::var(err_var0),
-                                ", ",
-                                leaf::binary_lit(&hint_msg),
-                                ") in",
-                                line(),
-                                "let ",
-                                leaf::var(err_msg_var.clone()),
-                                " = call 'beamtalk_error':'format_safe'(",
-                                leaf::var(err_var1.clone()),
-                                ") in",
-                                line(),
-                                "let ",
-                                leaf::var(class_name_var.clone()),
-                                " = call ",
-                                leaf::atom(self.module_name.clone()),
-                                ":'class_name'() in",
-                                line(),
-                                "let ",
-                                leaf::var(fmt_var.clone()),
-                                " = call 'beamtalk_error':'format'(",
-                                leaf::var(err_var1.clone()),
-                                ") in",
-                                line(),
-                                "let _ = call 'logger':'error'(",
-                                leaf::var(err_msg_var),
-                                ", ~{'class' => ",
-                                leaf::var(class_name_var),
-                                ", 'reason' => ",
-                                leaf::var(err_var1),
-                                ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
-                                line(),
+                                BeamtalkErrorChain::new(
+                                    "uninitialized_state_error",
+                                    leaf::atom(owning_class.to_string())
+                                )
+                                .hint(leaf::binary_lit(&hint_msg))
+                                .build(
+                                    vec![
+                                        ErrorBinding::plain(err_var0),
+                                        ErrorBinding::plain(err_var1.clone()),
+                                    ],
+                                    line(),
+                                ),
                                 // terminating path — the state flows to
                                 // terminate/2, not persistence, so no clean-up contract
                                 // applies; use the cleaned binding for consistency with
                                 // the success arm.
-                                "{'stop', ",
-                                leaf::var(fmt_var),
-                                ", InitCleanState}",
+                                log_and_stop_arm(LogAndStop {
+                                    msg_var: err_msg_var,
+                                    class_name_var,
+                                    module_name: &self.module_name,
+                                    format_safe_args: leaf::var(err_var1.clone()),
+                                    formatted_var: Some((
+                                        fmt_var.clone(),
+                                        leaf::var(err_var1.clone())
+                                    )),
+                                    reason: leaf::var(err_var1),
+                                    stacktrace: None,
+                                    stop_reason: leaf::var(fmt_var),
+                                    stop_state: Document::Str("InitCleanState"),
+                                }),
                             ]
                         ),
                         line(),
@@ -1353,51 +1425,38 @@ impl CoreErlangGenerator {
                                 INDENT,
                                 docvec![
                                     line(),
-                                    docvec![
-                                        "let ",
-                                        leaf::var(err_msg.clone()),
-                                        " = call 'beamtalk_error':'format_safe'({",
-                                        leaf::var(err_triple_type.clone()),
-                                        ", ",
-                                        leaf::var(err_triple_reason.clone()),
-                                        "}, ",
-                                        leaf::var(err_triple_stack.clone()),
-                                        ") in",
-                                    ],
-                                    line(),
-                                    docvec![
-                                        "let ",
-                                        leaf::var(err_class_name_var.clone()),
-                                        " = call ",
-                                        leaf::atom(class.module_name.clone()),
-                                        ":'class_name'() in",
-                                    ],
-                                    line(),
-                                    docvec![
-                                        "let _ = call 'logger':'error'(",
-                                        leaf::var(err_msg),
-                                        ", ~{'class' => ",
-                                        leaf::var(err_class_name_var),
-                                        ", 'reason' => {",
-                                        leaf::var(err_triple_type.clone()),
-                                        ", ",
-                                        leaf::var(err_triple_reason.clone()),
-                                        "}, 'stacktrace' => ",
-                                        leaf::var(err_triple_stack.clone()),
-                                        ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
-                                    ],
-                                    line(),
-                                    docvec![
-                                        "{'stop', {",
-                                        leaf::var(err_triple_type),
-                                        ", ",
-                                        leaf::var(err_triple_reason),
-                                        ", ",
-                                        leaf::var(err_triple_stack),
-                                        "}, ",
-                                        leaf::var(err_state_var),
-                                        "}",
-                                    ],
+                                    log_and_stop_arm(LogAndStop {
+                                        msg_var: err_msg,
+                                        class_name_var: err_class_name_var,
+                                        module_name: &class.module_name,
+                                        format_safe_args: docvec![
+                                            "{",
+                                            leaf::var(err_triple_type.clone()),
+                                            ", ",
+                                            leaf::var(err_triple_reason.clone()),
+                                            "}, ",
+                                            leaf::var(err_triple_stack.clone()),
+                                        ],
+                                        formatted_var: None,
+                                        reason: docvec![
+                                            "{",
+                                            leaf::var(err_triple_type.clone()),
+                                            ", ",
+                                            leaf::var(err_triple_reason.clone()),
+                                            "}"
+                                        ],
+                                        stacktrace: Some(leaf::var(err_triple_stack.clone())),
+                                        stop_reason: docvec![
+                                            "{",
+                                            leaf::var(err_triple_type),
+                                            ", ",
+                                            leaf::var(err_triple_reason),
+                                            ", ",
+                                            leaf::var(err_triple_stack),
+                                            "}"
+                                        ],
+                                        stop_state: leaf::var(err_state_var),
+                                    }),
                                 ]
                             ),
                             line(),
@@ -1413,39 +1472,17 @@ impl CoreErlangGenerator {
                                 INDENT,
                                 docvec![
                                     line(),
-                                    docvec![
-                                        "let ",
-                                        leaf::var(err_msg2.clone()),
-                                        " = call 'beamtalk_error':'format_safe'(",
-                                        leaf::var(err_plain.clone()),
-                                        ") in",
-                                    ],
-                                    line(),
-                                    docvec![
-                                        "let ",
-                                        leaf::var(err_class_name_var2.clone()),
-                                        " = call ",
-                                        leaf::atom(class.module_name.clone()),
-                                        ":'class_name'() in",
-                                    ],
-                                    line(),
-                                    docvec![
-                                        "let _ = call 'logger':'error'(",
-                                        leaf::var(err_msg2),
-                                        ", ~{'class' => ",
-                                        leaf::var(err_class_name_var2),
-                                        ", 'reason' => ",
-                                        leaf::var(err_plain.clone()),
-                                        ", 'domain' => ['beamtalk'|['runtime'|[]]]}~) in",
-                                    ],
-                                    line(),
-                                    docvec![
-                                        "{'stop', ",
-                                        leaf::var(err_plain),
-                                        ", ",
-                                        leaf::var(err_state_var2),
-                                        "}",
-                                    ],
+                                    log_and_stop_arm(LogAndStop {
+                                        msg_var: err_msg2,
+                                        class_name_var: err_class_name_var2,
+                                        module_name: &class.module_name,
+                                        format_safe_args: leaf::var(err_plain.clone()),
+                                        formatted_var: None,
+                                        reason: leaf::var(err_plain.clone()),
+                                        stacktrace: None,
+                                        stop_reason: leaf::var(err_plain),
+                                        stop_state: leaf::var(err_state_var2),
+                                    }),
                                 ]
                             ),
                         ]

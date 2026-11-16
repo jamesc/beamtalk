@@ -187,6 +187,7 @@ mod expression_assignment;
 mod load_project_parity;
 mod module_naming_and_misc;
 mod protocol_sources_wire;
+mod reply_atoms;
 mod same_file_extension_fold;
 mod source_queries;
 mod span_resolution;

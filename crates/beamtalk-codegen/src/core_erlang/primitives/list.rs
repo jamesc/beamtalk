@@ -8,7 +8,8 @@
 //! Lists are Erlang linked lists — fast prepend, sequential access.
 //! Complex operations delegate to `beamtalk_list` helper module.
 
-use super::{build_error_doc, call_p0_self, call_self_p0, param};
+use super::{call_p0_self, call_self_p0, param};
+use crate::core_erlang::errors::{BeamtalkErrorChain, ErrorBinding};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -28,6 +29,27 @@ pub(crate) fn generate_list_bif(selector: &str, params: &[String]) -> Option<Doc
     }
 }
 
+/// The `empty_collection` raise of `first`/`last` on an empty list:
+/// `new → with_selector → with_hint → raise`.
+fn empty_list_raise_doc(selector: &'static str) -> Document<'static> {
+    docvec![
+        BeamtalkErrorChain::new("empty_collection", leaf::atom("List"))
+            .selector(leaf::atom(selector))
+            .hint(leaf::binary_lit(
+                "List is empty; guard with `isEmpty` or use `detect:ifNone:`"
+            ))
+            .build(
+                vec![
+                    ErrorBinding::plain("Error0"),
+                    ErrorBinding::plain("Error1"),
+                    ErrorBinding::plain("Error2"),
+                ],
+                Document::Str(" "),
+            ),
+        "call 'beamtalk_error':'raise'(Error2)",
+    ]
+}
+
 fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     match selector {
         "size" => Some(Document::Str("call 'erlang':'length'(Self)")),
@@ -37,12 +59,7 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
         // it just has no element to answer. `rest` is deliberately total (see
         // below), so only the element accessors raise here.
         "first" => {
-            let error = build_error_doc(
-                "empty_collection",
-                "List",
-                "first",
-                "List is empty; guard with `isEmpty` or use `detect:ifNone:`",
-            );
+            let error = empty_list_raise_doc("first");
             Some(docvec![
                 "case Self of \
                  <[H|_T]> when 'true' -> H \
@@ -63,12 +80,7 @@ fn generate_list_access_bif(selector: &str, params: &[String]) -> Option<Documen
              end",
         )),
         "last" => {
-            let error = build_error_doc(
-                "empty_collection",
-                "List",
-                "last",
-                "List is empty; guard with `isEmpty` or use `detect:ifNone:`",
-            );
+            let error = empty_list_raise_doc("last");
             Some(docvec![
                 "case Self of \
                  <[]> when 'true' -> \

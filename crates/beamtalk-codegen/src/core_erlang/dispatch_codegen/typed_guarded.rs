@@ -15,7 +15,7 @@ use crate::core_erlang::expr_shape::is_character_typed_receiver;
 use crate::core_erlang::routing;
 use crate::core_erlang::{CodeGenError, CoreErlangGenerator, Result};
 
-use super::HANDLERS;
+use super::{HANDLERS, runtime_send_doc, send_arg_list_doc};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -269,11 +269,13 @@ impl CoreErlangGenerator {
             }
             Some(WellKnownSelector::RespondsTo) => {
                 let exprs: [&Expression; 2] = [receiver, &arguments[0]];
-                let mut seq = self.sequence_call(&exprs, "CharResp")?;
-                let _recv = seq.next();
-                let sel_doc = seq.next();
-                let call_doc = docvec!["call 'bt@stdlib@character':'has_method'(", sel_doc, ")"];
-                return Ok(Some(seq.close(self, call_doc, "CharRespRes")));
+                return Ok(Some(self.sequenced_runtime_call(
+                    "bt@stdlib@character",
+                    "has_method",
+                    &exprs,
+                    "CharResp",
+                    |operands| operands.into_iter().skip(1).collect(),
+                )?));
             }
             Some(
                 WellKnownSelector::Perform
@@ -337,21 +339,21 @@ impl CoreErlangGenerator {
         for arg in arguments {
             all_exprs.push(arg);
         }
-        let mut seq = self.sequence_call(&all_exprs, "CharDisp")?;
-        let actual_receiver = seq.next();
-        let args_doc = Self::join_docs_with_commas(seq.rest());
-
-        let call_doc = docvec![
-            "call 'bt@stdlib@character':'dispatch'(",
-            leaf::atom(selector_atom),
-            ", [",
-            args_doc,
-            "], ",
-            actual_receiver,
-            ")"
-        ];
-
-        Ok(seq.close(self, call_doc, "CharDispRes"))
+        self.sequenced_runtime_call(
+            "bt@stdlib@character",
+            "dispatch",
+            &all_exprs,
+            "CharDisp",
+            |operands| {
+                let mut operands = operands.into_iter();
+                let actual_receiver = operands.next().expect("receiver operand");
+                vec![
+                    leaf::atom(selector_atom),
+                    send_arg_list_doc(operands.collect()),
+                    actual_receiver,
+                ]
+            },
+        )
     }
 
     /// BT-4069, BT-4294: the receiver's trusted static class — the class
@@ -892,15 +894,12 @@ impl CoreErlangGenerator {
         let args_list_doc = Self::join_docs_with_commas(
             arg_vars.iter().map(|var| leaf::var(var.clone())).collect(),
         );
-        let fallback_doc = self.annotate_current_send_call(docvec![
-            "call 'beamtalk_message_dispatch':'send'(",
+        let fallback_doc = self.annotate_current_send_call(runtime_send_doc(
             leaf::var(receiver_var.to_string()),
-            ", ",
             leaf::atom(selector_atom.to_string()),
-            ", [",
-            args_list_doc.clone(),
-            "])",
-        ]);
+            docvec!["[", args_list_doc.clone(), "]"],
+            None,
+        ));
         self.guard_around(
             target,
             selector_atom,

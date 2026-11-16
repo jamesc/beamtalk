@@ -27,6 +27,7 @@ use super::threaded_ir::{CallSiteLine, ThreadedStmt, VerifyError};
 use super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression};
 use beamtalk_core::source_analysis::Span;
@@ -615,6 +616,27 @@ impl CoreErlangGenerator {
             prelude,
             docs: docs.into(),
         })
+    }
+
+    /// BT-4887: the sequenced runtime call — `sequence_call(operands, tag)`,
+    /// then one `call 'module':'function'(…)` over the threaded operand
+    /// documents, then `close` with result prefix `<tag>Res`. `layout` maps the
+    /// threaded operand documents (in `operands` order) to the call's argument
+    /// documents, so each site keeps its own argument order, literals and
+    /// list wrapping. `layout` mints no variables, so fresh-variable numbering
+    /// is the same as the hand-written five-step form it replaces.
+    pub(super) fn sequenced_runtime_call(
+        &mut self,
+        module: &str,
+        function: &str,
+        operands: &[&Expression],
+        tag: &str,
+        layout: impl FnOnce(Vec<Document<'static>>) -> Vec<Document<'static>>,
+    ) -> Result<Document<'static>> {
+        let mut seq = self.sequence_call(operands, tag)?;
+        let docs = seq.rest();
+        let call_doc = form::call(module, function, layout(docs));
+        Ok(seq.close(self, call_doc, &[tag, "Res"].concat()))
     }
 
     /// The one temp-binding step behind every "hoist an earlier

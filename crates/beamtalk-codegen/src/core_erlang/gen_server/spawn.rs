@@ -207,17 +207,19 @@ impl CoreErlangGenerator {
                                 docvec![
                                     line(),
                                     // Include the actual error reason in the hint
-                                    super::super::errors::beamtalk_error_doc(
-                                        Document::Str("SpawnErr0"),
-                                        Document::Str("SpawnErr0"),
-                                        Document::Str("SpawnErr1"),
-                                        Document::Str("SpawnErr1"),
-                                        Document::Str("SpawnErr2"),
+                                    super::super::errors::BeamtalkErrorChain::new(
                                         "instantiation_error",
-                                        leaf::atom(class_name.to_owned()),
-                                        leaf::atom(selector),
-                                        Document::Str("Reason"),
-                                        line(),
+                                        leaf::atom(class_name.to_owned())
+                                    )
+                                    .selector(leaf::atom(selector))
+                                    .hint(Document::Str("Reason"))
+                                    .build(
+                                        vec![
+                                            super::super::errors::ErrorBinding::plain("SpawnErr0"),
+                                            super::super::errors::ErrorBinding::plain("SpawnErr1"),
+                                            super::super::errors::ErrorBinding::plain("SpawnErr2")
+                                        ],
+                                        line()
                                     ),
                                     "call 'beamtalk_error':'raise'(SpawnErr2)",
                                 ]
@@ -394,19 +396,21 @@ impl CoreErlangGenerator {
                                 INDENT,
                                 docvec![
                                     line(),
-                                    super::super::errors::beamtalk_error_doc(
-                                        Document::Str("TypeErr0"),
-                                        Document::Str("TypeErr0"),
-                                        Document::Str("TypeErr1"),
-                                        Document::Str("TypeErr1"),
-                                        Document::Str("TypeErr2"),
+                                    super::super::errors::BeamtalkErrorChain::new(
                                         "type_error",
-                                        leaf::atom(class_name.clone()),
-                                        leaf::atom(selector),
-                                        leaf::binary_lit(format!(
-                                            "{selector} expects a Dictionary argument"
-                                        )),
-                                        line(),
+                                        leaf::atom(class_name.clone())
+                                    )
+                                    .selector(leaf::atom(selector))
+                                    .hint(leaf::binary_lit(format!(
+                                        "{selector} expects a Dictionary argument"
+                                    )))
+                                    .build(
+                                        vec![
+                                            super::super::errors::ErrorBinding::plain("TypeErr0"),
+                                            super::super::errors::ErrorBinding::plain("TypeErr1"),
+                                            super::super::errors::ErrorBinding::plain("TypeErr2")
+                                        ],
+                                        line()
                                     ),
                                     "call 'beamtalk_error':'raise'(TypeErr2)",
                                 ]
@@ -577,17 +581,19 @@ impl CoreErlangGenerator {
         hint: &str,
     ) -> Document<'static> {
         docvec![
-            super::super::errors::beamtalk_error_doc(
-                Document::Str("Error0"),
-                Document::Str("Error0"),
-                Document::Str("Error1"),
-                Document::Str("Error1"),
-                Document::Str("Error2"),
+            super::super::errors::BeamtalkErrorChain::new(
                 "instantiation_error",
-                leaf::atom(class_name),
-                leaf::atom(selector),
-                leaf::binary_lit(hint),
-                line(),
+                leaf::atom(class_name)
+            )
+            .selector(leaf::atom(selector))
+            .hint(leaf::binary_lit(hint))
+            .build(
+                vec![
+                    super::super::errors::ErrorBinding::plain("Error0"),
+                    super::super::errors::ErrorBinding::plain("Error1"),
+                    super::super::errors::ErrorBinding::plain("Error2")
+                ],
+                line()
             ),
             "call 'beamtalk_error':'raise'(Error2)",
         ]

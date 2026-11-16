@@ -1254,17 +1254,19 @@ impl CoreErlangGenerator {
         let error_sel = self.fresh_temp_var("Err");
         let error_hint = self.fresh_temp_var("Err");
         docvec![
-            super::super::errors::beamtalk_error_doc(
-                leaf::var(error_base.clone()),
-                leaf::var(error_base),
-                leaf::var(error_sel.clone()),
-                leaf::var(error_sel),
-                leaf::var(error_hint.clone()),
+            super::super::errors::BeamtalkErrorChain::new(
                 "stateful_block_dispatch",
-                leaf::atom(class_name.to_string()),
-                leaf::atom(real_selector.to_string()),
-                leaf::binary_lit(hint_text),
-                Document::Str(" "),
+                leaf::atom(class_name.to_string())
+            )
+            .selector(leaf::atom(real_selector.to_string()))
+            .hint(leaf::binary_lit(hint_text))
+            .build(
+                vec![
+                    super::super::errors::ErrorBinding::plain(error_base),
+                    super::super::errors::ErrorBinding::plain(error_sel),
+                    super::super::errors::ErrorBinding::plain(error_hint.clone())
+                ],
+                Document::Str(" ")
             ),
             form::call("beamtalk_error", "raise", [leaf::var(error_hint)]),
         ]

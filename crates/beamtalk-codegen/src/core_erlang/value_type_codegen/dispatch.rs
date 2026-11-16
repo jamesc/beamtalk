@@ -9,6 +9,7 @@
 use super::{DISPATCH_PREFIX_SELECTORS, OwnDispatchArm};
 
 use super::super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
+use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
 use super::super::value_accessors::{AutoSlotMethods, compute_auto_slot_methods};
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
@@ -145,12 +146,21 @@ impl CoreErlangGenerator {
                 &class_name,
                 docvec![
                     "                    let <DnuClass> = call 'beamtalk_primitive':'class_of'(Self) in\n",
-                    "                    let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass) in\n",
-                    "                    let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, Selector) in\n",
-                    "                    let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, ",
-                    leaf::binary_lit("Check spelling or use 'respondsTo:' to verify method exists"),
-                    ") in\n",
-                    "                    call 'beamtalk_error':'raise'(DnuErr2)\n",
+                    "                    ",
+                    BeamtalkErrorChain::new("does_not_understand", leaf::var("DnuClass"))
+                        .selector(leaf::var("Selector"))
+                        .hint(leaf::binary_lit(
+                            "Check spelling or use 'respondsTo:' to verify method exists"
+                        ))
+                        .build(
+                            vec![
+                                ErrorBinding::bracketed("DnuErr0"),
+                                ErrorBinding::bracketed("DnuErr1"),
+                                ErrorBinding::bracketed("DnuErr2"),
+                            ],
+                            Document::Str("\n                    "),
+                        ),
+                    "call 'beamtalk_error':'raise'(DnuErr2)\n",
                 ],
             )
         };
@@ -171,26 +181,36 @@ impl CoreErlangGenerator {
             has_field_branch,
             // fieldAt:put:
             "        <'fieldAt:put:'> when 'true' ->\n",
-            "            let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', ",
-            leaf::atom(class_name.clone()),
-            ") in\n",
-            "            let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'fieldAt:put:') in\n",
-            "            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, ",
-            leaf::binary_lit(immutable_hint.clone()),
-            ") in\n",
-            "            call 'beamtalk_error':'raise'(ImmErr2)\n",
+            "            ",
+            BeamtalkErrorChain::new("immutable_value", leaf::atom(class_name.clone()))
+                .selector(leaf::atom("fieldAt:put:"))
+                .hint(leaf::binary_lit(immutable_hint.clone()))
+                .build(
+                    vec![
+                        ErrorBinding::bracketed("ImmErr0"),
+                        ErrorBinding::bracketed("ImmErr1"),
+                        ErrorBinding::bracketed("ImmErr2"),
+                    ],
+                    Document::Str("\n            "),
+                ),
+            "call 'beamtalk_error':'raise'(ImmErr2)\n",
             // clearField: — always the existing "Cannot modify slot on
             // value type" error (ADR 0124 §1/B4): a Value can never declare
             // a `late field:` (§5), so there is never a late slot to clear.
             "        <'clearField:'> when 'true' ->\n",
-            "            let <ClrErr0> = call 'beamtalk_error':'new'('immutable_value', ",
-            leaf::atom(class_name.clone()),
-            ") in\n",
-            "            let <ClrErr1> = call 'beamtalk_error':'with_selector'(ClrErr0, 'clearField:') in\n",
-            "            let <ClrErr2> = call 'beamtalk_error':'with_hint'(ClrErr1, ",
-            leaf::binary_lit(immutable_hint),
-            ") in\n",
-            "            call 'beamtalk_error':'raise'(ClrErr2)\n",
+            "            ",
+            BeamtalkErrorChain::new("immutable_value", leaf::atom(class_name.clone()))
+                .selector(leaf::atom("clearField:"))
+                .hint(leaf::binary_lit(immutable_hint))
+                .build(
+                    vec![
+                        ErrorBinding::bracketed("ClrErr0"),
+                        ErrorBinding::bracketed("ClrErr1"),
+                        ErrorBinding::bracketed("ClrErr2"),
+                    ],
+                    Document::Str("\n            "),
+                ),
+            "call 'beamtalk_error':'raise'(ClrErr2)\n",
             // perform:, perform:withArguments:
             Document::Vec(reflection_perform),
             // Class-defined method branches
@@ -341,14 +361,19 @@ impl CoreErlangGenerator {
             let iva_hint = format!("{class_name}s are immutable and have no fields.");
             docvec![
                 "        <'fieldAt:'> when 'true' ->\n",
-                "            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', ",
-                leaf::atom(class_name.to_string()),
-                ") in\n",
-                "            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'fieldAt:') in\n",
-                "            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, ",
-                leaf::binary_lit(iva_hint),
-                ") in\n",
-                "            call 'beamtalk_error':'raise'(IvaErr2)\n",
+                "            ",
+                BeamtalkErrorChain::new("immutable_value", leaf::atom(class_name.to_string()))
+                    .selector(leaf::atom("fieldAt:"))
+                    .hint(leaf::binary_lit(iva_hint))
+                    .build(
+                        vec![
+                            ErrorBinding::bracketed("IvaErr0"),
+                            ErrorBinding::bracketed("IvaErr1"),
+                            ErrorBinding::bracketed("IvaErr2"),
+                        ],
+                        Document::Str("\n            "),
+                    ),
+                "call 'beamtalk_error':'raise'(IvaErr2)\n",
             ]
         };
 
@@ -899,21 +924,23 @@ impl CoreErlangGenerator {
     fn arity_error_fragment(&self, selector: &str, expected_arity: u32) -> Document<'static> {
         let hint = format!("Expected {expected_arity} argument(s) for '{selector}'");
         docvec![
-            super::super::errors::beamtalk_error_doc(
-                Document::Str("<ArErr0>"),
-                Document::Str("ArErr0"),
-                Document::Str("<ArErr1>"),
-                Document::Str("ArErr1"),
-                Document::Str("<ArErr2>"),
+            super::super::errors::BeamtalkErrorChain::new(
                 "arity_mismatch",
                 form::call(
                     "beamtalk_tagged_map",
                     "class_of",
                     [var("State"), leaf::atom("Object")]
-                ),
-                leaf::atom(selector.to_string()),
-                leaf::binary_lit(hint),
-                line(),
+                )
+            )
+            .selector(leaf::atom(selector.to_string()))
+            .hint(leaf::binary_lit(hint))
+            .build(
+                vec![
+                    super::super::errors::ErrorBinding::bracketed("ArErr0"),
+                    super::super::errors::ErrorBinding::bracketed("ArErr1"),
+                    super::super::errors::ErrorBinding::bracketed("ArErr2")
+                ],
+                line()
             ),
             "{'error', ArErr2, State}",
         ]
@@ -925,21 +952,23 @@ impl CoreErlangGenerator {
     #[allow(clippy::unused_self)] // method on impl for API consistency
     fn type_error_fragment(&self, selector: &str, hint_msg: &str) -> Document<'static> {
         docvec![
-            super::super::errors::beamtalk_error_doc(
-                Document::Str("<TyErr0>"),
-                Document::Str("TyErr0"),
-                Document::Str("<TyErr1>"),
-                Document::Str("TyErr1"),
-                Document::Str("<TyErr2>"),
+            super::super::errors::BeamtalkErrorChain::new(
                 "type_error",
                 form::call(
                     "beamtalk_tagged_map",
                     "class_of",
                     [var("State"), leaf::atom("Object")]
-                ),
-                leaf::atom(selector.to_string()),
-                leaf::binary_lit(hint_msg),
-                line(),
+                )
+            )
+            .selector(leaf::atom(selector.to_string()))
+            .hint(leaf::binary_lit(hint_msg))
+            .build(
+                vec![
+                    super::super::errors::ErrorBinding::bracketed("TyErr0"),
+                    super::super::errors::ErrorBinding::bracketed("TyErr1"),
+                    super::super::errors::ErrorBinding::bracketed("TyErr2")
+                ],
+                line()
             ),
             "{'error', TyErr2, State}",
         ]
