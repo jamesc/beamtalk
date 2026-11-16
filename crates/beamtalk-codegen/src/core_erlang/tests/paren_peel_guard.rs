@@ -109,8 +109,16 @@ const CEILINGS: &[(&str, usize)] = &[
         6,
     ),
     (
+        "beamtalk-codegen/src/core_erlang/control_flow/conditional_arms.rs",
+        1,
+    ),
+    (
         "beamtalk-codegen/src/core_erlang/control_flow/conditionals.rs",
-        4,
+        1,
+    ),
+    (
+        "beamtalk-codegen/src/core_erlang/control_flow/inline_control_flow.rs",
+        2,
     ),
     (
         "beamtalk-codegen/src/core_erlang/control_flow/exception_handling.rs",
