@@ -18,7 +18,8 @@ stop/kill. Every stop waits on a monitor `'DOWN'`, never a `timer:sleep`.
     shutdown/1,
     await_down/2,
     stop_registered/1,
-    restart/1
+    restart/1,
+    in_fresh_process/1
 ]).
 
 -doc "Spawn an unlinked process that idles until it is killed or sent `stop`.".
@@ -131,4 +132,35 @@ await_down(MRef, Pid) ->
     after 5000 ->
         demonitor(MRef, [flush]),
         error({wait_timeout, {alive, [Pid]}})
+    end.
+
+-doc """
+Run `Fun()` in a short-lived process and return its result (a crash is
+re-raised in the caller). For a test that calls an actor's `init/1` inline:
+`init/1` writes the `'$beamtalk_actor'` marker into the calling process's
+dictionary, and a marker left on a shared test process makes that process an
+"actor" to every later scan (ADR 0150), listing it in actor lists.
+""".
+-spec in_fresh_process(fun(() -> T)) -> T when T :: term().
+in_fresh_process(Fun) ->
+    Parent = self(),
+    Ref = make_ref(),
+    {Pid, MonRef} = spawn_monitor(fun() ->
+        Parent !
+            {Ref,
+                try
+                    {ok, Fun()}
+                catch
+                    Class:Reason:Stack -> {raised, Class, Reason, Stack}
+                end}
+    end),
+    receive
+        {Ref, {ok, Result}} ->
+            erlang:demonitor(MonRef, [flush]),
+            Result;
+        {Ref, {raised, Class, Reason, Stack}} ->
+            erlang:demonitor(MonRef, [flush]),
+            erlang:raise(Class, Reason, Stack);
+        {'DOWN', MonRef, process, Pid, Why} ->
+            erlang:error({in_fresh_process_died, Why})
     end.

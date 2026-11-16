@@ -351,6 +351,43 @@ loaded_modules_when_not_started_test() ->
     stop_if_running(),
     ?assertEqual({error, not_started}, beamtalk_workspace_meta:loaded_modules()).
 
+%% ADR 0150 (BT-4950): workspace_meta learns about spawned actors from the
+%% `ActorSpawned` announcement on the SystemAnnouncer bus, not a runtime hook.
+learns_spawned_actor_from_announcement_test() ->
+    stop_if_running(),
+    ok = ensure_bus(),
+    {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
+    ActorPid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    try
+        ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors()),
+        beamtalk_announcements:system_announce('ActorSpawned', #{
+            actorClass => 'Counter', pid => ActorPid
+        }),
+        ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
+        ?assertEqual({ok, [ActorPid]}, beamtalk_workspace_meta:supervised_actors()),
+        %% and forgets it again when it exits (monitor-based cleanup)
+        ActorPid ! stop,
+        ok = beamtalk_test_wait:dead(ActorPid),
+        ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
+        ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors())
+    after
+        exit(ActorPid, kill),
+        gen_server:stop(Pid)
+    end.
+
+ensure_bus() ->
+    case whereis(beamtalk_announcements) of
+        undefined ->
+            {ok, _} = beamtalk_announcements:start_link(),
+            ok;
+        _ ->
+            ok
+    end.
+
 register_actor_when_not_started_test() ->
     stop_if_running(),
     %% Should not crash

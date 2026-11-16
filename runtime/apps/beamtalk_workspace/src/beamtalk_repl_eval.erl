@@ -67,7 +67,7 @@ module loading to beamtalk_repl_loader.
     cleanup_module/1,
     strip_internal_bindings/1,
     inject_output/3,
-    handle_class_definition/7,
+    handle_class_definition/6,
     handle_method_definition/4,
     handle_protocol_definition/3,
     handle_type_alias_definition/3,
@@ -132,8 +132,6 @@ do_eval_expression(Expression, State, Subscriber) ->
     Bindings0 = maps:merge(WorkspaceUserBindings, SessionBindings),
     Bindings = Bindings0#{?WORKSPACE_BINDINGS_KEY => WorkspaceOnlyBindings},
 
-    RegistryPid = beamtalk_repl_state:get_actor_registry(State),
-
     %% ADR 0108 Phase 8: forward this session's earlier-turn
     %% alias declarations so `::` annotations in Expression resolve them.
     KnownTypeAliasSources = beamtalk_repl_state:known_type_alias_sources(State),
@@ -146,7 +144,7 @@ do_eval_expression(Expression, State, Subscriber) ->
         %% Inline class definition
         {ok, class_definition, ClassInfo, Warnings} ->
             handle_class_definition(
-                ClassInfo, Warnings, Expression, Bindings, NewState, RegistryPid, Subscriber
+                ClassInfo, Warnings, Expression, Bindings, NewState, Subscriber
             );
         %% Standalone method definition
         {ok, method_definition, MethodInfo, Warnings} ->
@@ -165,7 +163,6 @@ do_eval_expression(Expression, State, Subscriber) ->
                         Expression,
                         AssignedVar,
                         Bindings,
-                        RegistryPid,
                         Subscriber,
                         Warnings,
                         NewState
@@ -550,24 +547,17 @@ do_eval_trace(Expression, State) ->
     Bindings0 = maps:merge(WorkspaceUserBindings, SessionBindings),
     Bindings = Bindings0#{?WORKSPACE_BINDINGS_KEY => WorkspaceOnlyBindings},
 
-    RegistryPid = beamtalk_repl_state:get_actor_registry(State),
-
     case beamtalk_repl_compiler:compile_expression_trace(Expression, ModuleName, Bindings) of
         {ok, Binary, #{step_assignments := StepAssignments}, Warnings} ->
             case code:load_binary(ModuleName, "", Binary) of
                 {module, ModuleName} ->
-                    BindingsWithRegistry =
-                        case RegistryPid of
-                            undefined -> Bindings;
-                            _ -> Bindings#{?INTERNAL_REGISTRY_KEY => RegistryPid}
-                        end,
                     CaptureRef = beamtalk_io_capture:start(undefined),
                     EvalResult =
                         %% bt-catcher-audit: not-applicable-other-process - traced eval runs in
                         %% the session eval worker, no home entry
                         try
                             {RawSteps, UpdatedBindings} = apply(ModuleName, eval, [
-                                BindingsWithRegistry
+                                Bindings
                             ]),
                             CleanBindings = strip_internal_bindings(UpdatedBindings),
                             %% Await each step's value. If any future rejects, propagate
@@ -1182,12 +1172,11 @@ stdlib_method_read_only_error(ClassNameBin, SelectorBin) ->
     string(),
     map(),
     beamtalk_repl_state:state(),
-    pid() | undefined,
     pid() | undefined
 ) ->
     eval_result().
 handle_class_definition(
-    ClassInfo, Warnings, Expression, MergedBindings, State, RegistryPid, Subscriber
+    ClassInfo, Warnings, Expression, MergedBindings, State, Subscriber
 ) ->
     case beamtalk_repl_loader:load_class_module(ClassInfo, Expression, State) of
         {ok, ClassName, no_trailing, NewState2} ->
@@ -1204,7 +1193,6 @@ handle_class_definition(
                         Expression,
                         none,
                         MergedBindings,
-                        RegistryPid,
                         Subscriber,
                         Warnings,
                         NewState2
@@ -1311,18 +1299,17 @@ maybe_register_protocol_class(ModuleName) ->
     atom() | none,
     map(),
     pid() | undefined,
-    pid() | undefined,
     [beamtalk_repl_protocol:warning()],
     beamtalk_repl_state:state()
 ) ->
     eval_result().
 eval_loaded_module(
-    ModuleName, Expression, AssignedVar, Bindings, RegistryPid, Subscriber, Warnings, State
+    ModuleName, Expression, AssignedVar, Bindings, Subscriber, Warnings, State
 ) ->
     CaptureRef = beamtalk_io_capture:start(Subscriber),
     EvalResult =
         try
-            execute_and_process(ModuleName, Expression, AssignedVar, Bindings, RegistryPid, State)
+            execute_and_process(ModuleName, Expression, AssignedVar, Bindings, State)
         catch
             throw:{beamtalk_script_exit, Code} ->
                 %% `Program exit: Code` evaluated in a connected session
@@ -1344,16 +1331,11 @@ eval_loaded_module(
 
 -doc "Execute module and process the result (assignment/future handling).".
 -spec execute_and_process(
-    atom(), string(), atom() | none, map(), pid() | undefined, beamtalk_repl_state:state()
+    atom(), string(), atom() | none, map(), beamtalk_repl_state:state()
 ) ->
     {ok, term(), beamtalk_repl_state:state()} | {error, term(), beamtalk_repl_state:state()}.
-execute_and_process(ModuleName, Expression, AssignedVar, Bindings, RegistryPid, State) ->
-    BindingsWithRegistry =
-        case RegistryPid of
-            undefined -> Bindings;
-            _ -> Bindings#{?INTERNAL_REGISTRY_KEY => RegistryPid}
-        end,
-    {RawResult, UpdatedBindings} = apply(ModuleName, eval, [BindingsWithRegistry]),
+execute_and_process(ModuleName, Expression, AssignedVar, Bindings, State) ->
+    {RawResult, UpdatedBindings} = apply(ModuleName, eval, [Bindings]),
     CleanBindings = strip_internal_bindings(UpdatedBindings),
     Result = maybe_await_future(RawResult),
     process_eval_result(Result, Expression, AssignedVar, CleanBindings, State).
@@ -1553,7 +1535,7 @@ maybe_await_future(Value) ->
 -spec strip_internal_bindings(map()) -> map().
 strip_internal_bindings(Bindings) ->
     %% Strip workspace-only binding keys injected by do_eval.
-    Stripped0 =
+    Stripped =
         case maps:find(?WORKSPACE_BINDINGS_KEY, Bindings) of
             {ok, WorkspaceOnlyBindings} when is_map(WorkspaceOnlyBindings) ->
                 WithoutMeta = maps:remove(?WORKSPACE_BINDINGS_KEY, Bindings),
@@ -1571,7 +1553,9 @@ strip_internal_bindings(Bindings) ->
             _ ->
                 Bindings
         end,
-    maps:remove(?INTERNAL_REGISTRY_KEY, Stripped0).
+    %% No longer injected (BT-4950); still stripped so a binding map from an older
+    %% session never leaks the key into user-visible bindings.
+    maps:remove(?INTERNAL_REGISTRY_KEY, Stripped).
 
 -doc "Inject captured output and warnings into an eval result tuple.".
 -spec inject_output(

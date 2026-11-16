@@ -23,8 +23,6 @@ for manipulating state during REPL sessions.
     get_client_meta/1,
     get_loaded_modules/1,
     add_loaded_module/2,
-    get_actor_registry/1,
-    set_actor_registry/2,
     get_module_tracker/1,
     set_module_tracker/2,
     %% pending module removals (deferred during active eval)
@@ -70,7 +68,6 @@ for manipulating state during REPL sessions.
     bindings :: map(),
     eval_counter :: non_neg_integer(),
     loaded_modules :: [atom()],
-    actor_registry :: pid() | undefined,
     module_tracker :: beamtalk_repl_modules:module_tracker(),
     %% Modules removed via class_removed event while an eval worker
     %% is active.  Deferred here so they can be applied to the worker's returned
@@ -156,7 +153,6 @@ new(ListenSocket, Port, Options) ->
         bindings = #{},
         eval_counter = 0,
         loaded_modules = [],
-        actor_registry = undefined,
         module_tracker = beamtalk_repl_modules:new(),
         pending_module_removals = [],
         pending_mutations = [],
@@ -229,16 +225,6 @@ get_listen_socket(#state{listen_socket = Socket}) ->
 get_port(#state{port = Port}) ->
     Port.
 -endif.
-
--doc "Get actor registry PID.".
--spec get_actor_registry(state()) -> pid() | undefined.
-get_actor_registry(#state{actor_registry = Registry}) ->
-    Registry.
-
--doc "Set actor registry PID.".
--spec set_actor_registry(pid() | undefined, state()) -> state().
-set_actor_registry(Registry, State) ->
-    State#state{actor_registry = Registry}.
 
 -doc "Get module tracker.".
 -spec get_module_tracker(state()) -> beamtalk_repl_modules:module_tracker().

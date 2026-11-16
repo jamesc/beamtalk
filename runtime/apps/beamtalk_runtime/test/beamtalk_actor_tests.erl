@@ -37,7 +37,12 @@ init_with_valid_state_test() ->
         '__methods__' => #{test => fun(_Args, S) -> {reply, ok, S} end},
         data => 123
     },
-    ?assertEqual({ok, State}, beamtalk_actor:init(State)).
+    %% init/1 writes the actor marker into its process: keep it off the shared
+    %% test process, or every later scan lists that process as an actor (ADR 0150).
+    ?assertEqual(
+        {ok, State},
+        beamtalk_test_proc:in_fresh_process(fun() -> beamtalk_actor:init(State) end)
+    ).
 
 init_without_class_test() ->
     State = #{
@@ -85,7 +90,10 @@ init_actor_started_log_omits_unassigned_late_slot_state_keys_test() ->
             '__class_mod__' => 'bt@late_slot_actor',
             count => 0
         },
-        ?assertEqual({ok, State}, beamtalk_actor:init(State)),
+        ?assertEqual(
+            {ok, State},
+            beamtalk_test_proc:in_fresh_process(fun() -> beamtalk_actor:init(State) end)
+        ),
         Found = collect_log_meta("Actor started", state_keys, 500),
         ?assertMatch({ok, _}, Found),
         {ok, Keys} = Found,

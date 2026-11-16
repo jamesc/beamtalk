@@ -99,18 +99,14 @@ nonempty_or_undefined_wrong_type_is_absent_test_() ->
     ].
 
 actor_pid_unknown_actor_test() ->
-    PidBin = list_to_binary(pid_to_list(self())),
-    beamtalk_test_actor_registry:without_registry(fun() ->
-        {error, #beamtalk_error{kind = unknown_actor, hint = Hint}} =
-            beamtalk_repl_params:actor_pid(#{<<"actor">> => PidBin}),
-        ?assertEqual({beamtalk_string, <<"Use :actors to list valid actor PIDs.">>}, Hint)
-    end).
+    PidBin = list_to_binary(pid_to_list(beamtalk_test_proc:spawn_idle())),
+    {error, #beamtalk_error{kind = unknown_actor, hint = Hint}} =
+        beamtalk_repl_params:actor_pid(#{<<"actor">> => PidBin}),
+    ?assertEqual({beamtalk_string, <<"Use :actors to list valid actor PIDs.">>}, Hint).
 
 validate_actor_pid_invalid_test() ->
     ?assertEqual({error, invalid_pid}, beamtalk_repl_params:validate_actor_pid("not-a-pid")),
     ?assertEqual({error, invalid_pid}, beamtalk_repl_params:validate_actor_pid("")).
 
-is_known_actor_without_registry_test() ->
-    beamtalk_test_actor_registry:without_registry(fun() ->
-        ?assertEqual(false, beamtalk_repl_params:is_known_actor(self()))
-    end).
+is_known_actor_non_actor_test() ->
+    ?assertEqual(false, beamtalk_repl_params:is_known_actor(beamtalk_test_proc:spawn_idle())).

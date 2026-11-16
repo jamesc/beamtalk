@@ -9,8 +9,8 @@
 EUnit tests for beamtalk_repl_ops_actors module.
 
 Tests the validate_actor_pid/1 and is_known_actor/1 exported helpers plus
-the handle/4 operation paths that require no running actor registry:
-- actors op → empty list when registry absent
+the handle/4 operation paths (the actor lists are process scans, ADR 0150):
+- actors op → a scan; a synchronous spawn is visible at once (async: documented)
 - inspect/kill ops with invalid or unknown PID strings → error JSON
 - interrupt op with a dead SessionPid → noproc catch → ok status JSON
 
@@ -43,135 +43,93 @@ validate_empty_string_returns_invalid_pid_test() ->
         beamtalk_repl_params:validate_actor_pid("")
     ).
 
-validate_valid_pid_no_registry_returns_unknown_actor_test() ->
-    %% list_to_pid succeeds, but beamtalk_actor_registry is not running in unit
-    %% tests so is_known_actor/1 returns false → unknown_actor.
-    PidStr = pid_to_list(self()),
-    beamtalk_test_actor_registry:without_registry(fun() ->
-        ?assertEqual(
-            {error, unknown_actor},
-            beamtalk_repl_params:validate_actor_pid(PidStr)
+validate_non_actor_pid_returns_unknown_actor_test() ->
+    %% list_to_pid succeeds, but the pid carries no actor marker, so
+    %% is_known_actor/1 is false -> unknown_actor.
+    PidStr = pid_to_list(beamtalk_test_proc:spawn_idle()),
+    ?assertEqual(
+        {error, unknown_actor},
+        beamtalk_repl_params:validate_actor_pid(PidStr)
+    ).
+
+validate_live_actor_pid_is_known_test() ->
+    {ok, ActorPid} = beamtalk_actor:safe_spawn_linked(test_counter, 0),
+    try
+        ?assertMatch(
+            {ok, ActorPid},
+            beamtalk_repl_params:validate_actor_pid(pid_to_list(ActorPid))
         )
-    end).
+    after
+        unlink(ActorPid),
+        exit(ActorPid, kill)
+    end.
 
 %%====================================================================
 %% is_known_actor/1
 %%====================================================================
 
-is_known_actor_no_registry_returns_false_test() ->
-    %% whereis(beamtalk_actor_registry) returns undefined in unit tests → false.
-    beamtalk_test_actor_registry:without_registry(fun() ->
-        ?assertEqual(false, beamtalk_repl_params:is_known_actor(self()))
-    end).
+is_known_actor_non_actor_returns_false_test() ->
+    ?assertEqual(false, beamtalk_repl_params:is_known_actor(beamtalk_test_proc:spawn_idle())).
 
 %%====================================================================
 %% handle/4 — actors op
 %%====================================================================
 
-handle_actors_no_registry_returns_empty_list_test() ->
+handle_actors_op_shape_test() ->
     Msg = beamtalk_test_repl:make_msg(<<"actors">>, <<"a-1">>, undefined),
-    beamtalk_test_actor_registry:without_registry(fun() ->
-        Result = beamtalk_repl_ops_actors:handle(<<"actors">>, #{}, Msg, self()),
-        Decoded = json:decode(Result),
-        ?assert(maps:is_key(<<"actors">>, Decoded)),
-        ?assertEqual([], maps:get(<<"actors">>, Decoded)),
-        ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded))
-    end).
-
-%%====================================================================
-%% handle/4 — inspect op (invalid / unknown PID paths)
-%%====================================================================
-
-handle_inspect_invalid_pid_string_returns_error_test() ->
-    Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"i-1">>, undefined),
-    Result = beamtalk_repl_ops_actors:handle(
-        <<"inspect">>, #{<<"actor">> => <<"not-a-pid">>}, Msg, self()
-    ),
+    Result = beamtalk_repl_ops_actors:handle(<<"actors">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
-    ?assert(maps:is_key(<<"error">>, Decoded)),
-    ?assert(
-        binary:match(maps:get(<<"error">>, Decoded), <<"Invalid actor PID">>) =/= nomatch
-    ).
-
-handle_inspect_empty_actor_param_returns_error_test() ->
-    %% Empty binary → empty string → list_to_pid raises badarg → invalid_pid.
-    Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"i-2">>, undefined),
-    Result = beamtalk_repl_ops_actors:handle(
-        <<"inspect">>, #{<<"actor">> => <<>>}, Msg, self()
-    ),
-    Decoded = json:decode(Result),
-    ?assert(maps:is_key(<<"error">>, Decoded)).
-
-handle_inspect_missing_actor_param_returns_error_test() ->
-    %% No <<"actor">> key: defaults to <<>> → invalid_pid.
-    Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"i-3">>, undefined),
-    Result = beamtalk_repl_ops_actors:handle(<<"inspect">>, #{}, Msg, self()),
-    Decoded = json:decode(Result),
-    ?assert(maps:is_key(<<"error">>, Decoded)).
-
-handle_inspect_unknown_actor_pid_returns_error_test() ->
-    %% Valid PID string format but not registered in actor registry → unknown_actor.
-    %% invalid_pid_error wraps it with the same "Invalid actor PID" message.
-    PidBin = list_to_binary(pid_to_list(self())),
-    Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"i-4">>, undefined),
-    Result = beamtalk_repl_ops_actors:handle(
-        <<"inspect">>, #{<<"actor">> => PidBin}, Msg, self()
-    ),
-    Decoded = json:decode(Result),
-    ?assert(maps:is_key(<<"error">>, Decoded)),
-    ?assert(
-        binary:match(maps:get(<<"error">>, Decoded), <<"Invalid actor PID">>) =/= nomatch
-    ).
-
-%%====================================================================
-%% handle/4 — kill op (invalid PID paths)
-%%====================================================================
-
-handle_kill_invalid_pid_actor_key_returns_error_test() ->
-    Msg = beamtalk_test_repl:make_msg(<<"kill">>, <<"k-1">>, undefined),
-    Result = beamtalk_repl_ops_actors:handle(
-        <<"kill">>, #{<<"actor">> => <<"bad-pid">>}, Msg, self()
-    ),
-    Decoded = json:decode(Result),
-    ?assert(maps:is_key(<<"error">>, Decoded)),
-    ?assert(
-        binary:match(maps:get(<<"error">>, Decoded), <<"Invalid actor PID">>) =/= nomatch
-    ).
-
-handle_kill_invalid_pid_pid_key_returns_error_test() ->
-    %% kill/2 falls back to <<"pid">> when <<"actor">> is absent.
-    Msg = beamtalk_test_repl:make_msg(<<"kill">>, <<"k-2">>, undefined),
-    Result = beamtalk_repl_ops_actors:handle(
-        <<"kill">>, #{<<"pid">> => <<"bad-pid">>}, Msg, self()
-    ),
-    Decoded = json:decode(Result),
-    ?assert(maps:is_key(<<"error">>, Decoded)).
-
-handle_kill_missing_pid_returns_error_test() ->
-    %% No PID key → defaults to <<>> → list_to_pid raises badarg → invalid_pid.
-    Msg = beamtalk_test_repl:make_msg(<<"kill">>, <<"k-3">>, undefined),
-    Result = beamtalk_repl_ops_actors:handle(<<"kill">>, #{}, Msg, self()),
-    Decoded = json:decode(Result),
-    ?assert(maps:is_key(<<"error">>, Decoded)).
-
-%%====================================================================
-%% handle/4 — interrupt op
-%%====================================================================
-
-handle_interrupt_dead_session_catches_noproc_test() ->
-    %% Spawn a process that exits immediately, wait for its DOWN signal,
-    %% then pass the dead PID as SessionPid. The gen_server:call inside
-    %% beamtalk_repl_shell:interrupt/1 raises exit:{noproc,_}, which the
-    %% interrupt handler catches and converts to an ok status response.
-    Pid = spawn(fun() -> ok end),
-    MRef = monitor(process, Pid),
-    receive
-        {'DOWN', MRef, process, Pid, _} -> ok
-    end,
-    Msg = beamtalk_test_repl:make_msg(<<"interrupt">>, <<"int-1">>, undefined),
-    Result = beamtalk_repl_ops_actors:handle(<<"interrupt">>, #{}, Msg, Pid),
-    Decoded = json:decode(Result),
+    ?assert(is_list(maps:get(<<"actors">>, Decoded))),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
+
+%% `:actors` right after a synchronous spawn lists the actor (ADR 0150, BT-4950).
+actors_op_sees_sync_spawn_immediately_test() ->
+    {ok, ActorPid} = beamtalk_actor:safe_spawn_linked(test_counter, 0),
+    try
+        {actors, Actors} = beamtalk_repl_ops_actors:handle_term(
+            <<"actors">>,
+            #{},
+            beamtalk_test_repl:make_msg(<<"actors">>, <<"a-2">>, undefined),
+            self()
+        ),
+        ?assertMatch(
+            [#{class := 'Counter', spawned_at := _}],
+            [M || #{pid := P} = M <- Actors, P =:= ActorPid]
+        ),
+        %% The wire form is unchanged: pid / class / module / spawned_at.
+        Msg = beamtalk_test_repl:make_msg(<<"actors">>, <<"a-3">>, undefined),
+        Json = json:decode(beamtalk_repl_ops_actors:handle(<<"actors">>, #{}, Msg, self())),
+        PidBin = list_to_binary(pid_to_list(ActorPid)),
+        [Wire] = [W || #{<<"pid">> := P} = W <- maps:get(<<"actors">>, Json), P =:= PidBin],
+        ?assertEqual(
+            [<<"class">>, <<"module">>, <<"pid">>, <<"spawned_at">>],
+            lists:sort(maps:keys(Wire))
+        ),
+        ?assert(is_integer(maps:get(<<"spawned_at">>, Wire)))
+    after
+        unlink(ActorPid),
+        exit(ActorPid, kill)
+    end.
+
+%% An asynchronous spawn returns before `init/1` has run, so the very next
+%% `:actors` MAY miss the actor (the ADR accepts this brief invisibility). What
+%% is guaranteed: once `init/1` has run, the next `:actors` lists it.
+actors_op_async_spawn_visible_once_started_test() ->
+    {ok, {ActorPid, MonRef}} = beamtalk_actor:safe_spawn_monitored_async(test_counter, 0),
+    Msg = beamtalk_test_repl:make_msg(<<"actors">>, <<"a-4">>, undefined),
+    Listed = fun() ->
+        {actors, As} = beamtalk_repl_ops_actors:handle_term(<<"actors">>, #{}, Msg, self()),
+        lists:member(ActorPid, [P || #{pid := P} <- As])
+    end,
+    try
+        _MayMiss = Listed(),
+        _ = gen_server:call(ActorPid, {getValue, []}),
+        ?assert(Listed())
+    after
+        erlang:demonitor(MonRef, [flush]),
+        unlink(ActorPid),
+        exit(ActorPid, kill)
+    end.
 
 %%====================================================================
 %% handle_term/4 — inspect success path (live tagged-map actor)
@@ -184,9 +142,9 @@ handle_term_inspect_live_tagged_actor_returns_inspect_map_term_test() ->
     %% `try` (is_tagged → field_names → maps:with) to its normal completion — the
     %% body that was moved back inside the `try` so any future throw there
     %% is caught rather than escaping the op handler.
-    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
-        {ok, ActorPid} = test_counter:start_link(0),
-        ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
+    (fun() ->
+        %% A synchronous spawn: the marker is written, so the scan sees it.
+        {ok, ActorPid} = beamtalk_actor:safe_spawn_linked(test_counter, 0),
         PidBin = list_to_binary(pid_to_list(ActorPid)),
         Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"i-live">>, undefined),
         try
@@ -206,4 +164,4 @@ handle_term_inspect_live_tagged_actor_returns_inspect_map_term_test() ->
                 _:_ -> ok
             end
         end
-    end).
+    end)().

@@ -1,0 +1,259 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+-module(beamtalk_workspace_actors_tests).
+
+%%% **DDD Context:** REPL Session Context
+
+-moduledoc """
+Tests for `beamtalk_workspace_actors` (ADR 0150, BT-4950): the workspace actor
+lists are one process scan per call, `:actors` sees a synchronous spawn
+immediately, and the snapshot-plus-feed protocol loses and duplicates nothing.
+""".
+
+-include_lib("eunit/include/eunit.hrl").
+
+%% proc_lib entry point for the fake unmarked `native:` backing process.
+-export([init/1]).
+
+%% A `native:` backing gen_server (ADR 0056) carries no marker.
+init(_) ->
+    native_loop().
+
+native_loop() ->
+    receive
+        stop -> ok
+    end.
+
+stop(Pid) ->
+    unlink(Pid),
+    MonRef = erlang:monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+        {'DOWN', MonRef, process, Pid, _} -> ok
+    end.
+
+%% A marker-carrying process, like a generated `init/1` leaves behind.
+marked(Class) ->
+    Parent = self(),
+    Pid = spawn(fun() ->
+        erlang:put('$beamtalk_actor', Class),
+        erlang:put('$beamtalk_actor_started_at', erlang:system_time(microsecond)),
+        Parent ! {ready, self()},
+        receive
+            stop -> ok
+        end
+    end),
+    receive
+        {ready, Pid} -> Pid
+    end.
+
+pids(Metas) -> lists:sort([P || #{pid := P} <- Metas]).
+
+%%% ---------------------------------------------------------------------
+%%% list/0, lookup/1, count_for_module/1
+%%% ---------------------------------------------------------------------
+
+sync_spawn_visible_to_next_list_test() ->
+    %% A synchronous spawn returns after init/1 wrote the marker, so `:actors`
+    %% right after it lists the actor. (An async spawn returns before init/1
+    %% and may be missed by one scan: the ADR accepts this brief invisibility.)
+    {ok, Pid} = beamtalk_actor:safe_spawn_linked(test_counter, 0),
+    try
+        ?assertMatch(
+            [#{pid := Pid, class := 'Counter', module := _, spawned_at := _}],
+            [M || #{pid := P} = M <- beamtalk_workspace_actors:list(), P =:= Pid]
+        )
+    after
+        stop(Pid)
+    end.
+
+list_metadata_shape_test() ->
+    Pid = marked('Shape'),
+    try
+        [#{pid := Pid, class := 'Shape', module := Module, spawned_at := At}] =
+            [M || #{pid := P} = M <- beamtalk_workspace_actors:list(), P =:= Pid],
+        %% `module` is a resolved module or the atom `undefined` (the wire form
+        %% the registry produced); `spawned_at` is seconds, as before.
+        ?assert(is_atom(Module)),
+        ?assert(is_integer(At)),
+        ?assert(abs(At - erlang:system_time(second)) < 5)
+    after
+        stop(Pid)
+    end.
+
+list_missing_start_time_is_null_test() ->
+    Parent = self(),
+    Pid = spawn(fun() ->
+        erlang:put('$beamtalk_actor', 'NoClock'),
+        Parent ! {ready, self()},
+        receive
+            stop -> ok
+        end
+    end),
+    receive
+        {ready, Pid} -> ok
+    end,
+    try
+        ?assertMatch(
+            [#{spawned_at := null}],
+            [M || #{pid := P} = M <- beamtalk_workspace_actors:list(), P =:= Pid]
+        )
+    after
+        stop(Pid)
+    end.
+
+list_drops_dead_actor_test() ->
+    Pid = marked('Gone'),
+    stop(Pid),
+    ?assertNot(lists:member(Pid, pids(beamtalk_workspace_actors:list()))).
+
+%% An unmarked `native:` backing process is found by the scan but was never in
+%% the REPL's actor list (TranscriptStream is one): the lists leave it out so
+%% `:actors` output is unchanged.
+unmarked_native_process_is_not_listed_test() ->
+    beamtalk_class_registry:ensure_backing_module_index_table(),
+    Class = 'Bt4950NativeClass',
+    ClassPid = spawn(fun native_loop/0),
+    register(beamtalk_class_registry:registry_name(Class), ClassPid),
+    Pid = proc_lib:spawn(?MODULE, init, [x]),
+    ok = beamtalk_test_wait:until(fun() ->
+        {dictionary, D} = erlang:process_info(Pid, dictionary),
+        lists:keymember('$initial_call', 1, D)
+    end),
+    ets:insert(beamtalk_backing_module_index, {?MODULE, Class, ClassPid}),
+    try
+        %% the scan sees it ...
+        ?assertMatch([{Pid, Class, undefined}], beamtalk_actor_scan:info(Pid)),
+        %% ... the workspace lists do not
+        ?assertNot(lists:member(Pid, pids(beamtalk_workspace_actors:list()))),
+        ?assertEqual({error, not_found}, beamtalk_workspace_actors:lookup(Pid))
+    after
+        ets:match_delete(beamtalk_backing_module_index, {?MODULE, '_', '_'}),
+        unregister(beamtalk_class_registry:registry_name(Class)),
+        ClassPid ! stop,
+        Pid ! stop
+    end.
+
+lookup_known_and_unknown_test() ->
+    Pid = marked('Look'),
+    try
+        ?assertMatch({ok, #{pid := Pid, class := 'Look'}}, beamtalk_workspace_actors:lookup(Pid)),
+        ?assertEqual(
+            {error, not_found}, beamtalk_workspace_actors:lookup(beamtalk_test_proc:spawn_idle())
+        )
+    after
+        stop(Pid)
+    end.
+
+lookup_remote_pid_is_not_found_test() ->
+    %% Pids parsed from user input may name another node; never crash on one.
+    Name = atom_to_binary('nohost@nohost', utf8),
+    Remote = binary_to_term(
+        <<131, 88, 119, (byte_size(Name)), Name/binary, 0:32, 1:32, 1:32>>
+    ),
+    ?assertNotEqual(node(), node(Remote)),
+    ?assertEqual({error, not_found}, beamtalk_workspace_actors:lookup(Remote)).
+
+count_for_module_test() ->
+    {ok, A} = beamtalk_actor:safe_spawn_linked(test_counter, 0),
+    {ok, B} = beamtalk_actor:safe_spawn_linked(test_counter, 0),
+    try
+        Mod = module_of(A),
+        ?assert(beamtalk_workspace_actors:count_for_module(Mod) >= 2),
+        ?assertEqual(0, beamtalk_workspace_actors:count_for_module(no_such_module_bt4950))
+    after
+        stop(A),
+        stop(B)
+    end.
+
+module_of(Pid) ->
+    [#{module := M}] = [X || #{pid := P} = X <- beamtalk_workspace_actors:list(), P =:= Pid],
+    M.
+
+%%% ---------------------------------------------------------------------
+%%% Snapshot plus feed (subscribe first, then scan, then drop what the scan
+%%% already contains)
+%%% ---------------------------------------------------------------------
+
+spawned(Pid, Class) ->
+    #{'$beamtalk_class' => 'ActorSpawned', actorClass => Class, pid => Pid}.
+
+stopped(Pid, Class) ->
+    #{'$beamtalk_class' => 'ActorStopped', actorClass => Class, pid => Pid, reason => normal}.
+
+feed_drops_spawn_already_in_snapshot_test() ->
+    S0 = beamtalk_workspace_actors:feed_new([#{pid => self(), class => 'A'}]),
+    {drop, S1} = beamtalk_workspace_actors:feed_event(spawned(self(), 'A'), S0),
+    %% Only the first announcement is the duplicate; a later respawn of the
+    %% same pid (impossible in practice) would be emitted.
+    ?assertMatch({emit, _}, beamtalk_workspace_actors:feed_event(spawned(self(), 'A'), S1)).
+
+feed_emits_spawn_after_snapshot_test() ->
+    S0 = beamtalk_workspace_actors:feed_new([]),
+    ?assertMatch({emit, _}, beamtalk_workspace_actors:feed_event(spawned(self(), 'A'), S0)).
+
+feed_stop_of_snapshot_actor_is_emitted_and_clears_test() ->
+    S0 = beamtalk_workspace_actors:feed_new([#{pid => self(), class => 'A'}]),
+    {emit, S1} = beamtalk_workspace_actors:feed_event(stopped(self(), 'A'), S0),
+    %% After the stop the snapshot no longer shadows a fresh spawn.
+    ?assertMatch({emit, _}, beamtalk_workspace_actors:feed_event(spawned(self(), 'A'), S1)).
+
+feed_non_actor_event_is_emitted_unchanged_test() ->
+    S0 = beamtalk_workspace_actors:feed_new([]),
+    ?assertEqual({emit, S0}, beamtalk_workspace_actors:feed_event(#{other => 1}, S0)).
+
+%% No actor spawned between subscribe and scan is lost or duplicated: every
+%% pid that exists after the race appears exactly once in snapshot + emitted
+%% spawns, whichever side of the scan it landed on.
+subscribe_scan_race_loses_and_duplicates_nothing_test() ->
+    Class = 'Bt4950Race',
+    Self = self(),
+    Spawner = spawn_link(fun() -> spawner_loop(Self, Class, 200) end),
+    %% Scan while the spawner is mid-flight: some events precede the scan,
+    %% the rest follow it.
+    ok = wait_queue(20),
+    Snapshot = [M || #{class := C} = M <- beamtalk_workspace_actors:list(), C =:= Class],
+    Feed0 = beamtalk_workspace_actors:feed_new(Snapshot),
+    Spawned = collect_spawns(200, []),
+    {Emitted, _} = lists:foldl(
+        fun(Pid, {Acc, Feed}) ->
+            case beamtalk_workspace_actors:feed_event(spawned(Pid, Class), Feed) of
+                {emit, Feed1} -> {[Pid | Acc], Feed1};
+                {drop, Feed1} -> {Acc, Feed1}
+            end
+        end,
+        {[], Feed0},
+        Spawned
+    ),
+    Seen = lists:sort(pids(Snapshot) ++ Emitted),
+    Expected = lists:sort(Spawned),
+    unlink(Spawner),
+    [stop(P) || P <- Spawned],
+    ?assertEqual(Expected, Seen),
+    ?assertEqual(length(Seen), length(lists:usort(Seen))).
+
+spawner_loop(_Parent, _Class, 0) ->
+    ok;
+spawner_loop(Parent, Class, N) ->
+    Pid = marked(Class),
+    Parent ! {spawned, Pid},
+    spawner_loop(Parent, Class, N - 1).
+
+collect_spawns(0, Acc) ->
+    Acc;
+collect_spawns(N, Acc) ->
+    receive
+        {spawned, Pid} -> collect_spawns(N - 1, [Pid | Acc])
+    after 5000 -> error({missing_spawns, N})
+    end.
+
+wait_queue(N) ->
+    {message_queue_len, Len} = process_info(self(), message_queue_len),
+    case Len >= N of
+        true ->
+            ok;
+        false ->
+            timer:sleep(1),
+            wait_queue(N)
+    end.

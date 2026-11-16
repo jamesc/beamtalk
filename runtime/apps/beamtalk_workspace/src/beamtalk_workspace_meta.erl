@@ -31,7 +31,7 @@ and can be queried by other components (e.g., idle monitor).
 -export([prune_stale_foreground_workspaces/3]).
 -export([prune_stale_foreground_workspaces_async/3]).
 -export([start_link/1, get_metadata/0, update_activity/0, get_last_activity/0]).
--export([on_actor_spawned/2, register_actor/1, unregister_actor/1, supervised_actors/0]).
+-export([register_actor/1, unregister_actor/1, supervised_actors/0]).
 -export([register_module/1, register_module/2, unregister_module/1, loaded_modules/0]).
 -export([set_class_source/2, get_class_source/1, all_class_sources/0, remove_class_source/1]).
 %% ADR 0127 §10a / BT-3593: protocol source tracking, mirroring the class
@@ -200,15 +200,6 @@ get_last_activity() ->
         exit:{noproc, _} ->
             {error, not_started}
     end.
-
--doc """
-Hook installed as `actor_spawned_hook` by `beamtalk_workspace_app`: called by the
-runtime-owned actor registry after a REPL-spawned actor is registered.
-""".
--spec on_actor_spawned(pid(), atom()) -> ok.
-on_actor_spawned(Pid, _ClassName) ->
-    ok = register_actor(Pid),
-    update_activity().
 
 -doc "Register a supervised actor PID.".
 -spec register_actor(pid()) -> ok.
@@ -873,6 +864,10 @@ init(InitialMetadata) ->
     %% Load persisted metadata if exists
     State2 = load_metadata_from_disk(State),
 
+    %% ADR 0150: workspace_meta learns about spawned actors from the
+    %% `ActorSpawned` announcement (the former `actor_spawned_hook` is gone).
+    %% Tolerant of an absent bus: the facade skips it.
+    ok = beamtalk_repl_subscriptions:subscribe(actors, self()),
     {ok, State2}.
 
 handle_call(get_metadata, _From, State) ->
@@ -1013,6 +1008,13 @@ handle_cast(_Msg, State) ->
 handle_info(persist_to_disk, State) ->
     persist_metadata_to_disk(State),
     {noreply, State#state{persist_timer = undefined}};
+handle_info(
+    {beamtalk_announcement, _SubRef, 'ActorSpawned', _Handler, #{pid := Pid}}, State
+) when is_pid(Pid) ->
+    %% Same bookkeeping the spawn hook did: track the actor (monitored, so a
+    %% `DOWN` removes it) and count the spawn as workspace activity.
+    {noreply, State2} = handle_cast({register_actor, Pid}, State),
+    handle_cast(update_activity, State2);
 handle_info({'DOWN', _Ref, process, Pid, _Reason}, State) ->
     %% Actor exited, remove from tracked list and monitor refs
     State2 = remove_actor(Pid, State),
