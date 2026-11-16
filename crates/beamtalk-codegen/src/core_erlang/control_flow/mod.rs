@@ -28,7 +28,10 @@
 //! - [`dict_ops`] — Dictionary iteration constructs
 //! - [`while_loops`] — While loop constructs
 //! - [`counted_loops`] — Counted loop constructs (and `CountedLoopFrame`)
-//! - [`conditionals`] — `ifTrue:`/`ifFalse:`/`match:` etc.
+//! - [`conditionals`] — `ifTrue:`/`ifFalse:`/`match:` etc. (shared tables, receiver/tuple plumbing, `lower_simple_field_write_bind`)
+//! - [`conditional_producers`] — solo-boolean / nil / `ifTrue:ifFalse:` / `match:` producers and pure boolean arms
+//! - [`conditional_arms`] — the conditional arm-statement walker and `render_branch_arm`
+//! - [`inline_control_flow`] — inline control-flow lowering and the field / local assignment binds
 //! - [`exception_handling`] — `on:do:`/`ensure:` shared arm/catch-boundary helpers and `on:do:` lowering
 //! - [`ensure`] — `ensure:` lowering (plain, mutation-threaded and relay forms)
 //! - [`exception_bodies`] — `on:do:` tier-1 try, structural fallbacks and threaded exception-body lowering
@@ -40,6 +43,8 @@
 
 pub(in crate::core_erlang) mod analysis;
 mod body;
+mod conditional_arms;
+mod conditional_producers;
 mod conditionals;
 mod counted_loops;
 mod dict_ops;
@@ -47,6 +52,7 @@ mod ensure;
 mod exception_bodies;
 mod exception_handling;
 pub(in crate::core_erlang) mod family_slots;
+mod inline_control_flow;
 mod list_ops;
 mod local_assign;
 pub(in crate::core_erlang) use local_assign::LocalWrite;
