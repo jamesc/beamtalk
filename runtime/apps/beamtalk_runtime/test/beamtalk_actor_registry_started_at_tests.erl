@@ -70,13 +70,26 @@ failed_remote_read_takes_the_otp_fallback_not_the_local_side_test() ->
     %% The remote read fails. Treating that as "no start time" would keep the
     %% local pid every time. It must take OTP's fallback instead, which keeps
     %% the pid on the lower-named node: the same answer on every node.
-    Local = start_proc(erlang:system_time(microsecond)),
     Remote = unreachable_pid(),
-    Expected =
-        case node(Local) < node(Remote) of
-            true -> Local;
-            false -> Remote
+    %% A fresh Local per argument order: the fallback may kill Local, and a
+    %% dead Local would read `undefined`, not a time, hiding the {unreachable, T}
+    %% order.
+    lists:foreach(
+        fun(Order) ->
+            Local = start_proc(erlang:system_time(microsecond)),
+            Expected =
+                case node(Local) < node(Remote) of
+                    true -> Local;
+                    false -> Remote
+                end,
+            Args =
+                case Order of
+                    local_first -> [name, Local, Remote];
+                    remote_first -> [name, Remote, Local]
+                end,
+            ?assert(is_process_alive(Local)),
+            ?assertEqual(Expected, apply(beamtalk_actor_registry, resolve_global_conflict, Args)),
+            stop_proc(Local)
         end,
-    ?assertEqual(Expected, beamtalk_actor_registry:resolve_global_conflict(name, Local, Remote)),
-    ?assertEqual(Expected, beamtalk_actor_registry:resolve_global_conflict(name, Remote, Local)),
-    stop_proc(Local).
+        [local_first, remote_first]
+    ).

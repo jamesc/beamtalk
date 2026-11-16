@@ -599,16 +599,16 @@ reading the `'$beamtalk_actor_started_at'` process-dictionary marker
 `init/1` sets — possibly on the *other* node, via `erpc`) and keeps the
 older one, stopping the younger with `stop_global_conflict_loser/1`.
 
-When exactly one side reads `undefined` (alive, but no start time: an actor
-started by an older runtime during a rolling upgrade, ADR 0125, or a `native:`
-actor) and the other has a time, the side with a time is kept (BT-4937). An
-`unreachable` read (the remote read failed) is not that case: it says nothing
-about age, so it takes the fallback below. Falls back to OTP's own
-`global:random_exit_name/3` tie-break when a start time cannot be compared
-(e.g. a raw, non-Beamtalk process happens to hold the conflicting
-registration, or the actor terminated in the narrow window between the
-conflict being detected and this function running) — `global_name_server`
-calls this synchronously and expects a decision back, never an exception, so this must always return one. Note
+When exactly one side reads `undefined` (no start time: an actor started by an
+older runtime during a rolling upgrade, ADR 0125, a `native:` actor, a raw
+non-Beamtalk process, or a process that has already exited) and the other has
+a time, the side with a time is kept (BT-4937). An `unreachable` read (the
+remote read failed) is not that case: it says nothing about age, so it takes
+the fallback below. Falls back to OTP's own `global:random_exit_name/3`
+tie-break when the start times cannot be compared (neither side has one, or
+either read was `unreachable`) — `global_name_server` calls this synchronously
+and expects a decision back, never an exception, so this must always return
+one. Note
 this fallback (only reachable when ages genuinely cannot be compared, per
 ADR 0126 §4 "falling back to random_exit_name's choice") inherits
 `random_exit_name/3`'s own force-kill of the pid it does not return — the

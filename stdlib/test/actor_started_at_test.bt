@@ -78,8 +78,8 @@ TestCase subclass: ActorStartedAtTest
       pid1: older pid
       pid2: younger pid
     self assert: winner equals: older pid
+    // `younger` is stopped by the conflict resolver (asynchronously); stopping it here would race that.
     older stop
-    younger stop
 
   testResolveGlobalConflictKeepsOlderWhenOlderIsSecond =>
     older := Counter spawn
@@ -90,5 +90,5 @@ TestCase subclass: ActorStartedAtTest
       pid1: younger pid
       pid2: older pid
     self assert: winner equals: older pid
+    // `younger` is stopped by the conflict resolver (asynchronously); stopping it here would race that.
     older stop
-    younger stop
