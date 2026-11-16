@@ -968,7 +968,7 @@ false
 ok
 ```
 
-`Node current actors` and the workspace `actors` op (what MCP `list_actors`, the VS Code sidebar and the connect snapshot show) list the same set: every live actor on the node, including `native:` actors and the runtime's own actors such as `TranscriptStream`. The runtime's own actors are marked `"system": true` in the JSON. `inspect` works on them; `kill` refuses them with a `system_actor` error. A `native:` pid whose backing module is shared by several classes is listed once, under the alphabetically first class.
+`Node current actors` and the workspace `actors` op (what MCP `list_actors`, the VS Code sidebar and the connect snapshot show) list the same set: every live actor on the node, including `native:` actors and the runtime's own actors such as `TranscriptStream`. The runtime's own actors are marked `"system": true` in the JSON, and the text lists (the startup banner's "Available actors:" and MCP `list_actors`) print them with a trailing `[system]`, for example `TranscriptStream (<0.9.0>) [system]`. `inspect` works on them; `kill` refuses them with a `system_actor` error. A `native:` pid whose backing module is shared by several classes is listed once, under the alphabetically first class.
 
 ## MCP Server (AI Agent Interface)
 

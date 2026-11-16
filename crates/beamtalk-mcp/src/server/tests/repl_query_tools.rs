@@ -394,6 +394,23 @@ async fn list_actors_success() {
 }
 
 #[tokio::test]
+async fn list_actors_marks_system_actor_not_user_actor() {
+    let (_fake, mcp) = fake_mcp(respond(serde_json::json!({
+        "actors": [
+            {"pid": "<0.9.0>", "class": "TranscriptStream", "module": "bt@ts", "spawned_at": 0, "system": true},
+            {"pid": "<0.1.0>", "class": "Counter", "module": "bt@counter", "spawned_at": 0}
+        ]
+    })))
+    .await;
+    let result = mcp.list_actors().await.unwrap();
+    assert_eq!(result.is_error, Some(false));
+    assert_eq!(
+        call_text(&result),
+        "TranscriptStream (<0.9.0>) [system]\nCounter (<0.1.0>)"
+    );
+}
+
+#[tokio::test]
 async fn list_actors_error() {
     let (_fake, mcp) = fake_mcp(respond_error("workspace unavailable")).await;
     let result = mcp.list_actors().await.unwrap();
