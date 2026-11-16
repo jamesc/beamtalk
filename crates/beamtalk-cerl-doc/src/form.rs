@@ -1,8 +1,8 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Structural Core Erlang constructors: `let`, `case`, `try`, `call`,
-//! `primop` and `do` (BT-4685).
+//! Structural Core Erlang constructors: `let`, `let <…>`, `fun`, `letrec`,
+//! `case`, `try`, `call`, `primop` and `do` (BT-4685, BT-4874).
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
@@ -16,8 +16,9 @@
 //!
 //! **Structure goes through these constructors, not string literals.** A new
 //! `let`, `case`, `try`, `do`, `call` or `primop` is built with
-//! [`let_in`], [`case_of`] / [`clause`], [`try_of_catch`], [`seq`], [`call`]
-//! or [`primop`]; never with a `"let "` / `" in "` / `"catch <"` fragment.
+//! [`let_in`] / [`let_values`], [`fun_of`], [`letrec`], [`tuple`] / [`values`], [`case_of`] /
+//! [`clause`], [`try_of_catch`], [`seq`], [`call`] or [`primop`]; never with a
+//! `"let "` / `" in "` / `"fun ("` / `"letrec "` / `"catch <"` fragment.
 //! Existing literal sites move to the constructors as their files are
 //! touched. This is a typed-*document* API, not a Core Erlang AST (ADR 0089):
 //! operands are ordinary [`Document`]s.
@@ -68,6 +69,19 @@ fn comma_separated<'a>(items: impl IntoIterator<Item = Document<'a>>) -> Documen
 /// clause, an `of` branch or a `catch` branch.
 fn angle<'a>(items: impl IntoIterator<Item = Document<'a>>) -> Document<'a> {
     docvec!["<", comma_separated(items), ">"]
+}
+
+/// `{A, B}` — a Core Erlang tuple of already-built documents.
+#[must_use]
+pub fn tuple<'a>(items: impl IntoIterator<Item = Document<'a>>) -> Document<'a> {
+    docvec!["{", comma_separated(items), "}"]
+}
+
+/// `<A, B>` — a multi-value expression, as in the result of a `case` clause
+/// that feeds a [`let_values`], or a clause's pattern list.
+#[must_use]
+pub fn values<'a>(items: impl IntoIterator<Item = Document<'a>>) -> Document<'a> {
+    angle(items)
 }
 
 /// `call 'module':'function'(arg, …)`.
@@ -128,6 +142,62 @@ pub fn let_in<'a>(
         Layout::Block => line(),
     };
     docvec!["let ", var, " = ", value, " in", sep, body]
+}
+
+/// `let <A, B> = value in body` — the multi-value `let`, binding each of
+/// `vars` (variable documents) to the corresponding value of a multi-value
+/// `value` (e.g. a `values`-returning call or a `<A, B>` tuple of results).
+///
+/// Layouts follow [`let_in`].
+#[must_use]
+pub fn let_values<'a>(
+    vars: impl IntoIterator<Item = Document<'a>>,
+    value: Document<'a>,
+    body: Document<'a>,
+    layout: Layout,
+) -> Document<'a> {
+    let sep = match layout {
+        Layout::Flat => Document::Str(" "),
+        Layout::Block => line(),
+    };
+    docvec!["let ", angle(vars), " = ", value, " in", sep, body]
+}
+
+/// `fun (A, B) -> body`.
+///
+/// `Flat` renders `fun (A, B) -> body`; `Block` renders `fun (A, B) ->` and
+/// nests `body` on the next line.
+#[must_use]
+pub fn fun_of<'a>(
+    params: impl IntoIterator<Item = Document<'a>>,
+    body: Document<'a>,
+    layout: Layout,
+) -> Document<'a> {
+    let head = docvec!["fun (", comma_separated(params), ") ->"];
+    match layout {
+        Layout::Flat => docvec![head, " ", body],
+        Layout::Block => docvec![head, nest(INDENT, docvec![line(), body])],
+    }
+}
+
+/// `letrec 'name'/arity = fun (…) -> … in body`.
+///
+/// `name` is a function-name document ([`leaf::fname`]) and `fun` a [`fun_of`]
+/// (or any `fun` document). `Flat` renders the whole form on one line;
+/// `Block` renders `letrec name = fun in` and puts `body` on the next line
+/// at the same indentation, like a chain of [`let_in`]s.
+#[must_use]
+pub fn letrec<'a>(
+    name: Document<'a>,
+    fun: Document<'a>,
+    body: Document<'a>,
+    layout: Layout,
+) -> Document<'a> {
+    let sep = match layout {
+        Layout::Flat => Document::Str(" "),
+        Layout::Block => line(),
+    };
+    docvec!["letrec ", name, " = ", fun, " in", sep, body]
 }
 
 /// `do first second` — evaluate `first` for effect, then `second`.
@@ -282,6 +352,69 @@ mod tests {
             docvec![line(), let_in(v("X"), v("Y"), v("X"), Layout::Block)],
         );
         assert_eq!(block.to_pretty_string(), "\n    let X = Y in\n    X");
+    }
+
+    #[test]
+    fn tuple_and_values_literals() {
+        assert_eq!(tuple([v("A"), v("B")]).to_pretty_string(), "{A, B}");
+        assert_eq!(tuple([]).to_pretty_string(), "{}");
+        assert_eq!(values([v("A"), v("B")]).to_pretty_string(), "<A, B>");
+        assert_eq!(values([v("A")]).to_pretty_string(), "<A>");
+    }
+
+    #[test]
+    fn let_values_layouts() {
+        let flat = let_values([v("A"), v("B")], v("P"), v("A"), Layout::Flat);
+        assert_eq!(flat.to_pretty_string(), "let <A, B> = P in A");
+        let block = nest(
+            4,
+            docvec![
+                line(),
+                let_values([v("A"), v("B")], v("P"), v("A"), Layout::Block)
+            ],
+        );
+        assert_eq!(block.to_pretty_string(), "\n    let <A, B> = P in\n    A");
+        // A single variable keeps its angle brackets.
+        assert_eq!(
+            let_values([v("A")], v("P"), v("A"), Layout::Flat).to_pretty_string(),
+            "let <A> = P in A"
+        );
+    }
+
+    #[test]
+    fn fun_layouts() {
+        assert_eq!(
+            fun_of([v("A"), v("B")], v("A"), Layout::Flat).to_pretty_string(),
+            "fun (A, B) -> A"
+        );
+        assert_eq!(
+            fun_of([], v("A"), Layout::Flat).to_pretty_string(),
+            "fun () -> A"
+        );
+        assert_eq!(
+            fun_of([v("A")], v("A"), Layout::Block).to_pretty_string(),
+            "fun (A) ->\n    A"
+        );
+    }
+
+    #[test]
+    fn letrec_layouts() {
+        let mk = |layout| {
+            letrec(
+                leaf::fname("loop", 1),
+                fun_of([v("N")], call("m", "f", [v("N")]), layout),
+                docvec!["apply ", leaf::fname("loop", 1), " (X)"],
+                layout,
+            )
+        };
+        assert_eq!(
+            mk(Layout::Flat).to_pretty_string(),
+            "letrec 'loop'/1 = fun (N) -> call 'm':'f'(N) in apply 'loop'/1 (X)"
+        );
+        assert_eq!(
+            mk(Layout::Block).to_pretty_string(),
+            "letrec 'loop'/1 = fun (N) ->\n    call 'm':'f'(N) in\napply 'loop'/1 (X)"
+        );
     }
 
     #[test]
