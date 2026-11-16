@@ -210,7 +210,7 @@ pub(in crate::server) fn canonicalize_existing_dir(path: &Path) -> Option<PathBu
     if !path.is_dir() {
         return None;
     }
-    fs::canonicalize(path).ok()
+    beamtalk_core::paths::canonicalize(path).ok()
 }
 pub(in crate::server) fn path_within_any_root(path: &Path, roots: &[PathBuf]) -> bool {
     roots.iter().any(|root| path.starts_with(root))

@@ -116,7 +116,8 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
                     );
                     return Ok(metadata);
                 }
-                if let Ok(canonical_project_path) = project_path.canonicalize() {
+                if let Ok(canonical_project_path) = beamtalk_core::paths::canonicalize(project_path)
+                {
                     let healed = WorkspaceMetadata {
                         project_path: canonical_project_path,
                         project_fingerprint: current_fingerprint
@@ -179,8 +180,7 @@ fn create_workspace_impl(workspace_id: &str, project_path: &Path) -> Result<Work
     // `find_workspace_by_project_path`'s defense-in-depth check already
     // treats a non-absolute stored path as unmatchable, so a raw fallback
     // here can't reintroduce the wildcard-match bug.
-    let canonical_project_path = project_path
-        .canonicalize()
+    let canonical_project_path = beamtalk_core::paths::canonicalize(project_path)
         .unwrap_or_else(|_| project_path.to_path_buf());
 
     let metadata = WorkspaceMetadata {
@@ -714,7 +714,7 @@ pub(super) fn find_workspace_by_project_path(project_path: &Path) -> Result<Opti
         return Ok(None);
     }
 
-    let target_canon = project_path.canonicalize().ok();
+    let target_canon = beamtalk_core::paths::canonicalize(project_path).ok();
 
     let entries = fs::read_dir(&workspaces_dir).into_diagnostic()?;
     for entry in entries {
@@ -744,7 +744,10 @@ pub(super) fn find_workspace_by_project_path(project_path: &Path) -> Result<Opti
         }
 
         // Compare canonicalized paths to handle symlinks/relative paths
-        let matches = match (&target_canon, metadata.project_path.canonicalize().ok()) {
+        let matches = match (
+            &target_canon,
+            beamtalk_core::paths::canonicalize(&metadata.project_path).ok(),
+        ) {
             (Some(a), Some(b)) => a == &b,
             _ => project_path == metadata.project_path,
         };
@@ -957,7 +960,10 @@ mod tests {
             "project_path should be canonicalized once the directory exists, got {:?}",
             healed.project_path
         );
-        assert_eq!(healed.project_path, relative_dir.canonicalize().unwrap());
+        assert_eq!(
+            healed.project_path,
+            beamtalk_core::paths::canonicalize(&relative_dir).unwrap()
+        );
 
         // And the healed path is persisted on disk, not just returned in memory.
         let reloaded = get_workspace_metadata(&ws_id).unwrap();
@@ -1032,7 +1038,10 @@ mod tests {
         // fingerprint — still heals normally.
         let healed = create_workspace_impl(&ws_id, &real_dir).unwrap();
         assert!(healed.project_path.is_absolute());
-        assert_eq!(healed.project_path, real_dir.canonicalize().unwrap());
+        assert_eq!(
+            healed.project_path,
+            beamtalk_core::paths::canonicalize(&real_dir).unwrap()
+        );
     }
 
     /// Analysis of a hypothesized "orphaned node on upgrade" failure mode:

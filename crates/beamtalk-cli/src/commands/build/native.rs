@@ -804,7 +804,7 @@ fn compile_with_rebar3(
 
     // REBAR_BASE_DIR must be absolute — rebar3 resolves it relative to cwd,
     // and cwd is already rebar_base_dir, so a relative path would nest.
-    let abs_base_dir = std::fs::canonicalize(rebar_base_dir.as_std_path())
+    let abs_base_dir = beamtalk_core::paths::canonicalize(rebar_base_dir.as_std_path())
         .into_diagnostic()
         .wrap_err("Failed to canonicalize rebar base dir")?;
     let rebar3_command = |subcommand: &str| {

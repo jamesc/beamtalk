@@ -527,7 +527,7 @@ pub(crate) fn resolve_flushed_path(raw: &str, roots: &[PathBuf]) -> Option<(Path
 /// Resolve one absolute candidate path — see [`resolve_flushed_path`] for
 /// the existed/deleted classification this implements.
 pub(in crate::server) fn resolve_candidate(candidate: PathBuf) -> Option<(PathBuf, bool)> {
-    match candidate.canonicalize() {
+    match beamtalk_core::paths::canonicalize(&candidate) {
         Ok(canon) => return Some((canon, true)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
         // A non-NotFound failure (permission denied, symlink cycle, transient

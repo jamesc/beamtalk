@@ -92,7 +92,7 @@ fn configured_stdlib_source_dirs_accepts_outside_root_absolute_path() {
     );
     assert_eq!(
         dirs,
-        vec![fs::canonicalize(&stdlib).expect("canonical stdlib")]
+        vec![beamtalk_core::paths::canonicalize(&stdlib).expect("canonical stdlib")]
     );
 
     let _ = fs::remove_dir_all(&temp);

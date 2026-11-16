@@ -829,7 +829,7 @@ pub(crate) fn collect_project_alias_infos(
 /// and returns the first `src/` directory found, or `None` if the ancestor
 /// chain has none.
 pub(crate) fn implicit_sibling_src_dir(test_path: &Utf8Path) -> Option<Utf8PathBuf> {
-    let start = std::fs::canonicalize(test_path)
+    let start = beamtalk_core::paths::canonicalize(test_path)
         .ok()
         .and_then(|abs| Utf8PathBuf::from_path_buf(abs).ok())
         .unwrap_or_else(|| test_path.to_owned());

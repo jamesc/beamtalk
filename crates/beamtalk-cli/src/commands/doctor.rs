@@ -150,7 +150,7 @@ fn check_runtime(info: Option<&RuntimeInfo>, err: Option<&miette::Report>) -> Ch
         RuntimeLayout::Dev => "dev",
         RuntimeLayout::Installed => "installed",
     };
-    let display_path = path.canonicalize().unwrap_or_else(|_| path.clone());
+    let display_path = beamtalk_core::paths::canonicalize(path).unwrap_or_else(|_| path.clone());
     CheckResult::Pass(format!(
         "Beamtalk runtime: {} ({label})",
         display_path.display()
