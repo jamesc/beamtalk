@@ -95,7 +95,7 @@ load_all(Dir, Pattern) ->
     [
         begin
             M = list_to_atom(filename:basename(F, ".beam")),
-            catch code:ensure_loaded(M)
+            try code:ensure_loaded(M) catch _:_ -> ok end
         end
      || F <- filelib:wildcard(filename:join(Dir, Pattern))
     ],
@@ -339,7 +339,7 @@ costs() ->
         {monotonic_time, Net(fun() -> erlang:monotonic_time(nanosecond) end)},
         {pdict_put, Net(fun() -> erlang:put(vd_cost_key, 1) end)},
         {pdict_erase, Net(fun() -> erlang:put(vd_cost_key, 1), erlang:erase(vd_cost_key) end)},
-        {throw, Net(fun() -> catch throw(x) end)}
+        {throw, Net(fun() -> try throw(x) catch throw:_ -> ok end end)}
     ]}.
 
 %% Counts x isolated costs x measured time: for each row, ns/op, and the share

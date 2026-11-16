@@ -40,7 +40,7 @@ fi
 
 case "$mode" in
   count|time|cost|report|keys) ;;
-  *) echo "usage: $0 [count|time|cost|report] ..." >&2; exit 2 ;;
+  *) echo "usage: $0 [count|time|cost|report|keys] ..." >&2; exit 2 ;;
 esac
 args="["
 for a in "$@"; do args+="\"$a\","; done
