@@ -159,22 +159,22 @@ all_groups_test_() ->
     {setup, fun() -> ok end, fun(_) -> ok = beamtalk_test_boot:boot_real_stdlib('Integer') end, [
         {generator, G}
      || G <- [
-        fun start_link_group/0,
-        fun async_cast_methods_group/0,
-        fun new_with_non_map_raises_type_error_group/0,
-        fun new_on_primitive_not_double_wrapped_group/0,
-        fun qualified_drain_isolates_packages_group/0,
-        fun apply_class_info_corrects_stale_superclass_group/0,
-        fun local_call_snapshot_group/0,
-        fun put_class_method_arity_group/0,
-        fun crash_recovery_restart_group/0,
-        fun bt1982_set_class_var_unknown_raises_group/0,
-        fun bt1982_new_on_abstract_class_errors_group/0,
-        fun bt1982_update_class_unknown_group/0,
-        fun bt1982_code_change_delegates_group/0,
-        fun method_xref_forwarded_on_class_creation_group/0,
-        fun safe_name_lookups_do_not_message_class_process_group/0
-    ]
+            fun start_link_group/0,
+            fun async_cast_methods_group/0,
+            fun new_with_non_map_raises_type_error_group/0,
+            fun new_on_primitive_not_double_wrapped_group/0,
+            fun qualified_drain_isolates_packages_group/0,
+            fun apply_class_info_corrects_stale_superclass_group/0,
+            fun local_call_snapshot_group/0,
+            fun put_class_method_arity_group/0,
+            fun crash_recovery_restart_group/0,
+            fun bt1982_set_class_var_unknown_raises_group/0,
+            fun bt1982_new_on_abstract_class_errors_group/0,
+            fun bt1982_update_class_unknown_group/0,
+            fun bt1982_code_change_delegates_group/0,
+            fun method_xref_forwarded_on_class_creation_group/0,
+            fun safe_name_lookups_do_not_message_class_process_group/0
+        ]
     ]}.
 
 %%====================================================================
