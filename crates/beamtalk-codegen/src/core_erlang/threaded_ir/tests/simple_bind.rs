@@ -176,6 +176,64 @@ fn verify_body_with_opaque_version_gaps_backfills_a_value_type_self_gap() {
     );
 }
 
+/// An opaque `Statement` that advanced `State` to version 1 with no `Bind`,
+/// followed by a real `Bind` reading it: the shape the backfill explains away.
+fn opaque_state_gap_body() -> Vec<ThreadedStmt> {
+    let span = span();
+    vec![
+        ThreadedStmt::Statement(docvec!["<opaque dispatch, mints State1>"], span),
+        ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::State, 2, FrameId::ROOT),
+            source: VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT),
+            op: BindOp::Direct(ValueRef::Literal("'_'")),
+            span,
+        },
+    ]
+}
+
+#[test]
+fn verify_body_with_opaque_version_gaps_rejects_an_unexplained_gap_in_a_class_method() {
+    // BT-4926: a class-side method body produces no opaque version gap (every
+    // field write is a real `Bind`), so the same body that an instance method
+    // gets backfilled is an `UnboundVersion` here.
+    let ir = opaque_state_gap_body();
+    assert_eq!(
+        verify_body_with_opaque_version_gaps(&ir, ScopeKind::Instance),
+        Vec::new(),
+        "an instance body keeps the backfill"
+    );
+    let errors = verify_body_with_opaque_version_gaps(&ir, ScopeKind::ClassMethod);
+    assert!(
+        errors.iter().any(|e| matches!(
+            e,
+            VerifyError::UnboundVersion { var, .. }
+                if *var == VersionedVar::new(VersionPrefix::State, 1, FrameId::ROOT)
+        )),
+        "a class-method version gap must be UnboundVersion, got: {errors:?}"
+    );
+}
+
+#[test]
+fn backfill_opaque_version_gaps_with_no_families_leaves_the_body_untouched() {
+    // BT-4926: with no families (what `opaque_gap_families` returns for a
+    // class-method scope) the backfill is the identity, so an unexplained gap
+    // reaches the verifier. (`closure_prelude_doc` skips the backfill call
+    // entirely and verifies its prelude as-is.)
+    let ir = opaque_state_gap_body();
+    assert_eq!(
+        backfill_opaque_version_gaps(&ir, FrameId::ROOT, &[]),
+        ir,
+        "no families means no synthetic Binds"
+    );
+    let errors = verify_in_scope(&ir, ScopeKind::Instance);
+    assert!(
+        errors
+            .iter()
+            .any(|e| matches!(e, VerifyError::UnboundVersion { .. })),
+        "unbackfilled gap must be UnboundVersion, got: {errors:?}"
+    );
+}
+
 #[test]
 fn verify_body_with_opaque_version_gaps_still_catches_a_real_non_linear_version() {
     let span = span();

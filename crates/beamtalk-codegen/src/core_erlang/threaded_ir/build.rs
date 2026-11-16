@@ -117,12 +117,14 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
 /// established backfill technique, generalized from "backfill everything
 /// before the one Bind under test" to "backfill exactly the gaps between
 /// this body's real Binds": walk the IR in order, tracking the last
-/// `State`-prefix version produced at [`FrameId::ROOT`] (BT-3816: and the
-/// value-type `SelfVt` one, which `generate_vt_field_assignment_open` and the
-/// other value-type open-chain builders advance the same invisible way), and
-/// insert a synthetic `Direct('_')` `Bind` chain for any versions an opaque
-/// statement consumed. The backfill is verification-fixture-only — the real
-/// IR (and therefore [`render`]'s output) is untouched.
+/// version of each family [`opaque_gap_families`] names for `scope` produced
+/// at [`FrameId::ROOT`] (`State` for an instance/REPL body; `SelfVt` for a
+/// value-type body, which `generate_vt_field_assignment_open` and the other
+/// value-type open-chain builders advance the same invisible way; none for a
+/// class-method body), and insert a synthetic `Direct('_')` `Bind` chain for
+/// any versions an opaque statement consumed. The backfill is
+/// verification-fixture-only — the real IR (and therefore [`render`]'s
+/// output) is untouched.
 ///
 /// What this still genuinely checks across the REAL Binds, for the first
 /// time over whole-method emission structure rather than per-call-site
@@ -139,13 +141,45 @@ pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
     scope: ScopeKind,
 ) -> Vec<VerifyError> {
     verify_in_scope(
-        &backfill_opaque_version_gaps(
-            ir,
-            FrameId::ROOT,
-            &[VersionPrefix::State, VersionPrefix::SelfVt],
-        ),
+        &backfill_opaque_version_gaps(ir, FrameId::ROOT, opaque_gap_families(scope)),
         scope,
     )
+}
+
+/// The version families an opaque statement may still advance invisibly in a
+/// method body of `scope` — what [`verify_body_with_opaque_version_gaps`]
+/// backfills (BT-4926).
+///
+/// Measured over the full corpus (stdlib, `bootstrap-test`, examples, the
+/// REPL protocol cases, the codegen/package-compiler/CLI test suites, the
+/// proptest and agreement corpora), with the backfill instrumented to log every
+/// gap it closed:
+///
+/// - [`ScopeKind::ClassMethod`] (a class-side method body or an actor cell
+///   closure — both thread no actor `State`; the measurement covers every body
+///   verified under this scope) produced **no** gap anywhere in the corpus
+///   once BT-4919 made field writes real `Bind`s, so it backfills nothing
+///   (the corpus tier, `just test-corpus`, enforces this): an unexplained
+///   version bump there is a [`VerifyError::UnboundVersion`], not a gap.
+/// - [`ScopeKind::Instance`] still has gaps: a conditional/loop with state
+///   mutations (`_CfTuple`/`_SD…` dispatch) and Tier 2 helper calls mint
+///   `State{N}` inside one opaque `Statement` (no `Bind` node for that step).
+/// - [`ScopeKind::ValueType`] still has gaps: the legacy `*_open` let-chain
+///   builders (BT-4889) mint `Self{N}` inside opaque `Statement`s, and the
+///   `ThreadedResult` unpack after a mutating conditional rebinds `Self{N}`
+///   textually.
+/// - [`ScopeKind::Repl`] still has gaps: an input's prelude is verified as a
+///   slice that starts at a `State` version an earlier opaque statement
+///   already minted.
+pub(in crate::core_erlang) fn opaque_gap_families(scope: ScopeKind) -> &'static [VersionPrefix] {
+    match scope {
+        ScopeKind::ClassMethod => &[],
+        // Each remaining scope backfills only the family its measured gaps
+        // were in: every `Instance` and `Repl` gap was `State`, every
+        // `ValueType` gap was `SelfVt`.
+        ScopeKind::Instance | ScopeKind::Repl => &[VersionPrefix::State],
+        ScopeKind::ValueType => &[VersionPrefix::SelfVt],
+    }
 }
 
 /// The fixture-building half of [`verify_body_with_opaque_version_gaps`]:
@@ -158,8 +192,8 @@ pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
 /// a flat method-level fixture — can reuse the identical technique instead
 /// of re-deriving it at a hardcoded [`FrameId::ROOT`] (AGENTS.md's
 /// no-duplicate-implementations rule). `verify_body_with_opaque_version_gaps`
-/// itself is unchanged in behavior: `frame: FrameId::ROOT` reproduces
-/// exactly what it always built inline.
+/// calls it at `frame: FrameId::ROOT` with the families
+/// [`opaque_gap_families`] names for its scope.
 pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
     ir: &[ThreadedStmt],
     frame: FrameId,
@@ -167,10 +201,12 @@ pub(in crate::core_erlang) fn backfill_opaque_version_gaps(
 ) -> Vec<ThreadedStmt> {
     let mut fixture: Vec<ThreadedStmt> = Vec::with_capacity(ir.len());
     // `families` are the families whose versions an opaque statement can
-    // advance unrecorded in this body. A method body passes `State` and
-    // `SelfVt` (BT-3816: `generate_vt_field_assignment_open`'s `Self{N}`); a
-    // loop/fold body at a non-root frame passes `State` only, so a real
-    // `SelfVt` `UnboundVersion` there is still reported.
+    // advance unrecorded in this body. A method body passes
+    // `opaque_gap_families(scope)` (BT-4926: `State` for instance/REPL,
+    // `SelfVt` for value-type (BT-3816: `generate_vt_field_assignment_open`'s
+    // `Self{N}`), nothing for class-method); a loop/fold body at a non-root
+    // frame passes `State` only, so a real `SelfVt` `UnboundVersion` there is
+    // still reported.
     let mut last_versions: Vec<(VersionPrefix, usize)> =
         families.iter().map(|p| (p.clone(), 0usize)).collect();
     for stmt in ir {
