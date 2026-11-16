@@ -1369,12 +1369,16 @@ has_method_pass_test() ->
 -doc "Setup class system for hierarchy tests".
 setup_class_system() ->
     beamtalk_test_boot:registry(),
-    beamtalk_extensions:init(),
     case whereis(beamtalk_bootstrap) of
         undefined -> beamtalk_bootstrap:start_link();
         _ -> ok
     end,
     beamtalk_test_boot:boot_real_stdlib('Integer'),
+    %% Created by the runtime app (so it outlives this setup process). Calling
+    %% init/0 here first made the setup process the table owner, and the table
+    %% vanished when the fixture ended, breaking the next module (BT-4962).
+    ok = beamtalk_extensions:init(),
+    true = ets:info(beamtalk_extensions, owner) =/= self(),
     ok.
 
 -doc "Teardown class system".
