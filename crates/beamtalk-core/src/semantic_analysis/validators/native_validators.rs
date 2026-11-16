@@ -440,36 +440,31 @@ mod tests {
         );
     }
 
-    /// Standalone (Tonel-style) self delegate without return type on native class → warning.
+    /// BT-4930: a standalone (unfolded, so cross-file) `self delegate` on a
+    /// native class gets the new error, not the return-type warning.
     #[test]
-    fn native_standalone_delegate_missing_return_type_warning() {
+    fn native_standalone_delegate_gets_cross_file_error_not_return_type_warning() {
         let src = "Actor subclass: MyActor native: my_mod\n  get -> Integer => self delegate\nMyActor >> getValue => self delegate";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
-        assert_eq!(
-            diagnostics.len(),
-            1,
-            "Expected 1 warning for standalone method missing return type, got: {diagnostics:?}"
-        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        check_cross_file_native_delegate(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].severity, Severity::Error);
         assert!(diagnostics[0].message.contains("getValue"));
     }
 
-    /// Standalone self delegate with return type on native class → no warning.
+    /// A standalone non-delegate method on a native class gets no cross-file error.
     #[test]
-    fn native_standalone_delegate_with_return_type_ok() {
-        let src = "Actor subclass: MyActor native: my_mod\n  get -> Integer => self delegate\nMyActor >> getValue -> Integer => self delegate";
-        let module = parse_ok(src);
-        let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+    fn native_standalone_non_delegate_has_no_cross_file_error() {
+        let src = "Object subclass: MyObj native: my_mod\n  get -> Integer => self delegate\nMyObj >> other -> Integer => 1";
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
-        check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
-        assert!(
-            diagnostics.is_empty(),
-            "Expected no warning when standalone method has return type, got: {diagnostics:?}"
-        );
+        check_cross_file_native_delegate(&module, &hierarchy, &mut diagnostics);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     // ── native: Object validation (ADR 0101) ──────────────────────────────────

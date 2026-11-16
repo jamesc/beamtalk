@@ -83,3 +83,13 @@ fn cross_file_extension_is_a_plain_send_of_delegate() {
     assert!(!code.contains(NATIVE_CALL), "{code}");
     assert!(code.contains("'delegate', []"), "{code}");
 }
+
+#[test]
+fn native_class_meta_carries_the_native_flag_and_others_do_not() {
+    // `decode.rs` reads this key back so a compiled dependency's class is
+    // native for the validators. Non-native classes emit no key at all.
+    let native = compile(HOST, None);
+    assert!(native.contains("'native' => 'true'"), "{native}");
+    let plain = compile("Value subclass: Plain\n  ping -> Integer => 1\n", None);
+    assert!(!plain.contains("'native' =>"), "{plain}");
+}

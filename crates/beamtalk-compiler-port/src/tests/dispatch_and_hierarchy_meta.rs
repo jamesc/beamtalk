@@ -654,3 +654,33 @@ fn constant_class_methods_survive_etf_meta() {
     }
     assert_eq!(info.methods[0].constant_value, None);
 }
+
+/// BT-4930: `__beamtalk_meta` carries `'native' => 'true'` for a `native:`
+/// class and decode reads it back; a `.beam` built before the flag existed (no
+/// `native` key) decodes as non-native without error.
+#[test]
+fn parse_class_hierarchy_reads_the_native_flag() {
+    use eetf::List;
+
+    let meta = |native: Option<&str>| {
+        let mut m = Map::from([
+            (atom("class"), atom("Host")),
+            (atom("superclass"), atom("Value")),
+            (atom("is_value"), atom("true")),
+            (atom("fields"), Term::from(List::from(vec![]))),
+            (atom("class_fields"), Term::from(List::from(vec![]))),
+        ]);
+        if let Some(v) = native {
+            m.map.insert(atom("native"), atom(v));
+        }
+        let term = Term::from(Map::from([(atom("Host"), Term::from(m))]));
+        parse_class_hierarchy_from_term(&term)
+    };
+
+    let flagged = meta(Some("true"));
+    assert_eq!(flagged.len(), 1);
+    assert!(flagged[0].is_native, "flag 'true' must decode as native");
+    let old = meta(None);
+    assert_eq!(old.len(), 1, "a .beam without the flag must still decode");
+    assert!(!old[0].is_native, "absent flag must decode as non-native");
+}
