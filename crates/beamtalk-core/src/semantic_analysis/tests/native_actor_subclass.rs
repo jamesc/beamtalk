@@ -254,15 +254,12 @@ fn subclass_of_a_sealed_native_class_gets_only_the_seal_error() {
 #[test]
 fn subclass_of_a_sealed_native_class_from_a_dependency_is_still_an_error() {
     // The hierarchy build emits no seal error for a dependency's class, so the
-    // native-subclass error must still fire: exactly one error either way.
+    // native-subclass error must still fire, and it is the only error.
     let parent =
         "sealed Value subclass: SVal native: sval_backing\n  size -> Integer => self delegate\n";
     let d = from_dependency(parent, "SVal subclass: SubSVal\n  extra => 1\n");
-    assert_eq!(
-        sealed_errors(&d).len() + missing_native(&d).len(),
-        1,
-        "{d:?}"
-    );
+    assert!(sealed_errors(&d).is_empty(), "{d:?}");
+    assert_eq!(missing_native(&d).len(), 1, "{d:?}");
 }
 
 #[test]
