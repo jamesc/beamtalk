@@ -1109,3 +1109,48 @@ fn build_accepts_subclass_of_dependency_native_actor_that_redeclares_native() {
         .assert()
         .success();
 }
+
+// ---------------------------------------------------------------------------
+// BT-4964: the same rule for `Value` / `Object` native classes
+// ---------------------------------------------------------------------------
+
+const BT4964_PARENT: &str =
+    "Value subclass: Bt4964Box native: bt4964_backing\n  size -> Integer => self delegate\n";
+
+#[test]
+fn build_rejects_value_subclass_of_native_class_from_a_dependency() {
+    let root = tempfile::tempdir().unwrap();
+    write_native_package(root.path(), "dep", "", &[("Bt4964Box", BT4964_PARENT)]);
+    let app = write_native_package(
+        root.path(),
+        "app",
+        "dep = { path = \"../dep\" }\n",
+        &[("Bt4964Sub", "Bt4964Box subclass: Bt4964Sub\n  extra => 1\n")],
+    );
+    cli_common::beamtalk()
+        .current_dir(&app)
+        .arg("build")
+        .assert()
+        .failure()
+        .stderr(contains("subclasses the `native:` class").and(contains("Bt4964Box")));
+}
+
+#[test]
+fn build_accepts_value_subclass_of_dependency_native_class_that_redeclares_native() {
+    let root = tempfile::tempdir().unwrap();
+    write_native_package(root.path(), "dep", "", &[("Bt4964Box", BT4964_PARENT)]);
+    let app = write_native_package(
+        root.path(),
+        "app",
+        "dep = { path = \"../dep\" }\n",
+        &[(
+            "Bt4964Sub",
+            "Bt4964Box subclass: Bt4964Sub native: bt4964_other\n  more -> Integer => self delegate\n",
+        )],
+    );
+    cli_common::beamtalk()
+        .current_dir(&app)
+        .arg("build")
+        .assert()
+        .success();
+}

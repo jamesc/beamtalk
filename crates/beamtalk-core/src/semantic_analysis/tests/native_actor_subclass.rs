@@ -131,21 +131,68 @@ fn abstract_non_native_middle_class_with_a_native_redeclaring_child_is_silent() 
     assert!(missing_native(&d).is_empty(), "{d:?}");
 }
 
-/// KNOWN GAP (BT-4964, needs-spec): `Queue subclass: MyQ` compiles, but
-/// `MyQ new` answers a plain `Queue`, so `MyQ`'s own methods are unreachable.
-/// Whether this becomes "make it work" or a compile error is undecided; this
-/// pins today's behaviour (no diagnostic) and flips with that decision.
+// ---- BT-4964: the same rule for `Value` / `Object` native classes ----
+
+const NATIVE_VALUE: &str =
+    "Value subclass: NVal native: nval_backing\n  size -> Integer => self delegate\n";
+const NATIVE_OBJECT: &str =
+    "Object subclass: NObj native: nobj_backing\n  size -> Integer => self delegate\n";
+
 #[test]
-fn value_and_object_subclasses_of_native_classes_are_not_reported() {
-    let src = "Value subclass: NVal native: nval_backing\n  size -> Integer => self delegate\n\
-               NVal subclass: SubVal\n  extra => 1\n\
-               Object subclass: NObj native: nobj_backing\n  size -> Integer => self delegate\n\
-               NObj subclass: SubObj\n  extra => 1\n";
-    let d = same_package(src);
+fn same_package_value_and_object_subclasses_of_native_classes_are_errors() {
+    let d = same_package(&format!(
+        "{NATIVE_VALUE}NVal subclass: SubVal\n  extra => 1\n"
+    ));
+    assert_one_error(&d, "NVal", "SubVal");
+    let d = same_package(&format!(
+        "{NATIVE_OBJECT}NObj subclass: SubObj\n  extra => 1\n"
+    ));
+    assert_one_error(&d, "NObj", "SubObj");
+}
+
+#[test]
+fn value_subclass_error_suggests_wrapping_in_a_field() {
+    let d = same_package(&format!(
+        "{NATIVE_VALUE}NVal subclass: SubVal\n  extra => 1\n"
+    ));
+    let hint = missing_native(&d)[0].hint.clone().unwrap_or_default();
+    assert!(hint.contains("field"), "{hint}");
+}
+
+#[test]
+fn value_subclass_of_a_dependency_native_class_is_an_error() {
+    let d = from_dependency(NATIVE_VALUE, "NVal subclass: SubVal\n  extra => 1\n");
+    assert_one_error(&d, "NVal", "SubVal");
+    let d = from_dependency(NATIVE_OBJECT, "NObj subclass: SubObj\n  extra => 1\n");
+    assert_one_error(&d, "NObj", "SubObj");
+}
+
+#[test]
+fn value_subclass_that_redeclares_native_is_silent() {
+    let sub = "NVal subclass: SubVal native: other_backing\n  more -> Integer => self delegate\n";
+    let d = same_package(&format!("{NATIVE_VALUE}{sub}"));
     assert!(missing_native(&d).is_empty(), "{d:?}");
-    let d = from_dependency(
-        "Value subclass: NVal native: nval_backing\n  size -> Integer => self delegate\n",
-        "NVal subclass: SubVal\n  extra => 1\n",
+    let d = from_dependency(NATIVE_VALUE, sub);
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn abstract_value_subclass_is_silent_but_its_concrete_child_is_an_error() {
+    let abs = format!("{NATIVE_VALUE}abstract NVal subclass: Mid\n  extra => 1\n");
+    let d = same_package(&abs);
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+    let d = same_package(&format!("{abs}Mid subclass: Leaf\n  more => 2\n"));
+    assert_one_error(&d, "Mid", "Leaf");
+    let d = same_package(&format!(
+        "{abs}Mid subclass: Leaf native: leaf_backing\n  more -> Integer => self delegate\n"
+    ));
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn plain_value_and_object_subclasses_are_silent() {
+    let d = same_package(
+        "Value subclass: PV\n  a => 1\nPV subclass: PV2\n  b => 2\nObject subclass: PO\n  c => 3\n",
     );
     assert!(missing_native(&d).is_empty(), "{d:?}");
 }
