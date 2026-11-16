@@ -138,9 +138,9 @@ pub(crate) fn check_native_delegate_return_type(
 ) {
     // Instance methods, inline or folded same-file extensions (a cross-file
     // standalone method is rejected by `check_cross_file_native_delegate`
-    // instead, BT-4930). Only native classes (a backing module) are checked: on non-native classes `self delegate` is a regular
-    // message send to Actor.delegate (which raises at runtime), so no special
-    // warning is needed.
+    // instead, BT-4930). Only native classes (a backing module) are checked:
+    // on non-native classes `self delegate` is a regular message send to
+    // Actor.delegate (which raises at runtime), so no special warning is needed.
     for (class_name, side, method) in module.inline_methods_with_owner() {
         if side == MethodSide::Instance
             && hierarchy.is_native(class_name)

@@ -230,7 +230,12 @@ impl CoreErlangGenerator {
     /// and the standard builder; absent (not `'false'`) for non-native classes
     /// so their meta output is unchanged.
     pub(super) fn native_flag_entry() -> Document<'static> {
-        Document::Str(",\n      'native' => 'true'")
+        docvec![
+            ",\n      ",
+            leaf::atom("native"),
+            " => ",
+            leaf::atom("true"),
+        ]
     }
 
     /// Like `build_meta_map_doc` but appends extra map entries before closing the map.
