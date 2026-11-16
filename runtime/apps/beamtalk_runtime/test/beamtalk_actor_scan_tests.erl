@@ -56,11 +56,14 @@ marked(Class, StartedAt) ->
 compiled_actor_found_test() ->
     {ok, Pid} = beamtalk_actor:safe_spawn_linked(test_counter, 0),
     try
-        [{Pid, Class, StartedAt}] = [E || {P, _, _} = E <- beamtalk_actor_scan:scan_actors(), P =:= Pid],
-        ?assertEqual(test_counter, Class),
+        [{Pid, Class, StartedAt}] = [
+            E
+         || {P, _, _} = E <- beamtalk_actor_scan:scan_actors(), P =:= Pid
+        ],
+        ?assertEqual('Counter', Class),
         ?assert(is_integer(StartedAt)),
         ?assertEqual([{Pid, Class, StartedAt}], beamtalk_actor_scan:info(Pid)),
-        ?assert(lists:member({Pid, StartedAt}, beamtalk_actor_scan:scan_class(test_counter)))
+        ?assert(lists:member({Pid, StartedAt}, beamtalk_actor_scan:scan_class('Counter')))
     after
         stop(Pid)
     end.
@@ -69,8 +72,8 @@ named_actor_found_test() ->
     Name = bt4944_named_counter,
     {ok, Pid} = beamtalk_actor_registry:'spawnAs'(Name, test_counter, 0),
     try
-        ?assertMatch([{Pid, test_counter, _}], beamtalk_actor_scan:info(Pid)),
-        ?assert(lists:member(Pid, pids(beamtalk_actor_scan:scan_class(test_counter))))
+        ?assertMatch([{Pid, 'Counter', _}], beamtalk_actor_scan:info(Pid)),
+        ?assert(lists:keymember(Pid, 1, beamtalk_actor_scan:scan_class('Counter')))
     after
         stop(Pid)
     end.
@@ -83,7 +86,7 @@ supervised_actor_found_test() ->
     ),
     try
         [{_, Child, _, _}] = supervisor:which_children(Sup),
-        ?assertMatch([{Child, test_counter, _}], beamtalk_actor_scan:info(Child)),
+        ?assertMatch([{Child, 'Counter', _}], beamtalk_actor_scan:info(Child)),
         ?assert(lists:member(Child, pids(beamtalk_actor_scan:scan_actors())))
     after
         unlink(Sup),
@@ -220,7 +223,7 @@ async_spawn_is_not_guaranteed_visible_test() ->
     {ok, {Pid, MonRef}} = beamtalk_actor:safe_spawn_monitored_async(test_counter, 0),
     try
         _MayMiss = lists:member(Pid, pids(beamtalk_actor_scan:scan_actors())),
-        {ok, _} = gen_server:call(Pid, {getValue, []}),
+        _ = gen_server:call(Pid, {getValue, []}),
         ?assert(lists:member(Pid, pids(beamtalk_actor_scan:scan_actors())))
     after
         erlang:demonitor(MonRef, [flush]),
@@ -234,11 +237,14 @@ async_spawn_is_not_guaranteed_visible_test() ->
 cost_per_process_is_bounded_test_() ->
     {timeout, 60, fun() ->
         N = 20000,
-        Idle = [spawn(fun() ->
-            receive
-                stop -> ok
-            end
-        end) || _ <- lists:seq(1, N)],
+        Idle = [
+            spawn(fun() ->
+                receive
+                    stop -> ok
+                end
+            end)
+         || _ <- lists:seq(1, N)
+        ],
         try
             Total = erlang:system_info(process_count),
             {Micros, _} = timer:tc(fun beamtalk_actor_scan:scan_actors/0),
