@@ -294,3 +294,10 @@ TestCase subclass: Bt4003ResidualsTest
     self assert: Bt4310UnsequencedActor spawn fieldAtPutSelfSendInArm equals: #(1, 1)
     self assert: Bt4310UnsequencedActor spawn fieldAtPutFieldWriteRoot equals: #(5, 5)
     self assert: Bt4310UnsequencedActor spawn fieldAtPutFieldWriteInArm equals: #(5, 5)
+
+TestCase subclass: Bt4955ScratchLintDemo
+
+  testScratch =>
+    x := 1
+    x + 1
+    self assert: x equals: 1
