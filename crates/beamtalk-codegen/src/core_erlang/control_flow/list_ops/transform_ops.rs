@@ -8,12 +8,49 @@ use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::{BodyKind, ThreadingPlan};
 use super::fold_driver::FoldOp;
-use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::leaf;
+use beamtalk_cerl_doc::form::{self, Layout};
+use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{Block, Expression};
 
 impl CoreErlangGenerator {
+    /// The unthreaded form of a list selector: bind the receiver and the
+    /// callable, then `case is_list(L)` picks `list_branch` for a list and a
+    /// runtime send of `selector` for anything else.
+    fn list_selector_case_doc(
+        &self,
+        list_var: String,
+        recv_code: Document<'static>,
+        body_var: String,
+        body_code: Document<'static>,
+        selector: &str,
+        list_branch: Document<'static>,
+    ) -> Document<'static> {
+        docvec![
+            form::let_prefix(leaf::var(list_var.clone()), recv_code),
+            form::let_prefix(leaf::var(body_var.clone()), body_code),
+            form::case_of(
+                form::call("erlang", "is_list", [leaf::var(list_var.clone())]),
+                [
+                    form::clause([leaf::atom("true")], None, list_branch, Layout::Flat),
+                    form::clause(
+                        [leaf::atom("false")],
+                        None,
+                        // BT-4366: the fallback send is nested in the list-type `case`, so the
+                        // call node carries the send's line itself.
+                        self.runtime_send_call(
+                            leaf::var(list_var),
+                            selector,
+                            vec![leaf::var(body_var)],
+                        ),
+                        Layout::Flat,
+                    ),
+                ],
+                Layout::Flat,
+            ),
+        ]
+    }
+
     /// Generates code for `list count:` with mutation analysis.
     ///
     /// Without mutations: falls through to `lists:filter` + `erlang:length`.
@@ -42,31 +79,25 @@ impl CoreErlangGenerator {
         let body_code = self.list_op_callable_doc(body, "count:", 1)?;
         let filtered_var = self.fresh_temp_var("temp");
 
-        Ok(docvec![
-            "let ",
-            leaf::var(list_var.clone()),
-            " = ",
+        let list_branch = docvec![
+            form::let_prefix(
+                leaf::var(filtered_var.clone()),
+                form::call(
+                    "lists",
+                    "filter",
+                    [leaf::var(body_var.clone()), leaf::var(list_var.clone())],
+                ),
+            ),
+            form::call("erlang", "length", [leaf::var(filtered_var)]),
+        ];
+        Ok(self.list_selector_case_doc(
+            list_var,
             recv_code,
-            " in let ",
-            leaf::var(body_var.clone()),
-            " = ",
+            body_var,
             body_code,
-            " in case call 'erlang':'is_list'(",
-            leaf::var(list_var.clone()),
-            ") of <'true'> when 'true' -> let ",
-            leaf::var(filtered_var.clone()),
-            " = call 'lists':'filter'(",
-            leaf::var(body_var.clone()),
-            ", ",
-            leaf::var(list_var.clone()),
-            ") in call 'erlang':'length'(",
-            leaf::var(filtered_var),
-            ") <'false'> when 'true' -> ",
-            // BT-4366: the fallback send is nested in the list-type `case`, so the
-            // call node carries the send's line itself.
-            self.runtime_send_call(leaf::var(list_var), "count:", vec![leaf::var(body_var)]),
-            " end",
-        ])
+            "count:",
+            list_branch,
+        ))
     }
 
     /// Generates stateful `count:` using `lists:foldl` with state threading
@@ -109,27 +140,19 @@ impl CoreErlangGenerator {
         let body_var = self.fresh_temp_var("temp");
         let body_code = self.list_op_callable_doc(body, "flatMap:", 1)?;
 
-        Ok(docvec![
-            "let ",
-            leaf::var(list_var.clone()),
-            " = ",
+        let list_branch = form::call(
+            "lists",
+            "flatmap",
+            [leaf::var(body_var.clone()), leaf::var(list_var.clone())],
+        );
+        Ok(self.list_selector_case_doc(
+            list_var,
             recv_code,
-            " in let ",
-            leaf::var(body_var.clone()),
-            " = ",
+            body_var,
             body_code,
-            " in case call 'erlang':'is_list'(",
-            leaf::var(list_var.clone()),
-            ") of <'true'> when 'true' -> call 'lists':'flatmap'(",
-            leaf::var(body_var.clone()),
-            ", ",
-            leaf::var(list_var.clone()),
-            ") <'false'> when 'true' -> ",
-            // BT-4366: the fallback send is nested in the list-type `case`, so the
-            // call node carries the send's line itself.
-            self.runtime_send_call(leaf::var(list_var), "flatMap:", vec![leaf::var(body_var)]),
-            " end",
-        ])
+            "flatMap:",
+            list_branch,
+        ))
     }
 
     /// Generates stateful `flatMap:` using `lists:foldl` with state threading.
@@ -235,44 +258,34 @@ impl CoreErlangGenerator {
                 })?;
 
                 // fun (Elem, Acc) -> <body>
-                Ok(docvec![
-                    "fun (",
-                    leaf::var(elem_var.clone()),
-                    ", ",
-                    leaf::var(acc_var.clone()),
-                    ") -> ",
+                Ok(form::fun_of(
+                    [leaf::var(elem_var.clone()), leaf::var(acc_var.clone())],
                     body_doc,
-                ])
+                    Layout::Flat,
+                ))
             })?
         } else {
             // Non-literal callable: wrap to swap args at runtime.
             let body_var = self.fresh_temp_var("temp");
             let body_code = self.non_literal_callable_doc(body, "inject:into:", 2)?;
             docvec![
-                "let ",
-                leaf::var(body_var.clone()),
-                " = ",
-                body_code,
-                " in fun (Elem, Acc) -> ",
-                self.annotate_current_send_call(docvec![
-                    "apply ",
-                    leaf::var(body_var),
-                    " (Acc, Elem)"
-                ]),
+                form::let_prefix(leaf::var(body_var.clone()), body_code),
+                form::fun_of(
+                    [leaf::var("Elem"), leaf::var("Acc")],
+                    self.annotate_current_send_call(docvec![
+                        "apply ",
+                        leaf::var(body_var),
+                        " (Acc, Elem)"
+                    ]),
+                    Layout::Flat,
+                ),
             ]
         };
 
         Ok(docvec![
             super::list_recv_to_safe_list_doc(recv_code, None, list_var, safe_list_var.clone()),
-            "let ",
-            leaf::var(init_var.clone()),
-            " = ",
-            init_code,
-            " in let ",
-            leaf::var(lambda_var.clone()),
-            " = ",
-            foldl_fun_doc,
-            " in ",
+            form::let_prefix(leaf::var(init_var.clone()), init_code),
+            form::let_prefix(leaf::var(lambda_var.clone()), foldl_fun_doc),
             ThreadingPlan::foldl_expr_doc(&lambda_var, leaf::var(init_var), &safe_list_var),
         ])
     }
@@ -324,27 +337,19 @@ impl CoreErlangGenerator {
         let body_var = self.fresh_temp_var("temp");
         let body_code = self.list_op_callable_doc(body, "takeWhile:", 1)?;
 
-        Ok(docvec![
-            "let ",
-            leaf::var(list_var.clone()),
-            " = ",
+        let list_branch = form::call(
+            "lists",
+            "takewhile",
+            [leaf::var(body_var.clone()), leaf::var(list_var.clone())],
+        );
+        Ok(self.list_selector_case_doc(
+            list_var,
             recv_code,
-            " in let ",
-            leaf::var(body_var.clone()),
-            " = ",
+            body_var,
             body_code,
-            " in case call 'erlang':'is_list'(",
-            leaf::var(list_var.clone()),
-            ") of <'true'> when 'true' -> call 'lists':'takewhile'(",
-            leaf::var(body_var.clone()),
-            ", ",
-            leaf::var(list_var.clone()),
-            ") <'false'> when 'true' -> ",
-            // BT-4366: the fallback send is nested in the list-type `case`, so the
-            // call node carries the send's line itself.
-            self.runtime_send_call(leaf::var(list_var), "takeWhile:", vec![leaf::var(body_var)]),
-            " end",
-        ])
+            "takeWhile:",
+            list_branch,
+        ))
     }
 
     /// Generates stateful `takeWhile:` using `lists:foldl` with state threading.
@@ -388,27 +393,19 @@ impl CoreErlangGenerator {
         let body_var = self.fresh_temp_var("temp");
         let body_code = self.list_op_callable_doc(body, "dropWhile:", 1)?;
 
-        Ok(docvec![
-            "let ",
-            leaf::var(list_var.clone()),
-            " = ",
+        let list_branch = form::call(
+            "lists",
+            "dropwhile",
+            [leaf::var(body_var.clone()), leaf::var(list_var.clone())],
+        );
+        Ok(self.list_selector_case_doc(
+            list_var,
             recv_code,
-            " in let ",
-            leaf::var(body_var.clone()),
-            " = ",
+            body_var,
             body_code,
-            " in case call 'erlang':'is_list'(",
-            leaf::var(list_var.clone()),
-            ") of <'true'> when 'true' -> call 'lists':'dropwhile'(",
-            leaf::var(body_var.clone()),
-            ", ",
-            leaf::var(list_var.clone()),
-            ") <'false'> when 'true' -> ",
-            // BT-4366: the fallback send is nested in the list-type `case`, so the
-            // call node carries the send's line itself.
-            self.runtime_send_call(leaf::var(list_var), "dropWhile:", vec![leaf::var(body_var)]),
-            " end",
-        ])
+            "dropWhile:",
+            list_branch,
+        ))
     }
 
     /// Generates stateful `dropWhile:` using `lists:foldl` with state threading.
@@ -449,27 +446,19 @@ impl CoreErlangGenerator {
         let body_var = self.fresh_temp_var("temp");
         let body_code = self.list_op_callable_doc(body, "partition:", 1)?;
 
-        Ok(docvec![
-            "let ",
-            leaf::var(list_var.clone()),
-            " = ",
+        let list_branch = form::call(
+            "beamtalk_list",
+            "partition",
+            [leaf::var(list_var.clone()), leaf::var(body_var.clone())],
+        );
+        Ok(self.list_selector_case_doc(
+            list_var,
             recv_code,
-            " in let ",
-            leaf::var(body_var.clone()),
-            " = ",
+            body_var,
             body_code,
-            " in case call 'erlang':'is_list'(",
-            leaf::var(list_var.clone()),
-            ") of <'true'> when 'true' -> call 'beamtalk_list':'partition'(",
-            leaf::var(list_var.clone()),
-            ", ",
-            leaf::var(body_var.clone()),
-            ") <'false'> when 'true' -> ",
-            // BT-4366: the fallback send is nested in the list-type `case`, so the
-            // call node carries the send's line itself.
-            self.runtime_send_call(leaf::var(list_var), "partition:", vec![leaf::var(body_var)]),
-            " end",
-        ])
+            "partition:",
+            list_branch,
+        ))
     }
 
     /// Generates stateful `partition:` using `lists:foldl` with state threading.
@@ -513,27 +502,19 @@ impl CoreErlangGenerator {
         let body_var = self.fresh_temp_var("temp");
         let body_code = self.list_op_callable_doc(body, "groupBy:", 1)?;
 
-        Ok(docvec![
-            "let ",
-            leaf::var(list_var.clone()),
-            " = ",
+        let list_branch = form::call(
+            "beamtalk_list",
+            "group_by",
+            [leaf::var(list_var.clone()), leaf::var(body_var.clone())],
+        );
+        Ok(self.list_selector_case_doc(
+            list_var,
             recv_code,
-            " in let ",
-            leaf::var(body_var.clone()),
-            " = ",
+            body_var,
             body_code,
-            " in case call 'erlang':'is_list'(",
-            leaf::var(list_var.clone()),
-            ") of <'true'> when 'true' -> call 'beamtalk_list':'group_by'(",
-            leaf::var(list_var.clone()),
-            ", ",
-            leaf::var(body_var.clone()),
-            ") <'false'> when 'true' -> ",
-            // BT-4366: the fallback send is nested in the list-type `case`, so the
-            // call node carries the send's line itself.
-            self.runtime_send_call(leaf::var(list_var), "groupBy:", vec![leaf::var(body_var)]),
-            " end",
-        ])
+            "groupBy:",
+            list_branch,
+        ))
     }
 
     /// Generates stateful `groupBy:` using `lists:foldl` with state threading.
@@ -577,27 +558,19 @@ impl CoreErlangGenerator {
         let body_var = self.fresh_temp_var("temp");
         let body_code = self.list_op_callable_doc(body, "sort:", 2)?;
 
-        Ok(docvec![
-            "let ",
-            leaf::var(list_var.clone()),
-            " = ",
+        let list_branch = form::call(
+            "beamtalk_list",
+            "sort_with",
+            [leaf::var(list_var.clone()), leaf::var(body_var.clone())],
+        );
+        Ok(self.list_selector_case_doc(
+            list_var,
             recv_code,
-            " in let ",
-            leaf::var(body_var.clone()),
-            " = ",
+            body_var,
             body_code,
-            " in case call 'erlang':'is_list'(",
-            leaf::var(list_var.clone()),
-            ") of <'true'> when 'true' -> call 'beamtalk_list':'sort_with'(",
-            leaf::var(list_var.clone()),
-            ", ",
-            leaf::var(body_var.clone()),
-            ") <'false'> when 'true' -> ",
-            // BT-4366: the fallback send is nested in the list-type `case`, so the
-            // call node carries the send's line itself.
-            self.runtime_send_call(leaf::var(list_var), "sort:", vec![leaf::var(body_var)]),
-            " end",
-        ])
+            "sort:",
+            list_branch,
+        ))
     }
 
     /// Generates stateful `sort:` using process dictionary for state threading.
@@ -657,22 +630,30 @@ impl CoreErlangGenerator {
             list_var,
             safe_list_var.clone(),
         ));
+        // `let W = fun (A, B) -> let StateAcc = get(K) in ` stays open: the
+        // comparator body and the `in` that closes `W` are pushed below, so the
+        // `let` for `W` is written out and only its `fun` is a constructor.
         docs.push(docvec![
+            form::let_prefix(
+                leaf::var(state_key_var.clone()),
+                form::call("erlang", "make_ref", []),
+            ),
+            form::let_discard(form::call(
+                "erlang",
+                "put",
+                [state_key_doc.clone(), leaf::var(init_state)],
+            )),
             "let ",
-            leaf::var(state_key_var.clone()),
-            " = call 'erlang':'make_ref'() in let _ = call 'erlang':'put'(",
-            state_key_doc.clone(),
-            ", ",
-            leaf::var(init_state),
-            ") in let ",
             leaf::var(wrapper_var.clone()),
-            " = fun (",
-            leaf::var(var_a.clone()),
-            ", ",
-            leaf::var(var_b.clone()),
-            ") -> let StateAcc = call 'erlang':'get'(",
-            state_key_doc.clone(),
-            ") in ",
+            " = ",
+            form::fun_of(
+                [leaf::var(var_a.clone()), leaf::var(var_b.clone())],
+                form::let_prefix(
+                    leaf::var("StateAcc"),
+                    form::call("erlang", "get", [state_key_doc.clone()]),
+                ),
+                Layout::Flat,
+            ),
         ]);
 
         // BT-3771: the comparator is a closed `fun` whose own entry state is
@@ -718,37 +699,38 @@ impl CoreErlangGenerator {
         // normal path `erlang:erase/1` both reads the final state and removes
         // the key.
         docs.push(docvec![
-            " in let ",
-            leaf::var(sorted_var.clone()),
-            " = try call 'lists':'sort'(",
-            leaf::var(wrapper_var),
-            ", ",
-            leaf::var(safe_list_var),
-            ") of <",
-            leaf::var(sort_result_var.clone()),
-            "> -> ",
-            leaf::var(sort_result_var),
-            " catch <",
-            leaf::var(type_var.clone()),
-            ", ",
-            leaf::var(error_var.clone()),
-            ", ",
-            leaf::var(stack_var.clone()),
-            "> -> let _ = call 'erlang':'erase'(",
-            state_key_doc.clone(),
-            ") in ",
-            Self::emit_raw_raise(type_var, error_var, stack_var),
-            " in let ",
-            leaf::var(state_out.clone()),
-            " = call 'erlang':'erase'(",
-            state_key_doc,
-            ") in ",
-            plan.generate_extract_suffix_doc(&state_out, self),
-            "{",
-            leaf::var(sorted_var),
-            ", ",
-            leaf::var(state_out),
-            "}",
+            " in ",
+            form::let_in(
+                leaf::var(sorted_var.clone()),
+                form::try_of_catch(
+                    form::call(
+                        "lists",
+                        "sort",
+                        [leaf::var(wrapper_var), leaf::var(safe_list_var)],
+                    ),
+                    [leaf::var(sort_result_var.clone())],
+                    leaf::var(sort_result_var),
+                    [
+                        leaf::var(type_var.clone()),
+                        leaf::var(error_var.clone()),
+                        leaf::var(stack_var.clone()),
+                    ],
+                    docvec![
+                        form::let_discard(form::call("erlang", "erase", [state_key_doc.clone()])),
+                        Self::emit_raw_raise(type_var, error_var, stack_var),
+                    ],
+                    Layout::Flat,
+                ),
+                docvec![
+                    form::let_prefix(
+                        leaf::var(state_out.clone()),
+                        form::call("erlang", "erase", [state_key_doc]),
+                    ),
+                    plan.generate_extract_suffix_doc(&state_out, self),
+                    form::tuple([leaf::var(sorted_var), leaf::var(state_out)]),
+                ],
+                Layout::Flat,
+            ),
         ]);
 
         Ok(Document::Vec(docs))
