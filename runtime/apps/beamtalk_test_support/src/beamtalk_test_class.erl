@@ -193,5 +193,18 @@ stop_instances_since(Key) ->
             lists:foreach(fun beamtalk_test_proc:stop/1, live_instances() -- Before)
     end.
 
+%% The runtime's own actors (`TranscriptStream`, ...) are not instances a test
+%% started: stopping one would only make its supervisor restart it. Same rule
+%% as the workspace `actors` op (`system`), when the workspace app is loaded.
 live_instances() ->
-    [Pid || {Pid, _Class, _StartedAt} <- beamtalk_actor_scan:scan_actors_by_pid()].
+    [
+        Pid
+     || {Pid, _Class, _StartedAt} <- beamtalk_actor_scan:scan_actors_by_pid(),
+        not is_system_actor(Pid)
+    ].
+
+is_system_actor(Pid) ->
+    case code:ensure_loaded(beamtalk_workspace_actors) of
+        {module, Mod} -> Mod:is_system(Pid);
+        _ -> false
+    end.
