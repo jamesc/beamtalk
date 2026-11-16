@@ -485,7 +485,7 @@ pub(super) fn binary_send_dispatches_to_self(
 /// extracted (ADR 0118 phase 1b) so a caller that already knows
 /// the receiver is a bare `self` without owning an `Expression::MessageSend`
 /// node to hand back (a cascade message, whose selector/arguments come from
-/// `CascadeMessage` — see `util.rs`'s `cascade_self_dispatch_messages`) can
+/// `CascadeMessage` — see `threaded_prelude.rs`'s `cascade_self_dispatch_messages`) can
 /// reuse the exact same rule instead of copying it (AGENTS.md: no duplicate
 /// implementations).
 ///
