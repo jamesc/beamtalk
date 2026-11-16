@@ -64,7 +64,7 @@ module loading to beamtalk_repl_loader.
     announce_binding_changed/2,
     maybe_await_future/1,
     rebuild_bindings_from_steps/3,
-    should_purge_module/2,
+    cleanup_module/1,
     strip_internal_bindings/1,
     inject_output/3,
     handle_class_definition/7,
@@ -625,7 +625,7 @@ do_eval_trace(Expression, State) ->
                                 ),
                                 {error, {eval_error, Class, CaughtExObj}, CaughtState}
                         after
-                            cleanup_module(ModuleName, RegistryPid)
+                            cleanup_module(ModuleName)
                         end,
                     Output = beamtalk_io_capture:stop(CaptureRef),
                     case EvalResult of
@@ -1257,8 +1257,7 @@ handle_protocol_definition(ProtocolInfo, Warnings, State) ->
                 {error, RegError} ->
                     %% Registration failed — clean up the loaded module to avoid
                     %% leaving it resident but untracked in State.
-                    RegistryPid = beamtalk_repl_state:get_actor_registry(State),
-                    cleanup_module(ModuleName, RegistryPid),
+                    cleanup_module(ModuleName),
                     {error, RegError, <<>>, Warnings, State}
             end;
         {error, Reason, ErrState} ->
@@ -1338,7 +1337,7 @@ eval_loaded_module(
                 CaughtState = beamtalk_repl_state:set_bindings(CaughtBindings, State),
                 {error, {eval_error, Class, CaughtExObj}, CaughtState}
         after
-            cleanup_module(ModuleName, RegistryPid)
+            cleanup_module(ModuleName)
         end,
     Output = beamtalk_io_capture:stop(CaptureRef),
     inject_output(EvalResult, Output, Warnings).
@@ -1491,19 +1490,26 @@ announce_binding_changed(VarName, Value, SessionId) ->
     end,
     ok.
 
--doc "Purge eval module if no living actors reference it.".
--spec cleanup_module(atom(), pid() | undefined) -> ok.
-cleanup_module(ModuleName, RegistryPid) ->
-    case should_purge_module(ModuleName, RegistryPid) of
-        true ->
-            case code:purge(ModuleName) of
-                true -> code:delete(ModuleName);
-                false -> ok
-            end;
-        false ->
-            ok
-    end,
-    ok.
+-doc """
+Release an eval module's old code if nothing runs it (BT-4945, ADR 0150).
+
+Asks the code server instead of enumerating actors: `code:soft_purge/1`
+removes old code only if no process still runs it, and never kills anyone.
+Returns `purged` or `retained` (old code is still referenced and stays).
+
+The module is deliberately NOT `code:delete/1`d. `check_process_code/2` (and
+so `soft_purge/1`) sees processes *running* the module but not processes that
+merely hold one of its funs (verified on OTP 28): deleting and purging would
+leave a block stored in a REPL binding or an actor with a `badfun`. The module
+therefore stays loaded, which is what happened before this change (see
+`beamtalk_repl_eval_tests`, "cleanup_module tests").
+""".
+-spec cleanup_module(atom()) -> purged | retained.
+cleanup_module(ModuleName) ->
+    case code:soft_purge(ModuleName) of
+        true -> purged;
+        false -> retained
+    end.
 
 -doc """
 Rebuild bindings from awaited trace steps.
@@ -1542,14 +1548,6 @@ maybe_await_future({beamtalk_future, _} = Future) ->
     end;
 maybe_await_future(Value) ->
     Value.
-
--doc "Check if a module should be purged (no living actors reference it).".
--spec should_purge_module(atom(), pid() | undefined) -> boolean().
-should_purge_module(_ModuleName, undefined) ->
-    true;
-should_purge_module(ModuleName, RegistryPid) ->
-    Actors = beamtalk_repl_actors:list_actors(RegistryPid),
-    not lists:any(fun(#{module := ActorModule}) -> ActorModule =:= ModuleName end, Actors).
 
 -doc "Strip internal plumbing keys from bindings map.".
 -spec strip_internal_bindings(map()) -> map().
