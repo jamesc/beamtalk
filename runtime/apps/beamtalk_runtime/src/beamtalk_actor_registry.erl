@@ -606,9 +606,9 @@ actor) and the other has a time, the side with a time is kept (BT-4937). An
 about age, so it takes the fallback below. Falls back to OTP's own
 `global:random_exit_name/3` tie-break when a start time cannot be compared
 (e.g. a raw, non-Beamtalk process happens to hold the conflicting
-registration, or the actor terminated in the narrow window between the conflict being detected and this function
-running) — `global_name_server` calls this synchronously and expects a
-decision back, never an exception, so this must always return one. Note
+registration, or the actor terminated in the narrow window between the
+conflict being detected and this function running) — `global_name_server`
+calls this synchronously and expects a decision back, never an exception, so this must always return one. Note
 this fallback (only reachable when ages genuinely cannot be compared, per
 ADR 0126 §4 "falling back to random_exit_name's choice") inherits
 `random_exit_name/3`'s own force-kill of the pid it does not return — the
