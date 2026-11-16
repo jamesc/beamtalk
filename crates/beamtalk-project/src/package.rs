@@ -64,6 +64,35 @@ pub fn find_package_root(start: &Path) -> Option<PathBuf> {
     }
 }
 
+/// The path a compiled module embeds as its source location (the
+/// `beamtalk_source` attribute and the BEAM `Line` chunk file name), so that
+/// the same project built in two directories gives byte-identical `.beam`
+/// files and no build-machine path leaks into shipped modules (BT-4940).
+///
+/// * Inside a package: the path relative to the package root (the directory
+///   holding `beamtalk.toml`), always with `/` separators. A dependency is
+///   compiled from its own package root, so its path is relative to *that*
+///   package, not to the consuming project.
+/// * Outside any package (a single file, stdlib, REPL input): the file name
+///   alone. Never an absolute path.
+///
+/// The Windows verbatim prefix (`\\?\`, BT-4914) only ever appears in the
+/// absolute form; it is stripped here with the package root, so it cannot
+/// reach the embedded string.
+#[must_use]
+pub fn embedded_source_path(source: &Path) -> String {
+    let canonical = try_canonicalize(source);
+    let relative = find_package_root(&canonical)
+        .and_then(|root| canonical.strip_prefix(&root).ok().map(Path::to_path_buf))
+        .or_else(|| canonical.file_name().map(PathBuf::from))
+        .unwrap_or_else(|| canonical.clone());
+    relative
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 /// The package name declared by the `beamtalk.toml` directly inside `root`.
 ///
 /// The one reader of a manifest's `[package] name` for callers that do not
@@ -294,6 +323,40 @@ pub fn resolve_extraction_files_with_errors(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn embedded_source_path_is_package_relative_with_forward_slashes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("beamtalk.toml"), "[package]\nname=\"p\"\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("src/sub")).unwrap();
+        let file = dir.path().join("src/sub/foo.bt");
+        std::fs::write(&file, "").unwrap();
+        assert_eq!(embedded_source_path(&file), "src/sub/foo.bt");
+    }
+
+    #[test]
+    fn embedded_source_path_outside_a_package_is_the_file_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("loose.bt");
+        std::fs::write(&file, "").unwrap();
+        assert_eq!(embedded_source_path(&file), "loose.bt");
+    }
+
+    #[test]
+    fn embedded_source_path_is_the_same_in_two_directories() {
+        let make = || {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("beamtalk.toml"), "[package]\nname=\"p\"\n").unwrap();
+            std::fs::create_dir_all(dir.path().join("src")).unwrap();
+            std::fs::write(dir.path().join("src/a.bt"), "").unwrap();
+            dir
+        };
+        let (a, b) = (make(), make());
+        assert_eq!(
+            embedded_source_path(&a.path().join("src/a.bt")),
+            embedded_source_path(&b.path().join("src/a.bt"))
+        );
+    }
     use super::*;
     use std::fs;
     use tempfile::TempDir;

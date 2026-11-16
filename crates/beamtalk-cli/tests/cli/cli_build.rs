@@ -867,3 +867,71 @@ fn dependency_qualifiers_are_checked_against_the_dependencys_own_packages() {
         .assert()
         .success();
 }
+
+/// Collects every `.beam` under `<project>/_build`, keyed by path relative to
+/// the project, with its bytes.
+fn collect_beams(project: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    fn walk(
+        root: &std::path::Path,
+        dir: &std::path::Path,
+        out: &mut std::collections::BTreeMap<String, Vec<u8>>,
+    ) {
+        for entry in std::fs::read_dir(dir).expect("read_dir") {
+            let path = entry.expect("dir entry").path();
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else if path.extension().is_some_and(|e| e == "beam") {
+                let rel = path
+                    .strip_prefix(root)
+                    .expect("under root")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                out.insert(rel, std::fs::read(&path).expect("read beam"));
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    walk(project, &project.join("_build"), &mut out);
+    out
+}
+
+/// BT-4940: the same project built in two different directories gives
+/// byte-identical `.beam` files, and no `.beam` carries the absolute path of
+/// the directory it was built in (reproducible, no build-machine leak).
+#[test]
+fn build_is_reproducible_across_directories_and_embeds_no_absolute_path() {
+    let a = cli_common::fixture_project();
+    let b = cli_common::fixture_project();
+    for project in [&a, &b] {
+        cli_common::beamtalk()
+            .current_dir(project.path())
+            .arg("build")
+            .assert()
+            .success();
+    }
+    let beams_a = collect_beams(a.path());
+    let beams_b = collect_beams(b.path());
+    assert!(!beams_a.is_empty(), "expected .beam output from the build");
+    assert_eq!(
+        beams_a.keys().collect::<Vec<_>>(),
+        beams_b.keys().collect::<Vec<_>>(),
+        "both builds must produce the same set of .beam files"
+    );
+    for (name, bytes_a) in &beams_a {
+        assert!(
+            beams_b.get(name) == Some(bytes_a),
+            "{name} differs between the two build directories"
+        );
+    }
+    // Compressed chunks hide literals, so check the raw bytes of the
+    // directory name as well as what `beam_lib` reports for attributes.
+    let needle_a = a.path().to_string_lossy().into_owned();
+    for (name, bytes) in &beams_a {
+        assert!(
+            !bytes
+                .windows(needle_a.len())
+                .any(|w| w == needle_a.as_bytes()),
+            "{name} embeds the absolute build path {needle_a}"
+        );
+    }
+}

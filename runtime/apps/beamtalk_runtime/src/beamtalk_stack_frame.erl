@@ -840,8 +840,12 @@ attribute; `nil` when neither is known.
 -spec frame_source_path(map()) -> binary() | nil.
 frame_source_path(#{module := Module} = Frame) ->
     case frame_file(Module, maps:get(file, Frame, nil)) of
-        nil -> nil;
-        Path -> unicode:characters_to_binary(Path)
+        nil ->
+            nil;
+        Path ->
+            %% BT-4940: a frame's own `file` is the package-relative path the
+            %% compiler embedded; the snippet reader needs the file on disk.
+            unicode:characters_to_binary(beamtalk_source_path:resolve(Module, Path))
     end;
 frame_source_path(_) ->
     nil.
