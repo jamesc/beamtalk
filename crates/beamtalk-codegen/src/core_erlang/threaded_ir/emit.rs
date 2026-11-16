@@ -18,8 +18,28 @@ use super::ir::{
 };
 use crate::core_erlang::sentinel_tags;
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::form::Layout;
+use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::{Document, join, leaf};
+
+/// `let var = value in `: a binding whose body is the statements rendered
+/// after it, so the form ends at `in ` and the next document continues it.
+fn let_prefix(var: Document<'static>, value: Document<'static>) -> Document<'static> {
+    form::let_in(var, value, Document::Nil, Layout::Flat)
+}
+
+/// `let _ = value in `, the effect-only [`let_prefix`].
+fn let_discard(value: Document<'static>) -> Document<'static> {
+    let_prefix(leaf::var("_"), value)
+}
+
+/// `call 'erlang':'element'(k, tuple)`.
+fn element_call(k: usize, tuple: Document<'static>) -> Document<'static> {
+    form::call(
+        "erlang",
+        "element",
+        [leaf::int_lit(i64::try_from(k).unwrap_or(i64::MAX)), tuple],
+    )
+}
 
 // ─── RenderCtx (ADR 0111 §Addendum "Renderer design sketch") ──────
 
@@ -256,13 +276,14 @@ pub(in crate::core_erlang) fn render(
             ThreadedStmt::ConditionHandBack {
                 pair, value_var, ..
             } => docs.push(docvec![
-                "let ",
-                leaf::var(value_var.clone()),
-                " = call 'erlang':'element'(1, ",
-                leaf::var(pair.clone()),
-                ") in let StateAcc = call 'erlang':'element'(2, ",
-                leaf::var(pair.clone()),
-                ") in ",
+                let_prefix(
+                    leaf::var(value_var.clone()),
+                    element_call(1, leaf::var(pair.clone())),
+                ),
+                let_prefix(
+                    leaf::var("StateAcc"),
+                    element_call(2, leaf::var(pair.clone())),
+                ),
             ]),
             ThreadedStmt::OnDoCatch {
                 vars,
@@ -294,13 +315,9 @@ pub(in crate::core_erlang) fn render(
                 foreign.as_ref(),
                 other,
             )),
-            ThreadedStmt::ConstructTuple { carrier, doc, .. } => docs.push(docvec![
-                "let ",
-                leaf::var(carrier.clone()),
-                " = ",
-                doc.clone(),
-                " in ",
-            ]),
+            ThreadedStmt::ConstructTuple { carrier, doc, .. } => {
+                docs.push(let_prefix(leaf::var(carrier.clone()), doc.clone()));
+            }
             ThreadedStmt::LocalRebind {
                 carrier,
                 slot,
@@ -429,43 +446,26 @@ fn render_synced_call(
     ctx: &RenderCtx,
 ) -> Document<'static> {
     let store_name = ctx.resolve_prefix(store);
-    let mut parts: Vec<Document<'static>> = vec![docvec![
-        "let _ = ",
-        cell_put_call(leaf::var(store_name)),
-        " in ",
-    ]];
+    let mut parts: Vec<Document<'static>> = vec![let_discard(cell_put_call(leaf::var(store_name)))];
     match result {
-        Some(result) => parts.push(docvec![
-            "let ",
-            leaf::var(result.to_string()),
-            " = ",
-            call.clone(),
-            " in "
-        ]),
+        Some(result) => parts.push(let_prefix(leaf::var(result.to_string()), call.clone())),
         None => parts.push(call.clone()),
     }
     if let Some(load) = load {
         let load_name = ctx.resolve_prefix(load);
-        parts.push(docvec![
-            "let ",
-            leaf::var(load_name.clone()),
-            " = ",
-            cell_take_call(),
-            " in "
-        ]);
+        parts.push(let_prefix(leaf::var(load_name.clone()), cell_take_call()));
         // BT-4122: a merged Tier 2 call mutated caller-scope locals (the
         // only bracketed call that can); rebind each live Core name from
         // the reloaded state, like the statement unpacker's rebinds.
         for (core_var, key) in tier2_local_rebinds {
-            parts.push(docvec![
-                "let ",
+            parts.push(let_prefix(
                 leaf::var(core_var.clone()),
-                " = call 'maps':'get'(",
-                leaf::atom(key.clone()),
-                ", ",
-                leaf::var(load_name.clone()),
-                ") in ",
-            ]);
+                form::call(
+                    "maps",
+                    "get",
+                    [leaf::atom(key.clone()), leaf::var(load_name.clone())],
+                ),
+            ));
         }
     }
     Document::Vec(parts)
@@ -484,33 +484,34 @@ fn render_fast_path_synced_call(
 ) -> Document<'static> {
     let store_name = ctx.resolve_prefix(store);
     let load_name = ctx.resolve_prefix(load);
+    let fast_arm = form::clause(
+        [leaf::atom("true")],
+        None,
+        form::values([fast.fast.clone(), leaf::var(store_name.clone())]),
+        Layout::Flat,
+    );
+    let slow_arm = form::clause(
+        [leaf::var("_")],
+        None,
+        docvec![
+            let_discard(cell_put_call(leaf::var(store_name))),
+            let_prefix(leaf::var(fast.slow_result.clone()), call.clone()),
+            let_prefix(leaf::var(fast.slow_state.clone()), cell_take_call()),
+            form::values([
+                leaf::var(fast.slow_result.clone()),
+                leaf::var(fast.slow_state.clone()),
+            ]),
+        ],
+        Layout::Flat,
+    );
     docvec![
         fast.bindings.clone(),
-        "let <",
-        leaf::var(result.to_string()),
-        ", ",
-        leaf::var(load_name),
-        "> = case ",
-        fast.test.clone(),
-        " of <'true'> when 'true' -> <",
-        fast.fast.clone(),
-        ", ",
-        leaf::var(store_name.clone()),
-        "> <_> when 'true' -> let _ = ",
-        cell_put_call(leaf::var(store_name)),
-        " in let ",
-        leaf::var(fast.slow_result.clone()),
-        " = ",
-        call.clone(),
-        " in let ",
-        leaf::var(fast.slow_state.clone()),
-        " = ",
-        cell_take_call(),
-        " in <",
-        leaf::var(fast.slow_result.clone()),
-        ", ",
-        leaf::var(fast.slow_state.clone()),
-        "> end in ",
+        form::let_values(
+            [leaf::var(result.to_string()), leaf::var(load_name)],
+            form::case_of(fast.test.clone(), [fast_arm, slow_arm], Layout::Flat),
+            Document::Nil,
+            Layout::Flat,
+        ),
     ]
 }
 
@@ -532,38 +533,29 @@ fn render_nlr_throw(stmt: &ThreadedStmt, ctx: &RenderCtx) -> Document<'static> {
     };
     let slot_doc = match slot.as_slice() {
         [one] => leaf::var(ctx.resolve_prefix(one)),
-        many => {
-            let mut parts: Vec<Document<'static>> = Vec::with_capacity(many.len() * 2 + 1);
-            parts.push(Document::Str("{"));
-            for (i, var) in many.iter().enumerate() {
-                if i > 0 {
-                    parts.push(Document::Str(", "));
-                }
-                parts.push(leaf::var(ctx.resolve_prefix(var)));
-            }
-            parts.push(Document::Str("}"));
-            Document::Vec(parts)
-        }
+        many => form::tuple(many.iter().map(|var| leaf::var(ctx.resolve_prefix(var)))),
     };
     // ADR 0137 §5 / ADR 0146: the cell is current whenever a `^` starts.
     let store = if *cell_store {
-        docvec!["let _ = ", cell_put_call(slot_doc.clone()), " in "]
+        let_discard(cell_put_call(slot_doc.clone()))
     } else {
         Document::Nil
     };
     docvec![
         store,
-        "let ",
-        leaf::var(result_var.clone()),
-        " = call 'erlang':'throw'({",
-        leaf::atom(sentinel_tags::NLR),
-        ", ",
-        leaf::var(token.name().to_string()),
-        ", ",
-        render_value(value, ctx),
-        ", ",
-        slot_doc,
-        "}) in ",
+        let_prefix(
+            leaf::var(result_var.clone()),
+            form::call(
+                "erlang",
+                "throw",
+                [form::tuple([
+                    leaf::atom(sentinel_tags::NLR),
+                    leaf::var(token.name().to_string()),
+                    render_value(value, ctx),
+                    slot_doc,
+                ])],
+            ),
+        ),
     ]
 }
 
@@ -578,28 +570,14 @@ fn render_carrier_read(
     state_first: Option<&VersionedVar>,
     ctx: &RenderCtx,
 ) -> Document<'static> {
-    let element = |k: usize| {
-        docvec![
-            "call 'erlang':'element'(",
-            leaf::int_lit(i64::try_from(k).unwrap_or(i64::MAX)),
-            ", ",
-            leaf::var(carrier.to_string()),
-            ")",
-        ]
-    };
+    let element = |k: usize| element_call(k, leaf::var(carrier.to_string()));
     match slot {
         CarrierSlot::Key(key) => {
             let map = match state_first {
                 Some(state) => leaf::var(ctx.resolve_prefix(state)),
                 None => element(2),
             };
-            docvec![
-                "call 'maps':'get'(",
-                leaf::atom(key.clone()),
-                ", ",
-                map,
-                ")"
-            ]
+            form::call("maps", "get", [leaf::atom(key.clone()), map])
         }
         CarrierSlot::Pos(k) => element(*k),
         CarrierSlot::Whole => leaf::var(carrier.to_string()),
@@ -631,15 +609,7 @@ fn render_local_rebind(
     ctx: &RenderCtx,
 ) -> Document<'static> {
     let read = render_carrier_read(carrier, slot, state_first, ctx);
-    let plain_let = |read: Document<'static>| {
-        docvec![
-            "let ",
-            leaf::var(value_var.to_string()),
-            " = ",
-            read,
-            " in "
-        ]
-    };
+    let plain_let = |read: Document<'static>| let_prefix(leaf::var(value_var.to_string()), read);
     match lowering {
         // BT-3835: the map already holds the value; no `Put`, no step.
         RebindLowering::Let | RebindLowering::MapHeld { .. } => plain_let(read),
@@ -663,6 +633,15 @@ fn render_local_rebind(
             ),
         ],
     }
+}
+
+/// `{'throw', {'$bt_nlr', fields…}}`: the pattern of a `catch` clause for a
+/// non-local-return throw.
+fn thrown_nlr_pattern(fields: impl IntoIterator<Item = Document<'static>>) -> Document<'static> {
+    form::tuple([
+        leaf::atom("throw"),
+        form::tuple(std::iter::once(leaf::atom(sentinel_tags::NLR)).chain(fields)),
+    ])
 }
 
 /// Full-fidelity rendering of [`ThreadedStmt::OnDoCatch`], both halves of the
@@ -704,57 +683,65 @@ fn render_on_do_catch(
     let mut docs: Vec<Document<'static>> = vec![docvec![
         entry_doc,
         cell_entry_doc,
+        // `try_of_catch` cannot build this: the region body carries its own
+        // trailing space, the result is the bare `of R ->` spelling (not
+        // `of <R> ->`), and the `case` clauses below are streamed in as
+        // later documents, so no closed form exists to wrap them.
         "try ",
         try_region.body.clone(),
         "of ",
         leaf::var(try_region.result_var.clone()),
         " -> ",
         leaf::var(try_region.result_var.clone()),
-        " ",
-        "catch <",
-        leaf::var(vars.type_var.clone()),
-        ", ",
-        leaf::var(vars.error_var.clone()),
-        ", ",
-        leaf::var(vars.stack_var.clone()),
-        "> -> case {",
-        leaf::var(vars.type_var.clone()),
-        ", ",
-        leaf::var(vars.error_var.clone()),
-        "} of ",
+        " catch ",
+        form::values([
+            leaf::var(vars.type_var.clone()),
+            leaf::var(vars.error_var.clone()),
+            leaf::var(vars.stack_var.clone()),
+        ]),
+        " -> case ",
+        form::tuple([
+            leaf::var(vars.type_var.clone()),
+            leaf::var(vars.error_var.clone()),
+        ]),
+        " of ",
     ]];
     for clause in clauses {
         match clause {
             CatchClause::NlrPassThrough(NlrThrowShape::Tuple4) => docs.push(docvec![
-                "<{'throw', {",
-                leaf::atom(sentinel_tags::NLR),
-                ", ",
-                leaf::var(vars.nlr_tok_var.clone()),
-                ", ",
-                leaf::var(vars.nlr_val_var.clone()),
-                ", ",
-                leaf::var(vars.nlr_state_var.clone()),
-                "}}> when 'true' -> ",
-                raise(),
+                form::clause(
+                    [thrown_nlr_pattern([
+                        leaf::var(vars.nlr_tok_var.clone()),
+                        leaf::var(vars.nlr_val_var.clone()),
+                        leaf::var(vars.nlr_state_var.clone()),
+                    ])],
+                    None,
+                    raise(),
+                    Layout::Flat,
+                ),
                 " ",
             ]),
             CatchClause::NlrPassThrough(NlrThrowShape::Tuple3) => docs.push(docvec![
-                "<{'throw', {",
-                leaf::atom(sentinel_tags::NLR),
-                ", ",
-                leaf::var(vars.nlr_tok_var2.clone()),
-                ", ",
-                leaf::var(vars.nlr_val_var2.clone()),
-                "}}> when 'true' -> ",
-                raise(),
+                form::clause(
+                    [thrown_nlr_pattern([
+                        leaf::var(vars.nlr_tok_var2.clone()),
+                        leaf::var(vars.nlr_val_var2.clone()),
+                    ])],
+                    None,
+                    raise(),
+                    Layout::Flat,
+                ),
                 " ",
             ]),
             CatchClause::NonNlr { steps } => {
-                docs.push(docvec![
-                    "<",
-                    leaf::var(vars.other_pair_var.clone()),
-                    "> when 'true' -> "
-                ]);
+                // The clause body is the steps pushed next, so the clause is
+                // built with an empty body: `<Other> when 'true' -> `.
+                docs.push(form::clause(
+                    [leaf::var(vars.other_pair_var.clone())],
+                    None,
+                    Document::Nil,
+                    Layout::Flat,
+                ));
                 for step in steps {
                     docs.push(render_catch_step(vars, step));
                 }
@@ -783,13 +770,13 @@ fn render_ensure_catch(
     other: &Document<'static>,
 ) -> Document<'static> {
     let head = docvec![
-        "catch <",
-        leaf::var(vars.type_var.clone()),
-        ", ",
-        leaf::var(vars.error_var.clone()),
-        ", ",
-        leaf::var(vars.stack_var.clone()),
-        "> -> ",
+        "catch ",
+        form::values([
+            leaf::var(vars.type_var.clone()),
+            leaf::var(vars.error_var.clone()),
+            leaf::var(vars.stack_var.clone()),
+        ]),
+        " -> ",
     ];
     let relay = relay.zip(carry);
     let nlr_clauses = if let (
@@ -829,18 +816,24 @@ fn render_ensure_catch(
     let Some(nlr_clauses) = nlr_clauses else {
         return docvec![head, other.clone()];
     };
+    // The relay / foreign clauses arrive as one document that already ends
+    // with a space, so the `case` is not built with `case_of` (which would
+    // join them to the last clause with a second one).
     docvec![
         head,
-        "case {",
-        leaf::var(vars.type_var.clone()),
-        ", ",
-        leaf::var(vars.error_var.clone()),
-        "} of ",
+        "case ",
+        form::tuple([
+            leaf::var(vars.type_var.clone()),
+            leaf::var(vars.error_var.clone()),
+        ]),
+        " of ",
         nlr_clauses,
-        "<",
-        leaf::var(vars.other_pair_var.clone()),
-        "> when 'true' -> ",
-        other.clone(),
+        form::clause(
+            [leaf::var(vars.other_pair_var.clone())],
+            None,
+            other.clone(),
+            Layout::Flat,
+        ),
         " end",
     ]
 }
@@ -848,15 +841,22 @@ fn render_ensure_catch(
 /// The `$bt_nlr` clause head every foreign clause shares: a throw of either
 /// shape, bound to [`EnsureCatchVars::foreign_nlr_var`].
 fn foreign_clause_head(vars: &EnsureCatchVars) -> Document<'static> {
-    docvec![
-        "<{'throw', ",
-        leaf::var(vars.foreign_nlr_var.clone()),
-        "}> when call 'erlang':'=:='(call 'erlang':'element'(1, ",
-        leaf::var(vars.foreign_nlr_var.clone()),
-        "), ",
-        leaf::atom(sentinel_tags::NLR),
-        ") -> ",
-    ]
+    form::clause(
+        [form::tuple([
+            leaf::atom("throw"),
+            leaf::var(vars.foreign_nlr_var.clone()),
+        ])],
+        Some(form::call(
+            "erlang",
+            "=:=",
+            [
+                element_call(1, leaf::var(vars.foreign_nlr_var.clone())),
+                leaf::atom(sentinel_tags::NLR),
+            ],
+        )),
+        Document::Nil,
+        Layout::Flat,
+    )
 }
 
 /// The end of a foreign clause, once the cleanup has run: the store of its
@@ -865,14 +865,10 @@ fn foreign_clause_head(vars: &EnsureCatchVars) -> Document<'static> {
 /// came.
 fn foreign_reraise(vars: &EnsureCatchVars, foreign: &EnsureForeignNlr) -> Document<'static> {
     let store = match foreign.store {
-        Some(version) => docvec![
-            "let _ = ",
-            cell_put_unwound_call(
-                leaf::var(vars.foreign_nlr_var.clone()),
-                leaf::var(super::super::util::versioned_var("StateAcc", version)),
-            ),
-            " in ",
-        ],
+        Some(version) => let_discard(cell_put_unwound_call(
+            leaf::var(vars.foreign_nlr_var.clone()),
+            leaf::var(super::super::util::versioned_var("StateAcc", version)),
+        )),
         None => Document::Nil,
     };
     docvec![
@@ -919,21 +915,24 @@ fn render_ensure_shared_clause(
     // every throw is foreign.
     let guard = relay_guard(vars, token).unwrap_or_else(|| leaf::atom("false"));
     let resume = relay_resume(vars, carry, relay);
+    let relay_arm = form::clause_bare(relay_pattern(vars), Some(guard), resume, Layout::Flat);
+    let foreign_arm = form::clause(
+        [leaf::var("_")],
+        None,
+        foreign_reraise(vars, foreign),
+        Layout::Flat,
+    );
     docvec![
         foreign_clause_head(vars),
         relay.seed.clone(),
         relay.cleanup.clone(),
-        " case ",
-        leaf::var(vars.foreign_nlr_var.clone()),
-        " of ",
-        relay_pattern(vars),
-        " when ",
-        guard,
-        " -> ",
-        resume,
-        "<_> when 'true' -> ",
-        foreign_reraise(vars, foreign),
-        " end ",
+        " ",
+        form::case_of(
+            leaf::var(vars.foreign_nlr_var.clone()),
+            [relay_arm, foreign_arm],
+            Layout::Flat,
+        ),
+        " ",
     ]
 }
 
@@ -941,34 +940,29 @@ fn render_ensure_shared_clause(
 /// `None` when no throw of the scope can reach it.
 fn relay_guard(vars: &EnsureCatchVars, token: Option<&TokenId>) -> Option<Document<'static>> {
     token.map(|token| {
-        docvec![
-            "call 'erlang':'=:='(",
-            leaf::var(vars.nlr_tok_var.clone()),
-            ", ",
-            leaf::var(token.name().to_string()),
-            ")",
-        ]
+        form::call(
+            "erlang",
+            "=:=",
+            [
+                leaf::var(vars.nlr_tok_var.clone()),
+                leaf::var(token.name().to_string()),
+            ],
+        )
     })
 }
 
 /// `{'$bt_nlr', Tok, Val, Carried}`, the throw a relay takes.
 fn relay_pattern(vars: &EnsureCatchVars) -> Document<'static> {
-    docvec![
-        "{",
+    form::tuple([
         leaf::atom(sentinel_tags::NLR),
-        ", ",
         leaf::var(vars.nlr_tok_var.clone()),
-        ", ",
         leaf::var(vars.nlr_val_var.clone()),
-        ", ",
         leaf::var(vars.nlr_carried_var.clone()),
-        "}",
-    ]
+    ])
 }
 
 /// A relay's end, once its seed and cleanup have run: the store of the
-/// re-thrown state (`cell_store`) and the throw resumed with it. Followed by
-/// a space.
+/// re-thrown state (`cell_store`) and the throw resumed with it.
 fn relay_resume(
     vars: &EnsureCatchVars,
     carry: NlrCarry,
@@ -990,21 +984,22 @@ fn relay_resume(
         RethrowSlot::SiteState(doc) => doc.clone(),
     };
     let store = if relay.cell_store {
-        docvec!["let _ = ", cell_put_call(rethrow.clone()), " in "]
+        let_discard(cell_put_call(rethrow.clone()))
     } else {
         Document::Nil
     };
     docvec![
         store,
-        "call 'erlang':'throw'({",
-        leaf::atom(sentinel_tags::NLR),
-        ", ",
-        leaf::var(vars.nlr_tok_var.clone()),
-        ", ",
-        leaf::var(vars.nlr_val_var.clone()),
-        ", ",
-        rethrow,
-        "}) ",
+        form::call(
+            "erlang",
+            "throw",
+            [form::tuple([
+                leaf::atom(sentinel_tags::NLR),
+                leaf::var(vars.nlr_tok_var.clone()),
+                leaf::var(vars.nlr_val_var.clone()),
+                rethrow,
+            ])],
+        ),
     ]
 }
 
@@ -1019,17 +1014,12 @@ fn render_ensure_relay_clause(
 ) -> Option<Document<'static>> {
     let guard = relay_guard(vars, token)?;
     let resume = relay_resume(vars, carry, relay);
-    Some(docvec![
-        "<{'throw', ",
-        relay_pattern(vars),
-        "}> when ",
-        guard,
-        " -> ",
-        relay.seed.clone(),
-        relay.cleanup.clone(),
-        " ",
-        resume,
-    ])
+    Some(form::clause(
+        [form::tuple([leaf::atom("throw"), relay_pattern(vars)])],
+        Some(guard),
+        docvec![relay.seed.clone(), relay.cleanup.clone(), " ", resume, " "],
+        Layout::Flat,
+    ))
 }
 
 fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static> {
@@ -1053,27 +1043,40 @@ fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static
             Layout::Flat,
         ),
         CatchStep::ClassFilter => docvec![
-            "let ",
-            leaf::var(vars.match_var.clone()),
-            " = call 'beamtalk_exception_handler':'matches_class'(",
-            leaf::var(vars.ex_class_var.clone()),
-            ", ",
-            leaf::var(vars.ex_obj_var.clone()),
-            ") in ",
+            let_prefix(
+                leaf::var(vars.match_var.clone()),
+                form::call(
+                    "beamtalk_exception_handler",
+                    "matches_class",
+                    [
+                        leaf::var(vars.ex_class_var.clone()),
+                        leaf::var(vars.ex_obj_var.clone()),
+                    ],
+                ),
+            ),
+            // The handler (`FilterHandler`) and miss arm (`FilterMiss`) are
+            // later steps, so this opens the `case` and its first clause.
             "case ",
             leaf::var(vars.match_var.clone()),
             " of ",
-            "<'true'> when 'true' -> ",
+            form::clause([leaf::atom("true")], None, Document::Nil, Layout::Flat),
         ],
         CatchStep::FilterHandler(handler) => handler.clone(),
         CatchStep::FilterMiss => docvec![
-            " <'false'> when 'true' -> ",
-            CoreErlangGenerator::emit_raw_raise(
-                vars.type_var.clone(),
-                vars.error_var.clone(),
-                vars.stack_var.clone(),
+            " ",
+            form::clause(
+                [leaf::atom("false")],
+                None,
+                docvec![
+                    CoreErlangGenerator::emit_raw_raise(
+                        vars.type_var.clone(),
+                        vars.error_var.clone(),
+                        vars.stack_var.clone(),
+                    ),
+                    CoreErlangGenerator::case_clause_fallback_doc(vars.filter_fallback_var.clone()),
+                ],
+                Layout::Flat,
             ),
-            CoreErlangGenerator::case_clause_fallback_doc(vars.filter_fallback_var.clone()),
             " end end",
         ],
     }
@@ -1278,15 +1281,13 @@ fn render_loop_skeleton(
     // reference to it inside the `fun`'s body, including the recursive tail
     // call.
     let render_in_loop_body = |ctx: &mut RenderCtx| {
-        let param_list = join(
-            counter
-                .map(|c| leaf::var(c.name.clone()))
-                .into_iter()
-                .chain(produces.iter().map(|v| {
-                    leaf::var(ctx.resolve_prefix(&VersionedVar::new(v.prefix.clone(), 0, frame)))
-                })),
-            &Document::Str(", "),
-        );
+        let params: Vec<Document<'static>> = counter
+            .map(|c| leaf::var(c.name.clone()))
+            .into_iter()
+            .chain(produces.iter().map(|v| {
+                leaf::var(ctx.resolve_prefix(&VersionedVar::new(v.prefix.clone(), 0, frame)))
+            }))
+            .collect();
         // ADR 0118 phase 3: the condition prelude renders INSIDE
         // this closure, under the identical loop-context flags as
         // `body_doc` — a self-send's `Bind` in `condition` must resolve
@@ -1325,9 +1326,9 @@ fn render_loop_skeleton(
                 &Document::Str(", "),
             )
         };
-        (param_list, condition_doc, body_doc, final_args)
+        (params, condition_doc, body_doc, final_args)
     };
-    let (param_list, condition_doc, body_doc, final_args) = match loop_context {
+    let (params, condition_doc, body_doc, final_args) = match loop_context {
         Some(flags) => ctx.with_loop_context(flags, render_in_loop_body),
         None => render_in_loop_body(ctx),
     };
@@ -1355,35 +1356,43 @@ fn render_loop_skeleton(
     };
 
     match header {
-        None => docvec![
-            "letrec ",
+        None => form::letrec(
             leaf::fname(fn_name.to_string(), arity),
-            " = fun (",
-            param_list,
-            ") -> ",
-            body_doc,
-            "apply ",
-            leaf::fname(fn_name.to_string(), arity),
-            " (",
-            final_args,
-            ")",
-            " in ",
+            form::fun_of(
+                params,
+                docvec![
+                    body_doc,
+                    "apply ",
+                    leaf::fname(fn_name.to_string(), arity),
+                    " (",
+                    final_args,
+                    ")",
+                ],
+                Layout::Flat,
+            ),
             entry_apply,
-        ],
+            Layout::Flat,
+        ),
+        // Not `form::letrec`: `exit_arm` already ends with a space, and
+        // `letrec` would add a second one before `in`.
         Some(h) => docvec![
             "letrec ",
             leaf::fname(fn_name.to_string(), arity),
-            " = fun (",
-            param_list,
-            ") -> ",
-            condition_doc.expect("condition_doc is always Some when header is Some"),
-            body_doc,
-            " apply ",
-            leaf::fname(fn_name.to_string(), arity),
-            " (",
-            final_args,
-            ") ",
-            h.exit_arm.clone(),
+            " = ",
+            form::fun_of(
+                params,
+                docvec![
+                    condition_doc.expect("condition_doc is always Some when header is Some"),
+                    body_doc,
+                    " apply ",
+                    leaf::fname(fn_name.to_string(), arity),
+                    " (",
+                    final_args,
+                    ") ",
+                    h.exit_arm.clone(),
+                ],
+                Layout::Flat,
+            ),
             // NOTE: no leading space here (unlike the bare-shape arm above) —
             // `exit_arm` (e.g. `"<'false'> ... end "`) already ends with a
             // trailing space, matching production's own `" end ",` +
@@ -1551,27 +1560,26 @@ fn render_tuple_acc_unpack(
     if shape == FoldAccShape::Bare {
         // BT-4116: the accumulator IS the one threaded local.
         for target in targets {
-            docs.push(docvec![
-                "let ",
+            docs.push(let_prefix(
                 leaf::var(target.render_name()),
-                " = ",
                 leaf::var(param.0.clone()),
-                " in ",
-            ]);
+            ));
         }
         return Document::Vec(docs);
     }
     for (i, target) in targets.iter().enumerate() {
         let idx = gate_slots + 1 + i;
-        docs.push(docvec![
-            "let ",
+        docs.push(let_prefix(
             leaf::var(target.render_name()),
-            " = call 'erlang':'element'(",
-            leaf::int_lit(i64::try_from(idx).unwrap_or(0)),
-            ", ",
-            leaf::var(param.0.clone()),
-            ") in ",
-        ]);
+            form::call(
+                "erlang",
+                "element",
+                [
+                    leaf::int_lit(i64::try_from(idx).unwrap_or(0)),
+                    leaf::var(param.0.clone()),
+                ],
+            ),
+        ));
     }
     Document::Vec(docs)
 }
@@ -1595,17 +1603,18 @@ fn render_bind(
     let source_name = ctx.resolve_prefix(source);
     match op {
         BindOp::Put { field, value } => {
-            let put = docvec![
-                "let ",
+            let put = let_prefix(
                 leaf::var(target_name.clone()),
-                " = call 'maps':'put'(",
-                leaf::atom(field.clone()),
-                ", ",
-                render_value(value, ctx),
-                ", ",
-                leaf::var(source_name),
-                ") in ",
-            ];
+                form::call(
+                    "maps",
+                    "put",
+                    [
+                        leaf::atom(field.clone()),
+                        render_value(value, ctx),
+                        leaf::var(source_name),
+                    ],
+                ),
+            );
             // ADR 0137 §5: inside an `ensure:` protected body a field write also
             // stores the new version to the cell (a local's scratch key is not a
             // field).
@@ -1613,43 +1622,26 @@ fn render_bind(
                 && target.prefix == VersionPrefix::State
                 && !field.starts_with(super::ir::LOCAL_STATE_KEY_PREFIX)
             {
-                docvec![
-                    put,
-                    "let _ = ",
-                    cell_put_call(leaf::var(target_name)),
-                    " in "
-                ]
+                docvec![put, let_discard(cell_put_call(leaf::var(target_name)))]
             } else {
                 put
             }
         }
-        BindOp::Unpack { field } => docvec![
-            "let ",
+        BindOp::Unpack { field } => let_prefix(
             leaf::var(target_name),
-            " = call 'maps':'get'(",
-            leaf::atom(field.clone()),
-            ", ",
-            leaf::var(source_name),
-            ") in ",
-        ],
+            form::call(
+                "maps",
+                "get",
+                [leaf::atom(field.clone()), leaf::var(source_name)],
+            ),
+        ),
         BindOp::Direct(value) => {
-            let bind = docvec![
-                "let ",
-                leaf::var(target_name.clone()),
-                " = ",
-                render_value(value, ctx),
-                " in ",
-            ];
+            let bind = let_prefix(leaf::var(target_name.clone()), render_value(value, ctx));
             // ADR 0137 §5: a `State` version a compiled self-send hands back inside an
             // `ensure:` protected body is stored too, so the cleanup of a failed
             // body sees what the send changed.
             if ctx.generator.ensure_write_through > 0 && target.prefix == VersionPrefix::State {
-                docvec![
-                    bind,
-                    "let _ = ",
-                    cell_put_call(leaf::var(target_name)),
-                    " in "
-                ]
+                docvec![bind, let_discard(cell_put_call(leaf::var(target_name)))]
             } else {
                 bind
             }
