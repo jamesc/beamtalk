@@ -819,18 +819,16 @@ impl CoreErlangGenerator {
         let hint = format!("Define {class_name} with: Object subclass: {class_name}");
 
         docvec![
-            "<'undefined'> when 'true' -> let ",
-            leaf::var(err0_var.clone()),
-            " = call 'beamtalk_error':'new'('class_not_found', ",
-            leaf::atom(class_name.to_string()),
-            ") in ",
-            "let ",
-            leaf::var(err1_var.clone()),
-            " = call 'beamtalk_error':'with_hint'(",
-            leaf::var(err0_var),
-            ", ",
-            leaf::binary_lit(hint),
-            ") in ",
+            "<'undefined'> when 'true' -> ",
+            errors::BeamtalkErrorChain::new("class_not_found", leaf::atom(class_name.to_string()))
+                .hint(leaf::binary_lit(hint))
+                .build(
+                    vec![
+                        errors::ErrorBinding::plain(err0_var),
+                        errors::ErrorBinding::plain(err1_var.clone()),
+                    ],
+                    Document::Str(" "),
+                ),
             "call 'beamtalk_error':'raise'(",
             leaf::var(err1_var),
             ") ",

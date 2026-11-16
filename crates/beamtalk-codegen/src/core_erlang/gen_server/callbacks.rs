@@ -10,6 +10,7 @@
 //! and `terminate/2`.
 
 use super::super::actor_state_access::{actor_state_call, actor_state_helper};
+use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
 use super::super::exception_forms::{CatchVars, build_caught_triple_doc, wrap_and_reraise_doc};
 use super::super::{CoreErlangGenerator, Result};
 use crate::core_erlang::sentinel_tags;
@@ -849,20 +850,18 @@ impl CoreErlangGenerator {
                             INDENT,
                             docvec![
                                 line(),
-                                "let ",
-                                leaf::var(err_var0.clone()),
-                                " = call 'beamtalk_error':'new'('uninitialized_state_error', ",
-                                leaf::atom(owning_class.to_string()),
-                                ") in",
-                                line(),
-                                "let ",
-                                leaf::var(err_var1.clone()),
-                                " = call 'beamtalk_error':'with_hint'(",
-                                leaf::var(err_var0),
-                                ", ",
-                                leaf::binary_lit(&hint_msg),
-                                ") in",
-                                line(),
+                                BeamtalkErrorChain::new(
+                                    "uninitialized_state_error",
+                                    leaf::atom(owning_class.to_string())
+                                )
+                                .hint(leaf::binary_lit(&hint_msg))
+                                .build(
+                                    vec![
+                                        ErrorBinding::plain(err_var0),
+                                        ErrorBinding::plain(err_var1.clone()),
+                                    ],
+                                    line(),
+                                ),
                                 "let ",
                                 leaf::var(err_msg_var.clone()),
                                 " = call 'beamtalk_error':'format_safe'(",

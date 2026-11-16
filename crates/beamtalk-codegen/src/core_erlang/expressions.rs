@@ -651,17 +651,19 @@ impl CoreErlangGenerator {
         let err1 = self.fresh_temp_var("LateErr");
         let err2 = self.fresh_temp_var("LateErr");
         docvec![
-            super::errors::beamtalk_error_doc(
-                leaf::var(err0.clone()),
-                leaf::var(err0),
-                leaf::var(err1.clone()),
-                leaf::var(err1),
-                leaf::var(err2.clone()),
+            super::errors::BeamtalkErrorChain::new(
                 "uninitialized_state_error",
-                leaf::atom(class_name.to_string()),
-                leaf::atom(selector.to_string()),
-                leaf::binary_lit(hint_text),
-                Document::Str(" "),
+                leaf::atom(class_name.to_string())
+            )
+            .selector(leaf::atom(selector.to_string()))
+            .hint(leaf::binary_lit(hint_text))
+            .build(
+                vec![
+                    super::errors::ErrorBinding::split(leaf::var(err0.clone()), leaf::var(err0)),
+                    super::errors::ErrorBinding::split(leaf::var(err1.clone()), leaf::var(err1)),
+                    super::errors::ErrorBinding::terminal(leaf::var(err2.clone()))
+                ],
+                Document::Str(" ")
             ),
             "call 'beamtalk_error':'raise'(",
             leaf::var(err2),

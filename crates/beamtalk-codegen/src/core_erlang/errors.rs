@@ -17,6 +17,7 @@
 
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form;
 use beamtalk_cerl_doc::join;
 use beamtalk_cerl_doc::leaf;
 
@@ -40,64 +41,194 @@ use super::CoreErlangGenerator;
 pub(super) const VALUE_IMMUTABLE_SLOT_HINT: &str =
     "Cannot modify slot on value type \u{2014} use withSlot: to create a new instance";
 
-/// Builds the `let Err0 = call 'beamtalk_error':'new'(Kind, Class) in <sep>
-/// let Err1 = call 'beamtalk_error':'with_selector'(Err0, Selector) in <sep>
-/// let Err2 = call 'beamtalk_error':'with_hint'(Err1, Hint) in <sep>` chain
-/// shared by every structured runtime error emission site, stopping right
-/// after the final `in` + `sep` so the caller appends its own tail (`call
-/// 'beamtalk_error':'raise'(Err2)`, `{'error', Err2, State}`, ...)
-/// referencing `err2` itself.
+/// How one step of a [`BeamtalkErrorChain`] binds its result: the text on
+/// the left of the `let` (`binding`) and the text later steps use to refer
+/// back to it (`reference`). They are the same bare name at most sites, but
+/// Core Erlang's bracketed single-variable form (`let <X> = …`) and a
+/// `_`-prefixed binding make them differ, and each site keeps whatever
+/// spelling it already had so collapsing onto the builder stays a
+/// byte-identical extraction rather than a renaming (BT-4887).
+pub(super) struct ErrorBinding {
+    binding: Document<'static>,
+    reference: Document<'static>,
+}
+
+impl ErrorBinding {
+    /// A bare variable, bound and referenced by the same name.
+    pub(super) fn plain(name: impl Into<String>) -> Self {
+        let name = name.into();
+        Self {
+            binding: leaf::var(name.clone()),
+            reference: leaf::var(name),
+        }
+    }
+
+    /// Core Erlang's bracketed single-variable `let <Name> = …` form.
+    pub(super) fn bracketed(name: impl Into<String>) -> Self {
+        let name = name.into();
+        Self {
+            binding: docvec!["<", leaf::var(name.clone()), ">"],
+            reference: leaf::var(name),
+        }
+    }
+
+    /// The final link, whose reference no later step needs.
+    pub(super) fn terminal(binding: Document<'static>) -> Self {
+        Self {
+            reference: binding.clone(),
+            binding,
+        }
+    }
+
+    /// A binding and reference spelled differently (e.g. `_Error0` / `Error0`).
+    pub(super) fn split(binding: Document<'static>, reference: Document<'static>) -> Self {
+        Self { binding, reference }
+    }
+}
+
+/// One link after `beamtalk_error:new/2` in a [`BeamtalkErrorChain`].
+enum ErrorStep {
+    /// `beamtalk_error:with_selector/2`.
+    Selector(Document<'static>),
+    /// `beamtalk_error:with_hint/2`.
+    Hint(Document<'static>),
+    /// `beamtalk_error:with_message/2`.
+    Message(Document<'static>),
+    /// `beamtalk_error:with_details/2`.
+    Details(Document<'static>),
+    /// `with_hint/2` whose hint is bound by its own `let` just before the
+    /// call: `let <hint binding> = <hint> in <sep> let <Err> = with_hint(prev,
+    /// <hint reference>) in`.
+    HintBound(ErrorBinding, Document<'static>),
+}
+
+/// BT-4887: the one builder for the structured `beamtalk_error` `let` chain
+/// shared by every runtime error emission site:
 ///
-/// `err0`/`err1`/`err2` are each call site's own established `let`-binding
-/// text — a fixed name (`Document::Str("Error0")`) or a freshly minted one
-/// (`leaf::var(self.fresh_var("Err"))`), bracketed or not, however that site
-/// already spelled it — so collapsing onto this builder stays a
-/// byte-identical extraction rather than a renaming. `err0_ref`/`err1_ref`
-/// are the corresponding bare variable-reference text (identical to
-/// `err0`/`err1` at every call site that does not use Core Erlang's
-/// bracketed single-variable `let` form). `sep` is whatever separates one
-/// `let ... in` step from the next at the call site: a literal `" "` for an
-/// inline chain, `"\n"` plus the site's own indent for a manually indented
-/// one, or [`beamtalk_cerl_doc::line`] for one built with `nest`/`line`.
-#[allow(clippy::too_many_arguments)] // one param per varying piece of a fixed 3-step chain
-pub(super) fn beamtalk_error_doc(
-    err0: Document<'static>,
-    err0_ref: Document<'static>,
-    err1: Document<'static>,
-    err1_ref: Document<'static>,
-    err2: Document<'static>,
+/// ```text
+/// let Err0 = call 'beamtalk_error':'new'(Kind, Class) in <sep>
+/// let Err1 = call 'beamtalk_error':'with_selector'(Err0, Selector) in <sep>
+/// let Err2 = call 'beamtalk_error':'with_hint'(Err1, Hint) in <sep>
+/// ```
+///
+/// Steps are chosen with [`Self::selector`], [`Self::hint`],
+/// [`Self::message`], [`Self::details`] and [`Self::hint_bound`], in the
+/// order the site raises them. [`Self::build`] stops right after the final
+/// `in` + `sep` so the caller appends its own tail (`call
+/// 'beamtalk_error':'raise'(Err2)`, `{'error', Err2, State}`, …) referencing
+/// the last binding itself.
+///
+/// `build` takes one [`ErrorBinding`] per link (`new` first) — a fixed name,
+/// a freshly minted one, bracketed or not, however the site already spelled
+/// it — and `sep`, whatever separates one `let … in` step from the next at
+/// the site: a literal `" "` for an inline chain, `"\n"` plus the site's own
+/// indent for a manually indented one, or [`beamtalk_cerl_doc::line`] for one
+/// built with `nest`/`line`.
+pub(super) struct BeamtalkErrorChain {
     kind: &'static str,
     class: Document<'static>,
-    selector: Document<'static>,
-    hint: Document<'static>,
-    sep: Document<'static>,
-) -> Document<'static> {
-    docvec![
-        "let ",
-        err0,
-        " = call 'beamtalk_error':'new'(",
-        leaf::atom(kind),
-        ", ",
-        class,
-        ") in",
-        sep.clone(),
-        "let ",
-        err1,
-        " = call 'beamtalk_error':'with_selector'(",
-        err0_ref,
-        ", ",
-        selector,
-        ") in",
-        sep.clone(),
-        "let ",
-        err2,
-        " = call 'beamtalk_error':'with_hint'(",
-        err1_ref,
-        ", ",
-        hint,
-        ") in",
-        sep,
-    ]
+    steps: Vec<ErrorStep>,
+}
+
+impl BeamtalkErrorChain {
+    /// Starts a chain at `beamtalk_error:new(<kind>, <class>)`.
+    pub(super) fn new(kind: &'static str, class: Document<'static>) -> Self {
+        Self {
+            kind,
+            class,
+            steps: Vec::new(),
+        }
+    }
+
+    pub(super) fn selector(mut self, selector: Document<'static>) -> Self {
+        self.steps.push(ErrorStep::Selector(selector));
+        self
+    }
+
+    pub(super) fn hint(mut self, hint: Document<'static>) -> Self {
+        self.steps.push(ErrorStep::Hint(hint));
+        self
+    }
+
+    pub(super) fn message(mut self, message: Document<'static>) -> Self {
+        self.steps.push(ErrorStep::Message(message));
+        self
+    }
+
+    pub(super) fn details(mut self, details: Document<'static>) -> Self {
+        self.steps.push(ErrorStep::Details(details));
+        self
+    }
+
+    /// A `with_hint/2` step whose hint is first bound to `hint_binding`.
+    pub(super) fn hint_bound(
+        mut self,
+        hint_binding: ErrorBinding,
+        hint: Document<'static>,
+    ) -> Self {
+        self.steps.push(ErrorStep::HintBound(hint_binding, hint));
+        self
+    }
+
+    /// Renders the chain. `bindings` holds one entry for `new` and one per
+    /// step, in order.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `bindings.len()` is not `steps + 1` — every call site knows
+    /// its own chain length, so this is a codegen bug, never user input.
+    pub(super) fn build(
+        self,
+        bindings: Vec<ErrorBinding>,
+        sep: Document<'static>,
+    ) -> Document<'static> {
+        assert_eq!(
+            bindings.len(),
+            self.steps.len() + 1,
+            "BeamtalkErrorChain: one binding per link (`new` plus each step)"
+        );
+        let mut bindings = bindings.into_iter();
+        let first = bindings.next().expect("checked above");
+        let mut previous = first.reference;
+        // Each segment is one `let … in`; `sep` follows every one of them.
+        let mut segments: Vec<Document<'static>> = vec![docvec![
+            "let ",
+            first.binding,
+            " = ",
+            form::call("beamtalk_error", "new", [leaf::atom(self.kind), self.class]),
+            " in",
+        ]];
+        for step in self.steps {
+            let (function, arg) = match step {
+                ErrorStep::Selector(arg) => ("with_selector", arg),
+                ErrorStep::Hint(arg) => ("with_hint", arg),
+                ErrorStep::Message(arg) => ("with_message", arg),
+                ErrorStep::Details(arg) => ("with_details", arg),
+                ErrorStep::HintBound(hint_binding, hint) => {
+                    segments.push(docvec!["let ", hint_binding.binding, " = ", hint, " in"]);
+                    ("with_hint", hint_binding.reference)
+                }
+            };
+            let next = bindings.next().expect("checked above");
+            segments.push(docvec![
+                "let ",
+                next.binding,
+                " = ",
+                form::call("beamtalk_error", function, [previous, arg]),
+                " in",
+            ]);
+            previous = next.reference;
+        }
+        let last = segments.pop().expect("`new` segment is always present");
+        let mut parts: Vec<Document<'static>> = Vec::with_capacity(segments.len() * 2 + 2);
+        for segment in segments {
+            parts.push(segment);
+            parts.push(sep.clone());
+        }
+        parts.push(last);
+        parts.push(sep);
+        Document::Vec(parts)
+    }
 }
 
 /// BT-4030: the one `new:`/`spawnWith:` initialiser validation call.
@@ -137,7 +268,7 @@ impl CoreErlangGenerator {
     /// BT-3943: the structured `#pattern_mismatch` raise for a failed user
     /// pattern (tuple/array destructure, `match:` with no matching arm).
     ///
-    /// Built through [`beamtalk_error_doc`]; `with_details/2` carries the
+    /// Built through [`BeamtalkErrorChain`]; `with_details/2` carries the
     /// offending value (`#{value => Value}`) and `beamtalk_error:raise/1`
     /// throws it. Evaluates to a Core Erlang expression that never returns,
     /// so it is usable as a `case` clause body. A raw `badmatch` /
@@ -153,18 +284,17 @@ impl CoreErlangGenerator {
         let err2 = self.fresh_temp_var("PmErr");
         let err3 = self.fresh_temp_var("PmErr");
         docvec![
-            beamtalk_error_doc(
-                leaf::var(err0.clone()),
-                leaf::var(err0),
-                leaf::var(err1.clone()),
-                leaf::var(err1),
-                leaf::var(err2.clone()),
-                "pattern_mismatch",
-                leaf::atom("Object"),
-                leaf::atom(selector),
-                leaf::binary_lit(hint),
-                Document::Str(" "),
-            ),
+            BeamtalkErrorChain::new("pattern_mismatch", leaf::atom("Object"))
+                .selector(leaf::atom(selector))
+                .hint(leaf::binary_lit(hint))
+                .build(
+                    vec![
+                        ErrorBinding::plain(err0),
+                        ErrorBinding::plain(err1),
+                        ErrorBinding::plain(err2.clone()),
+                    ],
+                    Document::Str(" "),
+                ),
             "let ",
             leaf::var(err3.clone()),
             " = call 'beamtalk_error':'with_details'(",
@@ -180,24 +310,23 @@ impl CoreErlangGenerator {
 
 #[cfg(test)]
 mod tests {
-    use super::beamtalk_error_doc;
     use super::check_init_args_call_doc;
+    use super::{BeamtalkErrorChain, ErrorBinding};
     use beamtalk_cerl_doc::{Document, leaf};
 
     #[test]
     fn inline_chain_renders_three_let_bindings() {
-        let doc = beamtalk_error_doc(
-            Document::Str("Error0"),
-            Document::Str("Error0"),
-            Document::Str("Error1"),
-            Document::Str("Error1"),
-            Document::Str("Error2"),
-            "dnu",
-            leaf::atom("Counter"),
-            leaf::atom("badMethod"),
-            leaf::binary_lit("no such method"),
-            Document::Str(" "),
-        );
+        let doc = BeamtalkErrorChain::new("dnu", leaf::atom("Counter"))
+            .selector(leaf::atom("badMethod"))
+            .hint(leaf::binary_lit("no such method"))
+            .build(
+                vec![
+                    ErrorBinding::split(Document::Str("Error0"), Document::Str("Error0")),
+                    ErrorBinding::split(Document::Str("Error1"), Document::Str("Error1")),
+                    ErrorBinding::split(Document::Str("Error2"), Document::Str("Error2")),
+                ],
+                Document::Str(" "),
+            );
         let rendered = doc.to_pretty_string();
         assert!(
             rendered.starts_with("let Error0 = call 'beamtalk_error':'new'('dnu', 'Counter') in "),
@@ -218,18 +347,17 @@ mod tests {
 
     #[test]
     fn kind_is_emitted_as_atom_in_new_call() {
-        let doc = beamtalk_error_doc(
-            Document::Str("E0"),
-            Document::Str("E0"),
-            Document::Str("E1"),
-            Document::Str("E1"),
-            Document::Str("E2"),
-            "arity_mismatch",
-            leaf::atom("MyClass"),
-            leaf::atom("sel"),
-            leaf::binary_lit("hint"),
-            Document::Str(" "),
-        );
+        let doc = BeamtalkErrorChain::new("arity_mismatch", leaf::atom("MyClass"))
+            .selector(leaf::atom("sel"))
+            .hint(leaf::binary_lit("hint"))
+            .build(
+                vec![
+                    ErrorBinding::split(Document::Str("E0"), Document::Str("E0")),
+                    ErrorBinding::split(Document::Str("E1"), Document::Str("E1")),
+                    ErrorBinding::split(Document::Str("E2"), Document::Str("E2")),
+                ],
+                Document::Str(" "),
+            );
         let rendered = doc.to_pretty_string();
         assert!(
             rendered.contains("'arity_mismatch'"),
@@ -239,18 +367,17 @@ mod tests {
 
     #[test]
     fn err0_ref_used_in_with_selector_not_err0_binding() {
-        let doc = beamtalk_error_doc(
-            Document::Str("_Error0"),
-            Document::Str("Error0"),
-            Document::Str("_Error1"),
-            Document::Str("Error1"),
-            Document::Str("_Error2"),
-            "dnu",
-            leaf::atom("C"),
-            leaf::atom("s"),
-            leaf::binary_lit("h"),
-            Document::Str(" "),
-        );
+        let doc = BeamtalkErrorChain::new("dnu", leaf::atom("C"))
+            .selector(leaf::atom("s"))
+            .hint(leaf::binary_lit("h"))
+            .build(
+                vec![
+                    ErrorBinding::split(Document::Str("_Error0"), Document::Str("Error0")),
+                    ErrorBinding::split(Document::Str("_Error1"), Document::Str("Error1")),
+                    ErrorBinding::split(Document::Str("_Error2"), Document::Str("_Error2")),
+                ],
+                Document::Str(" "),
+            );
         let rendered = doc.to_pretty_string();
         assert!(
             rendered.contains("let _Error0 = call"),
@@ -303,18 +430,17 @@ mod tests {
 
     #[test]
     fn separator_appears_after_each_in_keyword() {
-        let doc = beamtalk_error_doc(
-            Document::Str("E0"),
-            Document::Str("E0"),
-            Document::Str("E1"),
-            Document::Str("E1"),
-            Document::Str("E2"),
-            "err",
-            leaf::atom("Cls"),
-            leaf::atom("sel"),
-            leaf::binary_lit("h"),
-            Document::Str("SEP"),
-        );
+        let doc = BeamtalkErrorChain::new("err", leaf::atom("Cls"))
+            .selector(leaf::atom("sel"))
+            .hint(leaf::binary_lit("h"))
+            .build(
+                vec![
+                    ErrorBinding::split(Document::Str("E0"), Document::Str("E0")),
+                    ErrorBinding::split(Document::Str("E1"), Document::Str("E1")),
+                    ErrorBinding::split(Document::Str("E2"), Document::Str("E2")),
+                ],
+                Document::Str("SEP"),
+            );
         let rendered = doc.to_pretty_string();
         assert_eq!(rendered.matches("SEP").count(), 3, "sep count: {rendered}");
     }

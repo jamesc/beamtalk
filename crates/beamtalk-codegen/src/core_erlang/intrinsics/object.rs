@@ -15,6 +15,7 @@ use super::{
     leaf, not_nil_apply, primitives, validate_if_not_nil_block,
 };
 use crate::core_erlang::dispatch_codegen::runtime_send_args;
+use crate::core_erlang::errors::{BeamtalkErrorChain, ErrorBinding};
 use beamtalk_cerl_doc::form;
 
 /// The `beamtalk_behaviour_intrinsics` functions the `isKindOf:` lowerings
@@ -977,17 +978,14 @@ impl CoreErlangGenerator {
             leaf::var(class_var.clone()),
             " = call 'beamtalk_primitive':'class_of'(",
             leaf::var(recv_var.to_string()),
-            ") in let ",
-            leaf::var(err0.clone()),
-            " = call 'beamtalk_error':'new'('user_error', ",
-            leaf::var(class_var),
-            ") in let ",
-            leaf::var(err1.clone()),
-            " = call 'beamtalk_error':'with_message'(",
-            leaf::var(err0),
-            ", ",
-            leaf::var(msg_var.to_string()),
-            ") in call 'beamtalk_error':'raise'(",
+            ") in ",
+            BeamtalkErrorChain::new("user_error", leaf::var(class_var))
+                .message(leaf::var(msg_var.to_string()))
+                .build(
+                    vec![ErrorBinding::plain(err0), ErrorBinding::plain(err1.clone()),],
+                    Document::Str(" "),
+                ),
+            "call 'beamtalk_error':'raise'(",
             leaf::var(err1),
             ")",
         ]
@@ -1341,17 +1339,27 @@ impl CoreErlangGenerator {
                             " = call 'beamtalk_primitive':'class_of'(",
                             leaf::var(receiver_var),
                             ") in ",
-                            super::super::errors::beamtalk_error_doc(
-                                leaf::var(error_base.clone()),
-                                leaf::var(error_base),
-                                leaf::var(error_sel.clone()),
-                                leaf::var(error_sel),
-                                leaf::var(error_hint.clone()),
+                            super::super::errors::BeamtalkErrorChain::new(
                                 "immutable_value",
-                                leaf::var(class_var),
-                                Document::Str("'fieldAt:'"),
-                                hint,
-                                Document::Str(" "),
+                                leaf::var(class_var)
+                            )
+                            .selector(Document::Str("'fieldAt:'"))
+                            .hint(hint)
+                            .build(
+                                vec![
+                                    super::super::errors::ErrorBinding::split(
+                                        leaf::var(error_base.clone()),
+                                        leaf::var(error_base)
+                                    ),
+                                    super::super::errors::ErrorBinding::split(
+                                        leaf::var(error_sel.clone()),
+                                        leaf::var(error_sel)
+                                    ),
+                                    super::super::errors::ErrorBinding::terminal(leaf::var(
+                                        error_hint.clone()
+                                    ))
+                                ],
+                                Document::Str(" ")
                             ),
                             "call 'beamtalk_error':'raise'(",
                             leaf::var(error_hint),
@@ -1485,17 +1493,27 @@ impl CoreErlangGenerator {
                             " = call 'beamtalk_primitive':'class_of'(",
                             leaf::var(receiver_var),
                             ") in ",
-                            super::super::errors::beamtalk_error_doc(
-                                leaf::var(error_base.clone()),
-                                leaf::var(error_base),
-                                leaf::var(error_sel.clone()),
-                                leaf::var(error_sel),
-                                leaf::var(error_hint.clone()),
+                            super::super::errors::BeamtalkErrorChain::new(
                                 "immutable_value",
-                                leaf::var(class_var),
-                                Document::Str("'fieldAt:put:'"),
-                                hint,
-                                Document::Str(" "),
+                                leaf::var(class_var)
+                            )
+                            .selector(Document::Str("'fieldAt:put:'"))
+                            .hint(hint)
+                            .build(
+                                vec![
+                                    super::super::errors::ErrorBinding::split(
+                                        leaf::var(error_base.clone()),
+                                        leaf::var(error_base)
+                                    ),
+                                    super::super::errors::ErrorBinding::split(
+                                        leaf::var(error_sel.clone()),
+                                        leaf::var(error_sel)
+                                    ),
+                                    super::super::errors::ErrorBinding::terminal(leaf::var(
+                                        error_hint.clone()
+                                    ))
+                                ],
+                                Document::Str(" ")
                             ),
                             "call 'beamtalk_error':'raise'(",
                             leaf::var(error_hint),

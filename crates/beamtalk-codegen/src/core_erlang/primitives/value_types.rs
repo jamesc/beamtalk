@@ -8,6 +8,7 @@
 //! Contains BIF generators for immutable value types: `Tuple`, `Set`, `Object`.
 
 use super::{call_self_p0, param, wrap_string_result};
+use crate::core_erlang::errors::{BeamtalkErrorChain, ErrorBinding};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -129,14 +130,17 @@ pub(crate) fn generate_proto_object_bif(
                 leaf::binary_lit("Check spelling or use 'respondsTo:' to verify method exists");
             Some(docvec![
                 "let <DnuClass0> = call 'beamtalk_primitive':'class_of'(Self) in\n",
-                "let <DnuErr0> = call 'beamtalk_error':'new'('does_not_understand', DnuClass0) in\n",
-                "let <DnuErr1> = call 'beamtalk_error':'with_selector'(DnuErr0, ",
-                leaf::var(selector_var.to_string()),
-                ") in\n",
-                "let <DnuHint> = ",
-                hint,
-                " in\n",
-                "let <DnuErr2> = call 'beamtalk_error':'with_hint'(DnuErr1, DnuHint) in\n",
+                BeamtalkErrorChain::new("does_not_understand", leaf::var("DnuClass0"))
+                    .selector(leaf::var(selector_var.to_string()))
+                    .hint_bound(ErrorBinding::bracketed("DnuHint"), hint)
+                    .build(
+                        vec![
+                            ErrorBinding::bracketed("DnuErr0"),
+                            ErrorBinding::bracketed("DnuErr1"),
+                            ErrorBinding::bracketed("DnuErr2"),
+                        ],
+                        Document::Str("\n"),
+                    ),
                 "call 'beamtalk_error':'raise'(DnuErr2)",
             ])
         }

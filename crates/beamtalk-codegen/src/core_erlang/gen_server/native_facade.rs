@@ -13,6 +13,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 
+use super::super::errors::{BeamtalkErrorChain, ErrorBinding};
 use super::super::selector_mangler::dispatch_fn_name;
 use super::super::spec_codegen;
 use super::super::util::omit_late_defaultless_slot;
@@ -305,20 +306,21 @@ impl CoreErlangGenerator {
         // Helper: build an instantiation_error with reason in details
         let spawn_error_with_reason = |class: &str, reason_var: &str| -> Document<'static> {
             docvec![
-                docvec![
-                    "let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', ",
-                    leaf::atom(class.to_string()),
-                    ") in",
-                ],
-                line(),
-                "let SpawnErr1 = call 'beamtalk_error':'with_selector'(SpawnErr0, 'spawnWith:') in",
-                line(),
-                docvec![
-                    "let SpawnErr2 = call 'beamtalk_error':'with_details'(SpawnErr1, ~{'reason' => ",
-                    leaf::var(reason_var.to_string()),
-                    "}~) in",
-                ],
-                line(),
+                BeamtalkErrorChain::new("instantiation_error", leaf::atom(class.to_string()))
+                    .selector(leaf::atom("spawnWith:"))
+                    .details(docvec![
+                        "~{'reason' => ",
+                        leaf::var(reason_var.to_string()),
+                        "}~"
+                    ])
+                    .build(
+                        vec![
+                            ErrorBinding::plain("SpawnErr0"),
+                            ErrorBinding::plain("SpawnErr1"),
+                            ErrorBinding::plain("SpawnErr2"),
+                        ],
+                        line(),
+                    ),
                 "call 'beamtalk_error':'raise'(SpawnErr2)",
             ]
         };
@@ -339,22 +341,22 @@ impl CoreErlangGenerator {
                                 INDENT,
                                 docvec![
                                     line(),
-                                    docvec![
-                                        "let TypeErr0 = call 'beamtalk_error':'new'('type_error', ",
-                                        leaf::atom(class_name.clone()),
-                                        ") in",
-                                    ],
-                                    line(),
-                                    "let TypeErr1 = call 'beamtalk_error':'with_selector'(TypeErr0, 'spawnWith:') in",
-                                    line(),
-                                    docvec![
-                                        "let TypeErr2 = call 'beamtalk_error':'with_hint'(TypeErr1, ",
-                                        leaf::binary_lit(
-                                            "spawnWith: expects a Dictionary argument"
-                                        ),
-                                        ") in",
-                                    ],
-                                    line(),
+                                    BeamtalkErrorChain::new(
+                                        "type_error",
+                                        leaf::atom(class_name.clone())
+                                    )
+                                    .selector(leaf::atom("spawnWith:"))
+                                    .hint(leaf::binary_lit(
+                                        "spawnWith: expects a Dictionary argument"
+                                    ))
+                                    .build(
+                                        vec![
+                                            ErrorBinding::plain("TypeErr0"),
+                                            ErrorBinding::plain("TypeErr1"),
+                                            ErrorBinding::plain("TypeErr2"),
+                                        ],
+                                        line(),
+                                    ),
                                     "call 'beamtalk_error':'raise'(TypeErr2)",
                                 ]
                             ),
