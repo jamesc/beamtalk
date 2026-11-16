@@ -54,7 +54,9 @@ const TEST_MODULE: &str = "#[cfg(test)]modtests";
 const FIELD_WRITE_SITES: &[(&str, usize, usize)] = &[
     // `lower_simple_field_write_bind`, the C6 non-producer two-hop, and
     // `lower_hybrid_field_rebind` (no `Put`).
-    ("control_flow/conditionals.rs", 2, 3),
+    ("control_flow/conditional_arms.rs", 1, 1),
+    ("control_flow/conditionals.rs", 1, 1),
+    ("control_flow/inline_control_flow.rs", 0, 1),
     // The method-body field assignment with a control-flow right-hand side
     // (`FieldAssignmentControlFlow`): the producer path and the two-hop.
     // A plain `FieldAssignment` is the shared `lower_field_assignment_bind`.
@@ -73,7 +75,7 @@ const NOT_FIELD_WRITES: &[(&str, usize)] = &[("threaded_ir/emit.rs", 1)];
 /// `fieldAt:put:` with a control-flow value, once in a conditional arm and once
 /// in a method body.
 const DYNAMIC_FIELD_WRITE_SITES: &[(&str, usize, usize)] = &[
-    ("control_flow/conditionals.rs", 1, 1),
+    ("control_flow/conditional_arms.rs", 1, 1),
     ("gen_server/methods.rs", 1, 1),
     ("statement_kinds.rs", 2, 2),
 ];
