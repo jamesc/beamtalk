@@ -138,15 +138,26 @@ tcp_integration_test_() ->
 
 tcp_setup() ->
     process_flag(trap_exit, true),
-    {ok, _} = application:ensure_all_started(beamtalk_workspace),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_workspace),
     %% The node-wide actor registry (BT-3633) replays every tracked actor to a
     %% newly subscribed session; earlier suites leave actors in it, so run this
     %% fixture against an empty one.
     ok = beamtalk_test_actor_registry:begin_isolated(),
+    %% An earlier suite may have left a workspace supervisor and its cowboy
+    %% listener running; starting the workspace again then fails with
+    %% `listen_failed, already_started`, or silently reuses that workspace and
+    %% its port (BT-4934). Start from none.
+    ok = tcp_stop_stray_workspace(),
     %% Find a free port and start workspace, with retry on port conflict
     {Port, SupPid} = tcp_start_workspace(3),
     ok = beamtalk_test_wait:until(fun() -> tcp_port_accepts(Port) end),
     {Port, SupPid}.
+
+tcp_stop_stray_workspace() ->
+    ok = beamtalk_test_proc:stop_registered(beamtalk_workspace_sup),
+    _ = cowboy:stop_listener(beamtalk_repl_ws),
+    undefined = whereis(beamtalk_workspace_sup),
+    ok.
 
 %% True once a TCP connection to the REPL port is accepted.
 tcp_port_accepts(Port) ->

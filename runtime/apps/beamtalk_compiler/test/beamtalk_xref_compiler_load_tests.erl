@@ -18,7 +18,9 @@ loaded on demand.
 
 sends_are_indexed_when_the_compiler_facade_is_not_loaded_test_() ->
     {setup, fun() -> beamtalk_test_boot:compiler() end, fun(_) -> ok end, fun() ->
-        %% Simulate interactive mode before the first compiler call.
+        %% Simulate interactive mode before the first compiler call: the facade
+        %% must be loaded for `code:delete/1` to have something to remove.
+        {module, beamtalk_compiler} = code:ensure_loaded(beamtalk_compiler),
         _ = code:purge(beamtalk_compiler),
         true = code:delete(beamtalk_compiler),
         _ = code:purge(beamtalk_compiler),
