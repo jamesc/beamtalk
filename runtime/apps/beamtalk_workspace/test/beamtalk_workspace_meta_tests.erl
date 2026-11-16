@@ -355,7 +355,7 @@ loaded_modules_when_not_started_test() ->
 %% `ActorSpawned` announcement on the SystemAnnouncer bus, not a runtime hook.
 learns_spawned_actor_from_announcement_test() ->
     stop_if_running(),
-    ok = ensure_bus(),
+    BusStarted = ensure_bus(),
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
     ActorPid = spawn(fun() ->
         receive
@@ -376,16 +376,20 @@ learns_spawned_actor_from_announcement_test() ->
         ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors())
     after
         exit(ActorPid, kill),
-        gen_server:stop(Pid)
+        gen_server:stop(Pid),
+        %% A bare announcement bus left running makes the next module's
+        %% `ensure_all_started(beamtalk_runtime)` fail (BT-4922, BT-4962).
+        BusStarted andalso beamtalk_test_proc:stop_registered(beamtalk_announcements)
     end.
 
+%% True when this call started the bus (and so must stop it again).
 ensure_bus() ->
     case whereis(beamtalk_announcements) of
         undefined ->
             {ok, _} = beamtalk_announcements:start_link(),
-            ok;
+            true;
         _ ->
-            ok
+            false
     end.
 
 register_actor_when_not_started_test() ->
