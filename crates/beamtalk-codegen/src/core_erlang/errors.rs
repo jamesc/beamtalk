@@ -287,21 +287,21 @@ impl CoreErlangGenerator {
             BeamtalkErrorChain::new("pattern_mismatch", leaf::atom("Object"))
                 .selector(leaf::atom(selector))
                 .hint(leaf::binary_lit(hint))
+                .details(docvec![
+                    "~{'value'=>",
+                    leaf::var(value_var.to_string()),
+                    "}~"
+                ])
                 .build(
                     vec![
                         ErrorBinding::plain(err0),
                         ErrorBinding::plain(err1),
-                        ErrorBinding::plain(err2.clone()),
+                        ErrorBinding::plain(err2),
+                        ErrorBinding::plain(err3.clone()),
                     ],
                     Document::Str(" "),
                 ),
-            "let ",
-            leaf::var(err3.clone()),
-            " = call 'beamtalk_error':'with_details'(",
-            leaf::var(err2),
-            ", ~{'value'=>",
-            leaf::var(value_var.to_string()),
-            "}~) in call 'beamtalk_error':'raise'(",
+            "call 'beamtalk_error':'raise'(",
             leaf::var(err3),
             ")",
         ]
@@ -321,9 +321,9 @@ mod tests {
             .hint(leaf::binary_lit("no such method"))
             .build(
                 vec![
-                    ErrorBinding::split(Document::Str("Error0"), Document::Str("Error0")),
-                    ErrorBinding::split(Document::Str("Error1"), Document::Str("Error1")),
-                    ErrorBinding::split(Document::Str("Error2"), Document::Str("Error2")),
+                    ErrorBinding::plain("Error0"),
+                    ErrorBinding::plain("Error1"),
+                    ErrorBinding::plain("Error2"),
                 ],
                 Document::Str(" "),
             );
@@ -352,9 +352,9 @@ mod tests {
             .hint(leaf::binary_lit("hint"))
             .build(
                 vec![
-                    ErrorBinding::split(Document::Str("E0"), Document::Str("E0")),
-                    ErrorBinding::split(Document::Str("E1"), Document::Str("E1")),
-                    ErrorBinding::split(Document::Str("E2"), Document::Str("E2")),
+                    ErrorBinding::plain("E0"),
+                    ErrorBinding::plain("E1"),
+                    ErrorBinding::plain("E2"),
                 ],
                 Document::Str(" "),
             );
@@ -374,7 +374,7 @@ mod tests {
                 vec![
                     ErrorBinding::split(Document::Str("_Error0"), Document::Str("Error0")),
                     ErrorBinding::split(Document::Str("_Error1"), Document::Str("Error1")),
-                    ErrorBinding::split(Document::Str("_Error2"), Document::Str("_Error2")),
+                    ErrorBinding::plain("_Error2"),
                 ],
                 Document::Str(" "),
             );
@@ -435,9 +435,9 @@ mod tests {
             .hint(leaf::binary_lit("h"))
             .build(
                 vec![
-                    ErrorBinding::split(Document::Str("E0"), Document::Str("E0")),
-                    ErrorBinding::split(Document::Str("E1"), Document::Str("E1")),
-                    ErrorBinding::split(Document::Str("E2"), Document::Str("E2")),
+                    ErrorBinding::plain("E0"),
+                    ErrorBinding::plain("E1"),
+                    ErrorBinding::plain("E2"),
                 ],
                 Document::Str("SEP"),
             );

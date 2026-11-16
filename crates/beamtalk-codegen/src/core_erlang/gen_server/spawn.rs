@@ -215,14 +215,8 @@ impl CoreErlangGenerator {
                                     .hint(Document::Str("Reason"))
                                     .build(
                                         vec![
-                                            super::super::errors::ErrorBinding::split(
-                                                Document::Str("SpawnErr0"),
-                                                Document::Str("SpawnErr0")
-                                            ),
-                                            super::super::errors::ErrorBinding::split(
-                                                Document::Str("SpawnErr1"),
-                                                Document::Str("SpawnErr1")
-                                            ),
+                                            super::super::errors::ErrorBinding::plain("SpawnErr0"),
+                                            super::super::errors::ErrorBinding::plain("SpawnErr1"),
                                             super::super::errors::ErrorBinding::terminal(
                                                 Document::Str("SpawnErr2")
                                             )
@@ -414,14 +408,8 @@ impl CoreErlangGenerator {
                                     )))
                                     .build(
                                         vec![
-                                            super::super::errors::ErrorBinding::split(
-                                                Document::Str("TypeErr0"),
-                                                Document::Str("TypeErr0")
-                                            ),
-                                            super::super::errors::ErrorBinding::split(
-                                                Document::Str("TypeErr1"),
-                                                Document::Str("TypeErr1")
-                                            ),
+                                            super::super::errors::ErrorBinding::plain("TypeErr0"),
+                                            super::super::errors::ErrorBinding::plain("TypeErr1"),
                                             super::super::errors::ErrorBinding::terminal(
                                                 Document::Str("TypeErr2")
                                             )
@@ -605,14 +593,8 @@ impl CoreErlangGenerator {
             .hint(leaf::binary_lit(hint))
             .build(
                 vec![
-                    super::super::errors::ErrorBinding::split(
-                        Document::Str("Error0"),
-                        Document::Str("Error0")
-                    ),
-                    super::super::errors::ErrorBinding::split(
-                        Document::Str("Error1"),
-                        Document::Str("Error1")
-                    ),
+                    super::super::errors::ErrorBinding::plain("Error0"),
+                    super::super::errors::ErrorBinding::plain("Error1"),
                     super::super::errors::ErrorBinding::terminal(Document::Str("Error2"))
                 ],
                 line()

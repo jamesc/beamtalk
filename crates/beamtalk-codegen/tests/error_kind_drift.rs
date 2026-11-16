@@ -7,7 +7,7 @@
 //! Four hand-kept views of "which error kinds exist" must agree:
 //!
 //! 1. the kinds Rust codegen emits (`BeamtalkErrorChain::new("kind", ..)` and
-//!    the `beamtalk_error:new('kind', ..)` text in `intrinsics/object.rs`);
+//!    any literal `beamtalk_error:new('kind', ..)` text left in codegen source);
 //! 2. `kind_to_class/1` in `beamtalk_exception_handler.erl` (the source of
 //!    truth for which kinds classify into the `Exception` hierarchy);
 //! 3. the kind list in the `#beamtalk_error{}` doc comment in `beamtalk.hrl`;
