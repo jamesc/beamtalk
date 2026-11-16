@@ -19,7 +19,10 @@ from another project):
 
 1. the root named by a `.beamtalk-source-root` marker beside the module's
    `.beam` (written for a path dependency, whose beams live under the
-   consumer's `_build/deps/` and outside any package);
+   consumer's `_build/deps/` and outside any package). Line 1 is the root
+   relative to the marker's directory, so a consumer + dependency tree moved
+   together (BT-4957) still resolves; line 2 is the absolute root, used when
+   the relative one holds no package (a dependency outside the moved tree);
 2. else the package root above the module's `.beam` (`code:which/1`) — a built
    project, or a git dependency checked out with its manifest.
 
@@ -39,7 +42,7 @@ workspace project root when there is one, else returned unchanged, still
 relative; callers that open the file treat that as "not found".
 """.
 
--export([find_package_root/1, resolve/2, is_absolute/1]).
+-export([find_package_root/1, resolve/2, resolve_strict/2, is_absolute/1]).
 
 -doc """
 Walk up from `Path` (a file or directory) to the first directory holding a
@@ -60,19 +63,33 @@ doc for the search order.
 """.
 -spec resolve(module() | undefined, file:filename_all()) -> file:filename_all().
 resolve(Module, Path) ->
+    case resolve_strict(Module, Path) of
+        {ok, Resolved} -> Resolved;
+        %% For display only; callers that open the file use `resolve_strict/2`.
+        unresolvable -> Path
+    end.
+
+-doc """
+Like `resolve/2`, but `unresolvable` when the module's root is recorded and
+cannot be read as text (a non-UTF-8 dependency path, BT-4957). The path must
+then not be handed to code that opens it: relative to the node's cwd it could
+name another project's file.
+""".
+-spec resolve_strict(module() | undefined, file:filename_all()) ->
+    {ok, file:filename_all()} | unresolvable.
+resolve_strict(Module, Path) ->
     case is_absolute(Path) of
         true ->
-            Path;
+            {ok, Path};
         false ->
             case beam_root(Module) of
                 %% The module's own root decides: a file missing under it is
                 %% reported there, never taken from another project.
-                undefined -> resolve_without_root(Path);
-                %% A root is recorded but cannot be read as text (a non-UTF-8
-                %% dependency path): the path stays unresolved. Never fall back
-                %% to another project's root.
-                unreadable -> Path;
-                Root -> filename:join(Root, Path)
+                undefined -> {ok, resolve_without_root(Path)};
+                %% A root is recorded but cannot be read as text. Never fall
+                %% back to another project's root.
+                unreadable -> unresolvable;
+                Root -> {ok, filename:join(Root, Path)}
             end
     end.
 
@@ -129,23 +146,53 @@ beam_root(Module) ->
 
 %% `absent`: no marker. `unreadable`: a marker names a root that cannot be
 %% decoded as text, so the package walk (which would find the consumer's root
-%% for a path dependency) must not run. Otherwise the root as a string.
+%% for a path dependency) must not run. Otherwise the root as a string: line 1
+%% (relative to `EbinDir`) when it holds a package, else line 2 (absolute),
+%% else whichever is present.
 -spec read_marker(file:filename_all()) -> file:filename_all() | unreadable | absent.
 read_marker(EbinDir) ->
     case file:read_file(filename:join(EbinDir, ".beamtalk-source-root")) of
         {ok, Bin} ->
             case unicode:characters_to_list(Bin) of
                 Decoded when is_list(Decoded) ->
-                    case string:trim(Decoded) of
-                        [] -> absent;
-                        Root -> Root
-                    end;
+                    marker_root(EbinDir, [string:trim(L) || L <- string:split(Decoded, "\n", all)]);
                 _ ->
                     unreadable
             end;
         {error, _} ->
             absent
     end.
+
+marker_root(EbinDir, Lines) ->
+    case [L || L <- Lines, L =/= []] of
+        [] ->
+            absent;
+        [Only] ->
+            marker_candidate(EbinDir, Only);
+        [Rel, Abs | _] ->
+            Cand = marker_candidate(EbinDir, Rel),
+            case filelib:is_file(filename:join(Cand, "beamtalk.toml")) of
+                true -> Cand;
+                false -> Abs
+            end
+    end.
+
+%% A relative root is relative to the marker's directory.
+marker_candidate(EbinDir, Root) ->
+    case is_absolute(Root) of
+        true -> Root;
+        false -> normalize(filename:absname(Root, EbinDir))
+    end.
+
+%% Collapse `.` and `..` segments lexically (the ebin dir is already absolute).
+normalize(Path) ->
+    Parts = filename:split(Path),
+    filename:join(lists:reverse(lists:foldl(fun norm_seg/2, [], Parts))).
+
+norm_seg(".", Acc) -> Acc;
+norm_seg("..", [Prev | Rest]) when Prev =/= "/" -> Rest;
+norm_seg("..", Acc) -> Acc;
+norm_seg(Seg, Acc) -> [Seg | Acc].
 
 -spec workspace_root() -> file:filename_all() | undefined.
 workspace_root() ->

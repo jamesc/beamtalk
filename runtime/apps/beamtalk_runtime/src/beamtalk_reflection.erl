@@ -230,9 +230,16 @@ absolute_utf8(ModuleName, Path) ->
         nil ->
             nil;
         Utf8 ->
-            case unicode:characters_to_binary(beamtalk_source_path:resolve(ModuleName, Utf8)) of
-                Bin when is_binary(Bin) -> Bin;
-                _ -> Utf8
+            case beamtalk_source_path:resolve_strict(ModuleName, Utf8) of
+                %% Unreadable root (BT-4957): no usable file, never a relative
+                %% path a caller could open by accident.
+                unresolvable ->
+                    nil;
+                {ok, Resolved} ->
+                    case unicode:characters_to_binary(Resolved) of
+                        Bin when is_binary(Bin) -> Bin;
+                        _ -> Utf8
+                    end
             end
     end.
 

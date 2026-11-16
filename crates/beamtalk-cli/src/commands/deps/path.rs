@@ -521,22 +521,56 @@ impl OtpTypeSpecs {
     }
 }
 
-/// Name of the file in a dependency's `ebin/` that holds the absolute path of
-/// its package root (BT-4940). Read by `beamtalk_source_path:beam_root/1`; keep
+/// Name of the file in a dependency's `ebin/` that records where its package
+/// root is (BT-4940, BT-4957). Read by `beamtalk_source_path:read_marker/1`; keep
 /// the two spellings equal (`beamtalk_source_path_tests` pins the Erlang side
 /// and `dependency_beam_embeds_path_relative_to_its_own_package_root` this one).
+///
+/// Line 1 is the root relative to the `ebin/` directory, so a consumer and its
+/// dependency moved together (`mv ws ws2`, a CI cache restore of `_build/`)
+/// still resolve without a rebuild. Line 2 is the absolute root, for a
+/// dependency outside the moved tree. Either line alone is accepted.
 pub(crate) const SOURCE_ROOT_MARKER: &str = ".beamtalk-source-root";
 
-/// Write [`SOURCE_ROOT_MARKER`] into `ebin_path`, naming `dep_root` absolutely.
+/// Write [`SOURCE_ROOT_MARKER`] into `ebin_path`, naming `dep_root`.
 fn write_source_root_marker(ebin_path: &Utf8Path, dep_root: &Utf8Path) -> Result<()> {
     let root = beamtalk_core::paths::canonicalize(dep_root.as_std_path())
         .unwrap_or_else(|_| dep_root.as_std_path().to_path_buf());
-    std::fs::write(
-        ebin_path.join(SOURCE_ROOT_MARKER),
-        root.as_os_str().as_encoded_bytes(),
-    )
-    .into_diagnostic()
-    .wrap_err_with(|| format!("Failed to write source-root marker in {ebin_path}"))
+    let ebin = beamtalk_core::paths::canonicalize(ebin_path.as_std_path())
+        .unwrap_or_else(|_| ebin_path.as_std_path().to_path_buf());
+    let mut contents = Vec::new();
+    if let Some(rel) = relative_to_dir(&root, &ebin) {
+        contents.extend_from_slice(rel.as_os_str().as_encoded_bytes());
+        contents.push(b'\n');
+    }
+    contents.extend_from_slice(root.as_os_str().as_encoded_bytes());
+    std::fs::write(ebin_path.join(SOURCE_ROOT_MARKER), contents)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to write source-root marker in {ebin_path}"))
+}
+
+/// `target` as a path relative to `from` (`../../dep`), or `None` when they
+/// share no root (different Windows drives) or either is not absolute.
+fn relative_to_dir(target: &std::path::Path, from: &std::path::Path) -> Option<std::path::PathBuf> {
+    use std::path::Component;
+    if !target.is_absolute() || !from.is_absolute() {
+        return None;
+    }
+    let t: Vec<Component> = target.components().collect();
+    let f: Vec<Component> = from.components().collect();
+    let common = t.iter().zip(&f).take_while(|(a, b)| a == b).count();
+    // No shared prefix at all (e.g. different drives): not expressible.
+    if common == 0 {
+        return None;
+    }
+    let mut rel = std::path::PathBuf::new();
+    for _ in common..f.len() {
+        rel.push("..");
+    }
+    for c in &t[common..] {
+        rel.push(c.as_os_str());
+    }
+    Some(rel)
 }
 
 /// The FFI type registry a dependency compiles against (BT-4225): the
