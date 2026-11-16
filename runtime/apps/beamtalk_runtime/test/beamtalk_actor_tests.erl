@@ -85,7 +85,17 @@ init_actor_started_log_omits_unassigned_late_slot_state_keys_test() ->
             '__class_mod__' => 'bt@late_slot_actor',
             count => 0
         },
-        ?assertEqual({ok, State}, beamtalk_actor:init(State)),
+        %% `init/1` run in the test process marks it as an actor for the process
+        %% scan (ADR 0150); unmark it so it is not listed by `allInstances`,
+        %% `bottlenecks` and the like for the rest of the run.
+        InitResult =
+            try
+                beamtalk_actor:init(State)
+            after
+                erlang:erase('$beamtalk_actor'),
+                erlang:erase('$beamtalk_actor_started_at')
+            end,
+        ?assertEqual({ok, State}, InitResult),
         Found = collect_log_meta("Actor started", state_keys, 500),
         ?assertMatch({ok, _}, Found),
         {ok, Keys} = Found,

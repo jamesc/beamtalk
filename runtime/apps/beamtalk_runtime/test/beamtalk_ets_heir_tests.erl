@@ -273,6 +273,8 @@ instance_registry_reclaims_after_crash() ->
     %% the tables would orphan them for good.
     Class = bt4123_registry_crash_test,
     Actor = spawn(fun() ->
+        %% The marker the scan-backed bottlenecks/1 reads (ADR 0150).
+        erlang:put('$beamtalk_actor', Class),
         receive
             stop -> ok
         end

@@ -344,9 +344,15 @@ protocol_info(ProtocolName) ->
 %%% Object Instances Delegators
 %%% ====================================================================
 
+-doc """
+The live instances of exactly `ClassName` (no descendants), supervised and
+named ones included. Reads `beamtalk_actor_scan` (ADR 0150): O(processes in the
+node) per call, so use it for human-driven work (`allInstances`, hot reload),
+never on a hot path. Not a snapshot, and local node only.
+""".
 -spec all_instances(atom()) -> [pid()].
 all_instances(ClassName) ->
-    beamtalk_object_instances:all(ClassName).
+    [Pid || {Pid, _StartedAt} <- beamtalk_actor_scan:scan_class(ClassName)].
 
 %%% ====================================================================
 %%% Message Dispatch Delegators

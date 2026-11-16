@@ -1395,7 +1395,7 @@ Safety checks (raises errors for):
   - Classes with direct subclasses (must remove children first)
 
 Cleanup sequence:
-  1. Stop all live actors of this class (via beamtalk_actor_registry)
+  1. Stop all live actors of this class (found by the process scan)
   2. Stop the class gen_server (terminate/2 removes ETS entry and pg group)
   3. Purge the BEAM module (code:soft_purge + code:delete)
   4. Purge derived registries — xref, extensions, protocol registry,
@@ -2112,43 +2112,27 @@ child_label(Id) -> io_lib:format("child id ~tp", [Id]).
 
 -spec class_actor_pids(atom()) -> [pid()].
 class_actor_pids(ClassName) ->
-    case erlang:whereis(beamtalk_actor_registry) of
-        undefined ->
-            [];
-        RegistryPid ->
-            Actors = gen_server:call(RegistryPid, list_actors),
-            [
-                maps:get(pid, Meta)
-             || Meta <- Actors, maps:get(class, Meta, undefined) =:= ClassName
-            ]
-    end.
+    beamtalk_runtime_api:all_instances(ClassName).
 
 -doc """
 Stop all live actors of a given class.
 
-Queries the actor registry (if available) for all actors belonging
-to the class, then kills each one. The registry is accessed by its
-registered name to avoid a module-level dependency on beamtalk_workspace.
+Finds them by the process scan (`class_actor_pids/1`, ADR 0150: supervised and
+named children included, no actor list involved) and kills each one, waiting
+for it to die. What is killed is unchanged from the list-based version; only
+how the pids are found differs.
 """.
 -spec stop_class_actors(atom()) -> ok.
 stop_class_actors(ClassName) ->
-    case erlang:whereis(beamtalk_actor_registry) of
-        undefined ->
-            ok;
-        RegistryPid ->
-            Actors = gen_server:call(RegistryPid, list_actors),
-            ClassActors = [
-                maps:get(pid, Meta)
-             || Meta <- Actors, maps:get(class, Meta, undefined) =:= ClassName
-            ],
-            lists:foreach(
-                fun(Pid) ->
-                    try
-                        gen_server:call(RegistryPid, {kill, Pid})
-                    catch
-                        _:_ -> ok
-                    end
-                end,
-                ClassActors
-            )
+    lists:foreach(fun kill_and_wait/1, class_actor_pids(ClassName)).
+
+-spec kill_and_wait(pid()) -> ok.
+kill_and_wait(Pid) ->
+    Ref = erlang:monitor(process, Pid),
+    exit(Pid, kill),
+    receive
+        {'DOWN', Ref, process, Pid, _Reason} -> ok
+    after 5000 ->
+        erlang:demonitor(Ref, [flush]),
+        ok
     end.

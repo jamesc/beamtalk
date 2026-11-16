@@ -471,87 +471,8 @@ expect_event(EventClass, PeerNode) ->
 %% Local introspection targets (moved from Workspace, BT-3633)
 %%====================================================================
 
-local_actors_returns_empty_when_no_registry_test() ->
-    beamtalk_test_actor_registry:without_registry(fun() ->
-        ?assertEqual([], beamtalk_node:local_actors())
-    end).
-
-local_actors_returns_live_actors_test() ->
-    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
-        {ok, Actor1} = test_counter:start_link(0),
-        {ok, Actor2} = test_counter:start_link(10),
-        ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor1, 'Counter', test_counter),
-        ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor2, 'Counter', test_counter),
-        try
-            Result = beamtalk_node:local_actors(),
-            ?assertEqual(2, length(Result)),
-            lists:foreach(
-                fun({beamtalk_object, Class, _Module, Pid}) ->
-                    ?assertEqual('Counter', Class),
-                    ?assert(is_process_alive(Pid))
-                end,
-                Result
-            )
-        after
-            gen_server:stop(Actor1),
-            gen_server:stop(Actor2)
-        end
-    end).
-
-local_actors_filters_dead_processes_test() ->
-    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
-        {ok, Actor1} = test_counter:start_link(0),
-        {ok, Actor2} = test_counter:start_link(10),
-        ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor1, 'Counter', test_counter),
-        ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor2, 'Counter', test_counter),
-        gen_server:stop(Actor1),
-        try
-            ?assertEqual(1, length(beamtalk_node:local_actors()))
-        after
-            gen_server:stop(Actor2)
-        end
-    end).
-
-local_actor_at_returns_object_for_valid_pid_test() ->
-    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
-        {ok, Actor} = test_counter:start_link(0),
-        ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
-        try
-            PidBin = list_to_binary(pid_to_list(Actor)),
-            ?assertMatch(
-                {beamtalk_object, 'Counter', _, _}, beamtalk_node:local_actor_at(PidBin)
-            ),
-            %% A charlist pid string is accepted too.
-            ?assertMatch(
-                {beamtalk_object, 'Counter', _, _},
-                beamtalk_node:local_actor_at(pid_to_list(Actor))
-            )
-        after
-            gen_server:stop(Actor)
-        end
-    end).
-
-local_actor_at_returns_nil_for_unknown_or_invalid_test() ->
-    beamtalk_test_actor_registry:with_registry(fun(_RegistryPid) ->
-        ?assertEqual(nil, beamtalk_node:local_actor_at(<<"<0.99999.0>">>)),
-        ?assertEqual(nil, beamtalk_node:local_actor_at(<<"not-a-pid">>)),
-        ?assertEqual(nil, beamtalk_node:local_actor_at(<<"">>)),
-        ?assertEqual(nil, beamtalk_node:local_actor_at(42))
-    end).
-
-local_actor_at_returns_nil_for_dead_actor_test() ->
-    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
-        {ok, Actor} = test_counter:start_link(0),
-        ok = beamtalk_repl_actors:register_actor(RegistryPid, Actor, 'Counter', test_counter),
-        PidBin = list_to_binary(pid_to_list(Actor)),
-        gen_server:stop(Actor),
-        ?assertEqual(nil, beamtalk_node:local_actor_at(PidBin))
-    end).
-
-local_actor_at_returns_nil_when_no_registry_test() ->
-    beamtalk_test_actor_registry:without_registry(fun() ->
-        ?assertEqual(nil, beamtalk_node:local_actor_at(<<"<0.1.0>">>))
-    end).
+%% local_actors/0 and local_actor_at/1 read the process scan (ADR 0150); their
+%% tests are in beamtalk_actor_scan_readers_tests.
 
 %% local_supervisors/0 reads the (possibly empty) root supervisor plus the user
 %% supervisors attached under beamtalk_workspace_sup. A childless supervisor

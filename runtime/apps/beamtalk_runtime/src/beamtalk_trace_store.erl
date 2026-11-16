@@ -1183,15 +1183,18 @@ grow_counters() ->
 %%====================================================================
 
 -doc """
-Resolve the class atom from the instance registry, else `unknown`: one
-lookup on its pid-keyed index (BT-4113), the same as
-`beamtalk_actor:lookup_class/1`. `unknown` also covers a lost index (the
-registry server and `beamtalk_ets_heir` both down, BT-4123); a registry
-crash alone keeps it, since the restarted server reclaims it from the heir.
+Resolve a pid's class from its actor marker (`beamtalk_actor_scan:info/1`, ADR
+0150), else `unknown`: a live non-actor, a dead pid or a remote pid. A native
+backing module shared by several classes answers its first class.
 """.
--spec class_from_registry(pid()) -> atom().
-class_from_registry(Pid) ->
-    beamtalk_actor:lookup_class(Pid).
+-spec class_of_pid(pid()) -> atom().
+class_of_pid(Pid) when node(Pid) =:= node() ->
+    case beamtalk_actor_scan:info(Pid) of
+        [{Pid, Class, _StartedAt} | _] -> Class;
+        [] -> unknown
+    end;
+class_of_pid(_RemotePid) ->
+    unknown.
 
 %%====================================================================
 %% Internal: Telemetry handlers
@@ -1867,37 +1870,16 @@ do_error_methods(Limit) ->
     lists:sublist(Sorted, Limit).
 
 -doc """
-Top N actors by message queue length (live snapshot). Scans the instance
-registry, so it covers every live actor whether or not tracing is enabled —
-unregistered processes never appear.
+Top N actors by message queue length (live snapshot). Scans the processes for
+the actor marker (`beamtalk_actor_scan:scan_actors/0`, ADR 0150), so it covers
+every live actor whether or not tracing is enabled, and costs O(processes in
+the node) per call. Non-actor processes never appear.
 """.
 do_bottlenecks(Limit) ->
-    %% Get all unique {Class, Pid} pairs from the instance registry,
-    %% deduplicated by pid (a pid registered under two classes must still
-    %% report once).
-    Pairs = lists:usort(
-        try
-            ets:foldl(
-                fun
-                    ({{Class, Pid}}, Acc) when is_atom(Class), is_pid(Pid) ->
-                        [{Class, Pid} | Acc];
-                    %% Another writer's malformed row: skip, never crash
-                    %% the query.
-                    (_Row, Acc) ->
-                        Acc
-                end,
-                [],
-                beamtalk_instance_registry
-            )
-        catch
-            %% Registry table missing: a partial harness, or the table was
-            %% genuinely lost (registry server and `beamtalk_ets_heir` both
-            %% down, BT-4123) — no actors to report. A registry crash alone
-            %% keeps the table: it survives under the heir and is reclaimed.
-            error:badarg -> []
-        end
-    ),
-    ByPid = maps:values(maps:from_list([{Pid, {Class, Pid}} || {Class, Pid} <- Pairs])),
+    %% One `{Class, Pid}` per pid: a `native:` backing module shared by several
+    %% classes is scanned once per class but must report once.
+    ByPid = maps:from_list([{Pid, {Class, Pid}} || {Pid, Class, _} <- beamtalk_actor_scan:scan_actors()]),
+    Pairs = lists:sort(maps:values(ByPid)),
     %% Get queue depths for live processes
     WithQueue = lists:filtermap(
         fun({Class, Pid}) ->
@@ -1920,7 +1902,7 @@ do_bottlenecks(Limit) ->
                     false
             end
         end,
-        ByPid
+        Pairs
     ),
     Sorted = lists:sort(
         fun(A, B) -> maps:get(queue_depth, A) >= maps:get(queue_depth, B) end,
@@ -1930,7 +1912,7 @@ do_bottlenecks(Limit) ->
 
 -doc "Live health for a specific actor.".
 do_actor_health(Pid) ->
-    ClassBin = atom_to_binary(class_from_registry(Pid), utf8),
+    ClassBin = atom_to_binary(class_of_pid(Pid), utf8),
     case erlang:is_process_alive(Pid) of
         true ->
             case
