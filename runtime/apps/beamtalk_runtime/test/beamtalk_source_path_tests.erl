@@ -199,7 +199,7 @@ relative_marker_survives_a_moved_tree_test() ->
     {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
     try
         ?assertEqual(
-            filename:join([Moved, "dep", "src", "x.bt"]),
+            filename:join([beamtalk_source_path:real_dir(Moved), "dep", "src", "x.bt"]),
             resolve(Mod, "src/x.bt")
         )
     after

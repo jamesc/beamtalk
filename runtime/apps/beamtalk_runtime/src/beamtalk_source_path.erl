@@ -203,8 +203,9 @@ norm_seg("..", []) -> [];
 norm_seg(Seg, Acc) -> [Seg | Acc].
 
 %% `Path` with every symlink resolved (`realpath`), like the canonical path the
-%% marker's writer used. A path that does not exist is kept as written from the
-%% first missing segment; a symlink loop stops being followed after 40 hops.
+%% marker's writer used. A path that does not exist is kept as written (links
+%% below a missing segment cannot be read, so none is followed);
+%% a symlink loop stops being followed after 40 hops.
 -spec real_dir(file:filename_all()) -> file:filename_all().
 real_dir(Path) ->
     [Root | Segs] = filename:split(filename:absname(Path)),
