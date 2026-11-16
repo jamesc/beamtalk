@@ -5,6 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
+use super::exception_forms::{CatchVars, try_catch_doc};
 use super::field_types::ComparisonKinds;
 use super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
@@ -719,18 +720,18 @@ impl CoreErlangGenerator {
                     form::tuple([atom("error"), atom("badarith")]),
                     is_number_case,
                 ),
-                flat_clause(
-                    var(other_pair_var),
-                    Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
-                ),
+                flat_clause(var(other_pair_var), raise),
             ],
             form::Layout::Flat,
         );
-        form::try_of_catch(
+        try_catch_doc(
             guarded_bif,
-            [var(try_result_var.clone())],
             var(try_result_var),
-            [var(type_var), var(error_var), var(stack_var)],
+            CatchVars {
+                class: var(type_var),
+                reason: var(error_var),
+                stack: var(stack_var),
+            },
             handler,
             form::Layout::Flat,
         )
