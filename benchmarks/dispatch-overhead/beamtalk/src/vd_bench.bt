@@ -1,0 +1,196 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// The Beamtalk half of benchmarks/dispatch-overhead (BT-4983). The harness
+// (harness/vd_bench.erl) calls these class methods directly, as
+// `'class_<selector>'(VdBench, N, ...)`; the class is stateless so each runs in
+// the caller's process. Every row is
+//
+//     last := 0
+//     n timesRepeat: [last := <operation>]
+//     last
+//
+// so `timesRepeat:` is inlined as a local loop and the result stays live.
+// Row `baseline` is the loop with a constant body; the harness subtracts it.
+sealed Object subclass: VdBench
+
+  class point -> VdPoint => VdPoint x: 1 y: 2
+  class openPoint -> VdOpenPoint => VdOpenPoint x: 1 y: 2
+  class counter -> VdCounter => VdCounter spawn
+  class tuple -> Tuple => Tuple withAll: #(1, 2, 3)
+  class dict -> Dictionary(Symbol, Integer) => #{#a => 1, #b => 2}
+  class list10 -> List(Integer) => (1 to: 10) asList
+  class openMath => VdOpenMath
+
+  class baseline: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := 1]
+    last
+
+  // === Plain sends ===
+  class plainSealed: n :: Integer p: p :: VdPoint -> Integer =>
+    last := 0
+    n timesRepeat: [last := p x]
+    last
+
+  class plainOpen: n :: Integer p: p :: VdOpenPoint -> Integer =>
+    last := 0
+    n timesRepeat: [last := p x]
+    last
+
+  class plainUntyped: n :: Integer o: o -> Object =>
+    last := 0
+    n timesRepeat: [last := o x]
+    last
+
+  class tupleAt: n :: Integer t: t :: Tuple -> Object =>
+    last := 0
+    n timesRepeat: [last := t at: 2]
+    last
+
+  class tupleAtUntyped: n :: Integer t: t -> Object =>
+    last := 0
+    n timesRepeat: [last := t at: 2]
+    last
+
+  class dictAtUntyped: n :: Integer d: d -> Object =>
+    last := 0
+    n timesRepeat: [last := d at: #a]
+    last
+
+  class actorCall: n :: Integer c: c :: VdCounter -> Integer =>
+    last := 0
+    n timesRepeat: [last := c count]
+    last
+
+  // === Self sends ===
+  class selfTwiceSealed: n :: Integer p: p :: VdPoint -> Integer =>
+    last := 0
+    n timesRepeat: [last := p twice]
+    last
+
+  class selfHelperSealed: n :: Integer p: p :: VdPoint -> Integer =>
+    last := 0
+    n timesRepeat: [last := p viaHelper]
+    last
+
+  class selfHelperOpen: n :: Integer p: p :: VdOpenPoint -> Integer =>
+    last := 0
+    n timesRepeat: [last := p viaHelper]
+    last
+
+  class selfActor: n :: Integer c: c :: VdCounter -> Integer =>
+    last := 0
+    n timesRepeat: [last := c viaSelf]
+    last
+
+  // === Class-side sends ===
+  class classSealedStatic: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VdSealedMath double: 21]
+    last
+
+  class classSealedPlain: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VdSealedMath triple: 21]
+    last
+
+  class classOpen: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VdOpenMath double: 21]
+    last
+
+  class classStateful: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VdStatefulMath double: 21]
+    last
+
+  class classInVariable: n :: Integer c: c -> Integer =>
+    last := 0
+    n timesRepeat: [last := c double: 21]
+    last
+
+  // === FFI calls ===
+  class ffiInt: n :: Integer a: a :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := Erlang erlang phash2: a]
+    last
+
+  class ffiBinary: n :: Integer a: a :: Integer -> String =>
+    last := ""
+    n timesRepeat: [s :: String := Erlang erlang integer_to_binary: a. last := s]
+    last
+
+  class ffiIolistSize: n :: Integer s: s :: String -> Integer =>
+    last := 0
+    n timesRepeat: [last := Erlang erlang iolist_size: s]
+    last
+
+  // Untyped argument: the compiler cannot prove it passes unchanged, so the call
+  // keeps the proxy (`direct_call/4`, which wraps `apply_with_coercion/6`).
+  class ffiIntUntyped: n :: Integer a: a -> Integer =>
+    last := 0
+    n timesRepeat: [last := Erlang erlang phash2: a]
+    last
+
+  class ffiSizeUntyped: n :: Integer a: a -> Object =>
+    last := 0
+    n timesRepeat: [last := Erlang erlang iolist_size: a]
+    last
+
+  class ffiTwoArgUntyped: n :: Integer a: a -> Object =>
+    last := 0
+    n timesRepeat: [last := Erlang lists member: a list: #(1, 2, 3)]
+    last
+
+  // === Exception handling ===
+  class onDoNoRaise: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := [1] on: Error do: [:e | 0]]
+    last
+
+  class ensureNoRaise: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := [1] ensure: [2]]
+    last
+
+  // === `^` in blocks ===
+  // Plain `ifTrue: [^x]` in the method body: inlined, no throw expected.
+  class retInlinedIf: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VdBench pickInlined: 3]
+    last
+
+  class pickInlined: x :: Integer -> Integer =>
+    x > 2 ifTrue: [^x]
+    0
+
+  // `^` inside a `do:` block over a list: the block is a real closure.
+  class retInDo: n :: Integer l: l :: List(Integer) -> Integer =>
+    last := 0
+    n timesRepeat: [last := VdBench firstBig: l]
+    last
+
+  class firstBig: l :: List(Integer) -> Integer =>
+    l do: [:e | e > 2 ifTrue: [^e]]
+    0
+
+  // `^` inside an inlined `to:do:` loop.
+  class retInToDo: n :: Integer -> Integer =>
+    last := 0
+    n timesRepeat: [last := VdBench firstBigRange]
+    last
+
+  class firstBigRange -> Integer =>
+    1 to: 10 do: [:i | i > 2 ifTrue: [^i]]
+    0
+
+  // `do:` block that never returns early (catch frame without a throw).
+  class noRetInDo: n :: Integer l: l :: List(Integer) -> Integer =>
+    last := 0
+    n timesRepeat: [last := VdBench neverBig: l]
+    last
+
+  class neverBig: l :: List(Integer) -> Integer =>
+    l do: [:e | e > 99 ifTrue: [^e]]
+    0

@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Actor: self sends inside a gen_server callback.
+Actor subclass: VdCounter
+  state: count :: Integer = 0
+
+  count -> Integer => self.count
+  viaSelf -> Integer => self count

@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Sealed Value: sends to it can be resolved statically.
+sealed Value subclass: VdPoint
+  field: x :: Integer = 0
+  field: y :: Integer = 0
+
+  // Self sends: `twice` calls `self x`, `self sum` calls two getters.
+  twice -> Integer => self x + self x
+  sum -> Integer => self x + self y
+  viaHelper -> Integer => self helper
+  helper -> Integer => self.x
