@@ -32,3 +32,10 @@ TestCase subclass: OSTest
   testRunTimeoutExpiryRaisesTimeout =>
     cmd := self.isUnix ifTrue: ["sleep 60"] ifFalse: ["ping -n 100 127.0.0.1"]
     self should: [OS run: cmd timeout: 100] raise: #timeout
+
+  testRunInvalidUtf8RaisesParseError =>
+    // printf '\\200' emits byte 0x80, which is not valid UTF-8 (BT-4170).
+    // Only run on Unix; Windows printf does not support octal byte escapes.
+    self.isUnix ifTrue: [
+      self should: [OS run: "printf '\\200'"] raise: #parse_error
+    ]

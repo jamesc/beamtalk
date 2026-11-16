@@ -16,6 +16,7 @@ Tests cover:
 - run:timeout: type error (non-integer timeout)
 - run:timeout: timeout expiry raises #timeout error
 - output exceeding MAX_OUTPUT_BYTES raises output_too_large error
+- command output with invalid UTF-8 bytes raises parse_error
 """.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
@@ -107,4 +108,34 @@ run_output_too_large_test() ->
             );
         _ ->
             {skip, "Unix-only: no dd equivalent on Windows"}
+    end.
+
+%%% ============================================================================
+%%% UTF-8 validation (BT-4170)
+%%% ============================================================================
+
+run_invalid_utf8_output_test() ->
+    case os:type() of
+        {unix, _} ->
+            %% printf '\200' emits a single byte 0x80, which is not valid UTF-8.
+            %% This exercises the {error, Offset} branch of beamtalk_binary:check_utf8/1
+            %% inside collect/4 and the parse_error raise path.
+            ?assertBtError(
+                parse_error,
+                beamtalk_os:run(<<"printf '\\200'">>)
+            );
+        {win32, _} ->
+            {skip, "Unix-only: octal printf escapes unavailable on Windows"}
+    end.
+
+run_timeout_invalid_utf8_output_test() ->
+    case os:type() of
+        {unix, _} ->
+            %% Same path via run:timeout: to verify the selector is threaded correctly.
+            ?assertBtError(
+                parse_error,
+                beamtalk_os:run(<<"printf '\\200'">>, 5000)
+            );
+        {win32, _} ->
+            {skip, "Unix-only: octal printf escapes unavailable on Windows"}
     end.
