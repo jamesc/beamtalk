@@ -746,33 +746,50 @@ impl Backend {
     /// until its next edit.
     pub(in crate::server) async fn load_root_packages(&self, roots: &[PathBuf]) {
         let roots_owned: Vec<PathBuf> = roots.to_vec();
-        let root_packages: Vec<(Utf8PathBuf, EcoString)> = tokio::task::spawn_blocking(move || {
-            // Each root's dependency checkouts too (BT-4611): a path
-            // dependency lives outside `_build/deps/<name>/`, so the path
-            // convention cannot name its package and its files would
-            // otherwise be stamped as the consumer's own.
-            let with_dependencies: Vec<PathBuf> = roots_owned
-                .iter()
-                .flat_map(|root| {
-                    std::iter::once(root.clone()).chain(
-                        super::config::root_dependencies(root)
-                            .found
-                            .into_iter()
-                            .map(|dep| dep.root.into_std_path_buf()),
-                    )
-                })
-                .collect();
-            with_dependencies
-                .into_iter()
-                .filter_map(|root| {
-                    let name = beamtalk_project::package::read_package_name(&root)?;
-                    let utf8_root = Utf8PathBuf::from_path_buf(root).ok()?;
-                    Some((utf8_root, EcoString::from(name)))
-                })
-                .collect()
-        })
-        .await
-        .unwrap_or_default();
+        let (root_packages, qualifier_packages): (Vec<_>, Vec<_>) =
+            tokio::task::spawn_blocking(move || {
+                // Each root's dependency checkouts too (BT-4611): a path
+                // dependency lives outside `_build/deps/<name>/`, so the path
+                // convention cannot name its package and its files would
+                // otherwise be stamped as the consumer's own.
+                let with_dependencies: Vec<PathBuf> = roots_owned
+                    .iter()
+                    .flat_map(|root| {
+                        std::iter::once(root.clone()).chain(
+                            super::config::root_dependencies(root)
+                                .found
+                                .into_iter()
+                                .map(|dep| dep.root.into_std_path_buf()),
+                        )
+                    })
+                    .collect();
+                let names: Vec<(Utf8PathBuf, EcoString)> = with_dependencies
+                    .iter()
+                    .filter_map(|root| {
+                        let name = beamtalk_project::package::read_package_name(root)?;
+                        let utf8_root = Utf8PathBuf::from_path_buf(root.clone()).ok()?;
+                        Some((utf8_root, EcoString::from(name)))
+                    })
+                    .collect();
+                // ADR 0070 Phase 2 (BT-4928): the `pkg@Class` qualifier set of
+                // each root, read by the CLI's own rule
+                // (`PackageCheckerScope::known_packages`). A missing or
+                // unreadable manifest yields no set, so its files are not checked.
+                let qualifiers: Vec<(Utf8PathBuf, std::collections::HashSet<String>)> =
+                    with_dependencies
+                        .into_iter()
+                        .filter_map(|root| {
+                            let utf8_root = Utf8PathBuf::from_path_buf(root).ok()?;
+                            let known =
+                                beamtalk_package::manifest::package_checker_scope(Some(&utf8_root))
+                                    .known_packages?;
+                            Some((utf8_root, known))
+                        })
+                        .collect();
+                (names, qualifiers)
+            })
+            .await
+            .unwrap_or_default();
 
         if !root_packages.is_empty() {
             debug!(
@@ -782,6 +799,7 @@ impl Backend {
         }
         let mut svc = self.service.lock().expect("service lock poisoned");
         svc.set_root_packages(root_packages);
+        svc.set_root_qualifier_packages(qualifier_packages);
     }
 
     /// Startup source-file preload over `config.roots` and the stdlib dirs.
