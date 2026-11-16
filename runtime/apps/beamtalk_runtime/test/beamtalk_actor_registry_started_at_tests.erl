@@ -24,8 +24,19 @@ start_proc(StartedAt) ->
             stop -> ok
         end
     end),
+    %% Bounded: an unbounded receive turns a process that never started into
+    %% an anonymous eunit timeout. Name what did not start instead.
     receive
         {ready, Pid} -> Pid
+    after 10000 ->
+        erlang:error(
+            {test_proc_did_not_start, #{
+                pid => Pid,
+                alive => is_process_alive(Pid),
+                process_info => erlang:process_info(Pid, [status, current_stacktrace]),
+                run_queue => erlang:statistics(run_queue)
+            }}
+        )
     end.
 
 stop_proc(Pid) ->
@@ -66,7 +77,13 @@ unreachable_pid() ->
         <<131, 88, 119, (byte_size(Node)), Node/binary, 1:32, 0:32, 1:32>>
     ).
 
-failed_remote_read_takes_the_otp_fallback_not_the_local_side_test() ->
+failed_remote_read_takes_the_otp_fallback_not_the_local_side_test_() ->
+    %% Each order makes one `erpc:call/5` to an unreachable node, bounded by
+    %% BT_REMOTE_CALL_TIMEOUT (5000 ms), so the default 5 s eunit timeout can
+    %% be spent by a single slow connect attempt.
+    {timeout, 60, fun failed_remote_read_takes_the_otp_fallback_not_the_local_side/0}.
+
+failed_remote_read_takes_the_otp_fallback_not_the_local_side() ->
     %% The remote read fails. Treating that as "no start time" would keep the
     %% local pid every time. It must take OTP's fallback instead, which keeps
     %% the pid on the lower-named node: the same answer on every node.
