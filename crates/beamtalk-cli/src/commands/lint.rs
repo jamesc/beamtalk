@@ -7,7 +7,7 @@
 //! [`Severity::Lint`] diagnostics. It also runs semantic analysis to collect
 //! DNU hint diagnostics so that `@expect type` annotations are correctly
 //! applied. It exits non-zero if any unsuppressed lint diagnostics
-//! are found.
+//! or error-severity diagnostics are found (BT-4942).
 //!
 //! Native `.erl` files in `native/` and `native/test/` are also checked for
 //! missing `-moduledoc`/`-doc` attributes and hardcoded `'bt@...'` module
@@ -37,7 +37,8 @@ use tracing::warn;
 
 /// Run lint passes on the given path (file or directory).
 ///
-/// Prints each lint diagnostic and returns an error if any are found.
+/// Prints each lint diagnostic and returns an error if any lint or
+/// error-severity diagnostic is found (BT-4942).
 /// With `warnings_as_errors`, live-recheck diagnostics (non-error
 /// `Dnu`/`Type` findings, plus any `Error`) also fail the command, so the
 /// buccaneer-style sources the REPL `load-project` rejects fail CI here too
@@ -144,12 +145,21 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
 
     // BT-4334: the REPL-parity gate. Reported separately so the default
     // lint-severity message above stays unchanged for existing callers.
-    if gate.fails(warnings_as_errors) {
+    if warnings_as_errors && gate.live_recheck > 0 {
         let count = gate.live_recheck;
         let plural = if count == 1 { "" } else { "s" };
         miette::bail!(
             "{count} type/DNU/error diagnostic{plural} found in {total_files_checked} file(s) (--warnings-as-errors: REPL load-project parity)"
         );
+    }
+
+    // BT-4942: an error-severity diagnostic fails the run on its own. Without
+    // `--warnings-as-errors` the gates above ignore `Error`, so e.g. an
+    // unknown package qualifier printed and still exited 0.
+    if gate.error > 0 {
+        let count = gate.error;
+        let plural = if count == 1 { "" } else { "s" };
+        miette::bail!("{count} error diagnostic{plural} found in {total_files_checked} file(s)");
     }
 
     Ok(())
