@@ -546,15 +546,14 @@ pub(crate) fn compile_source_with_bindings(
     let mut returned_diags = diagnostics;
 
     // Generate Core Erlang (with source text for CompiledMethod introspection, and bindings)
-    // Use an absolute path so reload works regardless of the
-    // working directory at reload time. Always pass the source path so that
-    // line annotations and the 'file' attribute populate BEAM stacktraces
-    // (even for stdlib). The `beamtalk_source` attribute is suppressed for
-    // stdlib mode in codegen (source_path_attr checks stdlib_mode).
-    let embed_source_path = beamtalk_core::paths::canonicalize(source_path)
-        .ok()
-        .and_then(|p| p.into_os_string().into_string().ok())
-        .unwrap_or_else(|| source_path.as_str().to_string());
+    // Embed a package-relative path (BT-4940), never the build machine's
+    // absolute one: the runtime resolves it against the project root when it
+    // needs the file on disk. Line annotations and the 'file' attribute use
+    // the same string, so BEAM stacktraces stay usable (even for stdlib). The
+    // `beamtalk_source` attribute is suppressed for stdlib mode in codegen
+    // (source_path_attr checks stdlib_mode).
+    let embed_source_path =
+        beamtalk_project::package::embedded_source_path(source_path.as_std_path());
     let embed_source_path = Some(embed_source_path.as_str());
     // Build a codegen-specific hierarchy with every pre-loaded class,
     // *unfiltered*: unlike analysis's `cross_file_classes`, codegen also needs

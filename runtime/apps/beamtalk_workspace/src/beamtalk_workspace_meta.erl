@@ -779,12 +779,22 @@ pid_is_gone(Name) ->
             false
     end.
 
+-spec set_runtime_project_root(binary() | undefined) -> ok.
+set_runtime_project_root(undefined) ->
+    application:unset_env(beamtalk_runtime, workspace_project_root);
+set_runtime_project_root(ProjectPath) ->
+    application:set_env(beamtalk_runtime, workspace_project_root, ProjectPath).
+
 %%% gen_server callbacks
 
 init(InitialMetadata) ->
     beamtalk_logging_config:set_domain(runtime),
     WorkspaceId = maps:get(workspace_id, InitialMetadata),
     ProjectPath = maps:get(project_path, InitialMetadata, undefined),
+    %% BT-4940: modules embed package-relative source paths; tell the runtime
+    %% which project they are relative to when a module has no .beam on disk
+    %% (compiled in memory by the REPL / `load_project`).
+    ok = set_runtime_project_root(ProjectPath),
     %% The root package is recorded by the launcher (from the Rust-parsed
     %% manifest) in the `root_package` app env; no toml parsing here (BT-3651).
     PackageName = beamtalk_package:root_package_name(),
