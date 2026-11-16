@@ -197,16 +197,19 @@ start_app(App, Retries) ->
             error({app_start_failed, App, Reason})
     end.
 
-%% A suite that deliberately stops the bootstrap `Object` class leaves the
-%% runtime application "started" but without it, and a second
-%% `ensure_all_started` is then a no-op, so no later suite ever sees `Object`
-%% again (`class_not_registered 'Object'`). Restart the application once so its
-%% bootstrap child registers the stub classes again (BT-4934).
+%% A suite can leave the runtime application "started" but unhealthy, and a
+%% second `ensure_all_started` is then a no-op, so no later suite ever sees it
+%% repaired: the bootstrap `Object` class stopped on purpose
+%% (`class_not_registered 'Object'`), or a supervised server (the announcement
+%% bus, ...) killed and replaced by a bare `start_link` instance that is not the
+%% supervisor's child, which a restarted dependent never sees. Restart the
+%% application once so its children and the bootstrap classes are registered
+%% again (BT-4934).
 ensure_bootstrap_classes() ->
-    case beamtalk_class_registry:whereis_class('Object') of
-        Pid when is_pid(Pid) ->
+    case runtime_healthy() of
+        true ->
             ok;
-        undefined ->
+        false ->
             ok = application:stop(beamtalk_runtime),
             {ok, _} = application:ensure_all_started(beamtalk_runtime),
             wait_for_class('Object', 100),
@@ -217,6 +220,34 @@ ensure_bootstrap_classes() ->
             beamtalk_stdlib:init(),
             wait_for_class('Integer', 100),
             ok = repair_class_pid_index()
+    end.
+
+%% `Object` is registered, the system announcer still holds its subscription on
+%% the announcement bus (a suite that wipes every subscription silences system
+%% events such as `NodeShapeSkew` for everyone after it), and every supervisor
+%% child that registers a name equal to its id is the process registered under
+%% that name.
+runtime_healthy() ->
+    is_pid(beamtalk_class_registry:whereis_class('Object')) andalso
+        system_announcer_subscribed() andalso
+        lists:all(
+            fun
+                ({Id, Pid, _Type, _Mods}) when is_atom(Id), is_pid(Pid) ->
+                    case whereis(Id) of
+                        undefined -> true;
+                        Registered -> Registered =:= Pid
+                    end;
+                ({_Id, _Restarting, _Type, _Mods}) ->
+                    false
+            end,
+            supervisor:which_children(beamtalk_runtime_sup)
+        ).
+
+system_announcer_subscribed() ->
+    try
+        beamtalk_announcements:subscription_count() > 0
+    catch
+        _:_ -> false
     end.
 
 -doc """
