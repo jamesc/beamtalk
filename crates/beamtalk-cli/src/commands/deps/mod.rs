@@ -314,7 +314,7 @@ fn collect_fresh_deps(
         // BT-4958: a fresh dependency is not recompiled, so its source-root
         // marker is not rewritten there. A copied workspace would keep naming
         // the original tree; refresh it on every build.
-        if dep.is_path_dep {
+        if dep.is_path_dep && ebin_path.is_dir() {
             path::write_source_root_marker(&ebin_path, &dep.root)?;
         }
 
