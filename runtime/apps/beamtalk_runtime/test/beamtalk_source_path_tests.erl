@@ -13,10 +13,11 @@ resolve(Module, Path) ->
 %% BT-4966: no production caller wanted the lenient result, so the export is
 %% gone and a future caller cannot open a cwd-relative path by mistake.
 lenient_resolve_is_not_exported_test() ->
+    {module, beamtalk_source_path} = code:ensure_loaded(beamtalk_source_path),
     ?assertNot(erlang:function_exported(beamtalk_source_path, resolve, 2)).
 
 %% BT-4940: embedded paths are package-relative; resolve/2 maps them back to
-%% a file on disk.
+%% a file on disk (via `resolve_strict/2`; `resolve/2` here is a test-local helper).
 
 absolute_path_is_returned_unchanged_test() ->
     ?assertEqual("/a/b/c.bt", resolve(undefined, "/a/b/c.bt")).
