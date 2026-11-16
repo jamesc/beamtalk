@@ -139,7 +139,7 @@ rebar3 package, in the probe; which rebar3 it used was not checked.)
 | | Mix direct (recommended) | `rebar_mix` under `[native.dependencies]` |
 |---|---|---|
 | Change to the generated config | New generator for `mix.exs`, new lock section | One line in `rebar.config`: `{plugins, [rebar_mix]}` (verified: Jason and Req both built) |
-| Req and its dependencies, one run | 9 packages fetched in 5.5 s, compiled in 8.3 s | 1 m 56 s, 15 packages built |
+| Req, one cold run each (not like for like: the plugin also fetched itself, built 15 packages including six that Mix never selected, and ran `mix deps.get` per dependency) | 9 packages fetched in 5.5 s, compiled in 8.3 s | 1 m 56 s |
 | Closure matches the lock | Yes: Mix's closure is exactly what `mix.lock` lists | No: `rebar.lock` lists 9 packages, `lib/` holds 15 (plus the project); `brotli`, `castore`, `decimal`, `nimble_csv`, `plug`, `plug_crypto` are not in it (verified) |
 | Dependency's dev-only dependencies fetched | No | Yes: the plugin runs `mix deps.get` inside each dependency, which fetched `ex_doc`, `dialyxir` and others for Jason (verified) |
 | Elixir version constraint | `elixir: "~> 1.19"` in `mix.exs`, enforced by Mix | None |
@@ -159,10 +159,23 @@ Rejected without a full option: **require pre-built Elixir beams** (user builds
 Elixir outside Beamtalk and points a `path` dependency at it). That works today
 and stays available; it is not a package story.
 
+**Resolver selection for the whole build.** The rule is per build, not per
+package: if the root package or any `path`/`git` Beamtalk dependency declares
+`[elixir.dependencies]`, Mix resolves the **union** of every package's
+`[native.dependencies]` and `[elixir.dependencies]`. Otherwise nothing changes
+and rebar3 resolves as today. Adding a first Elixir dependency must not move
+versions already locked: the existing `[[native_package]]` pins are written into
+the generated `mix.lock` before resolution, so a locked `cowboy` stays put
+unless the new dependency makes it impossible, in which case the build fails
+with the conflict instead of upgrading silently. Locked native packages keep
+their `[[native_package]]` entries; `[[elixir_package]]` holds only packages
+Mix added. Phase 2 starts with a test that adds `jason` to a project with
+pinned native packages and asserts every pin is unchanged. Not yet run.
+
 #### 1.2 Lockfile
 
-`beamtalk.lock` gains `[[elixir_package]]` entries for the **full Mix
-closure**, the same shape as `[[native_package]]`: name, version, inner
+`beamtalk.lock` gains `[[elixir_package]]` entries for the packages **Mix
+adds to the closure** (native pins stay where they are, see above), the same shape as `[[native_package]]`: name, version, inner
 checksum, outer checksum, plus the build tool (`mix` or `rebar3`). Before
 `mix deps.get`, the build writes `_build/dev/mix/mix.lock` from those entries,
 so Mix reproduces the locked set. This is the mechanism `prepare_rebar_lock`
@@ -177,8 +190,11 @@ not in `_build`. They must reach every node Beamtalk starts.
 
 - **Locate once.** Run `elixir -e 'IO.puts(:code.lib_dir(:elixir))'` (about
   0.35 s per call here), or read `[elixir] lib-dir` / `ELIXIR_LIB_DIR` when
-  set. Cache the answer under `_build/` keyed by the `elixir` executable's
-  mtime. Only packages with `[elixir]` pay this.
+  set. Cache the answer under `_build/`, keyed by the resolved real path of the
+  `elixir` executable and the `ELIXIR_LIB_DIR` value, and revalidate it on use by
+  reading `<lib>/elixir/ebin/elixir.app` (its `vsn` must match the cached one).
+  An mtime key is wrong under mise or asdf, where `elixir` is a shim (this
+  container's is); a version switch would not change it. Only packages with `[elixir]` pay this.
 - **One place.** `BeamEnvironment::from_layout` gets a new step: when the
   package or any dependency has Elixir packages, add `<lib>/elixir/ebin` and
   `<lib>/logger/ebin`, then the Mix `_build/prod/lib/*/ebin`, with the
@@ -190,9 +206,13 @@ not in `_build`. They must reach every node Beamtalk starts.
   `application:ensure_all_started/1`. It gains the top-level
   `[elixir.dependencies]` names. That call starts `elixir` and `logger` as
   dependencies (verified for `:req`).
-- **VM flag.** Whatever launches the VM adds `+fnu` when Elixir is on the path
-  (the warning above; the effect on Beamtalk's own file names was not checked).
-  For releases it goes into the generated `vm.args`.
+- **VM flag.** The warning means the VM started with a non-UTF-8 locale. The
+  probes silenced it with `ELIXIR_ERL_OPTIONS=+fnu`, which only the `elixir`
+  launcher reads, not Beamtalk's own `erl` launch. Phase 2 must check the
+  locale and Beamtalk's real launch path first; the proposal is `+fnu` added by
+  whatever launches the VM when Elixir is on the path, and in the generated
+  `vm.args` for releases. Its effect on Beamtalk's own file names was not
+  checked, so this is a proposal, not a verified requirement.
 
 #### 1.4 Releases (ADR 0125)
 
@@ -273,7 +293,11 @@ reaches the FFI module check (verified, E1g). The compiler recognises the
 chain the way it recognises `Erlang <mod> <fn>:` and emits a direct call with
 the new `elixir` coercion mode (Part 3). The value form `Elixir Enum` answers an
 `ErlangModule` proxy for the atom `'Elixir.Enum'`, so `call:args:` and dynamic
-dispatch work unchanged. The "unknown module" diagnostic gains a hint when the
+dispatch work. One proxy rule is new: in `elixir` mode a capitalised unary
+selector on a proxy extends the module path, so `proxy := Elixir String. proxy
+Chars to_string: 42` also reaches `'Elixir.String.Chars'` (without it the proxy
+would call a function named `Chars`). The static chain and the dynamic form must
+agree, which a test pins. The "unknown module" diagnostic gains a hint when the
 module is missing and no Elixir is on the path: `Elixir is not on the code
 path; add [elixir] to beamtalk.toml`.
 
@@ -325,12 +349,16 @@ extended with `elixir` cases (renamed to `ffi_coercion_mode_conformance.json`).
 Codegen precomputes it as it does the other two (`ffi_coercion_mode` in
 `beamtalk-codegen/src/core_erlang/util.rs`).
 
+The mode follows the **statically named module**. `Erlang erlang apply: #'Elixir.X' ...` keeps the `stock` rules, because its module is `erlang`: the same Elixir function follows two rule sets depending on how it is reached. That is accepted for the escape hatch and documented; the alternative, making `erlang:apply/3` inspect its first argument, would add a per-call check to an Erlang BIF path and is not proposed.
+
 The rules of the `elixir` mode, each justified by a failure above:
 
 | Rule | `stock` today | `elixir` | Why |
 |---|---|---|---|
 | Nested `String` in arguments | shallow unwrap, then retry on `badarg` / `function_clause` | **deep-unwrap before the first call; no retry** | Retry cannot see `Protocol.UndefinedError`, and a call that *succeeds* with a tagged String inside is undetectable (D2) |
 | Binary to charlist retry on `badarg` | yes | **no** | Elixir raises `ArgumentError`, not `badarg`; strings are binaries |
+| Beamtalk actor in arguments | converted to its pid only inside the `badarg` retry (`coerce_arg`) | **converted to its pid in the up-front walk** | With no retry, `Process.monitor(actor)` or a PubSub subscribe would otherwise receive the object record |
+| Value returned by a Beamtalk block called from Elixir | not unwrapped | **block wrapped at the boundary so its return value is deep-unwrapped** (design; blocks nested in arguments are wrapped by the same walk) | `Enum.map_join(xs, ",", [:x \| x printString])` and `Enum.sort_by` on a String field otherwise hand tagged Strings to Elixir. Cost: one extra fun layer per block. |
 | Charlist result to `String` scan | yes | **no** | Turns `[65,66,67]` into `"ABC"`. A user who wants a charlist conversion calls `Elixir List to_string:` (verified) |
 | `{:ok, v}` / `{:error, r}` to `Result` (ADR 0076) | yes | yes | Verified on `File.read`, `Enumerable.count` |
 | Bare `:error` to `Result error: nil` | yes | yes | Verified on `Integer.parse`; the idiom in Elixir for "no value" |
@@ -345,6 +373,26 @@ The rules of the `elixir` mode, each justified by a failure above:
 | B. A plus tag results | Also convert every valid-UTF-8 binary in results to a `String` | Also fixes `decode! at: "a"` | Rewrites every result; turns byte data that happens to be UTF-8 into a `String`; the representation flip ADR 0140 rejected, applied on one side. O(result) per call (a DataFrame or a large decoded document). |
 | C. Status quo (shallow unwrap and retry) | | | The silent-corruption and `Protocol.UndefinedError` failures stay. |
 | D. Spec-directed conversion | Use the callee's `@spec` | | ADR 0140 rejected it: the signature registry is missing in the REPL compiler, dependency builds and single-file builds, so behaviour would differ by surface. |
+
+Option A has its own silent failures, and the ADR does not hide them. A `String`
+that goes through Elixir comes back as a `Binary`, and ADR 0140 records that
+`"a" = <<"a">>` is false with different hashes. So after
+`names := Elixir Enum sort: names`, `names includes: "a"`, a `Set` or `Dictionary`
+lookup with a `String` key, and `=` can all answer "no" without an error, and a
+`Dictionary` can end up holding both `"a"` and `<<"a">>` as separate keys. A is
+chosen over C because these failures are deterministic and documentable, where
+C's depend on which Elixir function the data reaches. It is still the weakest
+part of this ADR.
+
+Option E, **ADR 0140's own tool**: leave the boundary as it is and rely on the
+BT-4243 lint plus explicit conversion by the caller. It adds no mode, but the
+Elixir cases that fail are not detectable by a lint (the call succeeds). Two
+mitigations belong to A: the compiler's `ffi-nested-string` hint is extended to
+mention that a nested `String` returns as `Binary` for Elixir modules, and the
+deep walk must be **copy-on-change**: today's `deep_unwrap_strings/1`
+(`beamtalk_primitive.erl`) rebuilds every tuple and map even when nothing
+changes, so a large list passed in a loop would pay for it on every call.
+Phase 1 measures the walk before it ships; no number exists yet.
 
 Recommendation: **A**. It is the smallest change that stops silent corruption,
 it is the same direction as the existing top-level unwrap, and it adds no new
@@ -629,7 +677,7 @@ dotted module names, and an LSP grouping of default-argument arities, are open.
 The argument is strong for small cases and the recommendation gives ground to
 it: `rebar_mix` is the fallback if the maintainer prefers minimal code. It is
 not chosen because its closure is not the locked closure (six unlocked
-packages in the Req build), it was about eight times slower on the same closure (one run each), and its failure
+packages in the Req build), it took minutes against seconds on the same top-level dependency (one run each, cold; not a like-for-like comparison, see 1.1), and its failure
 without Elixir is unreadable.
 
 ### Wrap the libraries in the Beamtalk stdlib instead
@@ -683,8 +731,8 @@ exception, and any package. Rejected: the boundary rules are wrong for Elixir
 whether or not packages are supported.
 
 ### A new `ElixirModule` proxy class
-Instead of reusing `ErlangModule`. Rejected: nothing about the proxy differs
-except the coercion mode, which is a function of the module atom.
+Instead of reusing `ErlangModule`. Rejected: the proxy differs only in
+that capitalised-selector rule and the coercion mode, both functions of the module atom.
 
 ## Consequences
 
@@ -723,11 +771,20 @@ except the coercion mode, which is a function of the module atom.
 
 Phases are in dependency order. Phase 0 is a napkin check.
 
+**Staging and the cheaper path.** Phases 0 and 1 (the `Elixir` global and the
+`elixir` mode) deliver most of the day-to-day value on their own and need no
+build change: users supply Elixir packages as they do now, by `ERL_LIBS` or a
+`path` dependency. For packages, the one-line `rebar_mix` route (D1's second
+option) is a working interim. Phase 2 (Mix direct) should therefore start with
+a spike that proves the lock round trip and the "adding `jason` keeps native
+pins" test, and the maintainer can stop after Phase 1 or take `rebar_mix` if the
+spike does not pay for itself.
+
 | Phase | Work | Components | Tests | Size |
 |---|---|---|---|---|
 | 0. Wire check | `Elixir Enum sum:` against a hand-set `ERL_LIBS`, no new mode: prove the global, the dotted chain and the `_bang` mapping on `Enum`, `String`, `URI`. BT-4866 has landed (the `function_clause` retry and report are in `beamtalk_erlang_proxy.erl`). | `stdlib/src/elixir.bt`, `beamtalk-core` parser tests, codegen `Erlang`-chain recogniser, `selector_to_function/1` | one stdlib BUnit file, one REPL protocol case | S |
 | 1. `elixir` mode | `is_elixir_erlang_module`, `coercion_mode/1`, deep-unwrap, no charlist rules, exception mapping, fixture `ffi_coercion_mode_conformance.json` | `beamtalk-core/src/ast`, `beamtalk-codegen/.../util.rs`, `beamtalk_erlang_proxy.erl` | EUnit, conformance fixture, a corpus for deep-unwrap, `ci:corpus` not needed (no ThreadedIr change) | M |
-| 2. Mix-backed packages | `[elixir]` manifest, `mix.exs` generator, lock round trip, `BeamEnvironment` Elixir step, `+fnu`, `doctor` check, `[elixir] version` check, `otp-support.toml` minimum | `beamtalk-package/src/manifest/`, `beamtalk-cli/src/commands/build/`, `beam_environment.rs`, `deps/lockfile.rs` | CLI tests with a local Hex repo (the existing test hook), lock round trip | L |
+| 2. Mix-backed packages (begin with the lock-round-trip spike) | `[elixir]` manifest, `mix.exs` generator, lock round trip, `BeamEnvironment` Elixir step, `+fnu`, `doctor` check, `[elixir] version` check, `otp-support.toml` minimum | `beamtalk-package/src/manifest/`, `beamtalk-cli/src/commands/build/`, `beam_environment.rs`, `deps/lockfile.rs` | CLI tests with a local Hex repo (the existing test hook), lock round trip | L |
 | 3. Releases | Elixir apps in the closure, `compiler` app, `$RELDIR` rule, provenance and preflight row | `commands/release/closure.rs`, `assembly.rs`, ADR 0125 docs | release boot smoke test with `jason` | M |
 | 4. Types and diagnostics | Elixir-not-on-path info, macro diagnostic, `_with` hint, spec-reader check on Elixir beams | `beamtalk_spec_reader.erl` wording, `native_types`, type checker | spec-reader EUnit on a fixture Elixir beam | M |
 | 5. Optional | keyword-list helper, `ElixirStruct`, stubs for dotted modules, LSP grouping of default arities | decided after use | | per item |
