@@ -2336,6 +2336,77 @@ fn e2e_library_project_program_package_and_sync() {
     );
 }
 
+/// BT-4940: modules built by `beamtalk build` embed a package-relative source
+/// path; the runtime must still map a loaded class back to its file. In a
+/// built project: `sourceFile` is absolute and exists, `reload` after an edit
+/// runs the new code and keeps `sourceFile`, and a workspace re-sync
+/// (`load-project`, the path file changes go through) does the same.
+#[test]
+#[ignore = "slow test - run with `just test-repl-protocol`"]
+#[serial(e2e)]
+fn e2e_built_project_source_path_survives_reload_and_sync() {
+    let tmp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let project_dir = tmp_dir.path();
+    let package = "e2e_reload_pkg";
+    fs::write(
+        project_dir.join("beamtalk.toml"),
+        format!("[package]\nname = \"{package}\"\nversion = \"0.1.0\"\n"),
+    )
+    .expect("Failed to write manifest");
+    let src_dir = project_dir.join("src");
+    fs::create_dir_all(&src_dir).expect("Failed to create src dir");
+    let source = |n: u32| {
+        format!(
+            "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\n\
+             Value subclass: ReloadThing\n\x20 answer -> Integer => {n}\n"
+        )
+    };
+    let file = src_dir.join("reload_thing.bt");
+    fs::write(&file, source(1)).expect("Failed to write source");
+
+    let status = Command::new(env!("CARGO_BIN_EXE_beamtalk"))
+        .args(["build", "."])
+        .current_dir(project_dir)
+        .status()
+        .expect("Failed to run beamtalk build");
+    assert!(status.success(), "beamtalk build failed");
+
+    let manager = ProcessManager::start_library_project(project_dir, package);
+    let mut client = ReplClient::connect(manager.port).expect("Could not connect to REPL");
+
+    let expected_file = fs::canonicalize(&file).expect("canonicalize source");
+    let source_file = |client: &mut ReplClient| {
+        let shown = client.eval("ReloadThing sourceFile").expect("sourceFile");
+        let path = PathBuf::from(shown.trim_matches('"'));
+        assert!(path.is_absolute(), "sourceFile must be absolute: {shown}");
+        assert_eq!(
+            fs::canonicalize(&path).expect("sourceFile must exist"),
+            expected_file,
+            "sourceFile must name the project's file"
+        );
+    };
+    assert_eq!(client.eval("ReloadThing new answer").unwrap(), "1");
+    source_file(&mut client);
+
+    // Edit + `reload`: the new code runs, the file mapping is unchanged.
+    fs::write(&file, source(2)).expect("edit source");
+    client.eval("ReloadThing reload").expect("reload");
+    assert_eq!(client.eval("ReloadThing new answer").unwrap(), "2");
+    source_file(&mut client);
+
+    // Edit + workspace sync (`load-project`): same.
+    fs::write(&file, source(3)).expect("edit source");
+    let sync = client
+        .send_op(&RequestBuilder::load_project(
+            &project_dir.to_string_lossy(),
+            false,
+        ))
+        .expect("sync failed");
+    assert!(!sync.is_error(), "sync errored: {sync:?}");
+    assert_eq!(client.eval("ReloadThing new answer").unwrap(), "3");
+    source_file(&mut client);
+}
+
 /// Run explicitly with: `cargo test --test repl_protocol -- --ignored` or `just test-repl-protocol`
 #[test]
 #[ignore = "slow test - run with `just test-repl-protocol`"]

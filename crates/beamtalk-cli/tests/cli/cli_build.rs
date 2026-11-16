@@ -935,3 +935,62 @@ fn build_is_reproducible_across_directories_and_embeds_no_absolute_path() {
         );
     }
 }
+
+/// BT-4940: a path dependency embeds a path relative to *its own* package
+/// root (`src/Producer.bt`), not relative to the consuming project and not
+/// absolute. Dependency beams are found by name under `_build`.
+#[test]
+fn dependency_beam_embeds_path_relative_to_its_own_package_root() {
+    let root = tempfile::tempdir().unwrap();
+    let dep_dir = root.path().join("dep_pkg");
+    std::fs::create_dir_all(dep_dir.join("src")).unwrap();
+    std::fs::write(
+        dep_dir.join("beamtalk.toml"),
+        "[package]\nname = \"dep_pkg\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dep_dir.join("src/DepThingBt4940.bt"),
+        "Value subclass: DepThingBt4940\n  answer => 1\n",
+    )
+    .unwrap();
+    let app_dir = root.path().join("app");
+    std::fs::create_dir_all(app_dir.join("src")).unwrap();
+    std::fs::write(
+        app_dir.join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\ndep_pkg = { path = \"../dep_pkg\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app_dir.join("src/AppThingBt4940.bt"),
+        "Value subclass: AppThingBt4940\n  answer => 2\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(&app_dir)
+        .arg("build")
+        .assert()
+        .success();
+
+    let beams = collect_beams(&app_dir);
+    let (dep_name, dep_bytes) = beams
+        .iter()
+        .find(|(name, _)| name.contains("dep_thing_bt4940"))
+        .expect("dependency beam under _build");
+    let contains =
+        |hay: &[u8], needle: &str| hay.windows(needle.len()).any(|w| w == needle.as_bytes());
+    assert!(
+        contains(dep_bytes, "src/DepThingBt4940.bt"),
+        "{dep_name} should embed its package-relative path"
+    );
+    assert!(
+        !contains(dep_bytes, "dep_pkg/src/DepThingBt4940.bt"),
+        "{dep_name} must not be relative to the consuming project or absolute"
+    );
+    let root_str = root.path().to_string_lossy().into_owned();
+    for (name, bytes) in &beams {
+        assert!(!contains(bytes, &root_str), "{name} embeds {root_str}");
+    }
+}
