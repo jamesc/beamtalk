@@ -34,7 +34,7 @@ with_env(Env, Fun) ->
     end.
 
 tmp_home() ->
-    {ok, _} = application:ensure_all_started(beamtalk_stdlib),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_stdlib),
     Dir = filename:join(
         binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
         "bt3680_" ++ beamtalk_test_unique:id()
