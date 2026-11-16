@@ -33,7 +33,7 @@
 
 -module(vs_bench).
 
--export([main/1, profile/1, invalidate/1, rows/0]).
+-export([main/1, profile/1, invalidate/1, rows/0, boot/0]).
 
 %% Row 13d's callee is `vs_ffi:ffi_ok/0` (beamtalk/native/vs_ffi.erl), not a
 %% harness function: only a package `native/` module has its spec read.
@@ -441,7 +441,7 @@ measure(Fun, N) ->
     ]],
     Session = trace:session_create(vs_bench, Tracer, []),
     Before = snapshot(Excluded),
-    _ = trace:process(Session, all, true, [garbage_collection]),
+    _ = trace:process(Session, all, true, trace_flags()),
     Worker ! go,
     Ns =
         receive
@@ -466,6 +466,15 @@ measure(Fun, N) ->
         maps:with([Worker], Before), maps:with([Worker], After), maps:with([Worker], Gcs)
     ),
     {Ns / N, Reds / N, Words / N, CallerReds / N, CallerWords / N}.
+
+%% VS_BENCH_NO_TRACE=1 switches the GC trace off for the timed call (BT-4935):
+%% the ns column is then free of the tracing cost, the reductions and heap
+%% words columns are not meaningful.
+trace_flags() ->
+    case os:getenv("VS_BENCH_NO_TRACE") of
+        "1" -> [];
+        _ -> [garbage_collection]
+    end.
 
 debug_others(Worker, Before, After) ->
     case os:getenv("VS_BENCH_DEBUG") of

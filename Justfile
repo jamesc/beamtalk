@@ -924,6 +924,12 @@ bench:
 bench-vs-elixir MODE="bench" ROUNDS="7" ROWS="":
     @benchmarks/vs-elixir/run.sh {{MODE}} {{ROUNDS}} {{ROWS}}
 
+# Benchee port of the concurrent actor rows 16a-16d (BT-4935), same node setup as
+# bench-vs-elixir. Knobs: BENCHEE_PARALLEL, BENCHEE_TIME, BENCHEE_ROWS, BENCHEE_SAVE,
+# BENCHEE_LOAD, BENCHEE_OVERHEAD=1; ERL_FLAGS="+S 1:1" picks the scheduler count.
+bench-vs-elixir-benchee:
+    @benchmarks/vs-elixir/benchee.sh
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Lint and Format
 # ═══════════════════════════════════════════════════════════════════════════
