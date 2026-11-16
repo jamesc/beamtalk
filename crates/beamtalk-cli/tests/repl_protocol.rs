@@ -46,7 +46,7 @@ use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
@@ -2471,6 +2471,154 @@ fn e2e_path_dependency_source_file_resolves_to_the_dependency() {
         fs::canonicalize(&dep_file).unwrap(),
         "dependency sourceFile must be the dependency's file, got {shown}"
     );
+}
+
+/// Build `app` (depending on `../dep_pkg` by path) under `root` and return
+/// `(app_dir, dep_file)`; the dependency's class is `class`.
+fn build_app_with_path_dependency(root: &Path, class: &str) -> (PathBuf, PathBuf) {
+    let dep_dir = root.join("dep_pkg");
+    let app_dir = root.join("app");
+    for dir in [&dep_dir, &app_dir] {
+        fs::create_dir_all(dir.join("src")).expect("mkdir src");
+    }
+    fs::write(
+        dep_dir.join("beamtalk.toml"),
+        "[package]\nname = \"dep_pkg\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let dep_file = dep_dir.join(format!("src/{class}.bt"));
+    fs::write(
+        &dep_file,
+        format!("Value subclass: {class}\n  answer => 1\n"),
+    )
+    .unwrap();
+    fs::write(
+        app_dir.join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\ndep_pkg = { path = \"../dep_pkg\" }\n",
+    )
+    .unwrap();
+    fs::write(
+        app_dir.join("src/AppThingBt4957.bt"),
+        "Value subclass: AppThingBt4957\n  answer => 2\n",
+    )
+    .unwrap();
+    let status = Command::new(env!("CARGO_BIN_EXE_beamtalk"))
+        .args(["build", "."])
+        .current_dir(&app_dir)
+        .status()
+        .expect("Failed to run beamtalk build");
+    assert!(status.success(), "beamtalk build failed");
+    (app_dir, dep_file)
+}
+
+/// BT-4957: the consumer and its path dependency move together (`mv ws ws2`,
+/// a CI cache restore of `_build/`) and the build is reused without a
+/// recompile. `sourceFile` must name the dependency's file in the new
+/// location, not the old (now missing) one.
+#[test]
+#[ignore = "slow test - run with `just test-repl-protocol`"]
+#[serial(e2e)]
+fn e2e_path_dependency_source_file_survives_a_moved_tree() {
+    let tmp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let before = tmp_dir.path().join("before");
+    fs::create_dir_all(&before).unwrap();
+    let (_, _) = build_app_with_path_dependency(&before, "DepThingBt4957");
+
+    let after = tmp_dir.path().join("after");
+    fs::rename(&before, &after).expect("move the tree");
+    let app_dir = after.join("app");
+    let dep_file = after.join("dep_pkg/src/DepThingBt4957.bt");
+
+    let dep_ebin = app_dir.join("_build/deps/dep_pkg/ebin");
+    let manager = ProcessManager::start_library_project(&app_dir, "app", &[dep_ebin]);
+    let mut client = ReplClient::connect(manager.port).expect("Could not connect to REPL");
+
+    let shown = client
+        .eval("DepThingBt4957 sourceFile")
+        .expect("sourceFile");
+    let resolved = fs::canonicalize(shown.trim_matches('"'))
+        .unwrap_or_else(|e| panic!("sourceFile must exist after the move ({shown}): {e}"));
+    assert_eq!(resolved, fs::canonicalize(&dep_file).unwrap());
+}
+
+/// BT-4958: the workspace is copied (`cp -r`), not moved, and built again
+/// without touching the dependency. `sourceFile` must name the copy's file,
+/// not the original tree's.
+#[test]
+#[ignore = "slow test - run with `just test-repl-protocol`"]
+#[serial(e2e)]
+fn e2e_path_dependency_source_file_follows_a_copied_workspace() {
+    let tmp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let before = tmp_dir.path().join("before");
+    fs::create_dir_all(&before).unwrap();
+    let (_, original_file) = build_app_with_path_dependency(&before, "DepThingBt4958");
+
+    let after = tmp_dir.path().join("after");
+    let status = Command::new("cp")
+        .arg("-r")
+        .arg(&before)
+        .arg(&after)
+        .status()
+        .expect("copy the tree");
+    assert!(status.success(), "cp -r failed");
+    let app_dir = after.join("app");
+    let status = Command::new(env!("CARGO_BIN_EXE_beamtalk"))
+        .args(["build", "."])
+        .current_dir(&app_dir)
+        .status()
+        .expect("Failed to run beamtalk build");
+    assert!(status.success(), "beamtalk build failed in the copy");
+
+    let dep_ebin = app_dir.join("_build/deps/dep_pkg/ebin");
+    let manager = ProcessManager::start_library_project(&app_dir, "app", &[dep_ebin]);
+    let mut client = ReplClient::connect(manager.port).expect("Could not connect to REPL");
+
+    let shown = client
+        .eval("DepThingBt4958 sourceFile")
+        .expect("sourceFile");
+    let resolved = fs::canonicalize(shown.trim_matches('"'))
+        .unwrap_or_else(|e| panic!("sourceFile must exist ({shown}): {e}"));
+    assert_eq!(
+        resolved,
+        fs::canonicalize(after.join("dep_pkg/src/DepThingBt4958.bt")).unwrap(),
+        "sourceFile must name the copy's file, not {}",
+        original_file.display()
+    );
+}
+
+/// BT-4957: a marker that is not valid UTF-8 (a dependency root with
+/// non-UTF-8 bytes) gives no source file: `reload` raises `no_source_file`
+/// rather than opening a relative path that could be the consumer's file.
+#[cfg(unix)]
+#[test]
+#[ignore = "slow test - run with `just test-repl-protocol`"]
+#[serial(e2e)]
+fn e2e_path_dependency_with_unreadable_marker_cannot_reload() {
+    let tmp_dir = tempfile::tempdir().expect("Failed to create temp directory");
+    let (app_dir, _) = build_app_with_path_dependency(tmp_dir.path(), "DepThingBt4957b");
+    // The consumer has a file at the dependency's embedded relative path.
+    fs::write(
+        app_dir.join("src/DepThingBt4957b.bt"),
+        "Value subclass: DepThingBt4957b\n  answer => 99\n",
+    )
+    .unwrap();
+    let dep_ebin = app_dir.join("_build/deps/dep_pkg/ebin");
+    fs::write(dep_ebin.join(".beamtalk-source-root"), [0xff, 0xfe, 0xfd]).unwrap();
+
+    let manager = ProcessManager::start_library_project(&app_dir, "app", &[dep_ebin]);
+    let mut client = ReplClient::connect(manager.port).expect("Could not connect to REPL");
+
+    assert_eq!(
+        client.eval("DepThingBt4957b sourceFile").unwrap(),
+        "nil",
+        "an unreadable marker gives no source file"
+    );
+    let err = client
+        .eval("DepThingBt4957b reload")
+        .expect_err("reload must fail, not reload the consumer's file");
+    assert!(err.contains("no source file"), "unexpected error: {err}");
+    assert_eq!(client.eval("DepThingBt4957b new answer").unwrap(), "1");
 }
 
 /// Run explicitly with: `cargo test --test repl_protocol -- --ignored` or `just test-repl-protocol`

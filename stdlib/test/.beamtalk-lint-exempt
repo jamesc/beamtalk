@@ -1,0 +1,7 @@
+# Directories `beamtalk lint stdlib/test` does not report on (BT-4955).
+# Files here still feed the cross-file context; only their diagnostics are dropped.
+#
+# fixtures/ holds codegen-shape inputs: unthreaded-block assignments, bare vs `^`
+# returns, discarded expressions and redundant parentheses are the shapes the
+# tests compile and compare, so the lint findings are the point of the files.
+fixtures/

@@ -944,7 +944,7 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names test-lint-stamp test-refresh-edge test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-beamtalk-stdlib lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules lint-compiler-made-names test-lint-stamp test-refresh-edge test-check-stdlib-class-beams test-core-diff-normalise test-vs-elixir-nightly
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -1133,6 +1133,16 @@ lint-beamtalk: fmt-check-beamtalk
 
 [windows]
 lint-beamtalk: fmt-check-beamtalk
+
+# `beamtalk lint` on the stdlib sources and tests (BT-4955). Both must stay clean:
+# stdlib/test is read as example Beamtalk code. Its deliberately non-idiomatic
+# codegen inputs are exempted by stdlib/test/.beamtalk-lint-exempt; anything else
+# gets a commented per-site `@expect lint "reason"`.
+lint-beamtalk-stdlib:
+    @echo "📋 Linting stdlib/src and stdlib/test..."
+    @cargo run --bin beamtalk --quiet -- lint stdlib/src
+    @cargo run --bin beamtalk --quiet -- lint stdlib/test
+    @echo "✅ Beamtalk stdlib lint passed"
 
 # Lint Rust: clippy + formatting check (stamped for the pre-push hook, see lint-elixir)
 [unix]

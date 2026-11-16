@@ -403,15 +403,24 @@ jobs:
   # the seed is printed in the log, rerun with
   # `just test-isolation random --seed S`). See scripts/ci/eunit-isolation.escript.
   #
-  # TEMPORARILY ALLOWED TO FAIL (BT-4934): main has known order dependencies
-  # listed on the issue, fixed in follow-up PRs. The last of those PRs removes
-  # `continue-on-error` so a failure is red like any other nightly failure and
-  # is triaged by ci-triage.yml.
+  # A failure here is a real order dependency in a test module, not a flaky run.
+  # `alone` and `reverse` are deterministic and clean on main: a failure fails
+  # the Nightly run like any other job and is triaged by ci-triage.yml.
+  # `random` (a new seed every night) still finds order dependencies in about a
+  # third of seeds, so it is reported but does not fail the run yet
+  # (`continue-on-error`); the open ones are tracked in BT-4934's follow-up and
+  # the job log prints the seed. Remove the `random` exemption when a batch of
+  # fresh seeds is clean. Reproduce with `just test-isolation random --seed S`,
+  # minimise with `escript scripts/ci/eunit-isolation.escript random --seed S
+  # --print-order` + `forward --order <modules>`, and find which earlier module
+  # pollutes a failing one with `just test-isolation culprit <module>`. It does
+  # not gate `publish-nightly` (the distribution builds are independent).
   eunit-isolation:
     needs: check-activity
     if: needs.check-activity.outputs.has_commits == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    continue-on-error: ${{ matrix.mode == 'random' }}
     strategy:
       fail-fast: false
       matrix:
@@ -453,8 +462,6 @@ jobs:
             nightly-${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
 
       - name: EUnit isolation (${{ matrix.mode }})
-        # TODO(BT-4934): remove continue-on-error in the last fix PR.
-        continue-on-error: true
         env:
           MODE: ${{ matrix.mode }}
         run: just test-isolation "$MODE"

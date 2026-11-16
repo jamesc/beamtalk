@@ -1365,6 +1365,12 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    // BT-4930: cross-file `self delegate` on a native class never reaches the backing module
+    validators::check_cross_file_native_delegate(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     // Reserved-word backing-function check for native Objects (ADR 0101)
     validators::check_native_delegate_reserved_word(
         module,

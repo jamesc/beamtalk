@@ -136,12 +136,12 @@ pub(crate) fn check_native_delegate_return_type(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Instance methods, inline and standalone (Tonel-style
-    // `MyActor >> selector => self delegate`). Only native classes (a backing
-    // module) are checked: on non-native classes `self delegate` is a regular
-    // message send to Actor.delegate (which raises at runtime), so no special
-    // warning is needed.
-    for (class_name, side, method) in module.methods_with_owner() {
+    // Instance methods, inline or folded same-file extensions (a cross-file
+    // standalone method is rejected by `check_cross_file_native_delegate`
+    // instead, BT-4930). Only native classes (a backing module) are checked:
+    // on non-native classes `self delegate` is a regular message send to
+    // Actor.delegate (which raises at runtime), so no special warning is needed.
+    for (class_name, side, method) in module.inline_methods_with_owner() {
         if side == MethodSide::Instance
             && hierarchy.is_native(class_name)
             && method.is_self_delegate()
@@ -173,11 +173,48 @@ pub(crate) fn check_native_delegate_reserved_word(
         hierarchy.is_native(class_name) && !hierarchy.is_actor_subclass(class_name)
     };
 
-    // Inline and standalone (Tonel-style `MyClass >> sel => self delegate`)
-    // methods, instance- and class-side.
-    for (class_name, _side, method) in module.methods_with_owner() {
+    // Inline methods and same-file extensions (folded into the class body),
+    // instance- and class-side. A cross-file `Foo >> sel => self delegate` is
+    // not a native delegate (BT-4930) and gets its own error instead.
+    for (class_name, _side, method) in module.inline_methods_with_owner() {
         if is_native_object(class_name) && method.is_self_delegate() {
             check_selector_reserved_word(&method.selector, method.span, diagnostics);
+        }
+    }
+}
+
+/// BT-4930: error on a cross-file `Foo >> sel => self delegate` where `Foo` is
+/// a `native:` class.
+///
+/// Codegen lowers `self delegate` through the backing module only for methods
+/// folded into the class body (inline methods and same-file extensions). A
+/// cross-file extension compiles to a foreign extension fun where `self
+/// delegate` is a plain send that resolves to the `Object>>delegate` sentinel
+/// and raises at run time, so the definition can never work. The native
+/// delegate checks (return type, reserved word) do not run for this form.
+pub(crate) fn check_cross_file_native_delegate(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for def in &module.method_definitions {
+        let class_name = def.class_name.name.as_str();
+        if hierarchy.is_native(class_name) && def.method.is_self_delegate() {
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "`self delegate` method `{}` on native class `{class_name}` is defined \
+                         outside the class's own file and will not reach the backing module",
+                        def.method.selector.name()
+                    ),
+                    def.method.head_span(),
+                )
+                .with_hint(format!(
+                    "`self delegate` only reaches the backing module when the method is in the \
+                     same file as `{class_name}`. Define the method in the file that declares \
+                     `{class_name}`."
+                )),
+            );
         }
     }
 }
@@ -387,36 +424,35 @@ mod tests {
         );
     }
 
-    /// Standalone (Tonel-style) self delegate without return type on native class → warning.
+    /// BT-4930: a standalone `self delegate` on a native class gets the new
+    /// error, not the return-type warning. The validators are called on the
+    /// unfolded parse on purpose: in a real compile a same-file extension is
+    /// folded into the class first, so only a cross-file one reaches them (and
+    /// a same-file instance-side extension on a native actor is rejected by
+    /// the fold instead).
     #[test]
-    fn native_standalone_delegate_missing_return_type_warning() {
+    fn native_standalone_delegate_gets_cross_file_error_not_return_type_warning() {
         let src = "Actor subclass: MyActor native: my_mod\n  get -> Integer => self delegate\nMyActor >> getValue => self delegate";
         let module = parse_ok(src);
         let (hierarchy, _) = ClassHierarchy::build(&module);
         let hierarchy = hierarchy.unwrap();
         let mut diagnostics = Vec::new();
         check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
-        assert_eq!(
-            diagnostics.len(),
-            1,
-            "Expected 1 warning for standalone method missing return type, got: {diagnostics:?}"
-        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        check_cross_file_native_delegate(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].severity, Severity::Error);
         assert!(diagnostics[0].message.contains("getValue"));
     }
 
-    /// Standalone self delegate with return type on native class → no warning.
+    /// A standalone non-delegate method on a native class gets no cross-file error.
     #[test]
-    fn native_standalone_delegate_with_return_type_ok() {
-        let src = "Actor subclass: MyActor native: my_mod\n  get -> Integer => self delegate\nMyActor >> getValue -> Integer => self delegate";
-        let module = parse_ok(src);
-        let (hierarchy, _) = ClassHierarchy::build(&module);
-        let hierarchy = hierarchy.unwrap();
+    fn native_standalone_non_delegate_has_no_cross_file_error() {
+        let src = "Object subclass: MyObj native: my_mod\n  get -> Integer => self delegate\nMyObj >> other -> Integer => 1";
+        let (module, hierarchy) = parse_and_build(src);
         let mut diagnostics = Vec::new();
-        check_native_delegate_return_type(&module, &hierarchy, &mut diagnostics);
-        assert!(
-            diagnostics.is_empty(),
-            "Expected no warning when standalone method has return type, got: {diagnostics:?}"
-        );
+        check_cross_file_native_delegate(&module, &hierarchy, &mut diagnostics);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     // ── native: Object validation (ADR 0101) ──────────────────────────────────

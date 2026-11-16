@@ -19,6 +19,7 @@ module on demand. Replaces the per-file `start_class/N`, `stop_class/1`,
     with_class/2,
     ensure_fixture_loaded/2,
     ensure_counter_loaded/0,
+    reload_fixture/2,
     stop_graceful/1,
     snapshot_instances/1,
     stop_instances_since/1
@@ -128,6 +129,22 @@ register_fixture(ClassName, Module) ->
             %% Registered by the module's own on_load, if at all.
             beamtalk_test_wait:class(ClassName)
     end.
+
+-doc """
+Register `ClassName` from `Module` freshly: stop a registered class of that name
+(deliberately, so the class monitor does not revive it) and register the fixture
+again. `ensure_fixture_loaded/2` treats any class backed by `Module` as the
+fixture, which holds for a class revived by the class monitor from compiled
+metadata but not for its published reflection data (instance variables ...); a
+test that asserts on that data starts from a fresh registration (BT-4934).
+""".
+-spec reload_fixture(atom(), atom()) -> ok.
+reload_fixture(ClassName, Module) ->
+    ok = stop_graceful(ClassName),
+    ok = beamtalk_test_wait:until(fun() ->
+        beamtalk_class_registry:whereis_class(ClassName) =:= undefined
+    end),
+    ensure_fixture_loaded(ClassName, Module).
 
 -doc "Ensure the compiled `Counter` fixture (`bt@counter`) is loaded and registered.".
 -spec ensure_counter_loaded() -> ok.

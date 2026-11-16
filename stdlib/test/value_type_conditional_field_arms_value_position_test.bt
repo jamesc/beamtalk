@@ -18,10 +18,13 @@ TestCase subclass: ValueTypeConditionalFieldArmsValuePositionTest
 
   bareLast => (self.n := 5) > 3 ifTrue: [self.m := 1] ifFalse: [0]
 
-  returned => ^(self.n := 5) > 3 ifTrue: [self.m := 1] ifFalse: [0]
+  returned =>
+    @expect lint "explicit trailing ^ is the return arm under test, compared with bareLast"
+    ^(self.n := 5) > 3 ifTrue: [self.m := 1] ifFalse: [0]
 
   returnedAfterEarlyExit =>
     #(1) do: [:e | e]
+    @expect lint "explicit trailing ^ is the return arm under test, compared with bareLast"
     ^(self.n := 5) > 3 ifTrue: [self.m := 7] ifFalse: [0]
 
   parenthesisedNonLast =>

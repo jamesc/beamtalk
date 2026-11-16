@@ -1029,19 +1029,30 @@ test_check_init_args_non_map_passthrough() ->
 
 test_check_init_args_registry_primary_inherited() ->
     %% Primary path (registered class): inherited names resolve from the
-    %% metadata walk, NOT from BaseState — `value` is deliberately absent
+    %% metadata walk, NOT from BaseState -- `value` is deliberately absent
     %% from BaseState here to prove the walk supplies it. (The other
     %% check_init_args tests use the unregistered 'Conf' and thus exercise
-    %% the state-keys fallback.)
-    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
-    BaseState = #{logCount => 0},
-    InitArgs = #{value => 1, logCount => 2},
-    ?assertEqual(
-        InitArgs,
-        beamtalk_class_instantiation:check_init_args(
-            'LoggingCounter', 'spawnWith:', BaseState, InitArgs, []
+    %% the state-keys fallback.) A private parent/child pair with published
+    %% instance variables: the shared compiled `Counter` / `LoggingCounter`
+    %% fixtures carry whatever reflection data an earlier suite left them with
+    %% (a class revived by the class monitor has none), which made this test
+    %% order-dependent (BT-4934).
+    Parent = 'Bt4934InheritParent',
+    Child = 'Bt4934InheritChild',
+    register_ivar_class(Parent, 'Object', [value]),
+    register_ivar_class(Child, Parent, [logCount]),
+    try
+        BaseState = #{logCount => 0},
+        InitArgs = #{value => 1, logCount => 2},
+        ?assertEqual(
+            InitArgs,
+            beamtalk_class_instantiation:check_init_args(
+                Child, 'spawnWith:', BaseState, InitArgs, []
+            )
         )
-    ).
+    after
+        delete_classes([Child, Parent])
+    end.
 
 test_check_init_args_registry_primary_late() ->
     %% Primary path: a `late` field is declared but never present in a

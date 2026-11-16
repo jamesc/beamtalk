@@ -87,17 +87,21 @@ class_removed_purges_xref_test_() ->
         [
             ?_test(begin
                 ClassName = 'BT3105LifecycleXref',
+                %% A selector no other suite uses: `implementors_of/1` is a node-wide
+                %% index, so a common one (`foo`) also lists classes other suites
+                %% left behind (BT-4934).
+                Selector = 'bt3105LifecycleXrefProbe',
                 Entry = beamtalk_xref:build_method_entry(
-                    false, 'foo', <<"foo => 1">>, indexed, class_body
+                    false, Selector, <<"bt3105LifecycleXrefProbe => 1">>, indexed, class_body
                 ),
                 ok = beamtalk_xref:register_class(ClassName, [Entry]),
                 ?assertEqual(
-                    [{ClassName, false}], beamtalk_xref:implementors_of('foo')
+                    [{ClassName, false}], beamtalk_xref:implementors_of(Selector)
                 ),
 
                 ok = beamtalk_class_lifecycle:class_removed(ClassName, bt3105_lifecycle_mod),
 
-                ?assertEqual([], beamtalk_xref:implementors_of('foo'))
+                ?assertEqual([], beamtalk_xref:implementors_of(Selector))
             end)
         ]
     end}.

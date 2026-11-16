@@ -370,11 +370,12 @@ enum UninstantiableNew {
 /// Only fires for classes known in the hierarchy (unknown classes get DNU instead).
 ///
 /// The `native:` arm needs `ClassInfo::is_native`, which is set when the class
-/// is built from an AST (this compilation unit) or from the generated stdlib
-/// table, but *not* from `__beamtalk_meta` — the compiled metadata carries no
-/// native flag. A `native:` class reached across a package boundary therefore
-/// degrades to `None` here and is caught by the raising `new/0` codegen emits
-/// instead, which is the same guard the REPL and `perform:` rely on.
+/// is built from an AST (this compilation unit), from the generated stdlib
+/// table, or from `__beamtalk_meta`'s `native` key (BT-4930; a `.beam` built
+/// before that key existed decodes as non-native). A `native:` class reached
+/// across a package boundary from such an old `.beam` degrades to `None` here
+/// and is caught by the raising `new/0` codegen emits instead, which is the
+/// same guard the REPL and `perform:` rely on.
 fn uninstantiable_new(
     class_name: &str,
     selector: &str,

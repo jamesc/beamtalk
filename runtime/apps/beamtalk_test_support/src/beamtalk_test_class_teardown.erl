@@ -26,7 +26,13 @@ live in this app).
 
 -export([stop_pg_class_processes/0, stop_class_process/1]).
 
--doc "Stop every live class process in the `beamtalk_classes` pg group.".
+-doc """
+Stop every live class process: the members of the `beamtalk_classes` pg group,
+and every registered class gen_server not in it. An earlier suite that restarted
+`pg` leaves live class processes (still registered under their
+`beamtalk_class_<Name>` name) that the group no longer lists; left running, they
+shadow the classes a later bootstrap registers (BT-4934).
+""".
 -spec stop_pg_class_processes() -> ok.
 stop_pg_class_processes() ->
     Members =
@@ -35,7 +41,21 @@ stop_pg_class_processes() ->
         catch
             _:_ -> []
         end,
-    lists:foreach(fun stop_class_process/1, Members).
+    Named = [Pid || Name <- registered(), Pid <- [whereis(Name)], is_class_process(Pid)],
+    Pids = lists:usort(Members ++ Named),
+    lists:foreach(fun stop_class_process/1, Pids).
+
+%% A class gen_server (`beamtalk_object_class`), as opposed to the other
+%% processes registered under a `beamtalk_class_*` name (sup, monitor, caches).
+is_class_process(Pid) when is_pid(Pid) ->
+    try proc_lib:translate_initial_call(Pid) of
+        {beamtalk_object_class, _, _} -> true;
+        _ -> false
+    catch
+        _:_ -> false
+    end;
+is_class_process(_) ->
+    false.
 
 -doc """
 Unwatch (when watched) then kill one class process and wait for it to exit.
@@ -45,7 +65,7 @@ Non-pids and dead pids are ignored.
 stop_class_process(Pid) when is_pid(Pid) ->
     case is_process_alive(Pid) of
         true ->
-            case beamtalk_class_registry:class_name_for_pid(Pid) of
+            case class_name_of(Pid) of
                 {ok, Name} -> ok = beamtalk_class_monitor:unwatch(Name);
                 not_found -> ok
             end,
@@ -61,3 +81,24 @@ stop_class_process(Pid) when is_pid(Pid) ->
     end;
 stop_class_process(_) ->
     ok.
+
+%% The class name of a live class process. The pid->name index can be gone (it
+%% is a shared table that dies with the ETS heir when an earlier suite stops the
+%% runtime), and skipping the unwatch then lets the class monitor revive the
+%% killed class from its stdlib metadata; the `beamtalk_class_<Name>` registered
+%% name of the process carries the same answer (BT-4934).
+class_name_of(Pid) ->
+    case beamtalk_class_registry:class_name_for_pid(Pid) of
+        {ok, _} = Found ->
+            Found;
+        not_found ->
+            case process_info(Pid, registered_name) of
+                {registered_name, Reg} ->
+                    case atom_to_list(Reg) of
+                        "beamtalk_class_" ++ Name when Name =/= "" -> {ok, list_to_atom(Name)};
+                        _ -> not_found
+                    end;
+                _ ->
+                    not_found
+            end
+    end.
