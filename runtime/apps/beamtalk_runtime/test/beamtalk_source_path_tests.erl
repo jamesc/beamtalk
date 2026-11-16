@@ -123,3 +123,15 @@ cwd_relative_path_resolves_without_a_package_test() ->
         application:unset_env(beamtalk_runtime, workspace_project_root),
         file:del_dir_r(Base)
     end.
+
+%% In a workspace, an in-memory module's file deleted since load is still
+%% reported under the workspace project, not as a bare relative path.
+missing_file_in_workspace_resolves_under_the_project_test() ->
+    application:set_env(beamtalk_runtime, workspace_project_root, <<"/ws/proj">>),
+    try
+        ?assertEqual(
+            "/ws/proj/src/gone.bt", beamtalk_source_path:resolve(undefined, "src/gone.bt")
+        )
+    after
+        application:unset_env(beamtalk_runtime, workspace_project_root)
+    end.

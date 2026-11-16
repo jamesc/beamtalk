@@ -34,8 +34,9 @@ before any of these (a REPL `:load tests/x.bt`, as before BT-4940).
 
 An already-absolute path is returned as is (modules built before BT-4940).
 With a module root, the result is that root joined with the path (it may not
-exist). Without one, a path that exists under no candidate is returned
-unchanged, still relative; callers that open the file treat that as "not found".
+exist). Without one, a path that exists under no candidate is joined to the
+workspace project root when there is one, else returned unchanged, still
+relative; callers that open the file treat that as "not found".
 """.
 
 -export([find_package_root/1, resolve/2, is_absolute/1]).
@@ -85,8 +86,17 @@ resolve_without_root(Path) ->
         false ->
             Roots = dedupe([R || R <- [workspace_root(), cwd_root()], R =/= undefined]),
             case [J || R <- Roots, J <- [filename:join(R, Path)], filelib:is_file(J)] of
-                [Found | _] -> Found;
-                [] -> Path
+                [Found | _] ->
+                    Found;
+                [] ->
+                    %% Nothing on disk. In a workspace the embedded path of an
+                    %% in-memory module is relative to its project, so a file
+                    %% deleted since load is still reported under that project
+                    %% (not mistaken for a dependency's). No workspace: as is.
+                    case workspace_root() of
+                        undefined -> Path;
+                        Ws -> filename:join(Ws, Path)
+                    end
             end
     end.
 
