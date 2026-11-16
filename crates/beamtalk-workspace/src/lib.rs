@@ -192,6 +192,12 @@ pub fn hash_workspace_path_string(path_str: &str) -> String {
 /// - The path cannot be canonicalized (e.g. does not exist).
 /// - The canonicalized path contains non-UTF-8 bytes.
 pub fn generate_workspace_id(project_path: &Path) -> Result<String> {
+    // Deliberately the raw `std` canonicalize, NOT `beamtalk_core::paths::canonicalize`
+    // (BT-4914): the result is hashed into the workspace ID, so on Windows the
+    // `\\?\`-prefixed form is part of every existing ID. Simplifying it here would
+    // orphan all existing workspaces. This crate also sits below `beamtalk-core`.
+    // Path *comparisons* elsewhere re-canonicalize both sides through the shared
+    // helper, so they never depend on this form.
     let absolute = project_path.canonicalize().into_diagnostic()?;
     let path_str = absolute
         .to_str()
