@@ -1145,9 +1145,39 @@ register_native_started({local, Name} = Registration, Pid) ->
         error:badarg -> refuse_unregistered_native(Registration, Pid)
     end;
 register_native_started({global, Name} = Registration, Pid) ->
+    ok = record_native_start_time(Pid),
     case global:register_name(Name, Pid, fun ?MODULE:resolve_global_conflict/3) of
         yes -> {ok, Pid};
         no -> refuse_unregistered_native(Registration, Pid)
+    end.
+
+%% BT-4956: give a `native:` actor the `'$beamtalk_actor_started_at'` key that a
+%% compiled actor's generated `init/1` writes (BT-4937), so
+%% `resolve_global_conflict/3` can keep the older of two registrants. The backing
+%% module's process has no generated `init/1`, and a process-dictionary key can
+%% only be written from inside the process, so the write runs there through
+%% `sys:replace_state/3` (the backing module is a `gen_server`, ADR 0056) with
+%% the state returned unchanged. It happens here, before `global:register_name/3`,
+%% so the key exists before the name can conflict; and only for `global`, the
+%% one scope the resolver reads, so anonymous and local starts pay nothing. A key
+%% the backing module already wrote is left alone. A backing process that does
+%% not answer the system message simply stays untimed (the pre-BT-4956
+%% behaviour: the other side wins, or `random_exit_name/3` if neither has one).
+-spec record_native_start_time(pid()) -> ok.
+record_native_start_time(Pid) ->
+    StartedAt = erlang:system_time(microsecond),
+    Stamp = fun(State) ->
+        case erlang:get('$beamtalk_actor_started_at') of
+            undefined -> erlang:put('$beamtalk_actor_started_at', StartedAt);
+            _Existing -> ok
+        end,
+        State
+    end,
+    try
+        _ = sys:replace_state(Pid, Stamp, 1000),
+        ok
+    catch
+        _:_ -> ok
     end.
 
 %% A registration failed: stop the new process, and name the holder when the
