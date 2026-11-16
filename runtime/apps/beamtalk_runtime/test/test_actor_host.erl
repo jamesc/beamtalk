@@ -10,7 +10,7 @@ Test-only gen_server host for the hand-written `test_*_actor` fixtures (BT-4871)
 
 Until BT-4871 these fixtures delegated their gen_server callbacks to an
 interpretive path inside `beamtalk_actor` that no production actor used. That
-path is now unreferenced and is deleted by the BT-4871 follow-up PR; this
+path was deleted in BT-4871; this
 module is the small stand-in the fixtures call instead. It
 speaks the same wire protocol a compiled actor's generated callbacks speak
 (`{Selector, Args}` calls, `{cast, Selector, Args}` and `{Selector, Args,
@@ -20,7 +20,8 @@ reuses the helpers `beamtalk_actor` keeps for generated code (`decode_wire_call/
 `take_init_ack/2`, `mailbox_continuation_check/2`, ...).
 
 A fixture's method table lives in its state under `'__methods__'`: selector to
-`fun(Args, State)` (or `fun(Selector, Args, Self, State)`) returning `{reply, V, S}` or `{noreply, S}`. Anything not in
+`fun(Args, State)` (or `fun(Selector, Args, Self, State)`) returning `{reply, V, S}`, `{noreply, S}` or
+`{error, Reason, S}`. Anything not in
 the table goes through the class hierarchy (`beamtalk_dispatch:lookup/5`), so
 Object's methods are reachable exactly as they are for a compiled actor.
 
@@ -296,13 +297,11 @@ call_method(Run, Selector, State) ->
         throw:Nlr when ?IS_NLR(Nlr) ->
             {error, Nlr, State};
         Class:Reason:Stacktrace ->
-            ClassName = beamtalk_tagged_map:class_of(State, unknown),
-            Message = beamtalk_actor:format_method_error_message(
-                ClassName, Selector, Class, Reason, Stacktrace
+            #{error := Error} = beamtalk_exception_handler:ensure_wrapped(
+                Class, Reason, Stacktrace
             ),
-            Error0 = beamtalk_error:new(runtime_error, ClassName, Selector),
-            Error1 = beamtalk_error:with_message(Error0, Message),
-            {error, beamtalk_error:with_details(Error1, #{original_reason => Reason}), State}
+            ClassName = beamtalk_tagged_map:class_of(State, unknown),
+            {error, Error#beamtalk_error{class = ClassName, selector = Selector}, State}
     end.
 
 via_hierarchy(Selector, Args, State) ->

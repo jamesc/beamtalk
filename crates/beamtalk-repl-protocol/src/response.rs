@@ -397,8 +397,14 @@ pub struct ActorInfo {
     pub class: String,
     /// Source module the actor was compiled from.
     pub module: String,
-    /// Unix timestamp (seconds) when the actor was spawned.
-    pub spawned_at: i64,
+    /// Unix timestamp (seconds) when the actor was spawned; `None` for an actor
+    /// that never recorded a start time (a `native:` actor, e.g. `TranscriptStream`).
+    #[serde(default)]
+    pub spawned_at: Option<i64>,
+    /// `true` for an actor the runtime started itself (e.g. `TranscriptStream`).
+    /// The wire omits the key for a user actor.
+    #[serde(default)]
+    pub system: bool,
 }
 
 /// Class information from the list-classes op.
@@ -798,6 +804,17 @@ mod tests {
         assert_eq!(actors.len(), 1);
         assert_eq!(actors[0].class, "Counter");
         assert_eq!(actors[0].pid, "<0.123.0>");
+        assert_eq!(actors[0].spawned_at, Some(1_234_567_890));
+        assert!(!actors[0].system);
+    }
+
+    #[test]
+    fn deserialize_system_actor_with_null_start_time() {
+        let json = r#"{"id":"msg-003","actors":[{"pid":"<0.5.0>","class":"TranscriptStream","module":"beamtalk_transcript_stream","spawned_at":null,"system":true}],"status":["done"]}"#;
+        let resp: ReplResponse = serde_json::from_str(json).unwrap();
+        let actors = resp.actors.unwrap();
+        assert_eq!(actors[0].spawned_at, None);
+        assert!(actors[0].system);
     }
 
     #[test]

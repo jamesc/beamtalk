@@ -216,7 +216,7 @@ sync_send_emits_stop_event_test_() ->
             end
         end),
         %%====================================================================
-        %% Test: Unknown PID defaults to 'unknown' class
+        %% Test: an unregistered pid reports its marker's class (BT-4949)
         %%====================================================================
         ?_test(begin
             StopHandler = attach_handler([beamtalk, actor, dispatch, stop]),
@@ -228,7 +228,7 @@ sync_send_emits_stop_event_test_() ->
                     receive
                         {telemetry_event, [beamtalk, actor, dispatch, stop], _Measurements,
                             Metadata} ->
-                            ?assertEqual(unknown, maps:get(class, Metadata))
+                            ?assertEqual('Counter', maps:get(class, Metadata))
                     after 1000 ->
                         ?assert(false)
                     end

@@ -10,7 +10,7 @@ The compiler embeds a path relative to the package root (the directory
 holding `beamtalk.toml`), with `/` separators, so the same project built in
 two directories gives byte-identical `.beam` files. That string is exactly
 what a stack frame should show. Code that needs the file on disk (reload,
-flush, test discovery, the language service) calls `resolve/2` to turn it
+flush, test discovery, the language service) calls `resolve_strict/2` to turn it
 back into an absolute path at run time.
 
 The module's own root is decided first, and when it is known it is the only
@@ -43,7 +43,10 @@ workspace project root when there is one, else returned unchanged, still
 relative; callers that open the file treat that as "not found".
 """.
 
--export([find_package_root/1, resolve/2, resolve_strict/2, is_absolute/1]).
+-export([find_package_root/1, resolve_strict/2, is_absolute/1]).
+-ifdef(TEST).
+-export([normalize/1, real_dir/1]).
+-endif.
 
 -doc """
 Walk up from `Path` (a file or directory) to the first directory holding a
@@ -59,22 +62,11 @@ is_absolute(Path) ->
     filename:pathtype(Path) =/= relative.
 
 -doc """
-Resolve the embedded `Path` of `Module` to an absolute path. See the module
-doc for the search order.
-""".
--spec resolve(module() | undefined, file:filename_all()) -> file:filename_all().
-resolve(Module, Path) ->
-    case resolve_strict(Module, Path) of
-        {ok, Resolved} -> Resolved;
-        %% For display only; every caller that opens the file uses `resolve_strict/2`.
-        unresolvable -> Path
-    end.
-
--doc """
-Like `resolve/2`, but `unresolvable` when the module's root is recorded and
-cannot be read as text (a non-UTF-8 dependency path, BT-4957). The path must
-then not be handed to code that opens it: relative to the node's cwd it could
-name another project's file.
+Resolve the embedded `Path` of `Module` to an absolute path (see the module
+doc for the search order), or `unresolvable` when the module's root is recorded
+and cannot be read as text (a non-UTF-8 dependency path, BT-4957). There is no
+lenient variant (BT-4966): a relative fallback opened relative to the node's cwd
+could name another project's file.
 """.
 -spec resolve_strict(module() | undefined, file:filename_all()) ->
     {ok, file:filename_all()} | unresolvable.
@@ -194,18 +186,46 @@ marker_candidate_or(EbinDir, Rel, Abs) ->
 marker_candidate(EbinDir, Root) ->
     case is_absolute(Root) of
         true -> Root;
-        false -> normalize(filename:absname(Root, EbinDir))
+        %% The writer relates canonical paths, so apply the line to the real
+        %% ebin dir: through a symlinked `_build/` a lexical join lands elsewhere.
+        false -> normalize(filename:absname(Root, real_dir(EbinDir)))
     end.
 
-%% Collapse `.` and `..` segments lexically (the ebin dir is already absolute).
+%% Collapse `.` and `..` segments lexically. The root (first element of the
+%% split: `/` or a drive such as `C:/`) is never popped, on any platform.
 normalize(Path) ->
-    Parts = filename:split(Path),
-    filename:join(lists:reverse(lists:foldl(fun norm_seg/2, [], Parts))).
+    [Root | Segs] = filename:split(Path),
+    filename:join([Root | lists:reverse(lists:foldl(fun norm_seg/2, [], Segs))]).
 
 norm_seg(".", Acc) -> Acc;
-norm_seg("..", [Prev | Rest]) when Prev =/= "/" -> Rest;
-norm_seg("..", Acc) -> Acc;
+norm_seg("..", [_ | Rest]) -> Rest;
+norm_seg("..", []) -> [];
 norm_seg(Seg, Acc) -> [Seg | Acc].
+
+%% `Path` with every symlink resolved (`realpath`), like the canonical path the
+%% marker's writer used. A path that does not exist is kept as written (links
+%% below a missing segment cannot be read, so none is followed);
+%% a symlink loop stops being followed after 40 hops.
+-spec real_dir(file:filename_all()) -> file:filename_all().
+real_dir(Path) ->
+    [Root | Segs] = filename:split(filename:absname(Path)),
+    real_walk(Segs, Root, 0).
+
+real_walk([], Acc, _Hops) ->
+    Acc;
+real_walk(["." | Rest], Acc, Hops) ->
+    real_walk(Rest, Acc, Hops);
+real_walk([".." | Rest], Acc, Hops) ->
+    real_walk(Rest, filename:dirname(Acc), Hops);
+real_walk([Seg | Rest], Acc, Hops) ->
+    Next = filename:join(Acc, Seg),
+    case file:read_link_all(Next) of
+        {ok, Target} when Hops < 40 ->
+            [R | S] = filename:split(filename:absname(Target, Acc)),
+            real_walk(S ++ Rest, R, Hops + 1);
+        _ ->
+            real_walk(Rest, Next, Hops)
+    end.
 
 -spec workspace_root() -> file:filename_all() | undefined.
 workspace_root() ->

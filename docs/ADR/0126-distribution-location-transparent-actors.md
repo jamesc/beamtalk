@@ -359,10 +359,26 @@ parent's `init/1`, called as a state-building helper, never overwrites it). It
 is written for every compiled actor, whatever its scope, because scope is a
 spawn-time choice made after `init/1` has run. Every start path goes through
 that `init/1`: plain `spawn`, `spawnMonitored`, `spawnMonitoredAsync`,
-supervised children and named children (local and global). It does not cover
-`native:` actors (ADR 0056): their process is the backing module's own, with no
-generated `init/1`, and a key can only be written from inside the process. They
-can be registered `#global`, so they have no start time; this is a known gap.
+supervised children and named children (local and global).
+
+`native:` actors (ADR 0056) have no generated `init/1`: their process is the
+backing module's own, and a key can only be written from inside the process.
+They can be registered `#global`, so the runtime writes the key for them
+(BT-4956), on the path it owns: `beamtalk_actor:register_native_started/2`, the
+one place a started native actor is registered under a global name (plain
+`spawnAsGlobal`, named supervised children and `spawn_named_*` all reach it
+through `safe_start_native`). Just before `global:register_name/3` it runs a
+`sys:replace_state/3` whose fun, executing inside the backing `gen_server`,
+puts `'$beamtalk_actor_started_at'` (and leaves the state unchanged). So the key
+exists before the name can conflict, and no backing-module author writes any
+code. The write is skipped if the backing module already wrote the key, and only
+`global` pays for it: anonymous and `local` native starts, which the resolver
+never reads, do not. The cost is one system-message round trip, about 4 us
+against about 210 us for a whole global native start (single scheduler, measured
+in the PR). A backing process that does not answer the system message within a
+second stays untimed, as before BT-4956. It is written at registration, not at
+`init/1`, so it is a few microseconds later than the process's true start; that
+is far below the resolution at which two registrants of one name are ordered.
 
 OTP's `random_exit_name/3`, the fallback, is not random: it keeps the pid on
 the node with the lower name, and on the same node its second argument. Before
@@ -370,9 +386,8 @@ BT-4937 it decided every compiled-actor conflict, so the "older registrant"
 rule above did not hold.
 
 **One side has no start time.** This happens in a rolling upgrade (ADR 0125),
-when a node still on a runtime older than BT-4937 started one of the
-candidates (that node can still answer the read, it just finds no key), and
-for a `native:` actor. A peer too old to answer the read at all is a different
+when a node still on a runtime older than BT-4937 or BT-4956 started one of the
+candidates (that node can still answer the read, it just finds no key). A peer too old to answer the read at all is a different
 case, covered below. The side that has a start time is kept
 and the other is stopped. The alternative, falling back to `random_exit_name/3`
 whenever either time is missing, would decide by node name for the whole

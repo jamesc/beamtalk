@@ -192,5 +192,6 @@ mod package_qualifiers;
 mod preload_files;
 mod preload_racing;
 mod references;
+mod stdlib_ffi_registry;
 mod symbol_unification;
 mod type_hierarchy;

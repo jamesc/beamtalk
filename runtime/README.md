@@ -9,12 +9,12 @@ This directory contains the Erlang runtime components for Beamtalk.
 The Actor runtime implementation. Every Beamtalk actor is a BEAM process running a `gen_server`.
 
 Each actor maintains state in a map with:
-- `__class__`: The actor's class name (atom)
-- `__methods__`: A map from selector (atom) to method function
+- `$beamtalk_class`: The actor's class name (atom)
+- `__class_mod__`: The compiled class module that owns the method table
 - User-defined state fields
 
 Key features:
-- **Message dispatch**: Routes messages to methods via `__methods__` map lookup
+- **Message dispatch**: Generated `handle_call/3` / `handle_cast/2` route messages to the class module's `safe_dispatch/3`
 - **doesNotUnderstand**: Fallback handler for unknown messages (metaprogramming)
 - **Sync and async**: Supports both `gen_server:call` (blocking) and `gen_server:cast` (with futures)
 - **Hot reload**: Implements `code_change/3` for state migration during code updates

@@ -47,8 +47,11 @@ each of them while `scan_actors/0` lists the pid once per class.
 -export([
     info/1,
     scan_actors/0,
+    scan_actors_by_pid/0,
+    one_per_pid/1,
     scan_class/1,
-    scan_classes/1
+    scan_classes/1,
+    scan_marked_classes/1
 ]).
 
 -export_type([entry/0]).
@@ -66,6 +69,35 @@ each of them while `scan_actors/0` lists the pid once per class.
 scan_actors() ->
     scan(fun(Entry, Acc) -> [Entry | Acc] end, []).
 
+-doc """
+Every live actor on this node, one entry per pid (`scan_actors/0` through
+`one_per_pid/1`). The lists a user reads (`Node current actors`, the workspace
+`actors` op) use this so they agree on which class a pid is shown under.
+""".
+-spec scan_actors_by_pid() -> [entry()].
+scan_actors_by_pid() ->
+    one_per_pid(scan_actors()).
+
+-doc """
+Reduce entries to one per pid. A `native:` backing module shared by several
+classes yields one entry per class for the same pid; the class shown is the
+alphabetically first, so the choice is deterministic and every reader of the
+list picks the same one. A marked actor has exactly one entry already.
+""".
+-spec one_per_pid([entry()]) -> [entry()].
+one_per_pid(Entries) ->
+    Best = lists:foldl(
+        fun({Pid, Class, _} = Entry, Acc) ->
+            case Acc of
+                #{Pid := {_, Kept, _}} when Kept =< Class -> Acc;
+                _ -> Acc#{Pid => Entry}
+            end
+        end,
+        #{},
+        Entries
+    ),
+    maps:values(Best).
+
 -doc "The live instances of `Class` (exactly that class, no descendants) as `{Pid, StartedAt}`.".
 -spec scan_class(atom()) -> [{pid(), integer() | undefined}].
 scan_class(Class) when is_atom(Class) ->
@@ -77,6 +109,22 @@ requested class is a key of the result, with `[]` when it has no instances.
 """.
 -spec scan_classes([atom()]) -> #{atom() => [{pid(), integer() | undefined}]}.
 scan_classes(Classes) when is_list(Classes) ->
+    scan_classes(Classes, any).
+
+-doc """
+Like `scan_classes/1`, but only processes that carry the `'$beamtalk_actor'`
+marker: the `native:` `'$initial_call'` fallback is not applied. For readers
+that kill or migrate what they find (`removeFromSystem`, hot reload): the
+fallback matches every process running a shared backing module, including
+another class's instances and processes Beamtalk never started, which a
+destructive reader must not touch.
+""".
+-spec scan_marked_classes([atom()]) -> #{atom() => [{pid(), integer() | undefined}]}.
+scan_marked_classes(Classes) when is_list(Classes) ->
+    scan_classes(Classes, marked).
+
+-spec scan_classes([atom()], any | marked) -> #{atom() => [{pid(), integer() | undefined}]}.
+scan_classes(Classes, Mode) ->
     Wanted = maps:from_keys(Classes, []),
     scan(
         fun({Pid, Class, StartedAt}, Acc) ->
@@ -85,7 +133,8 @@ scan_classes(Classes) when is_list(Classes) ->
                 _ -> Acc
             end
         end,
-        Wanted
+        Wanted,
+        Mode
     ).
 
 -doc """
@@ -104,23 +153,31 @@ info(Pid) when is_pid(Pid), node(Pid) =:= node() ->
 
 -spec scan(fun((entry(), Acc) -> Acc), Acc) -> Acc when Acc :: term().
 scan(Fun, Acc0) ->
-    scan_loop(erlang:processes_iterator(), Fun, Acc0).
+    scan(Fun, Acc0, any).
 
-scan_loop(Iter0, Fun, Acc) ->
+-spec scan(fun((entry(), Acc) -> Acc), Acc, any | marked) -> Acc when Acc :: term().
+scan(Fun, Acc0, Mode) ->
+    scan_loop(erlang:processes_iterator(), Fun, Acc0, Mode).
+
+scan_loop(Iter0, Fun, Acc, Mode) ->
     case erlang:processes_next(Iter0) of
         none ->
             Acc;
         {Pid, Iter} ->
-            scan_loop(Iter, Fun, lists:foldl(Fun, Acc, entries(Pid)))
+            scan_loop(Iter, Fun, lists:foldl(Fun, Acc, entries(Pid, Mode)), Mode)
     end.
 
 %% A process that exited between the iterator and here answers `undefined`.
 -spec entries(pid()) -> [entry()].
 entries(Pid) ->
+    entries(Pid, any).
+
+-spec entries(pid(), any | marked) -> [entry()].
+entries(Pid, Mode) ->
     case erlang:process_info(Pid, ?INFO_ITEMS) of
         [{_, Class}, {_, StartedAt}, _] when is_atom(Class), Class =/= undefined ->
             [{Pid, Class, started_at(StartedAt)}];
-        [_, {_, StartedAt}, {_, InitialCall}] ->
+        [_, {_, StartedAt}, {_, InitialCall}] when Mode =:= any ->
             [
                 {Pid, Class, started_at(StartedAt)}
              || Class <- beamtalk_actor_registry:native_class_candidates(InitialCall)

@@ -232,7 +232,7 @@ shapeManifest(#{'$beamtalk_class' := 'Node', name := Name}) ->
 -doc """
 Every live actor on this node (`Node current actors`) or on a peer via `erpc`
 (ADR 0126 §5.1: the returned object references cross the wire as pids), as
-`Result ok: List(Actor)`. Reads the runtime-owned `beamtalk_actor_registry`.
+`Result ok: List(Actor)`. Reads the process scan (`beamtalk_actor_scan`, ADR 0150).
 Distinct from `Actor allRegisteredOn:`, which lists only *name-registered*
 actors. Failures answer `Result error:` (`node_down`, `timeout`,
 `insecure_distribution`, `remote_code_mismatch`), never a raise.
@@ -278,15 +278,55 @@ shapeSkew(#{'$beamtalk_class' := 'Node', name := Name}) ->
 %%% Introspection targets (run on the queried node)
 %%% ============================================================================
 
--doc "Target of `actors/1`: every live actor on *this* node.".
+-doc """
+Target of `actors/1`: every live actor on *this* node, by the process scan
+(`beamtalk_actor_scan`, ADR 0150), each pid once. Includes `native:` actors and
+the runtime's own (`TranscriptStream`): the same set the workspace `actors` op
+lists (BT-4960). A pid whose backing module is shared by several classes is
+shown under the alphabetically first.
+""".
 -spec local_actors() -> [tuple()].
 local_actors() ->
-    beamtalk_repl_actors:list_objects().
+    lists:filtermap(
+        fun({Pid, Class, _}) -> actor_object(Pid, Class) end,
+        beamtalk_actor_scan:scan_actors_by_pid()
+    ).
 
--doc "Target of `actorAt/2`.".
+-doc "Target of `actorAt/2`: `info/1` on the one pid, no scan; `nil` for a non-actor, dead or unparsable pid.".
 -spec local_actor_at(term()) -> tuple() | nil.
-local_actor_at(PidString) ->
-    beamtalk_repl_actors:object_at(PidString).
+local_actor_at({beamtalk_string, PidStr}) when is_binary(PidStr) ->
+    local_actor_at(PidStr);
+local_actor_at(PidStr) when is_binary(PidStr) ->
+    local_actor_at(binary_to_list(PidStr));
+local_actor_at(PidStr) when is_list(PidStr) ->
+    try list_to_pid(PidStr) of
+        Pid when node(Pid) =:= node() ->
+            case beamtalk_actor_scan:one_per_pid(beamtalk_actor_scan:info(Pid)) of
+                [{Pid, Class, _StartedAt}] ->
+                    case actor_object(Pid, Class) of
+                        {true, Obj} -> Obj;
+                        false -> nil
+                    end;
+                [] ->
+                    nil
+            end;
+        _RemotePid ->
+            nil
+    catch
+        error:badarg -> nil
+    end;
+local_actor_at(_) ->
+    nil.
+
+%% The `#beamtalk_object{}` for a scanned actor; `false` when its class has no
+%% loaded module or it died since the scan.
+-spec actor_object(pid(), atom()) -> {true, tuple()} | false.
+actor_object(Pid, Class) ->
+    Module = beamtalk_class_registry:backing_module(Class),
+    case Module =/= undefined andalso is_process_alive(Pid) of
+        true -> {true, {beamtalk_object, Class, Module, Pid}};
+        false -> false
+    end.
 
 -doc """
 Target of `supervisors/1`: root application supervisor, workspace-attached

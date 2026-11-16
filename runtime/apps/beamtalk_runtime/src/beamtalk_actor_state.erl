@@ -40,7 +40,7 @@ not at home in the new one.
 A callback returns the cell only on a normal exit; on an exception it returns
 (or stops with) the state it was called with. `adapt/1` is the adapter for
 code that still answers `{reply, R, NewState}` (native methods, ADR 0066
-instance-side extension funs, `beamtalk_actor:dispatch/4`): it stores
+instance-side extension funs): it stores
 `NewState` in the cell so the callback can `take/0` it. `protect/1` is the
 rollback for runtime catchers that continue after an error: it restores the
 cell to its value at entry before re-raising. A `^` that reaches its actor
@@ -224,8 +224,7 @@ store(State) when is_map(State) ->
 
 -doc """
 Adapter for code that answers `{reply, R, NewState}`, `{noreply, NewState}` or
-`{error, Reason, State}` (native methods, ADR 0066 extension funs,
-`beamtalk_actor:dispatch/4`). Stores the state in the cell and answers the
+`{error, Reason, State}` (native methods, ADR 0066 extension funs). Stores the state in the cell and answers the
 result without it; the callback then returns `take/0`.
 """.
 -spec adapt({reply, term(), map()} | {noreply, map()} | {error, term(), map()}) -> adapted().

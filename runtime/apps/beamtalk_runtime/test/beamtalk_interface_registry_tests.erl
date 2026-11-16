@@ -30,12 +30,20 @@ Tests the Phase 2 dispatch/3 interface for Beamtalk primitives:
 
 setup() ->
     beamtalk_test_boot:registry(),
+    %% Start from no class processes: a class left alive by an earlier module
+    %% makes ensure_class_started/2 a no-op, and an earlier raw wipe of the
+    %% class-metadata table then leaves it without a row, so allClasses misses
+    %% it (BT-4962).
+    beamtalk_test_class_teardown:stop_pg_class_processes(),
     register_test_classes().
 
 teardown(_) ->
     OldTrap = process_flag(trap_exit, true),
     cleanup_test_classes(),
-    process_flag(trap_exit, OldTrap).
+    process_flag(trap_exit, OldTrap),
+    %% cleanup_test_classes/0 stops every class process, the stdlib ones too; leave
+    %% the real stdlib registered for the next module (BT-4962).
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer').
 
 register_test_classes() ->
     ensure_class_started('Object', #{

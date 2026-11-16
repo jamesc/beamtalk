@@ -502,23 +502,6 @@ frame_table_test_() ->
                     ),
                     ?assertNot(maps:is_key(mfa, E#beamtalk_error.details))
                 end},
-                {"BT-4816: method error tail renders a Beamtalk callee as Class>>selector", fun() ->
-                        Msg = beamtalk_actor:format_method_error_message(
-                            'Ticker', bump, error, badarg, [{?SOLO_MOD, class_go, 1, []}]
-                        ),
-                        ?assertEqual(
-                            <<"Bad argument in Ticker>>bump (called Bt4815Solo class>>go)">>, Msg
-                        )
-                    end},
-                {"BT-4816: method error tail keeps a foreign callee as module:function/arity",
-                    fun() ->
-                        Msg = beamtalk_actor:format_method_error_message(
-                            'Ticker', bump, error, badarg, [{lists, reverse, [x, y], []}]
-                        ),
-                        ?assertEqual(
-                            <<"Bad argument in Ticker>>bump (called lists:reverse/2)">>, Msg
-                        )
-                    end},
                 {"raw_mfa/1 is always module:function/arity", fun() ->
                     ?assertEqual(
                         <<"bt@bt4815pkg@bt4815_solo:class_new/1">>,

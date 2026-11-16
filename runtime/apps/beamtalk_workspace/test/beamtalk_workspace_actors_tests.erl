@@ -108,31 +108,76 @@ list_drops_dead_actor_test() ->
     stop(Pid),
     ?assertNot(lists:member(Pid, pids(beamtalk_workspace_actors:list()))).
 
-%% An unmarked `native:` backing process is found by the scan but was never in
-%% the REPL's actor list (TranscriptStream is one): the lists leave it out so
-%% `:actors` output is unchanged.
-unmarked_native_process_is_not_listed_test() ->
-    beamtalk_class_registry:ensure_backing_module_index_table(),
-    Class = 'Bt4950NativeClass',
-    ClassPid = spawn(fun native_loop/0),
-    register(beamtalk_class_registry:registry_name(Class), ClassPid),
-    Pid = proc_lib:spawn(?MODULE, init, [x]),
-    ok = beamtalk_test_wait:until(fun() ->
-        {dictionary, D} = erlang:process_info(Pid, dictionary),
-        lists:keymember('$initial_call', 1, D)
-    end),
-    ets:insert(beamtalk_backing_module_index, {?MODULE, Class, ClassPid}),
+%% BT-4960 (owner decision, 16 Nov 2026): the workspace lists include `native:`
+%% actors, the same set `Node current actors` reports. An unmarked `native:`
+%% backing process is listed with its class, and `lookup/1` finds it.
+unmarked_native_process_is_listed_test() ->
+    Class = 'Bt4960NativeClass',
+    beamtalk_test_fake_native:with_native([Class], fun(Pid) ->
+        ?assertMatch(
+            [#{pid := Pid, class := Class, module := _, spawned_at := null, system := false}],
+            [M || #{pid := P} = M <- beamtalk_workspace_actors:list(), P =:= Pid]
+        ),
+        ?assertMatch(
+            {ok, #{pid := Pid, class := Class, system := false}},
+            beamtalk_workspace_actors:lookup(Pid)
+        )
+    end).
+
+%% A backing module shared by several native classes: one entry per pid, and
+%% the class is the alphabetically first of the classes that share the module
+%% (deterministic, and the same rule `Node current actors` uses).
+shared_native_module_is_listed_once_per_pid_test() ->
+    beamtalk_test_fake_native:with_native(['Bt4960Zed', 'Bt4960Alpha'], fun(Pid) ->
+        ?assertMatch(
+            [#{pid := Pid, class := 'Bt4960Alpha'}],
+            [M || #{pid := P} = M <- beamtalk_workspace_actors:list(), P =:= Pid]
+        ),
+        ?assertMatch({ok, #{class := 'Bt4960Alpha'}}, beamtalk_workspace_actors:lookup(Pid))
+    end).
+
+%% System actors (children of the workspace supervisor, like `TranscriptStream`)
+%% are listed and flagged; user actors are not flagged.
+system_actor_is_flagged_test() ->
+    Class = 'Bt4960SystemClass',
+    User = marked('Bt4960User'),
     try
-        %% the scan sees it ...
-        ?assertMatch([{Pid, Class, undefined}], beamtalk_actor_scan:info(Pid)),
-        %% ... the workspace lists do not
-        ?assertNot(lists:member(Pid, pids(beamtalk_workspace_actors:list()))),
-        ?assertEqual({error, not_found}, beamtalk_workspace_actors:lookup(Pid))
+        beamtalk_test_fake_native:with_system_native([Class], fun(Pid) ->
+            ?assertMatch(
+                [#{pid := Pid, class := Class, system := true}],
+                [M || #{pid := P} = M <- beamtalk_workspace_actors:list(), P =:= Pid]
+            ),
+            ?assertMatch({ok, #{system := true}}, beamtalk_workspace_actors:lookup(Pid)),
+            ?assertMatch(
+                [#{system := false}],
+                [M || #{pid := P} = M <- beamtalk_workspace_actors:list(), P =:= User]
+            )
+        end)
     after
-        ets:match_delete(beamtalk_backing_module_index, {?MODULE, '_', '_'}),
-        unregister(beamtalk_class_registry:registry_name(Class)),
-        ClassPid ! stop,
-        Pid ! stop
+        stop(User)
+    end.
+
+%% The workspace list and `Node current actors` report the same set, with the
+%% same class for every pid (including a shared native backing module).
+workspace_list_and_node_actors_agree_test() ->
+    User = marked('Bt4960AgreeUser'),
+    try
+        beamtalk_test_fake_native:with_native(['Bt4960AgreeB', 'Bt4960AgreeA'], fun(_Native) ->
+            Workspace = lists:sort([
+                {P, C}
+             || #{pid := P, class := C} <- beamtalk_workspace_actors:list()
+            ]),
+            Node = lists:sort(
+                [{P, C} || {beamtalk_object, C, _Mod, P} <- beamtalk_node:local_actors()]
+            ),
+            %% `Node current actors` only returns actors whose class is loaded;
+            %% the marked fake above has no class, so compare on that common set.
+            Loaded = [E || {_, C} = E <- Workspace, lists:keymember(C, 2, Node)],
+            ?assertEqual(Node, lists:sort(Loaded)),
+            ?assert(lists:keymember('Bt4960AgreeA', 2, Node))
+        end)
+    after
+        stop(User)
     end.
 
 lookup_known_and_unknown_test() ->

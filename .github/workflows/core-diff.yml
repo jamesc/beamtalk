@@ -16,11 +16,15 @@ on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, labeled]
-    paths:
-      - 'crates/beamtalk-codegen/**'
-      # BT-4939: the harness itself, so a change to it proves itself.
-      - 'scripts/ci/core_diff_normalise.py'
-      - '.github/workflows/core-diff.yml'
+    # BT-4959: no `paths:` filter. A `paths:` filter also applies to `labeled`
+    # events, so a PR labelled `ci:core-diff` that touched none of the listed
+    # paths started no run, though it changed generated output from outside
+    # the codegen crate (BT-4940: beamtalk-project, beamtalk-cli,
+    # beamtalk-compiler-port). Without a filter the workflow starts for every
+    # PR event and the label-gated `if:` on the job below decides whether
+    # anything runs, so a labelled PR always gets a core-diff run and an
+    # unlabelled one costs only a skipped job. Any crate or stdlib change
+    # that alters generated output is therefore covered.
 
 # A label event for any other label must not cancel a real run, so it gets
 # its own group (and the job's `if:` skips it).

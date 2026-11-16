@@ -86,9 +86,28 @@ handle_term(<<"kill">>, Params, _Msg, _SessionPid) ->
     case beamtalk_repl_params:actor_pid(Params) of
         {error, _} = Err ->
             Err;
-        {ok, Pid, _PidBin} ->
-            exit(Pid, kill),
-            {status, ok}
+        {ok, Pid, PidBin} ->
+            case beamtalk_workspace_actors:lookup(Pid) of
+                {ok, #{system := true, class := Class}} ->
+                    %% BT-4960: killing a runtime-started actor (`Transcript`)
+                    %% would drop its buffer and every subscriber.
+                    {error,
+                        beamtalk_repl_errors:make(
+                            system_actor,
+                            'Actor',
+                            iolist_to_binary([
+                                <<"Cannot kill a system actor: ">>,
+                                PidBin,
+                                <<" (">>,
+                                atom_to_binary(Class, utf8),
+                                <<")">>
+                            ]),
+                            <<"System actors are started by the runtime; use :actors to find user actors.">>
+                        )};
+                _ ->
+                    exit(Pid, kill),
+                    {status, ok}
+            end
     end;
 handle_term(<<"interrupt">>, _Params, Msg, SessionPid) ->
     %% Interrupt a running evaluation.

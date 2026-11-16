@@ -173,7 +173,16 @@ mirrors that test's own workaround.
 """.
 named_scope_global_resolves_remote_registrant(PeerNode) ->
     Name = beamtalk_test_unique:atom("bt3603_remote_named"),
-    ok = beamtalk_class_metadata:insert('Counter', test_counter, undefined, none, false),
+    %% Only claim the shared 'Counter' row when no real Counter is registered, and
+    %% delete only a row inserted here: overwriting then deleting a live
+    %% Counter's row broke later modules (hot_reload: class_not_found, BT-4962).
+    InsertedRow = beamtalk_class_metadata:lookup_module('Counter') =:= not_found,
+    case InsertedRow of
+        true ->
+            ok = beamtalk_class_metadata:insert('Counter', test_counter, undefined, none, false);
+        false ->
+            ok
+    end,
     {ok, PeerPid} = rpc:call(PeerNode, erlang, apply, [
         fun() ->
             {ok, P} = beamtalk_actor_registry:'spawnAsGlobal'(Name, test_counter, 5),
@@ -199,7 +208,7 @@ named_scope_global_resolves_remote_registrant(PeerNode) ->
         %% table other EUnit modules in the same VM also read — so it must
         %% be cleaned up here, mirroring beamtalk_class_metadata_tests.erl
         %% and beamtalk_supervisor_tests.erl's own after-block convention.
-        beamtalk_class_metadata:delete('Counter'),
+        InsertedRow andalso beamtalk_class_metadata:delete('Counter'),
         rpc:call(PeerNode, gen_server, stop, [PeerPid])
     end.
 

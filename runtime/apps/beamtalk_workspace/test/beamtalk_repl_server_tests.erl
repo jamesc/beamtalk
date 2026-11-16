@@ -67,6 +67,9 @@ safe_to_existing_atom_integer_atom_test() ->
 tcp_integration_test_() ->
     {setup, fun tcp_setup/0, fun tcp_cleanup/1, fun({Port, _SupPid}) ->
         [
+            {"connect snapshot lists the system actor", fun() ->
+                tcp_snapshot_system_actor_test(Port)
+            end},
             {"clear op", fun() -> tcp_clear_test(Port) end},
             {"bindings op (empty)", fun() -> tcp_bindings_empty_test(Port) end},
             {"actors op (empty)", fun() -> tcp_actors_empty_test(Port) end},
@@ -136,9 +139,16 @@ tcp_integration_test_() ->
         ]
     end}.
 
+%% These tests read the real stdlib classes (Object, Integer, ...). An earlier module
+%% (beamtalk_object_class_tests) stops every class process, so assert and restore
+%% the precondition instead of relying on a leftover (BT-4962).
+stdlib_ready() ->
+    beamtalk_test_boot:boot_real_stdlib('Integer').
+
 tcp_setup() ->
     process_flag(trap_exit, true),
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_workspace),
+    ok = stdlib_ready(),
     %% The node-wide actor registry (BT-3633) replays every tracked actor to a
     %% newly subscribed session; earlier suites leave actors in it, so run this
     %% fixture against an empty one.
@@ -211,7 +221,9 @@ tcp_cleanup({_Port, SupPid}) ->
 tcp_send_op(Port, OpJson) ->
     {Ws, _Welcome} = ws_connect(Port),
     ws_send(Ws, OpJson),
-    {ok, Data} = ws_recv(Ws),
+    %% The connect snapshot pushes one `spawned` frame per live actor (BT-4960:
+    %% including the runtime's own `TranscriptStream`); skip pushes to reach the reply.
+    {ok, Data} = ws_recv_response(Ws),
     ws_close(Ws),
     json:decode(Data).
 
@@ -392,6 +404,35 @@ ws_mask(<<B, Rest/binary>>, Key = <<K1, K2, K3, K4>>, I, Acc) ->
         end,
     ws_mask(Rest, Key, I + 1, <<Acc/binary, M>>).
 
+%% BT-4960: the connect snapshot includes the runtime's own actors, flagged
+%% `system`, so `Transcript` is no longer silently missing from a client's list.
+tcp_snapshot_system_actor_test(Port) ->
+    {Ws, _Welcome} = ws_connect(Port),
+    try
+        ?assertMatch(
+            #{<<"system">> := true}, await_spawned_push(Ws, <<"TranscriptStream">>, 20)
+        )
+    after
+        ws_close(Ws)
+    end.
+
+%% Read frames until the `spawned` push for `Class` arrives (the snapshot is
+%% sent on connect, before any reply). Fails after `N` unrelated frames.
+await_spawned_push(_Ws, Class, 0) ->
+    error({no_spawned_push, Class});
+await_spawned_push(Ws, Class, N) ->
+    {ok, Data} = ws_recv(Ws),
+    case json:decode(Data) of
+        #{
+            <<"channel">> := <<"actors">>,
+            <<"event">> := <<"spawned">>,
+            <<"data">> := #{<<"class">> := Class} = D
+        } ->
+            D;
+        _ ->
+            await_spawned_push(Ws, Class, N - 1)
+    end.
+
 %% Test: `Session current clear` evaluates and returns a done status.
 %% (ADR 0081 Phase 6): the `clear` op was replaced by the Session API.
 tcp_clear_test(Port) ->
@@ -420,12 +461,15 @@ tcp_bindings_empty_test(Port) ->
     ?assertMatch(#{<<"id">> := <<"t2">>}, Resp),
     ?assert(maps:is_key(<<"value">>, Resp)).
 
-%% Test: actors op returns empty actor list
+%% Test: on a fresh workspace the actors op lists only the runtime's own
+%% (system) actors; no user actor exists yet (BT-4960).
 tcp_actors_empty_test(Port) ->
     Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"actors">>, <<"id">> => <<"t3">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t3">>}, Resp),
-    ?assertEqual([], maps:get(<<"actors">>, Resp)).
+    Actors = maps:get(<<"actors">>, Resp),
+    ?assertEqual([], [A || A <- Actors, maps:get(<<"system">>, A, false) =/= true]),
+    ?assert(lists:any(fun(#{<<"class">> := C}) -> C =:= <<"TranscriptStream">> end, Actors)).
 
 %% Test: sessions op returns sessions list
 tcp_sessions_test(Port) ->
@@ -690,8 +734,8 @@ tcp_concurrent_clients_test(Port) ->
     {Ws2, _W2} = ws_connect(Port),
     ws_send(Ws1, Msg1),
     ws_send(Ws2, Msg2),
-    {ok, Data1} = ws_recv(Ws1),
-    {ok, Data2} = ws_recv(Ws2),
+    {ok, Data1} = ws_recv_response(Ws1),
+    {ok, Data2} = ws_recv_response(Ws2),
     ws_close(Ws1),
     ws_close(Ws2),
     Resp1 = json:decode(Data1),
@@ -898,7 +942,7 @@ tcp_unbind_unavailable_in_next_eval_test(Port) ->
 tcp_empty_line_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
     ws_send(Ws, <<>>),
-    {ok, Data} = ws_recv(Ws),
+    {ok, Data} = ws_recv_response(Ws),
     ws_close(Ws),
     Resp = json:decode(Data),
     %% Empty message results in error
@@ -1135,11 +1179,13 @@ get_completions_keyword_prefix_test() ->
     ?assert(lists:member(<<"subclass:">>, Result)).
 
 get_completions_workspace_binding_test() ->
+    ok = stdlib_ready(),
     %% Workspace bindings (Transcript, Beamtalk, Workspace) should appear
     Result = beamtalk_repl_ops_dev_complete:get_completions(<<"Transcri">>),
     ?assert(lists:member(<<"Transcript">>, Result)).
 
 get_completions_workspace_binding_prefix_test() ->
+    ok = stdlib_ready(),
     %% "Work" should match the Workspace binding
     Result = beamtalk_repl_ops_dev_complete:get_completions(<<"Work">>),
     ?assert(lists:member(<<"Workspace">>, Result)).
@@ -1175,6 +1221,7 @@ context_completions_binding_actor_no_registry_test() ->
     ?assertEqual([], Result).
 
 context_completions_binding_reference_returns_object_methods_test() ->
+    ok = stdlib_ready(),
     %% All values are now classifiable via class_of/1.
     %% Even Erlang references inherit Object methods like `class`, `inspect`.
     Bindings = #{x => make_ref()},
@@ -1183,6 +1230,7 @@ context_completions_binding_reference_returns_object_methods_test() ->
 
 %% BT: Symbol binding (atom value) now correctly returns Symbol instance methods
 context_completions_symbol_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{x => some_atom},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"x cl">>, Bindings),
     %% `class` is inherited from Object; available on Symbol instances
@@ -1338,6 +1386,7 @@ context_completions_value_type_binding_returns_instance_methods_test() ->
 %% BT: Integer binding (e.g. i := 42) returns Integer instance methods
 %% Uses the real Integer class which is always registered in the test environment.
 context_completions_integer_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{i => 42},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"i cl">>, Bindings),
     %% `class` is inherited from Object; available on every Integer instance
@@ -1346,6 +1395,7 @@ context_completions_integer_binding_returns_instance_methods_test() ->
 %% BT: String binding (e.g. s := 'hello') returns String instance methods
 %% Uses the real String class which is always registered in the test environment.
 context_completions_string_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{s => <<"hello">>},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"s cl">>, Bindings),
     %% `class` is inherited from Object; available on every String instance
@@ -1353,6 +1403,7 @@ context_completions_string_binding_returns_instance_methods_test() ->
 
 %% BT: nil binding returns UndefinedObject instance methods
 context_completions_nil_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{n => nil},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"n cl">>, Bindings),
     %% `class` is inherited from Object; available on UndefinedObject instances
@@ -1360,6 +1411,7 @@ context_completions_nil_binding_returns_instance_methods_test() ->
 
 %% BT: true binding returns True instance methods (not Boolean — Boolean is abstract)
 context_completions_true_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{t => true},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"t cl">>, Bindings),
     %% `class` is inherited from Object; available on True instances
@@ -1367,6 +1419,7 @@ context_completions_true_binding_returns_instance_methods_test() ->
 
 %% BT: false binding returns False instance methods (not Boolean — Boolean is abstract)
 context_completions_false_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{f => false},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"f cl">>, Bindings),
     %% `class` is inherited from Object; available on False instances
@@ -1374,18 +1427,21 @@ context_completions_false_binding_returns_instance_methods_test() ->
 
 %% BT: Float binding (e.g. f := 3.14) returns Float instance methods
 context_completions_float_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{f => 3.14},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"f cl">>, Bindings),
     ?assert(lists:member(<<"class">>, Result)).
 
 %% BT: List binding (e.g. l := #(1 2 3)) returns List instance methods
 context_completions_list_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{l => [1, 2, 3]},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"l cl">>, Bindings),
     ?assert(lists:member(<<"class">>, Result)).
 
 %% BT: Block/closure binding returns Block instance methods
 context_completions_block_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{b => fun() -> ok end},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"b cl">>, Bindings),
     ?assert(lists:member(<<"class">>, Result)).
@@ -1398,6 +1454,7 @@ context_completions_unbound_variable_returns_empty_test() ->
 
 %% BT: String literal receiver (e.g. "hello" up) returns String instance methods
 context_completions_string_literal_receiver_test() ->
+    ok = stdlib_ready(),
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"\"hello\" cl">>),
     ?assert(lists:member(<<"class">>, Result)).
 

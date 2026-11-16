@@ -16,20 +16,34 @@ with the actors themselves.
 
 ## Metadata
 
-The same map the retired actor list process produced, so the wire output does
-not change: `#{pid, class, module, spawned_at}`. `module` is the backing module
-of `class` (`undefined` when the class is not loaded). `spawned_at` is seconds
-since the epoch, or `null` for an actor whose `init/1` has not written a start time yet.
+`#{pid, class, module, spawned_at, system}`. `module` is the backing module of
+`class` (`undefined` when the class is not loaded). `spawned_at` is seconds
+since the epoch, or `null` for an actor that never wrote a start time (a
+`native:` actor, or one whose `init/1` has not run yet). `system` is `true` for
+an actor the runtime started itself, `false` for every other.
 
 ## Which processes are listed
 
-Only actors that carry the `'$beamtalk_actor'` marker, i.e. what the retired
-list held for the REPL. The scan also finds `native:` backing gen_servers
-(ADR 0056) through their `'$initial_call'`; those include workspace
-infrastructure such as `TranscriptStream`, which `:actors` never listed, so
-they are left out here to keep the output unchanged. `Node current actors`
-(`beamtalk_actor_scan` direct) includes them. Whether the lists should agree
-on this is an owner decision (REPL output, AGENTS.md).
+Every actor the scan finds, the same set `Node current actors` reports
+(BT-4960, owner decision 16 Nov 2026): marked actors, and `native:` backing
+gen_servers (ADR 0056), found through their `'$initial_call'`. Before ADR 0150
+the retired list held only registered actors, so a `native:` actor was missing
+from `:actors`; that was an artifact of registration, not a decision.
+
+Each pid is listed once. A `native:` backing module shared by several classes
+gives the scan one entry per class; the class shown is the alphabetically
+first (`beamtalk_actor_scan:one_per_pid/1`, the rule `Node current actors`
+uses too), so both lists agree on it.
+
+## System actors
+
+An actor started by the runtime itself, such as `TranscriptStream`, is a
+child of `beamtalk_workspace_sup` (read from the process's own `'$ancestors'`,
+so no call into the supervisor); it is listed with `system => true` (on the
+wire the `system` key is present only when true). User actors, including
+`native:` ones a user spawned, are `system => false`. `kill` refuses a system
+actor (killing `Transcript` would drop its buffer and every subscriber);
+`inspect` works.
 
 ## Read-your-writes
 
@@ -47,6 +61,13 @@ double-count an actor that starts around it. The protocol:
 1. subscribe to `ActorSpawned` / `ActorStopped` (`beamtalk_repl_subscriptions`);
 2. take the snapshot (`list/0`) and `feed_new/1` from it;
 3. pass each announcement through `feed_event/2`.
+
+The feed covers marked actors only. `ActorSpawned` / `ActorStopped` come from
+the lifecycle telemetry of a compiled actor's `init/1` / `terminate/2`, which a
+`native:` backing gen_server does not run. A `native:` actor is in the snapshot
+taken at connect, but a later start or stop of one is not announced; a client
+sees it on its next `actors` call. System actors live as long as the workspace,
+so this only matters for user `native:` actors.
 
 An actor that started before the subscription is in the snapshot; one that
 started after the scan is announced and not in it; one that started in between
@@ -68,7 +89,8 @@ covers. The index lives in the subscriber, never in the runtime.
     pid := pid(),
     class := atom(),
     module := atom(),
-    spawned_at := integer() | null
+    spawned_at := integer() | null,
+    system := boolean()
 }.
 
 -opaque feed() :: #{pid() => true}.
@@ -76,7 +98,7 @@ covers. The index lives in the subscriber, never in the runtime.
 -doc "Every live actor on this node: one scan, ordered by pid.".
 -spec list() -> [actor_metadata()].
 list() ->
-    Metas = [meta(E) || {Pid, _, _} = E <- beamtalk_actor_scan:scan_actors(), is_listed(Pid, E)],
+    Metas = [meta(E) || E <- beamtalk_actor_scan:scan_actors_by_pid()],
     lists:sort(fun(#{pid := A}, #{pid := B}) -> A =< B end, Metas).
 
 -doc """
@@ -85,14 +107,9 @@ process or a non-actor is `{error, not_found}`.
 """.
 -spec lookup(pid()) -> {ok, actor_metadata()} | {error, not_found}.
 lookup(Pid) when is_pid(Pid), node(Pid) =:= node() ->
-    case beamtalk_actor_scan:info(Pid) of
-        [{Pid, _, _} = Entry | _] ->
-            case is_listed(Pid, Entry) of
-                true -> {ok, meta(Entry)};
-                false -> {error, not_found}
-            end;
-        [] ->
-            {error, not_found}
+    case beamtalk_actor_scan:one_per_pid(beamtalk_actor_scan:info(Pid)) of
+        [{Pid, _, _} = Entry] -> {ok, meta(Entry)};
+        [] -> {error, not_found}
     end;
 lookup(Pid) when is_pid(Pid) ->
     {error, not_found}.
@@ -124,30 +141,37 @@ feed_event(_Event, Feed) ->
 %%% Internal
 %%% ---------------------------------------------------------------------
 
-%% A start time means the marker was written (`init/1` writes it second); an
-%% entry without one is either a mid-`init/1` actor or an unmarked `native:`
-%% process, told apart by the marker itself.
--spec is_listed(pid(), beamtalk_actor_scan:entry()) -> boolean().
-is_listed(_Pid, {_, _, StartedAt}) when is_integer(StartedAt) -> true;
-is_listed(Pid, _Entry) -> beamtalk_actor_registry:is_beamtalk_actor(Pid).
-
 -spec meta(beamtalk_actor_scan:entry()) -> actor_metadata().
 meta({Pid, Class, StartedAt}) ->
     #{
         pid => Pid,
         class => Class,
         module => module_of(Class),
-        spawned_at => spawned_at(StartedAt)
+        spawned_at => spawned_at(StartedAt),
+        system => is_system(Pid)
     }.
+
+%% The runtime's own actors are the children of the workspace supervisor
+%% (`Transcript`). Read from the process itself: `proc_lib` records the parent
+%% first in `'$ancestors'` (the supervisor's registered name, or its pid when
+%% unnamed). No call into the supervisor, so a busy or restarting supervisor
+%% never stalls a pid check.
+-spec is_system(pid()) -> boolean().
+is_system(Pid) ->
+    %% Keyed form: reads one entry instead of copying the whole dictionary. A
+    %% dead pid answers `undefined`, a missing key `{{dictionary, _}, undefined}`.
+    case erlang:process_info(Pid, {dictionary, '$ancestors'}) of
+        {{dictionary, '$ancestors'}, [Parent | _]} -> is_workspace_sup(Parent);
+        _ -> false
+    end.
+
+is_workspace_sup(beamtalk_workspace_sup) -> true;
+is_workspace_sup(Parent) when is_pid(Parent) -> Parent =:= whereis(beamtalk_workspace_sup);
+is_workspace_sup(_) -> false.
 
 spawned_at(undefined) -> null;
 spawned_at(Micros) -> Micros div 1000000.
 
 -spec module_of(atom()) -> atom().
 module_of(Class) ->
-    try beamtalk_class_registry:whereis_class(Class) of
-        undefined -> undefined;
-        ClassPid -> beamtalk_object_class:module_name_safe(ClassPid)
-    catch
-        _:_ -> undefined
-    end.
+    beamtalk_class_registry:backing_module(Class).

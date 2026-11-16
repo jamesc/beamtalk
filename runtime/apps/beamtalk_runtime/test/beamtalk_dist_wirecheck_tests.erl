@@ -318,7 +318,7 @@ async_future_rejects(PeerNode) ->
         %% *throw* of `{future_rejected, Reason}`, not an `error/1` —
         %% and `Reason` here is the bare `#beamtalk_error{}` record
         %% `dispatch_user_method/4`'s handle_cast path rejects the future
-        %% with directly (`beamtalk_actor:handle_cast/2` →
+        %% with directly (`test_actor_host:handle_cast/2` →
         %% `beamtalk_future:reject(FuturePid, Reason)`), not map-wrapped —
         %% the map-wrap in (c)'s finding above is specific to the
         %% *sync* path's `beamtalk_exception_handler:reraise/1` at the

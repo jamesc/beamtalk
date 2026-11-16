@@ -620,18 +620,21 @@ fn test_native_facade_dispatch_extracts_pid() {
 }
 
 #[test]
-fn test_native_facade_dispatch_calls_sync_send() {
-    // Dispatch functions call beamtalk_actor:sync_send/3
+fn test_native_facade_dispatch_calls_sync_send_known_with_static_class() {
+    // BT-4949: dispatch functions call beamtalk_actor:sync_send_known/4 with the
+    // facade's static class, so the send never looks the class up from the pid
     let module = make_native_actor_module();
     let result = generate_module(&module, CodegenOptions::new("bt@test_native"));
     let code = result.unwrap();
     assert!(
-        code.contains("call 'beamtalk_actor':'sync_send'(Pid, 'doWork', [])"),
-        "dispatch_doWork should call sync_send with empty args. Got:\n{code}"
+        code.contains("call 'beamtalk_actor':'sync_send_known'(Pid, 'TestNative', 'doWork', [])"),
+        "dispatch_doWork should call sync_send_known with the static class and empty args. Got:\n{code}"
     );
     assert!(
-        code.contains("call 'beamtalk_actor':'sync_send'(Pid, 'process:', [Data@])"),
-        "dispatch_process: should call sync_send with [Data] args. Got:\n{code}"
+        code.contains(
+            "call 'beamtalk_actor':'sync_send_known'(Pid, 'TestNative', 'process:', [Data@])"
+        ),
+        "dispatch_process: should call sync_send_known with the static class and [Data] args. Got:\n{code}"
     );
 }
 
