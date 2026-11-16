@@ -409,15 +409,16 @@ topo_sort(Entries) ->
 -doc """
 Extract the `.bt` source file path from a loaded module's attributes.
 
-The compiler embeds `beamtalk_source = ["path/to/file.bt"]` in every user
-module.  Returns `undefined` for stdlib modules or older compiled modules.
+The compiler embeds `beamtalk_source = ["path/to/file.bt"]` (package-relative,
+BT-4940) in every user module. Returns it resolved to an absolute path, or
+`undefined` for stdlib modules or older compiled modules.
 """.
 -spec extract_source_path(module()) -> string() | undefined.
 extract_source_path(ModuleName) ->
     try
         Attrs = erlang:get_module_info(ModuleName, attributes),
         case proplists:get_value(beamtalk_source, Attrs) of
-            [Path] when is_list(Path) -> Path;
+            [Path] when is_list(Path) -> beamtalk_source_path:resolve(ModuleName, Path);
             _ -> undefined
         end
     catch

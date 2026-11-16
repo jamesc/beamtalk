@@ -245,6 +245,11 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
 
     // Extract optional source file path to embed as beamtalk_source attribute.
     let source_path = map_get(request, "source_path").and_then(term_to_string);
+    // BT-4940: embed a package-relative path, not the wire's absolute one
+    // (the absolute path is still what scopes this request above).
+    let embedded_path = source_path
+        .as_deref()
+        .map(crate::project_context::embedded_source_path);
 
     // Generate Core Erlang
     let warning_msgs = warnings_from_diag_infos(&warnings);
@@ -254,7 +259,7 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         .with_class_superclass_index(class_superclass_index)
         .with_class_hierarchy(pre_class_hierarchy)
         .with_pre_loaded_aliases(pre_loaded_aliases)
-        .with_source_path_opt(source_path.as_deref())
+        .with_source_path_opt(embedded_path.as_deref())
         .with_protocol_sources(codegen_protocol_sources);
     // Only trust `analysis` (computed pre-merge) when nothing was
     // merged into `module` afterward — see `had_standalone_method_definitions`'s
