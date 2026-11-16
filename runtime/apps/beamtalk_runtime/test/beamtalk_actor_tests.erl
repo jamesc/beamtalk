@@ -27,6 +27,30 @@ Tests all actor behaviors:
 %% test_wirecheck_actor.erl's method funs — must be exported.
 -export([bt3582_invoke_block_fun4/4, bt3582_invoke_block_fun2/2]).
 
+%%% Fixture (BT-4981)
+
+%% Module-level EUnit wrapper: every test in this module runs inside one fixture,
+%% so none of them depends on the stdlib an earlier module happened to leave
+%% registered (seeds 29, 37 and 59 of BT-4962 each killed this module that way).
+eunit_wrapper_(Tests) ->
+    {setup, fun fixture_setup/0, fun fixture_teardown/1, Tests}.
+
+%% The real stdlib supplies Object, Actor, ... (`Counter` etc. are the tests' own
+%% `test_actor_host` doubles). Returns the actors that already existed, so the
+%% teardown stops only the ones this module left behind.
+fixture_setup() ->
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
+    [Pid || {Pid, _Class, _StartedAt} <- beamtalk_actor_scan:scan_actors()].
+
+fixture_teardown(ActorsBefore) ->
+    Leaked = [
+        Pid
+     || {Pid, _Class, _StartedAt} <- beamtalk_actor_scan:scan_actors(),
+        not lists:member(Pid, ActorsBefore)
+    ],
+    lists:foreach(fun beamtalk_test_proc:stop/1, Leaked),
+    ok.
+
 %%% Tests
 
 %%% Initialization tests
