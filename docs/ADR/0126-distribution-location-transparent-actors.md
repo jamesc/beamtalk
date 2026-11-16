@@ -371,7 +371,9 @@ rule above did not hold.
 
 **One side has no start time.** This happens in a rolling upgrade (ADR 0125),
 when a node still on a runtime older than BT-4937 started one of the
-candidates, and for a `native:` actor. The side that has a start time is kept
+candidates (that node can still answer the read, it just finds no key), and
+for a `native:` actor. A peer too old to answer the read at all is a different
+case, covered below. The side that has a start time is kept
 and the other is stopped. The alternative, falling back to `random_exit_name/3`
 whenever either time is missing, would decide by node name for the whole
 upgrade window; keeping the side with a time is the only choice that is
