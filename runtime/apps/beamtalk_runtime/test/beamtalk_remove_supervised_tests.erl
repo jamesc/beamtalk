@@ -43,6 +43,7 @@ removal_test_() ->
         fun refuses_transient_child_that_exited_normally/0,
         fun removal_succeeds_once_child_is_deleted/0,
         fun refuses_factory_child_matched_by_pid/0,
+        {timeout, 30, fun refuses_when_supervisor_cannot_be_queried/0},
         fun unsupervised_class_still_removed/0
     ]}.
 
@@ -117,6 +118,19 @@ refuses_factory_child_matched_by_pid() ->
         ?assert(is_process_alive(Child))
     end).
 
+%% Fail closed: a supervisor that does not answer must refuse, not be skipped.
+refuses_when_supervisor_cannot_be_queried() ->
+    with_fixture(permanent, static, fun(#{class := C, sup := Sup, child := Child}) ->
+        true = erlang:suspend_process(Sup),
+        try
+            ?assertMatch(#beamtalk_error{}, remove_error(C))
+        after
+            erlang:resume_process(Sup)
+        end,
+        ?assert(is_process_alive(Child)),
+        ?assertNotEqual(undefined, beamtalk_class_registry:whereis_class(C))
+    end).
+
 unsupervised_class_still_removed() ->
     {C, M} = load_class(unsup),
     ?assertEqual(nil, beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(C)),
@@ -155,8 +169,12 @@ with_fixture(Restart, Shape, Fun) ->
             end
         end)
     after
-        catch unlink(Sup),
-        catch exit(Sup, shutdown),
+        try
+            unlink(Sup),
+            exit(Sup, shutdown)
+        catch
+            _:_ -> ok
+        end,
         timer:sleep(20),
         case beamtalk_class_registry:whereis_class(Class) of
             undefined -> ok;

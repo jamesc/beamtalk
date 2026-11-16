@@ -821,21 +821,48 @@ supervised_children_of(Module, Pids) ->
                     {ok, {Cls, _}} -> Cls;
                     _ -> nil
                 end,
-            Children =
-                try
-                    supervisor:which_children(SupPid)
-                catch
-                    _:_ -> []
-                end,
-            [
-                #{supervisor => SupClass, supervisor_pid => SupPid, id => Id, pid => P}
-             || {Id, P, _T, Mods} <- Children,
-                (is_list(Mods) andalso lists:member(Module, Mods)) orelse
-                    (is_pid(P) andalso lists:member(P, Pids))
-            ]
+            case children_or_unreachable(SupPid) of
+                dead ->
+                    [];
+                unreachable ->
+                    %% Fail closed: a supervisor that cannot be asked (timeout,
+                    %% or removal running inside it) may hold a child.
+                    [
+                        #{
+                            supervisor => SupClass,
+                            supervisor_pid => SupPid,
+                            id => unreachable,
+                            pid => unreachable
+                        }
+                    ];
+                Children ->
+                    matching_children(SupClass, SupPid, Children, Module, Pids)
+            end
         end,
         instance_pids()
     ).
+
+%% `which_children` with a bounded timeout. `dead` only for a gone supervisor.
+-spec children_or_unreachable(pid()) -> [tuple()] | dead | unreachable.
+children_or_unreachable(SupPid) when SupPid =:= self() ->
+    unreachable;
+children_or_unreachable(SupPid) ->
+    try
+        gen_server:call(SupPid, which_children, 5000)
+    catch
+        exit:{noproc, _} -> dead;
+        exit:{normal, _} -> dead;
+        exit:{shutdown, _} -> dead;
+        _:_ -> unreachable
+    end.
+
+matching_children(SupClass, SupPid, Children, Module, Pids) ->
+    [
+        #{supervisor => SupClass, supervisor_pid => SupPid, id => Id, pid => P}
+     || {Id, P, _T, Mods} <- Children,
+        (is_list(Mods) andalso lists:member(Module, Mods)) orelse
+            (is_pid(P) andalso lists:member(P, Pids))
+    ].
 
 -doc """
 Build the `Kind` error (`supervisor_start_failed` for `supervise`,

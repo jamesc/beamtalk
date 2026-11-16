@@ -2067,7 +2067,13 @@ is_stdlib_module_name(Module) ->
 -doc """
 BT-4936: raise a structured error (nothing killed, nothing removed) when a
 supervisor holds a child of the class: a static spec, a dynamic supervisor
-child, or a `withClassMethod:` factory child.
+child, or a `withClassMethod:` factory child. A supervisor that cannot be
+queried (timeout, or removal running inside it) also refuses (fail closed).
+
+Known, accepted window: the check runs once, up front. A dynamic child
+started by another process between this check and the module delete is not
+caught; closing it would need supervisors to refuse starts of a class under
+removal.
 """.
 -spec refuse_if_supervised(atom(), module()) -> ok.
 refuse_if_supervised(ClassName, Module) ->
@@ -2100,6 +2106,7 @@ refuse_if_supervised(ClassName, Module) ->
 supervisor_label(nil, Pid) -> io_lib:format("~p", [Pid]);
 supervisor_label(Sup, _Pid) -> atom_to_list(Sup).
 
+child_label(unreachable) -> "a supervisor that could not be queried";
 child_label(undefined) -> "dynamic child";
 child_label(Id) -> io_lib:format("child id ~tp", [Id]).
 
@@ -2109,15 +2116,11 @@ class_actor_pids(ClassName) ->
         undefined ->
             [];
         RegistryPid ->
-            try gen_server:call(RegistryPid, list_actors) of
-                Actors ->
-                    [
-                        maps:get(pid, Meta)
-                     || Meta <- Actors, maps:get(class, Meta, undefined) =:= ClassName
-                    ]
-            catch
-                _:_ -> []
-            end
+            Actors = gen_server:call(RegistryPid, list_actors),
+            [
+                maps:get(pid, Meta)
+             || Meta <- Actors, maps:get(class, Meta, undefined) =:= ClassName
+            ]
     end.
 
 -doc """

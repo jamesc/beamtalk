@@ -1572,24 +1572,45 @@ unload_modules_for_path(Path, SessionPid, ModToClass, LoadedModules) ->
                 true ->
                     %% Try to find class name for this module and remove it.
                     % elp:fixme W0032 maps:find with complex branch logic
-                    case maps:find(ModuleName, ModToClass) of
-                        {ok, ClassNameBin} ->
-                            case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
-                                {ok, ClassName} ->
-                                    case beamtalk_runtime_api:remove_class_from_system(ClassName) of
-                                        {ok, _} -> ok;
-                                        {error, _} -> ok
-                                    end;
-                                {error, badarg} ->
-                                    ok
+                    Removed =
+                        case maps:find(ModuleName, ModToClass) of
+                            {ok, ClassNameBin} ->
+                                case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
+                                    {ok, ClassName} ->
+                                        case
+                                            beamtalk_runtime_api:remove_class_from_system(ClassName)
+                                        of
+                                            {ok, _} ->
+                                                true;
+                                            {error, Reason} ->
+                                                %% BT-4936: a refusal (e.g. the class is
+                                                %% supervised) leaves the class loaded, so
+                                                %% keep the module registered and tracked.
+                                                ?LOG_WARNING(
+                                                    "Class removal refused during sync",
+                                                    #{
+                                                        class => ClassName,
+                                                        reason => Reason,
+                                                        domain => [beamtalk, runtime]
+                                                    }
+                                                ),
+                                                false
+                                        end;
+                                    {error, badarg} ->
+                                        true
+                                end;
+                            error ->
+                                true
+                        end,
+                    case Removed of
+                        true ->
+                            beamtalk_workspace_meta:unregister_module(ModuleName),
+                            case SessionPid of
+                                undefined -> ok;
+                                _ -> beamtalk_repl_shell:remove_from_tracker(SessionPid, ModuleName)
                             end;
-                        error ->
+                        false ->
                             ok
-                    end,
-                    beamtalk_workspace_meta:unregister_module(ModuleName),
-                    case SessionPid of
-                        undefined -> ok;
-                        _ -> beamtalk_repl_shell:remove_from_tracker(SessionPid, ModuleName)
                     end;
                 false ->
                     ok
