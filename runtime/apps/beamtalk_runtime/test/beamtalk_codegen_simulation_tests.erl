@@ -40,7 +40,7 @@ runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript
 shadow_actor.bt, coordinate_actor.bt), following the same real-fixture
 precedent used elsewhere in this module.
 The async future-cast protocol section is documented in place as staying
-simulated: it exercises a `beamtalk_actor:handle_cast/2` code path
+simulated: it exercises a `test_actor_host:handle_cast/2` code path
 (`{Selector, Args, FuturePid}`) that generated per-class `handle_cast/2`
 callbacks do not implement, so no compiled source construct reaches it.
 
@@ -71,7 +71,7 @@ See also: beamtalk_actor for the runtime implementation
 %% (crates/beamtalk-core/src/codegen/core_erlang/gen_server/*); they never
 %% store a `'__methods__'` map of funs in actor state. That funs-table shape
 %% is a *runtime* representation: it is what `beamtalk_actor:dispatch/4` and
-%% `beamtalk_actor:handle_cast/2`'s async future-cast branch
+%% `test_actor_host:handle_cast/2`'s async future-cast branch
 %% (`{Selector, Args, FuturePid}`) operate on directly, and it is the same
 %% shape produced by Beamtalk's dynamic class-building API
 %% (`Object classBuilder ... classMethods: #{...}; register`).
@@ -85,7 +85,7 @@ See also: beamtalk_actor for the runtime implementation
 %%
 %% What is kept here, and why: the async future-cast protocol
 %% (`{Selector, Args, FuturePid}` sent via `gen_server:cast/2`) is only
-%% implemented by `beamtalk_actor:handle_cast/2`'s generic fallback clause.
+%% implemented by `test_actor_host:handle_cast/2`'s generic fallback clause.
 %% A real compiled actor's generated `handle_cast/2`
 %% (crates/.../gen_server/callbacks.rs `generate_handle_cast`) only matches
 %% the `{cast, Selector, Args}` fire-and-forget tag; a bare
@@ -272,7 +272,7 @@ late_slot_spawn_with_supplies_the_slot_test() ->
 %%% ===========================================================================
 %%%
 %%% Kept on counter_module_state/1 deliberately. This section
-%%% exercises `beamtalk_actor:handle_cast/2`'s `{Selector, Args, FuturePid}`
+%%% exercises `test_actor_host:handle_cast/2`'s `{Selector, Args, FuturePid}`
 %%% branch, which is only reachable through the generic actor callback
 %%% module — real compiled classes' generated `handle_cast/2` does not
 %%% implement this cast shape (verified empirically; see the
@@ -287,7 +287,7 @@ late_slot_spawn_with_supplies_the_slot_test() ->
 async_message_creates_future_test() ->
     %% Test: Async message send creates a future
     State = counter_module_state(#{}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Simulate: future := actor increment
     Future = beamtalk_future:new(),
@@ -301,7 +301,7 @@ async_message_creates_future_test() ->
 async_message_uses_cast_tuple_test() ->
     %% Test: gen_server:cast with {Selector, Args, FuturePid} tuple
     State = counter_module_state(#{value => 0}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     Future = beamtalk_future:new(),
     %% This is the exact protocol the compiler generates
@@ -316,7 +316,7 @@ async_message_uses_cast_tuple_test() ->
 async_message_resolves_after_method_completes_test() ->
     %% Test: Future resolution after method completes
     State = counter_module_state(#{value => 10}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Send async increment
     Future = beamtalk_future:new(),
@@ -337,7 +337,7 @@ async_message_resolves_after_method_completes_test() ->
 async_await_on_pending_future_blocks_test() ->
     %% Test: await on a pending future blocks until resolved
     State = counter_module_state(#{value => 5}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     Future = beamtalk_future:new(),
     Parent = self(),
@@ -381,7 +381,7 @@ async_await_on_pending_future_blocks_test() ->
 async_await_on_resolved_future_returns_immediately_test() ->
     %% Test: await on an already-resolved future returns immediately
     State = counter_module_state(#{value => 20}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Send async message and await to ensure it's resolved
     Future = beamtalk_future:new(),
@@ -405,7 +405,7 @@ async_await_on_resolved_future_returns_immediately_test() ->
 async_future_rejection_on_method_error_test() ->
     %% Test: Future rejection when method returns error
     State = counter_module_state(#{value => 10}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Send async message that will error (divide by zero)
     Future = beamtalk_future:new(),
@@ -421,7 +421,7 @@ async_future_rejection_on_method_error_test() ->
 async_multiple_concurrent_messages_test() ->
     %% Test: Multiple concurrent async messages to same actor
     State = counter_module_state(#{value => 0}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Send 5 concurrent increment messages
     Futures = [
@@ -448,7 +448,7 @@ async_multiple_concurrent_messages_test() ->
 async_concurrent_messages_order_preserved_test() ->
     %% Test: Message order is preserved even with async
     State = counter_module_state(#{value => 100}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Send multiple async messages rapidly
     F1 = beamtalk_future:new(),
@@ -476,7 +476,7 @@ async_chained_operations_test() ->
     %% Test: Chained async operations (nested futures)
     %% Simulates: result1 := actor increment await. result2 := actor increment await.
     State = counter_module_state(#{value => 0}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% First async increment
     Future1 = beamtalk_future:new(),
@@ -497,8 +497,8 @@ async_nested_futures_different_actors_test() ->
     %% Simulates: actor1 increment await + actor2 increment await
     State1 = counter_module_state(#{value => 10}),
     State2 = counter_module_state(#{value => 20}),
-    {ok, Actor1} = gen_server:start_link(beamtalk_actor, State1, []),
-    {ok, Actor2} = gen_server:start_link(beamtalk_actor, State2, []),
+    {ok, Actor1} = gen_server:start_link(test_actor_host, State1, []),
+    {ok, Actor2} = gen_server:start_link(test_actor_host, State2, []),
 
     %% Send async messages to both actors
     F1 = beamtalk_future:new(),
@@ -521,7 +521,7 @@ async_nested_futures_different_actors_test() ->
 async_mixed_with_sync_messages_test() ->
     %% Test: Mixing synchronous and asynchronous messages
     State = counter_module_state(#{value => 0}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Sync increment
     ?assertEqual(1, gen_server:call(Actor, {increment, []})),
@@ -542,7 +542,7 @@ async_mixed_with_sync_messages_test() ->
 async_future_timeout_behavior_test() ->
     %% Test: Future await with timeout works correctly
     State = counter_module_state(#{value => 0}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Create a future but DON'T send the message
     Future = beamtalk_future:new(),
@@ -566,7 +566,7 @@ async_future_timeout_behavior_test() ->
 async_multiple_awaits_same_future_test() ->
     %% Test: Multiple processes can await the same future
     State = counter_module_state(#{value => 0}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     Future = beamtalk_future:new(),
     Parent = self(),
