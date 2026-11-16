@@ -799,7 +799,9 @@ Walks all live supervisor instances (`instance_pids/0`, which includes nested
 supervisors, static and dynamic) and returns one entry per child whose
 `modules` list contains `Module`, in any state (running, restarting,
 stopped). Used by `removeFromSystem` to refuse removing a class that a
-supervisor still holds. An unreachable supervisor is skipped.
+supervisor still holds. A dead supervisor is skipped; one that cannot be queried (timeout, or
+the caller is that supervisor) yields an entry with `id => unreachable`, so
+the caller fails closed.
 """.
 -spec supervised_children_of(module()) ->
     [#{supervisor := atom() | nil, supervisor_pid := pid(), id := term(), pid := term()}].
@@ -850,10 +852,15 @@ children_or_unreachable(SupPid) ->
     try
         gen_server:call(SupPid, which_children, 5000)
     catch
-        exit:{noproc, _} -> dead;
-        exit:{normal, _} -> dead;
-        exit:{shutdown, _} -> dead;
-        _:_ -> unreachable
+        exit:{noproc, _} ->
+            dead;
+        _:_ ->
+            %% Decide by liveness, not exit reason: a supervisor that was
+            %% killed or crashed can still be listed in pg for a moment.
+            case is_process_alive(SupPid) of
+                false -> dead;
+                true -> unreachable
+            end
     end.
 
 matching_children(SupClass, SupPid, Children, Module, Pids) ->

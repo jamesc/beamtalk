@@ -1582,12 +1582,15 @@ unload_modules_for_path(Path, SessionPid, ModToClass, LoadedModules) ->
                                         of
                                             {ok, _} ->
                                                 true;
+                                            {error, #beamtalk_error{kind = class_not_found}} ->
+                                                %% Already gone: nothing left to keep registered.
+                                                true;
                                             {error, Reason} ->
                                                 %% BT-4936: a refusal (e.g. the class is
                                                 %% supervised) leaves the class loaded, so
                                                 %% keep the module registered and tracked.
                                                 ?LOG_WARNING(
-                                                    "Class removal refused during sync",
+                                                    "Class removal refused during sync; the class stays loaded until removed by hand",
                                                     #{
                                                         class => ClassName,
                                                         reason => Reason,
