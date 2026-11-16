@@ -4,11 +4,12 @@
 //! BT-4930: what `Foo >> sel => self delegate` compiles to on a `native:`
 //! class, for the three ways the method can be written.
 //!
-//! These tests PIN TODAY'S BEHAVIOUR; they do not endorse it. The inline method
-//! and the same-file extension are lowered through the backing module. The
-//! cross-file extension is a foreign extension fun in which `self delegate` is
-//! a plain send. BT-4930 decides whether that is right; whoever resolves it
-//! flips the `PIN-BUG(BT-4930)` assertion.
+//! The inline method and the same-file extension are lowered through the
+//! backing module. The cross-file extension is a foreign extension fun in which
+//! `self delegate` is a plain send. That is why semantic analysis rejects the
+//! cross-file form with an error (`check_cross_file_native_delegate`), so this
+//! shape is never built from a program that compiles; the test pins what
+//! codegen does if it is reached, and the validator's reasoning with it.
 
 use std::collections::HashMap;
 
@@ -69,7 +70,7 @@ fn same_file_extension_calls_the_backing_module() {
 
 #[test]
 fn cross_file_extension_is_a_plain_send_of_delegate() {
-    // PIN-BUG(BT-4930): no `native_call` to `host_backing`; `delegate` is sent
+    // Codegen contract the BT-4930 error relies on: no `native_call` to `host_backing`; `delegate` is sent
     // to the receiver (`bt@xf@host:dispatch('delegate', [], Self)` when it is
     // a Host, else `beamtalk_message_dispatch:send`). At run time that reaches
     // the `Object>>delegate` sentinel, which raises `user_error`

@@ -399,6 +399,9 @@ pub(crate) fn parse_class_info_from_meta_term(
     let is_sealed = map_get(m, "is_sealed")
         .and_then(term_to_bool)
         .unwrap_or(false);
+    let is_native = map_get(m, "native")
+        .and_then(term_to_bool)
+        .unwrap_or(false);
     let is_abstract = map_get(m, "is_abstract")
         .and_then(term_to_bool)
         .unwrap_or(false);
@@ -487,7 +490,9 @@ pub(crate) fn parse_class_info_from_meta_term(
         is_internal,
         package,
         is_value,
-        is_native: false, // BEAM cache doesn't carry native flag; re-derived at parse time
+        // BT-4930: the flag only (not the backing module name). Absent in
+        // `.beam` files built before it was added, which decode as non-native.
+        is_native,
         // the wire doesn't carry the constructor anchor either;
         // binary-only cross-package classes conservatively miss out on
         // direct constructor calls (safe `class_send` fallback).

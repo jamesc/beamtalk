@@ -506,7 +506,7 @@ impl CoreErlangGenerator {
         provenance: super::super::class_meta::MetaProvenance<'_>,
     ) -> Document<'static> {
         let native_entries = docvec![
-            ",\n      'native' => 'true'",
+            Self::native_flag_entry(),
             ",\n      'backing_module' => ",
             leaf::atom(backing_module.to_string()),
         ];

@@ -136,12 +136,12 @@ pub(crate) fn check_native_delegate_return_type(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // Instance methods, inline and standalone (Tonel-style
-    // `MyActor >> selector => self delegate`). Only native classes (a backing
-    // module) are checked: on non-native classes `self delegate` is a regular
+    // Instance methods, inline or folded same-file extensions (a cross-file
+    // standalone method is rejected by `check_cross_file_native_delegate`
+    // instead, BT-4930). Only native classes (a backing module) are checked: on non-native classes `self delegate` is a regular
     // message send to Actor.delegate (which raises at runtime), so no special
     // warning is needed.
-    for (class_name, side, method) in module.methods_with_owner() {
+    for (class_name, side, method) in inline_methods_with_owner(module) {
         if side == MethodSide::Instance
             && hierarchy.is_native(class_name)
             && method.is_self_delegate()
@@ -173,11 +173,64 @@ pub(crate) fn check_native_delegate_reserved_word(
         hierarchy.is_native(class_name) && !hierarchy.is_actor_subclass(class_name)
     };
 
-    // Inline and standalone (Tonel-style `MyClass >> sel => self delegate`)
-    // methods, instance- and class-side.
-    for (class_name, _side, method) in module.methods_with_owner() {
+    // Inline methods and same-file extensions (folded into the class body),
+    // instance- and class-side. A cross-file `Foo >> sel => self delegate` is
+    // not a native delegate (BT-4930) and gets its own error instead.
+    for (class_name, _side, method) in inline_methods_with_owner(module) {
         if is_native_object(class_name) && method.is_self_delegate() {
             check_selector_reserved_word(&method.selector, method.span, diagnostics);
+        }
+    }
+}
+
+/// Inline methods only, with their owner: what codegen lowers through the
+/// backing module. Same-file extensions are already folded into the class body
+/// by the time the validators run, so the standalone definitions left in
+/// `module.method_definitions` are the cross-file ones.
+fn inline_methods_with_owner(
+    module: &Module,
+) -> impl Iterator<Item = (&str, MethodSide, &MethodDefinition)> {
+    module.methods_with_owner().take(
+        module
+            .classes
+            .iter()
+            .map(|c| c.methods.len() + c.class_methods.len())
+            .sum(),
+    )
+}
+
+/// BT-4930: error on a cross-file `Foo >> sel => self delegate` where `Foo` is
+/// a `native:` class.
+///
+/// Codegen lowers `self delegate` through the backing module only for methods
+/// folded into the class body (inline methods and same-file extensions). A
+/// cross-file extension compiles to a foreign extension fun where `self
+/// delegate` is a plain send that resolves to the `Object>>delegate` sentinel
+/// and raises at run time, so the definition can never work. The native
+/// delegate checks (return type, reserved word) do not run for this form.
+pub(crate) fn check_cross_file_native_delegate(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for def in &module.method_definitions {
+        let class_name = def.class_name.name.as_str();
+        if hierarchy.is_native(class_name) && def.method.is_self_delegate() {
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "`self delegate` method `{}` on native class `{class_name}` is defined \
+                         outside the class's own file and will not reach the backing module",
+                        def.method.selector.name()
+                    ),
+                    def.method.head_span(),
+                )
+                .with_hint(format!(
+                    "`self delegate` only reaches the backing module when the method is in the \
+                     same file as `{class_name}`. Define the method in the file that declares \
+                     `{class_name}`."
+                )),
+            );
         }
     }
 }

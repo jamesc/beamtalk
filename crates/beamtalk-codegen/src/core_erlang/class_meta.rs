@@ -215,10 +215,22 @@ impl CoreErlangGenerator {
             module,
             include_standalone,
             synthesize_supervision_spec,
-            Document::Nil,
+            if class.backing_module.is_some() {
+                Self::native_flag_entry()
+            } else {
+                Document::Nil
+            },
             package_name,
             provenance,
         )
+    }
+
+    /// BT-4930: the `'native' => 'true'` meta entry, read back by `decode.rs` so a
+    /// compiled dependency's `ClassInfo` is native. Shared by the native facade
+    /// and the standard builder; absent (not `'false'`) for non-native classes
+    /// so their meta output is unchanged.
+    pub(super) fn native_flag_entry() -> Document<'static> {
+        Document::Str(",\n      'native' => 'true'")
     }
 
     /// Like `build_meta_map_doc` but appends extra map entries before closing the map.

@@ -221,6 +221,10 @@ This is the same first-keyword convention as inline FFI (`(Erlang mod) do: x wit
 
 `native:` delegation follows the class declaration, **not** inheritance. A subclass that does not redeclare `native:` inherits no backing module and cannot add `self delegate` methods of its own; a subclass that redeclares `native: other_mod` uses `other_mod` only for the `self delegate` methods it declares.
 
+### `self delegate` must be in the class's own file (BT-4930)
+
+`self delegate` reaches the backing module only for a method written in the class body or as a `Foo >> sel` extension in the same file as `Foo`. A `Foo >> sel => self delegate` extension in a different file, on a `native:` class (an `Object` or an `Actor`, instance or class side), is a compile error at the definition: "`self delegate` method `sel` on native class `Foo` is defined outside the class's own file and will not reach the backing module". Before, it compiled and always raised "delegate called on a non-native Object" when called. Define the method in the file that declares the class. The return-type warning and the reserved-word error do not run for the cross-file form; only this error does. The check also applies to a native class that comes from a compiled dependency, as long as that dependency was built by a compiler that records the `native` flag in the class metadata; an older `.beam` is treated as non-native and gets no check.
+
 ### Reserved-word constraint
 
 If a method's first keyword is an Erlang reserved word (`after and andalso band begin bnot bor bsl bsr bxor case catch cond div end fun if let not of or orelse receive rem try when xor`), codegen emits a compile error rather than producing invalid output like `mod:receive(Self, X)`. Use inline FFI with an explicitly-named function for those (rare) cases.
