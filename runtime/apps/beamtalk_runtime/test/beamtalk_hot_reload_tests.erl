@@ -267,9 +267,16 @@ field_migration_test_() ->
         ]
     end}.
 
+%% `init/1` writes the actor marker into the calling process; run it elsewhere so
+%% the shared test process never looks like an actor to a scan (ADR 0150).
+counter_defaults() ->
+    beamtalk_test_proc:in_fresh_process(fun() ->
+        'bt@counter':init(#{'__skip_initialize__' => true})
+    end).
+
 test_field_migration_adds_new_fields() ->
     OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => 'bt@counter', value => 42},
-    {ok, Defaults} = 'bt@counter':init(#{'__skip_initialize__' => true}),
+    {ok, Defaults} = counter_defaults(),
     {ok, NewState} = beamtalk_hot_reload:code_change(
         v1, OldState, #{module => 'bt@counter'}
     ),
@@ -279,7 +286,7 @@ test_field_migration_adds_new_fields() ->
     ?assertEqual(maps:get('__class_mod__', Defaults), maps:get('__class_mod__', NewState)).
 
 test_field_migration_with_legacy_class_key() ->
-    {ok, Defaults} = 'bt@counter':init(#{'__skip_initialize__' => true}),
+    {ok, Defaults} = counter_defaults(),
     OldState = #{'__class__' => 'Counter', '__class_mod__' => 'bt@counter', value => 10},
     {ok, NewState} = beamtalk_hot_reload:code_change(
         v1, OldState, #{module => 'bt@counter'}
@@ -322,7 +329,7 @@ test_field_migration_drops_removed_fields() ->
     ?assertEqual(5, maps:get(value, NewState)).
 
 test_field_migration_preserves_internal_keys() ->
-    {ok, Defaults} = 'bt@counter':init(#{'__skip_initialize__' => true}),
+    {ok, Defaults} = counter_defaults(),
     OldState = #{'$beamtalk_class' => 'Counter', '__class_mod__' => old_mod, value => 1},
     {ok, NewState} = beamtalk_hot_reload:code_change(
         v1, OldState, #{module => 'bt@counter'}

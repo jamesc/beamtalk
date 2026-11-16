@@ -5,23 +5,18 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
-%%% The actor registry is owned by beamtalk_runtime (BT-3633); the workspace
-%%% app only installs the `actor_spawned_hook` for workspace_meta bookkeeping.
+%%% ADR 0150 (BT-4950): the workspace app no longer installs an
+%%% `actor_spawned_hook` into beamtalk_runtime. `beamtalk_workspace_meta` learns
+%%% about spawned actors from the `ActorSpawned` announcement
+%%% (see beamtalk_workspace_meta_tests).
 
-workspace_app_start_sets_hook_env_test() ->
+workspace_app_start_installs_no_spawn_hook_test() ->
     OldHook = application:get_env(beamtalk_runtime, actor_spawned_hook),
     application:unset_env(beamtalk_runtime, actor_spawned_hook),
-    %% start/2 installs the hook before starting the supervisor tree, so the
-    %% assertion holds even when another suite in the same EUnit VM left
-    %% `beamtalk_workspace_app_sup` running (`already_started`); only a
-    %% supervisor this test started is stopped again.
     StartResult = beamtalk_workspace_app:start(normal, []),
     try
         ?assertMatch({ok, _}, normalize_start(StartResult)),
-        ?assertEqual(
-            {ok, {beamtalk_workspace_meta, on_actor_spawned}},
-            application:get_env(beamtalk_runtime, actor_spawned_hook)
-        )
+        ?assertEqual(undefined, application:get_env(beamtalk_runtime, actor_spawned_hook))
     after
         case StartResult of
             {ok, SupPid} ->
@@ -44,10 +39,3 @@ workspace_app_start_sets_hook_env_test() ->
 normalize_start({ok, Pid}) -> {ok, Pid};
 normalize_start({error, {already_started, Pid}}) -> {ok, Pid};
 normalize_start(Other) -> Other.
-
-workspace_app_stop_unsets_hook_env_test() ->
-    application:set_env(
-        beamtalk_runtime, actor_spawned_hook, {beamtalk_workspace_meta, on_actor_spawned}
-    ),
-    ok = beamtalk_workspace_app:stop(undefined),
-    ?assertEqual(undefined, application:get_env(beamtalk_runtime, actor_spawned_hook)).

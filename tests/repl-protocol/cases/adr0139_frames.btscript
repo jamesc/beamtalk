@@ -98,7 +98,7 @@ Adr0139Hpack fromErlang
 // => CONTAINS: at maps:get/2  [maps:get/2]
 
 :error-frames
-// => CONTAINS: [beamtalk_repl_eval:execute_and_process/6]
+// => CONTAINS: [beamtalk_repl_eval:execute_and_process/5]
 
 :raw-mfa off
 // => raw-mfa off

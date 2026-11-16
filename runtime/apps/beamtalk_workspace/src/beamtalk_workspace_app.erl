@@ -80,15 +80,9 @@ check covers both.
 ]).
 -endif.
 
--doc "Start the workspace application and register actor spawn callback.".
+-doc "Start the workspace application.".
 -spec start(application:start_type(), term()) -> {ok, pid()} | {error, term()}.
 start(_StartType, _StartArgs) ->
-    %% Register the actor-spawned hook with the runtime-owned actor registry
-    %% This allows the runtime to notify us when actors spawn, enabling
-    %% workspace-wide tracking without creating a compile-time dependency
-    application:set_env(
-        beamtalk_runtime, actor_spawned_hook, {beamtalk_workspace_meta, on_actor_spawned}
-    ),
     %% The class-loaded push stream now rides the SystemAnnouncer bus
     %% (`ClassLoaded` / `ClassRemoved` announcements from `beamtalk_object_class`,
     %% subscribed via `beamtalk_repl_subscriptions`), so the legacy
@@ -325,11 +319,9 @@ activate_release_modules() ->
     end,
     ok.
 
--doc "Stop the workspace application and unregister actor spawn callback.".
+-doc "Stop the workspace application.".
 -spec stop(term()) -> ok.
 stop(_State) ->
-    %% Unregister actor spawn callback
-    application:unset_env(beamtalk_runtime, actor_spawned_hook),
     %% Remove WebSocket log handler
     _ = logger:remove_handler(beamtalk_ws_log),
     ok.

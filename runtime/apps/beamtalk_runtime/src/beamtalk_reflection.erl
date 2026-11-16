@@ -30,6 +30,7 @@ See also: beamtalk_tagged_map
     clear_field/2,
     inspect_string/1,
     source_file_from_module/1,
+    embedded_source_from_module/1,
     path_to_utf8/1,
     is_predefined_function/1
 ]).
@@ -183,6 +184,11 @@ Uses the erlang:get_module_info/2 BIF rather than Mod:module_info/1 so it
 also works for modules compiled before BT-4067, which did not export
 module_info/0,1. The BIF works regardless of exports.
 Returns nil for stdlib/bootstrap/dynamically-created classes.
+
+The attribute holds a package-relative path (BT-4940); this returns it
+resolved to an absolute path via `beamtalk_source_path:resolve/2`, because
+every caller wants the file on disk. `embedded_source_from_module/1` returns
+the path exactly as embedded, for display.
 """.
 -spec source_file_from_module(atom()) -> binary() | 'nil'.
 source_file_from_module(ModuleName) ->
@@ -192,12 +198,42 @@ source_file_from_module(ModuleName) ->
                 %% Binary and list attributes take the same conversion, so a
                 %% binary that is not valid UTF-8 is `nil` here too (BT-4370).
                 {beamtalk_source, [Path]} when is_binary(Path); is_list(Path) ->
+                    absolute_utf8(ModuleName, Path);
+                _ ->
+                    nil
+            end
+    catch
+        error:badarg -> nil
+    end.
+
+-doc """
+The `beamtalk_source` path exactly as embedded (package-relative, `/`
+separators), or nil. For display; use `source_file_from_module/1` to open it.
+""".
+-spec embedded_source_from_module(atom()) -> binary() | 'nil'.
+embedded_source_from_module(ModuleName) ->
+    try erlang:get_module_info(ModuleName, attributes) of
+        Attrs ->
+            case lists:keyfind(beamtalk_source, 1, Attrs) of
+                {beamtalk_source, [Path]} when is_binary(Path); is_list(Path) ->
                     path_to_utf8(Path);
                 _ ->
                     nil
             end
     catch
         error:badarg -> nil
+    end.
+
+-spec absolute_utf8(atom(), binary() | string()) -> binary() | 'nil'.
+absolute_utf8(ModuleName, Path) ->
+    case path_to_utf8(Path) of
+        nil ->
+            nil;
+        Utf8 ->
+            case unicode:characters_to_binary(beamtalk_source_path:resolve(ModuleName, Utf8)) of
+                Bin when is_binary(Bin) -> Bin;
+                _ -> Utf8
+            end
     end.
 
 %%% ============================================================================

@@ -532,7 +532,9 @@ extract_source_path_with_attribute_test() ->
     {ok, Mod, Bin} = compile:forms(Forms, [return_errors]),
     {module, Mod} = code:load_binary(Mod, "bt_test_source_attr_mod.beam", Bin),
     try
-        ?assertEqual("src/Foo.bt", beamtalk_module_activation:extract_source_path(Mod))
+        %% BT-4940: the embedded package-relative path is resolved at run time.
+        Path = beamtalk_module_activation:extract_source_path(Mod),
+        ?assert(lists:suffix("src/Foo.bt", Path))
     after
         purge_mod(Mod)
     end.

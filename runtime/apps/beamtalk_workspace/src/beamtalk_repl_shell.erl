@@ -294,20 +294,6 @@ init({SessionId, Meta}) when is_map(Meta) ->
     %% resolved lazily at eval time via beamtalk_workspace:resolve_name/2.
     State0c = beamtalk_repl_state:new(undefined, 0, #{client_meta => Meta}),
 
-    %% Get workspace-wide actor registry
-    %% The registry is registered globally in the workspace
-    RegistryPid =
-        case whereis(beamtalk_actor_registry) of
-            undefined ->
-                ?LOG_WARNING("Actor registry not found for session ~p", [SessionId], #{
-                    domain => [beamtalk, runtime]
-                }),
-                undefined;
-            Pid ->
-                Pid
-        end,
-    State1 = beamtalk_repl_state:set_actor_registry(RegistryPid, State0c),
-
     %% Join class-removed notification group so this session is notified
     %% when a class is removed via Beamtalk code (ClassName removeFromSystem).
     %% ensure_pg_started/0 mirrors beamtalk_object_class.erl — guarantees pg is
@@ -315,7 +301,7 @@ init({SessionId, Meta}) when is_map(Meta) ->
     beamtalk_class_registry:ensure_pg_started(),
     pg:join(beamtalk_repl_shells, self()),
 
-    {ok, {SessionId, State1, undefined}}.
+    {ok, {SessionId, State0c, undefined}}.
 
 handle_call({eval, Expression}, From, {SessionId, State, undefined}) ->
     %% Spawn eval in a monitored worker process so it can be interrupted

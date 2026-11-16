@@ -112,14 +112,9 @@ validate_actor_pid(PidStr) ->
 
 -spec is_known_actor(pid()) -> boolean().
 is_known_actor(Pid) when is_pid(Pid) ->
-    case whereis(beamtalk_actor_registry) of
-        undefined ->
-            false;
-        RegistryPid ->
-            case beamtalk_repl_actors:get_actor(RegistryPid, Pid) of
-                {ok, _} -> true;
-                {error, not_found} -> false
-            end
+    case beamtalk_workspace_actors:lookup(Pid) of
+        {ok, _} -> true;
+        {error, not_found} -> false
     end.
 
 -doc "Structured error for a pid param that is not a (known) actor.".

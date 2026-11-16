@@ -203,6 +203,7 @@ const HAND_WRITTEN: &[&str] = &[
     "_CastState",
     "_CastStateChanged",
     "_ChkVal",
+    "_ClassMarker",
     "_ClassRegResult",
     "_ClassSelf",
     "_ClearStack",

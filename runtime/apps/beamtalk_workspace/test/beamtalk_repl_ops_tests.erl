@@ -32,12 +32,12 @@ dispatch_eval_empty_code_returns_error_term_test() ->
     Result = beamtalk_repl_ops:dispatch(<<"eval">>, #{<<"code">> => <<>>}, Msg, self()),
     ?assertMatch({error, #beamtalk_error{}}, Result).
 
-dispatch_actors_no_registry_returns_actors_term_test() ->
+dispatch_actors_returns_actors_term_test() ->
     Msg = beamtalk_test_repl:make_msg(<<"actors">>, <<"id-1">>, undefined),
-    %% No beamtalk_actor_registry registered → empty actor list term.
-    beamtalk_test_actor_registry:without_registry(fun() ->
-        ?assertEqual({actors, []}, beamtalk_repl_ops:dispatch(<<"actors">>, #{}, Msg, self()))
-    end).
+    %% One scan; no actor list process needed (ADR 0150).
+    ?assertMatch(
+        {actors, L} when is_list(L), beamtalk_repl_ops:dispatch(<<"actors">>, #{}, Msg, self())
+    ).
 
 dispatch_inspect_invalid_pid_returns_error_term_test() ->
     Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"id-1">>, undefined),
@@ -160,14 +160,12 @@ encode_actors_term_matches_handle_op_json_test() ->
     %% Encoding a dispatched term at the edge must reproduce exactly what the
     %% WebSocket transport returns via handle_op/4 (wire format unchanged).
     Msg = beamtalk_test_repl:make_msg(<<"actors">>, <<"id-1">>, undefined),
-    beamtalk_test_actor_registry:without_registry(fun() ->
-        Term = beamtalk_repl_ops:dispatch(<<"actors">>, #{}, Msg, self()),
-        Encoded = beamtalk_repl_ops:encode(Term, Msg),
-        ViaServer = beamtalk_repl_server:handle_op(<<"actors">>, #{}, Msg, self()),
-        ?assertEqual(ViaServer, Encoded),
-        Decoded = json:decode(Encoded),
-        ?assertEqual([], maps:get(<<"actors">>, Decoded))
-    end).
+    Term = beamtalk_repl_ops:dispatch(<<"actors">>, #{}, Msg, self()),
+    Encoded = beamtalk_repl_ops:encode(Term, Msg),
+    ViaServer = beamtalk_repl_server:handle_op(<<"actors">>, #{}, Msg, self()),
+    ?assertEqual(ViaServer, Encoded),
+    Decoded = json:decode(Encoded),
+    ?assert(is_list(maps:get(<<"actors">>, Decoded))).
 
 encode_error_term_produces_error_json_test() ->
     Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"id-1">>, undefined),
