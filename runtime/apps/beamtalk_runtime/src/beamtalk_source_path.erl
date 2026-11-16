@@ -127,17 +127,17 @@ beam_root(Module) ->
 read_marker(EbinDir) ->
     case file:read_file(filename:join(EbinDir, ".beamtalk-source-root")) of
         {ok, Bin} ->
-            %% A list when the bytes are UTF-8 (so paths join as strings); the raw
-            %% binary otherwise, which is still a valid filename here. Never
-            %% raises on a marker that is not UTF-8.
-            case string:trim(Bin) of
-                <<>> ->
-                    undefined;
-                Root ->
-                    case unicode:characters_to_list(Root) of
-                        List when is_list(List) -> List;
-                        _ -> Root
-                    end
+            %% A marker that is not valid UTF-8 is treated as absent (the
+            %% package walk is the fallback), so a root is always a string and
+            %% callers' string()/binary() contracts hold.
+            case unicode:characters_to_list(Bin) of
+                Decoded when is_list(Decoded) ->
+                    case string:trim(Decoded) of
+                        [] -> undefined;
+                        Root -> Root
+                    end;
+                _ ->
+                    undefined
             end;
         {error, _} ->
             undefined
