@@ -10,7 +10,7 @@ Test-only gen_server host for the hand-written `test_*_actor` fixtures (BT-4871)
 
 Until BT-4871 these fixtures delegated their gen_server callbacks to an
 interpretive path inside `beamtalk_actor` that no production actor used. That
-path is now unreferenced and is deleted by the BT-4871 follow-up PR; this
+path was deleted in BT-4871; this
 module is the small stand-in the fixtures call instead. It
 speaks the same wire protocol a compiled actor's generated callbacks speak
 (`{Selector, Args}` calls, `{cast, Selector, Args}` and `{Selector, Args,

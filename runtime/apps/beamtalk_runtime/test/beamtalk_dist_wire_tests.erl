@@ -291,25 +291,6 @@ migrate_forward_through_wire(PeerNode) ->
     end.
 
 %%====================================================================
-%% Async future rejection — the "double-wrap" case (ADR 0126 Amendment (d))
-%%====================================================================
-
--doc """
-`beamtalk_future:await/2` signals rejection as a `throw` of
-`{future_rejected, Reason}` (not `error/1`) on every path — the plain case
-(a method that raises the bare `#beamtalk_error{}` directly, e.g.
-`test_wirecheck_actor:handle_boom/2`) is already exercised, over the real
-wire, by `beamtalk_dist_wirecheck_tests:async_future_rejects/1` (every
-remote send now goes through the `'\$beamtalk_wire'` tag automatically, per
-this module's moduledoc). This test covers the other path the Amendment
-calls out: `test_wire_actor:handle_boomWrapped/2` raises via
-`beamtalk_error:raise/1` on itself, which double-wraps — `Reason` here is a
-fresh `runtime_error` whose `details.original_reason` holds the
-already-wrapped Exception map, not the bare `#beamtalk_error{}` `boom`
-produces.
-""".
-
-%%====================================================================
 %% Livelock guard (BT-3613): a wire-tagged message of a `kind` the
 %% receiving direction doesn't expect must fall through to the ordinary
 %% local catch-all, not re-enter the same wire clause with an unchanged

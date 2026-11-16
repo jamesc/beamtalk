@@ -340,9 +340,9 @@ compat_self_dispatch_preserves_class_test_() ->
     [
         {Label, fun() -> compat_self_dispatch_case(Message, Kind) end}
      || {Label, Message, Kind} <- [
-            {"exit error keeps ExitError", selfSendExitError, erlang_exit},
-            {"throw error keeps ThrowError", selfSendThrowError, erlang_throw},
-            {"plain error keeps RuntimeError", selfSendPlainError, runtime_error}
+            {"exit error keeps erlang_exit kind", selfSendExitError, erlang_exit},
+            {"throw error keeps erlang_throw kind", selfSendThrowError, erlang_throw},
+            {"plain error keeps runtime_error kind", selfSendPlainError, runtime_error}
         ]
     ].
 
@@ -2371,14 +2371,6 @@ start_link_supervised_test() ->
     gen_server:stop(Pid).
 
 %%% ============================================================================
-%%% dispatch/4 delegate returns signal error
-%%% ============================================================================
-
-%%% ============================================================================
-%%% dispatch/4 perform:withArguments:timeout: tests
-%%% ============================================================================
-
-%%% ============================================================================
 %%% handle_cast fire-and-forget error path
 %%% ============================================================================
 
@@ -3281,10 +3273,6 @@ bt4525_unwrap_dispatch_result_error_still_stores_test() ->
     after
         beamtalk_actor_state:uninstall(undefined)
     end.
-
-%%% dispatch_via_hierarchy DNU fallback branches
-
-%%% call_dnu_handler: 2-ary and 3-ary handler variants with errors
 
 %%% safe_spawn error paths
 

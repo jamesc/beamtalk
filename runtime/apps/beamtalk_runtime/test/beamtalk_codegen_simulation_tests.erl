@@ -40,7 +40,7 @@ runtime/apps/beamtalk_runtime/test_fixtures/compile_fixtures.escript
 shadow_actor.bt, coordinate_actor.bt), following the same real-fixture
 precedent used elsewhere in this module.
 The async future-cast protocol section is documented in place as staying
-simulated: it exercises a `beamtalk_actor:handle_cast/2` code path
+simulated: it exercises a `test_actor_host:handle_cast/2` code path
 (`{Selector, Args, FuturePid}`) that generated per-class `handle_cast/2`
 callbacks do not implement, so no compiled source construct reaches it.
 
@@ -71,7 +71,7 @@ See also: beamtalk_actor for the runtime implementation
 %% (crates/beamtalk-core/src/codegen/core_erlang/gen_server/*); they never
 %% store a `'__methods__'` map of funs in actor state. That funs-table shape
 %% is a *runtime* representation: it is what `beamtalk_actor:dispatch/4` and
-%% `beamtalk_actor:handle_cast/2`'s async future-cast branch
+%% `test_actor_host:handle_cast/2`'s async future-cast branch
 %% (`{Selector, Args, FuturePid}`) operate on directly, and it is the same
 %% shape produced by Beamtalk's dynamic class-building API
 %% (`Object classBuilder ... classMethods: #{...}; register`).
@@ -85,7 +85,7 @@ See also: beamtalk_actor for the runtime implementation
 %%
 %% What is kept here, and why: the async future-cast protocol
 %% (`{Selector, Args, FuturePid}` sent via `gen_server:cast/2`) is only
-%% implemented by `beamtalk_actor:handle_cast/2`'s generic fallback clause.
+%% implemented by `test_actor_host:handle_cast/2`'s generic fallback clause.
 %% A real compiled actor's generated `handle_cast/2`
 %% (crates/.../gen_server/callbacks.rs `generate_handle_cast`) only matches
 %% the `{cast, Selector, Args}` fire-and-forget tag; a bare
@@ -272,7 +272,7 @@ late_slot_spawn_with_supplies_the_slot_test() ->
 %%% ===========================================================================
 %%%
 %%% Kept on counter_module_state/1 deliberately. This section
-%%% exercises `beamtalk_actor:handle_cast/2`'s `{Selector, Args, FuturePid}`
+%%% exercises `test_actor_host:handle_cast/2`'s `{Selector, Args, FuturePid}`
 %%% branch, which is only reachable through the generic actor callback
 %%% module — real compiled classes' generated `handle_cast/2` does not
 %%% implement this cast shape (verified empirically; see the

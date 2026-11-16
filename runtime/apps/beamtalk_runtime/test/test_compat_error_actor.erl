@@ -68,8 +68,8 @@ handle_cast(Msg, State) -> test_actor_host:handle_cast(Msg, State).
 %% exceptions itself), we produce the old-style
 %% {error, {ErlType, ErrorValue}} reply directly.
 %%
-%% Note: selfSend* methods delegate to beamtalk_actor:handle_call so they
-%% go through dispatch/4 → the method fun calls sync_send(self(), ...) →
+%% Note: selfSend* methods delegate to test_actor_host:handle_call so they
+%% run the method fun, which calls sync_send(self(), ...) →
 %% self_dispatch → safe_dispatch/3 → unwrap_dispatch_result.
 handle_call({triggerExitError, _Args}, _From, State) ->
     {reply, {error, {exit, simulated_exit}}, State};

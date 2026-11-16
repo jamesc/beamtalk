@@ -261,7 +261,7 @@ decode/encode helpers and the pending-action helpers.
 -type monitor_mode() :: release | keep.
 
 %% BT-3992: initialize acknowledgement, called from generated init/1 and
-%% handle_continue/2 (and this module's own init/1).
+%% handle_continue/2.
 -export([take_init_ack/2, ack_initialized/2]).
 
 %% Message send helpers (lifecycle-aware wrappers)
@@ -303,7 +303,7 @@ decode/encode helpers and the pending-action helpers.
 -endif.
 
 %% BT-3967 / BT-3968: deferred pending actions. Every gen_server callback
-%% that runs a Beamtalk dispatch (this module's own and every compiled
+%% that runs a Beamtalk dispatch (every compiled
 %% actor's generated handle_continue/handle_call/handle_cast/handle_info)
 %% passes its return value through apply_pending_actions/1, which turns it
 %% into a `{stop, ...}` return when the dispatch requested `self stopWith:`,
@@ -323,8 +323,8 @@ decode/encode helpers and the pending-action helpers.
 ]).
 
 %% BT-3968: the mailbox-boundary guard against another process scheduling a
-%% continuation — called by this module's own handle_call/handle_cast and by
-%% every compiled actor's generated ones (see mailbox_continuation_check/2).
+%% continuation — called by every compiled actor's
+%% generated handle_call/handle_cast (see mailbox_continuation_check/2).
 -export([mailbox_continuation_check/2, performed_selector/2]).
 %% Pdict cleanup after a callback; used by generated-shape hosts (and tests).
 -export([restore_dispatch_pdict/1]).
@@ -342,8 +342,7 @@ decode/encode helpers and the pending-action helpers.
 -export([notify_state_change/2, strip_local_temps/1]).
 
 %% ADR 0126 §5.1/§5.5 (BT-3613): the `'$beamtalk_wire'`-envelope
-%% recognition/decode helpers shared by this module's own handle_call/3 and
-%% handle_cast/2 clauses AND every compiled actor's generated
+%% recognition/decode helpers used by every compiled actor's generated
 %% handle_call/3 / handle_cast/2 (crates/beamtalk-codegen/.../gen_server/
 %% callbacks.rs) — the one place that logic lives (AGENTS.md "No duplicate
 %% implementations"). encode_reply_for/3 and
@@ -674,8 +673,7 @@ flush_init_ack(AckRef) ->
 
 -doc """
 BT-3992: called by an actor's `init/1` on its initial state (generated
-`init/1`, outermost call only — never as a parent state helper — and this
-module's own init/1). Removes the starter's ack target
+`init/1`, outermost call only — never as a parent state helper). Removes the starter's ack target
 (`'$bt_init_ack'`, see with_init_ack/1) from the state, and tells the
 starter where startup stands:
 
@@ -3292,8 +3290,7 @@ wire_version_unsupported_error(Selector, SentVersion) ->
 -doc """
 Recognise and decode a `'\$beamtalk_wire'` call envelope (ADR 0126 §5.1) —
 the single place this decode/version-check logic lives (AGENTS.md "No
-duplicate implementations"), called both by this module's own
-`handle_call/3` wire clause and by every compiled actor's generated
+duplicate implementations"), called by every compiled actor's generated
 `handle_call/3` (`crates/beamtalk-codegen/src/core_erlang/gen_server/
 callbacks.rs`, `generate_handle_call`).
 
@@ -3337,9 +3334,8 @@ log_wire_cast_rejected(Selector, Error) ->
 
 -doc """
 Recognise and decode a `'\$beamtalk_wire'` cast/async envelope (ADR 0126
-§5.1) — shared the same way decode_wire_call/1 is (see its doc), by this
-module's own `handle_cast/2` wire clauses and every compiled actor's
-generated `handle_cast/2`.
+§5.1) — shared the same way decode_wire_call/1 is (see its doc), by every
+compiled actor's generated `handle_cast/2`.
 
 Returns `{redispatch, Msg}` with a plain local cast/async 4-tuple on a
 successful decode, or `noreply` once a decode/version failure has already
