@@ -186,7 +186,8 @@ module 'logging_init_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
     let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
         <'true'> when 'true' -> 'skipped'
         <'false'> when 'true' ->
-            call 'erlang':'put'('$beamtalk_actor', 'LoggingInitCounter')
+            let _ClassMarker = call 'erlang':'put'('$beamtalk_actor', 'LoggingInitCounter') in
+            call 'erlang':'put'('$beamtalk_actor_started_at', call 'erlang':'system_time'('microsecond'))
     end in
     %% Call parent init to get inherited state fields
     let _ParentArgs = call 'maps':'put'('__skip_initialize__', 'true', InitArgs) in
