@@ -353,7 +353,9 @@ symlinked_build_dir_resolves_the_relative_line_from_the_real_path_test() ->
     ),
     Mod = bt4966_symlink_mod,
     {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
-    BeamFile = filename:join([Base, "app", "_build", "deps", "dep", "ebin", "bt4966_symlink_mod.beam"]),
+    BeamFile = filename:join([
+        Base, "app", "_build", "deps", "dep", "ebin", "bt4966_symlink_mod.beam"
+    ]),
     ok = file:write_file(BeamFile, Bin),
     {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
     try
@@ -371,5 +373,7 @@ normalize_clamps_excess_parent_segments_at_the_root_test() ->
     [Root | _] = filename:split(filename:absname("")),
     Deep = filename:join([Root, "a", "b", "..", "..", "..", "..", "c"]),
     ?assertEqual(filename:join(Root, "c"), beamtalk_source_path:normalize(Deep)),
-    ?assertEqual(filename:join([Root, "a", "c"]),
-        beamtalk_source_path:normalize(filename:join([Root, "a", ".", "b", "..", "c"]))).
+    ?assertEqual(
+        filename:join([Root, "a", "c"]),
+        beamtalk_source_path:normalize(filename:join([Root, "a", ".", "b", "..", "c"]))
+    ).
