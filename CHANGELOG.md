@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Behaviour change: the `pkg@` qualifier check also covers `uses: pkg@Proto` and protocol provided-method bodies (BT-4929).**
+  - Changed: an undeclared package in `uses: nosuchpkg@Foo`, or in a `nosuchpkg@Widget` reference inside a protocol's provided method, is now reported as "Unknown package 'nosuchpkg' …" by `beamtalk build`, `check`, `test`, `lint` and MCP `lint`, like any other qualifier (BT-4921). Before, a protocol body was not checked at all, and an unknown `uses:` package got only the flattener's "no source available for protocol" error. That error is now replaced by the "Unknown package" one for the same line, so it is reported once. A declared package whose protocol has no source still gets "no source available". The stdlib and the in-repo examples build clean; downstream packages were not scanned.
+  - Do: add the package to `[dependencies]` in `beamtalk.toml`, or drop the qualifier.
 - **Behaviour change: `beamtalk lint` exits non-zero on any error-severity diagnostic (BT-4942).**
   - Changed: plain `beamtalk lint` used to fail only on lint-severity diagnostics, so an error such as an unknown `pkg@Class` package qualifier (BT-4921) was printed and the command still exited 0. It now exits 1 with "N error diagnostic(s) found in M file(s)" whenever it reports an error from any check, parse errors included. Warnings keep their exit behaviour. `--warnings-as-errors` is unchanged. MCP `lint` already reported failure for these errors. The stdlib and the in-repo examples lint clean.
   - Do: fix the reported errors. A CI job that ran `beamtalk lint` and ignored its error output will now fail.

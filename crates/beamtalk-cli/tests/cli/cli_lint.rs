@@ -998,3 +998,101 @@ fn lint_known_package_qualifier_exits_zero_bt_4942() {
         .assert()
         .success();
 }
+
+const HEADER: &str = "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\n";
+
+/// BT-4929: `uses: nosuchpkg@Foo` is an unknown package, reported once — the
+/// flattener's own "no source available" error for the same line is replaced,
+/// not added to.
+#[test]
+fn lint_uses_unknown_package_qualifier_is_reported_once_bt_4929() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Widget.bt"),
+        format!(
+            "{HEADER}Object subclass: Widget\n  uses: nosuchpkg@Foo\n  name -> String => \"w\"\n"
+        ),
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .failure()
+        .stderr(contains(
+            "Unknown package 'nosuchpkg' in protocol reference 'nosuchpkg@Foo'",
+        ))
+        .stderr(contains("no source available").not())
+        .stderr(contains("1 error diagnostic found in"));
+}
+
+/// BT-4929: `uses: pkg@Proto` naming the package itself is a known qualifier;
+/// the package check adds nothing. (It resolves to the package's own protocol.)
+#[test]
+fn lint_uses_known_package_qualifier_is_accepted_bt_4929() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Foo.bt"),
+        format!(
+            "{HEADER}Protocol define: Foo\n  name -> String\n\n  shout -> String => self name\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("src/Widget.bt"),
+        format!(
+            "{HEADER}Object subclass: Widget\n  uses: cli_subprocess_fixture@Foo\n  name -> String => \"w\"\n"
+        ),
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success()
+        .stderr(contains("Unknown package").not());
+}
+
+/// BT-4929: a protocol's provided-method body is walked too.
+#[test]
+fn lint_protocol_provided_method_unknown_package_qualifier_bt_4929() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Greets.bt"),
+        format!(
+            "{HEADER}Protocol define: Greets\n  name -> String\n\n  greet -> Object => nosuchpkg@Widget new\n"
+        ),
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .failure()
+        .stderr(contains(
+            "Unknown package 'nosuchpkg' in qualified reference 'nosuchpkg@Widget'",
+        ))
+        .stderr(contains("1 error diagnostic found in"));
+}
+
+#[test]
+fn lint_protocol_provided_method_known_package_qualifier_bt_4929() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Greets.bt"),
+        format!(
+            "{HEADER}Protocol define: Greets\n  name -> String\n\n  greet -> Object => cli_subprocess_fixture@Greeter new\n"
+        ),
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success()
+        .stderr(contains("Unknown package").not());
+}

@@ -6,13 +6,25 @@
 //! **DDD Context:** Semantic Analysis
 //!
 //! Validates that package qualifiers in `ClassReference` nodes and
-//! `StandaloneMethodDefinition` targets name a known package: a declared
+//! `StandaloneMethodDefinition` targets, `uses: pkg@Proto` lines and the
+//! bodies of a protocol's provided methods name a known package: a declared
 //! dependency, the current package or the stdlib.
 
-use crate::ast::{Expression, Module};
+use crate::ast::{Expression, Identifier, Module};
 use crate::ast_walker::walk_expression;
+use crate::semantic_analysis::trait_expansion::missing_protocol_diagnostic;
 use crate::source_analysis::Diagnostic;
 use std::collections::HashSet;
+
+/// The one "Unknown package" error every qualifier site reports (ADR 0070):
+/// `message` says where the qualifier was written, the span and the hint are
+/// the same for all of them.
+fn unknown_package_diagnostic(pkg: &Identifier, message: String) -> Diagnostic {
+    Diagnostic::error(message, pkg.span).with_hint(format!(
+        "Add '{}' to [dependencies] in beamtalk.toml",
+        pkg.name
+    ))
+}
 
 /// Validates all package qualifiers in the module against known dependencies.
 ///
@@ -46,19 +58,36 @@ pub fn check_package_qualifiers(
             && !known_packages.contains(pkg.name.as_str())
         {
             let superclass_name = class.superclass.as_ref().map_or("?", |s| s.name.as_str());
-            diagnostics.push(
-                Diagnostic::error(
+            diagnostics.push(unknown_package_diagnostic(
+                pkg,
+                format!(
+                    "Unknown package '{}' in superclass reference '{}@{}'",
+                    pkg.name, pkg.name, superclass_name
+                ),
+            ));
+        }
+
+        // `uses: pkg@Proto` names a package too (BT-4929).
+        for use_ in &class.uses {
+            if let Some(pkg) = &use_.package
+                && !known_packages.contains(pkg.name.as_str())
+            {
+                // The flattener reports an unresolvable `uses:` as "no source
+                // available" (or "unknown protocol"). For a package nobody
+                // declared that is the same mistake, so the more precise
+                // "Unknown package" replaces it instead of adding to it.
+                // Built by the flattener's own constructor, so the two cannot
+                // drift apart.
+                let flattener_error = missing_protocol_diagnostic(use_);
+                diagnostics.retain(|d| *d != flattener_error);
+                diagnostics.push(unknown_package_diagnostic(
+                    pkg,
                     format!(
-                        "Unknown package '{}' in superclass reference '{}@{}'",
-                        pkg.name, pkg.name, superclass_name
+                        "Unknown package '{}' in protocol reference '{}@{}'",
+                        pkg.name, pkg.name, use_.protocol.name
                     ),
-                    pkg.span,
-                )
-                .with_hint(format!(
-                    "Add '{}' to [dependencies] in beamtalk.toml",
-                    pkg.name
-                )),
-            );
+                ));
+            }
         }
 
         // Check expressions in method bodies
@@ -82,24 +111,29 @@ pub fn check_package_qualifiers(
         }
     }
 
+    // Provided-method bodies in a protocol's own file (BT-4929). Checked here,
+    // on the written protocol, not on the copies flattened into each using
+    // class: those are cloned inside `analyse_full`, so each body is seen once.
+    for protocol in &module.protocols {
+        for method in &protocol.provided_methods {
+            for stmt in &method.body {
+                check_expression_packages(&stmt.expression, known_packages, diagnostics);
+            }
+        }
+    }
+
     // Check standalone method definitions
     for method_def in &module.method_definitions {
         if let Some(ref pkg) = method_def.package
             && !known_packages.contains(pkg.name.as_str())
         {
-            diagnostics.push(
-                Diagnostic::error(
-                    format!(
-                        "Unknown package '{}' in extension target '{}@{}'",
-                        pkg.name, pkg.name, method_def.class_name.name
-                    ),
-                    pkg.span,
-                )
-                .with_hint(format!(
-                    "Add '{}' to [dependencies] in beamtalk.toml",
-                    pkg.name
-                )),
-            );
+            diagnostics.push(unknown_package_diagnostic(
+                pkg,
+                format!(
+                    "Unknown package '{}' in extension target '{}@{}'",
+                    pkg.name, pkg.name, method_def.class_name.name
+                ),
+            ));
         }
 
         for stmt in &method_def.method.body {
@@ -125,19 +159,13 @@ fn check_expression_packages(
             return;
         };
         if !known_packages.contains(pkg.name.as_str()) {
-            diagnostics.push(
-                Diagnostic::error(
-                    format!(
-                        "Unknown package '{}' in qualified reference '{}@{}'",
-                        pkg.name, pkg.name, name.name
-                    ),
-                    pkg.span,
-                )
-                .with_hint(format!(
-                    "Add '{}' to [dependencies] in beamtalk.toml",
-                    pkg.name
-                )),
-            );
+            diagnostics.push(unknown_package_diagnostic(
+                pkg,
+                format!(
+                    "Unknown package '{}' in qualified reference '{}@{}'",
+                    pkg.name, pkg.name, name.name
+                ),
+            ));
         }
     });
 }
@@ -571,5 +599,130 @@ mod tests {
         // No package: still the stdlib, so the set is never empty.
         let known = crate::semantic_analysis::known_qualifier_packages(None, std::iter::empty());
         assert_eq!(known, HashSet::from(["stdlib".to_string()]));
+    }
+
+    fn unknown_package_errors(source: &str, known: &[&str]) -> Vec<String> {
+        let module = parse_bt(source);
+        let known: HashSet<String> = known.iter().map(|k| (*k).to_string()).collect();
+        let mut diags = Vec::new();
+        check_package_qualifiers(&module, &known, &mut diags);
+        diags
+            .into_iter()
+            .filter(|d| d.severity == Severity::Error)
+            .map(|d| d.message.to_string())
+            .collect()
+    }
+
+    /// BT-4929: `uses: pkg@Proto` names a package, so an undeclared one is
+    /// an unknown package like any other qualifier.
+    #[test]
+    fn uses_unknown_package_qualifier_produces_error() {
+        let errors = unknown_package_errors(
+            "Object subclass: Widget\n  uses: nosuchpkg@Foo\n  name -> String => \"w\"\n",
+            &["json"],
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].contains("Unknown package 'nosuchpkg'")
+                && errors[0].contains("nosuchpkg@Foo"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn uses_known_package_qualifier_no_error() {
+        let errors = unknown_package_errors(
+            "Object subclass: Widget\n  uses: json@Foo\n  name -> String => \"w\"\n",
+            &["json"],
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn uses_unqualified_protocol_no_error() {
+        let errors = unknown_package_errors(
+            "Object subclass: Widget\n  uses: Foo\n  name -> String => \"w\"\n",
+            &["json"],
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    /// Each `uses:` line is checked, not just the first.
+    #[test]
+    fn uses_every_line_is_checked() {
+        let errors = unknown_package_errors(
+            "Object subclass: Widget\n  uses: aaa@Foo\n  uses: json@Bar\n  uses: bbb@Baz\n  name -> String => \"w\"\n",
+            &["json"],
+        );
+        assert_eq!(errors.len(), 2, "{errors:?}");
+    }
+
+    /// BT-4929: a protocol's provided-method bodies live in
+    /// `module.protocols`, which the walk did not visit.
+    #[test]
+    fn protocol_provided_method_body_unknown_package_produces_error() {
+        let errors = unknown_package_errors(
+            "Protocol define: Greets\n  name -> String\n\n  greet -> Object => nosuchpkg@Widget new\n",
+            &["json"],
+        );
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(
+            errors[0].contains("Unknown package 'nosuchpkg'"),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn protocol_provided_method_body_known_package_no_error() {
+        let errors = unknown_package_errors(
+            "Protocol define: Greets\n  name -> String\n\n  greet -> Object => json@Widget new\n",
+            &["json"],
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    /// BT-4929: the flattener already fails an unresolvable `uses: pkg@Proto`
+    /// ("no source available …"). For an unknown `pkg` that is the same
+    /// mistake as "Unknown package", so only the latter is reported.
+    #[test]
+    fn uses_unknown_package_supersedes_the_flatteners_no_source_error() {
+        let module = parse_bt(
+            "Object subclass: Widget\n  uses: nosuchpkg@Foo\n  uses: json@Bar\n  name -> String => \"w\"\n",
+        );
+        let known: HashSet<String> = HashSet::from(["json".to_string()]);
+        let use_of = |pkg: &str| {
+            module.classes[0]
+                .uses
+                .iter()
+                .find(|u| u.package.as_ref().is_some_and(|p| p.name == pkg))
+                .unwrap()
+        };
+        let mut diags = vec![
+            missing_protocol_diagnostic(use_of("nosuchpkg")),
+            missing_protocol_diagnostic(use_of("json")),
+        ];
+        check_package_qualifiers(&module, &known, &mut diags);
+
+        let messages: Vec<_> = diags.iter().map(|d| d.message.to_string()).collect();
+        assert_eq!(messages.len(), 2, "{messages:?}");
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("Unknown package 'nosuchpkg'")),
+            "{messages:?}"
+        );
+        // A known package's missing source is a different problem: kept.
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.contains("no source available") && m.contains("json@Bar")),
+            "{messages:?}"
+        );
+        assert!(
+            !messages
+                .iter()
+                .any(|m| m.contains("no source available") && m.contains("nosuchpkg")),
+            "{messages:?}"
+        );
     }
 }
