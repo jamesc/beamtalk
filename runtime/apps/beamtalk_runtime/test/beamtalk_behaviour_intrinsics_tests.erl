@@ -1182,7 +1182,16 @@ class_remove_from_system_dynamic_class_test_() ->
             %% when it is absent, during early bootstrap); register it here instead of
             %% relying on an earlier module, and stop it only if this test started it.
             StartedClass = beamtalk_class_registry:whereis_class('Class') =:= undefined,
-            ok = beamtalk_test_class:ensure_fixture_loaded('Class', beamtalk_class_bt),
+            %% Register the bootstrap stub only when `Class` is absent: replacing a
+            %% registered stdlib `Class` with the stub would break every later
+            %% suite that needs the real one (BT-4934).
+            case StartedClass of
+                true ->
+                    ok = beamtalk_class_bt:register_class(),
+                    ok = beamtalk_test_wait:class('Class');
+                false ->
+                    ok
+            end,
             ClassPids =
                 case StartedClass of
                     true -> [beamtalk_class_registry:whereis_class('Class')];

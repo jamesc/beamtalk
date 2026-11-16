@@ -83,8 +83,9 @@ pub(crate) use match_validators::{
     warn_assignment_in_match_arms,
 };
 pub(crate) use native_validators::{
-    check_native_actor_instance_method_bodies, check_native_delegate_reserved_word,
-    check_native_delegate_return_type, check_native_state_fields,
+    check_cross_file_native_delegate, check_native_actor_instance_method_bodies,
+    check_native_delegate_reserved_word, check_native_delegate_return_type,
+    check_native_state_fields,
 };
 pub(crate) use operator_validators::check_non_overridable_operator_methods;
 pub(crate) use package_validators::check_package_qualifiers;
