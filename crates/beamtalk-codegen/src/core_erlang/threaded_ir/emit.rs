@@ -21,26 +21,6 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::{Document, join, leaf};
 
-/// `let var = value in `: a binding whose body is the statements rendered
-/// after it, so the form ends at `in ` and the next document continues it.
-fn let_prefix(var: Document<'static>, value: Document<'static>) -> Document<'static> {
-    form::let_in(var, value, Document::Nil, Layout::Flat)
-}
-
-/// `let _ = value in `, the effect-only [`let_prefix`].
-fn let_discard(value: Document<'static>) -> Document<'static> {
-    let_prefix(leaf::var("_"), value)
-}
-
-/// `call 'erlang':'element'(k, tuple)`.
-fn element_call(k: usize, tuple: Document<'static>) -> Document<'static> {
-    form::call(
-        "erlang",
-        "element",
-        [leaf::int_lit(i64::try_from(k).unwrap_or(i64::MAX)), tuple],
-    )
-}
-
 // ─── RenderCtx (ADR 0111 §Addendum "Renderer design sketch") ──────
 
 /// Loop-context flags captured/restored around rendering a nested
@@ -276,13 +256,13 @@ pub(in crate::core_erlang) fn render(
             ThreadedStmt::ConditionHandBack {
                 pair, value_var, ..
             } => docs.push(docvec![
-                let_prefix(
+                form::let_prefix(
                     leaf::var(value_var.clone()),
-                    element_call(1, leaf::var(pair.clone())),
+                    form::element(1, leaf::var(pair.clone())),
                 ),
-                let_prefix(
+                form::let_prefix(
                     leaf::var("StateAcc"),
-                    element_call(2, leaf::var(pair.clone())),
+                    form::element(2, leaf::var(pair.clone())),
                 ),
             ]),
             ThreadedStmt::OnDoCatch {
@@ -316,7 +296,7 @@ pub(in crate::core_erlang) fn render(
                 other,
             )),
             ThreadedStmt::ConstructTuple { carrier, doc, .. } => {
-                docs.push(let_prefix(leaf::var(carrier.clone()), doc.clone()));
+                docs.push(form::let_prefix(leaf::var(carrier.clone()), doc.clone()));
             }
             ThreadedStmt::LocalRebind {
                 carrier,
@@ -446,19 +426,26 @@ fn render_synced_call(
     ctx: &RenderCtx,
 ) -> Document<'static> {
     let store_name = ctx.resolve_prefix(store);
-    let mut parts: Vec<Document<'static>> = vec![let_discard(cell_put_call(leaf::var(store_name)))];
+    let mut parts: Vec<Document<'static>> =
+        vec![form::let_discard(cell_put_call(leaf::var(store_name)))];
     match result {
-        Some(result) => parts.push(let_prefix(leaf::var(result.to_string()), call.clone())),
+        Some(result) => parts.push(form::let_prefix(
+            leaf::var(result.to_string()),
+            call.clone(),
+        )),
         None => parts.push(call.clone()),
     }
     if let Some(load) = load {
         let load_name = ctx.resolve_prefix(load);
-        parts.push(let_prefix(leaf::var(load_name.clone()), cell_take_call()));
+        parts.push(form::let_prefix(
+            leaf::var(load_name.clone()),
+            cell_take_call(),
+        ));
         // BT-4122: a merged Tier 2 call mutated caller-scope locals (the
         // only bracketed call that can); rebind each live Core name from
         // the reloaded state, like the statement unpacker's rebinds.
         for (core_var, key) in tier2_local_rebinds {
-            parts.push(let_prefix(
+            parts.push(form::let_prefix(
                 leaf::var(core_var.clone()),
                 form::call(
                     "maps",
@@ -494,9 +481,9 @@ fn render_fast_path_synced_call(
         [leaf::var("_")],
         None,
         docvec![
-            let_discard(cell_put_call(leaf::var(store_name))),
-            let_prefix(leaf::var(fast.slow_result.clone()), call.clone()),
-            let_prefix(leaf::var(fast.slow_state.clone()), cell_take_call()),
+            form::let_discard(cell_put_call(leaf::var(store_name))),
+            form::let_prefix(leaf::var(fast.slow_result.clone()), call.clone()),
+            form::let_prefix(leaf::var(fast.slow_state.clone()), cell_take_call()),
             form::values([
                 leaf::var(fast.slow_result.clone()),
                 leaf::var(fast.slow_state.clone()),
@@ -537,13 +524,13 @@ fn render_nlr_throw(stmt: &ThreadedStmt, ctx: &RenderCtx) -> Document<'static> {
     };
     // ADR 0137 §5 / ADR 0146: the cell is current whenever a `^` starts.
     let store = if *cell_store {
-        let_discard(cell_put_call(slot_doc.clone()))
+        form::let_discard(cell_put_call(slot_doc.clone()))
     } else {
         Document::Nil
     };
     docvec![
         store,
-        let_prefix(
+        form::let_prefix(
             leaf::var(result_var.clone()),
             form::call(
                 "erlang",
@@ -570,7 +557,7 @@ fn render_carrier_read(
     state_first: Option<&VersionedVar>,
     ctx: &RenderCtx,
 ) -> Document<'static> {
-    let element = |k: usize| element_call(k, leaf::var(carrier.to_string()));
+    let element = |k: usize| form::element(k, leaf::var(carrier.to_string()));
     match slot {
         CarrierSlot::Key(key) => {
             let map = match state_first {
@@ -609,7 +596,8 @@ fn render_local_rebind(
     ctx: &RenderCtx,
 ) -> Document<'static> {
     let read = render_carrier_read(carrier, slot, state_first, ctx);
-    let plain_let = |read: Document<'static>| let_prefix(leaf::var(value_var.to_string()), read);
+    let plain_let =
+        |read: Document<'static>| form::let_prefix(leaf::var(value_var.to_string()), read);
     match lowering {
         // BT-3835: the map already holds the value; no `Put`, no step.
         RebindLowering::Let | RebindLowering::MapHeld { .. } => plain_let(read),
@@ -850,7 +838,7 @@ fn foreign_clause_head(vars: &EnsureCatchVars) -> Document<'static> {
             "erlang",
             "=:=",
             [
-                element_call(1, leaf::var(vars.foreign_nlr_var.clone())),
+                form::element(1, leaf::var(vars.foreign_nlr_var.clone())),
                 leaf::atom(sentinel_tags::NLR),
             ],
         )),
@@ -865,7 +853,7 @@ fn foreign_clause_head(vars: &EnsureCatchVars) -> Document<'static> {
 /// came.
 fn foreign_reraise(vars: &EnsureCatchVars, foreign: &EnsureForeignNlr) -> Document<'static> {
     let store = match foreign.store {
-        Some(version) => let_discard(cell_put_unwound_call(
+        Some(version) => form::let_discard(cell_put_unwound_call(
             leaf::var(vars.foreign_nlr_var.clone()),
             leaf::var(super::super::util::versioned_var("StateAcc", version)),
         )),
@@ -984,7 +972,7 @@ fn relay_resume(
         RethrowSlot::SiteState(doc) => doc.clone(),
     };
     let store = if relay.cell_store {
-        let_discard(cell_put_call(rethrow.clone()))
+        form::let_discard(cell_put_call(rethrow.clone()))
     } else {
         Document::Nil
     };
@@ -1043,7 +1031,7 @@ fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static
             Layout::Flat,
         ),
         CatchStep::ClassFilter => docvec![
-            let_prefix(
+            form::let_prefix(
                 leaf::var(vars.match_var.clone()),
                 form::call(
                     "beamtalk_exception_handler",
@@ -1560,7 +1548,7 @@ fn render_tuple_acc_unpack(
     if shape == FoldAccShape::Bare {
         // BT-4116: the accumulator IS the one threaded local.
         for target in targets {
-            docs.push(let_prefix(
+            docs.push(form::let_prefix(
                 leaf::var(target.render_name()),
                 leaf::var(param.0.clone()),
             ));
@@ -1569,7 +1557,7 @@ fn render_tuple_acc_unpack(
     }
     for (i, target) in targets.iter().enumerate() {
         let idx = gate_slots + 1 + i;
-        docs.push(let_prefix(
+        docs.push(form::let_prefix(
             leaf::var(target.render_name()),
             form::call(
                 "erlang",
@@ -1603,7 +1591,7 @@ fn render_bind(
     let source_name = ctx.resolve_prefix(source);
     match op {
         BindOp::Put { field, value } => {
-            let put = let_prefix(
+            let put = form::let_prefix(
                 leaf::var(target_name.clone()),
                 form::call(
                     "maps",
@@ -1622,12 +1610,15 @@ fn render_bind(
                 && target.prefix == VersionPrefix::State
                 && !field.starts_with(super::ir::LOCAL_STATE_KEY_PREFIX)
             {
-                docvec![put, let_discard(cell_put_call(leaf::var(target_name)))]
+                docvec![
+                    put,
+                    form::let_discard(cell_put_call(leaf::var(target_name)))
+                ]
             } else {
                 put
             }
         }
-        BindOp::Unpack { field } => let_prefix(
+        BindOp::Unpack { field } => form::let_prefix(
             leaf::var(target_name),
             form::call(
                 "maps",
@@ -1636,12 +1627,15 @@ fn render_bind(
             ),
         ),
         BindOp::Direct(value) => {
-            let bind = let_prefix(leaf::var(target_name.clone()), render_value(value, ctx));
+            let bind = form::let_prefix(leaf::var(target_name.clone()), render_value(value, ctx));
             // ADR 0137 §5: a `State` version a compiled self-send hands back inside an
             // `ensure:` protected body is stored too, so the cleanup of a failed
             // body sees what the send changed.
             if ctx.generator.ensure_write_through > 0 && target.prefix == VersionPrefix::State {
-                docvec![bind, let_discard(cell_put_call(leaf::var(target_name)))]
+                docvec![
+                    bind,
+                    form::let_discard(cell_put_call(leaf::var(target_name)))
+                ]
             } else {
                 bind
             }
