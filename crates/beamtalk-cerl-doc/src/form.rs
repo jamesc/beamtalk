@@ -16,7 +16,7 @@
 //!
 //! **Structure goes through these constructors, not string literals.** A new
 //! `let`, `case`, `try`, `do`, `call` or `primop` is built with
-//! [`let_in`] / [`let_values`], [`fun_of`], [`letrec`], [`tuple`] / [`values`], [`case_of`] /
+//! [`let_in`] / [`let_values`], [`fun_of`] / [`fun_def`], [`letrec`], [`tuple`] / [`values`], [`case_of`] /
 //! [`clause`], [`try_of_catch`], [`seq`], [`call`] or [`primop`]; never with a
 //! `"let "` / `" in "` / `"fun ("` / `"letrec "` / `"catch <"` fragment.
 //! Existing literal sites move to the constructors as their files are
@@ -178,6 +178,25 @@ pub fn fun_of<'a>(
         Layout::Flat => docvec![head, " ", body],
         Layout::Block => docvec![head, nest(INDENT, docvec![line(), body])],
     }
+}
+
+/// `'name'/arity = fun (A, B) -> body`: a module-level function definition.
+///
+/// The arity is the number of `params`, so the name and the parameter list
+/// cannot disagree. `layout` is [`fun_of`]'s.
+#[must_use]
+pub fn fun_def<'a>(
+    name: impl Into<String>,
+    params: impl IntoIterator<Item = Document<'a>>,
+    body: Document<'a>,
+    layout: Layout,
+) -> Document<'a> {
+    let params: Vec<Document<'a>> = params.into_iter().collect();
+    docvec![
+        leaf::fname(name, params.len()),
+        " = ",
+        fun_of(params, body, layout)
+    ]
 }
 
 /// `letrec 'name'/arity = fun (…) -> … in body`.
@@ -394,6 +413,18 @@ mod tests {
         assert_eq!(
             fun_of([v("A")], v("A"), Layout::Block).to_pretty_string(),
             "fun (A) ->\n    A"
+        );
+    }
+
+    #[test]
+    fn fun_def_derives_arity_from_params() {
+        assert_eq!(
+            fun_def("init", [v("A"), v("B")], v("A"), Layout::Block).to_pretty_string(),
+            "'init'/2 = fun (A, B) ->\n    A"
+        );
+        assert_eq!(
+            fun_def("f", [], v("A"), Layout::Flat).to_pretty_string(),
+            "'f'/0 = fun () -> A"
         );
     }
 
