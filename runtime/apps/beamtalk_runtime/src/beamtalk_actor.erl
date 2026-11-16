@@ -3335,7 +3335,9 @@ log_wire_cast_rejected(Selector, Error) ->
 -doc """
 Recognise and decode a `'\$beamtalk_wire'` cast/async envelope (ADR 0126
 §5.1) — shared the same way decode_wire_call/1 is (see its doc), by every
-compiled actor's generated `handle_cast/2`.
+compiled actor's generated `handle_cast/2`. The 7-element `async` form
+has no caller outside tests (a compiled actor's `handle_cast/2` matches only
+the 6-element `cast` form); whether to keep that branch is a follow-up.
 
 Returns `{redispatch, Msg}` with a plain local cast/async 4-tuple on a
 successful decode, or `noreply` once a decode/version failure has already

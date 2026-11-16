@@ -104,9 +104,4 @@ safe_dispatch(triggerThrowError, _Args, State) ->
 safe_dispatch(triggerPlainError, _Args, State) ->
     {error, {error, simulated_error}, State};
 safe_dispatch(normalMethod, _Args, State) ->
-    {reply, ok, State};
-safe_dispatch(Selector, Args, State) ->
-    %% For selfSend* methods, fall through to normal dispatch so they execute
-    %% as regular methods (which then self-send to trigger safe_dispatch above).
-    Self = beamtalk_actor:make_self(State),
-    beamtalk_actor:dispatch(Selector, Args, Self, State).
+    {reply, ok, State}.

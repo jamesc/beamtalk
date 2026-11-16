@@ -2459,8 +2459,7 @@ safe_spawn_restores_trap_exit_on_error_test() ->
 make_self_with_class_mod_test() ->
     State = #{
         '$beamtalk_class' => 'MyClass',
-        '__class_mod__' => my_class_mod,
-        '__methods__' => #{}
+        '__class_mod__' => my_class_mod
     },
     Self = beamtalk_actor:make_self(State),
     ?assertEqual('MyClass', Self#beamtalk_object.class),
@@ -2468,8 +2467,7 @@ make_self_with_class_mod_test() ->
 
 make_self_without_class_mod_test() ->
     State = #{
-        '$beamtalk_class' => 'MyClass',
-        '__methods__' => #{}
+        '$beamtalk_class' => 'MyClass'
     },
     Self = beamtalk_actor:make_self(State),
     ?assertEqual('MyClass', Self#beamtalk_object.class),
