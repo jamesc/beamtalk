@@ -679,7 +679,7 @@ which is the failure mode ADR 0122's migration series (BT-3508) exists to
 guard against.
 
 **Location:** `Justfile` (`core-diff-snapshot`, `core-diff-base-snapshot`,
-`core-diff` recipes), `crates/beamtalk-cli/src/commands/util.rs`
+`core-diff`, `core-diff-relocation` recipes), `scripts/ci/core_diff_normalise.py`, `crates/beamtalk-cli/src/commands/util.rs`
 (`core_output_dir`, `CoreOutputDir::snapshot_only`).
 
 **Corpus:** `stdlib/src/*.bt` (via `build-stdlib`), `stdlib/test/*.bt` +
@@ -741,7 +741,23 @@ snapshot's own copy (it changes no codegen):
   BEAM stacktraces — the `'file'` module attribute and a `{'file', Path}`
   annotation on nearly every statement. Two checkouts at different absolute
   paths would otherwise diff on every line. Collapsed to a `stdlib/`-relative
-  path.
+  path. The quoted-string form is rewritten by a `sed` in the recipe.
+- The same absolute source path is embedded as a **binary literal** — one
+  `#<N>(8,1,'integer',['unsigned'|['big']])` segment per byte — in
+  `'__beamtalk_method_lines'/0` and in the test fixtures' source-path
+  literals (BT-4939). `sed` cannot see through that encoding, so
+  `scripts/ci/core_diff_normalise.py` decodes each literal and, when it is an
+  absolute path with a `/stdlib/` component, rewrites it to `stdlib/...` in
+  the same encoding. Only that prefix changes: a different relative path or
+  file name still diffs (self-tested by `just test-core-diff-normalise`, part
+  of `just lint`). With `--root` the snapshot recipe also fails if the
+  checkout path survives anywhere, plain or encoded, so a new
+  checkout-dependent encoding is caught at snapshot time. `just core-diff`
+  re-applies the (idempotent) script to both sides, so a base snapshot built
+  or cached before this fix still compares equal.
+  `just core-diff-relocation` is the end-to-end self-check: it snapshots the
+  commit here and from a worktree at a different path and fails on any
+  difference (CI: the `core-diff-modes` job).
 - Every class's `__beamtalk_meta` bakes in a `beamtalk_version` build
   provenance binary (ADR 0098 Phase 3, derived from `git describe`) and an
   `otp_release`. Real and desirable in a shipped `.beam`, but exactly the
