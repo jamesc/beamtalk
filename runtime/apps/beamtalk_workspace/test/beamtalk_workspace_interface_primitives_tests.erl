@@ -744,7 +744,7 @@ current_session_returns_nil_outside_eval_test() ->
 %% currentSession delegates to beamtalk_session_primitives:current/0, so a
 %% seeded context yields the *same* Session value (same id and pid).
 current_session_matches_session_current_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_session_table:new(),
     {ok, ShellPid} = beamtalk_repl_shell:start_link(<<"ws-cur-1">>),
     put(beamtalk_session_pid, ShellPid),

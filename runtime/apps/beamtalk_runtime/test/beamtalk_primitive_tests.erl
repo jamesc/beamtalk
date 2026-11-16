@@ -269,7 +269,7 @@ responds_to_actor_inherited_method_test_() ->
     %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
-            {ok, _} = application:ensure_all_started(beamtalk_runtime),
+            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
             beamtalk_stdlib:init(),
             ok
         end,
@@ -1612,7 +1612,7 @@ responds_to_future_autoawait_test_() ->
     %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
-            {ok, _} = application:ensure_all_started(beamtalk_runtime),
+            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
             beamtalk_stdlib:init(),
             beamtalk_extensions:init(),
             ok
@@ -1710,7 +1710,7 @@ value_type_responds_to_via_exports_test_() ->
     %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
-            {ok, _} = application:ensure_all_started(beamtalk_runtime),
+            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
             beamtalk_stdlib:init(),
             ok
         end,
@@ -1731,7 +1731,7 @@ value_type_module_info_is_not_a_method_test_() ->
     %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
-            {ok, _} = application:ensure_all_started(beamtalk_runtime),
+            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
             beamtalk_stdlib:init(),
             Forms = beamtalk_test_erl_forms:parse_forms([
                 "-module('bt@mod_info_plain_value').",
@@ -1767,7 +1767,7 @@ module_for_value_tagged_variants_test_() ->
     %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
-            {ok, _} = application:ensure_all_started(beamtalk_runtime),
+            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
             beamtalk_stdlib:init(),
             ok
         end,
@@ -1811,7 +1811,7 @@ responds_to_beamtalk_object_non_class_test_() ->
     %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
-            {ok, _} = application:ensure_all_started(beamtalk_runtime),
+            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
             beamtalk_stdlib:init(),
             beamtalk_extensions:init(),
             ok

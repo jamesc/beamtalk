@@ -2159,7 +2159,7 @@ session_codegen_test_() ->
     end}.
 
 setup_session() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     {ok, Pid} = beamtalk_repl_shell:start_link(<<"ops-dev-codegen-session">>),
     Pid.
 

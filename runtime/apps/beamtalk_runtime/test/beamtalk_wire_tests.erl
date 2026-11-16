@@ -24,7 +24,7 @@ class for the `HandleScoped(#node)` row (exercising the
 %%====================================================================
 
 setup() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_stdlib:init(),
     ok = beamtalk_test_class:ensure_fixture_loaded('ShapePoint', 'bt@shape_point'),
     ok = beamtalk_test_class:ensure_fixture_loaded('ShapePlainObject', 'bt@shape_plain_object'),

@@ -222,7 +222,7 @@ compiled_secrets_metadata_test() ->
     ).
 
 compiled_actor_get_status_redacts_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Pid = element(4, 'bt@secret_vault_actor':spawn()),
     try
         ok = sys:log(Pid, true),
@@ -244,7 +244,7 @@ compiled_actor_get_status_redacts_test() ->
     end.
 
 compiled_actor_crash_report_redacts_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Capture = beamtalk_test_log:start_capture(error),
     Pid = element(4, 'bt@secret_vault_actor':spawn()),
     MRef = monitor(process, Pid),
@@ -325,7 +325,7 @@ crash_filter_fails_closed_test() ->
     end.
 
 compiled_actor_proc_lib_report_redacts_queued_send_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Capture = beamtalk_test_log:start_capture(error),
     Pid = element(4, 'bt@secret_vault_actor':spawn()),
     MRef = monitor(process, Pid),
@@ -353,7 +353,7 @@ compiled_actor_proc_lib_report_redacts_queued_send_test() ->
 %% BT-4477: an actor started by `safe_spawn_monitored_async/2` (a `proc_lib`
 %% fun, not `gen_server:start*`) is redacted in the crash report like any other.
 async_spawned_actor_proc_lib_report_redacts_queued_send_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Capture = beamtalk_test_log:start_capture(error),
     {ok, {Pid, MonRef}} =
         beamtalk_actor:safe_spawn_monitored_async('bt@secret_vault_actor', #{}),

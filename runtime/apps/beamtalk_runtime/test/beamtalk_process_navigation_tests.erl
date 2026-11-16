@@ -157,7 +157,7 @@ node_with_pid(Nodes, Pid) ->
 %%====================================================================
 
 snapshot_small_tree_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Self = self(),
     SupPid = start_supervisor([worker_spec(w1, start_worker, [Self])]),
     try
@@ -186,7 +186,7 @@ snapshot_small_tree_test() ->
 %%====================================================================
 
 beamtalk_actor_classified_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Self = self(),
     %% The test registers its own class, so behaviourClass resolves to a real
     %% class object without depending on stdlib state left by earlier modules.
@@ -204,7 +204,7 @@ beamtalk_actor_classified_test() ->
     end.
 
 beamtalk_actor_unknown_class_has_nil_behaviour_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Self = self(),
     SupPid = start_supervisor([
         worker_spec(a1, start_actor_worker, [Self, 'NotARegisteredClassXYZ'])
@@ -237,7 +237,7 @@ is_infra_predicate_test() ->
     ?assertNot(beamtalk_process_navigation:is_infra(not_a_pid)).
 
 deny_listed_process_excluded_from_default_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Self = self(),
     %% beamtalk_workspace_changelog lives in the (unstarted) workspace app, so
     %% its registered name is free in the runtime-only EUnit harness. Register a
@@ -278,7 +278,7 @@ deny_listed_process_excluded_from_default_test() ->
 %% supervisor that should be hidden from `default` but is missing from the
 %% deny-list fails CI here rather than leaking into the user-facing snapshot.
 deny_list_parity_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     DefaultPids = sets:from_list(
         [maps:get(pid, N) || N <- beamtalk_process_navigation:default_snapshot()],
         [{version, 2}]
@@ -415,7 +415,7 @@ worker_root_does_not_crash_test() ->
 %%====================================================================
 
 foreign_supervisor_and_worker_classified_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Self = self(),
     %% A raw OTP supervisor (no Beamtalk class) with a plain worker child.
     SupPid = start_supervisor([worker_spec(w1, start_worker, [Self])]),
@@ -440,7 +440,7 @@ foreign_supervisor_and_worker_classified_test() ->
 %%====================================================================
 
 child_cap_truncates_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Self = self(),
     SupPid = start_supervisor([
         worker_spec(w1, start_worker, [Self]),
@@ -468,7 +468,7 @@ child_cap_truncates_test() ->
 %%====================================================================
 
 from_accepts_pid_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Self = self(),
     SupPid = start_supervisor([worker_spec(w1, start_worker, [Self])]),
     try
@@ -478,7 +478,7 @@ from_accepts_pid_test() ->
     end.
 
 from_accepts_supervisor_handle_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Self = self(),
     SupPid = start_supervisor([worker_spec(w1, start_worker, [Self])]),
     Handle = {beamtalk_supervisor, 'FakeSup', fake_mod, SupPid},
@@ -674,7 +674,7 @@ node_field_accessors_test() ->
 %% actor child carries a live `{beamtalk_object, Class, Module, Pid}` handle so
 %% the Inspector can follow it as its own reference (ADR 0095).
 child_handles_beamtalk_actor_child_has_live_handle_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Self = self(),
     %% The test registers its own class (see start_nav_class/0).
     ClassName = start_nav_class(),
@@ -703,7 +703,7 @@ child_handles_beamtalk_actor_child_has_live_handle_test() ->
 %% null); the live-handle minting for a Beamtalk supervisor child is asserted by
 %% the actor-child test (same `child_handle/3` code path keyed on the kind tag).
 child_handles_nested_supervisor_child_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Self = self(),
     OuterFlags = #{strategy => one_for_one, intensity => 1, period => 5},
     %% `start_child_sup/1` boots its inner worker and drains that worker's
@@ -736,7 +736,7 @@ child_handles_nested_supervisor_child_test() ->
 %% A foreign OTP supervisor's children render but are not drillable: no Beamtalk
 %% class → `handle => null`, `className => null`.
 child_handles_foreign_child_not_drillable_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Self = self(),
     SupPid = start_supervisor([worker_spec(w1, start_worker, [Self])]),
     try
@@ -777,7 +777,7 @@ child_handles_restarting_child_row_test() ->
 %% `which_children` returns running pids, so each becomes a child row exactly like
 %% a static supervisor's child (treat static and dynamic alike).
 child_handles_dynamic_supervisor_children_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Self = self(),
     SupFlags = #{strategy => simple_one_for_one, intensity => 5, period => 5},
     ChildSpec = #{
@@ -816,7 +816,7 @@ child_handles_dynamic_supervisor_children_test() ->
 %% A supervisor with no running children yields an empty children list (the
 %% clean empty-state path) — not an error.
 child_handles_no_children_is_empty_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     SupFlags = #{strategy => one_for_one, intensity => 1, period => 5},
     {ok, SupPid} = supervisor:start_link(?MODULE, {SupFlags, []}),
     try

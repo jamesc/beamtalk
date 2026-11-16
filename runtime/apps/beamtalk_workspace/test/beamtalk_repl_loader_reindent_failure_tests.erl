@@ -39,7 +39,7 @@ no other test in the same `rebar3 eunit` run ever sees a faulted compiler.
 
 setup() ->
     beamtalk_test_boot:compiler(),
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     %% Same "real ChangeLog needs a resolvable HOME" wrinkle
     %% `beamtalk_behaviour_intrinsics_rename_to_tests.erl`'s own

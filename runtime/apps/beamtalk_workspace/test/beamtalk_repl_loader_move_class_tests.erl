@@ -46,7 +46,7 @@ gadget_source() ->
 
 setup() ->
     beamtalk_test_boot:compiler(),
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-move-class-" ++ Unique),
@@ -191,7 +191,7 @@ move_class_dynamic_no_source_file_test_() ->
 
 setup_dynamic() ->
     beamtalk_test_boot:compiler(),
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     %% (Re)load the stdlib classes: a suite earlier in the same EUnit VM may
     %% have stopped every class process, and the stdlib refusal case needs a
     %% real, `.beam`-backed stdlib class to classify as `stdlib`.
@@ -269,7 +269,7 @@ move_class_dependency_refusal_test_() ->
 
 setup_dependency() ->
     beamtalk_test_boot:compiler(),
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     Unique = beamtalk_test_unique:id(),
     %% `ProjDir` is the active project tree; the fixture class's own source

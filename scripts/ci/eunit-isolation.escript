@@ -17,6 +17,10 @@
 %%   eunit-isolation.escript reverse [--only M1,M2]
 %%   eunit-isolation.escript random  [--seed S] [--only M1,M2]
 %%   eunit-isolation.escript forward [--only M1,M2]       (control: sorted order)
+%%   eunit-isolation.escript culprit VICTIM [--jobs N]    (who pollutes VICTIM?)
+%%
+%% Any mode takes `--skip-prepare` to reuse the existing `_build/test` instead of
+%% running rebar3 first (debugging only: it must be up to date).
 %%
 %% Modes:
 %%   alone    every suite in its own fresh `erl` node, N nodes at a time.
@@ -24,6 +28,9 @@
 %%   random   as reverse, in a shuffled order; the seed is printed, and
 %%            `--seed S` reproduces it.
 %%   forward  as reverse, in sorted order (a control for the other two).
+%%   culprit  VICTIM is a module that fails in reverse/random order but passes
+%%            alone: runs `[X, VICTIM]` in a fresh node for every other module X
+%%            and lists the X after which VICTIM fails, i.e. who leaves state behind.
 %%
 %% "Group" mirrors the normal run: runtime+workspace+compiler suites share a
 %% node, stdlib suites run in a second one (`just test-runtime`).
@@ -51,11 +58,14 @@ main(Args) ->
     Groups = [{runtime, discover(?RUNTIME_APPS, Only)}, {stdlib, discover(?STDLIB_APPS, Only)}],
     Total = lists:sum([length(M) || {_, M} <- Groups]),
     Total > 0 orelse fail("no EUnit modules found (--only filter too narrow?)"),
-    prepare(),
+    maps:get(skip_prepare, Opts, false) orelse prepare(),
     Paths = code_paths(),
     Start = erlang:monotonic_time(millisecond),
     Results =
         case Mode of
+            culprit ->
+                culprit(maps:get(victim, Opts), lists:append([M || {_, M} <- Groups]), Paths,
+                    maps:get(jobs, Opts, default_jobs()));
             alone ->
                 Jobs = maps:get(jobs, Opts, default_jobs()),
                 io:format("Mode: alone, ~b modules, ~b parallel nodes~n", [Total, Jobs]),
@@ -73,15 +83,19 @@ main(Args) ->
 
 %%% ── arguments ────────────────────────────────────────────────────────────
 
+parse_args(["culprit", Victim | Rest]) ->
+    {culprit, (parse_opts(Rest, #{}))#{victim => Victim}};
 parse_args([ModeStr | Rest]) when
     ModeStr =:= "alone"; ModeStr =:= "reverse"; ModeStr =:= "random"; ModeStr =:= "forward"
 ->
     {list_to_atom(ModeStr), parse_opts(Rest, #{})};
 parse_args(_) ->
-    fail("usage: eunit-isolation.escript alone|reverse|random|forward [--jobs N] [--seed S] [--only M1,M2]").
+    fail("usage: eunit-isolation.escript alone|reverse|random|forward|culprit VICTIM [--jobs N] [--skip-prepare] [--seed S] [--only M1,M2]").
 
 parse_opts([], Acc) ->
     Acc;
+parse_opts(["--skip-prepare" | Rest], Acc) ->
+    parse_opts(Rest, Acc#{skip_prepare => true});
 parse_opts(["--jobs", N | Rest], Acc) ->
     parse_opts(Rest, Acc#{jobs => list_to_integer(N)});
 parse_opts(["--seed", S | Rest], Acc) ->
@@ -189,6 +203,39 @@ pool(Pending, Jobs, Running, Acc, Parent, Paths) ->
         {done, _Ref, Rs} ->
             progress(Rs),
             pool(Pending, Jobs, Running - 1, Rs ++ Acc, Parent, Paths)
+    end.
+
+%% Runs `[X, Victim]` in a fresh node for every other module X; returns one
+%% result per X whose run made the victim fail (and is then reported as failing
+%% under X's name, so the table lists the polluters). Prints each polluter.
+culprit(Victim, Mods, Paths, Jobs) ->
+    lists:member(Victim, Mods) orelse fail("unknown module: " ++ Victim),
+    Others = [M || M <- Mods, M =/= Victim],
+    io:format("Mode: culprit for ~s, ~b candidates, ~b parallel nodes~n", [Victim, length(Others), Jobs]),
+    Parent = self(),
+    Pending = [{X, make_ref()} || X <- Others],
+    culprit_pool(Pending, Jobs, 0, [], Parent, Paths, Victim).
+
+culprit_pool([], _Jobs, 0, Acc, _Parent, _Paths, _Victim) ->
+    Acc;
+culprit_pool([{X, Ref} | Rest], Jobs, Running, Acc, Parent, Paths, Victim) when Running < Jobs ->
+    spawn_link(fun() ->
+        Rs = run_node([X, Victim], Paths, "culprit_" ++ Victim ++ "_after_" ++ X),
+        Parent ! {culprit_done, Ref, X, Rs}
+    end),
+    culprit_pool(Rest, Jobs, Running + 1, Acc, Parent, Paths, Victim);
+culprit_pool(Pending, Jobs, Running, Acc, Parent, Paths, Victim) ->
+    receive
+        {culprit_done, _Ref, X, Rs} ->
+            Acc1 =
+                case [R || R = #{module := M, failures := F} <- Rs, M =:= Victim, F > 0] of
+                    [] ->
+                        Acc;
+                    [R | _] ->
+                        io:format("  ~s fails after ~s~n", [Victim, X]),
+                        [R#{module => X ++ " (then " ++ Victim ++ ")"} | Acc]
+                end,
+            culprit_pool(Pending, Jobs, Running - 1, Acc1, Parent, Paths, Victim)
     end.
 
 progress(Rs) ->

@@ -1459,7 +1459,7 @@ session_table_dead_pid_returns_default_test() ->
 
 %% Live shell with no user bindings → returns a map (may include workspace singletons)
 get_session_bindings_from_live_shell_returns_map_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     {ok, ShellPid} = beamtalk_repl_shell:start_link(<<"test-gsb-1">>),
     {ok, Bindings} = beamtalk_repl_shell:get_bindings(ShellPid),
     SessionBindings = beamtalk_repl_ops_dev:get_session_bindings(ShellPid),
@@ -1495,7 +1495,7 @@ complete_op_session_field_is_in_msg_not_params_test() ->
 %% Key invariant: the PID returned by resolve_pid/2 is the shell PID, so
 %% get_session_bindings called on it returns the same map as get_bindings/1.
 session_binding_lookup_pipeline_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     SessionId = <<"test-pipeline-bt1045">>,
     {ok, ShellPid} = beamtalk_repl_shell:start_link(SessionId),
     %% sleep: keeps a stand-in default session process alive for the test

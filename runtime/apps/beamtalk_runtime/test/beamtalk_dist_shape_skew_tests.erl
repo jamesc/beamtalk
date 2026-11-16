@@ -80,7 +80,7 @@ same as any other suite that is first to bring it up. The peer always gets
 its own copy via `start_peer/2`'s identical call.
 """.
 setup() ->
-    {ok, _Started} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _Started} = beamtalk_test_boot:start_app(beamtalk_runtime),
     {ok, Peer, PeerNode} = beamtalk_dist_test_helper:start_peer(
         "bt3602_skew", #{connection => standard_io}
     ),

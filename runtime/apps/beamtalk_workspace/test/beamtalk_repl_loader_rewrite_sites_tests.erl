@@ -94,7 +94,7 @@ sub_counter_source() ->
 
 setup() ->
     beamtalk_test_boot:compiler(),
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
     Unique = beamtalk_test_unique:id(),

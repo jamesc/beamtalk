@@ -25,7 +25,7 @@ Keyword constructors are ordinary class methods: the in-caller path of ADR
 -define(PLAIN_HELPER, beamtalk_class_dispatch_test_helper).
 
 setup() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     ok = beamtalk_stdlib:init(),
     ok.
 

@@ -222,7 +222,7 @@ trigger_code_change_3_dead_pid_test() ->
 %%====================================================================
 
 field_migration_setup() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_stdlib:init(),
     ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = beamtalk_test_class:ensure_fixture_loaded('InitHookCounter', 'bt@init_hook_counter'),
