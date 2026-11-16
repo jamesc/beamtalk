@@ -69,7 +69,7 @@ format_diagnostics_unexpected_type_test() ->
 %%====================================================================
 
 is_internal_key_double_underscore_test() ->
-    ?assert(beamtalk_repl_compiler:is_internal_key('__workspace_user_bindings__')).
+    ?assert(beamtalk_repl_compiler:is_internal_key('__some_internal_key__')).
 
 is_internal_key_double_underscore_prefix_only_test() ->
     ?assert(beamtalk_repl_compiler:is_internal_key('__workspace_user_bindings__')).
