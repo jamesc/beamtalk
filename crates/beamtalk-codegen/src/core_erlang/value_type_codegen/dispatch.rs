@@ -936,14 +936,8 @@ impl CoreErlangGenerator {
             .hint(leaf::binary_lit(hint))
             .build(
                 vec![
-                    super::super::errors::ErrorBinding::split(
-                        Document::Str("<ArErr0>"),
-                        Document::Str("ArErr0")
-                    ),
-                    super::super::errors::ErrorBinding::split(
-                        Document::Str("<ArErr1>"),
-                        Document::Str("ArErr1")
-                    ),
+                    super::super::errors::ErrorBinding::bracketed("ArErr0"),
+                    super::super::errors::ErrorBinding::bracketed("ArErr1"),
                     super::super::errors::ErrorBinding::terminal(Document::Str("<ArErr2>"))
                 ],
                 line()
@@ -970,14 +964,8 @@ impl CoreErlangGenerator {
             .hint(leaf::binary_lit(hint_msg))
             .build(
                 vec![
-                    super::super::errors::ErrorBinding::split(
-                        Document::Str("<TyErr0>"),
-                        Document::Str("TyErr0")
-                    ),
-                    super::super::errors::ErrorBinding::split(
-                        Document::Str("<TyErr1>"),
-                        Document::Str("TyErr1")
-                    ),
+                    super::super::errors::ErrorBinding::bracketed("TyErr0"),
+                    super::super::errors::ErrorBinding::bracketed("TyErr1"),
                     super::super::errors::ErrorBinding::terminal(Document::Str("<TyErr2>"))
                 ],
                 line()

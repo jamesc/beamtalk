@@ -659,8 +659,8 @@ impl CoreErlangGenerator {
             .hint(leaf::binary_lit(hint_text))
             .build(
                 vec![
-                    super::errors::ErrorBinding::split(leaf::var(err0.clone()), leaf::var(err0)),
-                    super::errors::ErrorBinding::split(leaf::var(err1.clone()), leaf::var(err1)),
+                    super::errors::ErrorBinding::plain(err0),
+                    super::errors::ErrorBinding::plain(err1),
                     super::errors::ErrorBinding::terminal(leaf::var(err2.clone()))
                 ],
                 Document::Str(" ")

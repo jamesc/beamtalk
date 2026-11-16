@@ -207,9 +207,14 @@ fn emitted_kinds() -> BTreeSet<String> {
         // `BeamtalkErrorChain::new(kind, ..)` (errors.rs) takes the kind first.
         for (idx, _) in src.match_indices("BeamtalkErrorChain::new(") {
             let open = idx + "BeamtalkErrorChain::new".len();
-            if let Some(kind) = string_literal_arg(src, open, 0) {
-                kinds.insert(kind);
-            }
+            let kind = string_literal_arg(src, open, 0).unwrap_or_else(|| {
+                panic!(
+                    "`BeamtalkErrorChain::new` in {} takes a non-literal kind; the drift scan \
+                     reads string literals, so pass the kind inline",
+                    file.display()
+                )
+            });
+            kinds.insert(kind);
         }
         for (idx, _) in src.match_indices("'beamtalk_error':'new'('") {
             let rest = &src[idx + "'beamtalk_error':'new'('".len()..];

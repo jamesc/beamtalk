@@ -1347,14 +1347,8 @@ impl CoreErlangGenerator {
                             .hint(hint)
                             .build(
                                 vec![
-                                    super::super::errors::ErrorBinding::split(
-                                        leaf::var(error_base.clone()),
-                                        leaf::var(error_base)
-                                    ),
-                                    super::super::errors::ErrorBinding::split(
-                                        leaf::var(error_sel.clone()),
-                                        leaf::var(error_sel)
-                                    ),
+                                    super::super::errors::ErrorBinding::plain(error_base),
+                                    super::super::errors::ErrorBinding::plain(error_sel),
                                     super::super::errors::ErrorBinding::terminal(leaf::var(
                                         error_hint.clone()
                                     ))
@@ -1501,14 +1495,8 @@ impl CoreErlangGenerator {
                             .hint(hint)
                             .build(
                                 vec![
-                                    super::super::errors::ErrorBinding::split(
-                                        leaf::var(error_base.clone()),
-                                        leaf::var(error_base)
-                                    ),
-                                    super::super::errors::ErrorBinding::split(
-                                        leaf::var(error_sel.clone()),
-                                        leaf::var(error_sel)
-                                    ),
+                                    super::super::errors::ErrorBinding::plain(error_base),
+                                    super::super::errors::ErrorBinding::plain(error_sel),
                                     super::super::errors::ErrorBinding::terminal(leaf::var(
                                         error_hint.clone()
                                     ))

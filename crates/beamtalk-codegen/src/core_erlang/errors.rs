@@ -79,11 +79,6 @@ impl ErrorBinding {
             binding,
         }
     }
-
-    /// A binding and reference spelled differently (e.g. `_Error0` / `Error0`).
-    pub(super) fn split(binding: Document<'static>, reference: Document<'static>) -> Self {
-        Self { binding, reference }
-    }
 }
 
 /// One link after `beamtalk_error:new/2` in a [`BeamtalkErrorChain`].
@@ -312,6 +307,11 @@ impl CoreErlangGenerator {
 mod tests {
     use super::check_init_args_call_doc;
     use super::{BeamtalkErrorChain, ErrorBinding};
+
+    /// A binding and reference spelled differently (e.g. `_Error0` / `Error0`).
+    fn split(binding: Document<'static>, reference: Document<'static>) -> ErrorBinding {
+        ErrorBinding { binding, reference }
+    }
     use beamtalk_cerl_doc::{Document, leaf};
 
     #[test]
@@ -372,8 +372,8 @@ mod tests {
             .hint(leaf::binary_lit("h"))
             .build(
                 vec![
-                    ErrorBinding::split(Document::Str("_Error0"), Document::Str("Error0")),
-                    ErrorBinding::split(Document::Str("_Error1"), Document::Str("Error1")),
+                    split(Document::Str("_Error0"), Document::Str("Error0")),
+                    split(Document::Str("_Error1"), Document::Str("Error1")),
                     ErrorBinding::plain("_Error2"),
                 ],
                 Document::Str(" "),
