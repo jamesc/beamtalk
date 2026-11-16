@@ -1870,7 +1870,13 @@ core-diff-base-snapshot BASE_REF OUT_DIR:
     # $OUT is absolute, so it lands outside the worktree; the base's own
     # `core-diff-snapshot` default MODE applies (full for commits that
     # predate BT-3887, snapshot-only after — identical `.core` either way).
-    (cd "$BASE_WORKTREE" && just core-diff-snapshot "$OUT")
+    # BT-4959: mise refuses a `mise.toml` it has not been told to trust, and
+    # this worktree is a new path, so `build-erlang` fails there in a fresh
+    # session. Trust exactly this worktree, for these commands only, via the
+    # environment (nothing is written to the global mise trust store). Safe
+    # because the worktree is a checkout of this repository's own BASE_REF,
+    # created above by `git worktree add`; nothing else is trusted.
+    (cd "$BASE_WORKTREE" && MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$BASE_WORKTREE" just core-diff-snapshot "$OUT")
 
 # BT-3509: diffs a fresh corpus `.core` snapshot of the current checkout
 # against the same snapshot taken from BASE_REF (default `origin/main`),
@@ -1994,7 +2000,10 @@ core-diff-relocation OUT_DIR="target/core-diff-relocation":
     git worktree add --detach --quiet "$WT" HEAD
     trap 'git worktree remove --force "$WT" >/dev/null 2>&1 || true' EXIT
     just core-diff-snapshot "$OUT/here" snapshot-only
-    (cd "$WT" && CARGO_TARGET_DIR="$ROOT/target" just core-diff-snapshot "$OUT/relocated" snapshot-only)
+    # BT-4959: trust only this worktree's `mise.toml`, for this command only
+    # (see `core-diff-base-snapshot`); it is a checkout of this repository's
+    # own HEAD, and the global mise trust store is not touched.
+    (cd "$WT" && CARGO_TARGET_DIR="$ROOT/target" MISE_TRUSTED_CONFIG_PATHS="${MISE_TRUSTED_CONFIG_PATHS:+$MISE_TRUSTED_CONFIG_PATHS:}$WT" just core-diff-snapshot "$OUT/relocated" snapshot-only)
     for d in here relocated; do
         if [[ -z "$(find "$OUT/$d" -name '*.core' -print -quit)" ]]; then
             echo "❌ core-diff-relocation: $d snapshot holds no .core files" >&2

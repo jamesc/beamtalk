@@ -707,6 +707,28 @@ just core-diff-base-snapshot origin/main target/core-diff/base
 just core-diff origin/main target/core-diff/base
 ```
 
+**Trust for the base worktree (BT-4959):** `core-diff-base-snapshot` and
+`core-diff-relocation` build a second checkout of this repository, and mise
+refuses an untrusted `mise.toml` there. The recipes set
+`MISE_TRUSTED_CONFIG_PATHS` to exactly that worktree for the commands they
+run in it, so no manual `mise trust` is needed and the global mise trust
+store is never written.
+
+**Fallback (own-tree method):** if the recipe cannot run, take the snapshot
+on `main` and on your branch yourself, then compare:
+
+```bash
+git switch --detach origin/main && just core-diff-snapshot target/core-diff/base
+git switch -                    && just core-diff-snapshot target/core-diff/head
+python3 scripts/ci/core_diff_normalise.py target/core-diff/base
+python3 scripts/ci/core_diff_normalise.py target/core-diff/head
+diff -ru target/core-diff/base target/core-diff/head
+```
+
+**CI trigger (BT-4959):** `.github/workflows/core-diff.yml` has no `paths:`
+filter. A PR carrying `ci:core-diff` or `core-diff:enforce` always gets a run,
+whatever files it changes; without either label the job is skipped.
+
 **Snapshot-only mode (BT-3887):** the harness only ever reads `.core`, so
 `core-diff-snapshot`'s default `MODE=snapshot-only` sets
 `BEAMTALK_CORE_SNAPSHOT_ONLY=1` and each of `build-stdlib`, `test-stdlib`
