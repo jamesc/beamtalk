@@ -458,6 +458,19 @@ error[E0301]: Class name 'Parser' is exported by multiple dependencies
 
 The collision is detected lazily — only when you actually reference the ambiguous name. If two dependencies both export `Parser` but your code never uses it, there is no error.
 
+### Qualifier Validation
+
+The package name in a `pkg@Class` qualifier must be one of the current package's declared `[dependencies]`, the package itself, or `stdlib`. An undeclared qualifier is a compile error in `beamtalk build`, `check`, `test`, `load_project` and `lint` (BT-4921):
+
+```text
+error: Unknown package 'foo' in qualified reference 'foo@Bar'
+  --> src/app.bt:3:5
+   |
+   = help: Add 'foo' to [dependencies] in beamtalk.toml
+```
+
+A transitive dependency must be declared directly to be named in a qualifier. Single files and directories with no `beamtalk.toml` have no package set and are not checked. The language server does not check qualifiers yet.
+
 ## Collision Detection
 
 Beamtalk prevents silent class name shadowing. The compiler checks for collisions at two levels:
