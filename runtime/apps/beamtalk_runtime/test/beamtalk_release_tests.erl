@@ -124,6 +124,8 @@ shape_manifest_matches_the_shared_projection_for_registered_fixture_classes_test
     ).
 
 shape_manifest_excludes_stdlib_classes_test() ->
+    %% The assertion below needs live stdlib classes to compare against (BT-4934).
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     Dir = fixtures_dir(),
     {ok, _} = beamtalk_release_shapes:extract_shapes([], [Dir]),
     Manifest = beamtalk_release:shape_manifest(),
