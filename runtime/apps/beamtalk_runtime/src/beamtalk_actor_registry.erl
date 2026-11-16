@@ -43,6 +43,7 @@ release.
 -export([
     all_registered/0,
     is_beamtalk_actor/1,
+    native_class_candidates/1,
     pid_class_candidates/1,
     pid_class_candidates_remote_safe/1,
     pid_class_name/1,
@@ -470,17 +471,28 @@ pid_class_candidates(Pid) ->
 -spec native_pid_class_candidates(list()) -> [atom()].
 native_pid_class_candidates(Dict) ->
     case lists:keyfind('$initial_call', 1, Dict) of
-        {'$initial_call', {Backing, init, 1}} when is_atom(Backing) ->
-            %% The index can hold a stale row for a class whose process died
-            %% (`forget_backing_module_entries/2`), so keep live classes only.
-            lists:usort([
-                C
-             || C <- beamtalk_class_registry:classes_backing_module(Backing),
-                beamtalk_class_registry:whereis_class(C) =/= undefined
-            ]);
-        _ ->
-            []
+        {'$initial_call', InitialCall} -> native_class_candidates(InitialCall);
+        _ -> []
     end.
+
+-doc """
+The live classes whose `native:` backing module (ADR 0056) is the module of a
+process's `'$initial_call'` (`{BackingModule, init, 1}`, set by `proc_lib`),
+or `[]` for any other initial call. Single implementation of the
+backing-module match: `pid_class_candidates/1` and `beamtalk_actor_scan`
+(ADR 0150) both call it with the `'$initial_call'` they read.
+""".
+-spec native_class_candidates(term()) -> [atom()].
+native_class_candidates({Backing, init, 1}) when is_atom(Backing) ->
+    %% The index can hold a stale row for a class whose process died
+    %% (`forget_backing_module_entries/2`), so keep live classes only.
+    lists:usort([
+        C
+     || C <- beamtalk_class_registry:classes_backing_module(Backing),
+        beamtalk_class_registry:whereis_class(C) =/= undefined
+    ]);
+native_class_candidates(_) ->
+    [].
 
 -doc """
 Node-aware wrapper over `pid_class_candidates/1` (ADR 0126 §4, BT-3603):
