@@ -1162,8 +1162,7 @@ impl CoreErlangGenerator {
                     // validates arity.
                     Some(WellKnownSelector::HasField) => self.object_has_field(receiver, arguments),
                     // ADR 0124 §1/§4f/B4: `clearField:` — returns a `late`
-                    // slot to unassigned. A write; lowers exactly as
-                    // `fieldAt:put:` does.
+                    // slot to unassigned. A write; same shape as `fieldAt:put:`.
                     Some(WellKnownSelector::ClearField) => {
                         self.object_clear_field(receiver, arguments)
                     }
@@ -1625,7 +1624,7 @@ impl CoreErlangGenerator {
     }
 
     /// `clearField:` — return a `late` field to unassigned (ADR 0124 §1/§4f/B4).
-    /// A write; shares `fieldAt:put:`'s class-side and actor-`self` fast paths.
+    /// A write; same shape as `fieldAt:put:` (class-side in-place path, actor-`self` fast path).
     fn object_clear_field(
         &mut self,
         receiver: &Expression,
