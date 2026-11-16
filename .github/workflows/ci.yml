@@ -129,6 +129,7 @@ jobs:
             crates/beamtalk-cli/src/commands/test.rs \
             crates/beamtalk-cli/src/commands/test_stdlib.rs \
             crates/beamtalk-cli/src/commands/util.rs \
+            scripts/ci/core_diff_normalise.py \
             Justfile)
 
           # The chapters' doctests run against the compiler, the runtime and
@@ -451,6 +452,12 @@ jobs:
 
       - name: Compare snapshot-only and full .core output
         run: just core-diff-modes
+
+      # BT-4939: `core-diff:enforce` compares a head and a base built in
+      # different directories; prove two snapshots of one commit from
+      # different directories are identical.
+      - name: Check .core snapshots do not depend on the checkout directory
+        run: just core-diff-relocation
 
   # ─── OTP support-window matrix (ADR 0125 §3.1, BT-3572) ────────────────
   # otp-support.toml is the single declared source of the OTP support
