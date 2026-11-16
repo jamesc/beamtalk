@@ -181,6 +181,10 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     // aliases, FFI registry, and `[diagnostics]` table apply here too (same
     // session-wins merge and stdlib/manifest-less fallbacks).
     let source_path = map_get(request, "source_path").and_then(term_to_string);
+    // BT-4940: embed a package-relative path, not the wire's absolute one.
+    let embedded_path = source_path
+        .as_deref()
+        .map(crate::project_context::embedded_source_path);
     // A method patch is never part of a `load_project` batch: always verify
     // the project scope afresh.
     let scope = crate::project_context::RequestScope::for_source(
@@ -397,7 +401,7 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
         .with_class_superclass_index(class_superclass_index)
         .with_class_hierarchy(pre_class_hierarchy)
         .with_pre_loaded_aliases(pre_loaded_aliases)
-        .with_source_path_opt(source_path.as_deref())
+        .with_source_path_opt(embedded_path.as_deref())
         // `analysis` was computed on `merged_module` with no
         // mutation since — always safe to hand off.
         .with_analysis(analysis);

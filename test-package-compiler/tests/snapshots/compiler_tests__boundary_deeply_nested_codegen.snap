@@ -185,7 +185,8 @@ module 'boundary_deeply_nested' ['start_link'/1, 'start_link'/2, 'init'/1, 'hand
     let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of
         <'true'> when 'true' -> 'skipped'
         <'false'> when 'true' ->
-            call 'erlang':'put'('$beamtalk_actor', 'boundary_deeply_nested')
+            let _ClassMarker = call 'erlang':'put'('$beamtalk_actor', 'boundary_deeply_nested') in
+            call 'erlang':'put'('$beamtalk_actor_started_at', call 'erlang':'system_time'('microsecond'))
     end in
     let DefaultState = ~{
         '__class_mod__' => 'boundary_deeply_nested'

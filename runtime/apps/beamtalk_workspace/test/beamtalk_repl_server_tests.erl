@@ -1106,14 +1106,14 @@ validate_actor_pid_invalid_format_test() ->
 
 validate_actor_pid_unknown_actor_test() ->
     %% Valid PID format but not registered as an actor
-    PidStr = pid_to_list(self()),
+    PidStr = pid_to_list(beamtalk_test_proc:spawn_idle()),
     ?assertEqual({error, unknown_actor}, beamtalk_repl_params:validate_actor_pid(PidStr)).
 
 %%% is_known_actor/1 tests
 
-is_known_actor_no_registry_test() ->
-    %% When no registry is running, should return false
-    ?assertEqual(false, beamtalk_repl_params:is_known_actor(self())).
+is_known_actor_non_actor_test() ->
+    %% A process without the actor marker is not an actor
+    ?assertEqual(false, beamtalk_repl_params:is_known_actor(beamtalk_test_proc:spawn_idle())).
 
 %%% get_completions/1 tests
 
@@ -1901,9 +1901,9 @@ handle_op_inspect_live_non_actor_test() ->
 %% Regression test for the bug where state was returned as a binary string, causing
 %% the TypeScript client's Object.entries() to iterate characters instead of fields.
 handle_op_inspect_live_tagged_actor_test() ->
-    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
-        {ok, ActorPid} = test_counter:start_link(0),
-        ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
+    (fun() ->
+        %% A synchronous spawn: the marker is written, so the scan sees it.
+        {ok, ActorPid} = beamtalk_actor:safe_spawn_linked(test_counter, 0),
         PidStr = list_to_binary(pid_to_list(ActorPid)),
         Msg = make_proto_msg(<<"inspect">>, <<"i4">>, #{<<"actor">> => PidStr}),
         Params = #{<<"actor">> => PidStr},
@@ -1925,7 +1925,7 @@ handle_op_inspect_live_tagged_actor_test() ->
                 _:_ -> ok
             end)
         end
-    end).
+    end)().
 
 handle_op_kill_invalid_pid_test() ->
     Msg = make_proto_msg(<<"kill">>, <<"k1">>, #{<<"actor">> => <<"notapid">>}),

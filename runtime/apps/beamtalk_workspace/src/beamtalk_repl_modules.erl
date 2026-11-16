@@ -16,7 +16,7 @@ Provides utilities for listing, unloading, and reloading modules.
     new/0,
     add_module/3,
     remove_module/2,
-    get_actor_count/3,
+    get_actor_count/2,
     resolve_source_path/1
 ]).
 -ifdef(TEST).
@@ -102,26 +102,14 @@ module_exists(ModuleName, Tracker) ->
 -endif.
 
 -doc """
-Get the current actor count for a module.
-Queries the actor registry to count actors using this module.
+Get the current actor count for a module: one actor scan, `0` for a module
+the session does not track.
 """.
--spec get_actor_count(atom(), pid() | undefined, module_tracker()) -> non_neg_integer().
-get_actor_count(ModuleName, RegistryPid, Tracker) ->
-    case {maps:find(ModuleName, Tracker), RegistryPid} of
-        {{ok, _Info}, Pid} when is_pid(Pid) ->
-            %% Query actor registry for count
-            try
-                case beamtalk_repl_actors:count_actors_for_module(Pid, ModuleName) of
-                    {ok, Count} -> Count;
-                    {error, _} -> 0
-                end
-            catch
-                exit:{noproc, _} -> 0;
-                exit:{timeout, _} -> 0;
-                _:_ -> 0
-            end;
-        _ ->
-            0
+-spec get_actor_count(atom(), module_tracker()) -> non_neg_integer().
+get_actor_count(ModuleName, Tracker) ->
+    case maps:is_key(ModuleName, Tracker) of
+        true -> beamtalk_workspace_actors:count_for_module(ModuleName);
+        false -> 0
     end.
 
 -ifdef(TEST).
@@ -161,7 +149,7 @@ resolve_source_path(ModName) ->
     try
         Attrs = erlang:get_module_info(ModName, attributes),
         case proplists:get_value(beamtalk_source, Attrs) of
-            [Path] when is_list(Path), Path =/= "" -> Path;
+            [Path] when is_list(Path), Path =/= "" -> beamtalk_source_path:resolve(ModName, Path);
             _ -> "unknown"
         end
     catch

@@ -36,7 +36,7 @@ TestCase subclass: IsKindOfInlineMatrixTest
   samples -> List(Object) =>
     #(42, -1, 1.5, "ab", "", #ab, nil, true, false, #(1, 2), #(), [:x |
       x
-    ], {1, 2}, {}, (Dictionary new at: #a put: 1), (Dictionary new), $a, (Erlang erlang list_to_binary: #(255)), (Binary fromBytes: #(234)), self unaligned, (Erlang erlang self), (Erlang erlang make_ref), TypePatternActorFixture spawn, (ValuePoint new: #{
+    ], {1, 2}, {}, (Dictionary new at: #a put: 1), Dictionary new, $a, (Erlang erlang list_to_binary: #(255)), (Binary fromBytes: #(234)), self unaligned, Erlang erlang self, Erlang erlang make_ref, TypePatternActorFixture spawn, (ValuePoint new: #{
       #x => 1,
       #y => 2
     }), Integer, self)

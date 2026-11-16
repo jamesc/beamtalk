@@ -319,48 +319,108 @@ strip_internal_bindings_only_registry_test() ->
     Bindings = #{'__repl_actor_registry__' => self()},
     ?assertEqual(#{}, beamtalk_repl_eval:strip_internal_bindings(Bindings)).
 
-%%% should_purge_module tests
+%%% cleanup_module tests (BT-4945)
 
-should_purge_module_undefined_registry_test() ->
-    %% No registry means always purge
-    ?assertEqual(true, beamtalk_repl_eval:should_purge_module(some_module, undefined)).
+%% BT-4945: eval-module cleanup asks the code server, never the actor list.
+%% Old behaviour (recorded for the PR note): the actor list records the class
+%% module, never `beamtalk_repl_eval_N` (classes load through
+%% beamtalk_repl_loader into their own modules), so the check was always true;
+%% and `code:purge/1` returned false for a module with no old code, so
+%% `code:delete/1` never ran: eval modules were never deleted. They still are
+%% not, because OTP's check_process_code does not see fun holders, so a delete
+%% would break blocks held in bindings or actors with `badfun`.
 
-should_purge_module_no_actors_test() ->
-    %% Start a registry with no actors — module should be purged
-    {ok, Registry} = gen_server:start_link(beamtalk_repl_actors, [], []),
-    Result = beamtalk_repl_eval:should_purge_module(beamtalk_repl_eval_999, Registry),
-    gen_server:stop(Registry),
-    ?assertEqual(true, Result).
+%% Load a throwaway module `Name` exporting `make/0` (returns a fun defined in
+%% the module) and `f/0`.
+load_probe_module(Name) ->
+    Src = lists:flatten(
+        io_lib:format(
+            "-module(~s).~n-export([make/1, f/0, wait/0]).~nf() -> ok.~nwait() -> receive stop -> ok end.~nmake(X) -> fun() -> {f(), X} end.~n",
+            [Name]
+        )
+    ),
+    {ok, Toks, _} = erl_scan:string(Src),
+    Forms = split_forms(Toks),
+    {ok, Name, Bin} = compile:forms(Forms, [return_errors]),
+    {module, Name} = code:load_binary(Name, "", Bin),
+    ok.
 
-should_purge_module_with_actor_test() ->
-    %% Start a registry, register an actor — module should NOT be purged
-    {ok, Registry} = gen_server:start_link(beamtalk_repl_actors, [], []),
-    %% Create a dummy process to act as the actor
-    ActorPid = spawn(fun() ->
+split_forms(Toks) ->
+    split_forms(Toks, [], []).
+split_forms([], [], Acc) ->
+    lists:reverse(Acc);
+split_forms([{dot, _} = D | Rest], Cur, Acc) ->
+    {ok, Form} = erl_parse:parse_form(lists:reverse([D | Cur])),
+    split_forms(Rest, [], [Form | Acc]);
+split_forms([T | Rest], Cur, Acc) ->
+    split_forms(Rest, [T | Cur], Acc).
+
+probe_name() ->
+    list_to_atom("bt4945_probe_" ++ integer_to_list(erlang:unique_integer([positive]))).
+
+cleanup_module_no_process_runs_it_test() ->
+    Mod = probe_name(),
+    ok = load_probe_module(Mod),
+    ?assertEqual(purged, beamtalk_repl_eval:cleanup_module(Mod)),
+    %% nothing old left, current code untouched
+    ?assertEqual(false, erlang:check_old_code(Mod)),
+    ?assertEqual(ok, Mod:f()).
+
+cleanup_module_old_code_unreferenced_is_purged_test() ->
+    Mod = probe_name(),
+    ok = load_probe_module(Mod),
+    ok = load_probe_module(Mod),
+    ?assert(erlang:check_old_code(Mod)),
+    ?assertEqual(purged, beamtalk_repl_eval:cleanup_module(Mod)),
+    ?assertEqual(false, erlang:check_old_code(Mod)).
+
+cleanup_module_unloaded_module_test() ->
+    ?assertEqual(purged, beamtalk_repl_eval:cleanup_module(bt4945_never_loaded)).
+
+cleanup_module_running_process_retained_not_killed_test() ->
+    %% A process running old code is not killed: soft_purge answers false.
+    Mod = probe_name(),
+    ok = load_probe_module(Mod),
+    Holder = spawn(Mod, wait, []),
+    ok = load_probe_module(Mod),
+    ?assertEqual(retained, beamtalk_repl_eval:cleanup_module(Mod)),
+    ?assert(erlang:is_process_alive(Holder)),
+    Ref = erlang:monitor(process, Holder),
+    Holder ! stop,
+    receive
+        {'DOWN', Ref, process, Holder, normal} -> ok
+    after 1000 -> ?assert(false)
+    end.
+
+cleanup_module_fun_holder_keeps_working_test() ->
+    %% A process holding only a fun of the module is not killed and its fun
+    %% keeps working after cleanup (the module is not deleted).
+    Mod = probe_name(),
+    ok = load_probe_module(Mod),
+    Fun = Mod:make(erlang:unique_integer()),
+    Holder = spawn(fun() ->
         receive
-            stop -> ok
+            {call, From} -> From ! {result, Fun()}
         end
     end),
-    %% register_actor(Registry, ActorPid, ClassName, ModuleName)
-    beamtalk_repl_actors:register_actor(Registry, ActorPid, 'TestClass', test_module),
-    Result = beamtalk_repl_eval:should_purge_module(test_module, Registry),
-    ActorPid ! stop,
-    gen_server:stop(Registry),
-    ?assertEqual(false, Result).
+    _ = beamtalk_repl_eval:cleanup_module(Mod),
+    ?assert(erlang:is_process_alive(Holder)),
+    Holder ! {call, self()},
+    receive
+        {result, {ok, _}} -> ok
+    after 1000 -> ?assert(false)
+    end,
+    ?assertMatch({ok, _}, Fun()).
 
-should_purge_module_different_module_test() ->
-    %% Actor registered for different module — our module should be purged
-    {ok, Registry} = gen_server:start_link(beamtalk_repl_actors, [], []),
-    ActorPid = spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end),
-    beamtalk_repl_actors:register_actor(Registry, ActorPid, 'OtherClass', other_module),
-    Result = beamtalk_repl_eval:should_purge_module(my_module, Registry),
-    ActorPid ! stop,
-    gen_server:stop(Registry),
-    ?assertEqual(true, Result).
+cleanup_module_eval_module_never_hosts_actor_class_test() ->
+    %% An actor class is loaded by beamtalk_repl_loader into its own module,
+    %% never into `beamtalk_repl_eval_N`; so the old actor-list check
+    %% (recorded module =:= eval module) could never be true.
+    Mod = beamtalk_module_name:repl_eval_module(4945),
+    ?assertNotEqual(
+        nomatch, string:find(atom_to_list(Mod), "repl_eval_")
+    ),
+    ?assertEqual(purged, beamtalk_repl_eval:cleanup_module(Mod)).
 
 %%% maybe_await_future tests
 
@@ -635,14 +695,12 @@ handle_load_valid_file_no_compiler_test() ->
         Other2 -> error({unexpected_result, Other2})
     end.
 
-%%% do_eval with bindings and actor registry
+%%% do_eval without a compiler
 
-do_eval_with_registry_no_compiler_test() ->
-    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
-    State = beamtalk_repl_state:new(RegistryPid, 0),
+do_eval_no_compiler_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
     {error, #beamtalk_error{}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 2", State),
-    ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)),
-    gen_server:stop(RegistryPid).
+    ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)).
 
 %%% format_formatted_diagnostics edge cases
 
@@ -712,7 +770,7 @@ handle_class_definition_load_error_test() ->
     },
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:handle_class_definition(
-        ClassInfo, [], "test", #{}, State, undefined, undefined
+        ClassInfo, [], "test", #{}, State, undefined
     ),
     ?assertMatch({error, #beamtalk_error{}, <<>>, [], _}, Result).
 
@@ -728,7 +786,7 @@ handle_class_definition_empty_classes_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     %% Load will fail, hitting the error branch
     Result = beamtalk_repl_eval:handle_class_definition(
-        ClassInfo, [<<"warn">>], "test", #{}, State, undefined, undefined
+        ClassInfo, [<<"warn">>], "test", #{}, State, undefined
     ),
     ?assertMatch({error, #beamtalk_error{}, <<>>, [<<"warn">>], _}, Result).
 
@@ -968,16 +1026,6 @@ is_stdlib_path_not_stdlib_test() ->
 
 is_stdlib_path_rel_lib_v2_test() ->
     ?assertEqual(true, beamtalk_repl_loader_support:is_stdlib_path("stdlib/src/string.bt")).
-
-%% ===================================================================
-%% should_purge_module edge cases
-%% ===================================================================
-
-should_purge_module_with_registry_no_actors_test() ->
-    %% Test with a live registry that returns empty actors
-    {ok, Pid} = gen_server:start_link(beamtalk_repl_actors, [], []),
-    ?assertEqual(true, beamtalk_repl_eval:should_purge_module(some_module, Pid)),
-    gen_server:stop(Pid).
 
 %% ===================================================================
 %% Stdin request detection tests
@@ -1675,9 +1723,6 @@ eval_success_test_() ->
         %% Standalone `Class >> selector => body` method definition.
         {"do_eval standalone method definition reloads the target class",
             fun do_eval_standalone_method_definition/0},
-        %% A live actor registry pid threaded into eval bindings.
-        {"do_eval threads a live actor registry pid into bindings",
-            fun do_eval_with_actor_registry/0},
         %% do_dispatch/5 (connected-mode entry dispatch).
         {"do_dispatch unary success sends to the class object", fun do_dispatch_unary_success/0},
         {"do_dispatch keyword success passes argv", fun do_dispatch_keyword_success/0},
@@ -2026,21 +2071,6 @@ do_eval_standalone_method_definition() ->
     MethodSource = "EvalStandaloneMethodCls >> value2 => 6",
     Result = beamtalk_repl_eval:do_eval(MethodSource, State1),
     ?assertMatch({ok, _, <<>>, _, _}, Result).
-
-do_eval_with_actor_registry() ->
-    %% A non-undefined actor-registry pid is threaded into the eval bindings
-    %% map (INTERNAL_REGISTRY_KEY) and stripped again on the way out. A
-    %% minimal fake registry answers the post-eval `list_actors` cleanup
-    %% call (a real pid, but not self() — gen_server:call(self(), _) would
-    %% deadlock-detect against the calling test process itself).
-    FakeRegistry = spawn(fun() ->
-        receive
-            {'$gen_call', From, list_actors} -> gen_server:reply(From, [])
-        end
-    end),
-    State = beamtalk_repl_state:set_actor_registry(FakeRegistry, state0()),
-    Result = beamtalk_repl_eval:do_eval("5 + 5", State),
-    ?assertMatch({ok, 10, _, _, _}, Result).
 
 %%====================================================================
 %% do_dispatch/5 (connected-mode `beamtalk run` entry
