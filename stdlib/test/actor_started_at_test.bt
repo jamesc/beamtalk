@@ -6,6 +6,7 @@
 // keeps the OLDER registrant instead of falling back to a random force-kill.
 
 TestCase subclass: ActorStartedAtTest
+
   startedAt: actor :: Actor -> Integer =>
     Erlang beamtalk_actor_registry started_at_from_dictionary: actor pid
 
@@ -33,7 +34,6 @@ TestCase subclass: ActorStartedAtTest
     younger stop
 
   // === Every start path writes the key ===
-
   testSpawnMonitoredRecordsStartTime =>
     pair := Counter spawnMonitored
     a := pair at: 1
@@ -73,7 +73,10 @@ TestCase subclass: ActorStartedAtTest
     older := Counter spawn
     Timer sleep: 5
     younger := Counter spawn
-    winner := Erlang beamtalk_actor_registry resolve_global_conflict: #bt4937First pid1: older pid pid2: younger pid
+    winner := Erlang beamtalk_actor_registry
+      resolve_global_conflict: #bt4937First
+      pid1: older pid
+      pid2: younger pid
     self assert: winner equals: older pid
     older stop
     younger stop
@@ -82,7 +85,10 @@ TestCase subclass: ActorStartedAtTest
     older := Counter spawn
     Timer sleep: 5
     younger := Counter spawn
-    winner := Erlang beamtalk_actor_registry resolve_global_conflict: #bt4937Second pid1: younger pid pid2: older pid
+    winner := Erlang beamtalk_actor_registry
+      resolve_global_conflict: #bt4937Second
+      pid1: younger pid
+      pid2: older pid
     self assert: winner equals: older pid
     older stop
     younger stop
