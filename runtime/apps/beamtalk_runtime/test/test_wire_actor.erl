@@ -39,8 +39,7 @@ returned as a reply (`shapeAheadReply`), and a raise via
     'handle_setLate:'/2,
     handle_lateOp/2,
     handle_shapeAheadReply/2,
-    handle_boomWrapped/2,
-    'handle_invokeBlockWith:'/2
+    handle_boomWrapped/2
 ]).
 
 start_link(InitialValue) ->
@@ -51,7 +50,7 @@ start(InitialValue) ->
     gen_server:start(?MODULE, InitialValue, []).
 
 init(InitialValue) ->
-    beamtalk_actor:init(#{
+    test_actor_host:init(#{
         '$beamtalk_class' => 'WireActor',
         '__class_mod__' => 'wire_actor',
         '__methods__' => #{
@@ -60,8 +59,7 @@ init(InitialValue) ->
             'setLate:' => fun ?MODULE:'handle_setLate:'/2,
             lateOp => fun ?MODULE:handle_lateOp/2,
             shapeAheadReply => fun ?MODULE:handle_shapeAheadReply/2,
-            boomWrapped => fun ?MODULE:handle_boomWrapped/2,
-            'invokeBlockWith:' => fun ?MODULE:'handle_invokeBlockWith:'/2
+            boomWrapped => fun ?MODULE:handle_boomWrapped/2
         },
         value => InitialValue
         %% Deliberately no 'late_field' key here — the `late`-slot stand-in
@@ -69,11 +67,11 @@ init(InitialValue) ->
         %% "no sentinel, absent means absent" contract.
     }).
 
-handle_cast(Msg, State) -> beamtalk_actor:handle_cast(Msg, State).
-handle_call(Msg, From, State) -> beamtalk_actor:handle_call(Msg, From, State).
-handle_info(Msg, State) -> beamtalk_actor:handle_info(Msg, State).
-code_change(OldVsn, State, Extra) -> beamtalk_actor:code_change(OldVsn, State, Extra).
-terminate(Reason, State) -> beamtalk_actor:terminate(Reason, State).
+handle_cast(Msg, State) -> test_actor_host:handle_cast(Msg, State).
+handle_call(Msg, From, State) -> test_actor_host:handle_call(Msg, From, State).
+handle_info(Msg, State) -> test_actor_host:handle_info(Msg, State).
+code_change(OldVsn, State, Extra) -> test_actor_host:code_change(OldVsn, State, Extra).
+terminate(Reason, State) -> test_actor_host:terminate(Reason, State).
 
 %% Method implementations
 
@@ -137,15 +135,3 @@ handle_boomWrapped([], _State) ->
     beamtalk_error:raise(
         beamtalk_error:new(runtime_error, 'WireActor', boomWrapped, <<"boom, wrapped">>)
     ).
-
--doc """
-Invoke a one-argument block passed as the sole argument, in this actor's own
-process — the `remote_code_mismatch` scenarios (ADR 0126 §5.5, BT-3579
-finding (b)) need a block shaped like
-`beamtalk_dist_wirecheck_tests:compile_block_module_variant/2`'s generated
-`fun(X) -> ... end` (arity 1), unlike `test_wirecheck_actor`'s zero-arity
-`'invokeBlock:'` (built for the NLR scenario's `fun() -> throw(...) end`).
-""".
-'handle_invokeBlockWith:'([Block], State) when is_function(Block, 1) ->
-    Result = Block(1),
-    {reply, Result, State}.

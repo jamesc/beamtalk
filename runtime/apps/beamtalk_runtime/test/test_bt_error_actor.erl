@@ -30,7 +30,7 @@ start_link() ->
     beamtalk_actor:start_link(?MODULE, []).
 
 init(_Args) ->
-    beamtalk_actor:init(#{
+    test_actor_host:init(#{
         '$beamtalk_class' => 'BtErrorActor',
         '__class_mod__' => 'test_bt_error_actor',
         '__methods__' => #{
@@ -39,11 +39,11 @@ init(_Args) ->
         }
     }).
 
-handle_cast(Msg, State) -> beamtalk_actor:handle_cast(Msg, State).
-handle_call(Msg, From, State) -> beamtalk_actor:handle_call(Msg, From, State).
-handle_info(Msg, State) -> beamtalk_actor:handle_info(Msg, State).
-code_change(OldVsn, State, Extra) -> beamtalk_actor:code_change(OldVsn, State, Extra).
-terminate(Reason, State) -> beamtalk_actor:terminate(Reason, State).
+handle_cast(Msg, State) -> test_actor_host:handle_cast(Msg, State).
+handle_call(Msg, From, State) -> test_actor_host:handle_call(Msg, From, State).
+handle_info(Msg, State) -> test_actor_host:handle_info(Msg, State).
+code_change(OldVsn, State, Extra) -> test_actor_host:code_change(OldVsn, State, Extra).
+terminate(Reason, State) -> test_actor_host:terminate(Reason, State).
 
 %% Method that throws a structured #beamtalk_error{}
 handle_throwBtError([], _State) ->
