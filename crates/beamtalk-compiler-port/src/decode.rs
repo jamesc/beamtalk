@@ -516,8 +516,7 @@ pub(crate) fn parse_class_info_from_meta_term(
         // scan (`beamtalk_core::semantic_analysis::has_dynamic_field_writer`)
         // is not part of `__beamtalk_meta`'s wire format — cross-package
         // construction-site confidence is already the documented gap ADR
-        // 0100 WS3 (cross-package metadata) leaves open, same as
-        // `is_native` above. `false` here only ever costs confidence
+        // 0100 WS3 (cross-package metadata) leaves open. `false` here only ever costs confidence
         // (Warning where a Hint would be more honest), never correctness —
         // see `ClassInfo::has_dynamic_field_writer`'s doc.
         has_dynamic_field_writer: false,

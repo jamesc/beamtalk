@@ -141,7 +141,7 @@ pub(crate) fn check_native_delegate_return_type(
     // instead, BT-4930). Only native classes (a backing module) are checked: on non-native classes `self delegate` is a regular
     // message send to Actor.delegate (which raises at runtime), so no special
     // warning is needed.
-    for (class_name, side, method) in inline_methods_with_owner(module) {
+    for (class_name, side, method) in module.inline_methods_with_owner() {
         if side == MethodSide::Instance
             && hierarchy.is_native(class_name)
             && method.is_self_delegate()
@@ -176,27 +176,11 @@ pub(crate) fn check_native_delegate_reserved_word(
     // Inline methods and same-file extensions (folded into the class body),
     // instance- and class-side. A cross-file `Foo >> sel => self delegate` is
     // not a native delegate (BT-4930) and gets its own error instead.
-    for (class_name, _side, method) in inline_methods_with_owner(module) {
+    for (class_name, _side, method) in module.inline_methods_with_owner() {
         if is_native_object(class_name) && method.is_self_delegate() {
             check_selector_reserved_word(&method.selector, method.span, diagnostics);
         }
     }
-}
-
-/// Inline methods only, with their owner: what codegen lowers through the
-/// backing module. Same-file extensions are already folded into the class body
-/// by the time the validators run, so the standalone definitions left in
-/// `module.method_definitions` are the cross-file ones.
-fn inline_methods_with_owner(
-    module: &Module,
-) -> impl Iterator<Item = (&str, MethodSide, &MethodDefinition)> {
-    module.methods_with_owner().take(
-        module
-            .classes
-            .iter()
-            .map(|c| c.methods.len() + c.class_methods.len())
-            .sum(),
-    )
 }
 
 /// BT-4930: error on a cross-file `Foo >> sel => self delegate` where `Foo` is
@@ -440,8 +424,12 @@ mod tests {
         );
     }
 
-    /// BT-4930: a standalone (unfolded, so cross-file) `self delegate` on a
-    /// native class gets the new error, not the return-type warning.
+    /// BT-4930: a standalone `self delegate` on a native class gets the new
+    /// error, not the return-type warning. The validators are called on the
+    /// unfolded parse on purpose: in a real compile a same-file extension is
+    /// folded into the class first, so only a cross-file one reaches them (and
+    /// a same-file instance-side extension on a native actor is rejected by
+    /// the fold instead).
     #[test]
     fn native_standalone_delegate_gets_cross_file_error_not_return_type_warning() {
         let src = "Actor subclass: MyActor native: my_mod\n  get -> Integer => self delegate\nMyActor >> getValue => self delegate";
