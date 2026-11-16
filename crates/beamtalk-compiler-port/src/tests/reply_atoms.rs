@@ -119,7 +119,14 @@ fn emitted_atoms() -> BTreeSet<String> {
                     file.display()
                 );
             } else if arg.starts_with("if ") {
-                atoms.extend(string_literals(arg)); // `atom(if c { "true" } else { "false" })`
+                // `atom(if c { "true" } else { "false" })`: both branches must be literals.
+                let lits = string_literals(arg);
+                assert!(
+                    lits.len() == 2 && arg.ends_with("\" }"),
+                    "{}: `atom({arg})` must be an `if` whose two branches are string literals",
+                    file.display()
+                );
+                atoms.extend(lits);
             } else {
                 panic!(
                     "{}: `atom({arg})` is not a string literal, a known variable or an `if` of \
@@ -133,9 +140,10 @@ fn emitted_atoms() -> BTreeSet<String> {
         // `let reason = match ... { ... => "literal", ... };` blocks.
         let lines: Vec<&str> = text.lines().collect();
         for (i, line) in lines.iter().enumerate() {
-            let is_dynamic_let = DYNAMIC_ATOM_VARS
-                .iter()
-                .any(|v| line.trim_start().starts_with(&format!("let {v} = match")));
+            let is_dynamic_let = DYNAMIC_ATOM_VARS.iter().any(|v| {
+                line.trim_start().starts_with(&format!("let {v} = match"))
+                    && text.contains(&format!("atom({v})"))
+            });
             if !is_dynamic_let {
                 continue;
             }
@@ -143,7 +151,17 @@ fn emitted_atoms() -> BTreeSet<String> {
                 if body.trim() == "};" {
                     break;
                 }
-                atoms.extend(string_literals(body));
+                if body.contains("=>") {
+                    let lits = string_literals(body);
+                    assert!(
+                        !lits.is_empty(),
+                        "{}: match arm `{}` yields no string literal, so its reply atom cannot \
+                         be listed",
+                        file.display(),
+                        body.trim()
+                    );
+                    atoms.extend(lits);
+                }
             }
         }
     }
