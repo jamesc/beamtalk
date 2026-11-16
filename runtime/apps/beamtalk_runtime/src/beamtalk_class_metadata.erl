@@ -180,9 +180,9 @@ a table deleted between an existence check and the op (teardown/shutdown).
 %% table so compile-time-only classes pay nothing on the dispatch hot path.
 -define(FUN_TABLE, beamtalk_class_method_funs).
 %% Reverse-edge index for match_subclasses/1 — an `ordered_set` of
-%% `{Superclass, ClassName, Owner}` rows, keyed on Superclass (BT-4808: `Owner`
-%% is the class process that wrote the edge). See moduledoc "Reverse subclass
-%% index".
+%% `{{Superclass, ClassName}, Owner}` rows, keyed on the `{Superclass,
+%% ClassName}` pair (BT-4840; BT-4808: `Owner` is the class process that wrote
+%% the edge). See moduledoc "Reverse subclass index".
 -define(SUBCLASS_INDEX, beamtalk_class_subclass_index).
 %% BT-3832: per-method records (info / source / signature / doc) behind
 %% `CompiledMethod` lookups, an `ordered_set` keyed `{ClassName, Side,
@@ -374,6 +374,7 @@ new() ->
     %% `ordered_set` keyed on the pair: insert/delete are O(log N) regardless of
     %% a superclass's subclass count, and a Superclass-prefix select reads just
     %% that superclass's edges.
+    ok = migrate_legacy_subclass_index(),
     ensure_table(?SUBCLASS_INDEX, [
         ordered_set,
         public,
@@ -388,6 +389,39 @@ new() ->
         {read_concurrency, true}
     ]),
     ok.
+
+%% BT-4846: before BT-4840 the subclass index was a `bag` of
+%% `{Superclass, ClassName, Owner}`. `ensure_table` keeps an existing table, so a
+%% node hot-upgraded in place would otherwise keep the bag and write the new row
+%% shape into it (duplicates, wrong deletes). Rebuild it: read the old rows,
+%% drop the table, and re-insert them in the new shape once `ensure_table` has
+%% recreated it as an `ordered_set`. Only the table owner (or the heir that
+%% holds it) can delete it; if the delete is refused the old table stays and a
+%% node restart is needed.
+-spec migrate_legacy_subclass_index() -> ok.
+migrate_legacy_subclass_index() ->
+    case ets:info(?SUBCLASS_INDEX, type) of
+        T when T =:= undefined; T =:= ordered_set ->
+            ok;
+        _Legacy ->
+            Old = [
+                {{Super, Class}, Owner}
+             || {Super, Class, Owner} <- ets:tab2list(?SUBCLASS_INDEX)
+            ],
+            try ets:delete(?SUBCLASS_INDEX) of
+                true ->
+                    ensure_table(?SUBCLASS_INDEX, [
+                        ordered_set,
+                        public,
+                        named_table,
+                        {read_concurrency, true}
+                    ]),
+                    ets:insert(?SUBCLASS_INDEX, Old),
+                    ok
+            catch
+                error:badarg -> ok
+            end
+    end.
 
 -spec ensure_table(atom(), [term()]) -> ok.
 ensure_table(Table, Opts) ->
@@ -2051,8 +2085,8 @@ insert_subclass_edge(Superclass, Name, Owner) ->
 delete_subclass_edge(Superclass, Name, Owner) ->
     try
         case {Superclass, Owner} of
-            {'_', _} -> ets:match_delete(?SUBCLASS_INDEX, {{Superclass, Name}, Owner});
-            {_, '_'} -> ets:delete(?SUBCLASS_INDEX, {Superclass, Name});
+            %% Fully-bound key, any owner: a direct key delete.
+            {Super, '_'} when Super =/= '_' -> ets:delete(?SUBCLASS_INDEX, {Super, Name});
             _ -> ets:match_delete(?SUBCLASS_INDEX, {{Superclass, Name}, Owner})
         end,
         ok
