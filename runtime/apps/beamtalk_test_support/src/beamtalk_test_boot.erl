@@ -242,6 +242,7 @@ start_app(App, Retries) ->
     case application:ensure_all_started(App) of
         {ok, _} = Ok when App =:= beamtalk_runtime ->
             ok = ensure_bootstrap_classes(),
+            ok = ensure_boot_tables(),
             Ok;
         {ok, _} = Ok ->
             Ok;
@@ -253,6 +254,16 @@ start_app(App, Retries) ->
         {error, Reason} ->
             error({app_start_failed, App, Reason})
     end.
+
+%% Boot tables that a test process created before the runtime app was up are
+%% owned by that process and vanish with it (`badarg` on `ets:lookup/2` in a later
+%% module), while the app itself is "healthy" and never recreates them. The heir
+%% is alive now, so the idempotent `init/0` of the registries tests have been seen
+%% to lose recreates a missing table with the heir (BT-4962).
+ensure_boot_tables() ->
+    _ = beamtalk_extensions:init(),
+    _ = beamtalk_protocol_registry:init(),
+    ok.
 
 %% A suite can leave the runtime application "started" but unhealthy, and a
 %% second `ensure_all_started` is then a no-op, so no later suite ever sees it
