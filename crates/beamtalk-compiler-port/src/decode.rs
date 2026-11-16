@@ -399,9 +399,7 @@ pub(crate) fn parse_class_info_from_meta_term(
     let is_sealed = map_get(m, "is_sealed")
         .and_then(term_to_bool)
         .unwrap_or(false);
-    let is_native = map_get(m, "native")
-        .and_then(term_to_bool)
-        .unwrap_or(false);
+    let is_native = map_get(m, "native").and_then(term_to_bool).unwrap_or(false);
     let is_abstract = map_get(m, "is_abstract")
         .and_then(term_to_bool)
         .unwrap_or(false);

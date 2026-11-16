@@ -220,7 +220,10 @@ fn cross_file_self_delegate_on_native_class_is_one_error() {
     assert_eq!(hits[0].severity, crate::source_analysis::Severity::Error);
     assert!(hits[0].message.contains("`cross`"), "{}", hits[0].message);
     assert!(
-        hits[0].hint.as_deref().is_some_and(|h| h.contains("same file")),
+        hits[0]
+            .hint
+            .as_deref()
+            .is_some_and(|h| h.contains("same file")),
         "{:?}",
         hits[0].hint
     );
@@ -241,7 +244,10 @@ fn cross_file_self_delegate_does_not_get_the_native_delegate_checks() {
 
 #[test]
 fn cross_file_class_side_self_delegate_on_native_class_is_an_error() {
-    let d = cross_file(NATIVE_VALUE, "Host class >> make -> Integer => self delegate\n");
+    let d = cross_file(
+        NATIVE_VALUE,
+        "Host class >> make -> Integer => self delegate\n",
+    );
     assert_eq!(cross_file_delegate_errors(&d).len(), 1, "{d:?}");
 }
 
@@ -268,7 +274,10 @@ fn same_file_self_delegate_keeps_the_native_checks_and_gets_no_new_error() {
     let src = format!("{NATIVE_VALUE}Host >> cross => self delegate\n");
     let d = analyse_full(&parse_bt(&src), AnalysisContext::default()).diagnostics;
     assert!(
-        has(&d, "Method `cross` uses `self delegate` without a return type"),
+        has(
+            &d,
+            "Method `cross` uses `self delegate` without a return type"
+        ),
         "{d:?}"
     );
     assert!(cross_file_delegate_errors(&d).is_empty(), "{d:?}");
