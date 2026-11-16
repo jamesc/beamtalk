@@ -562,7 +562,7 @@ shared helpers:
 - `beamtalk_test_boot:start_app/1`: asserts an application start, stops a
   bare-started child (`beamtalk_xref`, `beamtalk_alias_xref`, ...) that blocks
   the supervised start, and restarts the runtime when an earlier suite left it
-  without the bootstrap `Object` class. Never call `ignore`d
+  without the bootstrap `Object` class. Never ignore the result of
   `application:ensure_all_started` in a test.
 - `beamtalk_test_boot:boot_real_stdlib/1`: the stdlib classes a test uses. It
   heals the state where stdlib modules are loaded but their class processes are
