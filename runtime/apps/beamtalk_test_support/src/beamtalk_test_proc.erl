@@ -146,6 +146,8 @@ in_fresh_process(Fun) ->
     Parent = self(),
     Ref = make_ref(),
     {Pid, MonRef} = spawn_monitor(fun() ->
+        %% bt-catcher-audit: not-applicable-reraises - test helper; the failure is
+        %% sent to the caller, which re-raises it with the original stacktrace
         Parent !
             {Ref,
                 try
