@@ -6676,6 +6676,15 @@ source). Unlike `removeSelector:` (above), it is a hard, unconditional
 refusal for stdlib classes and classes with subclasses — there is no
 in-memory-but-non-flushable escape hatch.
 
+It also refuses while any supervisor still holds a child of the class (a
+static child spec, a `DynamicSupervisor` child, or a child started through a
+`withClassMethod:` factory), including supervisors nested anywhere in a tree
+and a `transient` child that has exited normally but whose spec remains
+([BT-4936](https://linear.app/beamtalk/issue/BT-4936)). The error names the
+supervisor and the child, and nothing is stopped or removed. Remove the child
+from the supervisor first (`terminateChild:` then `deleteChild:`), then remove
+the class. Unsupervised actors of the class are stopped as before.
+
 ```beamtalk
 Counter removeFromSystem   // => nil (Counter class removed; refuses if Counter has subclasses)
 Integer removeFromSystem   // => Error: cannot remove stdlib class

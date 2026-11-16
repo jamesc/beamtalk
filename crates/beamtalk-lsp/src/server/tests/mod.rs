@@ -188,6 +188,7 @@ mod flush_and_rename_edits;
 mod formatting_and_paths;
 mod hover_and_stdlib;
 mod nested_package_root;
+mod package_qualifiers;
 mod preload_files;
 mod preload_racing;
 mod references;
