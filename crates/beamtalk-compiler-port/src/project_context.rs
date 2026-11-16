@@ -707,3 +707,15 @@ fn resolve_project_context(root: PathBuf, batch: Option<&str>) -> Option<FilePro
     );
     Some(context)
 }
+
+/// The source path a workspace (in-memory) compile embeds (BT-4940).
+///
+/// Inside a package this is the package-relative path, same as
+/// `beamtalk build`. A file with no enclosing `beamtalk.toml` keeps its
+/// absolute path: these modules live only in the running node (never in a
+/// shipped `.beam`), and the runtime has no project root to resolve a bare
+/// file name against, so `reload`/`sourceFile` would otherwise lose the file.
+pub(crate) fn embedded_source_path(source_path: &str) -> String {
+    beamtalk_project::package::embedded_source_path_in_package(std::path::Path::new(source_path))
+        .unwrap_or_else(|| source_path.to_string())
+}

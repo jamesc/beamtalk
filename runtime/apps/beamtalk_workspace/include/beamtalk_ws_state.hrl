@@ -20,6 +20,9 @@
     stdin_ref :: reference() | undefined,
     %% Whether this session is subscribed to log streaming.
     log_subscribed = false :: boolean(),
+    %% ADR 0150: the connect snapshot's pids, so an `ActorSpawned` the snapshot
+    %% already covers is not pushed twice (`beamtalk_workspace_actors:feed_*`).
+    actor_feed = beamtalk_workspace_actors:feed_new([]) :: beamtalk_workspace_actors:feed(),
     %% Version-exempt admin surface (BT-4327): when the client authenticated
     %% with `client = shutdown`, the version handshake is skipped and this
     %% connection may only issue the `shutdown` op (enforced in

@@ -695,14 +695,12 @@ handle_load_valid_file_no_compiler_test() ->
         Other2 -> error({unexpected_result, Other2})
     end.
 
-%%% do_eval with bindings and actor registry
+%%% do_eval without a compiler
 
-do_eval_with_registry_no_compiler_test() ->
-    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
-    State = beamtalk_repl_state:new(RegistryPid, 0),
+do_eval_no_compiler_test() ->
+    State = beamtalk_repl_state:new(undefined, 0),
     {error, #beamtalk_error{}, _, _, NewState} = beamtalk_repl_eval:do_eval("1 + 2", State),
-    ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)),
-    gen_server:stop(RegistryPid).
+    ?assertEqual(1, beamtalk_repl_state:get_eval_counter(NewState)).
 
 %%% format_formatted_diagnostics edge cases
 
@@ -772,7 +770,7 @@ handle_class_definition_load_error_test() ->
     },
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_eval:handle_class_definition(
-        ClassInfo, [], "test", #{}, State, undefined, undefined
+        ClassInfo, [], "test", #{}, State, undefined
     ),
     ?assertMatch({error, #beamtalk_error{}, <<>>, [], _}, Result).
 
@@ -788,7 +786,7 @@ handle_class_definition_empty_classes_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     %% Load will fail, hitting the error branch
     Result = beamtalk_repl_eval:handle_class_definition(
-        ClassInfo, [<<"warn">>], "test", #{}, State, undefined, undefined
+        ClassInfo, [<<"warn">>], "test", #{}, State, undefined
     ),
     ?assertMatch({error, #beamtalk_error{}, <<>>, [<<"warn">>], _}, Result).
 
@@ -1725,9 +1723,6 @@ eval_success_test_() ->
         %% Standalone `Class >> selector => body` method definition.
         {"do_eval standalone method definition reloads the target class",
             fun do_eval_standalone_method_definition/0},
-        %% A live actor registry pid threaded into eval bindings.
-        {"do_eval threads a live actor registry pid into bindings",
-            fun do_eval_with_actor_registry/0},
         %% do_dispatch/5 (connected-mode entry dispatch).
         {"do_dispatch unary success sends to the class object", fun do_dispatch_unary_success/0},
         {"do_dispatch keyword success passes argv", fun do_dispatch_keyword_success/0},
@@ -2076,21 +2071,6 @@ do_eval_standalone_method_definition() ->
     MethodSource = "EvalStandaloneMethodCls >> value2 => 6",
     Result = beamtalk_repl_eval:do_eval(MethodSource, State1),
     ?assertMatch({ok, _, <<>>, _, _}, Result).
-
-do_eval_with_actor_registry() ->
-    %% A non-undefined actor-registry pid is threaded into the eval bindings
-    %% map (INTERNAL_REGISTRY_KEY) and stripped again on the way out. A
-    %% minimal fake registry answers the post-eval `list_actors` cleanup
-    %% call (a real pid, but not self() — gen_server:call(self(), _) would
-    %% deadlock-detect against the calling test process itself).
-    FakeRegistry = spawn(fun() ->
-        receive
-            {'$gen_call', From, list_actors} -> gen_server:reply(From, [])
-        end
-    end),
-    State = beamtalk_repl_state:set_actor_registry(FakeRegistry, state0()),
-    Result = beamtalk_repl_eval:do_eval("5 + 5", State),
-    ?assertMatch({ok, 10, _, _, _}, Result).
 
 %%====================================================================
 %% do_dispatch/5 (connected-mode `beamtalk run` entry

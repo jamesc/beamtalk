@@ -14,7 +14,7 @@ workspace also pushes **live streams** — Transcript output, actor lifecycle,
 class loads, bindings changes, flush completions, and reload-induced
 re-check outcomes (ADR 0105). Previously those were
 wired only inside `beamtalk_ws_handler`, which called each underlying event
-module (`beamtalk_transcript_stream:subscribe/1`, `beamtalk_repl_actors:subscribe/0`,
+module (`beamtalk_transcript_stream:subscribe/1`, the actor registry's subscribe,
 …) directly. A dist-attached client (Phoenix LiveView, runtime-attached LSP)
 had no stable surface and would otherwise cast `{subscribe, self()}` tuples at
 the gen_servers — coupling to internal message shapes.

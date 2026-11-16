@@ -71,9 +71,9 @@ describe_ops_returns_pid_stats_descriptor_test() ->
 %%====================================================================
 
 handle_term_pid_stats_live_actor_returns_value_map_test() ->
-    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
-        {ok, ActorPid} = test_counter:start_link(0),
-        ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
+    (fun() ->
+        %% A synchronous spawn: the marker is written, so the scan sees it.
+        {ok, ActorPid} = beamtalk_actor:safe_spawn_linked(test_counter, 0),
         PidBin = list_to_binary(pid_to_list(ActorPid)),
         Msg = beamtalk_test_repl:make_msg(<<"pid-stats">>, <<"s-live">>, undefined),
         try
@@ -95,7 +95,7 @@ handle_term_pid_stats_live_actor_returns_value_map_test() ->
                 _:_ -> ok
             end
         end
-    end).
+    end)().
 
 %%====================================================================
 %% pid_stats/1 — dead pid returns dead-stats map (dead_stats/1 body)

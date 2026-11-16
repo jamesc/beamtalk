@@ -29,7 +29,6 @@ beamtalk_workspace_app_sup (one_for_one)
   └─ [per-workspace children added dynamically]
       └─ beamtalk_workspace_sup (one_for_one)
           ├─ beamtalk_workspace_meta
-          ├─ beamtalk_repl_actors
           ├─ beamtalk_repl_server
           ├─ beamtalk_idle_monitor
           ├─ beamtalk_actor_sup
