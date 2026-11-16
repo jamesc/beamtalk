@@ -35,12 +35,7 @@ Term-returning handler for actors/inspect/kill/interrupt. Returns
 -spec handle_term(binary(), map(), beamtalk_repl_protocol:protocol_msg(), pid()) ->
     beamtalk_repl_ops:op_result().
 handle_term(<<"actors">>, _Params, _Msg, _SessionPid) ->
-    case whereis(beamtalk_actor_registry) of
-        undefined ->
-            {actors, []};
-        RegistryPid ->
-            {actors, beamtalk_repl_actors:list_actors(RegistryPid)}
-    end;
+    {actors, beamtalk_workspace_actors:list()};
 handle_term(<<"inspect">>, Params, _Msg, _SessionPid) ->
     case beamtalk_repl_params:actor_pid(Params) of
         {error, _} = Err ->

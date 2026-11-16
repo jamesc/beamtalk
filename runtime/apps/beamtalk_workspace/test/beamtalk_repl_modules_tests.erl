@@ -145,28 +145,15 @@ module_exists_after_removal_test() ->
 %% get_actor_count/3 tests
 %% ===================================================================
 
-get_actor_count_no_registry_pid_test() ->
-    Tracker = beamtalk_repl_modules:new(),
-    Tracker2 = beamtalk_repl_modules:add_module(my_module, "/path.bt", Tracker),
-    Count = beamtalk_repl_modules:get_actor_count(my_module, undefined, Tracker2),
-    ?assertEqual(0, Count).
-
 get_actor_count_module_not_tracked_test() ->
+    %% A module the session does not track counts 0, whatever is running.
     Tracker = beamtalk_repl_modules:new(),
-    Count = beamtalk_repl_modules:get_actor_count(nonexistent, self(), Tracker),
-    ?assertEqual(0, Count).
+    ?assertEqual(0, beamtalk_repl_modules:get_actor_count(nonexistent, Tracker)).
 
-get_actor_count_with_dead_registry_test() ->
-    %% This test verifies the function handles registry errors gracefully
-    %% We spawn a process and immediately exit it to have a dead pid
+get_actor_count_tracked_module_without_actors_test() ->
     Tracker = beamtalk_repl_modules:new(),
-    Tracker2 = beamtalk_repl_modules:add_module(my_module, "/path.bt", Tracker),
-    DeadPid = spawn(fun() -> ok end),
-    %% Ensure process exits
-    ok = beamtalk_test_wait:dead(DeadPid),
-    %% Function should handle error gracefully and return 0
-    Count = beamtalk_repl_modules:get_actor_count(my_module, DeadPid, Tracker2),
-    ?assertEqual(0, Count).
+    Tracker2 = beamtalk_repl_modules:add_module(bt4950_no_actors_mod, "/path.bt", Tracker),
+    ?assertEqual(0, beamtalk_repl_modules:get_actor_count(bt4950_no_actors_mod, Tracker2)).
 
 %% ===================================================================
 %% format_module_info/2 tests
@@ -217,28 +204,22 @@ get_source_file_undefined_test() ->
     ?assertEqual(undefined, beamtalk_repl_modules:get_source_file(Info)).
 
 %% ===================================================================
-%% get_actor_count/3 with live registry
+%% get_actor_count/2 against live actors (one scan)
 %% ===================================================================
 
-get_actor_count_with_live_registry_test() ->
-    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
-    Tracker = beamtalk_repl_modules:new(),
-    Tracker2 = beamtalk_repl_modules:add_module(test_counter, "/path.bt", Tracker),
-    %% No actors registered yet
-    Count = beamtalk_repl_modules:get_actor_count(test_counter, RegistryPid, Tracker2),
-    ?assertEqual(0, Count),
-    gen_server:stop(RegistryPid).
-
-get_actor_count_with_registered_actors_test() ->
-    {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
-    {ok, ActorPid} = test_counter:start_link(0),
-    ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
-    Tracker = beamtalk_repl_modules:new(),
-    Tracker2 = beamtalk_repl_modules:add_module(test_counter, "/path.bt", Tracker),
-    Count = beamtalk_repl_modules:get_actor_count(test_counter, RegistryPid, Tracker2),
-    ?assertEqual(1, Count),
-    gen_server:stop(ActorPid),
-    gen_server:stop(RegistryPid).
+get_actor_count_counts_live_actors_test() ->
+    {ok, ActorPid} = beamtalk_actor:safe_spawn_linked(test_counter, 0),
+    try
+        [#{module := Module}] = [
+            M
+         || #{pid := P} = M <- beamtalk_workspace_actors:list(), P =:= ActorPid
+        ],
+        Tracker = beamtalk_repl_modules:add_module(Module, "/path.bt", beamtalk_repl_modules:new()),
+        ?assert(beamtalk_repl_modules:get_actor_count(Module, Tracker) >= 1)
+    after
+        unlink(ActorPid),
+        exit(ActorPid, kill)
+    end.
 
 %% ===================================================================
 %% Integration tests
