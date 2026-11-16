@@ -67,6 +67,20 @@ pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> 
 /// as `?BEAMTALK_RUNTIME_ONLY_BUILTIN_CLASSES` for `beamtalk_class_metadata.erl`.
 pub const RUNTIME_ONLY_BUILTIN_CLASSES: &[&str] = &["Future"];
 
+/// Built-in classes whose instances are recognised by their Erlang term shape
+/// at run time, not by a class tag a `native:` constructor writes (BT-4964).
+///
+/// `String` is a bare UTF-8 binary: `class_of` identifies it from the term
+/// itself, so its methods are reachable on any string value even though its
+/// parent `Binary` is `native: beamtalk_binary`. The "`new` answers the
+/// parent's class" bug that makes a `Value`/`Object` subclass of a `native:`
+/// class unusable cannot happen for it, so the native-subclass check
+/// (`check_native_subclass_declares_native`) exempts exactly these classes,
+/// and only while compiling the stdlib (`stdlib_mode`). Not derived from
+/// `sealed` or any user-writable keyword; add a class here only when it is
+/// identified by term shape.
+pub const TERM_SHAPE_BUILTIN_CLASSES: &[&str] = &["String"];
+
 /// Returns true if the given class name is a built-in class.
 ///
 /// This is a fast O(1) check using a static set, suitable for hot paths
@@ -78,6 +92,12 @@ pub(super) fn is_builtin_class(name: &str) -> bool {
     // Runtime-only built-ins have no .bt source; all others (including Value)
     // are in the generated set.
     RUNTIME_ONLY_BUILTIN_CLASSES.contains(&name) || generated::is_generated_builtin_class(name)
+}
+
+/// Returns true if `name` is a built-in class identified by term shape (see
+/// [`TERM_SHAPE_BUILTIN_CLASSES`]).
+pub(super) fn is_term_shape_builtin_class(name: &str) -> bool {
+    TERM_SHAPE_BUILTIN_CLASSES.contains(&name) && is_builtin_class(name)
 }
 
 /// Returns true if the given class name has runtime shadowing protection.

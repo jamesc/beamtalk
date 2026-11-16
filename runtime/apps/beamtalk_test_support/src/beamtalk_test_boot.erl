@@ -389,7 +389,10 @@ Idempotent; pair with `beamtalk_test_proc:stop_registered/1` in teardown.
 }) -> ok.
 workspace(#{workspace_id := WorkspaceId} = Opts) ->
     ok = compiler(),
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    %% start_app/1, not a bare ensure_all_started: an earlier suite may have left a
+    %% supervised server (beamtalk_xref via ensure_xref/0, ...) running bare, which
+    %% makes the supervisor's own start fail with already_started (BT-4962).
+    {ok, _} = start_app(beamtalk_runtime),
     ok = beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     {ok, _} = beamtalk_workspace_meta:start_link(#{
         workspace_id => WorkspaceId,
