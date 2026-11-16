@@ -83,7 +83,11 @@ registry() ->
     Started =
         case whereis(pg) of
             undefined ->
-                {ok, _} = pg:start_link(),
+                %% Unlinked: `start_link` would tie `pg` to the short-lived EUnit
+                %% fixture process, and when that exits `pg` dies with it, losing
+                %% every class registration made in this node while the class
+                %% processes and their loaded modules live on (BT-4934).
+                {ok, _} = pg:start(pg),
                 true;
             _ ->
                 false
