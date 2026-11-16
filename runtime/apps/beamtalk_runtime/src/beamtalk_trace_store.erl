@@ -448,8 +448,9 @@ error_methods(Limit) ->
 -spec bottlenecks(pos_integer()) -> [map()].
 bottlenecks(Limit) ->
     %% Runs in the caller (BT-4124): it scans the node's processes
-    %% (`beamtalk_actor_scan`, ADR 0150) and calls `process_info` only, so a large scan never queues counter grows or
-    %% queries behind it in the gen_server.
+    %% (`beamtalk_actor_scan`, ADR 0150) and calls `process_info` only, so a
+    %% large scan never queues counter grows or queries behind it in the
+    %% gen_server.
     [to_bt_keys(M) || M <- do_bottlenecks(Limit)].
 
 -doc "Live process health for a specific actor.".
