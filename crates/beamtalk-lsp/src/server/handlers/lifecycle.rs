@@ -271,6 +271,9 @@ impl Backend {
                 versions.insert(path.clone(), params.text_document.version);
             }
             if uri.scheme() != "beamtalk-stdlib" {
+                // BT-4967: the file's FFI registry goes in *before* its text,
+                // so no diagnostics pass can see the file without it.
+                self.load_stdlib_file_registry(&path).await;
                 // Stdlib files are pre-loaded at startup; skip re-indexing.
                 {
                     let mut svc = self.service.lock().expect("service lock poisoned");
@@ -280,7 +283,6 @@ impl Backend {
                 // `beamtalk.toml`) — the workspace folder may be a parent
                 // of it, leaving its dependencies unloaded.
                 self.ensure_package_root_loaded(&path).await;
-                self.load_stdlib_file_registry(&path).await;
             }
             self.publish_diagnostics(&uri).await;
         }
