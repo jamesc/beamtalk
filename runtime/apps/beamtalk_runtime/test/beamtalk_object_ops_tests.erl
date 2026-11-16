@@ -58,9 +58,14 @@ object_reflection_test_() ->
     ]}.
 
 test_class() ->
-    State = counter_state(),
+    %% `class` answers the registered class object when a class of that name
+    %% exists, and the bare name from the state tag otherwise. This test is
+    %% about the state tag, so use a name no suite registers: with `Counter` it
+    %% passed only while no `Counter` class was alive in the node (BT-4934).
+    Tag = 'ObjectOpsTagOnlyClass',
+    State = (counter_state())#{'$beamtalk_class' => Tag},
     Result = beamtalk_object_ops:dispatch(class, [], self_ref(), State),
-    ?assertMatch({reply, 'Counter', _}, Result).
+    ?assertMatch({reply, Tag, _}, Result).
 
 test_inst_var_names() ->
     State = counter_state(),

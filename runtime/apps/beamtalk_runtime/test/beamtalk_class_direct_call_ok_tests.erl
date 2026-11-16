@@ -21,7 +21,7 @@ self-send guard (`shadow_free/2`) still holds for a class with class variables.
 
 setup() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-    ok = beamtalk_stdlib:init(),
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     ok.
 
 class_info(ClassVars, Meta) ->

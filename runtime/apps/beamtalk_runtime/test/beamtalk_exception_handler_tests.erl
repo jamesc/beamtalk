@@ -1374,7 +1374,7 @@ setup_class_system() ->
         undefined -> beamtalk_bootstrap:start_link();
         _ -> ok
     end,
-    beamtalk_stdlib:init(),
+    beamtalk_test_boot:boot_real_stdlib('Integer'),
     ok.
 
 -doc "Teardown class system".

@@ -21,7 +21,7 @@ method validation.
 
 setup() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-    beamtalk_stdlib:init(),
+    beamtalk_test_boot:boot_real_stdlib('Integer'),
     ok.
 
 teardown(_) ->

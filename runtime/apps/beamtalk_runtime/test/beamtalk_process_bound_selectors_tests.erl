@@ -25,7 +25,7 @@ clauses' own abstract code, so a clause added in Erlang without the Rust list
 
 setup() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-    ok = beamtalk_stdlib:init(),
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     ok.
 
 %% The generated list, read from a compiled stdlib class's meta.
