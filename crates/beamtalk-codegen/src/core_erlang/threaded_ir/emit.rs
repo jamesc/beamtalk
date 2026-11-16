@@ -1559,14 +1559,7 @@ fn render_tuple_acc_unpack(
         let idx = gate_slots + 1 + i;
         docs.push(form::let_prefix(
             leaf::var(target.render_name()),
-            form::call(
-                "erlang",
-                "element",
-                [
-                    leaf::int_lit(i64::try_from(idx).unwrap_or(0)),
-                    leaf::var(param.0.clone()),
-                ],
-            ),
+            form::element(idx, leaf::var(param.0.clone())),
         ));
     }
     Document::Vec(docs)
