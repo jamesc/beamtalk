@@ -41,6 +41,8 @@ mod body;
 mod conditionals;
 mod counted_loops;
 mod dict_ops;
+mod ensure;
+mod exception_bodies;
 mod exception_handling;
 pub(in crate::core_erlang) mod family_slots;
 mod list_ops;
