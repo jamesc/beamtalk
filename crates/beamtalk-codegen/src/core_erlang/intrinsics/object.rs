@@ -1400,7 +1400,7 @@ impl CoreErlangGenerator {
     /// `fieldAt:put:` — write an instance variable by name.
     #[expect(
         clippy::too_many_lines,
-        reason = "fieldAt: and fieldAt:put: require verbose type guards for actor vs primitive dispatch"
+        reason = "fieldAt:put: requires verbose type guards for actor vs primitive dispatch"
     )]
     fn object_field_at_put(
         &mut self,
@@ -1568,7 +1568,7 @@ impl CoreErlangGenerator {
                 " = ",
                 name_code,
                 " in ",
-                self.class_var_read_helper_call_doc(class_var_fn::HAS, vec![leaf::var(name_var)],),
+                self.class_var_read_helper_call_doc(class_var_fn::HAS, vec![leaf::var(name_var)]),
             ];
             return Ok(Some(doc));
         }
@@ -1646,7 +1646,7 @@ impl CoreErlangGenerator {
                 " = ",
                 name_code,
                 " in ",
-                Self::class_var_helper_call_doc(class_var_fn::CLEAR, vec![leaf::var(name_var)],),
+                Self::class_var_helper_call_doc(class_var_fn::CLEAR, vec![leaf::var(name_var)]),
             ];
             return Ok(Some(doc));
         }
