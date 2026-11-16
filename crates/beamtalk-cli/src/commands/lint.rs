@@ -145,7 +145,7 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
 
     // BT-4334: the REPL-parity gate. Reported separately so the default
     // lint-severity message above stays unchanged for existing callers.
-    if warnings_as_errors && gate.fails(true) {
+    if warnings_as_errors && gate.live_recheck > 0 {
         let count = gate.live_recheck;
         let plural = if count == 1 { "" } else { "s" };
         miette::bail!(
