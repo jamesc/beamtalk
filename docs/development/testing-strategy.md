@@ -551,9 +551,14 @@ failures, time) and exits non-zero on any failure:
 
 `--only M1,M2` narrows a mode to named modules and `--skip-prepare` reuses the
 existing `_build/test` (debugging only). The check runs nightly (`nightly.yml`,
-job `eunit-isolation`, one job per mode; a failure fails the Nightly run and is
-triaged like any other main-red), not on PRs: reverse and random take about six
-minutes each.
+job `eunit-isolation`, one job per mode), not on PRs: reverse and random take
+about six minutes each. A failure in `alone` or `reverse` (deterministic, clean
+on main) fails the Nightly run and is triaged like any other main-red. `random`
+(a new seed every night) still finds order dependencies in some seeds, so it is
+reported but does not fail the run yet; reproduce a failing seed with
+`just test-isolation random --seed S`, list its order with `--print-order`, and
+shrink it with `forward --order <modules>` (`--order` runs exactly those modules,
+in that order, in one node) or `culprit <module>`.
 
 A test must set up and tear down what it needs and assert its own
 preconditions; never skip or quarantine a test to make this check pass. The
