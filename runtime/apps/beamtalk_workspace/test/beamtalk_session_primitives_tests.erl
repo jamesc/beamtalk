@@ -22,6 +22,8 @@ rejection, and the dead-session liveness error.
 
 setup() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
+    %% `Session current` dispatches to the compiled `Session` class (BT-4934).
+    ok = beamtalk_test_boot:boot_real_stdlib('Session'),
     beamtalk_session_table:new(),
     %% Clear any leftover process-dict session context from other tests.
     erase(beamtalk_session_pid),

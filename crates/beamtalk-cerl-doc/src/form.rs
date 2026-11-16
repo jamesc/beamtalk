@@ -16,7 +16,7 @@
 //!
 //! **Structure goes through these constructors, not string literals.** A new
 //! `let`, `case`, `try`, `do`, `call` or `primop` is built with
-//! [`let_in`] / [`let_values`], [`fun_of`], [`letrec`], [`tuple`] / [`values`], [`case_of`] /
+//! [`let_in`] / [`let_prefix`] / [`let_values`], [`fun_of`], [`letrec`], [`tuple`] / [`values`], [`case_of`] /
 //! [`clause`], [`try_of_catch`], [`seq`], [`call`] or [`primop`]; never with a
 //! `"let "` / `" in "` / `"fun ("` / `"letrec "` / `"catch <"` fragment.
 //! Existing literal sites move to the constructors as their files are
@@ -142,6 +142,35 @@ pub fn let_in<'a>(
         Layout::Block => line(),
     };
     docvec!["let ", var, " = ", value, " in", sep, body]
+}
+
+/// `let var = value in ` — the open binding of a statement sequence.
+///
+/// Flat, and it ends with the space after `in`: the body is whatever the
+/// caller appends next (the following statements of the sequence). This is
+/// [`let_in`] with an empty body.
+#[must_use]
+pub fn let_prefix<'a>(var: Document<'a>, value: Document<'a>) -> Document<'a> {
+    let_in(var, value, Document::Nil, Layout::Flat)
+}
+
+/// `let _ = value in ` — [`let_prefix`] for a value kept only for its effect.
+#[must_use]
+pub fn let_discard(value: Document<'_>) -> Document<'_> {
+    let_prefix(leaf::var("_"), value)
+}
+
+/// `call 'erlang':'element'(index, tuple)` — the 1-based element of a tuple.
+#[must_use]
+pub fn element(index: usize, tuple: Document<'_>) -> Document<'_> {
+    call(
+        "erlang",
+        "element",
+        [
+            leaf::int_lit(i64::try_from(index).unwrap_or(i64::MAX)),
+            tuple,
+        ],
+    )
 }
 
 /// `let <A, B> = value in body` — the multi-value `let`, binding each of
@@ -360,6 +389,27 @@ mod tests {
         assert_eq!(tuple([]).to_pretty_string(), "{}");
         assert_eq!(values([v("A"), v("B")]).to_pretty_string(), "<A, B>");
         assert_eq!(values([v("A")]).to_pretty_string(), "<A>");
+    }
+
+    #[test]
+    fn let_prefix_ends_with_the_space_after_in() {
+        assert_eq!(
+            let_prefix(v("X"), v("Y")).to_pretty_string(),
+            "let X = Y in "
+        );
+    }
+
+    #[test]
+    fn let_discard_binds_the_wildcard() {
+        assert_eq!(let_discard(v("Y")).to_pretty_string(), "let _ = Y in ");
+    }
+
+    #[test]
+    fn element_is_a_one_based_erlang_element_call() {
+        assert_eq!(
+            element(2, v("T")).to_pretty_string(),
+            "call 'erlang':'element'(2, T)"
+        );
     }
 
     #[test]
