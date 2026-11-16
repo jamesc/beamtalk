@@ -28,7 +28,11 @@ setup() ->
     ok.
 
 cleanup(_) ->
-    catch meck:unload(beamtalk_object_instances),
+    try
+        meck:unload(beamtalk_object_instances)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 class_travel_test_() ->
@@ -53,7 +57,11 @@ no_class_of_reads() ->
         ok = beamtalk_actor:sync_send(Pid, kill, []),
         ?assertEqual(0, meck:num_calls(beamtalk_object_instances, class_of, '_'))
     after
-        catch gen_server:stop(Pid)
+        try
+            gen_server:stop(Pid)
+        catch
+            _:_ -> ok
+        end
     end.
 
 bare_pid_reports_marker_class() ->
@@ -122,7 +130,11 @@ traced_call_timeout(Pid) ->
         after 1000 -> no_call_traced
         end
     after
-        catch erlang:trace(Self, false, [call]),
+        try
+            erlang:trace(Self, false, [call])
+        catch
+            _:_ -> ok
+        end,
         erlang:trace_pattern({gen_server, call, 2}, false, [local]),
         erlang:trace_pattern({gen_server, call, 3}, false, [local]),
         unlink(Tracer),
