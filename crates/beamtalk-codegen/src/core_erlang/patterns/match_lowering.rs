@@ -29,6 +29,7 @@ use super::super::util::index_lit;
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{
     BinarySegment, BinarySegmentType, Block, Expression, ExpressionStatement, Identifier, Literal,
@@ -1412,22 +1413,14 @@ impl CoreErlangGenerator {
             // Note: concrete Core `try` takes no `end` terminator (unlike
             // `case`/`let` nesting might suggest — see `erlc +to_core`
             // output or `number_coercion_try_catch`).
-            next = docvec![
-                "try ",
+            next = form::try_of_catch(
                 value,
-                " of <",
-                leaf::var(var),
-                "> -> ",
+                [leaf::var(var)],
                 next,
-                " catch <",
-                leaf::var(t),
-                ", ",
-                leaf::var(e),
-                ", ",
-                leaf::var(s),
-                "> -> ",
-                rest_doc.clone()
-            ];
+                [leaf::var(t), leaf::var(e), leaf::var(s)],
+                rest_doc.clone(),
+                Layout::Flat,
+            );
         }
         next
     }
@@ -2346,12 +2339,13 @@ impl SharedRest {
     /// the annotation `erlc`'s own `v3_core` emits for its labels.
     pub(super) fn bind_around(self, arm: Document<'static>) -> Document<'static> {
         docvec![
-            "( letrec ",
-            leaf::fname(self.label, 0),
-            " = fun () -> ",
-            self.rest,
-            " in ",
-            arm,
+            "( ",
+            form::letrec(
+                leaf::fname(self.label, 0),
+                form::fun_of([], self.rest, Layout::Flat),
+                arm,
+                Layout::Flat,
+            ),
             " -| ['letrec_goto', 'no_inline'] )"
         ]
     }
