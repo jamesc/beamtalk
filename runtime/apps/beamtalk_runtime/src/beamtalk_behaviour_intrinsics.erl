@@ -1470,6 +1470,10 @@ classRemoveFromSystemByName(ClassName) ->
                             %% on the class process during the removal
                             %% window, which the monitor would otherwise
                             %% classify as a crash and resurrect mid-removal.
+                            %% BT-4936: refuse while any supervisor holds a child
+                            %% of this class — before anything is unwatched,
+                            %% killed or removed.
+                            ok = refuse_if_supervised(ClassName, Module),
                             beamtalk_class_monitor:unwatch(ClassName),
                             %% Stop live actors of this class
                             stop_class_actors(ClassName),
@@ -2059,6 +2063,62 @@ authority for this check (was byte-identical to
 -spec is_stdlib_module_name(atom()) -> boolean().
 is_stdlib_module_name(Module) ->
     beamtalk_module_name:is_stdlib_module(Module).
+
+-doc """
+BT-4936: raise a structured error (nothing killed, nothing removed) when a
+supervisor holds a child of the class: a static spec, a dynamic supervisor
+child, or a `withClassMethod:` factory child.
+""".
+-spec refuse_if_supervised(atom(), module()) -> ok.
+refuse_if_supervised(ClassName, Module) ->
+    case beamtalk_supervisor:supervised_children_of(Module, class_actor_pids(ClassName)) of
+        [] ->
+            ok;
+        [#{supervisor := Sup, supervisor_pid := SupPid, id := Id} | _] = Found ->
+            SupStr = supervisor_label(Sup, SupPid),
+            Error0 = beamtalk_error:new(runtime_error, ClassName),
+            Error1 = beamtalk_error:with_message(
+                Error0,
+                iolist_to_binary(
+                    io_lib:format(
+                        "Cannot remove class '~ts'; supervisor ~ts holds a child of it (~ts)",
+                        [ClassName, SupStr, child_label(Id)]
+                    )
+                )
+            ),
+            Error2 = beamtalk_error:with_hint(
+                Error1,
+                <<"Remove the child from the supervisor first, then remove the class.">>
+            ),
+            beamtalk_error:raise(
+                beamtalk_error:with_details(Error2, #{
+                    supervisor => Sup, child_id => Id, supervised_children => length(Found)
+                })
+            )
+    end.
+
+supervisor_label(nil, Pid) -> io_lib:format("~p", [Pid]);
+supervisor_label(Sup, _Pid) -> atom_to_list(Sup).
+
+child_label(undefined) -> "dynamic child";
+child_label(Id) -> io_lib:format("child id ~tp", [Id]).
+
+-spec class_actor_pids(atom()) -> [pid()].
+class_actor_pids(ClassName) ->
+    case erlang:whereis(beamtalk_actor_registry) of
+        undefined ->
+            [];
+        RegistryPid ->
+            try gen_server:call(RegistryPid, list_actors) of
+                Actors ->
+                    [
+                        maps:get(pid, Meta)
+                     || Meta <- Actors, maps:get(class, Meta, undefined) =:= ClassName
+                    ]
+            catch
+                _:_ -> []
+            end
+    end.
 
 -doc """
 Stop all live actors of a given class.
