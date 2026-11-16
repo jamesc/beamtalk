@@ -1175,7 +1175,7 @@ loading the module (which `port_roundtrip/6` needs anyway) interns them all
 The list is pinned in both directions to the shared fixture
 `test/fixtures/compiler_port_reply_atoms.json`: the Rust port's test fails if
 the port emits an atom the fixture lacks, and `beamtalk_compiler_port_atoms_tests`
-fails if an atom in the fixture is missing from this module's `atoms` chunk.
+fails if an atom in the fixture does not exist in a fresh VM once this module is loaded.
 """.
 -spec reply_atoms() -> [atom()].
 reply_atoms() ->

@@ -74,7 +74,18 @@ fn emitted_atoms() -> BTreeSet<String> {
     for file in files {
         let raw = std::fs::read_to_string(&file).expect("read source");
         // Drop `#[cfg(test)]` modules and comment lines.
-        let raw = raw.split("#[cfg(test)]").next().unwrap_or_default();
+        assert!(
+            raw.matches("#[cfg(test)]").count() <= 1,
+            "{}: more than one `#[cfg(test)]`; only a trailing test module may be skipped",
+            file.display()
+        );
+        let (raw, test_tail) = raw.split_once("#[cfg(test)]").unwrap_or((&raw, ""));
+        assert!(
+            test_tail.is_empty() || test_tail.trim_start().starts_with("mod "),
+            "{}: `#[cfg(test)]` must introduce the trailing `mod tests`, or production atoms \
+             after it would go unscanned",
+            file.display()
+        );
         let text: String = raw
             .lines()
             .filter(|l| !l.trim_start().starts_with("//"))
@@ -97,7 +108,16 @@ fn emitted_atoms() -> BTreeSet<String> {
             if let Some(lit) = arg.strip_prefix('"').and_then(|a| a.strip_suffix('"')) {
                 atoms.insert(lit.to_string());
             } else if DYNAMIC_ATOM_VARS.contains(&arg) {
-                // Collected from its `let` block below.
+                // Collected from its `let` block below; that block must be
+                // in this file, or the scan would silently miss its atoms.
+                assert!(
+                    text.lines()
+                        .any(|l| l.trim_start().starts_with(&format!("let {arg} = match"))),
+                    "{}: `atom({arg})` has no `let {arg} = match` block in the same file, so \
+                     its atoms cannot be listed. Bind it that way, or teach this test the \
+                     new shape.",
+                    file.display()
+                );
             } else if arg.starts_with("if ") {
                 atoms.extend(string_literals(arg)); // `atom(if c { "true" } else { "false" })`
             } else {
