@@ -17,10 +17,6 @@ module 'logging_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
 'spawn'/0 = fun () ->
     case call 'beamtalk_actor':'safe_spawn'('logging_counter', ~{}~) of
         <{'ok', Pid}> when 'true' ->
-            let _InstReg = try call 'beamtalk_object_instances':'register'('LoggingCounter', Pid)
-                of _RegOk -> _RegOk
-                catch <_RegT, _RegE, _RegS> -> 'ok'
-            in
             {'beamtalk_object', 'LoggingCounter', 'logging_counter', Pid}
         <{'error', Reason}> when 'true' ->
             let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in
@@ -45,10 +41,6 @@ module 'logging_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
         <'true'> when 'true' ->
             case call 'beamtalk_actor':'safe_spawn'('logging_counter', InitArgs) of
                 <{'ok', Pid}> when 'true' ->
-                    let _InstReg = try call 'beamtalk_object_instances':'register'('LoggingCounter', Pid)
-                        of _RegOk -> _RegOk
-                        catch <_RegT, _RegE, _RegS> -> 'ok'
-                    in
                     {'beamtalk_object', 'LoggingCounter', 'logging_counter', Pid}
                 <{'error', Reason}> when 'true' ->
                     let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in
@@ -67,10 +59,6 @@ module 'logging_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
 'spawn_monitored'/0 = fun () ->
     case call 'beamtalk_actor':'safe_spawn_monitored'('logging_counter', ~{}~) of
         <{'ok', {Pid, MonRef}}> when 'true' ->
-            let _InstReg = try call 'beamtalk_object_instances':'register'('LoggingCounter', Pid)
-                of _RegOk -> _RegOk
-                catch <_RegT, _RegE, _RegS> -> 'ok'
-            in
             {{'beamtalk_object', 'LoggingCounter', 'logging_counter', Pid}, MonRef}
         <{'error', Reason}> when 'true' ->
             let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in
@@ -95,10 +83,6 @@ module 'logging_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
         <'true'> when 'true' ->
             case call 'beamtalk_actor':'safe_spawn_monitored'('logging_counter', InitArgs) of
                 <{'ok', {Pid, MonRef}}> when 'true' ->
-                    let _InstReg = try call 'beamtalk_object_instances':'register'('LoggingCounter', Pid)
-                        of _RegOk -> _RegOk
-                        catch <_RegT, _RegE, _RegS> -> 'ok'
-                    in
                     {{'beamtalk_object', 'LoggingCounter', 'logging_counter', Pid}, MonRef}
                 <{'error', Reason}> when 'true' ->
                     let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in
@@ -117,10 +101,6 @@ module 'logging_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
 'spawn_monitored_async'/0 = fun () ->
     case call 'beamtalk_actor':'safe_spawn_monitored_async'('logging_counter', ~{}~) of
         <{'ok', {Pid, MonRef}}> when 'true' ->
-            let _InstReg = try call 'beamtalk_object_instances':'register'('LoggingCounter', Pid)
-                of _RegOk -> _RegOk
-                catch <_RegT, _RegE, _RegS> -> 'ok'
-            in
             {{'beamtalk_object', 'LoggingCounter', 'logging_counter', Pid}, MonRef}
         <{'error', Reason}> when 'true' ->
             let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in
@@ -145,10 +125,6 @@ module 'logging_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle_cont
         <'true'> when 'true' ->
             case call 'beamtalk_actor':'safe_spawn_monitored_async'('logging_counter', InitArgs) of
                 <{'ok', {Pid, MonRef}}> when 'true' ->
-                    let _InstReg = try call 'beamtalk_object_instances':'register'('LoggingCounter', Pid)
-                        of _RegOk -> _RegOk
-                        catch <_RegT, _RegE, _RegS> -> 'ok'
-                    in
                     {{'beamtalk_object', 'LoggingCounter', 'logging_counter', Pid}, MonRef}
                 <{'error', Reason}> when 'true' ->
                     let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in

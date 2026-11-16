@@ -79,6 +79,7 @@ covers. The index lives in the subscriber, never in the runtime.
     list/0,
     lookup/1,
     count_for_module/1,
+    is_system/1,
     feed_new/1,
     feed_event/2
 ]).
@@ -156,6 +157,7 @@ meta({Pid, Class, StartedAt}) ->
 %% first in `'$ancestors'` (the supervisor's registered name, or its pid when
 %% unnamed). No call into the supervisor, so a busy or restarting supervisor
 %% never stalls a pid check.
+-doc "Is `Pid` an actor the runtime itself started (a child of `beamtalk_workspace_sup`)?".
 -spec is_system(pid()) -> boolean().
 is_system(Pid) ->
     %% Keyed form: reads one entry instead of copying the whole dictionary. A

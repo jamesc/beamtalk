@@ -1013,11 +1013,15 @@ fn test_class_method_call_generation() {
     let code3 =
         generate_repl_expression(&expr3, "repl_eval3").expect("codegen should succeed for spawn");
 
-    // Spawn on ClassReference uses generate_actor_spawn which calls
-    // Module:spawn() with REPL registry integration
+    // Spawn on ClassReference calls Module:spawn() directly; the REPL no
+    // longer registers the pid anywhere (ADR 0150, BT-4951).
     assert!(
-        code3.contains("'initcounter':'spawn'") || code3.contains("register_spawned"),
-        "REPL spawn should use direct module spawn (with optional registry). Got:\n{code3}"
+        code3.contains("call 'bt@init_counter':'spawn'()"),
+        "REPL spawn should use direct module spawn. Got:\n{code3}"
+    );
+    assert!(
+        !code3.contains("register_spawned"),
+        "REPL spawn must not register the actor. Got:\n{code3}"
     );
 }
 

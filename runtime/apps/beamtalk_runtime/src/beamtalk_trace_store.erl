@@ -447,9 +447,10 @@ error_methods(Limit) ->
 -doc "Top N actors by message queue length (live snapshot).".
 -spec bottlenecks(pos_integer()) -> [map()].
 bottlenecks(Limit) ->
-    %% Runs in the caller (BT-4124): it reads the public instance registry and
-    %% `process_info` only, so a large scan never queues counter grows or
-    %% queries behind it in the gen_server.
+    %% Runs in the caller (BT-4124): it scans the node's processes
+    %% (`beamtalk_actor_scan`, ADR 0150) and calls `process_info` only, so a
+    %% large scan never queues counter grows or queries behind it in the
+    %% gen_server.
     [to_bt_keys(M) || M <- do_bottlenecks(Limit)].
 
 -doc "Live process health for a specific actor.".
@@ -1183,18 +1184,12 @@ grow_counters() ->
 %%====================================================================
 
 -doc """
-Resolve a pid's class from its actor marker (`beamtalk_actor_scan:info/1`, ADR
-0150), else `unknown`: a live non-actor, a dead pid or a remote pid. A native
-backing module shared by several classes answers its first class.
+Resolve a pid's class for health queries: `beamtalk_actor:lookup_class/1` (the
+actor marker, ADR 0150), else `unknown`.
 """.
 -spec class_of_pid(pid()) -> atom().
-class_of_pid(Pid) when node(Pid) =:= node() ->
-    case beamtalk_actor_scan:info(Pid) of
-        [{Pid, Class, _StartedAt} | _] -> Class;
-        [] -> unknown
-    end;
-class_of_pid(_RemotePid) ->
-    unknown.
+class_of_pid(Pid) ->
+    beamtalk_actor:lookup_class(Pid).
 
 %%====================================================================
 %% Internal: Telemetry handlers
