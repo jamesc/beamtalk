@@ -57,16 +57,18 @@ child_src() ->
 migrated(Pid, Field) ->
     maps:is_key(Field, sys:get_state(Pid)).
 
-%% The `beamtalk_actor_scan` calls made while `Fun` runs, in any process. A
-%% separate tracer process collects them: the calling process is never traced
-%% by `trace(all, ...)`, and the reload may not run in it.
-trace_scans(Fun) ->
+%% The `beamtalk_actor_scan` calls naming one of `Classes` made while `Fun` runs,
+%% in any process. A separate tracer process collects them (the calling process
+%% is never traced by `trace(all, ...)`, and the reload may not run in it).
+%% Calls that do not name one of `Classes` (an unrelated scan from elsewhere on
+%% the node, or `scan_actors/0`) are not counted, so the assertion is not
+%% sensitive to what else runs in the window.
+trace_scans(Classes, Fun) ->
     {module, beamtalk_actor_scan} = code:ensure_loaded(beamtalk_actor_scan),
-    Tracer = spawn(fun() -> tracer_loop([]) end),
+    Tracer = spawn(fun() -> tracer_loop(Classes, []) end),
     1 = erlang:trace_pattern({beamtalk_actor_scan, scan_marked_classes, 1}, true, [global]),
     1 = erlang:trace_pattern({beamtalk_actor_scan, scan_classes, 1}, true, [global]),
     1 = erlang:trace_pattern({beamtalk_actor_scan, scan_class, 1}, true, [global]),
-    1 = erlang:trace_pattern({beamtalk_actor_scan, scan_actors, 0}, true, [global]),
     _ = erlang:trace(all, true, [call, {tracer, Tracer}]),
     try
         Fun()
@@ -81,10 +83,14 @@ trace_scans(Fun) ->
     after 5000 -> error(tracer_timeout)
     end.
 
-tracer_loop(Acc) ->
+tracer_loop(Classes, Acc) ->
     receive
-        {trace, _, call, {beamtalk_actor_scan, F, A}} ->
-            tracer_loop([{F, length(A)} | Acc]);
+        {trace, _, call, {beamtalk_actor_scan, F, [Arg]}} ->
+            Named = lists:flatten([Arg]),
+            case lists:any(fun(C) -> lists:member(C, Named) end, Classes) of
+                true -> tracer_loop(Classes, [{F, 1} | Acc]);
+                false -> tracer_loop(Classes, Acc)
+            end;
         {done, From, Ref} ->
             From ! {Ref, lists:reverse(Acc)}
     end.
@@ -121,7 +127,7 @@ hot_reload_scan_test_() ->
 
                             %% Reload the parent with a new field: one scan, all migrated.
                             ok = file:write_file(ParentPath, parent_src(["extra"])),
-                            Calls = trace_scans(fun() ->
+                            Calls = trace_scans(['HotScanParent', 'HotScanChild'], fun() ->
                                 {ok, _, _} = beamtalk_repl_loader:handle_load(ParentPath, S2)
                             end),
                             ?assertEqual([{scan_marked_classes, 1}], Calls),
@@ -138,7 +144,7 @@ hot_reload_scan_test_() ->
 
                             %% ...and by the next reload, which migrates old and new alike.
                             ok = file:write_file(ParentPath, parent_src(["extra", "more"])),
-                            Calls2 = trace_scans(fun() ->
+                            Calls2 = trace_scans(['HotScanParent', 'HotScanChild'], fun() ->
                                 {ok, _, _} = beamtalk_repl_loader:handle_load(ParentPath, S2)
                             end),
                             ?assertEqual([{scan_marked_classes, 1}], Calls2),

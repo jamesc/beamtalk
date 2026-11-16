@@ -14,6 +14,7 @@ would not see it.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% proc_lib entry point for the fake `native:` backing process.
 -export([init/1]).
@@ -239,4 +240,48 @@ native_fallback_is_listing_only_test() ->
         Bare ! stop,
         beamtalk_test_class:stop(PidB),
         beamtalk_test_class:stop(PidA)
+    end.
+
+%%% ---------------------------------------------------------------------
+%%% removeFromSystem from one of the class's own instances
+%%% ---------------------------------------------------------------------
+
+%% `Foo removeFromSystem` run by a `Foo` actor would kill the caller part-way
+%% (after the class monitor was unwatched, before the class process, module and
+%% registries were cleaned up). It is refused up front instead; nothing is
+%% stopped or removed.
+remove_from_system_refuses_from_own_instance_test() ->
+    Class = 'Bt4947SelfClass',
+    ClassPid = beamtalk_test_class:start(Class, #{
+        name => Class,
+        module => ?MODULE,
+        superclass => none,
+        instance_methods => #{},
+        class_methods => #{}
+    }),
+    Parent = self(),
+    Instance = spawn(fun() ->
+        erlang:put('$beamtalk_actor', Class),
+        Result =
+            try
+                beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(Class)
+            catch
+                error:Err -> {error, Err}
+            end,
+        Parent ! {result, self(), Result},
+        receive
+            stop -> ok
+        end
+    end),
+    try
+        receive
+            {result, Instance, Result} ->
+                ?assertMatch({error, #{error := #beamtalk_error{kind = runtime_error}}}, Result)
+        after 5000 -> ?assert(false)
+        end,
+        ?assert(is_process_alive(Instance)),
+        ?assertEqual(ClassPid, beamtalk_class_registry:whereis_class(Class))
+    after
+        Instance ! stop,
+        beamtalk_test_class:stop(ClassPid)
     end.

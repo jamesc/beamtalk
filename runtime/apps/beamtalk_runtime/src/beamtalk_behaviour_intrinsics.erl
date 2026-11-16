@@ -1473,10 +1473,14 @@ classRemoveFromSystemByName(ClassName) ->
                             %% BT-4936: refuse while any supervisor holds a child
                             %% of this class — before anything is unwatched,
                             %% killed or removed.
-                            ok = refuse_if_supervised(ClassName, Module),
+                            %% One scan serves the supervision check, the
+                            %% self-kill check and the stop below.
+                            ActorPids = class_actor_pids(ClassName),
+                            ok = refuse_if_supervised(ClassName, Module, ActorPids),
+                            ok = refuse_if_caller_is_instance(ClassName, ActorPids),
                             beamtalk_class_monitor:unwatch(ClassName),
                             %% Stop live actors of this class
-                            stop_class_actors(ClassName),
+                            stop_class_actors(ActorPids),
                             %% Stop the class gen_server
                             %% (terminate/2 in beamtalk_object_class removes ETS entry and pg group)
                             gen_server:stop(ClassPid),
@@ -2075,9 +2079,9 @@ started by another process between this check and the module delete is not
 caught; closing it would need supervisors to refuse starts of a class under
 removal.
 """.
--spec refuse_if_supervised(atom(), module()) -> ok.
-refuse_if_supervised(ClassName, Module) ->
-    case beamtalk_supervisor:supervised_children_of(Module, class_actor_pids(ClassName)) of
+-spec refuse_if_supervised(atom(), module(), [pid()]) -> ok.
+refuse_if_supervised(ClassName, Module, ActorPids) ->
+    case beamtalk_supervisor:supervised_children_of(Module, ActorPids) of
         [] ->
             ok;
         [#{supervisor := Sup, supervisor_pid := SupPid, id := Id} | _] = Found ->
@@ -2103,6 +2107,35 @@ refuse_if_supervised(ClassName, Module) ->
             )
     end.
 
+-doc """
+Raise a structured error (nothing killed, nothing removed) when the calling
+process is itself an instance of the class (`Foo removeFromSystem` run by a
+`Foo` actor). Stopping the class's actors would kill the caller part-way, after
+the class monitor was unwatched but before the class process, module and
+registries were cleaned up.
+""".
+-spec refuse_if_caller_is_instance(atom(), [pid()]) -> ok.
+refuse_if_caller_is_instance(ClassName, ActorPids) ->
+    case lists:member(self(), ActorPids) of
+        false ->
+            ok;
+        true ->
+            Error0 = beamtalk_error:new(runtime_error, ClassName),
+            Error1 = beamtalk_error:with_message(
+                Error0,
+                iolist_to_binary(
+                    io_lib:format(
+                        "Cannot remove class '~ts' from one of its own instances", [ClassName]
+                    )
+                )
+            ),
+            beamtalk_error:raise(
+                beamtalk_error:with_hint(
+                    Error1, <<"Call removeFromSystem from outside an instance of the class.">>
+                )
+            )
+    end.
+
 supervisor_label(nil, Pid) -> io_lib:format("~p", [Pid]);
 supervisor_label(Sup, _Pid) -> atom_to_list(Sup).
 
@@ -2118,18 +2151,18 @@ class_actor_pids(ClassName) ->
     beamtalk_runtime_api:marked_instances(ClassName).
 
 -doc """
-Stop all live actors of a given class.
+Stop the live actors of a class, given by `class_actor_pids/1`, and wait for
+each to die.
 
-Finds them by the process scan (`class_actor_pids/1`, ADR 0150: supervised and
-named children included, no actor list involved; marked actors only, so a
-`native:` backing module shared with another class or an OTP process is never
-killed) and kills each one, waiting
-for it to die. What is killed is unchanged from the list-based version; only
-how the pids are found differs.
+The pids come from the process scan (ADR 0150): supervised and named children
+included, no actor list involved, marked actors only, so a `native:` backing
+module shared with another class or an OTP process is never killed. Unlike the
+list-based version, a REPL-spawned `native:` actor is no longer killed, and
+marked actors are killed whether or not an actor list is running.
 """.
--spec stop_class_actors(atom()) -> ok.
-stop_class_actors(ClassName) ->
-    lists:foreach(fun kill_and_wait/1, class_actor_pids(ClassName)).
+-spec stop_class_actors([pid()]) -> ok.
+stop_class_actors(ActorPids) ->
+    lists:foreach(fun kill_and_wait/1, ActorPids).
 
 -spec kill_and_wait(pid()) -> ok.
 kill_and_wait(Pid) ->
