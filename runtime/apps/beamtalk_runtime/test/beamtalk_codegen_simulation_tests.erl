@@ -226,6 +226,7 @@ spawn_with_multiple_overrides_test() ->
 %%% ===========================================================================
 
 late_slot_spawns_without_uninitialized_state_error_test() ->
+    ok = beamtalk_test_class:ensure_fixture_loaded('LateSlotActor', 'bt@late_slot_actor'),
     %% A `late` slot opts out of the post-initialize definite-assignment
     %% check (ADR 0124 A1/B2), so this must not raise UninitializedStateError
     %% the way an eager typed-no-default field left unset would.
@@ -238,6 +239,7 @@ late_slot_spawns_without_uninitialized_state_error_test() ->
     gen_server:stop(Pid).
 
 late_slot_absent_from_state_when_unassigned_test() ->
+    ok = beamtalk_test_class:ensure_fixture_loaded('LateSlotActor', 'bt@late_slot_actor'),
     %% The unassigned `late` slot's key is entirely absent from state — not
     %% present as `proc => nil` — so a plain `spawn` never puts it there.
     Object = 'bt@late_slot_actor':spawn(),
@@ -250,6 +252,7 @@ late_slot_absent_from_state_when_unassigned_test() ->
     gen_server:stop(Pid).
 
 late_slot_spawn_with_supplies_the_slot_test() ->
+    ok = beamtalk_test_class:ensure_fixture_loaded('LateSlotActor', 'bt@late_slot_actor'),
     %% spawnWith: #{#proc => v} merges InitArgs over DefaultState
     %% (maps:merge(DefaultState, InitArgs)) — the documented injection path
     %% for a `late` slot — so it shows up in state afterward even though
@@ -1221,6 +1224,9 @@ method_not_found_error_test_() ->
 method_not_found_error() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_test_wait:class('Actor', ?ACTOR_WAIT_MS),
+    %% The error names the `Counter` class, so it must be registered; an earlier
+    %% suite may have removed it (BT-4934).
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
 
