@@ -180,6 +180,13 @@ pub struct SimpleLanguageService {
     project_index: ProjectIndex,
     /// Native type registry for Erlang FFI typed completions (ADR 0075).
     native_types: Option<std::sync::Arc<NativeTypeRegistry>>,
+    /// Per-file FFI registry that replaces `native_types` for diagnostics of
+    /// that file (BT-4967): a file under the monorepo's `stdlib/` tree has no
+    /// `beamtalk.toml`, so no root contributes a registry for it. The LSP
+    /// fills this from the registry `build`/`test`/`lint` share
+    /// (`ffi_type_registry::lint_type_registry`); this crate does not decide
+    /// which files qualify.
+    file_native_types: HashMap<Utf8PathBuf, std::sync::Arc<NativeTypeRegistry>>,
     /// Project-known Erlang modules for the `unresolved_ffi` check (BT-4022):
     /// hex-dep/native ebin modules plus own `native/*.erl`, unioned across
     /// workspace roots by the LSP server at startup (mirrors `native_types`).
@@ -277,6 +284,7 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index: ProjectIndex::new(),
             native_types: None,
+            file_native_types: HashMap::new(),
             known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
             root_qualifier_packages: Vec::new(),
             project_complete: false,
@@ -297,6 +305,7 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index,
             native_types: None,
+            file_native_types: HashMap::new(),
             known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
             root_qualifier_packages: Vec::new(),
             project_complete: false,
@@ -389,6 +398,24 @@ impl SimpleLanguageService {
     /// just arity information.
     pub fn set_native_types(&mut self, registry: NativeTypeRegistry) {
         self.native_types = Some(std::sync::Arc::new(registry));
+    }
+
+    /// Sets (`Some`) or clears (`None`) the FFI registry used for `file`'s
+    /// diagnostics in place of the session-wide one (BT-4967).
+    pub fn set_file_native_types(
+        &mut self,
+        file: &Utf8PathBuf,
+        registry: Option<NativeTypeRegistry>,
+    ) {
+        match registry {
+            Some(registry) => {
+                self.file_native_types
+                    .insert(file.clone(), std::sync::Arc::new(registry));
+            }
+            None => {
+                self.file_native_types.remove(file);
+            }
+        }
     }
 
     /// Returns a reference to the native type registry, if set.
@@ -1132,6 +1159,7 @@ impl LanguageService for SimpleLanguageService {
         let had_internal_aliases = !self.project_index.internal_aliases_of(file).is_empty();
         self.project_index.remove_file(file);
         self.files.remove(file);
+        self.file_native_types.remove(file);
         // Siblings were expanded against this file's aliases (BT-4778).
         if had_internal_aliases && crate::project_index::is_dependency_file(file) {
             self.reindex_dependency_siblings(file, false);
@@ -1228,7 +1256,11 @@ impl LanguageService for SimpleLanguageService {
                     pre_loaded_protocol_defs,
                     pre_loaded_aliases,
                     cross_file_extensions,
-                    native_type_registry: self.native_types.clone(),
+                    native_type_registry: self
+                        .file_native_types
+                        .get(file)
+                        .cloned()
+                        .or_else(|| self.native_types.clone()),
                     // Apply the same `beamtalk.toml` `[diagnostics]`
                     // severity-override table `beamtalk build` uses, so the
                     // LSP never disagrees with the CLI about a diagnostic's
