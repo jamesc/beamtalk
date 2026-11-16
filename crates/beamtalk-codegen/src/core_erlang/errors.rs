@@ -307,12 +307,12 @@ impl CoreErlangGenerator {
 mod tests {
     use super::check_init_args_call_doc;
     use super::{BeamtalkErrorChain, ErrorBinding};
+    use beamtalk_cerl_doc::{Document, leaf};
 
     /// A binding and reference spelled differently (e.g. `_Error0` / `Error0`).
     fn split(binding: Document<'static>, reference: Document<'static>) -> ErrorBinding {
         ErrorBinding { binding, reference }
     }
-    use beamtalk_cerl_doc::{Document, leaf};
 
     #[test]
     fn inline_chain_renders_three_let_bindings() {

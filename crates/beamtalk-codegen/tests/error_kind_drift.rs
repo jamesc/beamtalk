@@ -209,8 +209,8 @@ fn emitted_kinds() -> BTreeSet<String> {
             let open = idx + "BeamtalkErrorChain::new".len();
             let kind = string_literal_arg(src, open, 0).unwrap_or_else(|| {
                 panic!(
-                    "`BeamtalkErrorChain::new` in {} takes a non-literal kind; the drift scan \
-                     reads string literals, so pass the kind inline",
+                    "`BeamtalkErrorChain::new` in {} takes a kind the drift scan cannot read; \
+                     pass it as an inline string literal of lowercase letters and `_`",
                     file.display()
                 )
             });
