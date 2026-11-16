@@ -1018,3 +1018,94 @@ fn dependency_beam_embeds_path_relative_to_its_own_package_root() {
         assert!(!contains(bytes, &root_str), "{name} embeds {root_str}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// BT-4961: a subclass of a `native:` actor must declare its own `native:`
+// ---------------------------------------------------------------------------
+
+/// Writes package `name` with one `src/<class>.bt` file per `(class, source)`.
+fn write_native_package(
+    root: &std::path::Path,
+    name: &str,
+    deps: &str,
+    files: &[(&str, &str)],
+) -> std::path::PathBuf {
+    let dir = root.join(name);
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(
+        dir.join("beamtalk.toml"),
+        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n\n[dependencies]\n{deps}"),
+    )
+    .unwrap();
+    for (class, source) in files {
+        std::fs::write(dir.join(format!("src/{class}.bt")), source).unwrap();
+    }
+    dir
+}
+
+const BT4961_PARENT: &str =
+    "Actor subclass: Bt4961Counter native: bt4961_backing\n  get -> Integer => self delegate\n";
+
+#[test]
+fn build_rejects_subclass_of_native_actor_without_native_same_package() {
+    let root = tempfile::tempdir().unwrap();
+    let app = write_native_package(
+        root.path(),
+        "app",
+        "",
+        &[
+            ("Bt4961Counter", BT4961_PARENT),
+            (
+                "Bt4961Sub",
+                "Bt4961Counter subclass: Bt4961Sub\n  extra => 1\n",
+            ),
+        ],
+    );
+    cli_common::beamtalk()
+        .current_dir(&app)
+        .arg("build")
+        .assert()
+        .failure()
+        .stderr(contains("subclasses the").and(contains("Bt4961Counter")));
+}
+
+#[test]
+fn build_rejects_subclass_of_native_actor_from_a_dependency() {
+    let root = tempfile::tempdir().unwrap();
+    write_native_package(root.path(), "dep", "", &[("Bt4961Counter", BT4961_PARENT)]);
+    let app = write_native_package(
+        root.path(),
+        "app",
+        "dep = { path = \"../dep\" }\n",
+        &[(
+            "Bt4961Sub",
+            "Bt4961Counter subclass: Bt4961Sub\n  extra => 1\n",
+        )],
+    );
+    cli_common::beamtalk()
+        .current_dir(&app)
+        .arg("build")
+        .assert()
+        .failure()
+        .stderr(contains("subclasses the").and(contains("Bt4961Counter")));
+}
+
+#[test]
+fn build_accepts_subclass_of_dependency_native_actor_that_redeclares_native() {
+    let root = tempfile::tempdir().unwrap();
+    write_native_package(root.path(), "dep", "", &[("Bt4961Counter", BT4961_PARENT)]);
+    let app = write_native_package(
+        root.path(),
+        "app",
+        "dep = { path = \"../dep\" }\n",
+        &[(
+            "Bt4961Sub",
+            "Bt4961Counter subclass: Bt4961Sub native: bt4961_other\n  more -> Integer => self delegate\n",
+        )],
+    );
+    cli_common::beamtalk()
+        .current_dir(&app)
+        .arg("build")
+        .assert()
+        .success();
+}

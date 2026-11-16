@@ -1371,6 +1371,12 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    // BT-4961: a non-native actor under a native actor has no `init/1` to spawn with
+    validators::check_native_actor_subclass_declares_native(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     // Reserved-word backing-function check for native Objects (ADR 0101)
     validators::check_native_delegate_reserved_word(
         module,

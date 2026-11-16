@@ -219,6 +219,63 @@ pub(crate) fn check_cross_file_native_delegate(
     }
 }
 
+/// BT-4961: error on a non-abstract actor that has a `native:` actor ancestor
+/// but declares no `native:` of its own.
+///
+/// A `native:` actor compiles to a facade module with no `init/1`. A subclass
+/// without `native:` compiles to a full `gen_server` whose `init/1` calls its
+/// superclass's `init/1`, so spawning it died on an undefined function.
+/// `native:` is not inherited (see `docs/beamtalk-native-erlang.md` §
+/// Inheritance), so the subclass has to name its own backing module.
+///
+/// Not reported: a class that redeclares `native:`, an abstract class (it can
+/// never be spawned; its concrete descendants are checked), and `Value` /
+/// `Object` subclasses of native classes (no `init/1` involved). The ancestor
+/// may come from this module or from a dependency, as long as the dependency
+/// was built with the `native` metadata flag (BT-4930).
+pub(crate) fn check_native_actor_subclass_declares_native(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for class in &module.classes {
+        let name = class.name.name.as_str();
+        if class.backing_module.is_some() || class.is_abstract || !hierarchy.is_actor_subclass(name)
+        {
+            continue;
+        }
+        let Some(parent) = class.superclass.as_ref().map(|s| s.name.as_str()) else {
+            continue;
+        };
+        let Some(native_ancestor) = hierarchy
+            .ancestors(name)
+            .find(|info| info.is_native)
+            .map(|info| info.name.clone())
+        else {
+            continue;
+        };
+        let via = if native_ancestor.as_str() == parent {
+            String::new()
+        } else {
+            format!(" (through `{parent}`)")
+        };
+        diagnostics.push(
+            Diagnostic::error(
+                format!(
+                    "Actor `{name}` subclasses the `native:` actor `{native_ancestor}`{via} and \
+                     must declare its own `native:` backing module"
+                ),
+                class.name.span,
+            )
+            .with_hint(format!(
+                "`native:` is not inherited, so `{name}` has no `init/1` and `{name} spawn` would \
+                 fail. Write `{parent} subclass: {name} native: your_backing_module`, or derive \
+                 from `Actor` instead."
+            )),
+        );
+    }
+}
+
 /// Emit a reserved-word error if the backing function name (first keyword, colon
 /// stripped, or the bare unary/binary selector) collides with an Erlang keyword.
 fn check_selector_reserved_word(
