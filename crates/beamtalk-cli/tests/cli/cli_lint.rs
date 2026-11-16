@@ -1096,3 +1096,36 @@ fn lint_protocol_provided_method_known_package_qualifier_bt_4929() {
         .success()
         .stderr(contains("Unknown package").not());
 }
+
+/// BT-4929 (review): a qualifier written once in a protocol's provided method
+/// is one error however many classes `uses:` the protocol. A class and a
+/// protocol cannot share a file, so the users are in other files of the
+/// package: the error is reported in the protocol's file only, not again
+/// against each user's. (The same-file case is covered by the `analyse_full`
+/// tests in `flattened_provision_diagnostics.rs`.)
+#[test]
+fn lint_protocol_provided_method_qualifier_reported_once_with_users_in_other_files_bt_4929() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Greets.bt"),
+        format!(
+            "{HEADER}Protocol define: Greets\n  name -> String\n\n  greet -> Object => nosuchpkg@Widget new\n"
+        ),
+    )
+    .unwrap();
+    for user in ["A", "B"] {
+        std::fs::write(
+            project.path().join(format!("src/{user}.bt")),
+            format!("{HEADER}Object subclass: {user}\n  uses: Greets\n  name -> String => \"x\"\n"),
+        )
+        .unwrap();
+    }
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .failure()
+        .stderr(contains("Greets.bt"))
+        .stderr(contains("1 error diagnostic found in"));
+}

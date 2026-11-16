@@ -28,6 +28,11 @@ fn unknown_package_diagnostic(pkg: &Identifier, message: String) -> Diagnostic {
 
 /// Validates all package qualifiers in the module against known dependencies.
 ///
+/// `module` must be the module as written, not its flattened form: a
+/// `uses:`d provision is spliced into each using class, and would be checked
+/// again there (and, when the protocol is in another file, reported against
+/// the wrong file).
+///
 /// Emits an error for each package qualifier that doesn't match a known
 /// package. Build the `known_packages` set with
 /// [`known_qualifier_packages`](crate::semantic_analysis::known_qualifier_packages):
@@ -111,9 +116,10 @@ pub fn check_package_qualifiers(
         }
     }
 
-    // Provided-method bodies in a protocol's own file (BT-4929). Checked here,
-    // on the written protocol, not on the copies flattened into each using
-    // class: those are cloned inside `analyse_full`, so each body is seen once.
+    // Provided-method bodies in a protocol's own file (BT-4929). `module` is
+    // the module as written (see `analyse_full`'s Phase 7), so a body is seen
+    // here once; the copies the flattener splices into each using class's
+    // `methods` are not part of it.
     for protocol in &module.protocols {
         for method in &protocol.provided_methods {
             for stmt in &method.body {
