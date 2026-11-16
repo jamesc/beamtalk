@@ -8,9 +8,10 @@
 -moduledoc """
 Enumerate live actors by scanning the node's processes (ADR 0150, option D).
 
-Actor start no longer registers the actor anywhere. The readers that need to
-enumerate actors (`allInstances`, hot reload, `stop_class_actors`, the actor
-lists) scan instead, with `erlang:processes_iterator/0` and one
+Under ADR 0150 actor start stops registering the actor anywhere. The readers
+that need to enumerate actors (`allInstances`, hot reload,
+`stop_class_actors`, the actor lists) scan with this module instead, once each
+has been moved onto it. They scan with `erlang:processes_iterator/0` and one
 `erlang:process_info/2` call per process reading the `'$beamtalk_actor'`
 class marker and the `'$beamtalk_actor_started_at'` start time that an
 actor's `init/1` writes. Cost is O(processes in the node), about 2.5-4.5 µs
@@ -93,7 +94,7 @@ the marker check. `[]` for a dead process or a non-actor; more than one entry
 only for a `native:` backing module shared by several classes.
 """.
 -spec info(pid()) -> [entry()].
-info(Pid) when is_pid(Pid) ->
+info(Pid) when is_pid(Pid), node(Pid) =:= node() ->
     entries(Pid).
 
 %%% ---------------------------------------------------------------------

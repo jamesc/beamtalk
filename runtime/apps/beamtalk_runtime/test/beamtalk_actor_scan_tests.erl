@@ -90,9 +90,10 @@ supervised_actor_found_test() ->
         ?assert(lists:member(Child, pids(beamtalk_actor_scan:scan_actors())))
     after
         unlink(Sup),
+        MonRef = erlang:monitor(process, Sup),
         exit(Sup, shutdown),
         receive
-        after 50 -> ok
+            {'DOWN', MonRef, process, Sup, _} -> ok
         end
     end.
 
