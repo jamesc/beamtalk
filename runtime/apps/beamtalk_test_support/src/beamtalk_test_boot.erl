@@ -36,6 +36,7 @@ idempotent (a normal stdlib load skips a module whose on_load already ran).
     start_app/1,
     compiler/0,
     extensions/0,
+    app_owned_table/1,
     no_compiler/0,
     telemetry/0,
     load_runtime_modules/0,
@@ -108,6 +109,30 @@ extensions() ->
                 exit(Owner, kill),
                 error(extensions_tables_not_created)
             end;
+        _ ->
+            ok
+    end.
+
+-doc """
+Make sure the boot table `Table` is owned and heir-protected the way
+`beamtalk_runtime_app:start/2` leaves it. A module that loads stdlib code before
+the runtime app is up creates such tables from a test or class process with no
+heir (`beamtalk_ets_heir:heir_option/0` is empty then), and starting the app later
+cannot add one (`maybe_set_heir/1` only works for the owner). When that happened
+(a table with no heir), restart the app with the table removed so the app creates
+it, and register the stdlib classes again. A no-op otherwise (BT-4962).
+""".
+-spec app_owned_table(atom()) -> ok.
+app_owned_table(Table) ->
+    case ets:info(Table, heir) of
+        none ->
+            _ = application:stop(beamtalk_runtime),
+            try
+                ets:delete(Table)
+            catch
+                error:badarg -> ok
+            end,
+            boot_real_stdlib('Integer');
         _ ->
             ok
     end.
@@ -217,6 +242,7 @@ start_app(App, Retries) ->
     case application:ensure_all_started(App) of
         {ok, _} = Ok when App =:= beamtalk_runtime ->
             ok = ensure_bootstrap_classes(),
+            ok = ensure_boot_tables(),
             Ok;
         {ok, _} = Ok ->
             Ok;
@@ -228,6 +254,16 @@ start_app(App, Retries) ->
         {error, Reason} ->
             error({app_start_failed, App, Reason})
     end.
+
+%% Boot tables that a test process created before the runtime app was up are
+%% owned by that process and vanish with it (`badarg` on `ets:lookup/2` in a later
+%% module), while the app itself is "healthy" and never recreates them. The heir
+%% is alive now, so the idempotent `init/0` of the registries tests have been seen
+%% to lose recreates a missing table with the heir (BT-4962).
+ensure_boot_tables() ->
+    _ = beamtalk_extensions:init(),
+    _ = beamtalk_protocol_registry:init(),
+    ok.
 
 %% A suite can leave the runtime application "started" but unhealthy, and a
 %% second `ensure_all_started` is then a no-op, so no later suite ever sees it
