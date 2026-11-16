@@ -219,31 +219,59 @@ pub(crate) fn check_cross_file_native_delegate(
     }
 }
 
-/// BT-4961: error on a non-abstract actor that has a `native:` actor ancestor
-/// but declares no `native:` of its own.
+/// BT-4961 / BT-4964: error on a non-abstract class that has a `native:`
+/// ancestor but declares no `native:` of its own.
 ///
-/// A `native:` actor compiles to a facade module with no `init/1`. A subclass
+/// Actor (BT-4961): a `native:` actor compiles to a facade module with no `init/1`. A subclass
 /// without `native:` compiles to a full `gen_server` whose `init/1` calls its
 /// superclass's `init/1`, so spawning it died on an undefined function.
 /// `native:` is not inherited (see `docs/beamtalk-native-erlang.md` §
 /// Inheritance), so the subclass has to name its own backing module.
 ///
-/// Not reported: a class that redeclares `native:`, an abstract class (it can
-/// never be spawned; its concrete descendants are checked), and `Value` /
-/// `Object` subclasses of native classes (no `init/1` involved). The ancestor
+/// Value / Object (BT-4964): the inherited `class new` is a `self delegate` that
+/// builds the backing module's term, tagged with the parent class, so `MyQ new`
+/// answers a plain `Queue` and `MyQ`'s own methods are unreachable.
+///
+/// One rule, two messages. Exempt: the built-in classes identified by term
+/// shape ([`ClassHierarchy::is_term_shape_builtin_class`]), while compiling the
+/// stdlib. Not reported: a class that redeclares `native:`, a subclass that
+/// already has the seal error (that is the one diagnostic), and
+/// an abstract class (never instantiated; its concrete descendants are
+/// checked). The ancestor
 /// may come from this module or from a dependency, as long as the dependency
 /// was built with the `native` metadata flag (BT-4930).
-pub(crate) fn check_native_actor_subclass_declares_native(
+pub(crate) fn check_native_subclass_declares_native(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    stdlib_mode: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for class in &module.classes {
         let name = class.name.name.as_str();
-        if class.backing_module.is_some() || class.is_abstract || !hierarchy.is_actor_subclass(name)
+        if class.backing_module.is_some() || class.is_abstract {
+            continue;
+        }
+        // The one exemption: a built-in class identified by term shape (today
+        // `String` under `Binary`), and only while compiling the stdlib itself,
+        // so a user class that reuses the name is still checked.
+        if stdlib_mode && ClassHierarchy::is_term_shape_builtin_class(name) {
+            continue;
+        }
+        // A subclass of a sealed class that already has the seal error (same
+        // span, emitted when the hierarchy was built) gets no second error: the
+        // "declare your own `native:`" hint would suggest a form the seal
+        // forbids (BT-4964 review). If no seal error was emitted (a sealed
+        // parent from a dependency), this check still reports.
+        if let Some(superclass) = class.superclass.as_ref()
+            && diagnostics.iter().any(|d| {
+                d.severity == crate::source_analysis::Severity::Error
+                    && d.span == superclass.span
+                    && d.category == Some(DiagnosticCategory::Inheritance)
+            })
         {
             continue;
         }
+        let is_actor = hierarchy.is_actor_subclass(name);
         let Some(parent) = class.superclass.as_ref().map(|s| s.name.as_str()) else {
             continue;
         };
@@ -259,7 +287,7 @@ pub(crate) fn check_native_actor_subclass_declares_native(
         } else {
             format!(" (through `{parent}`)")
         };
-        diagnostics.push(
+        let diagnostic = if is_actor {
             Diagnostic::error(
                 format!(
                     "Actor `{name}` subclasses the `native:` actor `{native_ancestor}`{via} and \
@@ -271,8 +299,23 @@ pub(crate) fn check_native_actor_subclass_declares_native(
                 "`native:` is not inherited, so `{name}` has no `init/1` and `{name} spawn` would \
                  fail. Write `{parent} subclass: {name} native: your_backing_module`, or derive \
                  from `Actor` instead."
-            )),
-        );
+            ))
+        } else {
+            Diagnostic::error(
+                format!(
+                    "Class `{name}` subclasses the `native:` class `{native_ancestor}`{via} and \
+                     must declare its own `native:` backing module"
+                ),
+                class.name.span,
+            )
+            .with_hint(format!(
+                "`native:` is not inherited, so `{name} new` would answer a plain \
+                 `{native_ancestor}` and `{name}`'s own methods would be unreachable. Hold a \
+                 `{native_ancestor}` in a field of a plain class instead, or write \
+                 `{parent} subclass: {name} native: your_backing_module`."
+            ))
+        };
+        diagnostics.push(diagnostic);
     }
 }
 

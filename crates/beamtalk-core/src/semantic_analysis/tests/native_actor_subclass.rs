@@ -131,23 +131,146 @@ fn abstract_non_native_middle_class_with_a_native_redeclaring_child_is_silent() 
     assert!(missing_native(&d).is_empty(), "{d:?}");
 }
 
-/// KNOWN GAP (BT-4964, needs-spec): `Queue subclass: MyQ` compiles, but
-/// `MyQ new` answers a plain `Queue`, so `MyQ`'s own methods are unreachable.
-/// Whether this becomes "make it work" or a compile error is undecided; this
-/// pins today's behaviour (no diagnostic) and flips with that decision.
+// ---- BT-4964: the same rule for `Value` / `Object` native classes ----
+
+const NATIVE_VALUE: &str =
+    "Value subclass: NVal native: nval_backing\n  size -> Integer => self delegate\n";
+const NATIVE_OBJECT: &str =
+    "Object subclass: NObj native: nobj_backing\n  size -> Integer => self delegate\n";
+
 #[test]
-fn value_and_object_subclasses_of_native_classes_are_not_reported() {
-    let src = "Value subclass: NVal native: nval_backing\n  size -> Integer => self delegate\n\
-               NVal subclass: SubVal\n  extra => 1\n\
-               Object subclass: NObj native: nobj_backing\n  size -> Integer => self delegate\n\
-               NObj subclass: SubObj\n  extra => 1\n";
-    let d = same_package(src);
+fn same_package_value_and_object_subclasses_of_native_classes_are_errors() {
+    let d = same_package(&format!(
+        "{NATIVE_VALUE}NVal subclass: SubVal\n  extra => 1\n"
+    ));
+    assert_one_error(&d, "NVal", "SubVal");
+    let d = same_package(&format!(
+        "{NATIVE_OBJECT}NObj subclass: SubObj\n  extra => 1\n"
+    ));
+    assert_one_error(&d, "NObj", "SubObj");
+}
+
+#[test]
+fn value_subclass_error_suggests_wrapping_in_a_field() {
+    let d = same_package(&format!(
+        "{NATIVE_VALUE}NVal subclass: SubVal\n  extra => 1\n"
+    ));
+    let hint = missing_native(&d)[0].hint.clone().unwrap_or_default();
+    assert!(hint.contains("field"), "{hint}");
+}
+
+#[test]
+fn value_subclass_of_a_dependency_native_class_is_an_error() {
+    let d = from_dependency(NATIVE_VALUE, "NVal subclass: SubVal\n  extra => 1\n");
+    assert_one_error(&d, "NVal", "SubVal");
+    let d = from_dependency(NATIVE_OBJECT, "NObj subclass: SubObj\n  extra => 1\n");
+    assert_one_error(&d, "NObj", "SubObj");
+}
+
+#[test]
+fn value_subclass_that_redeclares_native_is_silent() {
+    let sub = "NVal subclass: SubVal native: other_backing\n  more -> Integer => self delegate\n";
+    let d = same_package(&format!("{NATIVE_VALUE}{sub}"));
     assert!(missing_native(&d).is_empty(), "{d:?}");
-    let d = from_dependency(
-        "Value subclass: NVal native: nval_backing\n  size -> Integer => self delegate\n",
-        "NVal subclass: SubVal\n  extra => 1\n",
+    let d = from_dependency(NATIVE_VALUE, sub);
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn abstract_value_subclass_is_silent_but_its_concrete_child_is_an_error() {
+    let abs = format!("{NATIVE_VALUE}abstract NVal subclass: Mid\n  extra => 1\n");
+    let d = same_package(&abs);
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+    let d = same_package(&format!("{abs}Mid subclass: Leaf\n  more => 2\n"));
+    assert_one_error(&d, "Mid", "Leaf");
+    let d = same_package(&format!(
+        "{abs}Mid subclass: Leaf native: leaf_backing\n  more -> Integer => self delegate\n"
+    ));
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn plain_value_and_object_subclasses_are_silent() {
+    let d = same_package(
+        "Value subclass: PV\n  a => 1\nPV subclass: PV2\n  b => 2\nObject subclass: PO\n  c => 3\n",
     );
     assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+// ---- BT-4964: the term-shape built-in exemption (`String` under `Binary`) ----
+
+const STRING_UNDER_BINARY: &str = "sealed typed Binary subclass: String\n  size -> Integer => 1\n";
+
+fn stdlib_mode(src: &str) -> Vec<Diagnostic> {
+    let ctx = AnalysisContext {
+        stdlib_mode: true,
+        ..AnalysisContext::default()
+    };
+    analyse_full(&parse_bt(src), ctx).diagnostics
+}
+
+#[test]
+fn builtin_string_under_native_binary_is_exempt_in_stdlib_mode() {
+    let d = stdlib_mode(STRING_UNDER_BINARY);
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn user_class_named_string_outside_the_stdlib_is_not_exempt() {
+    // Same name as the built-in, but not the stdlib build: still checked.
+    let d = same_package(&format!(
+        "{NATIVE_VALUE}NVal subclass: String\n  extra => 1\n"
+    ));
+    assert_one_error(&d, "NVal", "String");
+    // Under the sealed `Binary` it is still an error: the seal error.
+    let d = same_package(STRING_UNDER_BINARY);
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+    assert_eq!(sealed_errors(&d).len(), 1, "{d:?}");
+}
+
+#[test]
+fn exemption_does_not_extend_to_other_classes_in_stdlib_mode() {
+    let src = format!("{NATIVE_VALUE}NVal subclass: SubVal\n  extra => 1\n");
+    assert_one_error(&stdlib_mode(&src), "NVal", "SubVal");
+}
+
+fn sealed_errors(d: &[Diagnostic]) -> Vec<&Diagnostic> {
+    d.iter()
+        .filter(|d| d.message.contains("Cannot subclass sealed class"))
+        .collect()
+}
+
+#[test]
+fn subclass_of_a_sealed_native_class_gets_only_the_seal_error() {
+    // The seal error is the one diagnostic; a second "declare your own
+    // `native:`" error would suggest a form the seal forbids.
+    let parent =
+        "sealed Value subclass: SVal native: sval_backing\n  size -> Integer => self delegate\n";
+    let d = same_package(&format!("{parent}SVal subclass: SubSVal\n  extra => 1\n"));
+    assert_eq!(sealed_errors(&d).len(), 1, "{d:?}");
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn subclass_of_a_sealed_native_class_from_a_dependency_is_still_an_error() {
+    // The hierarchy build emits no seal error for a dependency's class, so the
+    // native-subclass error must still fire, and it is the only error.
+    let parent =
+        "sealed Value subclass: SVal native: sval_backing\n  size -> Integer => self delegate\n";
+    let d = from_dependency(parent, "SVal subclass: SubSVal\n  extra => 1\n");
+    assert!(sealed_errors(&d).is_empty(), "{d:?}");
+    assert_eq!(missing_native(&d).len(), 1, "{d:?}");
+}
+
+#[test]
+fn user_sealed_subclass_of_a_non_sealed_native_class_is_an_error() {
+    // `sealed` on the subclass is a keyword a user can write; it grants no exemption.
+    let d = same_package(&format!(
+        "{NATIVE_VALUE}sealed NVal subclass: SubVal\n  extra => 1\n"
+    ));
+    assert_one_error(&d, "NVal", "SubVal");
+    let d = same_package("sealed Queue subclass: MyQ\n  extra -> Integer => 42\n");
+    assert_one_error(&d, "Queue", "MyQ");
 }
 
 #[test]
