@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-04-15)
 
+> **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** The `'$beamtalk_actor'` marker was introduced here for identification and for filtering `all_registered/0`, not for enumeration. It now also backs the scan that finds every actor (`beamtalk_actor_scan`), and every generated `init/1` also writes `'$beamtalk_actor_started_at'` (used by `actor_started_at/1`). The module `beamtalk_actor_registry.erl` remains the *name* registry of this ADR; the process that used to be registered under that name (`beamtalk_repl_actors`) is deleted.
+
 ## Context
 
 Beamtalk actors are currently identified only by pid. An actor reference held by another process is a snapshot — if the target restarts under a supervisor, the stored pid becomes stale and the holder either crashes on the next send or silently messages a dead process.

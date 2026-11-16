@@ -6,24 +6,30 @@
 %%% **DDD Context:** Actor System Context
 
 -moduledoc """
-BT-4951 (ADR 0150, option D): starting an actor sends no message to, and
-writes no table of, either registry (`beamtalk_object_instances` and the actor
-list `beamtalk_repl_actors`, registered `beamtalk_actor_registry`).
+BT-4951 / BT-4953 (ADR 0150, option D): there is no actor registry. Starting an
+actor sends no message to, and writes no table of, a registry, because the
+modules `beamtalk_object_instances` and the actor list `beamtalk_repl_actors`
+(registered `beamtalk_actor_registry`) are deleted, with their two tables
+(`beamtalk_instance_registry`, `beamtalk_instance_class`).
 
-The first group starts an actor down every start path and asserts, with a
-`receive` trace on both registry processes, that nothing arrived that names
-the new pid, and that the three registry tables did not grow. The second
-group is the open-loop flood the ADR asks for: many spawners that never
-drain, with clean stops and `exit(kill)`, leave both mailboxes empty and the
-tables the size they were. It asserts mailboxes and table sizes, not the
-process count (a spawn flood legitimately queues runnable actors).
+Groups:
+
+- a fresh node carries none of the deleted processes, supervisor children or
+  tables (an `ets:all()` / `whereis/1` check), and the modules are gone;
+- an actor started down every start path leaves the table set and the
+  registered-name set unchanged, and still announces `ActorSpawned`;
+- compiled code from an older compiler, which calls
+  `beamtalk_object_instances:register/2` inside `try ... catch`, still runs:
+  the catch absorbs the `undef`.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
 
--define(INSTANCE_TABLES, [beamtalk_instance_registry, beamtalk_instance_class]).
--define(SPAWNERS, 8).
--define(PER_SPAWNER, 250).
+-define(GONE_MODULES, [
+    beamtalk_object_instances, beamtalk_repl_actors, beamtalk_test_actor_registry
+]).
+-define(GONE_TABLES, [beamtalk_instance_registry, beamtalk_instance_class]).
+-define(GONE_NAMES, [beamtalk_object_instances, beamtalk_actor_registry]).
 
 %%% ---------------------------------------------------------------------
 %%% Fixture
@@ -33,10 +39,6 @@ setup() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_test_boot:boot_real_stdlib('Integer'),
     ok = beamtalk_test_class:ensure_counter_loaded(),
-    %% Both registries are runtime-owned until BT-4953 deletes them; the test
-    %% is only meaningful while they are there to be (not) called.
-    ?assert(is_pid(whereis(beamtalk_object_instances))),
-    ?assert(is_pid(whereis(beamtalk_actor_registry))),
     ok.
 
 cleanup(_) ->
@@ -81,45 +83,22 @@ start_paths_test_() ->
 
 spawned({beamtalk_object, _Class, _Mod, Pid}) -> Pid.
 
-%% Start one actor with `Start`, wait until it is up, and assert that neither
-%% registry received a message naming it and that no table grew. The actor is
+%% Start one actor with `Start`, wait until it is up, and assert that no table
+%% was created and no process registered under a deleted name. The actor is
 %% stopped afterwards.
 no_registration(Start) ->
-    InstPid = whereis(beamtalk_object_instances),
-    ListPid = whereis(beamtalk_actor_registry),
-    SizesBefore = table_sizes(),
-    1 = erlang:trace(InstPid, true, ['receive']),
-    1 = erlang:trace(ListPid, true, ['receive']),
+    TablesBefore = lists:sort(ets:all()),
     {ok, Pid} = Start(),
     %% A synchronous round trip: `init/1` (and everything after it that could
     %% register) has run.
     pong = sync(Pid),
-    %% Let the registries drain whatever they were sent before asking.
-    _ = sys:get_state(InstPid),
-    _ = sys:get_state(ListPid),
-    Traced = collect_traced(),
-    erlang:trace(InstPid, false, ['receive']),
-    erlang:trace(ListPid, false, ['receive']),
     stop(Pid),
-    ?assertEqual([], [M || {_To, M} <- Traced, mentions(M, Pid)]),
-    ?assertEqual(SizesBefore, table_sizes()).
+    ?assertEqual(TablesBefore, lists:sort(ets:all())),
+    ?assertEqual([], [N || N <- ?GONE_NAMES, whereis(N) =/= undefined]).
 
 sync(Pid) ->
     _ = sys:get_state(Pid),
     pong.
-
-collect_traced() ->
-    receive
-        {trace, To, 'receive', Msg} -> [{To, Msg} | collect_traced()]
-    after 0 -> []
-    end.
-
-%% Does `Pid` occur anywhere in `Term`?
-mentions(Pid, Pid) -> true;
-mentions(Tuple, Pid) when is_tuple(Tuple) -> mentions(tuple_to_list(Tuple), Pid);
-mentions([H | T], Pid) -> mentions(H, Pid) orelse mentions(T, Pid);
-mentions(Map, Pid) when is_map(Map) -> mentions(maps:to_list(Map), Pid);
-mentions(_, _) -> false.
 
 announces_spawned() ->
     Collector = self(),
@@ -140,104 +119,84 @@ announces_spawned() ->
     end.
 
 %%% ---------------------------------------------------------------------
-%%% The open-loop flood
+%%% Nothing of the registries is left
 %%% ---------------------------------------------------------------------
 
-flood_test_() ->
-    {setup, fun setup/0, fun cleanup/1, {timeout, 120, fun flood_leaves_no_registry_state/0}}.
+gone_test_() ->
+    {setup, fun setup/0, fun cleanup/1, [
+        {"the registry modules are deleted", fun modules_are_gone/0},
+        {"a fresh node has none of their processes, children or tables", fun fresh_node_is_clean/0}
+    ]}.
 
-flood_leaves_no_registry_state() ->
-    InstPid = whereis(beamtalk_object_instances),
-    ListPid = whereis(beamtalk_actor_registry),
-    SizesBefore = table_sizes(),
-    Parent = self(),
-    Sampler = spawn_link(fun() -> sample(InstPid, ListPid, Parent, 0) end),
-    Spawners = [
-        spawn_monitor(fun() -> exit({done, spawn_loop(?PER_SPAWNER)}) end)
-     || _ <- lists:seq(1, ?SPAWNERS)
-    ],
-    Left = lists:append([await_spawner(Ref, Pid) || {Pid, Ref} <- Spawners]),
-    %% The flood is over; the survivors are still alive, never drained.
-    ?assert(length(Left) > 0),
-    Sampler ! {stop, Parent},
-    MaxQueue =
-        receive
-            {max_queue, Q} -> Q
-        after 5000 -> error(sampler_timeout)
-        end,
-    ?assertEqual(0, MaxQueue),
-    ?assertEqual(0, queue_len(InstPid)),
-    ?assertEqual(0, queue_len(ListPid)),
-    ?assertEqual(SizesBefore, table_sizes()),
-    lists:foreach(fun stop/1, Left),
-    ?assertEqual(0, queue_len(InstPid)),
-    ?assertEqual(0, queue_len(ListPid)),
-    ?assertEqual(SizesBefore, table_sizes()).
+modules_are_gone() ->
+    [?assertEqual({M, non_existing}, {M, code:which(M)}) || M <- ?GONE_MODULES].
 
-%% Start `N` actors without waiting for any of them: a quarter are stopped
-%% cleanly, a quarter are killed, half of the rest are left running and
-%% returned, and the others are killed too.
-spawn_loop(N) -> spawn_loop(N, []).
-
-spawn_loop(0, Left) ->
-    Left;
-spawn_loop(N, Left) ->
-    {Actor, MonRef} = bt@counter:spawn_monitored_async(),
-    Pid = spawned(Actor),
-    true = erlang:demonitor(MonRef, [flush]),
-    case N rem 4 of
-        0 ->
-            %% Clean stop: the actor may not have reached `init/1` yet, so the
-            %% stop is a request, not a wait.
-            spawn(fun() ->
-                try
-                    gen_server:stop(Pid)
-                catch
-                    _:_ -> ok
-                end
-            end),
-            spawn_loop(N - 1, Left);
-        1 ->
-            exit(Pid, kill),
-            spawn_loop(N - 1, Left);
-        2 ->
-            spawn_loop(N - 1, [Pid | Left]);
-        3 ->
-            exit(Pid, kill),
-            spawn_loop(N - 1, Left)
-    end.
-
-await_spawner(Ref, Pid) ->
-    receive
-        {'DOWN', Ref, process, Pid, {done, Left}} -> Left;
-        {'DOWN', Ref, process, Pid, Reason} -> error({spawner_failed, Reason})
-    after 60000 -> error(spawner_timeout)
-    end.
-
-%% Sample both registries' mailboxes while the flood runs; report the maximum.
-sample(InstPid, ListPid, Parent, Max) ->
-    Seen = max(Max, max(queue_len(InstPid), queue_len(ListPid))),
-    receive
-        {stop, Parent} -> Parent ! {max_queue, Seen}
-    after 5 -> sample(InstPid, ListPid, Parent, Seen)
-    end.
-
-queue_len(Pid) ->
-    {message_queue_len, N} = process_info(Pid, message_queue_len),
-    N.
+fresh_node_is_clean() ->
+    ?assertEqual([], [N || N <- ?GONE_NAMES, whereis(N) =/= undefined]),
+    Tables = [T || T <- ets:all(), is_atom(T)],
+    ?assertEqual([], [T || T <- ?GONE_TABLES, lists:member(T, Tables)]),
+    ?assertEqual([], [T || T <- ?GONE_TABLES, ets:whereis(T) =/= undefined]),
+    %% The runtime supervisor has no child for either.
+    Ids = [Id || {Id, _, _, _} <- supervisor:which_children(beamtalk_runtime_sup)],
+    ?assertEqual([], [I || I <- ?GONE_NAMES, lists:member(I, Ids)]).
 
 %%% ---------------------------------------------------------------------
-%%% Helpers
+%%% Code from an older compiler
 %%% ---------------------------------------------------------------------
 
-table_sizes() ->
-    [{T, ets:info(T, size)} || T <- ?INSTANCE_TABLES] ++
-        [{beamtalk_actor_registry, registry_actor_count()}].
+%% Before BT-4951 every generated `spawn*` ran, after the actor started,
+%%   try call 'beamtalk_object_instances':'register'(Class, Pid)
+%%   of _RegOk -> _RegOk catch <_RegT, _RegE, _RegS> -> 'ok'
+%% A `.beam` built by that compiler may still be loaded into a runtime that no
+%% longer has the module: the call raises `undef`, and the catch absorbs it.
+%% This compiles that exact Core Erlang and runs it.
+old_compiler_registration_is_absorbed_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun() ->
+        Mod = bt4953_old_compiler_spawn,
+        Src = old_compiler_core(Mod),
+        {ok, Scanned, _} = core_scan:string(Src),
+        {ok, Core} = core_parse:parse(Scanned),
+        {ok, Mod, Bin} = compile:noenv_forms(Core, [from_core, binary, return_errors]),
+        {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".beam", Bin),
+        try
+            %% The old registration, on its own: no module, no crash.
+            ?assertEqual(ok, Mod:register_only(self())),
+            %% The old spawn: it started the actor, then ran the registration.
+            {ok, Pid} = Mod:spawn_like(0),
+            try
+                ?assertEqual(0, beamtalk_actor:sync_send(Pid, getValue, []))
+            after
+                stop(Pid)
+            end
+        after
+            code:purge(Mod),
+            code:delete(Mod),
+            code:purge(Mod)
+        end
+    end}.
 
-%% The actor list server keeps a map, not a table: its size is the length of
-%% its answer to `list_actors`.
-registry_actor_count() ->
-    length(beamtalk_repl_actors:list_actors(whereis(beamtalk_actor_registry))).
+old_compiler_core(Mod) ->
+    lists:flatten([
+        "module '",
+        atom_to_list(Mod),
+        "' ['register_only'/1, 'spawn_like'/1]\n"
+        "    attributes []\n"
+        "'register_only'/1 = fun (Pid) ->\n"
+        "    let _InstReg = try call 'beamtalk_object_instances':'register'('Counter', Pid)\n"
+        "        of _RegOk -> _RegOk\n"
+        "        catch <_RegT, _RegE, _RegS> -> 'ok'\n"
+        "    in _InstReg\n"
+        "'spawn_like'/1 = fun (Arg) ->\n"
+        "    case call 'beamtalk_actor':'safe_spawn'('test_counter', Arg) of\n"
+        "        <{'ok', Pid}> when 'true' ->\n"
+        "            let _InstReg = try call 'beamtalk_object_instances':'register'('Counter', Pid)\n"
+        "                of _RegOk -> _RegOk\n"
+        "                catch <_RegT, _RegE, _RegS> -> 'ok'\n"
+        "            in {'ok', Pid}\n"
+        "        <Other> when 'true' -> Other\n"
+        "    end\n"
+        "end\n"
+    ]).
 
 stop(Pid) ->
     unlink(Pid),

@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-02-07)
 
+> **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** `beamtalk_object_instances` and `beamtalk_repl_actors` (the process registered as `beamtalk_actor_registry`) are deleted and leave the supervision tree; the `actor_spawn_callback` / `on_actor_spawned/4` hook is gone. `beamtalk_runtime_sup` no longer starts either. Actors are found by scanning (`beamtalk_actor_scan`), and `ActorSpawned` / `ActorStopped` announcements are the only incremental feed. The trees and file lists below show the structure at the time of this decision.
+
 ## Context
 
 ### Problem

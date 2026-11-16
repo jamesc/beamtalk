@@ -196,7 +196,7 @@ websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true
     {[{text, Push}], State};
 %% Actor / class / flush system announcements (SystemAnnouncer bus),
 %% re-encoded to the existing JSON push frames. The legacy bespoke channels
-%% (`beamtalk_repl_actors` lifecycle, `beamtalk_class_events`,
+%% (the actor-list lifecycle channel, `beamtalk_class_events`,
 %% `beamtalk_flush_events`) were retired; consumers now discriminate on the
 %% announced class atom.
 %%

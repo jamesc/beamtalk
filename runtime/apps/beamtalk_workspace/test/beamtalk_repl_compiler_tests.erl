@@ -69,7 +69,7 @@ format_diagnostics_unexpected_type_test() ->
 %%====================================================================
 
 is_internal_key_double_underscore_test() ->
-    ?assert(beamtalk_repl_compiler:is_internal_key('__repl_actor_registry__')).
+    ?assert(beamtalk_repl_compiler:is_internal_key('__workspace_user_bindings__')).
 
 is_internal_key_double_underscore_prefix_only_test() ->
     ?assert(beamtalk_repl_compiler:is_internal_key('__workspace_user_bindings__')).
@@ -108,10 +108,10 @@ known_vars_includes_user_bindings_test() ->
 %% Internal `__`-prefixed keys are excluded (they are not source identifiers).
 known_vars_excludes_internal_keys_test() ->
     KnownVars = beamtalk_repl_compiler:known_vars(#{
-        '__workspace_user_bindings__' => #{}, '__repl_actor_registry__' => self()
+        '__workspace_user_bindings__' => #{}, '__internal_other__' => self()
     }),
     ?assertNot(lists:member(<<"__workspace_user_bindings__">>, KnownVars)),
-    ?assertNot(lists:member(<<"__repl_actor_registry__">>, KnownVars)).
+    ?assertNot(lists:member(<<"__internal_other__">>, KnownVars)).
 
 %% The result is sorted and de-duplicated (a binding shadowing a singleton name
 %% must not appear twice).

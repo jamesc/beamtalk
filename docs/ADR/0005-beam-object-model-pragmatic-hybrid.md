@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-02-08) — Epic BT-162
 
+> **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** `allInstances` no longer tracks actors in an ETS table kept up by process monitors. `beamtalk_object_instances` and its tables are deleted. Every actor's `init/1` writes a `'$beamtalk_actor'` process-dictionary marker (and its start time), and `allInstances`, hot reload and `Node current actors` enumerate by scanning processes for it (`beamtalk_actor_scan`). Supervised and named actors are included. Value types are still not tracked. The "explicit registration" and "ETS tracking" wording below describes the original design.
+
 ## Context
 
 Beamtalk aims to bring Smalltalk's "everything is an object" philosophy to the BEAM virtual machine. However, BEAM's architecture fundamentally differs from traditional Smalltalk VMs:
@@ -42,7 +44,7 @@ This creates tension: Should we try to emulate Smalltalk's object model fully (s
 | `doesNotUnderstand:` | ✅ Full | Gen_server `handle_call` fallback, structured errors |
 | Method combinations | ✅ Full | Before/after methods (inspired by Flavors) |
 | Error isolation | ✅ Full | Catch at instance, re-raise at caller with context |
-| Reflection | ✅ Full | `class`, `respondsTo:`, `allInstances` (ETS tracking) |
+| Reflection | ✅ Full | `class`, `respondsTo:`, `allInstances` (process-marker scan, ADR 0150) |
 
 ### What We Don't Support
 
@@ -100,7 +102,7 @@ ProtoObject (minimal - identity, DNU)
 **Reflection and introspection:**
 - Classes registered via Erlang process registry and OTP process groups at module load
 - Methods stored as metadata (selector, arity, source location)
-- `allInstances` tracks actors via ETS (value types not tracked)
+- `allInstances` finds actors by scanning for the process marker (ADR 0150; value types not tracked)
 
 ## Consequences
 
@@ -117,7 +119,7 @@ ProtoObject (minimal - identity, DNU)
 
 1. **Not Smalltalk-compatible:** Cannot run Smalltalk code without modification
 2. **Limited metaprogramming:** No `become:`, `thisContext`, or continuations
-3. **Manual tracking:** `allInstances` and reference finding require explicit registration
+3. **Marker scanning:** `allInstances` and reference finding enumerate processes that carry the actor marker (ADR 0150; originally explicit registration)
 4. **Learning curve:** Developers must understand value vs actor distinction
 5. **Migration cost:** Converting value types to actors requires code changes
 
@@ -224,7 +226,7 @@ Smalltalk's `become:` swaps all references globally — used for object migratio
 
 ### Global Reference Scanning (`pointersTo`, `allInstances`)
 
-Smalltalk can scan the entire heap. BEAM has per-process heaps with no system-wide object graph. **Workaround:** Explicit instance tracking via ETS, which is actually more efficient than heap scanning for large systems. Process monitors provide lifecycle notifications superior to weak references.
+Smalltalk can scan the entire heap. BEAM has per-process heaps with no system-wide object graph. **Workaround:** Every actor marks its own process (ADR 0150), and `allInstances` scans processes for the marker on demand, which is cheaper than a heap scan and costs nothing on the actor start path. (This ADR first used an ETS instance registry with process monitors; ADR 0150 removed it.)
 
 ### Image Snapshots
 

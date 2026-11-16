@@ -176,7 +176,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0147](0147-map-shape-types.md) | Map-Shape Types for Keyed Dictionaries | Implemented | 2026-11-11 |
 | [0148](0148-checked-narrowing-casts.md) | Checked Narrowing Casts and the Trusted-Type Comparison Hole | Deferred (2026-11-14) | 2026-11-14 |
 | [0149](0149-eep48-doc-chunks-for-beamtalk-modules.md) | EEP-48 Doc Chunks for Beamtalk Modules | Deferred (2026-11-14) | 2026-11-14 |
-| [0150](0150-actor-registry-off-the-start-path.md) | Actor Registration Off the Start Path | Accepted (2026-11-16) | 2026-11-15 |
+| [0150](0150-actor-registry-off-the-start-path.md) | Actor Registration Off the Start Path | Implemented (2026-11-16) | 2026-11-15 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

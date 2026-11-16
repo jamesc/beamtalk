@@ -10,6 +10,8 @@ load-bearing runtime assumptions (with API corrections) and found one
 the time. That gap was fixed as BT-3582 (done), and Phases 1–7 were then
 implemented against the corrected ADR as BT-3598–BT-3605 under Epic BT-3577.
 
+> **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** `local_actors/0` and `local_actor_at/1` are scans of actor markers, not reads of the deleted actor list. The class of a bare local pid is its marker (`lookup_class/1`), and a missing marker gives `unknown`; there is no registry row to be missing. `actor_started_at/1` returns a value for compiled actors, because every generated `init/1` writes `'$beamtalk_actor_started_at'`, so the `global` tie-break of §4 no longer falls back to a random exit name.
+
 ## Implementation Tracking
 
 **Epic:** BT-3577
@@ -64,8 +66,8 @@ silently resolves against *that* node's registry.
 
 **Sends are not remote-safe.** Every send path in `beamtalk_actor.erl` guards
 with `is_process_alive(ActorPid)` (lines 599, 712, 749, 793, 899, 1003), which
-raises `badarg` for a remote pid. `lookup_class/1` reads the local
-`beamtalk_instance_registry` ETS table (line 1339) and returns `unknown` for a
+raises `badarg` for a remote pid. `lookup_class/1` read the local
+`beamtalk_instance_registry` ETS table (line 1339; since replaced by the actor marker, ADR 0150) and returned `unknown` for a
 remote pid. The exit mapping (lines 952-965) has no `nodedown`/`noconnection`
 case: a partition falls into the catch-all and is reported as `actor_dead`,
 which is false — the actor may be alive on the far side. BT-2530 already fixed
@@ -1360,8 +1362,8 @@ receiver, `Node current` included, so one selector has one return type (ADR
 cross the wire per §5.1. Failures are `Error` values tagged `node_down`,
 `timeout`, `insecure_distribution` or `remote_code_mismatch` (§7), never raised.
 
-- `aNode actors` lists every live actor (the runtime-owned
-  `beamtalk_actor_registry`). `Actor allRegisteredOn:` (§3) still lists only
+- `aNode actors` lists every live actor (a scan of actor markers; ADR 0150. It was the runtime-owned
+  `beamtalk_actor_registry` process). `Actor allRegisteredOn:` (§3) still lists only
   name-registered actors, and the two doc comments say so.
 - `aNode shapeSkew` is the per-node form of the §8 tally. `Workspace nodes` and
   `connectedWithSkew` are removed; the `nodes` surface operation (§10) maps

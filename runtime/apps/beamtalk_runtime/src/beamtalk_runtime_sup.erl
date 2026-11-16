@@ -106,27 +106,6 @@ init([]) ->
             type => worker,
             modules => [beamtalk_stdlib]
         },
-        %% Then start instance tracking
-        #{
-            id => beamtalk_object_instances,
-            start => {beamtalk_object_instances, start_link, []},
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [beamtalk_object_instances]
-        },
-        %% Node-wide actor list. Registers itself as `beamtalk_actor_registry`.
-        %% Dead since ADR 0150 (BT-4951): nothing registers actors with it and
-        %% `Node current actors` scans processes instead. Deleted by BT-4953
-        %% (see the `beamtalk_repl_actors` moduledoc).
-        #{
-            id => beamtalk_actor_registry,
-            start => {beamtalk_repl_actors, start_link, [registered]},
-            restart => permanent,
-            shutdown => 5000,
-            type => worker,
-            modules => [beamtalk_repl_actors]
-        },
         %% Supervisor for Subprocess gen_servers (simple_one_for_one, temporary)
         #{
             id => beamtalk_subprocess_sup,

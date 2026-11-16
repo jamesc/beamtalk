@@ -8,7 +8,7 @@
 -moduledoc """
 Reader tests for ADR 0150 / BT-4947: `allInstances`, `Node current actors` /
 `actorAt:`, and the trace store's `bottlenecks` / `actor_health` read the
-process scan, not `beamtalk_object_instances` or the actor list. Every actor
+process scan, not a registry. Every actor
 here is *never registered anywhere*: a reader that still consulted a table
 would not see it.
 """.
@@ -32,7 +32,7 @@ stop(Pid) ->
     end.
 
 %% A marker-carrying process, like a generated `init/1` leaves behind, that is
-%% registered in neither `beamtalk_object_instances` nor the actor list.
+%% registered anywhere.
 marked(Class) ->
     Parent = self(),
     Pid = spawn(fun() ->
@@ -110,28 +110,26 @@ all_instances_includes_named_and_supervised_test() ->
 %%% ---------------------------------------------------------------------
 
 local_actors_scans_without_the_actor_list_test() ->
-    beamtalk_test_actor_registry:without_registry(fun() ->
-        with_obj_class(fun() ->
-            A = marked('Bt4947Obj'),
-            B = marked('Bt4947Obj'),
-            try
-                Objs = beamtalk_node:local_actors(),
-                Mine = [O || {beamtalk_object, _, _, P} = O <- Objs, lists:member(P, [A, B])],
-                ?assertEqual(
-                    lists:sort([
-                        {beamtalk_object, 'Bt4947Obj', test_counter, A},
-                        {beamtalk_object, 'Bt4947Obj', test_counter, B}
-                    ]),
-                    lists:sort(Mine)
-                ),
-                %% a pid is listed once
-                Pids = [P || {beamtalk_object, _, _, P} <- Objs],
-                ?assertEqual(length(Pids), length(lists:usort(Pids)))
-            after
-                stop(A),
-                stop(B)
-            end
-        end)
+    with_obj_class(fun() ->
+        A = marked('Bt4947Obj'),
+        B = marked('Bt4947Obj'),
+        try
+            Objs = beamtalk_node:local_actors(),
+            Mine = [O || {beamtalk_object, _, _, P} = O <- Objs, lists:member(P, [A, B])],
+            ?assertEqual(
+                lists:sort([
+                    {beamtalk_object, 'Bt4947Obj', test_counter, A},
+                    {beamtalk_object, 'Bt4947Obj', test_counter, B}
+                ]),
+                lists:sort(Mine)
+            ),
+            %% a pid is listed once
+            Pids = [P || {beamtalk_object, _, _, P} <- Objs],
+            ?assertEqual(length(Pids), length(lists:usort(Pids)))
+        after
+            stop(A),
+            stop(B)
+        end
     end).
 
 local_actors_filters_dead_test() ->
@@ -149,28 +147,26 @@ local_actors_filters_dead_test() ->
     end).
 
 local_actor_at_uses_info_test() ->
-    beamtalk_test_actor_registry:without_registry(fun() ->
-        with_obj_class(fun() ->
-            A = marked('Bt4947Obj'),
-            PidBin = list_to_binary(pid_to_list(A)),
-            Expected = {beamtalk_object, 'Bt4947Obj', test_counter, A},
-            try
-                ?assertEqual(Expected, beamtalk_node:local_actor_at(PidBin)),
-                ?assertEqual(Expected, beamtalk_node:local_actor_at(pid_to_list(A))),
-                ?assertEqual(Expected, beamtalk_node:local_actor_at({beamtalk_string, PidBin}))
-            after
-                stop(A)
-            end,
-            %% dead
-            ?assertEqual(nil, beamtalk_node:local_actor_at(PidBin)),
-            %% not a pid / not a string
-            ?assertEqual(nil, beamtalk_node:local_actor_at(<<"not-a-pid">>)),
-            ?assertEqual(nil, beamtalk_node:local_actor_at(<<"">>)),
-            ?assertEqual(nil, beamtalk_node:local_actor_at(42)),
-            %% unknown pid, and a live process that is not an actor
-            ?assertEqual(nil, beamtalk_node:local_actor_at(<<"<0.99999.0>">>)),
-            ?assertEqual(nil, beamtalk_node:local_actor_at(list_to_binary(pid_to_list(self()))))
-        end)
+    with_obj_class(fun() ->
+        A = marked('Bt4947Obj'),
+        PidBin = list_to_binary(pid_to_list(A)),
+        Expected = {beamtalk_object, 'Bt4947Obj', test_counter, A},
+        try
+            ?assertEqual(Expected, beamtalk_node:local_actor_at(PidBin)),
+            ?assertEqual(Expected, beamtalk_node:local_actor_at(pid_to_list(A))),
+            ?assertEqual(Expected, beamtalk_node:local_actor_at({beamtalk_string, PidBin}))
+        after
+            stop(A)
+        end,
+        %% dead
+        ?assertEqual(nil, beamtalk_node:local_actor_at(PidBin)),
+        %% not a pid / not a string
+        ?assertEqual(nil, beamtalk_node:local_actor_at(<<"not-a-pid">>)),
+        ?assertEqual(nil, beamtalk_node:local_actor_at(<<"">>)),
+        ?assertEqual(nil, beamtalk_node:local_actor_at(42)),
+        %% unknown pid, and a live process that is not an actor
+        ?assertEqual(nil, beamtalk_node:local_actor_at(<<"<0.99999.0>">>)),
+        ?assertEqual(nil, beamtalk_node:local_actor_at(list_to_binary(pid_to_list(self()))))
     end).
 
 %%% ---------------------------------------------------------------------
