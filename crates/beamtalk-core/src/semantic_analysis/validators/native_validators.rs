@@ -232,7 +232,9 @@ pub(crate) fn check_cross_file_native_delegate(
 /// builds the backing module's term, tagged with the parent class, so `MyQ new`
 /// answers a plain `Queue` and `MyQ`'s own methods are unreachable.
 ///
-/// One rule, two messages. Not reported: a class that redeclares `native:`, and
+/// One rule, two messages. Exempt: the built-in classes identified by term
+/// shape ([`ClassHierarchy::is_term_shape_builtin_class`]), while compiling the
+/// stdlib. Not reported: a class that redeclares `native:`, and
 /// an abstract class (never instantiated; its concrete descendants are
 /// checked). The ancestor
 /// may come from this module or from a dependency, as long as the dependency
@@ -240,11 +242,18 @@ pub(crate) fn check_cross_file_native_delegate(
 pub(crate) fn check_native_subclass_declares_native(
     module: &Module,
     hierarchy: &ClassHierarchy,
+    stdlib_mode: bool,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for class in &module.classes {
         let name = class.name.name.as_str();
         if class.backing_module.is_some() || class.is_abstract {
+            continue;
+        }
+        // The one exemption: a built-in class identified by term shape (today
+        // `String` under `Binary`), and only while compiling the stdlib itself,
+        // so a user class that reuses the name is still checked.
+        if stdlib_mode && ClassHierarchy::is_term_shape_builtin_class(name) {
             continue;
         }
         let is_actor = hierarchy.is_actor_subclass(name);

@@ -1375,6 +1375,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     validators::check_native_subclass_declares_native(
         module,
         &result.class_hierarchy,
+        stdlib_mode,
         &mut result.diagnostics,
     );
     // Reserved-word backing-function check for native Objects (ADR 0101)

@@ -197,6 +197,48 @@ fn plain_value_and_object_subclasses_are_silent() {
     assert!(missing_native(&d).is_empty(), "{d:?}");
 }
 
+// ---- BT-4964: the term-shape built-in exemption (`String` under `Binary`) ----
+
+const STRING_UNDER_BINARY: &str = "sealed typed Binary subclass: String\n  size -> Integer => 1\n";
+
+fn stdlib_mode(src: &str) -> Vec<Diagnostic> {
+    let ctx = AnalysisContext {
+        stdlib_mode: true,
+        ..AnalysisContext::default()
+    };
+    analyse_full(&parse_bt(src), ctx).diagnostics
+}
+
+#[test]
+fn builtin_string_under_native_binary_is_exempt_in_stdlib_mode() {
+    let d = stdlib_mode(STRING_UNDER_BINARY);
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn user_class_named_string_outside_the_stdlib_is_not_exempt() {
+    // Same name as the built-in, but not the stdlib build: still checked.
+    let d = same_package(STRING_UNDER_BINARY);
+    assert_one_error(&d, "Binary", "String");
+}
+
+#[test]
+fn exemption_does_not_extend_to_other_classes_in_stdlib_mode() {
+    let src = format!("{NATIVE_VALUE}sealed NVal subclass: SubVal\n  extra => 1\n");
+    assert_one_error(&stdlib_mode(&src), "NVal", "SubVal");
+}
+
+#[test]
+fn user_sealed_subclass_of_a_native_value_class_is_an_error() {
+    // `sealed` is a keyword a user can write; it grants no exemption.
+    let d = same_package(&format!(
+        "{NATIVE_VALUE}sealed NVal subclass: SubVal\n  extra => 1\n"
+    ));
+    assert_one_error(&d, "NVal", "SubVal");
+    let d = same_package("sealed Queue subclass: MyQ\n  extra -> Integer => 42\n");
+    assert_one_error(&d, "Queue", "MyQ");
+}
+
 #[test]
 fn dependency_class_without_the_native_flag_is_not_checked() {
     // A `.beam` built before BT-4930 decodes as non-native: no error.
