@@ -1239,7 +1239,7 @@ class_remove_from_system_dynamic_class_test_() ->
                 )
             end)
         end),
-        %% stop_class_actors is a no-op when the actor registry is not running.
+        %% stop_class_actors needs no actor registry process (it scans).
         %% It's exported as a plain function, but only called internally from
         %% classRemoveFromSystemByName — exercise that path by attempting a successful
         %% removal, which calls stop_class_actors in its success branch.
@@ -1518,8 +1518,7 @@ meta_fast_path_reflection_test_() ->
         %%% stop_class_actors/1 — via removeFromSystem with a live actor registry
         %%% ============================================================================
         %% classRemoveFromSystemByName/1 calls stop_class_actors/1 in its success
-        %% branch. With a stub registry process registered under beamtalk_actor_registry
-        %% that answers list_actors, the actor-collection + kill loop is exercised.
+        %% branch, which finds the class's actors by the process scan and kills them.
         ?_test(begin
             %% A removable module so code:delete succeeds on the happy path.
             ModAtom = bt_stopactors_removable_mod,
@@ -1541,39 +1540,35 @@ meta_fast_path_reflection_test_() ->
             },
             {ok, _ClassPid} = beamtalk_object_class:start(ClassName, ClassInfo),
 
-            %% A fake actor belonging to this class.
+            %% A fake actor belonging to this class: it carries the actor marker
+            %% and is registered nowhere (ADR 0150: stop_class_actors scans).
+            Parent = self(),
             ActorPid = spawn(fun() ->
+                erlang:put('$beamtalk_actor', ClassName),
+                Parent ! {ready, self()},
                 receive
                     stop -> ok
                 after 10000 -> ok
                 end
             end),
-            %% Stub registry: answers list_actors with one matching actor and
-            %% {kill, Pid} by stopping it.
-            Registry = spawn(fun() -> stub_registry_loop(ClassName, ActorPid) end),
-            beamtalk_test_actor_registry:with_registered(Registry, fun() ->
+            receive
+                {ready, ActorPid} -> ok
+            end,
+            try
+                ?assertEqual(
+                    nil,
+                    beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+                ),
+                %% The class is gone from the registry, and its actor with it.
+                ?assertEqual(undefined, beamtalk_class_registry:whereis_class(ClassName)),
+                ?assertNot(is_process_alive(ActorPid))
+            after
                 try
-                    ?assertEqual(
-                        nil,
-                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
-                    ),
-                    %% The class is gone from the registry.
-                    ?assertEqual(
-                        undefined, beamtalk_class_registry:whereis_class(ClassName)
-                    )
-                after
-                    try
-                        exit(Registry, kill)
-                    catch
-                        _:_ -> ok
-                    end,
-                    try
-                        exit(ActorPid, kill)
-                    catch
-                        _:_ -> ok
-                    end
+                    exit(ActorPid, kill)
+                catch
+                    _:_ -> ok
                 end
-            end)
+            end
         end),
         %%% ============================================================================
         %%% classRemoveFromSystemByName with a real class-spawned live actor
@@ -1603,7 +1598,9 @@ meta_fast_path_reflection_test_() ->
             {module, ModAtom} = code:load_binary(
                 ModAtom, "bt_3243_removable_class_mod.erl", Bin
             ),
-            ClassName = 'BT3243LiveActorClass',
+            %% The class name the `test_class_actor` fixture stamps on its instances
+            %% (the scan matches an actor to its class by that marker).
+            ClassName = 'TestClassActor',
             ClassInfo = #{
                 name => ClassName,
                 module => ModAtom,
@@ -1618,28 +1615,20 @@ meta_fast_path_reflection_test_() ->
                 gen_server:call(ClassPid, {spawn, []}),
             ?assert(is_process_alive(ActorPid)),
 
-            Registry = spawn(fun() -> stub_registry_loop(ClassName, ActorPid) end),
-            beamtalk_test_actor_registry:with_registered(Registry, fun() ->
+            try
+                ?assertEqual(
+                    nil,
+                    beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
+                ),
+                ?assertEqual(undefined, beamtalk_class_registry:whereis_class(ClassName)),
+                ?assertNot(is_process_alive(ActorPid))
+            after
                 try
-                    ?assertEqual(
-                        nil,
-                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassName)
-                    ),
-                    ?assertEqual(undefined, beamtalk_class_registry:whereis_class(ClassName)),
-                    ?assertNot(is_process_alive(ActorPid))
-                after
-                    try
-                        exit(Registry, kill)
-                    catch
-                        _:_ -> ok
-                    end,
-                    try
-                        exit(ActorPid, kill)
-                    catch
-                        _:_ -> ok
-                    end
+                    exit(ActorPid, kill)
+                catch
+                    _:_ -> ok
                 end
-            end)
+            end
         end),
         %%% ============================================================================
         %%% walk_hierarchy/3 — max depth cycle guard
@@ -1704,24 +1693,6 @@ load_meta_module(ModAtom, MetaMap0) ->
 
 purge_meta_module(ModAtom) ->
     beamtalk_test_module:unload(ModAtom).
-
-%% Minimal stub for beamtalk_actor_registry used by stop_class_actors_with_registry.
-stub_registry_loop(ClassName, ActorPid) ->
-    receive
-        {'$gen_call', From, list_actors} ->
-            gen_server:reply(From, [#{pid => ActorPid, class => ClassName}]),
-            stub_registry_loop(ClassName, ActorPid);
-        {'$gen_call', From, {kill, Pid}} ->
-            try
-                exit(Pid, kill)
-            catch
-                _:_ -> ok
-            end,
-            gen_server:reply(From, ok),
-            stub_registry_loop(ClassName, ActorPid);
-        _ ->
-            stub_registry_loop(ClassName, ActorPid)
-    end.
 
 %%% ============================================================================
 %%% classRenameTo/2 (ADR 0114 Phase 2)
