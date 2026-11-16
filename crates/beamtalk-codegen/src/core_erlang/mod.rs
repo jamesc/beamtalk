@@ -167,6 +167,7 @@ mod supervisor_codegen;
 mod synced_call;
 mod threaded_expr;
 mod threaded_ir;
+mod threaded_prelude;
 mod threaded_rebind;
 mod threading_analysis;
 mod util;
