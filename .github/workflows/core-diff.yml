@@ -18,6 +18,9 @@ on:
     types: [opened, synchronize, reopened, labeled]
     paths:
       - 'crates/beamtalk-codegen/**'
+      # BT-4939: the harness itself, so a change to it proves itself.
+      - 'scripts/ci/core_diff_normalise.py'
+      - '.github/workflows/core-diff.yml'
 
 # A label event for any other label must not cancel a real run, so it gets
 # its own group (and the job's `if:` skips it).
