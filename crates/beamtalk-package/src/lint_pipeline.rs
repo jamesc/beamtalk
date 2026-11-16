@@ -669,6 +669,11 @@ pub fn analyse_package(
 pub struct LintGate {
     /// Lint-severity diagnostics.
     pub lint: usize,
+    /// Error-severity diagnostics (BT-4942). Plain `beamtalk lint` fails on
+    /// these whatever the category — an unknown package qualifier, a parse
+    /// error, any other semantic error — not only under
+    /// `--warnings-as-errors`.
+    pub error: usize,
     /// Live-recheck failures: any `Error` plus non-error `Dnu`/`Type`.
     pub live_recheck: usize,
 }
@@ -678,6 +683,9 @@ impl LintGate {
     pub fn count(&mut self, diag: &Diagnostic) {
         if diag.severity == Severity::Lint {
             self.lint += 1;
+        }
+        if diag.severity == Severity::Error {
+            self.error += 1;
         }
         if diagnostics_policy::is_live_recheck_failure(diag) {
             self.live_recheck += 1;
@@ -689,11 +697,11 @@ impl LintGate {
         self.lint += n;
     }
 
-    /// Whether the run fails: on any Lint diagnostic, and with
+    /// Whether the run fails: on any Lint or Error diagnostic, and with
     /// `warnings_as_errors` on any live-recheck failure too.
     #[must_use]
     pub fn fails(&self, warnings_as_errors: bool) -> bool {
-        self.lint > 0 || (warnings_as_errors && self.live_recheck > 0)
+        self.lint > 0 || self.error > 0 || (warnings_as_errors && self.live_recheck > 0)
     }
 }
 

@@ -950,3 +950,50 @@ fn actor_state_abroad_resolves_out_of_file_actor_ancestor_bt_4183() {
     assert!(abroad[0].contains("Sub.bt"), "{}", abroad[0]);
     assert!(!output.status.success(), "lint must fail:\n{stdout}");
 }
+
+/// BT-4942: an error-severity diagnostic (here ADR 0070's unknown package
+/// qualifier) must fail plain `beamtalk lint`, not only
+/// `--warnings-as-errors`. The gate used to count `Severity::Lint` alone, so
+/// every `Error` diagnostic printed and still exited 0.
+#[test]
+fn lint_unknown_package_qualifier_exits_nonzero_bt_4942() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Qualified.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Qualified\n\
+         \x20\x20other => nosuchpkg@Widget\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .failure()
+        .stderr(contains("Unknown package 'nosuchpkg'"))
+        .stderr(contains("error diagnostic"));
+}
+
+/// BT-4942: a known qualifier (the package's own name) stays clean.
+#[test]
+fn lint_known_package_qualifier_exits_zero_bt_4942() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/Qualified.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Object subclass: Qualified\n\
+         \x20\x20other => cli_subprocess_fixture@Greeter\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success();
+}

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Behaviour change: `beamtalk lint` exits non-zero on any error-severity diagnostic (BT-4942).**
+  - Changed: plain `beamtalk lint` used to fail only on lint-severity diagnostics, so an error such as an unknown `pkg@Class` package qualifier (BT-4921) was printed and the command still exited 0. It now exits 1 with "N error diagnostic(s) found in M file(s)" whenever it reports an error from any check, parse errors included. Warnings keep their exit behaviour. `--warnings-as-errors` is unchanged. MCP `lint` already reported failure for these errors. The stdlib and the in-repo examples lint clean.
+  - Do: fix the reported errors. A CI job that ran `beamtalk lint` and ignored its error output will now fail.
 - **`beamtalk deps update` re-resolves the whole dependency subtree (BT-4920).**
   - Changed: `deps update <name>` now re-resolves `<name>` and every package it pulls in, and a bare `deps update` re-resolves every git and registry lock entry. Before, only direct dependencies moved, so a new version that needed a newer transitive release (A@2 needs B@2) left B at the old version in `beamtalk.lock`. Four more behaviours follow from this:
     - `deps update <name>` removes the lock entry of a transitive package that the new version of `<name>` no longer depends on. A bare `deps update` removes every lock entry that nothing in the manifest graph reaches any more.
