@@ -170,6 +170,8 @@ trigger_hot_reload(ModuleName, Classes) ->
         [N || ClassMap <- Classes, N <- [resolve_class_name(ClassMap)], N =/= undefined],
         [{version, 2}]
     ),
+    %% Plan order does not matter: each entry migrates its own instances, and
+    %% `usort` only drops duplicates (a class named by two `Classes` entries).
     Plan = lists:usort(
         lists:append([
             [{ModuleName, ClassName} | descendant_targets(ClassName, ReloadedNames)]
@@ -286,7 +288,7 @@ hot_reload_class(ModuleName, ClassName, Pids) ->
 %% (cheap, already-loaded local call) rather than the shape store, since
 %% this runs for descendants too, which the shape store never primes/captures
 %% (their own module is not recompiled by this reload — see
-%% `hot_reload_class/2`'s doc). Never raises: any internal failure is logged
+%% `hot_reload_class/3`'s doc). Never raises: any internal failure is logged
 %% and swallowed — this is advisory plumbing on the reload's own response
 %% path, never a gate on the reload having already succeeded.
 -spec publish_suspended_finding(atom(), atom(), non_neg_integer(), [{pid(), term()}]) -> ok.

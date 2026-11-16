@@ -38,9 +38,12 @@ spawn() ->
 spawn(InitArgs) when is_map(InitArgs) ->
     beamtalk_actor:safe_spawn(?MODULE, InitArgs).
 
+%% `InitArgs` may carry `class => Name` to stamp a private class name on the
+%% instance, so a test that removes its class never matches another test's
+%% actors (`removeFromSystem` kills every process carrying the class marker).
 init(InitArgs) ->
     test_actor_host:init(#{
-        '$beamtalk_class' => 'TestClassActor',
+        '$beamtalk_class' => maps:get(class, InitArgs, 'TestClassActor'),
         '__class_mod__' => ?MODULE,
         '__methods__' => #{
             getValue => fun handle_getValue/2
