@@ -64,8 +64,8 @@ init(_Args) ->
 handle_cast(Msg, State) -> test_actor_host:handle_cast(Msg, State).
 
 %% Custom handle_call that simulates backward-compat error replies.
-%% Instead of delegating to beamtalk_actor:handle_call (which would use
-%% dispatch/4 with its own try/catch), we produce the old-style
+%% Instead of delegating to test_actor_host:handle_call (which wraps method
+%% exceptions itself), we produce the old-style
 %% {error, {ErlType, ErrorValue}} reply directly.
 %%
 %% Note: selfSend* methods delegate to beamtalk_actor:handle_call so they

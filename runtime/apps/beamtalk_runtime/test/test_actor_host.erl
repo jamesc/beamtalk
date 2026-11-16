@@ -10,7 +10,8 @@ Test-only gen_server host for the hand-written `test_*_actor` fixtures (BT-4871)
 
 Until BT-4871 these fixtures delegated their gen_server callbacks to an
 interpretive path inside `beamtalk_actor` that no production actor used. That
-path is gone; this module is the small stand-in the fixtures call instead. It
+path is now unreferenced and is deleted by the BT-4871 follow-up PR; this
+module is the small stand-in the fixtures call instead. It
 speaks the same wire protocol a compiled actor's generated callbacks speak
 (`{Selector, Args}` calls, `{cast, Selector, Args}` and `{Selector, Args,
 FuturePid}` casts, propagated context, `'\$beamtalk_wire'` envelopes) and
@@ -48,6 +49,7 @@ registration) a process to talk to.
 
 -spec init(map()) -> {ok, map()} | {stop, term()}.
 init(State) when is_map(State) ->
+    beamtalk_logging_config:set_domain(runtime),
     ClassKey = beamtalk_tagged_map:class_key(),
     case maps:find(ClassKey, State) of
         {ok, Class} when is_atom(Class) ->
@@ -325,7 +327,7 @@ via_hierarchy(Selector, Args, State) ->
 dnu(Selector, Args, ClassName, State) ->
     Self = beamtalk_actor:make_self(State),
     case beamtalk_object_ops:dispatch(Selector, Args, Self, State) of
-        {error, _, _} ->
+        {error, #beamtalk_error{kind = does_not_understand}, _} ->
             {error, beamtalk_error:does_not_understand(ClassName, Selector), State};
         Result ->
             Result
