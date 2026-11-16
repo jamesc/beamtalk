@@ -520,7 +520,7 @@ fn collect_beam_module_names(ebin_dir: &Utf8Path) -> Result<Vec<String>> {
 /// Used to normalize package root paths before deduplication so that `"."` (relative CWD)
 /// and the same directory expressed as an absolute path compare equal.
 fn canonical_path(p: &Utf8Path) -> Utf8PathBuf {
-    std::fs::canonicalize(p)
+    beamtalk_core::paths::canonicalize(p)
         .ok()
         .and_then(|abs| Utf8PathBuf::from_path_buf(abs).ok())
         .unwrap_or_else(|| p.to_owned())
@@ -2254,8 +2254,8 @@ mod tests {
 
     fn temp_utf8_dir() -> (tempfile::TempDir, Utf8PathBuf) {
         let temp = tempfile::TempDir::new().unwrap();
-        let canonical =
-            std::fs::canonicalize(temp.path()).unwrap_or_else(|_| temp.path().to_path_buf());
+        let canonical = beamtalk_core::paths::canonicalize(temp.path())
+            .unwrap_or_else(|_| temp.path().to_path_buf());
         let dir = Utf8PathBuf::from_path_buf(canonical).unwrap();
         (temp, dir)
     }

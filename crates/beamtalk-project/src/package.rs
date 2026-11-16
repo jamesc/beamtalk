@@ -29,7 +29,7 @@ use beamtalk_core::file_walker::FileWalker;
 /// Both the CLI and the MCP server use this helper to produce consistent
 /// normalized keys for path-based deduplication in their lint pipelines.
 pub fn try_canonicalize(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    beamtalk_core::paths::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Walk ancestors from `start` to find the package root — the first ancestor
@@ -315,7 +315,7 @@ mod tests {
         write_manifest(dir);
 
         let found = find_package_root(&subdir);
-        let expected = fs::canonicalize(dir).unwrap();
+        let expected = beamtalk_core::paths::canonicalize(dir).unwrap();
         assert_eq!(found.as_deref(), Some(expected.as_path()));
     }
 
@@ -337,7 +337,7 @@ mod tests {
         fs::write(&file, "Object subclass: Foo\n").unwrap();
 
         let found = find_package_root(&file);
-        let expected = fs::canonicalize(dir).unwrap();
+        let expected = beamtalk_core::paths::canonicalize(dir).unwrap();
         assert_eq!(found.as_deref(), Some(expected.as_path()));
     }
 
@@ -484,7 +484,8 @@ mod tests {
         assert!(
             extraction
                 .iter()
-                .any(|f| fs::canonicalize(f).unwrap() == fs::canonicalize(&outside).unwrap()),
+                .any(|f| beamtalk_core::paths::canonicalize(f).unwrap()
+                    == beamtalk_core::paths::canonicalize(&outside).unwrap()),
             "target file must appear in extraction set, got {extraction:?}"
         );
         assert!(

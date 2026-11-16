@@ -215,7 +215,7 @@ pub fn find_runtime_dir_with_layout() -> Result<(PathBuf, RuntimeLayout)> {
     if let Some(installed_root) = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|p| p.join("../lib/beamtalk")))
-        .and_then(|p| p.canonicalize().ok())
+        .and_then(|p| crate::paths::canonicalize(p).ok())
         && has_beam_files(&installed_root.join("lib/beamtalk_runtime/ebin"))
     {
         return Ok((installed_root, RuntimeLayout::Installed));
@@ -478,7 +478,7 @@ impl TypeCache {
         // make `is_cache_entry_fresh` treat the entry as legacy/fresh, so
         // lint would keep replaying stale specs instead of detecting that
         // the underlying `.beam` is gone.
-        let canonical_beam_path = beam_path.canonicalize_utf8().map_or_else(
+        let canonical_beam_path = crate::paths::canonicalize_utf8(beam_path).map_or_else(
             |_| {
                 if beam_path.is_absolute() {
                     beam_path.as_str().to_string()
@@ -913,7 +913,7 @@ fn extract_specs_from_child(
     let file_list: Vec<String> = beam_files
         .iter()
         .map(|p| {
-            let abs = std::fs::canonicalize(p.as_std_path())
+            let abs = crate::paths::canonicalize(p.as_std_path())
                 .unwrap_or_else(|_| p.as_std_path().to_path_buf());
             format!("\"{}\"", escape_erlang_string(&abs.to_string_lossy()))
         })
@@ -977,8 +977,7 @@ fn spawn_build_worker_for_specs(beam_files: &[Utf8PathBuf]) -> Result<std::proce
         )
     })?;
 
-    let runtime_dir = runtime_dir
-        .canonicalize()
+    let runtime_dir = crate::paths::canonicalize(&runtime_dir)
         .into_diagnostic()
         .wrap_err("Failed to resolve runtime directory for spec extraction")?;
 
@@ -1017,7 +1016,7 @@ fn spawn_build_worker_for_specs(beam_files: &[Utf8PathBuf]) -> Result<std::proce
     let mut seen_dirs: std::collections::HashSet<std::path::PathBuf> =
         ebin_dirs.iter().cloned().collect();
     for beam_file in beam_files {
-        let absolute = match std::fs::canonicalize(beam_file.as_std_path()) {
+        let absolute = match crate::paths::canonicalize(beam_file.as_std_path()) {
             Ok(abs) => abs,
             Err(e) => {
                 warn!("Failed to canonicalize '{beam_file}': {e}. Using path as-is.");

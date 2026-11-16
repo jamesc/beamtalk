@@ -460,49 +460,19 @@ async fn read_lsp_frame(stream: &mut ChildStdout) -> Result<Vec<u8>, String> {
 /// Render a path as a `file://` URI. Good enough for LSP rootUri / textDocument.uri
 /// — only used for absolute paths from `tempfile::TempDir`.
 ///
-/// `Path::canonicalize()` strips the verbatim (`\\?\`) prefix
-/// Windows adds via [`strip_verbatim_prefix`] before it ever reaches the
-/// slash-replacement below — see that function's doc for why the raw
-/// prefix silently breaks `beamtalk-lsp`.
+/// Windows `canonicalize` yields a verbatim (`\\?\`) path; the shared
+/// `beamtalk_core::paths` helpers strip it before it reaches the
+/// slash-replacement below. Left in, the `?` reads as a URL query delimiter
+/// to RFC 3986 parsers (`Url::to_file_path()` in `beamtalk-lsp`), so
+/// `didOpen` silently no-ops and the harness waits forever for diagnostics.
 fn path_to_uri(p: &Path) -> String {
-    let abs = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-    let s = strip_verbatim_prefix(&abs.to_string_lossy()).replace('\\', "/");
+    let abs = beamtalk_core::paths::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let s = beamtalk_core::paths::simplify_verbatim(&abs.to_string_lossy()).replace('\\', "/");
     if s.starts_with('/') {
         format!("file://{s}")
     } else {
         // Windows drive paths (`C:/foo`).
         format!("file:///{s}")
-    }
-}
-
-/// Strips the `\\?\` extended-length ("verbatim") path prefix that
-/// `Path::canonicalize()` adds on Windows.
-///
-/// Left in place, the embedded `?` is indistinguishable from a URL
-/// query-string delimiter once folded into a `file://` URI: RFC 3986
-/// parsers — including the one `beamtalk-lsp`'s `uri_to_path` uses via
-/// `Url::to_file_path()` — read everything from that `?` onward as the
-/// query string rather than the path. `uri_to_path` then fails to resolve
-/// the file, `textDocument/didOpen` silently no-ops instead of publishing
-/// diagnostics, and the parity harness's `diagnose()` call times out
-/// waiting for a `publishDiagnostics` notification that was never going to
-/// arrive — no amount of extending that timeout budget would fix it. Unix
-/// `canonicalize()` never adds this prefix, so the bug was invisible on
-/// Linux CI.
-///
-/// `pub` (not `pub(crate)`) because `tests/lsp_parity.rs` — a separate
-/// integration-test crate — hits the exact same prefix when it
-/// canonicalizes a staged project directory to check that an LSP
-/// `definition` response's URI resolves inside it.
-pub fn strip_verbatim_prefix(s: &str) -> String {
-    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-        // `\\?\UNC\server\share\...` denotes the same target as the regular
-        // UNC form `\\server\share\...`.
-        format!(r"\\{rest}")
-    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
-        rest.to_string()
-    } else {
-        s.to_string()
     }
 }
 
@@ -514,31 +484,6 @@ mod tests {
     fn path_to_uri_handles_unix_absolute() {
         let uri = path_to_uri(Path::new("/tmp/x.bt"));
         assert!(uri.starts_with("file:///") || uri.starts_with("file:////"));
-    }
-
-    #[test]
-    fn strip_verbatim_prefix_strips_windows_drive_form() {
-        assert_eq!(
-            strip_verbatim_prefix(r"\\?\C:\Users\x\bad_syntax.bt"),
-            r"C:\Users\x\bad_syntax.bt"
-        );
-    }
-
-    #[test]
-    fn strip_verbatim_prefix_strips_windows_unc_form() {
-        assert_eq!(
-            strip_verbatim_prefix(r"\\?\UNC\server\share\file.bt"),
-            r"\\server\share\file.bt"
-        );
-    }
-
-    #[test]
-    fn strip_verbatim_prefix_leaves_non_verbatim_paths_untouched() {
-        assert_eq!(
-            strip_verbatim_prefix(r"C:\Users\x\bad_syntax.bt"),
-            r"C:\Users\x\bad_syntax.bt"
-        );
-        assert_eq!(strip_verbatim_prefix("/tmp/x.bt"), "/tmp/x.bt");
     }
 
     #[test]

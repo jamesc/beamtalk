@@ -1128,19 +1128,16 @@ fn erlang_string_list(dirs: &[Utf8PathBuf]) -> String {
 /// lowercases it) is handled separately, just below.
 #[cfg(windows)]
 pub(crate) fn resolve_long_path(path: &Utf8Path) -> Result<Utf8PathBuf> {
-    let canonical = std::fs::canonicalize(path.as_std_path())
+    // `beamtalk_core::paths::canonicalize` is `std::fs::canonicalize` with
+    // the Windows `\\?\` verbatim prefix stripped back to an ordinary
+    // drive-letter (or UNC) path, so it still looks like — and
+    // string-prefixes the same way as — every other path this module
+    // produces. (The one shared implementation of that rule: BT-4914.)
+    let stripped = beamtalk_core::paths::canonicalize(path.as_std_path())
         .into_diagnostic()
-        .wrap_err_with(|| format!("Failed to resolve the long-path form of '{path}'"))?;
-    let canonical = canonical.to_string_lossy();
-    // `std::fs::canonicalize` on Windows returns the `\\?\`-prefixed
-    // "verbatim" form; strip it back to an ordinary drive-letter path (or
-    // UNC path) so it still looks like — and string-prefixes the same way
-    // as — every other path this module produces.
-    let stripped = canonical
-        .strip_prefix(r"\\?\UNC\")
-        .map(|rest| format!(r"\\{rest}"))
-        .or_else(|| canonical.strip_prefix(r"\\?\").map(str::to_owned))
-        .unwrap_or_else(|| canonical.clone().into_owned());
+        .wrap_err_with(|| format!("Failed to resolve the long-path form of '{path}'"))?
+        .to_string_lossy()
+        .into_owned();
     // `std::fs::canonicalize` normalizes the drive letter to *uppercase*
     // (`C:\...`); Erlang's own `file:path_open/3` (what
     // `systools_make.erl` uses to resolve `App#application.dir` — see the

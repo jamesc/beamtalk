@@ -15,7 +15,7 @@ fn resolve_flushed_path_canonicalises_absolute_paths_against_existing_file() {
     let (resolved, existed) = resolve_flushed_path(raw, &[]).expect("resolved");
     // canonicalize may resolve symlinks; just verify equality with the
     // canonical form of the same input.
-    let canon = bt.canonicalize().expect("canonicalize");
+    let canon = beamtalk_core::paths::canonicalize(&bt).expect("canonicalize");
     assert_eq!(resolved, canon);
     assert!(existed);
     let _ = fs::remove_dir_all(&temp);
@@ -31,7 +31,10 @@ fn resolve_flushed_path_joins_against_first_matching_workspace_root() {
 
     let (resolved, existed) =
         resolve_flushed_path("src/counter.bt", std::slice::from_ref(&root)).expect("resolved");
-    assert_eq!(resolved, target.canonicalize().expect("canonicalize"));
+    assert_eq!(
+        resolved,
+        beamtalk_core::paths::canonicalize(&target).expect("canonicalize")
+    );
     assert!(existed);
     let _ = fs::remove_dir_all(&temp);
 }

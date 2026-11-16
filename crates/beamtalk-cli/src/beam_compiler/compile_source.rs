@@ -551,7 +551,7 @@ pub(crate) fn compile_source_with_bindings(
     // line annotations and the 'file' attribute populate BEAM stacktraces
     // (even for stdlib). The `beamtalk_source` attribute is suppressed for
     // stdlib mode in codegen (source_path_attr checks stdlib_mode).
-    let embed_source_path = std::fs::canonicalize(source_path)
+    let embed_source_path = beamtalk_core::paths::canonicalize(source_path)
         .ok()
         .and_then(|p| p.into_os_string().into_string().ok())
         .unwrap_or_else(|| source_path.as_str().to_string());
