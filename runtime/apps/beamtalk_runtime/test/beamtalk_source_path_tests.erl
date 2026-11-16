@@ -5,11 +5,22 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% The lenient `resolve/2` is gone (BT-4966): tests go through the strict form.
+resolve(Module, Path) ->
+    {ok, Resolved} = beamtalk_source_path:resolve_strict(Module, Path),
+    Resolved.
+
+%% BT-4966: no production caller wanted the lenient result, so the export is
+%% gone and a future caller cannot open a cwd-relative path by mistake.
+lenient_resolve_is_not_exported_test() ->
+    {module, beamtalk_source_path} = code:ensure_loaded(beamtalk_source_path),
+    ?assertNot(erlang:function_exported(beamtalk_source_path, resolve, 2)).
+
 %% BT-4940: embedded paths are package-relative; resolve/2 maps them back to
-%% a file on disk.
+%% a file on disk (via `resolve_strict/2`; `resolve/2` here is a test-local helper).
 
 absolute_path_is_returned_unchanged_test() ->
-    ?assertEqual("/a/b/c.bt", beamtalk_source_path:resolve(undefined, "/a/b/c.bt")).
+    ?assertEqual("/a/b/c.bt", resolve(undefined, "/a/b/c.bt")).
 
 resolves_against_cwd_package_root_test() ->
     Root = filename:absname("bt4940_resolve_cwd"),
@@ -20,7 +31,7 @@ resolves_against_cwd_package_root_test() ->
     {ok, Old} = file:get_cwd(),
     try
         ok = file:set_cwd(filename:join(Root, "src")),
-        ?assertEqual(File, beamtalk_source_path:resolve(undefined, "src/foo.bt"))
+        ?assertEqual(File, resolve(undefined, "src/foo.bt"))
     after
         file:set_cwd(Old),
         file:del_dir_r(Root)
@@ -33,14 +44,14 @@ resolves_against_workspace_root_test() ->
     ok = file:write_file(File, <<>>),
     application:set_env(beamtalk_runtime, workspace_project_root, list_to_binary(Root)),
     try
-        ?assertEqual(File, beamtalk_source_path:resolve(undefined, "src/bar.bt"))
+        ?assertEqual(File, resolve(undefined, "src/bar.bt"))
     after
         application:unset_env(beamtalk_runtime, workspace_project_root),
         file:del_dir_r(Root)
     end.
 
 unresolvable_path_is_returned_unchanged_test() ->
-    ?assertEqual("nope/zzz.bt", beamtalk_source_path:resolve(undefined, "nope/zzz.bt")).
+    ?assertEqual("nope/zzz.bt", resolve(undefined, "nope/zzz.bt")).
 
 %% A beam in a directory with a `.beamtalk-source-root` marker (a path
 %% dependency under the consumer's `_build/deps/`) resolves against the root
@@ -65,7 +76,7 @@ marker_root_wins_over_enclosing_package_test() ->
     ok = file:write_file(BeamFile, Bin),
     {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
     try
-        ?assertEqual(DepFile, beamtalk_source_path:resolve(Mod, "src/x.bt"))
+        ?assertEqual(DepFile, resolve(Mod, "src/x.bt"))
     after
         code:purge(Mod),
         code:delete(Mod),
@@ -90,7 +101,7 @@ missing_file_is_not_taken_from_another_root_test() ->
     application:set_env(beamtalk_runtime, workspace_project_root, list_to_binary(Ws)),
     try
         ?assertEqual(
-            filename:join(Own, "src/y.bt"), beamtalk_source_path:resolve(Mod, "src/y.bt")
+            filename:join(Own, "src/y.bt"), resolve(Mod, "src/y.bt")
         )
     after
         application:unset_env(beamtalk_runtime, workspace_project_root),
@@ -116,7 +127,7 @@ cwd_relative_path_resolves_without_a_package_test() ->
     try
         ok = file:set_cwd(Cwd),
         %% Answered as embedded (relative), as before BT-4940.
-        ?assertEqual("fixtures/z.bt", beamtalk_source_path:resolve(undefined, "fixtures/z.bt")),
+        ?assertEqual("fixtures/z.bt", resolve(undefined, "fixtures/z.bt")),
         ?assert(filelib:is_file(File))
     after
         file:set_cwd(Old),
@@ -130,7 +141,7 @@ missing_file_in_workspace_resolves_under_the_project_test() ->
     application:set_env(beamtalk_runtime, workspace_project_root, <<"/ws/proj">>),
     try
         ?assertEqual(
-            "/ws/proj/src/gone.bt", beamtalk_source_path:resolve(undefined, "src/gone.bt")
+            "/ws/proj/src/gone.bt", resolve(undefined, "src/gone.bt")
         )
     after
         application:unset_env(beamtalk_runtime, workspace_project_root)
@@ -153,7 +164,7 @@ non_utf8_marker_never_resolves_against_the_consumer_test() ->
     ok = file:write_file(BeamFile, Bin),
     {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
     try
-        ?assertEqual("src/a.bt", beamtalk_source_path:resolve(Mod, "src/a.bt"))
+        ?assertEqual(unresolvable, beamtalk_source_path:resolve_strict(Mod, "src/a.bt"))
     after
         code:purge(Mod),
         code:delete(Mod),
@@ -188,8 +199,8 @@ relative_marker_survives_a_moved_tree_test() ->
     {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
     try
         ?assertEqual(
-            filename:join([Moved, "dep", "src", "x.bt"]),
-            beamtalk_source_path:resolve(Mod, "src/x.bt")
+            filename:join([beamtalk_source_path:real_dir(Moved), "dep", "src", "x.bt"]),
+            resolve(Mod, "src/x.bt")
         )
     after
         code:purge(Mod),
@@ -220,7 +231,7 @@ absolute_marker_line_covers_a_dependency_outside_the_moved_tree_test() ->
     {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
     try
         ?assertEqual(
-            filename:join([Dep, "src", "x.bt"]), beamtalk_source_path:resolve(Mod, "src/x.bt")
+            filename:join([Dep, "src", "x.bt"]), resolve(Mod, "src/x.bt")
         )
     after
         code:purge(Mod),
@@ -282,7 +293,7 @@ absolute_root_wins_over_a_lookalike_relative_package_test() ->
     {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
     try
         ?assertEqual(
-            filename:join([Dep, "src", "x.bt"]), beamtalk_source_path:resolve(Mod, "src/x.bt")
+            filename:join([Dep, "src", "x.bt"]), resolve(Mod, "src/x.bt")
         )
     after
         code:purge(Mod),
@@ -314,3 +325,55 @@ unreadable_marker_frame_has_no_source_path_test() ->
         code:delete(Mod),
         file:del_dir_r(Base)
     end.
+
+%% BT-4966: the Rust writer computes line 1 between canonical paths, so the
+%% runtime must apply it to the canonical ebin dir. `_build` is a symlink to a
+%% cache of a different depth (a CI cache mount); applied lexically, line 1
+%% climbs the wrong number of levels and misses `dep`.
+symlinked_build_dir_resolves_the_relative_line_from_the_real_path_test() ->
+    %% Canonical `Base`: the resolver canonicalises the whole path, so a
+    %% checkout under a symlinked directory (macOS `/var`) must not skew it.
+    Base0 = filename:absname("bt4966_symlink"),
+    ok = filelib:ensure_path(Base0),
+    Base = beamtalk_source_path:real_dir(Base0),
+    Dep = filename:join(Base, "dep"),
+    RealEbin = filename:join([Base, "cache", "x", "build", "deps", "dep", "ebin"]),
+    ok = filelib:ensure_path(RealEbin),
+    ok = filelib:ensure_path(filename:join(Dep, "src")),
+    ok = file:write_file(filename:join(Dep, "beamtalk.toml"), <<"[package]\n">>),
+    ok = file:write_file(filename:join([Dep, "src", "x.bt"]), <<>>),
+    ok = filelib:ensure_path(filename:join(Base, "app")),
+    ok = file:make_symlink(
+        filename:join([Base, "cache", "x", "build"]), filename:join([Base, "app", "_build"])
+    ),
+    %% Line 1 from the canonical ebin dir; line 2 (old location) is gone.
+    ok = file:write_file(
+        filename:join(RealEbin, ".beamtalk-source-root"),
+        iolist_to_binary(["../../../../../../dep\n", filename:join(Base, "gone")])
+    ),
+    Mod = bt4966_symlink_mod,
+    {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
+    BeamFile = filename:join([
+        Base, "app", "_build", "deps", "dep", "ebin", "bt4966_symlink_mod.beam"
+    ]),
+    ok = file:write_file(BeamFile, Bin),
+    {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
+    try
+        ?assertEqual(filename:join([Dep, "src", "x.bt"]), resolve(Mod, "src/x.bt"))
+    after
+        code:purge(Mod),
+        code:delete(Mod),
+        file:del_dir_r(Base)
+    end.
+
+%% BT-4966: `..` never climbs above the root, on any platform. The root is the
+%% first element of `filename:split/1` (`/` or a drive like `C:/`), not a
+%% literal "/".
+normalize_clamps_excess_parent_segments_at_the_root_test() ->
+    [Root | _] = filename:split(filename:absname("")),
+    Deep = filename:join([Root, "a", "b", "..", "..", "..", "..", "c"]),
+    ?assertEqual(filename:join(Root, "c"), beamtalk_source_path:normalize(Deep)),
+    ?assertEqual(
+        filename:join([Root, "a", "c"]),
+        beamtalk_source_path:normalize(filename:join([Root, "a", ".", "b", "..", "c"]))
+    ).

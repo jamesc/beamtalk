@@ -477,7 +477,13 @@ class_removed_drained_on_worker_crash_test_() ->
                 end),
                 %% Kill the fake worker — shell receives DOWN
                 exit(FakeWorkerPid, kill),
-                beamtalk_test_wait:dead(FakeWorkerPid),
+                %% Wait for the shell to handle the worker's DOWN, not merely for
+                %% the worker to die: the DOWN reaches the shell on its own signal
+                %% path, unordered against this process's calls. The shell clears
+                %% its worker slot in the same step that drains the removals.
+                beamtalk_test_wait:until(fun() ->
+                    element(3, sys:get_state(Pid)) =:= undefined
+                end),
                 %% Module must be removed from tracker
                 {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(Pid),
                 ?assertNot(beamtalk_repl_modules:module_exists(DummyMod, Tracker)),

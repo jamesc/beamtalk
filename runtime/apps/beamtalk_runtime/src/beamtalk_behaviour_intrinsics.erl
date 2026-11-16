@@ -2172,5 +2172,14 @@ kill_and_wait(Pid) ->
         {'DOWN', Ref, process, Pid, _Reason} -> ok
     after 5000 ->
         erlang:demonitor(Ref, [flush]),
+        Class =
+            case beamtalk_actor_scan:info(Pid) of
+                [{_, C, _} | _] -> C;
+                [] -> unknown
+            end,
+        ?LOG_WARNING(
+            "removeFromSystem: actor did not die within 5s of kill",
+            #{pid => Pid, class => Class, domain => [beamtalk, runtime]}
+        ),
         ok
     end.
