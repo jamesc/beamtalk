@@ -55,9 +55,24 @@ main(Args) ->
     ok = file:set_cwd(runtime_root()),
     Seed = seed(Mode, Opts),
     Only = maps:get(only, Opts, all),
-    Groups = [{runtime, discover(?RUNTIME_APPS, Only)}, {stdlib, discover(?STDLIB_APPS, Only)}],
+    Groups =
+        case maps:get(order, Opts, undefined) of
+            undefined ->
+                [
+                    {runtime, discover(?RUNTIME_APPS, Only)},
+                    {stdlib, discover(?STDLIB_APPS, Only)}
+                ];
+            %% An explicit order (from `--print-order`, minimised by hand or by a
+            %% delta-debugging driver) runs exactly these modules, in this order,
+            %% in one node: reproduces an order dependency with fewer modules.
+            Order ->
+                %% Distinct report directory per order, so concurrent minimisation
+                %% runs do not delete each other's results.
+                [{list_to_atom("custom_" ++ integer_to_list(erlang:phash2(Order))), Order}]
+        end,
     Total = lists:sum([length(M) || {_, M} <- Groups]),
     Total > 0 orelse fail("no EUnit modules found (--only filter too narrow?)"),
+    maps:get(print_order, Opts, false) andalso print_order(Mode, Groups, Seed),
     maps:get(skip_prepare, Opts, false) orelse prepare(),
     Paths = code_paths(),
     Start = erlang:monotonic_time(millisecond),
@@ -96,6 +111,10 @@ parse_opts([], Acc) ->
     Acc;
 parse_opts(["--skip-prepare" | Rest], Acc) ->
     parse_opts(Rest, Acc#{skip_prepare => true});
+parse_opts(["--print-order" | Rest], Acc) ->
+    parse_opts(Rest, Acc#{print_order => true});
+parse_opts(["--order", L | Rest], Acc) ->
+    parse_opts(Rest, Acc#{order => string:tokens(L, ",")});
 parse_opts(["--jobs", N | Rest], Acc) ->
     parse_opts(Rest, Acc#{jobs => list_to_integer(N)});
 parse_opts(["--seed", S | Rest], Acc) ->
@@ -104,6 +123,18 @@ parse_opts(["--only", L | Rest], Acc) ->
     parse_opts(Rest, Acc#{only => string:tokens(L, ",")});
 parse_opts([Other | _], _) ->
     fail("unknown argument: " ++ Other).
+
+%% `--print-order`: print each group's module order for this mode and seed, one
+%% `ORDER <group> <m1,m2,...>` line per group, and stop. Feed a (sub)list back
+%% with `forward --order m1,m2,...` to reproduce or minimise a failure.
+print_order(Mode, Groups, Seed) ->
+    lists:foreach(
+        fun({Group, Mods}) ->
+            io:format("ORDER ~s ~s~n", [Group, string:join(order(Mode, Mods, Seed), ",")])
+        end,
+        Groups
+    ),
+    halt(0).
 
 seed(random, #{seed := S}) -> S;
 seed(random, _) -> erlang:phash2({os:system_time(), self()}, 1 bsl 31);
