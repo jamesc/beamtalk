@@ -67,6 +67,9 @@ safe_to_existing_atom_integer_atom_test() ->
 tcp_integration_test_() ->
     {setup, fun tcp_setup/0, fun tcp_cleanup/1, fun({Port, _SupPid}) ->
         [
+            {"connect snapshot lists the system actor", fun() ->
+                tcp_snapshot_system_actor_test(Port)
+            end},
             {"clear op", fun() -> tcp_clear_test(Port) end},
             {"bindings op (empty)", fun() -> tcp_bindings_empty_test(Port) end},
             {"actors op (empty)", fun() -> tcp_actors_empty_test(Port) end},
@@ -218,7 +221,9 @@ tcp_cleanup({_Port, SupPid}) ->
 tcp_send_op(Port, OpJson) ->
     {Ws, _Welcome} = ws_connect(Port),
     ws_send(Ws, OpJson),
-    {ok, Data} = ws_recv(Ws),
+    %% The connect snapshot pushes one `spawned` frame per live actor (BT-4960:
+    %% including the runtime's own `TranscriptStream`); skip pushes to reach the reply.
+    {ok, Data} = ws_recv_response(Ws),
     ws_close(Ws),
     json:decode(Data).
 
@@ -399,6 +404,35 @@ ws_mask(<<B, Rest/binary>>, Key = <<K1, K2, K3, K4>>, I, Acc) ->
         end,
     ws_mask(Rest, Key, I + 1, <<Acc/binary, M>>).
 
+%% BT-4960: the connect snapshot includes the runtime's own actors, flagged
+%% `system`, so `Transcript` is no longer silently missing from a client's list.
+tcp_snapshot_system_actor_test(Port) ->
+    {Ws, _Welcome} = ws_connect(Port),
+    try
+        ?assertMatch(
+            #{<<"system">> := true}, await_spawned_push(Ws, <<"TranscriptStream">>, 20)
+        )
+    after
+        ws_close(Ws)
+    end.
+
+%% Read frames until the `spawned` push for `Class` arrives (the snapshot is
+%% sent on connect, before any reply). Fails after `N` unrelated frames.
+await_spawned_push(_Ws, Class, 0) ->
+    error({no_spawned_push, Class});
+await_spawned_push(Ws, Class, N) ->
+    {ok, Data} = ws_recv(Ws),
+    case json:decode(Data) of
+        #{
+            <<"channel">> := <<"actors">>,
+            <<"event">> := <<"spawned">>,
+            <<"data">> := #{<<"class">> := Class} = D
+        } ->
+            D;
+        _ ->
+            await_spawned_push(Ws, Class, N - 1)
+    end.
+
 %% Test: `Session current clear` evaluates and returns a done status.
 %% (ADR 0081 Phase 6): the `clear` op was replaced by the Session API.
 tcp_clear_test(Port) ->
@@ -427,12 +461,15 @@ tcp_bindings_empty_test(Port) ->
     ?assertMatch(#{<<"id">> := <<"t2">>}, Resp),
     ?assert(maps:is_key(<<"value">>, Resp)).
 
-%% Test: actors op returns empty actor list
+%% Test: on a fresh workspace the actors op lists only the runtime's own
+%% (system) actors; no user actor exists yet (BT-4960).
 tcp_actors_empty_test(Port) ->
     Msg = iolist_to_binary(json:encode(#{<<"op">> => <<"actors">>, <<"id">> => <<"t3">>})),
     Resp = tcp_send_op(Port, Msg),
     ?assertMatch(#{<<"id">> := <<"t3">>}, Resp),
-    ?assertEqual([], maps:get(<<"actors">>, Resp)).
+    Actors = maps:get(<<"actors">>, Resp),
+    ?assertEqual([], [A || A <- Actors, maps:get(<<"system">>, A, false) =/= true]),
+    ?assert(lists:any(fun(#{<<"class">> := C}) -> C =:= <<"TranscriptStream">> end, Actors)).
 
 %% Test: sessions op returns sessions list
 tcp_sessions_test(Port) ->
@@ -697,8 +734,8 @@ tcp_concurrent_clients_test(Port) ->
     {Ws2, _W2} = ws_connect(Port),
     ws_send(Ws1, Msg1),
     ws_send(Ws2, Msg2),
-    {ok, Data1} = ws_recv(Ws1),
-    {ok, Data2} = ws_recv(Ws2),
+    {ok, Data1} = ws_recv_response(Ws1),
+    {ok, Data2} = ws_recv_response(Ws2),
     ws_close(Ws1),
     ws_close(Ws2),
     Resp1 = json:decode(Data1),
@@ -905,7 +942,7 @@ tcp_unbind_unavailable_in_next_eval_test(Port) ->
 tcp_empty_line_test(Port) ->
     {Ws, _Welcome} = ws_connect(Port),
     ws_send(Ws, <<>>),
-    {ok, Data} = ws_recv(Ws),
+    {ok, Data} = ws_recv_response(Ws),
     ws_close(Ws),
     Resp = json:decode(Data),
     %% Empty message results in error

@@ -52,8 +52,10 @@ BT3575NoSuchClass >> foo => 1
 // run-entry, actors, sessions — always available (ADR 0125 §1.5)
 // ===========================================================================
 
+// A fresh workspace lists the runtime's own actor (BT-4960): `:actors` includes
+// `native:` and system actors, the same set `Node current actors` reports.
 :actors
-// => No actors
+// => TranscriptStream (_)
 
 :sessions
 // => _

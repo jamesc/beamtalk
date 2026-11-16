@@ -22,6 +22,7 @@ inside the `try`).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%====================================================================
 %% Helpers
@@ -165,3 +166,52 @@ handle_term_inspect_live_tagged_actor_returns_inspect_map_term_test() ->
             end
         end
     end)().
+
+%%====================================================================
+%% System actors (BT-4960): listed and flagged; inspect works; kill refuses
+%%====================================================================
+
+actors_op_flags_system_actor_on_the_wire_test() ->
+    Class = 'Bt4960WireSystem',
+    beamtalk_test_fake_native:with_system_native([Class], fun(Pid) ->
+        Msg = beamtalk_test_repl:make_msg(<<"actors">>, <<"s-1">>, undefined),
+        Json = json:decode(beamtalk_repl_ops_actors:handle(<<"actors">>, #{}, Msg, self())),
+        PidBin = list_to_binary(pid_to_list(Pid)),
+        [Wire] = [W || #{<<"pid">> := P} = W <- maps:get(<<"actors">>, Json), P =:= PidBin],
+        ?assertEqual(true, maps:get(<<"system">>, Wire)),
+        ?assertEqual(atom_to_binary(Class, utf8), maps:get(<<"class">>, Wire))
+    end).
+
+inspect_system_actor_works_test() ->
+    beamtalk_test_fake_native:with_system_native(['Bt4960InspectSystem'], fun(Pid) ->
+        Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"s-2">>, undefined),
+        PidBin = list_to_binary(pid_to_list(Pid)),
+        Result = beamtalk_repl_ops_actors:handle_term(
+            <<"inspect">>, #{<<"actor">> => PidBin}, Msg, self()
+        ),
+        ?assertMatch({inspect, _}, Result)
+    end).
+
+kill_system_actor_is_refused_test() ->
+    beamtalk_test_fake_native:with_system_native(['Bt4960KillSystem'], fun(Pid) ->
+        Msg = beamtalk_test_repl:make_msg(<<"kill">>, <<"s-3">>, undefined),
+        PidBin = list_to_binary(pid_to_list(Pid)),
+        Result = beamtalk_repl_ops_actors:handle_term(
+            <<"kill">>, #{<<"actor">> => PidBin}, Msg, self()
+        ),
+        ?assertMatch({error, #beamtalk_error{kind = system_actor}}, Result),
+        ?assert(is_process_alive(Pid))
+    end).
+
+kill_user_native_actor_works_test() ->
+    beamtalk_test_fake_native:with_native(['Bt4960KillUser'], fun(Pid) ->
+        Msg = beamtalk_test_repl:make_msg(<<"kill">>, <<"s-4">>, undefined),
+        PidBin = list_to_binary(pid_to_list(Pid)),
+        ?assertEqual(
+            {status, ok},
+            beamtalk_repl_ops_actors:handle_term(
+                <<"kill">>, #{<<"actor">> => PidBin}, Msg, self()
+            )
+        ),
+        ok = beamtalk_test_wait:until(fun() -> not is_process_alive(Pid) end)
+    end).

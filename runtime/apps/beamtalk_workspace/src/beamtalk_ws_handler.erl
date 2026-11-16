@@ -1075,9 +1075,15 @@ encode_actor_metadata(#{pid := Pid, class := Class} = Meta) ->
         <<"pid">> => list_to_binary(pid_to_list(Pid))
     },
     % elp:fixme W0032 maps:find with complex branch logic
-    case maps:find(spawned_at, Meta) of
-        {ok, T} -> Base#{<<"spawned_at">> => T};
-        error -> Base
+    WithTime =
+        case maps:find(spawned_at, Meta) of
+            {ok, T} -> Base#{<<"spawned_at">> => T};
+            error -> Base
+        end,
+    %% BT-4960: present only for a runtime-started actor, like the `actors` op.
+    case Meta of
+        #{system := true} -> WithTime#{<<"system">> => true};
+        _ -> WithTime
     end.
 
 -doc """

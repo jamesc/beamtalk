@@ -280,23 +280,17 @@ shapeSkew(#{'$beamtalk_class' := 'Node', name := Name}) ->
 
 -doc """
 Target of `actors/1`: every live actor on *this* node, by the process scan
-(`beamtalk_actor_scan`, ADR 0150), each pid once.
+(`beamtalk_actor_scan`, ADR 0150), each pid once. Includes `native:` actors and
+the runtime's own (`TranscriptStream`): the same set the workspace `actors` op
+lists (BT-4960). A pid whose backing module is shared by several classes is
+shown under the alphabetically first.
 """.
 -spec local_actors() -> [tuple()].
 local_actors() ->
-    Entries = beamtalk_actor_scan:scan_actors(),
-    %% A `native:` backing module shared by several classes appears once per class.
-    ByPid = lists:foldl(
-        fun({Pid, Class, _}, Acc) ->
-            case is_map_key(Pid, Acc) of
-                true -> Acc;
-                false -> Acc#{Pid => Class}
-            end
-        end,
-        #{},
-        Entries
-    ),
-    lists:filtermap(fun({Pid, Class}) -> actor_object(Pid, Class) end, maps:to_list(ByPid)).
+    lists:filtermap(
+        fun({Pid, Class, _}) -> actor_object(Pid, Class) end,
+        beamtalk_actor_scan:scan_actors_by_pid()
+    ).
 
 -doc "Target of `actorAt/2`: `info/1` on the one pid, no scan; `nil` for a non-actor, dead or unparsable pid.".
 -spec local_actor_at(term()) -> tuple() | nil.
@@ -307,8 +301,8 @@ local_actor_at(PidStr) when is_binary(PidStr) ->
 local_actor_at(PidStr) when is_list(PidStr) ->
     try list_to_pid(PidStr) of
         Pid when node(Pid) =:= node() ->
-            case beamtalk_actor_scan:info(Pid) of
-                [{Pid, Class, _StartedAt} | _] ->
+            case beamtalk_actor_scan:one_per_pid(beamtalk_actor_scan:info(Pid)) of
+                [{Pid, Class, _StartedAt}] ->
                     case actor_object(Pid, Class) of
                         {true, Obj} -> Obj;
                         false -> nil

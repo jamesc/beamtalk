@@ -47,7 +47,7 @@ matches on the `beamtalk_error` record tag, so no shared `.hrl` is required.
 |-----|-------|-------------|
 | result | `{ok, Value, Output, Warnings}` | `eval`, `unload`, `clone`, tracing read ops |
 | trace | `{trace, Steps, Output, Warnings}` | `eval` (trace mode) |
-| actors | `{actors, [ActorMeta]}` | `actors` |
+| actors | `{actors, [ActorMeta]}` (`ActorMeta` = `#{pid, class, module, spawned_at, system}`; wire `system` only when `true`) | `actors` |
 | inspect | `{inspect, map() \| binary()}` | `inspect` |
 | status | `{status, ok}` | `kill`, `interrupt`, `close`, `shutdown` |
 | value | `{value, JsonValue}` | `nav-query`, `nav-symbols`, `export-traces` |

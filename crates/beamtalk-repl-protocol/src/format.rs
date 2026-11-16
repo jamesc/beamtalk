@@ -686,7 +686,8 @@ mod tests {
             pid: pid.to_string(),
             class: class.to_string(),
             module: "m".to_string(),
-            spawned_at: 0,
+            spawned_at: Some(0),
+            system: false,
         }
     }
 
