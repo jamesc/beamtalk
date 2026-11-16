@@ -147,10 +147,41 @@ teardown(_) ->
     ok.
 
 %%====================================================================
+%% Fixture wrapper
+%%====================================================================
+
+%% Every group below starts and ends by stopping all class processes, the stdlib
+%% ones included. Run them under one fixture that, once they are all done, leaves
+%% the runtime with the real stdlib registered again. A later module that relies
+%% on Object & co. (beamtalk_actor_tests has no setup of its own) then finds it
+%% (BT-4962). Healing once here, not in each teardown, keeps the module fast.
+all_groups_test_() ->
+    {setup, fun() -> ok end, fun(_) -> ok = beamtalk_test_boot:boot_real_stdlib('Integer') end, [
+        {generator, G}
+     || G <- [
+        fun start_link_group/0,
+        fun async_cast_methods_group/0,
+        fun new_with_non_map_raises_type_error_group/0,
+        fun new_on_primitive_not_double_wrapped_group/0,
+        fun qualified_drain_isolates_packages_group/0,
+        fun apply_class_info_corrects_stale_superclass_group/0,
+        fun local_call_snapshot_group/0,
+        fun put_class_method_arity_group/0,
+        fun crash_recovery_restart_group/0,
+        fun bt1982_set_class_var_unknown_raises_group/0,
+        fun bt1982_new_on_abstract_class_errors_group/0,
+        fun bt1982_update_class_unknown_group/0,
+        fun bt1982_code_change_delegates_group/0,
+        fun method_xref_forwarded_on_class_creation_group/0,
+        fun safe_name_lookups_do_not_message_class_process_group/0
+    ]
+    ]}.
+
+%%====================================================================
 %% Basic Lifecycle Tests
 %%====================================================================
 
-start_link_test_() ->
+start_link_group() ->
     {foreach, fun setup/0, fun teardown/1, [
         ?_test(begin
             ClassInfo = #{
@@ -474,7 +505,7 @@ whereis_nonexistent_class_test() ->
 %% Async cast dispatch (Future protocol) tests
 %%====================================================================
 
-async_cast_methods_test_() ->
+async_cast_methods_group() ->
     {foreach, fun setup/0, fun teardown/1, [
         ?_test(begin
             ClassInfo = #{
@@ -770,7 +801,7 @@ compile_bt525_test_module() ->
 %% type_error via class_send (exercises raise → catch → unwrap_class_call).
 %% Guards against raise/1 in handle_call producing an already-wrapped
 %% Exception map that unwrap_class_call then re-wraps via raise/1 → double-wrap.
-new_with_non_map_raises_type_error_test_() ->
+new_with_non_map_raises_type_error_group() ->
     {foreach, fun setup/0, fun teardown/1, [
         ?_test(begin
             Mod = compile_bt525_test_module(),
@@ -896,7 +927,7 @@ new_with_non_map_raises_type_error_test_() ->
 %% Test that new: errors from non-constructible classes (e.g. primitives)
 %% also go through unwrap_class_call correctly without double-wrapping.
 %% This exercises the is_constructible=false → Module:new/0 error path.
-new_on_primitive_not_double_wrapped_test_() ->
+new_on_primitive_not_double_wrapped_group() ->
     %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
     {setup,
         fun() ->
@@ -944,7 +975,7 @@ new_on_primitive_not_double_wrapped_test_() ->
 
 %% Test that draining by qualified name only removes the target package's
 %% warnings, leaving the other package's warnings intact.
-qualified_drain_isolates_packages_test_() ->
+qualified_drain_isolates_packages_group() ->
     {foreach, fun setup/0, fun teardown/1, [
         ?_test(begin
             beamtalk_test_boot:registry(),
@@ -1276,7 +1307,7 @@ class_method_self_call_class_name_in_error_test() ->
 %% the stub registers 'BT1185StaleSuper' with placeholder superclass 'Object',
 %% then update_class is called carrying meta => #{superclass => 'Behaviour'}
 %% (as the compiled module's on-load hook would do).
-apply_class_info_corrects_stale_superclass_test_() ->
+apply_class_info_corrects_stale_superclass_group() ->
     {foreach, fun setup/0, fun teardown/1, [
         ?_test(begin
             %% Register with placeholder superclass (simulates bootstrap stub)
@@ -1426,7 +1457,7 @@ class_lcRead(ClassSelf) -> beamtalk_class_vars:get(ClassSelf, n).
 class_lcWrite(ClassSelf) -> beamtalk_class_vars:put(ClassSelf, n, 99).
 class_lcSelf(ClassSelf) -> ClassSelf.
 
-local_call_snapshot_test_() ->
+local_call_snapshot_group() ->
     {foreach, fun setup/0, fun teardown/1, [
         {"passes the receiver as ClassSelf, not nil", fun test_local_call_passes_receiver/0},
         {"reads the mirror snapshot", fun test_local_call_reads_snapshot/0},
@@ -1507,7 +1538,7 @@ test_local_call_other_class_keeps_home() ->
 %% put_class_method/4 arity gate (ADR 0130 §3, BT-3708)
 %%====================================================================
 
-put_class_method_arity_test_() ->
+put_class_method_arity_group() ->
     {foreach, fun setup/0, fun teardown/1, [
         {"accepts an n+1 fun", fun test_put_class_method_accepts_n_plus_1/0},
         {"rejects an old n+2 fun naming the selector", fun test_put_class_method_rejects_n_plus_2/0}
@@ -1562,7 +1593,7 @@ test_put_class_method_rejects_n_plus_2() ->
 
 %% Test that killing a class process and looking it up via restart_class
 %% produces a new live process.
-crash_recovery_restart_test_() ->
+crash_recovery_restart_group() ->
     {foreach, fun setup/0, fun teardown/1, [
         ?_test(begin
             ClassInfo = #{
@@ -2002,7 +2033,7 @@ crash_recovery_restart_test_() ->
     ]}.
 
 %% set_class_var/3 on an unknown class raises class_not_found (0% → covered).
-bt1982_set_class_var_unknown_raises_test_() ->
+bt1982_set_class_var_unknown_raises_group() ->
     ?_assertError(
         _,
         beamtalk_object_class:set_class_var('BT1982NoSuchClass', foo, 1)
@@ -2011,7 +2042,7 @@ bt1982_set_class_var_unknown_raises_test_() ->
 %% new/1 and new/2 constructor entry points go through {new, Args} handle_call (0% → covered).
 %% Abstract class refuses construction — exercises the handle_call({new, []}, ... is_abstract=true)
 %% branch.
-bt1982_new_on_abstract_class_errors_test_() ->
+bt1982_new_on_abstract_class_errors_group() ->
     {foreach, fun setup/0, fun teardown/1, [
         ?_test(begin
             ClassInfo = #{
@@ -2051,14 +2082,14 @@ bt1982_new_on_abstract_class_errors_test_() ->
     ]}.
 
 %% update_class on an unknown class returns {error, {class_not_found, _}}.
-bt1982_update_class_unknown_test_() ->
+bt1982_update_class_unknown_group() ->
     ?_assertEqual(
         {error, {class_not_found, 'BT1982NoSuchUpdate'}},
         beamtalk_object_class:update_class('BT1982NoSuchUpdate', #{})
     ).
 
 %% code_change/3 delegates to beamtalk_hot_reload and clears is_constructible.
-bt1982_code_change_delegates_test_() ->
+bt1982_code_change_delegates_group() ->
     {foreach, fun setup/0, fun teardown/1, [
         ?_test(begin
             ClassInfo = #{
@@ -2275,7 +2306,7 @@ xref_fixture() ->
         }
     ].
 
-method_xref_forwarded_on_class_creation_test_() ->
+method_xref_forwarded_on_class_creation_group() ->
     {foreach, fun xref_setup/0, fun xref_teardown/1, [
         ?_test(begin
             ClassInfo = #{
@@ -2499,7 +2530,7 @@ method_xref_forwarded_on_class_creation_test_() ->
 %% BT-3820: name/module lookups that must not queue behind a busy class
 %%====================================================================
 
-safe_name_lookups_do_not_message_class_process_test_() ->
+safe_name_lookups_do_not_message_class_process_group() ->
     {foreach, fun setup/0, fun teardown/1, [
         ?_test(begin
             ClassInfo = #{
