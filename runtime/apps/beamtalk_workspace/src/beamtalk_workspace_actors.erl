@@ -158,14 +158,11 @@ meta({Pid, Class, StartedAt}) ->
 %% never stalls a pid check.
 -spec is_system(pid()) -> boolean().
 is_system(Pid) ->
-    case erlang:process_info(Pid, dictionary) of
-        {dictionary, Dict} ->
-            case proplists:get_value('$ancestors', Dict) of
-                [Parent | _] -> is_workspace_sup(Parent);
-                _ -> false
-            end;
-        undefined ->
-            false
+    %% Keyed form: reads one entry instead of copying the whole dictionary. A
+    %% dead pid answers `undefined`, a missing key `{{dictionary, _}, undefined}`.
+    case erlang:process_info(Pid, {dictionary, '$ancestors'}) of
+        {{dictionary, '$ancestors'}, [Parent | _]} -> is_workspace_sup(Parent);
+        _ -> false
     end.
 
 is_workspace_sup(beamtalk_workspace_sup) -> true;
