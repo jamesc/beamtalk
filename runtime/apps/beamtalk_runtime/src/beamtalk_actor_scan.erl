@@ -91,7 +91,8 @@ scan_classes(Classes) when is_list(Classes) ->
 -doc """
 The entries of one local pid, without a scan: `process_info/2` on the pid plus
 the marker check. `[]` for a dead process or a non-actor; more than one entry
-only for a `native:` backing module shared by several classes.
+only for a `native:` backing module shared by several classes. A remote pid
+is a caller error (`function_clause`).
 """.
 -spec info(pid()) -> [entry()].
 info(Pid) when is_pid(Pid), node(Pid) =:= node() ->
