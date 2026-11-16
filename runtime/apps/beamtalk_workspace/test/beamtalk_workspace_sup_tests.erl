@@ -271,6 +271,13 @@ all_children_alive_test() ->
     Config0 = test_config(),
     Config = Config0#{tcp_port => 0},
 
+    %% A suite that started `beamtalk_alias_xref` bare and left it running makes
+    %% the supervisor's own child fail with `already_started` (BT-4934).
+    case whereis(beamtalk_workspace_sup) of
+        undefined -> ok = beamtalk_test_proc:stop_registered(beamtalk_alias_xref);
+        _ -> ok
+    end,
+
     %% Handle already-started supervisor (registered name)
     {Sup, WeStarted} =
         case beamtalk_workspace_sup:start_link(Config) of

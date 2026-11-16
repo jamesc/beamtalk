@@ -155,6 +155,8 @@ tcp_setup() ->
 
 tcp_stop_stray_workspace() ->
     ok = beamtalk_test_proc:stop_registered(beamtalk_workspace_sup),
+    %% A bare-started child would make the supervisor's own start fail.
+    ok = beamtalk_test_proc:stop_registered(beamtalk_alias_xref),
     _ = cowboy:stop_listener(beamtalk_repl_ws),
     undefined = whereis(beamtalk_workspace_sup),
     ok.

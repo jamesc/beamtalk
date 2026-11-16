@@ -52,13 +52,24 @@ compiler_setup() ->
 
 alias_xref_setup() ->
     ok = compiler_setup(),
-    case whereis(beamtalk_alias_xref) of
-        undefined -> {ok, _} = beamtalk_alias_xref:start_link();
-        _Pid -> ok
-    end,
-    ok = beamtalk_alias_xref:clear().
+    Started =
+        case whereis(beamtalk_alias_xref) of
+            undefined ->
+                {ok, _} = beamtalk_alias_xref:start_link(),
+                true;
+            _Pid ->
+                false
+        end,
+    ok = beamtalk_alias_xref:clear(),
+    Started.
 
-alias_xref_teardown(_) ->
+%% Stop the server only if this fixture started it: left running bare it makes
+%% the workspace supervisor's own `beamtalk_alias_xref` child fail with
+%% `already_started` in whichever suite starts the workspace next (BT-4934).
+alias_xref_teardown(true) ->
+    ok = beamtalk_alias_xref:clear(),
+    beamtalk_test_proc:stop_registered(beamtalk_alias_xref);
+alias_xref_teardown(false) ->
     ok = beamtalk_alias_xref:clear().
 
 %% Repeated `evaluate:` calls in one process reuse a single module-name atom

@@ -195,7 +195,7 @@ setup_dynamic() ->
     %% (Re)load the stdlib classes: a suite earlier in the same EUnit VM may
     %% have stopped every class process, and the stdlib refusal case needs a
     %% real, `.beam`-backed stdlib class to classify as `stdlib`.
-    ok = beamtalk_stdlib:init(),
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-move-class-dyn-" ++ Unique),

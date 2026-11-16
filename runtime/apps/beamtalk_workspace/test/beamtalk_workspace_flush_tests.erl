@@ -194,49 +194,14 @@ reload_suite_setup() ->
     %% (mirrors beamtalk_workspace_revert_tests:suite_setup/0).
     ok = beamtalk_test_wait:class('Object'),
     ok.
-
-%% Never tear down or restart a shared, already-live runtime here — this
-%% module runs alongside every other `beamtalk_workspace` EUnit module in one
-%% shared-VM `rebar3 eunit --app=beamtalk_workspace` invocation, and other
-%% test modules' own bootstrap (e.g. `beamtalk_test_boot:boot_real_stdlib/1`)
-%% may already have booted the runtime and be relying on that SAME instance
-%% staying up for the rest of the run; killing it here to force our own clean
-%% start would orphan that state for everything that runs after us (an
-%% earlier version of this fix did exactly that and cost 36 unrelated test
-%% failures elsewhere in the app suite — `Integer`/`Subprocess` no longer
-%% registered — found by running `rebar3 eunit --app=beamtalk_workspace`,
-%% not just this module in isolation).
-%%
-%% `'Object'` already resolving is the signal that some prior boot (this
-%% run's own, or another test module's) already did the work — reuse it
-%% as-is. Only when NOTHING is up yet do we attempt our own start, in which
-%% case this module's own lightweight `announce_flush_completed_emits_typed_
-%% event_test/0` may have already brought up `beamtalk_announcements`
-%% standalone/unsupervised (its own `ensure_started/0` contract, meant for a
-%% bare BUnit/REPL context with no full runtime) — blocking `beamtalk_
-%% runtime`'s supervisor from starting its OWN, properly-supervised child
-%% under the same registered name. Stopping it is safe ONLY in this branch:
-%% since `'Object'` is not yet registered, nothing else in this run can be
-%% relying on that standalone instance either.
+%% The runtime must be up with its bootstrap and stdlib classes. `start_app/1`
+%% restarts the application and reloads the stdlib classes if an earlier suite
+%% left it without `Object`, and stops a stray standalone child (for example
+%% `beamtalk_announcements`, which this module's own lightweight tests may bring
+%% up) that would block the supervised start (BT-4934).
 ensure_beamtalk_runtime_started() ->
-    case beamtalk_class_registry:whereis_class('Object') of
-        Pid when is_pid(Pid) ->
-            ok;
-        _NotYetBooted ->
-            case application:ensure_all_started(beamtalk_runtime) of
-                {ok, _} ->
-                    ok;
-                {error, _Reason} ->
-                    case whereis(beamtalk_announcements) of
-                        undefined ->
-                            error(beamtalk_runtime_start_failed);
-                        AnnouncementsPid ->
-                            stop(AnnouncementsPid),
-                            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-                            ok
-                    end
-            end
-    end.
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
+    ok.
 
 reload_suite_teardown(_) ->
     _ = application:stop(beamtalk_compiler),
