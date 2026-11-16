@@ -420,31 +420,3 @@ track_spawned_without_registry_is_noop_test() ->
         ?assertEqual(undefined, whereis(beamtalk_actor_registry)),
         ?assertEqual(ok, beamtalk_repl_actors:track_spawned(self(), 'Counter'))
     end).
-
-list_objects_and_object_at_wrap_live_actors_test() ->
-    beamtalk_test_actor_registry:with_registry(fun(RegistryPid) ->
-        {ok, ActorPid} = test_counter:start_link(0),
-        try
-            ok = beamtalk_repl_actors:register_actor(
-                RegistryPid, ActorPid, 'Counter', test_counter
-            ),
-            ?assertMatch(
-                [{beamtalk_object, 'Counter', _, ActorPid}],
-                beamtalk_repl_actors:list_objects()
-            ),
-            PidStr = pid_to_list(ActorPid),
-            ?assertMatch(
-                {beamtalk_object, 'Counter', _, ActorPid},
-                beamtalk_repl_actors:object_at(PidStr)
-            ),
-            ?assertEqual(nil, beamtalk_repl_actors:object_at("invalid")),
-            ?assertEqual(nil, beamtalk_repl_actors:object_at(not_a_string))
-        after
-            gen_server:stop(ActorPid)
-        end
-    end).
-
-list_objects_without_registry_is_empty_test() ->
-    beamtalk_test_actor_registry:without_registry(fun() ->
-        ?assertEqual([], beamtalk_repl_actors:list_objects())
-    end).

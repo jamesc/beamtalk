@@ -44,9 +44,7 @@ Owned by `beamtalk_runtime_sup`, so it exists in every boot context
     get_actor/2,
     count_actors_for_module/2,
     on_actor_spawned/4,
-    track_spawned/2,
-    list_objects/0,
-    object_at/1
+    track_spawned/2
 ]).
 
 %% gen_server callbacks
@@ -188,52 +186,6 @@ track_spawned(ActorPid, ClassName) when is_pid(ActorPid), is_atom(ClassName) ->
 track_spawned(_ActorPid, _ClassName) ->
     ok.
 
--doc """
-Every live actor on this node as a `#beamtalk_object{}` reference (backs
-`Node current actors`). `[]` when the registry is not running.
-""".
--spec list_objects() -> [tuple()].
-list_objects() ->
-    case erlang:whereis(beamtalk_actor_registry) of
-        undefined ->
-            [];
-        RegistryPid ->
-            lists:filtermap(fun wrap_actor/1, list_actors(RegistryPid))
-    end.
-
--doc """
-Look up one live actor by pid string (`"<0.132.0>"`); `nil` when the string is
-not a pid, the pid is untracked or dead (backs `Node current actorAt:`).
-""".
--spec object_at(term()) -> tuple() | nil.
-object_at({beamtalk_string, PidStr}) when is_binary(PidStr) ->
-    %% BT-4173: pid strings from Beamtalk arrive tagged.
-    object_at(binary_to_list(PidStr));
-object_at(PidStr) when is_binary(PidStr) ->
-    object_at(binary_to_list(PidStr));
-object_at(PidStr) when is_list(PidStr) ->
-    try list_to_pid(PidStr) of
-        Pid ->
-            case erlang:whereis(beamtalk_actor_registry) of
-                undefined ->
-                    nil;
-                RegistryPid ->
-                    case get_actor(RegistryPid, Pid) of
-                        {ok, Metadata} ->
-                            case wrap_actor(Metadata) of
-                                {true, Obj} -> Obj;
-                                false -> nil
-                            end;
-                        {error, not_found} ->
-                            nil
-                    end
-            end
-    catch
-        error:badarg -> nil
-    end;
-object_at(_) ->
-    nil.
-
 -doc "Unregister an actor from the registry.".
 -spec unregister_actor(pid(), pid()) -> ok.
 unregister_actor(RegistryPid, ActorPid) ->
@@ -372,7 +324,7 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
 handle_cast({track, ActorPid, ClassName}, State) ->
-    {noreply, do_register(ActorPid, ClassName, resolve_module(ClassName), State)};
+    {noreply, do_register(ActorPid, ClassName, beamtalk_class_registry:backing_module(ClassName), State)};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -425,28 +377,6 @@ do_register(ActorPid, ClassName, ModuleName, #state{actors = Actors, monitors = 
                 actors = Actors#{ActorPid => Metadata},
                 monitors = Monitors#{MonitorRef => ActorPid}
             }
-    end.
-
--doc "Resolve the backing module of a class name; `undefined` when unknown.".
--spec wrap_actor(actor_metadata()) -> {true, tuple()} | false.
-wrap_actor(#{pid := Pid, class := Class} = Meta) ->
-    Module =
-        case maps:get(module, Meta, undefined) of
-            undefined -> resolve_module(Class);
-            M -> M
-        end,
-    case Module =/= undefined andalso is_process_alive(Pid) of
-        true -> {true, {beamtalk_object, Class, Module, Pid}};
-        false -> false
-    end.
-
--spec resolve_module(atom()) -> atom().
-resolve_module(ClassName) ->
-    try beamtalk_class_registry:whereis_class(ClassName) of
-        undefined -> undefined;
-        ClassPid -> beamtalk_object_class:module_name_safe(ClassPid)
-    catch
-        _:_ -> undefined
     end.
 
 code_change(OldVsn, State, Extra) ->

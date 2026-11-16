@@ -14,6 +14,8 @@ Hot reload finds live instances by the process scan (ADR 0150, BT-4947):
   created after a reload is seen by the next reload and by `allInstances`.
 """.
 
+-export([init/1]).
+
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -57,18 +59,22 @@ child_src() ->
 migrated(Pid, Field) ->
     maps:is_key(Field, sys:get_state(Pid)).
 
-%% The `beamtalk_actor_scan` calls naming one of `Classes` made while `Fun` runs,
-%% in any process. A separate tracer process collects them (the calling process
-%% is never traced by `trace(all, ...)`, and the reload may not run in it).
-%% Calls that do not name one of `Classes` (an unrelated scan from elsewhere on
-%% the node, or `scan_actors/0`) are not counted, so the assertion is not
-%% sensitive to what else runs in the window.
+%% The `beamtalk_actor_scan` calls made while `Fun` runs, in any process. A
+%% separate tracer process collects them (the calling process is never traced
+%% by `trace(all, ...)`, and the reload may not run in it). Returns:
+%%   * the class-scan calls naming one of `Classes` (`{Fun, 1}`), so an unrelated
+%%     scan from elsewhere on the node does not affect the assertion;
+%%   * every `scan_actors/0` (full-node scan) made by a process that made one
+%%     of those class scans, i.e. by the reload's own processes (`{scan_actors, 0}`),
+%%     so a full-node scan added to the reload path fails the test while one
+%%     from an unrelated process does not.
 trace_scans(Classes, Fun) ->
     {module, beamtalk_actor_scan} = code:ensure_loaded(beamtalk_actor_scan),
-    Tracer = spawn(fun() -> tracer_loop(Classes, []) end),
+    Tracer = spawn(fun() -> tracer_loop([]) end),
     1 = erlang:trace_pattern({beamtalk_actor_scan, scan_marked_classes, 1}, true, [global]),
     1 = erlang:trace_pattern({beamtalk_actor_scan, scan_classes, 1}, true, [global]),
     1 = erlang:trace_pattern({beamtalk_actor_scan, scan_class, 1}, true, [global]),
+    1 = erlang:trace_pattern({beamtalk_actor_scan, scan_actors, 0}, true, [global]),
     _ = erlang:trace(all, true, [call, {tracer, Tracer}]),
     try
         Fun()
@@ -79,20 +85,32 @@ trace_scans(Classes, Fun) ->
     Ref = make_ref(),
     Tracer ! {done, self(), Ref},
     receive
-        {Ref, Calls} -> Calls
+        {Ref, Calls} -> reload_calls(Classes, Calls)
     after 5000 -> error(tracer_timeout)
     end.
 
-tracer_loop(Classes, Acc) ->
+tracer_loop(Acc) ->
     receive
-        {trace, _, call, {beamtalk_actor_scan, F, [Arg]}} ->
-            Named = lists:flatten([Arg]),
-            case lists:any(fun(C) -> lists:member(C, Named) end, Classes) of
-                true -> tracer_loop(Classes, [{F, 1} | Acc]);
-                false -> tracer_loop(Classes, Acc)
-            end;
+        {trace, Pid, call, {beamtalk_actor_scan, F, Args}} ->
+            tracer_loop([{Pid, F, Args} | Acc]);
         {done, From, Ref} ->
             From ! {Ref, lists:reverse(Acc)}
+    end.
+
+reload_calls(Classes, Calls) ->
+    Named = fun(Args) ->
+        Flat = lists:flatten(Args),
+        lists:any(fun(C) -> lists:member(C, Flat) end, Classes)
+    end,
+    ClassScans = [{Pid, F} || {Pid, F, [_] = Args} <- Calls, Named(Args)],
+    Owners = [Pid || {Pid, _} <- ClassScans],
+    [{F, 1} || {_, F} <- ClassScans] ++
+        [{scan_actors, 0} || {Pid, scan_actors, []} <- Calls, lists:member(Pid, Owners)].
+
+%% proc_lib entry point for a fake `native:` backing process.
+init(_) ->
+    receive
+        stop -> ok
     end.
 
 hot_reload_scan_test_() ->
@@ -125,6 +143,25 @@ hot_reload_scan_test_() ->
                             ?assertNot(migrated(P1, extra)),
                             ?assertNot(migrated(C1, extra)),
 
+                            %% A `native:` process on the parent's backing module is
+                            %% listed by `allInstances` but a reload leaves it alone.
+                            Native = proc_lib:spawn(?MODULE, init, [x]),
+                            beamtalk_class_registry:ensure_backing_module_index_table(),
+                            ok = beamtalk_test_wait:until(fun() ->
+                                {dictionary, D} = erlang:process_info(Native, dictionary),
+                                lists:keymember('$initial_call', 1, D)
+                            end),
+                            ets:insert(beamtalk_backing_module_index, {
+                                ?MODULE,
+                                'HotScanParent',
+                                beamtalk_runtime_api:whereis_class('HotScanParent')
+                            }),
+                            ?assert(
+                                lists:member(
+                                    Native, beamtalk_runtime_api:all_instances('HotScanParent')
+                                )
+                            ),
+
                             %% Reload the parent with a new field: one scan, all migrated.
                             ok = file:write_file(ParentPath, parent_src(["extra"])),
                             Calls = trace_scans(['HotScanParent', 'HotScanChild'], fun() ->
@@ -134,6 +171,10 @@ hot_reload_scan_test_() ->
                             ?assert(migrated(P1, extra)),
                             ?assert(migrated(Named, extra)),
                             ?assert(migrated(C1, extra)),
+                            %% The native process was neither suspended nor migrated.
+                            ?assert(is_process_alive(Native)),
+                            ets:match_delete(beamtalk_backing_module_index, {?MODULE, '_', '_'}),
+                            beamtalk_test_proc:stop(Native),
 
                             %% Owner condition (a): readers re-scan, no stale list. An
                             %% instance made after the reload is seen immediately...

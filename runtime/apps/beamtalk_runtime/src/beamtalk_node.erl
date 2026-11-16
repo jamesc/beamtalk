@@ -287,13 +287,20 @@ local_actors() ->
     Entries = beamtalk_actor_scan:scan_actors(),
     %% A `native:` backing module shared by several classes appears once per class.
     ByPid = lists:foldl(
-        fun({Pid, Class, _}, Acc) -> maps:merge(#{Pid => Class}, Acc) end, #{}, Entries
+        fun({Pid, Class, _}, Acc) ->
+            case is_map_key(Pid, Acc) of
+                true -> Acc;
+                false -> Acc#{Pid => Class}
+            end
+        end,
+        #{},
+        Entries
     ),
     lists:filtermap(fun({Pid, Class}) -> actor_object(Pid, Class) end, maps:to_list(ByPid)).
 
 -doc "Target of `actorAt/2`: `info/1` on the one pid, no scan; `nil` for a non-actor, dead or unparsable pid.".
 -spec local_actor_at(term()) -> tuple() | nil.
-local_actor_at({beamtalk_string, PidStr}) ->
+local_actor_at({beamtalk_string, PidStr}) when is_binary(PidStr) ->
     local_actor_at(PidStr);
 local_actor_at(PidStr) when is_binary(PidStr) ->
     local_actor_at(binary_to_list(PidStr));
@@ -321,13 +328,7 @@ local_actor_at(_) ->
 %% loaded module or it died since the scan.
 -spec actor_object(pid(), atom()) -> {true, tuple()} | false.
 actor_object(Pid, Class) ->
-    Module =
-        try beamtalk_class_registry:whereis_class(Class) of
-            undefined -> undefined;
-            ClassPid -> beamtalk_object_class:module_name_safe(ClassPid)
-        catch
-            _:_ -> undefined
-        end,
+    Module = beamtalk_class_registry:backing_module(Class),
     case Module =/= undefined andalso is_process_alive(Pid) of
         true -> {true, {beamtalk_object, Class, Module, Pid}};
         false -> false

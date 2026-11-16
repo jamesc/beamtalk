@@ -36,6 +36,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     user_classes/0,
     class_object_from_pid/1,
     resolve_class_object/1,
+    backing_module/1,
     registry_name/1,
     ensure_pg_started/0,
     ensure_class_warnings_table/0,
@@ -286,6 +287,20 @@ resolve_class_object(ClassName) when is_atom(ClassName) ->
             Module = beamtalk_object_class:module_name_safe(ClassPid),
             Tag = class_object_tag(ClassName),
             #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid}
+    end.
+
+-doc """
+The backing Erlang module of a loaded class, or `undefined` when the class is
+unknown or its process is gone. Never raises. The one place that turns a class
+name into the module a `#beamtalk_object{}` for an actor needs.
+""".
+-spec backing_module(class_name()) -> module() | undefined.
+backing_module(ClassName) ->
+    try whereis_class(ClassName) of
+        undefined -> undefined;
+        ClassPid -> beamtalk_object_class:module_name_safe(ClassPid)
+    catch
+        _:_ -> undefined
     end.
 
 -doc "Compute the Erlang registry name for a class.".

@@ -37,7 +37,7 @@ loader only for `normalize_class_source_key/1`.
     spawn_shape_recheck/1,
     %% Same cross-module reason: called from beamtalk_workspace_shape_recheck_worker.
     maybe_trigger_shape_recheck/1,
-    %% Reload-time reflection finding publishing (called from hot_reload_class/2).
+    %% Reload-time reflection finding publishing (called from hot_reload_class/3).
     publish_reload_findings/2,
     %% ADR 0107 Phase A: leaf-change detection and re-check.
     superclasses_losing_leaf_status/1,
@@ -541,7 +541,7 @@ maybe_trigger_shape_recheck_for_class(#{name := Name}) ->
         %% — independent of `Classification`, since a version-only finding
         %% (bumped-without-migration, version-decreased) can fire with no
         %% field change at all. Row 5 (instances_suspended) is published
-        %% separately and synchronously from `hot_reload_class/2`, which
+        %% separately and synchronously from `hot_reload_class/3`, which
         %% runs before this worker call and needs no shape/version diff.
         ReloadFindings = beamtalk_shape_diff:reload_findings(
             ClassNameBin, Prev, NewGen, DiffResult

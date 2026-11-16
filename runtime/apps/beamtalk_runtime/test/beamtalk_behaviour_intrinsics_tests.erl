@@ -1592,15 +1592,16 @@ meta_fast_path_reflection_test_() ->
             Forms = beamtalk_test_erl_forms:parse_forms([
                 "-module(" ++ atom_to_list(ModAtom) ++ ").",
                 "-export([spawn/0]).",
-                "spawn() -> beamtalk_actor:safe_spawn(test_class_actor, #{})."
+                "spawn() -> beamtalk_actor:safe_spawn(test_class_actor, #{class => 'Bt3243RemovableActor'})."
             ]),
             {ok, ModAtom, Bin} = compile:forms(Forms, [return_errors]),
             {module, ModAtom} = code:load_binary(
                 ModAtom, "bt_3243_removable_class_mod.erl", Bin
             ),
-            %% The class name the `test_class_actor` fixture stamps on its instances
-            %% (the scan matches an actor to its class by that marker).
-            ClassName = 'TestClassActor',
+            %% A private class name, stamped on the instance by the fixture's
+            %% `class` option: `removeFromSystem` kills every process carrying
+            %% the class marker, so a shared fixture name would hit other tests.
+            ClassName = 'Bt3243RemovableActor',
             ClassInfo = #{
                 name => ClassName,
                 module => ModAtom,
