@@ -302,6 +302,7 @@ Follow-up issue (filed, not done here): `beamtalk-buccaneer` makes HTTP/2 stream
 | [0123](0123-versioned-state-migration.md) | Hot-reload migration enumerates by one scan and includes supervised actors; a failed migration leaves a supervised actor suspended and a supervisor shutdown waits out its timeout. |
 | [0126](0126-distribution-location-transparent-actors.md) | `local_actors/0`, `local_actor_at/1` become scans; the `unknown` class note for a missing row goes away; `actor_started_at/1` returns values for compiled actors. |
 | [0129](0129-class-side-system-facades.md) | `Node current actors` "backed by `beamtalk_actor_registry`" (the process `beamtalk_repl_actors`) becomes a scan. |
+| [0010](0010-global-objects-and-singleton-dispatch.md), [0087](0087-maintained-xref-index-for-system-navigation.md) | Supervision tree / start order lists `beamtalk_object_instances`; amendment note only. |
 | `docs/beamtalk-ddd-model.md` ADR-5 | "ETS table with process monitors" becomes "process marker, enumerated on demand" (D). |
 
 ## References

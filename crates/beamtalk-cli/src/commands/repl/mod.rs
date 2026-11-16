@@ -15,7 +15,6 @@
 //! │                 │ TCP │    ├─ beamtalk_repl_server        │
 //! │  rustyline      │     │    ├─ beamtalk_session_sup        │
 //! └─────────────────┘     │    │   └─ beamtalk_repl_shell     │
-//!                         │    ├─ beamtalk_actor_registry      │
 //!                         │    └─ beamtalk_compiler_sup        │
 //!                         │         └─ beamtalk_compiler_server│
 //!                         │              └─ OTP Port (Rust)    │
