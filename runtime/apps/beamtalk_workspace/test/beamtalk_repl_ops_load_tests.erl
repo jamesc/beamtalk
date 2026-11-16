@@ -1982,6 +1982,20 @@ setup_project_class(ClassName, Src) ->
 
 teardown_project_class(Proj) ->
     beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
+    %% The loaded `BtSection*Class` classes (and their xref rows) would otherwise
+    %% outlive the test and show up as implementors in later modules (BT-4962).
+    lists:foreach(
+        fun({Name, _Module, _Pid}) ->
+            case atom_to_list(Name) of
+                "BtSection" ++ _ ->
+                    beamtalk_test_class:stop_graceful(Name),
+                    ok = beamtalk_xref:purge_class(Name);
+                _ ->
+                    ok
+            end
+        end,
+        beamtalk_class_registry:live_class_entries()
+    ),
     rm_temp_dir(Proj).
 
 save_section_renames_existing_divider_test() ->

@@ -139,9 +139,16 @@ tcp_integration_test_() ->
         ]
     end}.
 
+%% These tests read the real stdlib classes (Object, Integer, ...). An earlier module
+%% (beamtalk_object_class_tests) stops every class process, so assert and restore
+%% the precondition instead of relying on a leftover (BT-4962).
+stdlib_ready() ->
+    beamtalk_test_boot:boot_real_stdlib('Integer').
+
 tcp_setup() ->
     process_flag(trap_exit, true),
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_workspace),
+    ok = stdlib_ready(),
     %% The node-wide actor registry (BT-3633) replays every tracked actor to a
     %% newly subscribed session; earlier suites leave actors in it, so run this
     %% fixture against an empty one.
@@ -1172,11 +1179,13 @@ get_completions_keyword_prefix_test() ->
     ?assert(lists:member(<<"subclass:">>, Result)).
 
 get_completions_workspace_binding_test() ->
+    ok = stdlib_ready(),
     %% Workspace bindings (Transcript, Beamtalk, Workspace) should appear
     Result = beamtalk_repl_ops_dev_complete:get_completions(<<"Transcri">>),
     ?assert(lists:member(<<"Transcript">>, Result)).
 
 get_completions_workspace_binding_prefix_test() ->
+    ok = stdlib_ready(),
     %% "Work" should match the Workspace binding
     Result = beamtalk_repl_ops_dev_complete:get_completions(<<"Work">>),
     ?assert(lists:member(<<"Workspace">>, Result)).
@@ -1212,6 +1221,7 @@ context_completions_binding_actor_no_registry_test() ->
     ?assertEqual([], Result).
 
 context_completions_binding_reference_returns_object_methods_test() ->
+    ok = stdlib_ready(),
     %% All values are now classifiable via class_of/1.
     %% Even Erlang references inherit Object methods like `class`, `inspect`.
     Bindings = #{x => make_ref()},
@@ -1220,6 +1230,7 @@ context_completions_binding_reference_returns_object_methods_test() ->
 
 %% BT: Symbol binding (atom value) now correctly returns Symbol instance methods
 context_completions_symbol_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{x => some_atom},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"x cl">>, Bindings),
     %% `class` is inherited from Object; available on Symbol instances
@@ -1375,6 +1386,7 @@ context_completions_value_type_binding_returns_instance_methods_test() ->
 %% BT: Integer binding (e.g. i := 42) returns Integer instance methods
 %% Uses the real Integer class which is always registered in the test environment.
 context_completions_integer_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{i => 42},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"i cl">>, Bindings),
     %% `class` is inherited from Object; available on every Integer instance
@@ -1383,6 +1395,7 @@ context_completions_integer_binding_returns_instance_methods_test() ->
 %% BT: String binding (e.g. s := 'hello') returns String instance methods
 %% Uses the real String class which is always registered in the test environment.
 context_completions_string_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{s => <<"hello">>},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"s cl">>, Bindings),
     %% `class` is inherited from Object; available on every String instance
@@ -1390,6 +1403,7 @@ context_completions_string_binding_returns_instance_methods_test() ->
 
 %% BT: nil binding returns UndefinedObject instance methods
 context_completions_nil_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{n => nil},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"n cl">>, Bindings),
     %% `class` is inherited from Object; available on UndefinedObject instances
@@ -1397,6 +1411,7 @@ context_completions_nil_binding_returns_instance_methods_test() ->
 
 %% BT: true binding returns True instance methods (not Boolean — Boolean is abstract)
 context_completions_true_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{t => true},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"t cl">>, Bindings),
     %% `class` is inherited from Object; available on True instances
@@ -1404,6 +1419,7 @@ context_completions_true_binding_returns_instance_methods_test() ->
 
 %% BT: false binding returns False instance methods (not Boolean — Boolean is abstract)
 context_completions_false_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{f => false},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"f cl">>, Bindings),
     %% `class` is inherited from Object; available on False instances
@@ -1411,18 +1427,21 @@ context_completions_false_binding_returns_instance_methods_test() ->
 
 %% BT: Float binding (e.g. f := 3.14) returns Float instance methods
 context_completions_float_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{f => 3.14},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"f cl">>, Bindings),
     ?assert(lists:member(<<"class">>, Result)).
 
 %% BT: List binding (e.g. l := #(1 2 3)) returns List instance methods
 context_completions_list_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{l => [1, 2, 3]},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"l cl">>, Bindings),
     ?assert(lists:member(<<"class">>, Result)).
 
 %% BT: Block/closure binding returns Block instance methods
 context_completions_block_binding_returns_instance_methods_test() ->
+    ok = stdlib_ready(),
     Bindings = #{b => fun() -> ok end},
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"b cl">>, Bindings),
     ?assert(lists:member(<<"class">>, Result)).
@@ -1435,6 +1454,7 @@ context_completions_unbound_variable_returns_empty_test() ->
 
 %% BT: String literal receiver (e.g. "hello" up) returns String instance methods
 context_completions_string_literal_receiver_test() ->
+    ok = stdlib_ready(),
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"\"hello\" cl">>),
     ?assert(lists:member(<<"class">>, Result)).
 
