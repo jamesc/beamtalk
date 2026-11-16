@@ -115,10 +115,10 @@ init([]) ->
             type => worker,
             modules => [beamtalk_object_instances]
         },
-        %% Node-wide actor registry (BT-3633): backs `Node current actors` in
-        %% every boot context (test, run, REPL, release). Registers itself as
-        %% `beamtalk_actor_registry`; actors track themselves from their
-        %% lifecycle-start telemetry.
+        %% Node-wide actor list. Registers itself as `beamtalk_actor_registry`.
+        %% Dead since ADR 0150 (BT-4951): nothing registers actors with it and
+        %% `Node current actors` scans processes instead. Deleted by BT-4953
+        %% (see the `beamtalk_repl_actors` moduledoc).
         #{
             id => beamtalk_actor_registry,
             start => {beamtalk_repl_actors, start_link, [registered]},

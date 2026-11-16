@@ -189,7 +189,13 @@ spawn_loop(N, Left) ->
         0 ->
             %% Clean stop: the actor may not have reached `init/1` yet, so the
             %% stop is a request, not a wait.
-            spawn(fun() -> catch gen_server:stop(Pid) end),
+            spawn(fun() ->
+                try
+                    gen_server:stop(Pid)
+                catch
+                    _:_ -> ok
+                end
+            end),
             spawn_loop(N - 1, Left);
         1 ->
             exit(Pid, kill),
