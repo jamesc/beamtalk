@@ -36,7 +36,7 @@ const ALLOWED_FILES: &[&str] = &["synced_call.rs"];
 /// a hybrid field write rebinds the parameter it reads the chain source of
 /// (`lower_hybrid_field_rebind`).
 const NOT_READ_SOURCES: &[(&str, &str, usize)] = &[(
-    "control_flow/conditionals.rs",
+    "control_flow/inline_control_flow.rs",
     ".hybrid_readonly_field_params.get(",
     1,
 )];

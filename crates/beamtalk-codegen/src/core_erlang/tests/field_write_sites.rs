@@ -37,10 +37,14 @@ const NOTE_CALL: &str = ".note_field_write(";
 const NOTE_DYNAMIC_CALL: &str = ".note_field_write(\"<dynamic>\"";
 
 /// A dynamic-key field mutation: a `maps:put` or `maps:remove` on a name
-/// variable, matched with whitespace removed.
+/// variable, matched with whitespace removed. Each is spelled both as a
+/// literal call fragment and as the `form::call` constructor, so migrating a
+/// site between the two does not make the guard stop seeing it.
 const DYNAMIC_MUTATIONS: &[&str] = &[
     "'maps':'put'(\",leaf::var(name_var)",
     "'maps':'remove'(\",leaf::var(name_var)",
+    "form::call(\"maps\",\"put\",[leaf::var(name_var)",
+    "form::call(\"maps\",\"remove\",[leaf::var(name_var)",
 ];
 
 /// Production code ends where the inline test module starts.
@@ -52,9 +56,12 @@ const TEST_MODULE: &str = "#[cfg(test)]modtests";
 /// `lower_hybrid_field_rebind` calls the hook for a rebind that is a `Direct`
 /// bind, not a `Put`.
 const FIELD_WRITE_SITES: &[(&str, usize, usize)] = &[
-    // `lower_simple_field_write_bind`, the C6 non-producer two-hop, and
+    // The C6 non-producer two-hop.
+    ("control_flow/conditional_arms.rs", 1, 1),
+    // `lower_simple_field_write_bind`.
+    ("control_flow/conditionals.rs", 1, 1),
     // `lower_hybrid_field_rebind` (no `Put`).
-    ("control_flow/conditionals.rs", 2, 3),
+    ("control_flow/inline_control_flow.rs", 0, 1),
     // The method-body field assignment with a control-flow right-hand side
     // (`FieldAssignmentControlFlow`): the producer path and the two-hop.
     // A plain `FieldAssignment` is the shared `lower_field_assignment_bind`.
@@ -73,7 +80,7 @@ const NOT_FIELD_WRITES: &[(&str, usize)] = &[("threaded_ir/emit.rs", 1)];
 /// `fieldAt:put:` with a control-flow value, once in a conditional arm and once
 /// in a method body.
 const DYNAMIC_FIELD_WRITE_SITES: &[(&str, usize, usize)] = &[
-    ("control_flow/conditionals.rs", 1, 1),
+    ("control_flow/conditional_arms.rs", 1, 1),
     ("gen_server/methods.rs", 1, 1),
     ("statement_kinds.rs", 2, 2),
 ];

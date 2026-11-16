@@ -28,7 +28,7 @@ use super::list_ops::{BodyKind, EpilogueCx};
 use super::plan::ThreadingPlan;
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::{Document, leaf};
+use beamtalk_cerl_doc::{Document, form, leaf};
 use beamtalk_core::ast::{Block, Expression};
 use beamtalk_core::source_analysis::Span;
 
@@ -673,7 +673,7 @@ impl CoreErlangGenerator {
                 stmts.push(ThreadedStmt::Statement(expr_code, span));
             } else {
                 stmts.push(ThreadedStmt::Statement(
-                    docvec!["let _ = ", expr_code, " in"],
+                    form::let_header(leaf::var("_"), expr_code),
                     span,
                 ));
             }
@@ -692,36 +692,26 @@ impl CoreErlangGenerator {
                 let _ = self.next_state_var();
                 let target_version = self.state_version();
                 stmts.push(ThreadedStmt::Statement(
-                    docvec![
-                        "let ",
-                        leaf::var(tuple_var.clone()),
-                        " = ",
-                        expr_code,
-                        " in ",
-                    ],
+                    docvec![form::let_prefix(leaf::var(tuple_var.clone()), expr_code),],
                     span,
                 ));
                 stmts.push(ThreadedStmt::Bind {
                     target: VersionedVar::new(VersionPrefix::State, target_version, frame),
                     source: VersionedVar::new(VersionPrefix::State, source_version, frame),
-                    op: BindOp::Direct(ValueRef::Doc(docvec![
-                        "call 'erlang':'element'(2, ",
-                        leaf::var(tuple_var),
-                        ")",
-                    ])),
+                    op: BindOp::Direct(ValueRef::Doc(form::element(2, leaf::var(tuple_var)))),
                     span,
                 });
             } else {
                 let expr_code = self.expression_doc(expr)?;
                 stmts.push(ThreadedStmt::Statement(
-                    docvec!["let _ = ", expr_code, " in"],
+                    form::let_header(leaf::var("_"), expr_code),
                     span,
                 ));
             }
         } else {
             let expr_code = self.expression_doc(expr)?;
             stmts.push(ThreadedStmt::Statement(
-                docvec!["let _ = ", expr_code, " in"],
+                form::let_header(leaf::var("_"), expr_code),
                 span,
             ));
         }
@@ -919,10 +909,6 @@ impl CoreErlangGenerator {
         Ok(stmts)
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one statement kind (a construct answering {Result, NewStateAcc}) of the fold body walker"
-    )]
     fn lower_foldl_control_flow_with_mutations(
         &mut self,
         cx: FoldlStmtCx<'_>,
@@ -961,15 +947,11 @@ impl CoreErlangGenerator {
         let new_state = self.next_state_var();
         stmts.push(ThreadedStmt::Statement(
             docvec![
-                "let ",
-                leaf::var(tuple_var.clone()),
-                " = ",
-                doc,
-                " in let ",
-                leaf::var(new_state),
-                " = call 'erlang':'element'(2, ",
-                leaf::var(tuple_var.clone()),
-                ") in ",
+                form::let_prefix(leaf::var(tuple_var.clone()), doc),
+                form::let_prefix(
+                    leaf::var(new_state),
+                    form::element(2, leaf::var(tuple_var.clone()))
+                ),
             ],
             span,
         ));
@@ -990,15 +972,14 @@ impl CoreErlangGenerator {
                     stmts.push(Self::fold_accumulator(
                         FoldCarry::StateMap,
                         docvec![
-                            "let ",
-                            leaf::var(result_var.clone()),
-                            " = call 'erlang':'element'(1, ",
-                            leaf::var(tuple_var),
-                            ") in {[",
-                            leaf::var(result_var),
-                            " | AccList], ",
-                            leaf::var(self.current_state_var()),
-                            "}",
+                            form::let_prefix(
+                                leaf::var(result_var.clone()),
+                                form::element(1, leaf::var(tuple_var))
+                            ),
+                            form::tuple([
+                                docvec!["[", leaf::var(result_var), " | AccList]"],
+                                leaf::var(self.current_state_var())
+                            ]),
                         ],
                         span,
                     ));
@@ -1017,15 +998,11 @@ impl CoreErlangGenerator {
                         let result_var = self.fresh_temp_var("CondVal");
                         stmts.push(ThreadedStmt::Statement(
                             docvec![
-                                "let ",
-                                leaf::var(result_var.clone()),
-                                " = call 'erlang':'element'(1, ",
-                                leaf::var(tuple_var),
-                                ") in let ",
-                                leaf::var(pv.clone()),
-                                " = ",
-                                leaf::var(result_var),
-                                " in ",
+                                form::let_prefix(
+                                    leaf::var(result_var.clone()),
+                                    form::element(1, leaf::var(tuple_var))
+                                ),
+                                form::let_prefix(leaf::var(pv.clone()), leaf::var(result_var)),
                             ],
                             span,
                         ));
@@ -1037,15 +1014,14 @@ impl CoreErlangGenerator {
                     stmts.push(Self::fold_accumulator(
                         FoldCarry::StateMap,
                         docvec![
-                            "let ",
-                            leaf::var(result_var.clone()),
-                            " = call 'erlang':'element'(1, ",
-                            leaf::var(tuple_var),
-                            ") in {",
-                            leaf::var(result_var),
-                            ", ",
-                            leaf::var(self.current_state_var()),
-                            "}",
+                            form::let_prefix(
+                                leaf::var(result_var.clone()),
+                                form::element(1, leaf::var(tuple_var))
+                            ),
+                            form::tuple([
+                                leaf::var(result_var),
+                                leaf::var(self.current_state_var())
+                            ]),
                         ],
                         span,
                     ));
@@ -1262,15 +1238,11 @@ impl CoreErlangGenerator {
         let new_state = self.next_state_var();
         stmts.push(ThreadedStmt::Statement(
             docvec![
-                "let ",
-                leaf::var(tuple_var.clone()),
-                " = ",
-                expr_doc,
-                " in let ",
-                leaf::var(new_state),
-                " = call 'erlang':'element'(2, ",
-                leaf::var(tuple_var.clone()),
-                ") in ",
+                form::let_prefix(leaf::var(tuple_var.clone()), expr_doc),
+                form::let_prefix(
+                    leaf::var(new_state),
+                    form::element(2, leaf::var(tuple_var.clone()))
+                ),
             ],
             span,
         ));
@@ -1399,13 +1371,10 @@ impl CoreErlangGenerator {
             BodyKind::FoldlCollect => {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![
-                        "{[",
-                        leaf::var(last_val.to_string()),
-                        " | AccList], ",
+                    form::tuple([
+                        docvec!["[", leaf::var(last_val.to_string()), " | AccList]"],
                         leaf::var(self.current_state_var()),
-                        "}",
-                    ],
+                    ]),
                     span,
                 ));
             }
@@ -1420,13 +1389,10 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
-                        docvec![
-                            "let ",
+                        docvec![form::let_prefix(
                             leaf::var(pv.clone()),
-                            " = ",
-                            leaf::var(last_val.to_string()),
-                            " in ",
-                        ],
+                            leaf::var(last_val.to_string())
+                        ),],
                         span,
                     ));
                 }
@@ -1434,13 +1400,10 @@ impl CoreErlangGenerator {
             BodyKind::FoldlInject => {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![
-                        "{",
+                    docvec![form::tuple([
                         leaf::var(last_val.to_string()),
-                        ", ",
-                        leaf::var(self.current_state_var()),
-                        "}",
-                    ],
+                        leaf::var(self.current_state_var())
+                    ]),],
                     span,
                 ));
             }
@@ -1469,15 +1432,11 @@ impl CoreErlangGenerator {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
                     docvec![
-                        "let ",
-                        leaf::var(ir.clone()),
-                        " = call 'erlang':'element'(1, ",
-                        leaf::var(dispatch_var.to_string()),
-                        ") in {[",
-                        leaf::var(ir),
-                        " | AccList], ",
-                        leaf::var(fs),
-                        "}",
+                        form::let_prefix(
+                            leaf::var(ir.clone()),
+                            form::element(1, leaf::var(dispatch_var.to_string()))
+                        ),
+                        form::tuple([docvec!["[", leaf::var(ir), " | AccList]"], leaf::var(fs)]),
                     ],
                     span,
                 ));
@@ -1493,13 +1452,10 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
-                        docvec![
-                            "let ",
+                        docvec![form::let_prefix(
                             leaf::var(pv.clone()),
-                            " = call 'erlang':'element'(1, ",
-                            leaf::var(dispatch_var.to_string()),
-                            ") in ",
-                        ],
+                            form::element(1, leaf::var(dispatch_var.to_string()))
+                        ),],
                         span,
                     ));
                 }
@@ -1510,15 +1466,11 @@ impl CoreErlangGenerator {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
                     docvec![
-                        "let ",
-                        leaf::var(ar.clone()),
-                        " = call 'erlang':'element'(1, ",
-                        leaf::var(dispatch_var.to_string()),
-                        ") in {",
-                        leaf::var(ar),
-                        ", ",
-                        leaf::var(fs),
-                        "}",
+                        form::let_prefix(
+                            leaf::var(ar.clone()),
+                            form::element(1, leaf::var(dispatch_var.to_string()))
+                        ),
+                        form::tuple([leaf::var(ar), leaf::var(fs)]),
                     ],
                     span,
                 ));
@@ -1553,15 +1505,11 @@ impl CoreErlangGenerator {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
                     docvec![
-                        "let ",
-                        leaf::var(ir.clone()),
-                        " = call 'erlang':'element'(1, ",
-                        leaf::var(tuple_var.to_string()),
-                        ") in {[",
-                        leaf::var(ir),
-                        " | AccList], ",
-                        leaf::var(fs),
-                        "}",
+                        form::let_prefix(
+                            leaf::var(ir.clone()),
+                            form::element(1, leaf::var(tuple_var.to_string()))
+                        ),
+                        form::tuple([docvec!["[", leaf::var(ir), " | AccList]"], leaf::var(fs)]),
                     ],
                     span,
                 ));
@@ -1577,13 +1525,10 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
-                        docvec![
-                            "let ",
+                        docvec![form::let_prefix(
                             leaf::var(pv.clone()),
-                            " = call 'erlang':'element'(1, ",
-                            leaf::var(tuple_var.to_string()),
-                            ") in ",
-                        ],
+                            form::element(1, leaf::var(tuple_var.to_string()))
+                        ),],
                         span,
                     ));
                 }
@@ -1594,15 +1539,11 @@ impl CoreErlangGenerator {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
                     docvec![
-                        "let ",
-                        leaf::var(ar.clone()),
-                        " = call 'erlang':'element'(1, ",
-                        leaf::var(tuple_var.to_string()),
-                        ") in {",
-                        leaf::var(ar),
-                        ", ",
-                        leaf::var(fs),
-                        "}",
+                        form::let_prefix(
+                            leaf::var(ar.clone()),
+                            form::element(1, leaf::var(tuple_var.to_string()))
+                        ),
+                        form::tuple([leaf::var(ar), leaf::var(fs)]),
                     ],
                     span,
                 ));
@@ -1639,11 +1580,11 @@ impl CoreErlangGenerator {
                     stmts.push(Self::fold_accumulator(
                         plan.fold_carry(),
                         docvec![
-                            " {[",
-                            leaf::var(val.to_string()),
-                            " | AccList], ",
-                            vars_doc,
-                            "}",
+                            " ",
+                            form::tuple([
+                                docvec!["[", leaf::var(val.to_string()), " | AccList]"],
+                                vars_doc
+                            ]),
                         ],
                         span,
                     ));
@@ -1660,11 +1601,8 @@ impl CoreErlangGenerator {
                     if let Some(pv) = pred_var {
                         stmts.push(ThreadedStmt::Statement(
                             docvec![
-                                " let ",
-                                leaf::var(pv.clone()),
-                                " = ",
-                                leaf::var(val.to_string()),
-                                " in ",
+                                " ",
+                                form::let_prefix(leaf::var(pv.clone()), leaf::var(val.to_string())),
                             ],
                             span,
                         ));
@@ -1673,7 +1611,7 @@ impl CoreErlangGenerator {
                 BodyKind::FoldlInject => {
                     stmts.push(Self::fold_accumulator(
                         plan.fold_carry(),
-                        docvec![" {", leaf::var(val.to_string()), ", ", vars_doc, "}",],
+                        docvec![" ", form::tuple([leaf::var(val.to_string()), vars_doc]),],
                         span,
                     ));
                 }
@@ -1695,11 +1633,11 @@ impl CoreErlangGenerator {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
                     docvec![
-                        " {[",
-                        leaf::var(val.to_string()),
-                        " | AccList], ",
-                        leaf::var(self.current_state_var()),
-                        "}",
+                        " ",
+                        form::tuple([
+                            docvec!["[", leaf::var(val.to_string()), " | AccList]"],
+                            leaf::var(self.current_state_var())
+                        ]),
                     ],
                     span,
                 ));
@@ -1716,11 +1654,8 @@ impl CoreErlangGenerator {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
                         docvec![
-                            " let ",
-                            leaf::var(pv.clone()),
-                            " = ",
-                            leaf::var(val.to_string()),
-                            " in ",
+                            " ",
+                            form::let_prefix(leaf::var(pv.clone()), leaf::var(val.to_string())),
                         ],
                         span,
                     ));
@@ -1730,11 +1665,11 @@ impl CoreErlangGenerator {
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
                     docvec![
-                        " {",
-                        leaf::var(val.to_string()),
-                        ", ",
-                        leaf::var(self.current_state_var()),
-                        "}",
+                        " ",
+                        form::tuple([
+                            leaf::var(val.to_string()),
+                            leaf::var(self.current_state_var())
+                        ]),
                     ],
                     span,
                 ));
@@ -1770,13 +1705,10 @@ impl CoreErlangGenerator {
                 };
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![
-                        "{[",
-                        leaf::var(rhs_var.to_string()),
-                        " | AccList], ",
+                    form::tuple([
+                        docvec!["[", leaf::var(rhs_var.to_string()), " | AccList]"],
                         leaf::var(fs),
-                        "}",
-                    ],
+                    ]),
                     span,
                 ));
             }
@@ -1791,13 +1723,10 @@ impl CoreErlangGenerator {
             | BodyKind::FoldlSort { .. } => {
                 if let Some(pv) = pred_var {
                     stmts.push(ThreadedStmt::Statement(
-                        docvec![
-                            "let ",
+                        docvec![form::let_prefix(
                             leaf::var(pv.clone()),
-                            " = ",
-                            leaf::var(rhs_var.to_string()),
-                            " in ",
-                        ],
+                            leaf::var(rhs_var.to_string())
+                        ),],
                         span,
                     ));
                 }
@@ -1810,13 +1739,7 @@ impl CoreErlangGenerator {
                 };
                 stmts.push(Self::fold_accumulator(
                     FoldCarry::StateMap,
-                    docvec![
-                        "{",
-                        leaf::var(rhs_var.to_string()),
-                        ", ",
-                        leaf::var(fs),
-                        "}"
-                    ],
+                    docvec![form::tuple([leaf::var(rhs_var.to_string()), leaf::var(fs)]),],
                     span,
                 ));
             }
@@ -1836,13 +1759,10 @@ impl CoreErlangGenerator {
         result_var: &str,
     ) -> Result<Document<'static>> {
         let expr_code = self.expression_doc(expr)?;
-        Ok(docvec![
-            "let ",
+        Ok(docvec![form::let_prefix(
             leaf::var(result_var.to_string()),
-            " = ",
-            expr_code,
-            " in ",
-        ])
+            expr_code
+        ),])
     }
 
     #[allow(
@@ -1945,7 +1865,7 @@ impl CoreErlangGenerator {
                     }
                 } else {
                     stmts.push(ThreadedStmt::Statement(
-                        docvec!["let _ = ", self.expression_doc(expr)?, " in "],
+                        form::let_discard(self.expression_doc(expr)?),
                         span,
                     ));
                 }
@@ -1962,7 +1882,10 @@ impl CoreErlangGenerator {
                         let vars_doc = plan.current_vars_doc(self);
                         stmts.push(Self::fold_accumulator(
                             plan.fold_carry(),
-                            docvec!["{[", leaf::var(result_var), " | AccList], ", vars_doc, "}",],
+                            form::tuple([
+                                docvec!["[", leaf::var(result_var), " | AccList]"],
+                                vars_doc,
+                            ]),
                             span,
                         ));
                     } else {
@@ -1973,13 +1896,10 @@ impl CoreErlangGenerator {
                         };
                         stmts.push(Self::fold_accumulator(
                             FoldCarry::StateMap,
-                            docvec![
-                                "{[",
-                                leaf::var(result_var),
-                                " | AccList], ",
+                            form::tuple([
+                                docvec!["[", leaf::var(result_var), " | AccList]"],
                                 leaf::var(fs),
-                                "}",
-                            ],
+                            ]),
                             span,
                         ));
                     }
@@ -1987,7 +1907,7 @@ impl CoreErlangGenerator {
                     // close a non-last statement so the surrounding sequencing
                     // does not dangle a second `in`.
                     stmts.push(ThreadedStmt::Statement(
-                        docvec!["let _ = ", self.expression_doc(expr)?, " in "],
+                        form::let_discard(self.expression_doc(expr)?),
                         span,
                     ));
                 }
@@ -2011,7 +1931,7 @@ impl CoreErlangGenerator {
                 } else {
                     // see FoldlCollect — close a non-last statement.
                     stmts.push(ThreadedStmt::Statement(
-                        docvec!["let _ = ", self.expression_doc(expr)?, " in "],
+                        form::let_discard(self.expression_doc(expr)?),
                         span,
                     ));
                 }
@@ -2028,7 +1948,7 @@ impl CoreErlangGenerator {
                         let vars_doc = plan.current_vars_doc(self);
                         stmts.push(Self::fold_accumulator(
                             plan.fold_carry(),
-                            docvec!["{", leaf::var(acc_var), ", ", vars_doc, "}",],
+                            form::tuple([leaf::var(acc_var), vars_doc]),
                             span,
                         ));
                     } else {
@@ -2039,14 +1959,14 @@ impl CoreErlangGenerator {
                         };
                         stmts.push(Self::fold_accumulator(
                             FoldCarry::StateMap,
-                            docvec!["{", leaf::var(acc_var), ", ", leaf::var(fs), "}",],
+                            docvec![form::tuple([leaf::var(acc_var), leaf::var(fs)]),],
                             span,
                         ));
                     }
                 } else {
                     // see FoldlCollect — close a non-last statement.
                     stmts.push(ThreadedStmt::Statement(
-                        docvec!["let _ = ", self.expression_doc(expr)?, " in "],
+                        form::let_discard(self.expression_doc(expr)?),
                         span,
                     ));
                 }

@@ -20,6 +20,69 @@ use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{ClassDefinition, Expression, Module, SlotKind};
 use ecow::EcoString;
 
+/// A Block-layout `let var = value in`, with the rest of the sequence on the
+/// next line.
+fn bind(
+    var: Document<'static>,
+    value: Document<'static>,
+    body: Document<'static>,
+) -> Document<'static> {
+    form::let_in(var, value, body, Layout::Block)
+}
+
+/// A Block-layout `case`: one clause per line between `of` and `end`.
+fn case_block(
+    scrutinee: Document<'static>,
+    clauses: impl IntoIterator<Item = Document<'static>>,
+) -> Document<'static> {
+    form::case_of(scrutinee, clauses, Layout::Block)
+}
+
+/// A Block-layout clause with the always-true guard: `<patterns> when 'true' ->`
+/// with the body nested beneath.
+fn arm(
+    patterns: impl IntoIterator<Item = Document<'static>>,
+    body: Document<'static>,
+) -> Document<'static> {
+    form::clause(patterns, None, body, Layout::Block)
+}
+
+/// A one-line clause: `<patterns> when 'true' -> body`.
+fn arm_inline(
+    patterns: impl IntoIterator<Item = Document<'static>>,
+    body: Document<'static>,
+) -> Document<'static> {
+    form::clause(patterns, None, body, Layout::Flat)
+}
+
+/// `call 'maps':'get'('__skip_initialize__', InitArgs, 'false')`: the flag a
+/// child's `init/1` sets when it calls its parent's as a state-building helper.
+fn skip_initialize_flag() -> Document<'static> {
+    form::call(
+        "maps",
+        "get",
+        [
+            leaf::atom("__skip_initialize__"),
+            leaf::var("InitArgs"),
+            leaf::atom("false"),
+        ],
+    )
+}
+
+/// The `case` on [`skip_initialize_flag`]: `on_helper` is its `'true'` clause
+/// (a parent-helper call), `on_leaf` its `'false'` one.
+fn skip_initialize_case(
+    on_helper: Document<'static>,
+    on_leaf: Document<'static>,
+) -> Document<'static> {
+    case_block(skip_initialize_flag(), [on_helper, on_leaf])
+}
+
+/// `{'noreply', state}`.
+fn noreply(state: Document<'static>) -> Document<'static> {
+    form::tuple([leaf::atom("noreply"), state])
+}
+
 /// ADR 0078: Identifies a single class's `initialize` method in the
 /// auto-chained dispatch sequence emitted by `generate_handle_continue`.
 #[derive(Debug, Clone)]
@@ -68,7 +131,7 @@ impl InternalStateKey {
 /// The internal keys of an actor's state map, in the order `init/1` writes
 /// them. The single source for both the initial state map
 /// (`internal_state_prefix_doc`) and the committed-state guard
-/// (`clean_state_binding`, BT-4113).
+/// (`clean_state_let`, BT-4113).
 const INTERNAL_STATE_KEYS: [InternalStateKey; 2] =
     [InternalStateKey::ClassMod, InternalStateKey::ShapeVersion];
 
@@ -98,16 +161,13 @@ struct CommittedStateKeys(Vec<EcoString>);
 /// (`beamtalk_repl_loader_activate:hot_reload_descendants/2`) and their `init/1`
 /// calls the new superclass `init/1`, but their own modules are never
 /// recompiled.
-fn clean_state_binding(
+fn clean_state_let(
     dest: &'static str,
     src: &'static str,
     state_keys: Option<&CommittedStateKeys>,
+    body: Document<'static>,
 ) -> Document<'static> {
-    let strip = docvec![
-        "call 'beamtalk_actor':'strip_local_temps'(",
-        leaf::var(src),
-        ")"
-    ];
+    let strip = form::call("beamtalk_actor", "strip_local_temps", [leaf::var(src)]);
     let value = match state_keys {
         None => strip,
         Some(CommittedStateKeys(fields)) => {
@@ -126,33 +186,28 @@ fn clean_state_binding(
                 pattern.push(leaf::var(format!("_Key{i}")));
                 size += 1;
             }
-            docvec![
-                "case ",
+            case_block(
                 leaf::var(src),
-                " of",
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        "<~{",
-                        Document::Vec(pattern),
-                        "}~> when call 'erlang':'=:='(call 'erlang':'map_size'(",
+                [
+                    form::clause(
+                        [docvec!["~{", Document::Vec(pattern), "}~"]],
+                        Some(form::call(
+                            "erlang",
+                            "=:=",
+                            [
+                                form::call("erlang", "map_size", [leaf::var(src)]),
+                                leaf::int_lit(size),
+                            ],
+                        )),
                         leaf::var(src),
-                        "), ",
-                        leaf::int_lit(size),
-                        ") -> ",
-                        leaf::var(src),
-                        line(),
-                        "<_> when 'true' -> ",
-                        strip,
-                    ]
-                ),
-                line(),
-                "end",
-            ]
+                        Layout::Flat,
+                    ),
+                    form::clause([leaf::var("_")], None, strip, Layout::Flat),
+                ],
+            )
         }
     };
-    docvec!["let ", leaf::var(dest), " = ", value, " in"]
+    bind(leaf::var(dest), value, body)
 }
 
 /// The Core Erlang variable names of one pdict install / uninstall bracket
@@ -217,37 +272,9 @@ struct LogAndStop<'a> {
 /// arm shared by the generated `init/1`'s uninitialized-field check and its
 /// two `{'error', …}` result clauses.
 fn log_and_stop_arm(arm: LogAndStop<'_>) -> Document<'static> {
-    let mut parts: Vec<Document<'static>> = vec![
-        docvec![
-            "let ",
-            leaf::var(arm.msg_var.clone()),
-            " = ",
-            form::call("beamtalk_error", "format_safe", [arm.format_safe_args]),
-            " in",
-        ],
-        line(),
-        docvec![
-            "let ",
-            leaf::var(arm.class_name_var.clone()),
-            " = ",
-            form::call(arm.module_name, "class_name", []),
-            " in",
-        ],
-        line(),
-    ];
-    if let Some((var, arg)) = arm.formatted_var {
-        parts.push(docvec![
-            "let ",
-            leaf::var(var),
-            " = ",
-            form::call("beamtalk_error", "format", [arg]),
-            " in",
-        ]);
-        parts.push(line());
-    }
     let mut log_map = vec![
         Document::Str("~{'class' => "),
-        leaf::var(arm.class_name_var),
+        leaf::var(arm.class_name_var.clone()),
         Document::Str(", 'reason' => "),
         arm.reason,
     ];
@@ -256,24 +283,33 @@ fn log_and_stop_arm(arm: LogAndStop<'_>) -> Document<'static> {
         log_map.push(stack);
     }
     log_map.push(Document::Str(", 'domain' => ['beamtalk'|['runtime'|[]]]}~"));
-    parts.push(docvec![
-        "let _ = ",
+    let stop = form::tuple([leaf::atom("stop"), arm.stop_reason, arm.stop_state]);
+    let log = bind(
+        leaf::var("_"),
         form::call(
             "logger",
             "error",
-            [leaf::var(arm.msg_var), Document::Vec(log_map)]
+            [leaf::var(arm.msg_var.clone()), Document::Vec(log_map)],
         ),
-        " in",
-    ]);
-    parts.push(line());
-    parts.push(docvec![
-        "{'stop', ",
-        arm.stop_reason,
-        ", ",
-        arm.stop_state,
-        "}"
-    ]);
-    Document::Vec(parts)
+        stop,
+    );
+    let formatted = match arm.formatted_var {
+        Some((var, format_arg)) => bind(
+            leaf::var(var),
+            form::call("beamtalk_error", "format", [format_arg]),
+            log,
+        ),
+        None => log,
+    };
+    bind(
+        leaf::var(arm.msg_var),
+        form::call("beamtalk_error", "format_safe", [arm.format_safe_args]),
+        bind(
+            leaf::var(arm.class_name_var),
+            form::call(arm.module_name, "class_name", []),
+            formatted,
+        ),
+    )
 }
 
 impl CoreErlangGenerator {
@@ -418,90 +454,116 @@ impl CoreErlangGenerator {
                 (own_state_fields.prelude, own_state_fields.fields);
 
             let doc = docvec![
-                "'init'/1 = fun (InitArgs) ->",
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        // ADR 0079: set the `$beamtalk_actor` marker
-                        // so `class named:` / `allRegistered` can filter this
-                        // process as a Beamtalk actor. Guarded by
-                        // `__skip_initialize__` so parent helpers don't overwrite
-                        // the leaf class's marker.
-                        Self::beamtalk_actor_marker_doc(&class_name, traps_exit),
-                        line(),
-                        "%% Call parent init to get inherited state fields",
-                        line(),
-                        // Pass __skip_initialize__ to parent so it
-                        // doesn't dispatch initialize — only the leaf should.
-                        "let _ParentArgs = call 'maps':'put'('__skip_initialize__', 'true', InitArgs) in",
-                        line(),
+                form::fun_def(
+                    "init",
+                    [leaf::var("InitArgs")],
+                    // ADR 0079: set the `$beamtalk_actor` marker
+                    // so `class named:` / `allRegistered` can filter this
+                    // process as a Beamtalk actor. Guarded by
+                    // `__skip_initialize__` so parent helpers don't overwrite
+                    // the leaf class's marker.
+                    Self::beamtalk_actor_marker_doc(
+                        &class_name,
+                        traps_exit,
                         docvec![
-                            "case call ",
-                            leaf::atom(parent_module.clone()),
-                            ":'init'(_ParentArgs) of"
-                        ],
-                        nest(
-                            INDENT,
-                            docvec![
-                                line(),
-                                "<{'ok', ParentState}> when 'true' ->",
-                                nest(
-                                    INDENT,
-                                    docvec![
-                                        line(),
-                                        "%% Merge parent state with the fields declared by this class",
-                                        line(),
-                                        own_prelude,
-                                        "let ChildFields = ~{",
-                                        nest(
-                                            INDENT,
+                            "%% Call parent init to get inherited state fields",
+                            line(),
+                            // Pass __skip_initialize__ to parent so it
+                            // doesn't dispatch initialize — only the leaf should.
+                            bind(
+                                leaf::var("_ParentArgs"),
+                                form::call(
+                                    "maps",
+                                    "put",
+                                    [
+                                        leaf::atom("__skip_initialize__"),
+                                        leaf::atom("true"),
+                                        leaf::var("InitArgs"),
+                                    ],
+                                ),
+                                case_block(
+                                    form::call(parent_module, "init", [leaf::var("_ParentArgs")]),
+                                    [
+                                        arm(
+                                            [form::tuple([
+                                                leaf::atom("ok"),
+                                                leaf::var("ParentState"),
+                                            ])],
                                             docvec![
+                                                "%% Merge parent state with the fields declared by this class",
                                                 line(),
-                                                Self::internal_state_prefix_doc(
-                                                    &module_name,
-                                                    shape_version
+                                                own_prelude,
+                                                // The `in let` chain keeps `in` at the start of each
+                                                // line, which no `form::let_in` layout produces.
+                                                "let ChildFields = ~{",
+                                                nest(
+                                                    INDENT,
+                                                    docvec![
+                                                        line(),
+                                                        Self::internal_state_prefix_doc(
+                                                            &module_name,
+                                                            shape_version
+                                                        ),
+                                                        Document::Vec(own_state_fields),
+                                                    ]
                                                 ),
-                                                Document::Vec(own_state_fields),
+                                                line(),
+                                                "}~",
+                                                line(),
+                                                "in let MergedState = ",
+                                                form::call(
+                                                    "maps",
+                                                    "merge",
+                                                    [
+                                                        leaf::var("ParentState"),
+                                                        leaf::var("ChildFields"),
+                                                    ],
+                                                ),
+                                                line(),
+                                                // Merge InitArgs last so user-provided values override defaults
+                                                // Order: parent defaults → child defaults → user overrides
+                                                // `self.class_name()` (not the AST-or-module
+                                                // `class_name` above): identical when a class is
+                                                // present, and consistent with the spawn arms
+                                                // for expression modules with no class.
+                                                Self::check_init_args_guarded_doc(
+                                                    &self.class_name(),
+                                                    "MergedState",
+                                                ),
+                                                line(),
+                                                "in let FinalState = ",
+                                                form::call(
+                                                    "maps",
+                                                    "merge",
+                                                    [
+                                                        leaf::var("MergedState"),
+                                                        leaf::var("CheckedArgs"),
+                                                    ],
+                                                ),
+                                                line(),
+                                                init_return.clone(),
                                             ]
                                         ),
-                                        line(),
-                                        "}~",
-                                        line(),
-                                        "in let MergedState = call 'maps':'merge'(ParentState, ChildFields)",
-                                        line(),
-                                        // Merge InitArgs last so user-provided values override defaults
-                                        // Order: parent defaults → child defaults → user overrides
-                                        // `self.class_name()` (not the AST-or-module
-                                        // `class_name` above): identical when a class is
-                                        // present, and consistent with the spawn arms
-                                        // for expression modules with no class.
-                                        Self::check_init_args_guarded_doc(
-                                            &self.class_name(),
-                                            "MergedState",
+                                        arm(
+                                            [form::tuple([
+                                                leaf::atom("error"),
+                                                leaf::var("Reason"),
+                                            ])],
+                                            docvec![
+                                                "%% Propagate parent init error",
+                                                line(),
+                                                form::tuple([
+                                                    leaf::atom("error"),
+                                                    leaf::var("Reason")
+                                                ]),
+                                            ]
                                         ),
-                                        line(),
-                                        "in let FinalState = call 'maps':'merge'(MergedState, CheckedArgs)",
-                                        line(),
-                                        init_return.clone(),
-                                    ]
+                                    ],
                                 ),
-                                line(),
-                                "<{'error', Reason}> when 'true' ->",
-                                nest(
-                                    INDENT,
-                                    docvec![
-                                        line(),
-                                        "%% Propagate parent init error",
-                                        line(),
-                                        "{'error', Reason}",
-                                    ]
-                                ),
-                            ]
-                        ),
-                        line(),
-                        "end",
-                    ]
+                            ),
+                        ],
+                    ),
+                    Layout::Block,
                 ),
                 "\n",
                 "\n",
@@ -514,39 +576,48 @@ impl CoreErlangGenerator {
                 (initial_state_fields.prelude, initial_state_fields.fields);
 
             let doc = docvec![
-                "'init'/1 = fun (InitArgs) ->",
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        // ADR 0079: set the `$beamtalk_actor` marker
-                        // so `class named:` / `allRegistered` can filter this
-                        // process as a Beamtalk actor. Guarded by
-                        // `__skip_initialize__` so parent helpers don't overwrite
-                        // the leaf class's marker.
-                        Self::beamtalk_actor_marker_doc(&class_name, traps_exit),
-                        line(),
-                        initial_prelude,
-                        "let DefaultState = ~{",
-                        nest(
-                            INDENT,
-                            docvec![
-                                line(),
-                                Self::internal_state_prefix_doc(&module_name, shape_version),
-                                Document::Vec(initial_state_fields),
-                            ]
-                        ),
-                        line(),
-                        "}~",
-                        line(),
-                        // Merge InitArgs into DefaultState - InitArgs values override defaults
-                        // `self.class_name()`: see the MergedState path above.
-                        Self::check_init_args_guarded_doc(&self.class_name(), "DefaultState"),
-                        line(),
-                        "in let FinalState = call 'maps':'merge'(DefaultState, CheckedArgs)",
-                        line(),
-                        init_return,
-                    ]
+                form::fun_def(
+                    "init",
+                    [leaf::var("InitArgs")],
+                    // ADR 0079: set the `$beamtalk_actor` marker
+                    // so `class named:` / `allRegistered` can filter this
+                    // process as a Beamtalk actor. Guarded by
+                    // `__skip_initialize__` so parent helpers don't overwrite
+                    // the leaf class's marker.
+                    Self::beamtalk_actor_marker_doc(
+                        &class_name,
+                        traps_exit,
+                        docvec![
+                            initial_prelude,
+                            // The `in let` chain keeps `in` at the start of each
+                            // line, which no `form::let_in` layout produces.
+                            "let DefaultState = ~{",
+                            nest(
+                                INDENT,
+                                docvec![
+                                    line(),
+                                    Self::internal_state_prefix_doc(&module_name, shape_version),
+                                    Document::Vec(initial_state_fields),
+                                ]
+                            ),
+                            line(),
+                            "}~",
+                            line(),
+                            // Merge InitArgs into DefaultState - InitArgs values override defaults
+                            // `self.class_name()`: see the MergedState path above.
+                            Self::check_init_args_guarded_doc(&self.class_name(), "DefaultState"),
+                            line(),
+                            "in let FinalState = ",
+                            form::call(
+                                "maps",
+                                "merge",
+                                [leaf::var("DefaultState"), leaf::var("CheckedArgs")],
+                            ),
+                            line(),
+                            init_return,
+                        ],
+                    ),
+                    Layout::Block,
                 ),
                 "\n",
                 "\n",
@@ -575,31 +646,20 @@ impl CoreErlangGenerator {
         base_state_var: &'static str,
     ) -> Document<'static> {
         docvec![
-            "in let CheckedArgs = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<'true'> when 'true' -> InitArgs",
-                    line(),
-                    "<'false'> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            super::super::errors::check_init_args_call_doc(
-                                leaf::atom(class_name.to_owned()),
-                                "spawnWith:",
-                                Document::Str(base_state_var),
-                                Document::Str("InitArgs"),
-                                &[sentinel_tags::INIT_ACK],
-                            ),
-                        ]
+            "in let CheckedArgs = ",
+            skip_initialize_case(
+                arm_inline([leaf::atom("true")], leaf::var("InitArgs")),
+                arm(
+                    [leaf::atom("false")],
+                    super::super::errors::check_init_args_call_doc(
+                        leaf::atom(class_name.to_owned()),
+                        "spawnWith:",
+                        Document::Str(base_state_var),
+                        Document::Str("InitArgs"),
+                        &[sentinel_tags::INIT_ACK],
                     ),
-                ]
+                ),
             ),
-            line(),
-            "end",
         ]
     }
 
@@ -616,7 +676,7 @@ impl CoreErlangGenerator {
     /// superclass's, since shape versions are per concrete class.
     ///
     /// The entries come from [`INTERNAL_STATE_KEYS`], the same table the
-    /// committed-state guard ([`clean_state_binding`]) matches, so the guard
+    /// committed-state guard ([`clean_state_let`]) matches, so the guard
     /// can never disagree with the map `init/1` builds.
     fn internal_state_prefix_doc(module_name: &str, shape_version: u32) -> Document<'static> {
         let mut parts: Vec<Document<'static>> = Vec::new();
@@ -640,7 +700,7 @@ impl CoreErlangGenerator {
     /// actor holds when it carries no codegen-internal `__local__`
     /// temporaries. The generated callbacks skip the `strip_local_temps/1`
     /// key scan when the new state holds all of these keys and no others
-    /// (see [`clean_state_binding`]).
+    /// (see [`clean_state_let`]).
     ///
     /// The guard checks presence as well as count, so it stays sound
     /// whatever the runtime field set turns out to be: an ancestor missing
@@ -694,36 +754,40 @@ impl CoreErlangGenerator {
     /// `traps_exit` is false, this is byte-identical to the pre-BT-3596
     /// output — actors that never override `terminate:` keep today's plain
     /// link semantics.
-    fn beamtalk_actor_marker_doc(class_name: &str, traps_exit: bool) -> Document<'static> {
-        let put_marker = docvec![
-            "call 'erlang':'put'('$beamtalk_actor', ",
-            leaf::atom(class_name.to_owned()),
-            ")",
-        ];
+    fn beamtalk_actor_marker_doc(
+        class_name: &str,
+        traps_exit: bool,
+        body: Document<'static>,
+    ) -> Document<'static> {
+        let put_marker = form::call(
+            "erlang",
+            "put",
+            [
+                leaf::atom("$beamtalk_actor"),
+                leaf::atom(class_name.to_owned()),
+            ],
+        );
         let false_arm_body = if traps_exit {
-            docvec![
-                "let _TrapExit = call 'erlang':'process_flag'('trap_exit', 'true') in",
-                line(),
+            bind(
+                leaf::var("_TrapExit"),
+                form::call(
+                    "erlang",
+                    "process_flag",
+                    [leaf::atom("trap_exit"), leaf::atom("true")],
+                ),
                 put_marker,
-            ]
+            )
         } else {
             put_marker
         };
-        docvec![
-            "let _Marker = case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<'true'> when 'true' -> 'skipped'",
-                    line(),
-                    "<'false'> when 'true' ->",
-                    nest(INDENT, docvec![line(), false_arm_body]),
-                ]
+        bind(
+            leaf::var("_Marker"),
+            skip_initialize_case(
+                arm_inline([leaf::atom("true")], leaf::atom("skipped")),
+                arm([leaf::atom("false")], false_arm_body),
             ),
-            line(),
-            "end in",
-        ]
+            body,
+        )
     }
 
     /// Generate the lifecycle start telemetry call for init/1.
@@ -732,17 +796,39 @@ impl CoreErlangGenerator {
     /// Uses a `let` binding for `self()` since Core Erlang map literals cannot contain calls.
     /// Takes the clean Beamtalk class name (e.g., `EventStore`), not the
     /// compiled module name, so lifecycle traces match dispatch trace format.
-    fn lifecycle_start_telemetry_doc(class_name: &str) -> Document<'static> {
-        docvec![
-            "let _TelPid = call 'erlang':'self'() in",
-            line(),
-            docvec![
-                "let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(",
-                "['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => ",
-                leaf::atom(class_name.to_owned()),
-                "}~) in",
-            ],
-        ]
+    fn lifecycle_telemetry_let(
+        event: &'static str,
+        telemetry_var: &'static str,
+        class_name: &str,
+        extra_metadata: Document<'static>,
+        body: Document<'static>,
+    ) -> Document<'static> {
+        bind(
+            leaf::var("_TelPid"),
+            form::call("erlang", "self", []),
+            bind(
+                leaf::var(telemetry_var),
+                form::call(
+                    "beamtalk_actor",
+                    "maybe_execute_telemetry",
+                    [
+                        docvec![
+                            "['beamtalk', 'actor', 'lifecycle', ",
+                            leaf::atom(event),
+                            "]"
+                        ],
+                        Document::Str("~{}~"),
+                        docvec![
+                            "~{'pid' => _TelPid, 'class' => ",
+                            leaf::atom(class_name.to_owned()),
+                            extra_metadata,
+                            "}~"
+                        ],
+                    ],
+                ),
+                body,
+            ),
+        )
     }
 
     /// Generate a plain init return with lifecycle telemetry.
@@ -755,41 +841,42 @@ impl CoreErlangGenerator {
         docvec![
             // Guard telemetry behind __skip_initialize__ to avoid
             // double-fire when called as parent state-building helper
-            "in case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<'true'> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            "let CleanState = call 'maps':'remove'('__skip_initialize__', FinalState) in",
-                            line(),
-                            "{'ok', CleanState}",
-                        ]
+            "in ",
+            skip_initialize_case(
+                arm(
+                    [leaf::atom("true")],
+                    bind(
+                        leaf::var("CleanState"),
+                        form::call(
+                            "maps",
+                            "remove",
+                            [leaf::atom("__skip_initialize__"), leaf::var("FinalState")],
+                        ),
+                        form::tuple([leaf::atom("ok"), leaf::var("CleanState")]),
                     ),
-                    line(),
-                    "<'false'> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            Self::lifecycle_start_telemetry_doc(class_name),
-                            line(),
-                            // BT-3992: strip the starter's initialize-ack
-                            // target and ack at once — no `initialize` step
-                            // follows, so startup ends here.
-                            "let AckState = call 'beamtalk_actor':'take_init_ack'(FinalState, 'initialized') in",
-                            line(),
-                            "{'ok', AckState}",
-                        ]
+                ),
+                arm(
+                    [leaf::atom("false")],
+                    Self::lifecycle_telemetry_let(
+                        "start",
+                        "_TelStart",
+                        class_name,
+                        Document::Nil,
+                        // BT-3992: strip the starter's initialize-ack
+                        // target and ack at once — no `initialize` step
+                        // follows, so startup ends here.
+                        bind(
+                            leaf::var("AckState"),
+                            form::call(
+                                "beamtalk_actor",
+                                "take_init_ack",
+                                [leaf::var("FinalState"), leaf::atom("initialized")],
+                            ),
+                            form::tuple([leaf::atom("ok"), leaf::var("AckState")]),
+                        ),
                     ),
-                ]
+                ),
             ),
-            line(),
-            "end",
         ]
     }
 
@@ -810,48 +897,59 @@ impl CoreErlangGenerator {
         docvec![
             "%% BT-1417/BT-1541: Defer initialize to handle_continue unless called as a parent helper",
             line(),
-            "in case call 'maps':'get'('__skip_initialize__', InitArgs, 'false') of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<'true'> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            // Strip the flag from state before returning
-                            "let CleanState = call 'maps':'remove'('__skip_initialize__', FinalState) in",
-                            line(),
-                            "{'ok', CleanState}",
-                        ]
+            "in ",
+            skip_initialize_case(
+                arm(
+                    [leaf::atom("true")],
+                    // Strip the flag from state before returning
+                    bind(
+                        leaf::var("CleanState"),
+                        form::call(
+                            "maps",
+                            "remove",
+                            [leaf::atom("__skip_initialize__"), leaf::var("FinalState")],
+                        ),
+                        form::tuple([leaf::atom("ok"), leaf::var("CleanState")]),
                     ),
-                    line(),
-                    "<'false'> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            // Strip the flag from state before returning
-                            "let CleanState1 = call 'maps':'remove'('__skip_initialize__', FinalState) in",
-                            line(),
-                            // Emit lifecycle start telemetry before returning
-                            Self::lifecycle_start_telemetry_doc(class_name),
-                            line(),
+                ),
+                arm(
+                    [leaf::atom("false")],
+                    // Strip the flag from state before returning
+                    bind(
+                        leaf::var("CleanState1"),
+                        form::call(
+                            "maps",
+                            "remove",
+                            [leaf::atom("__skip_initialize__"), leaf::var("FinalState")],
+                        ),
+                        // Emit lifecycle start telemetry before returning
+                        Self::lifecycle_telemetry_let(
+                            "start",
+                            "_TelStart",
+                            class_name,
+                            Document::Nil,
                             // BT-3992: strip the starter's initialize-ack
                             // target and keep it for handle_continue's
                             // `initialize` step, which acks once it succeeds.
-                            "let AckState = call 'beamtalk_actor':'take_init_ack'(CleanState1, 'initializing') in",
-                            line(),
-                            // Return {ok, State, {continue, initialize}} to defer
-                            // initialize dispatch to handle_continue where the loop is running
-                            "{'ok', AckState, {'continue', 'initialize'}}",
-                        ]
+                            bind(
+                                leaf::var("AckState"),
+                                form::call(
+                                    "beamtalk_actor",
+                                    "take_init_ack",
+                                    [leaf::var("CleanState1"), leaf::atom("initializing")],
+                                ),
+                                // Return {ok, State, {continue, initialize}} to defer
+                                // initialize dispatch to handle_continue where the loop is running
+                                form::tuple([
+                                    leaf::atom("ok"),
+                                    leaf::var("AckState"),
+                                    form::tuple([leaf::atom("continue"), leaf::atom("initialize")]),
+                                ]),
+                            ),
+                        ),
                     ),
-                ]
+                ),
             ),
-            line(),
-            "end",
         ]
     }
 
@@ -888,18 +986,18 @@ impl CoreErlangGenerator {
             // post-initialize committed state, the same outermost-boundary clean-up
             // handle_call/handle_cast apply — an `initialize` that threads an outer
             // local must not persist the temporary into the actor's first state.
-            return docvec![
-                line(),
-                clean_state_binding("InitCleanState", "InitNewState", state_keys),
-                line(),
-                "{'noreply', InitCleanState}",
-            ];
+            return clean_state_let(
+                "InitCleanState",
+                "InitNewState",
+                state_keys,
+                noreply(leaf::var("InitCleanState")),
+            );
         }
 
         // Build nested checks: each field gets a case that either stops or continues.
         // We build from the inside out — the innermost is the cleaned {'noreply', …}
         // (__local__ threading temps stripped from the committed state).
-        let mut body: Document<'static> = docvec!["{'noreply', InitCleanState}"];
+        let mut body: Document<'static> = noreply(leaf::var("InitCleanState"));
 
         for (i, field) in typed_no_default.iter().enumerate().rev() {
             let field_name = field.field_name.clone();
@@ -919,25 +1017,19 @@ impl CoreErlangGenerator {
                 "{owning_class} field '{field_name}' (:: {type_name}) was not initialized",
             );
 
-            body = docvec![
-                "let ",
+            body = bind(
                 leaf::var(check_var.clone()),
-                " = call 'maps':'get'(",
-                leaf::atom(field_name),
-                ", InitNewState) in",
-                line(),
-                "case ",
-                leaf::var(check_var),
-                " of",
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        "<'nil'> when 'true' ->",
-                        nest(
-                            INDENT,
+                form::call(
+                    "maps",
+                    "get",
+                    [leaf::atom(field_name), leaf::var("InitNewState")],
+                ),
+                case_block(
+                    leaf::var(check_var),
+                    [
+                        arm(
+                            [leaf::atom("nil")],
                             docvec![
-                                line(),
                                 BeamtalkErrorChain::new(
                                     "uninitialized_state_error",
                                     leaf::atom(owning_class.to_string())
@@ -968,28 +1060,26 @@ impl CoreErlangGenerator {
                                     stop_reason: leaf::var(fmt_var),
                                     stop_state: Document::Str("InitCleanState"),
                                 }),
-                            ]
+                            ],
                         ),
-                        line(),
-                        "<_> when 'true' ->",
-                        nest(INDENT, docvec![line(), body]),
-                    ]
+                        arm([leaf::var("_")], body),
+                    ],
                 ),
-                line(),
-                "end",
-            ];
+            );
         }
 
-        docvec![
-            line(),
-            // clean the committed state once before the field checks; the
-            // checks read user fields (never `__local__`) so they are unaffected.
-            clean_state_binding("InitCleanState", "InitNewState", state_keys),
-            line(),
-            "%% BT-1949/BT-1951: Verify typed-no-default fields (including inherited) were initialized",
-            line(),
-            body,
-        ]
+        // clean the committed state once before the field checks; the
+        // checks read user fields (never `__local__`) so they are unaffected.
+        clean_state_let(
+            "InitCleanState",
+            "InitNewState",
+            state_keys,
+            docvec![
+                "%% BT-1949/BT-1951: Verify typed-no-default fields (including inherited) were initialized",
+                line(),
+                body,
+            ],
+        )
     }
 
     /// ADR 0078: Returns the list of user-defined initializers to run
@@ -1344,7 +1434,7 @@ impl CoreErlangGenerator {
         // initialize method), the post-init check runs directly against the
         // inbound `State` by binding it to `InitNewState`.
         let inner = if chain.is_empty() {
-            docvec![line(), "let InitNewState = State in", success_body,]
+            bind(leaf::var("InitNewState"), leaf::var("State"), success_body)
         } else {
             // Build the dispatch chain from last to first so each step can nest
             // inside the previous one's success arm.
@@ -1379,183 +1469,155 @@ impl CoreErlangGenerator {
 
                 let pdict = PdictVars::chain_step(&idx);
 
-                inner = docvec![
-                    Self::pdict_stash_preamble(&pdict, &in_state_var),
-                    line(),
-                    docvec![
-                        "let ",
-                        leaf::var(result_var.clone()),
-                        " = call ",
-                        leaf::atom(class.module_name.clone()),
-                        ":'safe_dispatch'('initialize', [], ",
-                        leaf::var(in_state_var),
-                        ") in",
+                let dispatch = form::call(
+                    class.module_name.clone(),
+                    "safe_dispatch",
+                    [
+                        leaf::atom("initialize"),
+                        Document::Str("[]"),
+                        leaf::var(in_state_var.clone()),
                     ],
-                    Self::pdict_restore_epilogue(&pdict),
-                    line(),
-                    "case ",
-                    leaf::var(result_var),
-                    " of",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            docvec![
-                                "<{'reply', ",
-                                leaf::var(reply_ret_var),
-                                ", ",
-                                leaf::var(next_state_var),
-                                "}> when 'true' ->",
-                            ],
-                            nest(INDENT, inner),
-                            line(),
-                            // Destructure error triple to capture stacktrace
-                            docvec![
-                                "<{'error', {",
+                );
+                let success_arm = arm(
+                    [form::tuple([
+                        leaf::atom("reply"),
+                        leaf::var(reply_ret_var),
+                        leaf::var(next_state_var),
+                    ])],
+                    inner,
+                );
+                // Destructure error triple to capture stacktrace
+                let triple_arm = arm(
+                    [form::tuple([
+                        leaf::atom("error"),
+                        form::tuple([
+                            leaf::var(err_triple_type.clone()),
+                            leaf::var(err_triple_reason.clone()),
+                            leaf::var(err_triple_stack.clone()),
+                        ]),
+                        leaf::var(err_state_var.clone()),
+                    ])],
+                    log_and_stop_arm(LogAndStop {
+                        msg_var: err_msg,
+                        class_name_var: err_class_name_var,
+                        module_name: &class.module_name,
+                        format_safe_args: docvec![
+                            form::tuple([
                                 leaf::var(err_triple_type.clone()),
-                                ", ",
                                 leaf::var(err_triple_reason.clone()),
-                                ", ",
-                                leaf::var(err_triple_stack.clone()),
-                                "}, ",
-                                leaf::var(err_state_var.clone()),
-                                "}> when 'true' ->",
-                            ],
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    log_and_stop_arm(LogAndStop {
-                                        msg_var: err_msg,
-                                        class_name_var: err_class_name_var,
-                                        module_name: &class.module_name,
-                                        format_safe_args: docvec![
-                                            "{",
-                                            leaf::var(err_triple_type.clone()),
-                                            ", ",
-                                            leaf::var(err_triple_reason.clone()),
-                                            "}, ",
-                                            leaf::var(err_triple_stack.clone()),
-                                        ],
-                                        formatted_var: None,
-                                        reason: docvec![
-                                            "{",
-                                            leaf::var(err_triple_type.clone()),
-                                            ", ",
-                                            leaf::var(err_triple_reason.clone()),
-                                            "}"
-                                        ],
-                                        stacktrace: Some(leaf::var(err_triple_stack.clone())),
-                                        stop_reason: docvec![
-                                            "{",
-                                            leaf::var(err_triple_type),
-                                            ", ",
-                                            leaf::var(err_triple_reason),
-                                            ", ",
-                                            leaf::var(err_triple_stack),
-                                            "}"
-                                        ],
-                                        stop_state: leaf::var(err_state_var),
-                                    }),
-                                ]
-                            ),
-                            line(),
-                            // Fallback: plain {error, Error, State} from dispatch (DNU, #beamtalk_error{}, etc.)
-                            docvec![
-                                "<{'error', ",
-                                leaf::var(err_plain.clone()),
-                                ", ",
-                                leaf::var(err_state_var2.clone()),
-                                "}> when 'true' ->",
-                            ],
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    log_and_stop_arm(LogAndStop {
-                                        msg_var: err_msg2,
-                                        class_name_var: err_class_name_var2,
-                                        module_name: &class.module_name,
-                                        format_safe_args: leaf::var(err_plain.clone()),
-                                        formatted_var: None,
-                                        reason: leaf::var(err_plain.clone()),
-                                        stacktrace: None,
-                                        stop_reason: leaf::var(err_plain),
-                                        stop_state: leaf::var(err_state_var2),
-                                    }),
-                                ]
-                            ),
-                        ]
+                            ]),
+                            ", ",
+                            leaf::var(err_triple_stack.clone()),
+                        ],
+                        formatted_var: None,
+                        reason: form::tuple([
+                            leaf::var(err_triple_type.clone()),
+                            leaf::var(err_triple_reason.clone()),
+                        ]),
+                        stacktrace: Some(leaf::var(err_triple_stack.clone())),
+                        stop_reason: form::tuple([
+                            leaf::var(err_triple_type),
+                            leaf::var(err_triple_reason),
+                            leaf::var(err_triple_stack),
+                        ]),
+                        stop_state: leaf::var(err_state_var),
+                    }),
+                );
+                // Fallback: plain {error, Error, State} from dispatch (DNU, #beamtalk_error{}, etc.)
+                let plain_arm = arm(
+                    [form::tuple([
+                        leaf::atom("error"),
+                        leaf::var(err_plain.clone()),
+                        leaf::var(err_state_var2.clone()),
+                    ])],
+                    log_and_stop_arm(LogAndStop {
+                        msg_var: err_msg2,
+                        class_name_var: err_class_name_var2,
+                        module_name: &class.module_name,
+                        format_safe_args: leaf::var(err_plain.clone()),
+                        formatted_var: None,
+                        reason: leaf::var(err_plain.clone()),
+                        stacktrace: None,
+                        stop_reason: leaf::var(err_plain),
+                        stop_state: leaf::var(err_state_var2),
+                    }),
+                );
+
+                inner = Self::pdict_stash(
+                    &pdict,
+                    &in_state_var,
+                    bind(
+                        leaf::var(result_var.clone()),
+                        dispatch,
+                        Self::pdict_restore(
+                            &pdict,
+                            case_block(leaf::var(result_var), [success_arm, triple_arm, plain_arm]),
+                        ),
                     ),
-                    line(),
-                    "end",
-                ];
+                );
             }
             inner
         };
 
-        let wrapped = Self::pending_actions_wrap(docvec![
-            "case Continue of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<'initialize'> when 'true' ->",
-                    nest(
-                        INDENT,
-                        // The auto-chained dispatch body. Each
-                        // class's initialize is bracketed by its own
-                        // pdict stash/restore pair to preserve
-                        // re-entrant self-send semantics.
-                        inner,
-                    ),
-                    // BT-3968: one queued `self continueWith:`
-                    // step. The rest of the queue is seeded back
-                    // first (FIFO: a request made by this step
-                    // runs after them), then the step dispatches
-                    // through the very same case as a
-                    // fire-and-forget cast — pdict stash/restore,
-                    // strip_local_temps, notify_state_change and
-                    // the shared no-reply error arms, so a raising
-                    // step crashes the actor (ADR 0134) — by binding
-                    // CastSelector / CastArgs in the pattern.
-                    line(),
-                    docvec![
-                        "<{",
+        let wrapped = Self::pending_actions_wrap(case_block(
+            leaf::var("Continue"),
+            [
+                // The auto-chained dispatch body. Each class's initialize is
+                // bracketed by its own pdict stash/restore pair to preserve
+                // re-entrant self-send semantics.
+                arm([leaf::atom("initialize")], inner),
+                // BT-3968: one queued `self continueWith:`
+                // step. The rest of the queue is seeded back
+                // first (FIFO: a request made by this step
+                // runs after them), then the step dispatches
+                // through the very same case as a
+                // fire-and-forget cast — pdict stash/restore,
+                // strip_local_temps, notify_state_change and
+                // the shared no-reply error arms, so a raising
+                // step crashes the actor (ADR 0134) — by binding
+                // CastSelector / CastArgs in the pattern.
+                arm(
+                    [form::tuple([
                         leaf::atom(sentinel_tags::CONTINUE),
-                        ", [{CastSelector, CastArgs}|ContRest]}> when 'true' ->",
-                    ],
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            "let _ContSeeded = call 'beamtalk_actor':'seed_pending_continuations'(ContRest) in",
-                            Self::cast_dispatch_case(&module_name, state_keys),
-                        ]
+                        docvec!["[{CastSelector, CastArgs}|ContRest]"],
+                    ])],
+                    bind(
+                        leaf::var("_ContSeeded"),
+                        form::call(
+                            "beamtalk_actor",
+                            "seed_pending_continuations",
+                            [leaf::var("ContRest")],
+                        ),
+                        Self::cast_dispatch_case(&module_name, state_keys),
                     ),
-                    line(),
-                    "<_> when 'true' -> {'noreply', State}",
-                ]
-            ),
-            line(),
-            "end",
-        ]);
+                ),
+                arm_inline([leaf::var("_")], noreply(leaf::var("State"))),
+            ],
+        ));
 
         let doc = docvec![
-            "'handle_continue'/2 = fun (Continue, State) ->",
-            nest(
-                INDENT,
+            form::fun_def(
+                "handle_continue",
+                [leaf::var("Continue"), leaf::var("State")],
                 docvec![
-                    line(),
                     // BT-3992: once the `initialize` step (with its pending
                     // actions applied) has its final result, tell the starter
                     // startup is over — before OTP runs any continuation
                     // `initialize` requested. A no-op for every other step.
+                    //
+                    // `in` sits on its own line here, a layout no
+                    // `form::let_in` produces.
                     "let _ContinueResult =",
                     nest(INDENT, docvec![line(), wrapped]),
                     line(),
-                    "in call 'beamtalk_actor':'ack_initialized'(Continue, _ContinueResult)",
-                ]
+                    "in ",
+                    form::call(
+                        "beamtalk_actor",
+                        "ack_initialized",
+                        [leaf::var("Continue"), leaf::var("_ContinueResult")],
+                    ),
+                ],
+                Layout::Block,
             ),
             "\n",
             "\n",
@@ -1580,14 +1642,23 @@ impl CoreErlangGenerator {
     /// through unchanged. `clear_pending_actions/0` runs first, so only a
     /// request made by this callback's own dispatch can take effect.
     fn pending_actions_wrap(body: Document<'static>) -> Document<'static> {
-        docvec![
-            "let _PendingActionsCleared = call 'beamtalk_actor':'clear_pending_actions'() in",
-            line(),
-            "let _CallbackResult =",
-            nest(INDENT, docvec![line(), body]),
-            line(),
-            "in call 'beamtalk_actor':'apply_pending_actions'(_CallbackResult)",
-        ]
+        bind(
+            leaf::var("_PendingActionsCleared"),
+            form::call("beamtalk_actor", "clear_pending_actions", []),
+            // `in` sits on its own line here, a layout no `form::let_in`
+            // produces.
+            docvec![
+                "let _CallbackResult =",
+                nest(INDENT, docvec![line(), body]),
+                line(),
+                "in ",
+                form::call(
+                    "beamtalk_actor",
+                    "apply_pending_actions",
+                    [leaf::var("_CallbackResult")],
+                ),
+            ],
+        )
     }
 
     /// BT-3968: `handle_call/3`'s dispatch behind the mailbox-boundary guard
@@ -1606,7 +1677,11 @@ impl CoreErlangGenerator {
             "Args",
             "ContErr",
             Self::handle_call_dispatch_case(module_name, state_keys),
-            docvec!["{'reply', {'error', ContErr}, State}"],
+            form::tuple([
+                leaf::atom("reply"),
+                form::tuple([leaf::atom("error"), leaf::var("ContErr")]),
+                leaf::var("State"),
+            ]),
         )
     }
 
@@ -1622,7 +1697,7 @@ impl CoreErlangGenerator {
             "CastArgs",
             "_ContErr",
             Self::cast_dispatch_case(module_name, state_keys),
-            docvec!["{'noreply', State}"],
+            noreply(leaf::var("State")),
         )
     }
 
@@ -1633,78 +1708,65 @@ impl CoreErlangGenerator {
         accepted: Document<'static>,
         rejected: Document<'static>,
     ) -> Document<'static> {
-        docvec![
-            line(),
-            "case call 'beamtalk_actor':'mailbox_continuation_check'(",
-            leaf::var(selector_var),
-            ", ",
-            leaf::var(args_var),
-            ") of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<'ok'> when 'true' ->",
-                    nest(INDENT, accepted),
-                    line(),
-                    docvec!["<{'error', ", leaf::var(error_var), "}> when 'true' ->"],
-                    nest(INDENT, docvec![line(), rejected]),
-                ]
+        case_block(
+            form::call(
+                "beamtalk_actor",
+                "mailbox_continuation_check",
+                [leaf::var(selector_var), leaf::var(args_var)],
             ),
-            line(),
-            "end",
-        ]
+            [
+                arm([leaf::atom("ok")], accepted),
+                arm(
+                    [form::tuple([leaf::atom("error"), leaf::var(error_var)])],
+                    rejected,
+                ),
+            ],
+        )
     }
 
     /// BT-3968: the `let` binding that drops the continuation queue in
     /// `handle_call/3`'s dispatch-error arm — the follow-up steps a failed
     /// dispatch requested are void. (The no-reply error arms crash the actor
     /// instead, which drops the whole queue; ADR 0134.)
-    fn discard_continuations_binding() -> Document<'static> {
-        docvec![
-            "let _ContDiscarded = call ",
-            leaf::atom("beamtalk_actor"),
-            ":",
-            leaf::atom("discard_pending_continuations"),
-            "() in",
-        ]
+    fn discard_continuations_let(body: Document<'static>) -> Document<'static> {
+        bind(
+            leaf::var("_ContDiscarded"),
+            form::call("beamtalk_actor", "discard_pending_continuations", []),
+            body,
+        )
     }
 
-    /// Generates the pdict stash preamble for re-entrant self-sends.
-    /// Returns `let <old> = ... in` (a leading line break, then the install
-    /// of `state_var`) — the caller appends the dispatch body and must call
-    /// [`Self::pdict_restore_epilogue`] with the same `vars` after.
-    fn pdict_stash_preamble(vars: &PdictVars, state_var: &str) -> Document<'static> {
-        docvec![
-            line(),
-            "let ",
+    /// `let <old> = <install state_var> in body`: stashes `state_var` for
+    /// re-entrant self-sends around `body`, which must close the bracket with
+    /// [`Self::pdict_restore`] using the same `vars`.
+    fn pdict_stash(
+        vars: &PdictVars,
+        state_var: &str,
+        body: Document<'static>,
+    ) -> Document<'static> {
+        bind(
             leaf::var(vars.old.clone()),
-            " = ",
             actor_state_call(
                 actor_state_helper::INSTALL,
                 [leaf::var(state_var.to_string())],
             ),
-            " in",
-        ]
+            body,
+        )
     }
 
-    /// Generates the pdict restore epilogue. Must follow the dispatch
-    /// result binding (e.g., `let _DispatchResult = ... in`).
-    fn pdict_restore_epilogue(vars: &PdictVars) -> Document<'static> {
-        docvec![
-            line(),
-            "let ",
+    /// Wraps `body` in the uninstall of the stashed state and the erase of the
+    /// call stack. `body` follows the dispatch result binding (for example
+    /// `let _DispatchResult = ... in`).
+    fn pdict_restore(vars: &PdictVars, body: Document<'static>) -> Document<'static> {
+        bind(
             leaf::var(vars.restore.clone()),
-            " = ",
-            actor_state_call(actor_state_helper::UNINSTALL, [leaf::var(vars.old.clone())],),
-            " in",
-            line(),
-            "let ",
-            leaf::var(vars.clear.clone()),
-            " = call 'erlang':'erase'(",
-            leaf::atom(sentinel_tags::CALL_STACK),
-            ") in",
-        ]
+            actor_state_call(actor_state_helper::UNINSTALL, [leaf::var(vars.old.clone())]),
+            bind(
+                leaf::var(vars.clear.clone()),
+                form::call("erlang", "erase", [leaf::atom(sentinel_tags::CALL_STACK)]),
+                body,
+            ),
+        )
     }
 
     /// The inner `case safe_dispatch ... end` for a fire-and-forget cast (and
@@ -1715,49 +1777,63 @@ impl CoreErlangGenerator {
         module_name: &ecow::EcoString,
         state_keys: Option<&CommittedStateKeys>,
     ) -> Document<'static> {
-        docvec![
-            // Stash State for re-entrant self-sends
-            Self::pdict_stash_preamble(&PdictVars::reentrant(), "State"),
-            line(),
+        let vars = PdictVars::reentrant();
+        // Stash State for re-entrant self-sends
+        Self::pdict_stash(
+            &vars,
+            "State",
             // safe_dispatch turns a raise into an {error, ...} value; the
             // error arms below re-raise it after the pdict is restored
-            docvec![
-                "let _CastDispatchResult = call ",
-                leaf::atom(module_name.clone()),
-                ":'safe_dispatch'(CastSelector, CastArgs, State) in"
-            ],
-            // Restore pdict
-            Self::pdict_restore_epilogue(&PdictVars::reentrant()),
-            line(),
-            "case _CastDispatchResult of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<{'reply', _CastResult, CastNewState}> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            // strip codegen-internal `__local__` threading
-                            // temporaries before persist + notify (see handle_call).
-                            line(),
-                            clean_state_binding("CleanCastNewState", "CastNewState", state_keys),
-                            // same per-object change push as handle_call, for
-                            // a state write committed via a fire-and-forget cast.
-                            line(),
-                            "let _CastStateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanCastNewState) in",
-                            line(),
-                            "{'noreply', CleanCastNewState}",
+            bind(
+                leaf::var("_CastDispatchResult"),
+                form::call(
+                    module_name.clone(),
+                    "safe_dispatch",
+                    [
+                        leaf::var("CastSelector"),
+                        leaf::var("CastArgs"),
+                        leaf::var("State"),
+                    ],
+                ),
+                // Restore pdict
+                Self::pdict_restore(
+                    &vars,
+                    case_block(leaf::var("_CastDispatchResult"), {
+                        let [triple_arm, plain_arm] = noreply_error_arms("Cast");
+                        [
+                            arm(
+                                [form::tuple([
+                                    leaf::atom("reply"),
+                                    leaf::var("_CastResult"),
+                                    leaf::var("CastNewState"),
+                                ])],
+                                // strip codegen-internal `__local__` threading
+                                // temporaries before persist + notify (see handle_call).
+                                clean_state_let(
+                                    "CleanCastNewState",
+                                    "CastNewState",
+                                    state_keys,
+                                    // same per-object change push as handle_call, for
+                                    // a state write committed via a fire-and-forget cast.
+                                    bind(
+                                        leaf::var("_CastStateChanged"),
+                                        form::call(
+                                            "beamtalk_actor",
+                                            "notify_state_change",
+                                            [leaf::var("State"), leaf::var("CleanCastNewState")],
+                                        ),
+                                        noreply(leaf::var("CleanCastNewState")),
+                                    ),
+                                ),
+                            ),
+                            // ADR 0134: re-raise, crashing the actor — shared with handle_info
+                            triple_arm,
+                            plain_arm,
                         ]
-                    ),
-                    line(),
-                    // ADR 0134: re-raise, crashing the actor — shared with handle_info
-                    noreply_error_arms("Cast"),
-                ]
+                    }),
+                ),
             ),
-            line(),
-            "end",
-        ]
+        )
     }
 
     /// Generates the `handle_cast/2` callback for fire-and-forget (`!`) sends,
@@ -1794,77 +1870,77 @@ impl CoreErlangGenerator {
         let state_keys_owned = self.committed_state_keys(module);
         let state_keys = state_keys_owned.as_ref();
         let doc = docvec![
-            "'handle_cast'/2 = fun (Msg, State) ->",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    Self::pending_actions_wrap(docvec![
-                        "case Msg of",
-                        nest(
-                            INDENT,
-                            docvec![
-                                // Wire-tagged remote fire-and-forget cast (ADR 0126
-                                // §5.1) — decode via the shared helper, then
-                                // redispatch or drop.
-                                line(),
-                                "<{",
+            form::fun_def(
+                "handle_cast",
+                [leaf::var("Msg"), leaf::var("State")],
+                Self::pending_actions_wrap(case_block(
+                    leaf::var("Msg"),
+                    [
+                        // Wire-tagged remote fire-and-forget cast (ADR 0126
+                        // §5.1) — decode via the shared helper, then
+                        // redispatch or drop.
+                        arm(
+                            [form::tuple([
                                 leaf::atom(sentinel_tags::WIRE),
-                                ", _WireVersion, 'cast', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->",
-                                nest(
-                                    INDENT,
-                                    docvec![
-                                        line(),
-                                        "case call 'beamtalk_actor':'decode_wire_cast'(Msg) of",
-                                        nest(
-                                            INDENT,
-                                            docvec![
-                                                line(),
-                                                "<{'redispatch', WireMsg2}> when 'true' ->",
-                                                nest(
-                                                    INDENT,
-                                                    docvec![
-                                                        line(),
-                                                        "call ",
-                                                        leaf::atom(module_name.clone()),
-                                                        ":'handle_cast'(WireMsg2, State)",
-                                                    ]
-                                                ),
-                                                line(),
-                                                "<'noreply'> when 'true' ->",
-                                                nest(
-                                                    INDENT,
-                                                    docvec![line(), "{'noreply', State}",]
-                                                ),
-                                            ]
+                                leaf::var("_WireVersion"),
+                                leaf::atom("cast"),
+                                leaf::var("_WireSelector"),
+                                leaf::var("_WireArgs"),
+                                leaf::var("_WirePropCtx"),
+                            ])],
+                            case_block(
+                                form::call(
+                                    "beamtalk_actor",
+                                    "decode_wire_cast",
+                                    [leaf::var("Msg")],
+                                ),
+                                [
+                                    arm(
+                                        [form::tuple([
+                                            leaf::atom("redispatch"),
+                                            leaf::var("WireMsg2"),
+                                        ])],
+                                        form::call(
+                                            module_name.clone(),
+                                            "handle_cast",
+                                            [leaf::var("WireMsg2"), leaf::var("State")],
                                         ),
-                                        line(),
-                                        "end",
-                                    ]
-                                ),
-                                // Fire-and-forget cast with propagated context
-                                line(),
-                                "<{'cast', CastSelector, CastArgs, CastPropCtx}> when 'true' ->",
-                                nest(
-                                    INDENT,
-                                    docvec![
-                                        line(),
-                                        "let _CastCtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(CastPropCtx) in",
-                                        Self::mailbox_cast_guard(&module_name, state_keys),
-                                    ]
-                                ),
-                                // Fire-and-forget cast without context (backward compat)
-                                line(),
-                                "<{'cast', CastSelector, CastArgs}> when 'true' ->",
-                                nest(INDENT, Self::mailbox_cast_guard(&module_name, state_keys)),
-                                line(),
-                                "<_> when 'true' -> {'noreply', State}",
-                            ]
+                                    ),
+                                    arm([leaf::atom("noreply")], noreply(leaf::var("State"))),
+                                ],
+                            ),
                         ),
-                        line(),
-                        "end",
-                    ]),
-                ]
+                        // Fire-and-forget cast with propagated context
+                        arm(
+                            [form::tuple([
+                                leaf::atom("cast"),
+                                leaf::var("CastSelector"),
+                                leaf::var("CastArgs"),
+                                leaf::var("CastPropCtx"),
+                            ])],
+                            bind(
+                                leaf::var("_CastCtxOk"),
+                                form::call(
+                                    "beamtalk_actor",
+                                    "restore_propagated_ctx",
+                                    [leaf::var("CastPropCtx")],
+                                ),
+                                Self::mailbox_cast_guard(&module_name, state_keys),
+                            ),
+                        ),
+                        // Fire-and-forget cast without context (backward compat)
+                        arm(
+                            [form::tuple([
+                                leaf::atom("cast"),
+                                leaf::var("CastSelector"),
+                                leaf::var("CastArgs"),
+                            ])],
+                            Self::mailbox_cast_guard(&module_name, state_keys),
+                        ),
+                        arm_inline([leaf::var("_")], noreply(leaf::var("State"))),
+                    ],
+                )),
+                Layout::Block,
             ),
             "\n",
             "\n",
@@ -1901,77 +1977,84 @@ impl CoreErlangGenerator {
         let dispatch_case =
             Self::mailbox_call_guard(&module_name, self.committed_state_keys(module).as_ref());
         let doc = docvec![
-            "'handle_call'/3 = fun (Msg, From, State) ->",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    Self::pending_actions_wrap(docvec![
-                        "case Msg of",
-                        nest(
-                            INDENT,
-                            docvec![
-                                // Wire-tagged remote call (ADR 0126 §5.1) — decode via
-                                // the shared helper, then redispatch or reply directly.
-                                line(),
-                                "<{",
+            form::fun_def(
+                "handle_call",
+                [leaf::var("Msg"), leaf::var("From"), leaf::var("State")],
+                Self::pending_actions_wrap(case_block(
+                    leaf::var("Msg"),
+                    [
+                        // Wire-tagged remote call (ADR 0126 §5.1) — decode via
+                        // the shared helper, then redispatch or reply directly.
+                        arm(
+                            [form::tuple([
                                 leaf::atom(sentinel_tags::WIRE),
-                                ", _WireVersion, 'call', _WireSelector, _WireArgs, _WirePropCtx}> when 'true' ->",
-                                nest(
-                                    INDENT,
-                                    docvec![
-                                        line(),
-                                        "case call 'beamtalk_actor':'decode_wire_call'(Msg) of",
-                                        nest(
-                                            INDENT,
-                                            docvec![
-                                                line(),
-                                                "<{'redispatch', WireMsg2}> when 'true' ->",
-                                                nest(
-                                                    INDENT,
-                                                    docvec![
-                                                        line(),
-                                                        "call ",
-                                                        leaf::atom(module_name.clone()),
-                                                        ":'handle_call'(WireMsg2, From, State)",
-                                                    ]
-                                                ),
-                                                line(),
-                                                "<{'reply', WireReplyVal}> when 'true' ->",
-                                                nest(
-                                                    INDENT,
-                                                    docvec![
-                                                        line(),
-                                                        "{'reply', WireReplyVal, State}",
-                                                    ]
-                                                ),
-                                            ]
+                                leaf::var("_WireVersion"),
+                                leaf::atom("call"),
+                                leaf::var("_WireSelector"),
+                                leaf::var("_WireArgs"),
+                                leaf::var("_WirePropCtx"),
+                            ])],
+                            case_block(
+                                form::call(
+                                    "beamtalk_actor",
+                                    "decode_wire_call",
+                                    [leaf::var("Msg")],
+                                ),
+                                [
+                                    arm(
+                                        [form::tuple([
+                                            leaf::atom("redispatch"),
+                                            leaf::var("WireMsg2"),
+                                        ])],
+                                        form::call(
+                                            module_name.clone(),
+                                            "handle_call",
+                                            [
+                                                leaf::var("WireMsg2"),
+                                                leaf::var("From"),
+                                                leaf::var("State"),
+                                            ],
                                         ),
-                                        line(),
-                                        "end",
-                                    ]
-                                ),
-                                // 3-tuple with propagated context — restore before dispatch
-                                line(),
-                                "<{Selector, Args, PropCtx}> when 'true' ->",
-                                nest(
-                                    INDENT,
-                                    docvec![
-                                        line(),
-                                        "let _CtxOk = call 'beamtalk_actor':'restore_propagated_ctx'(PropCtx) in",
-                                        dispatch_case.clone(),
-                                    ]
-                                ),
-                                // Backward compat: 2-tuple without context
-                                line(),
-                                "<{Selector, Args}> when 'true' ->",
-                                nest(INDENT, dispatch_case),
-                            ]
+                                    ),
+                                    arm(
+                                        [form::tuple([
+                                            leaf::atom("reply"),
+                                            leaf::var("WireReplyVal"),
+                                        ])],
+                                        form::tuple([
+                                            leaf::atom("reply"),
+                                            leaf::var("WireReplyVal"),
+                                            leaf::var("State"),
+                                        ]),
+                                    ),
+                                ],
+                            ),
                         ),
-                        line(),
-                        "end",
-                    ]),
-                ]
+                        // 3-tuple with propagated context — restore before dispatch
+                        arm(
+                            [form::tuple([
+                                leaf::var("Selector"),
+                                leaf::var("Args"),
+                                leaf::var("PropCtx"),
+                            ])],
+                            bind(
+                                leaf::var("_CtxOk"),
+                                form::call(
+                                    "beamtalk_actor",
+                                    "restore_propagated_ctx",
+                                    [leaf::var("PropCtx")],
+                                ),
+                                dispatch_case.clone(),
+                            ),
+                        ),
+                        // Backward compat: 2-tuple without context
+                        arm(
+                            [form::tuple([leaf::var("Selector"), leaf::var("Args")])],
+                            dispatch_case,
+                        ),
+                    ],
+                )),
+                Layout::Block,
             ),
             "\n",
             "\n",
@@ -1984,53 +2067,44 @@ impl CoreErlangGenerator {
     /// return value is never encoded; otherwise the reply is wire-encoded and
     /// tagged exactly as described on [`Self::handle_call_dispatch_case`].
     fn success_reply_case() -> Document<'static> {
-        docvec![
-            "case _CallDeferred of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<'true'> when 'true' ->",
-                    nest(INDENT, docvec![line(), "{'noreply', CleanNewState}"]),
-                    line(),
-                    "<_NotDeferred> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            "case call 'beamtalk_actor':'encode_reply_for_tagged'(From, Selector, Result) of",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    "<{'error', EncErr}> when 'true' ->",
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            line(),
-                                            "{'reply', {'error', EncErr}, CleanNewState}",
-                                        ]
-                                    ),
-                                    line(),
-                                    "<{'ok', EncodedResult}> when 'true' ->",
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            line(),
-                                            "{'reply', {'ok', EncodedResult}, CleanNewState}",
-                                        ]
-                                    ),
-                                ]
+        case_block(
+            leaf::var("_CallDeferred"),
+            [
+                arm([leaf::atom("true")], noreply(leaf::var("CleanNewState"))),
+                arm(
+                    [leaf::var("_NotDeferred")],
+                    case_block(
+                        form::call(
+                            "beamtalk_actor",
+                            "encode_reply_for_tagged",
+                            [
+                                leaf::var("From"),
+                                leaf::var("Selector"),
+                                leaf::var("Result"),
+                            ],
+                        ),
+                        [
+                            arm(
+                                [form::tuple([leaf::atom("error"), leaf::var("EncErr")])],
+                                form::tuple([
+                                    leaf::atom("reply"),
+                                    form::tuple([leaf::atom("error"), leaf::var("EncErr")]),
+                                    leaf::var("CleanNewState"),
+                                ]),
                             ),
-                            line(),
-                            "end",
-                        ]
+                            arm(
+                                [form::tuple([leaf::atom("ok"), leaf::var("EncodedResult")])],
+                                form::tuple([
+                                    leaf::atom("reply"),
+                                    form::tuple([leaf::atom("ok"), leaf::var("EncodedResult")]),
+                                    leaf::var("CleanNewState"),
+                                ]),
+                            ),
+                        ],
                     ),
-                ]
-            ),
-            line(),
-            "end"
-        ]
+                ),
+            ],
+        )
     }
 
     /// Generates the inner `case safe_dispatch ... end` block for `handle_call`.
@@ -2078,124 +2152,154 @@ impl CoreErlangGenerator {
         module_name: &ecow::EcoString,
         state_keys: Option<&CommittedStateKeys>,
     ) -> Document<'static> {
-        docvec![
-            // Stash State for re-entrant self-sends
-            Self::pdict_stash_preamble(&PdictVars::reentrant(), "State"),
-            line(),
+        let vars = PdictVars::reentrant();
+        // Stash State for re-entrant self-sends
+        Self::pdict_stash(
+            &vars,
+            "State",
             // BT-4090: expose the caller's `From` to `self deferReply`
-            "let _CallFromInstalled = call 'beamtalk_actor':'install_call_from'(From) in",
-            line(),
-            // Use safe_dispatch for error isolation
-            docvec![
-                "let _DispatchResult = call ",
-                leaf::atom(module_name.clone()),
-                ":'safe_dispatch'(Selector, Args, State) in"
-            ],
-            // Restore pdict
-            Self::pdict_restore_epilogue(&PdictVars::reentrant()),
-            line(),
-            // BT-4090: remove the `From` cell; `true` when the method deferred
-            // its reply. Only the success arm acts on it — error arms reply
-            // the error, so a raise after deferring never hangs the caller.
-            "let _CallDeferred = call 'beamtalk_actor':'uninstall_call_from'() in",
-            line(),
-            "case _DispatchResult of",
-            nest(
-                INDENT,
-                docvec![
-                    // Success case: return {ok, Result}
-                    line(),
-                    "<{'reply', Result, NewState}> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            // strip codegen-internal `__local__` threading
-                            // temporaries before persist + notify, so an outer local
-                            // threaded through a control-flow desugar never leaks into
-                            // the committed actor state or a watch notification.
-                            line(),
-                            clean_state_binding("CleanNewState", "NewState", state_keys),
-                            // notify the per-object change substrate so a
-                            // watched compiled actor's committed state write pushes
-                            // {object_changed, …} to the live Inspector — the runtime
-                            // beamtalk_actor path does this via log_dispatch_complete.
-                            line(),
-                            "let _StateChanged = call 'beamtalk_actor':'notify_state_change'(State, CleanNewState) in",
-                            // wire-encode the reply when the caller is remote
-                            // (no-op locally — see this function's doc), then
-                            // branch on the outer {ok,_}/{error,_} tag
-                            // encode_reply_for_tagged/3 itself always adds —
-                            // never on the payload's own shape.
-                            //
-                            // BT-4090: a deferred reply (`self deferReply`) is
-                            // answered `{noreply, _}` *before* encoding — the
-                            // method's ignored return value must not be encoded.
-                            line(),
-                            Self::success_reply_case(),
-                        ]
+            bind(
+                leaf::var("_CallFromInstalled"),
+                form::call("beamtalk_actor", "install_call_from", [leaf::var("From")]),
+                // Use safe_dispatch for error isolation
+                bind(
+                    leaf::var("_DispatchResult"),
+                    form::call(
+                        module_name.clone(),
+                        "safe_dispatch",
+                        [leaf::var("Selector"), leaf::var("Args"), leaf::var("State")],
                     ),
-                    // Error case: reclassify a stale-block badfun/undef, then
-                    // pass the (possibly reclassified) error opaquely to the
-                    // caller, wire-encoded when remote. Same branch-not-wrap
-                    // reasoning as the success arm above: an encode failure
-                    // here would otherwise double-wrap as
-                    // {'error', {'error', EncErr}} instead of the flat
-                    // {'error', EncErr} shape decode_call_result expects.
-                    // Unlike the success arm, this one stays on the
-                    // untagged encode_reply_for/3, not the _tagged variant
-                    // — both of its branches already converge on the same
-                    // {'reply', {'error', _}, ErrState} outer shape, so
-                    // there's no {'ok', _} vs {'error', _} choice for a
-                    // payload shape collision to corrupt.
-                    line(),
-                    "<{'error', Error, ErrState}> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            Self::discard_continuations_binding(),
-                            line(),
-                            // BT-4850: a caught exception's raw trace is built here,
-                            // in the actor that caught it, so the caller's
-                            // `ensure_wrapped` keeps the raise-site frames.
-                            docvec![
-                                "let BuiltError = ",
-                                build_caught_triple_doc(leaf::var("Error"), "Reply"),
-                                " in",
-                            ],
-                            line(),
-                            "let ClassifiedError = call 'beamtalk_actor':'maybe_reclassify_compiled_dispatch_error'(Args, BuiltError) in",
-                            line(),
-                            "case call 'beamtalk_actor':'encode_reply_for'(From, Selector, ClassifiedError) of",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    "<{'error', EncErr}> when 'true' ->",
-                                    nest(
-                                        INDENT,
-                                        docvec![line(), "{'reply', {'error', EncErr}, ErrState}",]
-                                    ),
-                                    line(),
-                                    "<EncodedError> when 'true' ->",
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            line(),
-                                            "{'reply', {'error', EncodedError}, ErrState}",
-                                        ]
-                                    ),
-                                ]
+                    // Restore pdict
+                    Self::pdict_restore(
+                        &vars,
+                        // BT-4090: remove the `From` cell; `true` when the method deferred
+                        // its reply. Only the success arm acts on it — error arms reply
+                        // the error, so a raise after deferring never hangs the caller.
+                        bind(
+                            leaf::var("_CallDeferred"),
+                            form::call("beamtalk_actor", "uninstall_call_from", []),
+                            case_block(
+                                leaf::var("_DispatchResult"),
+                                [Self::call_success_arm(state_keys), Self::call_error_arm()],
                             ),
-                            line(),
-                            "end",
-                        ]
+                        ),
                     ),
-                ]
+                ),
             ),
-            line(),
-            "end",
-        ]
+        )
+    }
+
+    /// `handle_call/3`'s success arm: `<{'reply', Result, NewState}>`.
+    fn call_success_arm(state_keys: Option<&CommittedStateKeys>) -> Document<'static> {
+        // Success case: return {ok, Result}
+        arm(
+            [form::tuple([
+                leaf::atom("reply"),
+                leaf::var("Result"),
+                leaf::var("NewState"),
+            ])],
+            // strip codegen-internal `__local__` threading
+            // temporaries before persist + notify, so an outer local
+            // threaded through a control-flow desugar never leaks into
+            // the committed actor state or a watch notification.
+            clean_state_let(
+                "CleanNewState",
+                "NewState",
+                state_keys,
+                // notify the per-object change substrate so a
+                // watched compiled actor's committed state write pushes
+                // {object_changed, …} to the live Inspector — the runtime
+                // beamtalk_actor path does this via log_dispatch_complete.
+                bind(
+                    leaf::var("_StateChanged"),
+                    form::call(
+                        "beamtalk_actor",
+                        "notify_state_change",
+                        [leaf::var("State"), leaf::var("CleanNewState")],
+                    ),
+                    // wire-encode the reply when the caller is remote
+                    // (no-op locally — see `handle_call_dispatch_case`'s doc), then
+                    // branch on the outer {ok,_}/{error,_} tag
+                    // encode_reply_for_tagged/3 itself always adds —
+                    // never on the payload's own shape.
+                    //
+                    // BT-4090: a deferred reply (`self deferReply`) is
+                    // answered `{noreply, _}` *before* encoding — the
+                    // method's ignored return value must not be encoded.
+                    Self::success_reply_case(),
+                ),
+            ),
+        )
+    }
+
+    /// `handle_call/3`'s error arm, `<{'error', Error, ErrState}>`.
+    //
+    // Error case: reclassify a stale-block badfun/undef, then
+    // pass the (possibly reclassified) error opaquely to the
+    // caller, wire-encoded when remote. Same branch-not-wrap
+    // reasoning as the success arm: an encode failure
+    // here would otherwise double-wrap as
+    // {'error', {'error', EncErr}} instead of the flat
+    // {'error', EncErr} shape decode_call_result expects.
+    // Unlike the success arm, this one stays on the
+    // untagged encode_reply_for/3, not the _tagged variant
+    // — both of its branches already converge on the same
+    // {'reply', {'error', _}, ErrState} outer shape, so
+    // there's no {'ok', _} vs {'error', _} choice for a
+    // payload shape collision to corrupt.
+    fn call_error_arm() -> Document<'static> {
+        let error_reply = |error: Document<'static>| {
+            form::tuple([
+                leaf::atom("reply"),
+                form::tuple([leaf::atom("error"), error]),
+                leaf::var("ErrState"),
+            ])
+        };
+        arm(
+            [form::tuple([
+                leaf::atom("error"),
+                leaf::var("Error"),
+                leaf::var("ErrState"),
+            ])],
+            Self::discard_continuations_let(
+                // BT-4850: a caught exception's raw trace is built here,
+                // in the actor that caught it, so the caller's
+                // `ensure_wrapped` keeps the raise-site frames.
+                bind(
+                    leaf::var("BuiltError"),
+                    build_caught_triple_doc(leaf::var("Error"), "Reply"),
+                    bind(
+                        leaf::var("ClassifiedError"),
+                        form::call(
+                            "beamtalk_actor",
+                            "maybe_reclassify_compiled_dispatch_error",
+                            [leaf::var("Args"), leaf::var("BuiltError")],
+                        ),
+                        case_block(
+                            form::call(
+                                "beamtalk_actor",
+                                "encode_reply_for",
+                                [
+                                    leaf::var("From"),
+                                    leaf::var("Selector"),
+                                    leaf::var("ClassifiedError"),
+                                ],
+                            ),
+                            [
+                                arm(
+                                    [form::tuple([leaf::atom("error"), leaf::var("EncErr")])],
+                                    error_reply(leaf::var("EncErr")),
+                                ),
+                                arm(
+                                    [leaf::var("EncodedError")],
+                                    error_reply(leaf::var("EncodedError")),
+                                ),
+                            ],
+                        ),
+                    ),
+                ),
+            ),
+        )
     }
 
     /// Generates the `handle_info/2` callback (ADR 0065).
@@ -2264,34 +2368,34 @@ impl CoreErlangGenerator {
             let state_keys = state_keys_owned.as_ref();
             let dispatch_body = self.info_dispatch_doc("handleInfo:", "[Msg]", state_keys);
             let hook_arm = has_hook.then(|| {
-                docvec![
-                    line(),
-                    "<{'hook', HookPid, HookReason}> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            self.info_dispatch_doc(
-                                "onLinkedExit:reason:",
-                                "[HookPid, HookReason]",
-                                state_keys
-                            )
-                        ]
-                    ),
-                ]
-            });
-            let doc = docvec![
-                "'handle_info'/2 = fun (Msg, State) ->",
-                nest(
-                    INDENT,
+                arm(
+                    [form::tuple([
+                        leaf::atom("hook"),
+                        leaf::var("HookPid"),
+                        leaf::var("HookReason"),
+                    ])],
+                    // The leading `line()` is the blank line this arm has
+                    // always had (see `linked_exit_intercept_doc`).
                     docvec![
                         line(),
-                        Self::pending_actions_wrap(Self::linked_exit_intercept_doc(
-                            dispatch_body,
-                            hook_arm,
-                            has_hook,
-                        )),
-                    ]
+                        self.info_dispatch_doc(
+                            "onLinkedExit:reason:",
+                            "[HookPid, HookReason]",
+                            state_keys,
+                        ),
+                    ],
+                )
+            });
+            let doc = docvec![
+                form::fun_def(
+                    "handle_info",
+                    [leaf::var("Msg"), leaf::var("State")],
+                    Self::pending_actions_wrap(Self::linked_exit_intercept_doc(
+                        dispatch_body,
+                        hook_arm,
+                        has_hook,
+                    )),
+                    Layout::Block,
                 ),
                 "\n",
                 "\n",
@@ -2299,10 +2403,15 @@ impl CoreErlangGenerator {
             Ok(doc)
         } else {
             let doc = docvec![
-                "'handle_info'/2 = fun (Msg, State) ->",
-                nest(
-                    INDENT,
-                    docvec![line(), "call 'beamtalk_actor':'handle_info'(Msg, State)",]
+                form::fun_def(
+                    "handle_info",
+                    [leaf::var("Msg"), leaf::var("State")],
+                    form::call(
+                        "beamtalk_actor",
+                        "handle_info",
+                        [leaf::var("Msg"), leaf::var("State")],
+                    ),
+                    Layout::Block,
                 ),
                 "\n",
                 "\n",
@@ -2320,50 +2429,53 @@ impl CoreErlangGenerator {
         args: &'static str,
         state_keys: Option<&CommittedStateKeys>,
     ) -> Document<'static> {
-        docvec![
-            // Stash State for re-entrant self-sends
-            Self::pdict_stash_preamble(&PdictVars::reentrant(), "State"),
-            line(),
-            docvec![
-                "let _InfoDispatchResult = call ",
-                leaf::atom(self.module_name.clone()),
-                ":'safe_dispatch'(",
-                leaf::atom(selector.to_string()),
-                ", ",
-                args,
-                ", State) in",
-            ],
-            Self::pdict_restore_epilogue(&PdictVars::reentrant()),
-            line(),
-            "case _InfoDispatchResult of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<{'reply', _Result, NewState}> when 'true' ->",
-                    nest(
-                        INDENT,
-                        docvec![
-                            // handle_info is an outermost state-commit
-                            // boundary too - a Server `handleInfo:` that threads an
-                            // outer local through a control-flow desugar must not
-                            // persist `__local__` temps into the committed state.
-                            line(),
-                            clean_state_binding("CleanInfoNewState", "NewState", state_keys),
-                            line(),
-                            "{'noreply', CleanInfoNewState}",
-                        ]
-                    ),
-                    line(),
-                    // ADR 0134: re-raise, crashing the actor - shared with handle_cast
-                    noreply_error_arms("Info"),
-                    line(),
-                    "<_Other> when 'true' -> {'noreply', State}",
-                ]
+        let vars = PdictVars::reentrant();
+        // Stash State for re-entrant self-sends
+        Self::pdict_stash(
+            &vars,
+            "State",
+            bind(
+                leaf::var("_InfoDispatchResult"),
+                form::call(
+                    self.module_name.clone(),
+                    "safe_dispatch",
+                    [
+                        leaf::atom(selector.to_string()),
+                        Document::Str(args),
+                        leaf::var("State"),
+                    ],
+                ),
+                Self::pdict_restore(&vars, {
+                    let [triple_arm, plain_arm] = noreply_error_arms("Info");
+                    case_block(
+                        leaf::var("_InfoDispatchResult"),
+                        [
+                            arm(
+                                [form::tuple([
+                                    leaf::atom("reply"),
+                                    leaf::var("_Result"),
+                                    leaf::var("NewState"),
+                                ])],
+                                // handle_info is an outermost state-commit
+                                // boundary too - a Server `handleInfo:` that threads an
+                                // outer local through a control-flow desugar must not
+                                // persist `__local__` temps into the committed state.
+                                clean_state_let(
+                                    "CleanInfoNewState",
+                                    "NewState",
+                                    state_keys,
+                                    noreply(leaf::var("CleanInfoNewState")),
+                                ),
+                            ),
+                            // ADR 0134: re-raise, crashing the actor - shared with handle_cast
+                            triple_arm,
+                            plain_arm,
+                            arm_inline([leaf::var("_Other")], noreply(leaf::var("State"))),
+                        ],
+                    )
+                }),
             ),
-            line(),
-            "end",
-        ]
+        )
     }
 
     /// BT-3596: Wraps a `handle_info/2` body in a `beamtalk_actor:handle_linked_exit/3`
@@ -2380,24 +2492,28 @@ impl CoreErlangGenerator {
         hook_arm: Option<Document<'static>>,
         has_hook: bool,
     ) -> Document<'static> {
-        docvec![
-            "case call 'beamtalk_actor':'handle_linked_exit'(Msg, State, ",
-            leaf::atom(if has_hook { "true" } else { "false" }.to_string()),
-            ") of",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "<'pass'> when 'true' ->",
-                    nest(INDENT, docvec![line(), inner_body]),
-                    hook_arm.unwrap_or_else(|| docvec![]),
-                    line(),
-                    "<_ExitResult> when 'true' -> _ExitResult",
-                ]
+        // The leading `line()` in both arm bodies is the blank line the
+        // generated `handle_info/2` has always had after each arm head
+        // (the body, which starts with its own line break, sits under the
+        // arm's); kept so the generated Core Erlang stays byte-identical.
+        let clauses = std::iter::once(arm([leaf::atom("pass")], docvec![line(), inner_body]))
+            .chain(hook_arm)
+            .chain(std::iter::once(arm_inline(
+                [leaf::var("_ExitResult")],
+                leaf::var("_ExitResult"),
+            )));
+        case_block(
+            form::call(
+                "beamtalk_actor",
+                "handle_linked_exit",
+                [
+                    leaf::var("Msg"),
+                    leaf::var("State"),
+                    leaf::atom(if has_hook { "true" } else { "false" }.to_string()),
+                ],
             ),
-            line(),
-            "end",
-        ]
+            clauses,
+        )
     }
 
     /// Whether `class`'s superclass is itself a compiled actor module whose
@@ -2450,34 +2566,39 @@ impl CoreErlangGenerator {
         let own_selectors = atom_list(&secrets.selectors);
 
         let secrets_body = match current_class.filter(|c| Self::has_parent_actor_module(c)) {
-            Some(class) => docvec![
-                "let <ParentSecrets> = call ",
-                leaf::atom(self.compiled_module_name(class.superclass_name())),
-                ":'__beamtalk_secrets'() in",
-                line(),
-                "call 'beamtalk_actor_redaction':'merge_secrets'(ParentSecrets, ",
-                own_slots,
-                ", ",
-                own_selectors,
-                ")",
-            ],
-            None => docvec!["{", own_slots, ", ", own_selectors, "}"],
+            Some(class) => form::let_values(
+                [leaf::var("ParentSecrets")],
+                form::call(
+                    self.compiled_module_name(class.superclass_name()),
+                    "__beamtalk_secrets",
+                    [],
+                ),
+                form::call(
+                    "beamtalk_actor_redaction",
+                    "merge_secrets",
+                    [leaf::var("ParentSecrets"), own_slots, own_selectors],
+                ),
+                Layout::Block,
+            ),
+            None => form::tuple([own_slots, own_selectors]),
         };
 
         docvec![
-            "'format_status'/1 = fun (Status) ->",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "call 'beamtalk_actor_redaction':'format_status'(",
-                    leaf::atom(self.module_name.to_string()),
-                    ", Status)",
-                ]
+            form::fun_def(
+                "format_status",
+                [leaf::var("Status")],
+                form::call(
+                    "beamtalk_actor_redaction",
+                    "format_status",
+                    [
+                        leaf::atom(self.module_name.to_string()),
+                        leaf::var("Status"),
+                    ],
+                ),
+                Layout::Block,
             ),
             "\n\n",
-            "'__beamtalk_secrets'/0 = fun () ->",
-            nest(INDENT, docvec![line(), secrets_body]),
+            form::fun_def("__beamtalk_secrets", [], secrets_body, Layout::Block),
             "\n",
         ]
     }
@@ -2492,13 +2613,15 @@ impl CoreErlangGenerator {
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_code_change(&self) -> Result<Document<'static>> {
         let doc = docvec![
-            "'code_change'/3 = fun (OldVsn, State, Extra) ->",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "call 'beamtalk_hot_reload':'code_change'(OldVsn, State, Extra)",
-                ]
+            form::fun_def(
+                "code_change",
+                [leaf::var("OldVsn"), leaf::var("State"), leaf::var("Extra"),],
+                form::call(
+                    "beamtalk_hot_reload",
+                    "code_change",
+                    [leaf::var("OldVsn"), leaf::var("State"), leaf::var("Extra"),],
+                ),
+                Layout::Block,
             ),
             "\n",
             "\n",
@@ -2535,42 +2658,59 @@ impl CoreErlangGenerator {
         let class_name = current_class.map_or_else(|| module_name.clone(), |c| c.name.name.clone());
 
         let doc = docvec![
-            "'terminate'/2 = fun (Reason, State) ->",
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    // Emit lifecycle stop telemetry from compiled terminate
-                    "let _TelPid = call 'erlang':'self'() in",
-                    line(),
+            form::fun_def(
+                "terminate",
+                [leaf::var("Reason"), leaf::var("State")],
+                // Emit lifecycle stop telemetry from compiled terminate
+                Self::lifecycle_telemetry_let(
+                    "stop",
+                    "_TelStop",
+                    &class_name,
+                    Document::Str(", 'reason' => Reason"),
                     docvec![
-                        "let _TelStop = call 'beamtalk_actor':'maybe_execute_telemetry'(",
-                        "['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => ",
-                        leaf::atom(class_name.to_string()),
-                        ", 'reason' => Reason}~) in",
+                        "%% Call terminate: method if defined — exceptions must not prevent shutdown",
+                        line(),
+                        bind(
+                            leaf::var("Self"),
+                            form::call("beamtalk_actor", "make_self", [leaf::var("State")]),
+                            // Not `form::try_of_catch`: `of _TermOk` is the bare
+                            // spelling (not `of <_TermOk>`), the clauses are
+                            // nested under `try` rather than at its level, and
+                            // `in` sits on its own line.
+                            docvec![
+                                "let _TermDisp = try ",
+                                form::call(
+                                    module_name.to_string(),
+                                    "dispatch",
+                                    [
+                                        leaf::atom("terminate:"),
+                                        Document::Str("[Reason]"),
+                                        leaf::var("Self"),
+                                        leaf::var("State"),
+                                    ],
+                                ),
+                                nest(
+                                    INDENT,
+                                    docvec![
+                                        line(),
+                                        "of _TermOk -> 'ok'",
+                                        line(),
+                                        "catch ",
+                                        form::values([
+                                            leaf::var("_TermT"),
+                                            leaf::var("_TermE"),
+                                            leaf::var("_TermS"),
+                                        ]),
+                                        " -> 'ok'",
+                                    ]
+                                ),
+                                line(),
+                                "in 'ok'",
+                            ],
+                        ),
                     ],
-                    line(),
-                    "%% Call terminate: method if defined — exceptions must not prevent shutdown",
-                    line(),
-                    "let Self = call 'beamtalk_actor':'make_self'(State) in",
-                    line(),
-                    docvec![
-                        "let _TermDisp = try call ",
-                        leaf::atom(module_name.to_string()),
-                        ":'dispatch'('terminate:', [Reason], Self, State)"
-                    ],
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            "of _TermOk -> 'ok'",
-                            line(),
-                            "catch <_TermT, _TermE, _TermS> -> 'ok'",
-                        ]
-                    ),
-                    line(),
-                    "in 'ok'",
-                ]
+                ),
+                Layout::Block,
             ),
             "\n",
             "\n",
@@ -2590,76 +2730,28 @@ fn noreply_raise_tail(
     stack_v: Document<'static>,
     wrapped_v: Document<'static>,
 ) -> Document<'static> {
-    docvec![
-        "case ",
+    case_block(
         type_v,
-        " of",
-        nest(
-            INDENT,
-            docvec![
-                line(),
-                "<",
-                leaf::atom("exit"),
-                "> when call ",
-                leaf::atom("erlang"),
-                ":",
-                leaf::atom("or"),
-                "(call ",
-                leaf::atom("erlang"),
-                ":",
-                leaf::atom("=:="),
-                "(",
-                reason_v.clone(),
-                ", ",
-                leaf::atom("normal"),
-                "), call ",
-                leaf::atom("erlang"),
-                ":",
-                leaf::atom("=:="),
-                "(",
-                reason_v.clone(),
-                ", ",
-                leaf::atom("shutdown"),
-                ")) ->",
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        "primop ",
-                        leaf::atom("raw_raise"),
-                        "(",
-                        leaf::atom("exit"),
-                        ", ",
-                        reason_v,
-                        ", ",
-                        stack_v.clone(),
-                        ")",
+        [
+            form::clause(
+                [leaf::atom("exit")],
+                Some(form::call(
+                    "erlang",
+                    "or",
+                    [
+                        form::call("erlang", "=:=", [reason_v.clone(), leaf::atom("normal")]),
+                        form::call("erlang", "=:=", [reason_v.clone(), leaf::atom("shutdown")]),
                     ],
-                ),
-                line(),
-                "<_> when ",
-                leaf::atom("true"),
-                " ->",
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        "primop ",
-                        leaf::atom("raw_raise"),
-                        "(",
-                        leaf::atom("error"),
-                        ", ",
-                        wrapped_v,
-                        ", ",
-                        stack_v,
-                        ")",
-                    ],
-                ),
-            ],
-        ),
-        line(),
-        "end",
-    ]
+                )),
+                form::primop("raw_raise", [leaf::atom("exit"), reason_v, stack_v.clone()]),
+                Layout::Block,
+            ),
+            arm(
+                [leaf::var("_")],
+                form::primop("raw_raise", [leaf::atom("error"), wrapped_v, stack_v]),
+            ),
+        ],
+    )
 }
 
 /// Generates the two error case arms shared by every `gen_server` callback
@@ -2702,7 +2794,7 @@ fn noreply_raise_tail(
 /// `var_prefix` is the capitalised variable-name prefix (e.g. `"Cast"` →
 /// `CastType`, `CastReason`, …; `"Info"` → `InfoType`, …).  Variable names are
 /// produced via [`leaf::var`] to satisfy the typed-leaf rule (ADR 0089).
-fn noreply_error_arms(var_prefix: &str) -> Document<'static> {
+fn noreply_error_arms(var_prefix: &str) -> [Document<'static>; 2] {
     // Compute variable name strings from the prefix, then pass to leaf::var.
     // format! here derives the *input* to the typed-leaf API, not a raw Core
     // Erlang fragment — this is the sanctioned pattern per ADR 0089.
@@ -2715,66 +2807,37 @@ fn noreply_error_arms(var_prefix: &str) -> Document<'static> {
     let error_v = leaf::var(format!("{var_prefix}Error"));
     let state2_v = leaf::var(format!("_{var_prefix}State2"));
 
-    docvec![
+    [
         // Triple-format arm — wrap, then raise keeping the original trace
-        docvec![
-            "<{",
-            leaf::atom("error"),
-            ", {",
-            type_v.clone(),
-            ", ",
-            reason_v.clone(),
-            ", ",
-            stack_v.clone(),
-            "}, ",
-            state1_v,
-            "}> when ",
-            leaf::atom("true"),
-            " ->",
-        ],
-        nest(
-            INDENT,
-            docvec![
-                line(),
-                wrap_and_reraise_doc(
-                    &CatchVars {
-                        class: type_v.clone(),
-                        reason: reason_v.clone(),
-                        stack: stack_v.clone(),
-                    },
-                    built_v,
-                    wrapped_v.clone(),
-                    None,
-                    noreply_raise_tail(type_v, reason_v, stack_v, wrapped_v),
-                    Layout::Block,
-                ),
-            ],
+        form::clause(
+            [form::tuple([
+                leaf::atom("error"),
+                form::tuple([type_v.clone(), reason_v.clone(), stack_v.clone()]),
+                state1_v,
+            ])],
+            Some(leaf::atom("true")),
+            wrap_and_reraise_doc(
+                &CatchVars {
+                    class: type_v.clone(),
+                    reason: reason_v.clone(),
+                    stack: stack_v.clone(),
+                },
+                built_v,
+                wrapped_v.clone(),
+                None,
+                noreply_raise_tail(type_v, reason_v, stack_v, wrapped_v),
+                Layout::Block,
+            ),
+            Layout::Block,
         ),
-        line(),
         // Plain-format fallback — {error, Error, State} (DNU, #beamtalk_error{}, etc.)
-        docvec![
-            "<{",
-            leaf::atom("error"),
-            ", ",
-            error_v.clone(),
-            ", ",
-            state2_v,
-            "}> when ",
-            leaf::atom("true"),
-            " ->",
-        ],
-        nest(
-            INDENT,
-            docvec![
-                line(),
-                "call ",
-                leaf::atom("beamtalk_exception_handler"),
-                ":",
-                leaf::atom("reraise"),
-                "(",
-                error_v,
-                ")",
-            ],
+        arm(
+            [form::tuple([
+                leaf::atom("error"),
+                error_v.clone(),
+                state2_v,
+            ])],
+            form::call("beamtalk_exception_handler", "reraise", [error_v]),
         ),
     ]
 }

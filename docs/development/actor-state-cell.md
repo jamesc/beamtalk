@@ -53,7 +53,7 @@ A throwaway probe package, built with a debug build of `main` from
 | `self apply: [self bump]. self.x` | 1 | `stateful_block_dispatch` | `stateful_block_dispatch` |
 
 The first three had one cause. Every generated callback stashes the entry
-`State` in `'$bt_actor_state'` (`pdict_stash_preamble` in
+`State` in `'$bt_actor_state'` (`pdict_stash` in
 `gen_server/callbacks.rs`) so that an aliased self-send can take
 `sync_send/3`'s Layer 1 path through `self_dispatch/2` instead of
 deadlocking. The method's own writes never reach that stash, and what
