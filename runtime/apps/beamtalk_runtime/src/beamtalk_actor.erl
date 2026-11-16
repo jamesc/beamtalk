@@ -1398,7 +1398,13 @@ async_send_impl(ActorPid, 'stopWith:timeout:', [Reason, Timeout], FuturePid, _Cl
 async_send_impl(ActorPid, 'continueWith:' = Selector, [ContSelector], FuturePid, _ClassHint) ->
     %% BT-3968: only meaningful on `self`; raises in the caller otherwise.
     async_request_continuation(ActorPid, Selector, ContSelector, none, FuturePid);
-async_send_impl(ActorPid, 'continueWith:withArguments:' = Selector, [ContSelector, ContArgs], FuturePid, _ClassHint) ->
+async_send_impl(
+    ActorPid,
+    'continueWith:withArguments:' = Selector,
+    [ContSelector, ContArgs],
+    FuturePid,
+    _ClassHint
+) ->
     async_request_continuation(ActorPid, Selector, ContSelector, {args, ContArgs}, FuturePid);
 async_send_impl(ActorPid, kill, [], FuturePid, _ClassHint) ->
     %% kill is handled locally - forcefully kills the actor process.
