@@ -1,9 +1,9 @@
 # ADR 0150: Actor Registration Off the Start Path
 
 ## Status
-Proposed (2026-11-15; revised the same day after owner review, which sent the first draft back). Issue BT-4854; the rest of the start path is BT-4932.
+Accepted (2026-11-16). Decision: **option D, no table**, with the two owner conditions below and option C (the minimal table design) kept as the stated fallback. Proposed 2026-11-15; revised the same day after owner review, which sent the first draft back. Issue BT-4854; the rest of the start path is BT-4932.
 
-> **Revision note.** The first draft decided "insert, then monitor" with a table, a bounded pending buffer, a drain pass, a backstop reaper and a scan rebuild, and dismissed a no-table design in six lines. This revision puts four options side by side, corrects the facts the first draft got wrong, and **recommends the no-table design (D)**, with the minimal table design (C) as the fallback if one of the acceptance conditions below fails. Nothing in this ADR is implemented. The WIP prototype of the first draft is on `bt-4854-registry-impl`; it is evidence, not a decision.
+> **Revision note.** The first draft decided "insert, then monitor" with a table, a bounded pending buffer, a drain pass, a backstop reaper and a scan rebuild, and dismissed a no-table design in six lines. This revision puts four options side by side, corrects the facts the first draft got wrong, and **recommended the no-table design (D)**, with the minimal table design (C) as the fallback if one of the acceptance conditions below fails; the owner accepted D on 2026-11-16. Nothing in this ADR is implemented. The WIP prototype of the first draft is on `bt-4854-registry-impl`; it is evidence, not a decision.
 
 Amends, if accepted: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md), [0009](0009-otp-application-structure.md), [0069](0069-actor-observability-and-tracing.md), [0079](0079-named-actor-registration.md), [0093](0093-announcements-event-substrate.md), [0123](0123-versioned-state-migration.md), [0126](0126-distribution-location-transparent-actors.md), [0129](0129-class-side-system-facades.md) and ADR-5 of `docs/beamtalk-ddd-model.md` (see [Consequences for earlier ADRs](#consequences-for-earlier-adrs)). Those documents are edited by the implementation PR, after acceptance.
 
@@ -145,12 +145,16 @@ Who is hurt: a node with ~1M processes that runs hot reload, `removeFromSystem` 
 | C | pending + drain, bound, restart pass, scan rebuild (4) | ≈8.9 µs | table views | medium: shared writes at `+S 18` unmeasured |
 | D | scan, plumbing the class through sends, `started_at` write (3 small) | 7.4 µs | scans | readers O(processes); native actors; snapshot only with a subscriber |
 
-## Decision (recommended)
+## Decision
 
-**Adopt D.** It removes the work instead of making it cheaper, it needs the fewest mechanisms, it has no shared write on the start path (so nothing for 18 schedulers to contend on), it needs no recovery story (no owner, no heir, no rebuild), and the two readers that run most often (`class_of/1` on the send path, `should_purge_module` after every evaluation) stop enumerating or stop looking up. Its costs fall on rare, human-driven readers, which is also where the owner's steer (the registries "may not be needed as much now") points.
+**Accepted 2026-11-16: adopt D, no table.** It removes the work instead of making it cheaper, it needs the fewest mechanisms, it has no shared write on the start path (so nothing for 18 schedulers to contend on), it needs no recovery story (no owner, no heir, no rebuild), and the two readers that run most often (`class_of/1` on the send path, `should_purge_module` after every evaluation) stop enumerating or stop looking up. Its costs fall on rare, human-driven readers, which is also where the owner's steer (the registries "may not be needed as much now") points.
 
-**Acceptance conditions.** D is accepted only if each of these holds when measured; if one fails, fall back to **C**:
-1. Rows 16a/16c/16d on the maintainer's machine at `+S 18`, before and after, and the nightly vs-elixir gate does not regress. (The cloud-VM numbers in this ADR are not sufficient to accept either design; contention is the thing they cannot show.)
+**Owner conditions (2026-11-16).**
+- **(a) Readers re-scan after a hot reload.** A hot reload replaces code and can change which classes and actors exist; no reader may serve a list, count or snapshot it took before the reload. Every scan-backed reader (the actor lists, `Node current actors`, an IDE feed) re-scans after a reload, and a test pins it.
+- **(b) Re-measure before the implementation merges.** Rows 16a/16c/16d are re-measured at `+S 18` on the owner's machine **with the harness's tracing off**, before and after. The M5 Max numbers in BT-4854 are probably inflated about 2× by GC tracing, so they cannot be used as the baseline. The implementation PR is not merged until this is reported.
+
+**Acceptance conditions.** D is accepted only if each of these holds when measured; if one fails, fall back to **C**, which stays the stated fallback:
+1. Rows 16a/16c/16d on the maintainer's machine at `+S 18` with tracing off (condition b), before and after, and the nightly vs-elixir gate does not regress. (The cloud-VM numbers in this ADR are not sufficient to accept either design; contention is the thing they cannot show.)
 2. One enumeration at the process counts of the project's real nodes (the maintainer's, and a buccaneer load test), including with 100k–1M live processes, stays inside a bound the owner accepts for hot reload and the REPL actor list.
 3. The `'$beamtalk_actor_started_at'` write in generated `init/1` costs less than the registry hop it replaces.
 4. Native-actor listing through `'$initial_call'` works in a test.
@@ -254,6 +258,24 @@ Observable changes and what to do about them:
 - **`removeFromSystem` / purge:** see the section above; no change to the set of actors it touches (they were already in the actor list).
 - **`global` name conflicts between compiled actors** resolve by start time instead of `random_exit_name/3` if the `started_at` write is adopted.
 - Anything reading `beamtalk_instance_registry` / `beamtalk_instance_class` directly (`trace_store`) moves to an API or a scan in the implementation PR.
+
+## Implementation Tracking
+
+**Epic:** BT-4943. **Status:** Planned.
+
+| Order | Issue | What |
+|---|---|---|
+| 1 | BT-4944 | scan reader module (additive) |
+| 1 | BT-4945 | `should_purge_module` via the code server (independent) |
+| 2 | BT-4947 | runtime readers on the scan: `allInstances`, hot reload, `stop_class_actors`, `Node` actors, `trace_store` |
+| 2 | BT-4949 | the class travels with sends (touches `beamtalk_actor.erl`; after BT-4871) |
+| 2 | BT-4950 | workspace actor lists on the scan and the `ActorSpawned` feed |
+| 3 | BT-4951 | remove the registrations from the start path (touches `beamtalk_actor.erl`; after BT-4937 and BT-4871; not merged until BT-4952 reports) |
+| 4 | BT-4952 | owner re-measures rows 16a/16c/16d at `+S 18`, tracing off (condition b) |
+| 5 | BT-4953 | delete the dead modules, amend the earlier ADRs |
+| 6 | BT-4954 | follow-up in `beamtalk-buccaneer` (filed, not started) |
+
+Related bugs found on the way: BT-4936 (`removeFromSystem` leaves a zombie child), BT-4937 (compiled actors never record a start time). BT-4932 (the rest of the start path) comes after the epic. The branch `bt-4854-registry-impl` holds a WIP of the dropped insert-then-monitor design and is not to be reused.
 
 ## Implementation
 
