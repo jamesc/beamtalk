@@ -45,7 +45,7 @@ The testClassProtocol probe is a test-registered extension on `Class`
 
 setup() ->
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-    beamtalk_stdlib:init(),
+    beamtalk_test_boot:boot_real_stdlib('Integer'),
     %% Provide the testClassProtocol probe as an instance-side extension on
     %% 'Class' (the supported open-class path) instead of re-pointing the
     %% registered 'Class' at a test module. Redefining 'Class' from a non-stdlib

@@ -38,7 +38,7 @@ setup() ->
 
     %% Ensure stdlib classes are registered (may have been killed by
     %% earlier test teardowns since class processes are unlinked)
-    beamtalk_stdlib:init(),
+    beamtalk_test_boot:boot_real_stdlib('Integer'),
 
     %% Initialize extensions registry
     beamtalk_extensions:init(),

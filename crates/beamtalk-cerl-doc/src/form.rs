@@ -16,7 +16,7 @@
 //!
 //! **Structure goes through these constructors, not string literals.** A new
 //! `let`, `case`, `try`, `do`, `call` or `primop` is built with
-//! [`let_in`] / [`let_prefix`] / [`let_values`], [`fun_of`] / [`fun_def`], [`letrec`], [`tuple`] / [`values`], [`case_of`] /
+//! [`let_in`] / [`let_header`] / [`let_prefix`] / [`let_values`], [`fun_of`] / [`fun_def`], [`letrec`], [`tuple`] / [`values`], [`case_of`] /
 //! [`clause`], [`try_of_catch`], [`seq`], [`call`] or [`primop`]; never with a
 //! `"let "` / `" in "` / `"fun ("` / `"letrec "` / `"catch <"` fragment.
 //! Existing literal sites move to the constructors as their files are
@@ -142,6 +142,13 @@ pub fn let_in<'a>(
         Layout::Block => line(),
     };
     docvec!["let ", var, " = ", value, " in", sep, body]
+}
+
+/// `let var = value in` — a binding header with no trailing space, for a
+/// sequence whose next part supplies its own separator.
+#[must_use]
+pub fn let_header<'a>(var: Document<'a>, value: Document<'a>) -> Document<'a> {
+    docvec!["let ", var, " = ", value, " in"]
 }
 
 /// `let var = value in ` — the open binding of a statement sequence.
@@ -408,6 +415,14 @@ mod tests {
         assert_eq!(tuple([]).to_pretty_string(), "{}");
         assert_eq!(values([v("A"), v("B")]).to_pretty_string(), "<A, B>");
         assert_eq!(values([v("A")]).to_pretty_string(), "<A>");
+    }
+
+    #[test]
+    fn let_header_has_no_trailing_space() {
+        assert_eq!(
+            let_header(v("X"), v("Y")).to_pretty_string(),
+            "let X = Y in"
+        );
     }
 
     #[test]

@@ -174,6 +174,9 @@ start_app(App) ->
 
 start_app(App, Retries) ->
     case application:ensure_all_started(App) of
+        {ok, _} = Ok when App =:= beamtalk_runtime ->
+            ok = ensure_bootstrap_classes(),
+            Ok;
         {ok, _} = Ok ->
             Ok;
         {error, {_, {{shutdown, {failed_to_start_child, _Child, {already_started, Pid}}}, _}}} when
@@ -183,6 +186,28 @@ start_app(App, Retries) ->
             start_app(App, Retries - 1);
         {error, Reason} ->
             error({app_start_failed, App, Reason})
+    end.
+
+%% A suite that deliberately stops the bootstrap `Object` class leaves the
+%% runtime application "started" but without it, and a second
+%% `ensure_all_started` is then a no-op, so no later suite ever sees `Object`
+%% again (`class_not_registered 'Object'`). Restart the application once so its
+%% bootstrap child registers the stub classes again (BT-4934).
+ensure_bootstrap_classes() ->
+    case beamtalk_class_registry:whereis_class('Object') of
+        Pid when is_pid(Pid) ->
+            ok;
+        undefined ->
+            ok = application:stop(beamtalk_runtime),
+            {ok, _} = application:ensure_all_started(beamtalk_runtime),
+            wait_for_class('Object', 100),
+            %% Stopping the app took every class process with it, but stdlib
+            %% modules stay loaded and `stdlib:init/0` skips loaded modules:
+            %% reload them so `Integer`, `Subprocess`, ... register again.
+            ok = reload_stdlib_modules(),
+            beamtalk_stdlib:init(),
+            wait_for_class('Integer', 100),
+            ok = repair_class_pid_index()
     end.
 
 -doc """

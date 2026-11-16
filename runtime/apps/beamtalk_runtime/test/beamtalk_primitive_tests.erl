@@ -270,7 +270,7 @@ responds_to_actor_inherited_method_test_() ->
     {setup,
         fun() ->
             {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -710,7 +710,7 @@ print_string_plain_map_test_() ->
             beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -736,7 +736,7 @@ class_of_object_primitive_test_() ->
             beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, [
@@ -773,7 +773,7 @@ class_of_object_by_name_test_() ->
             beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, [
@@ -1245,7 +1245,7 @@ print_string_plain_map_empty_test_() ->
             beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -1260,7 +1260,7 @@ print_string_plain_map_sorted_test_() ->
             beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -1278,7 +1278,7 @@ print_string_beamtalk_object_instance_test_() ->
             beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -1301,7 +1301,7 @@ print_string_class_object_test_() ->
             beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -1333,7 +1333,7 @@ display_string_map_dispatch_test_() ->
             beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -1349,7 +1349,7 @@ display_string_beamtalk_object_instance_test_() ->
             beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -1373,7 +1373,7 @@ display_string_class_object_test_() ->
             beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -1470,7 +1470,7 @@ class_of_object_non_class_beamtalk_object_test_() ->
             beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -1496,7 +1496,7 @@ responds_to_beamtalk_object_unknown_tag_test_() ->
             beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -1581,7 +1581,7 @@ class_of_object_future_autoawait_test_() ->
             beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -1613,7 +1613,7 @@ responds_to_future_autoawait_test_() ->
     {setup,
         fun() ->
             {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             beamtalk_extensions:init(),
             ok
         end,
@@ -1711,7 +1711,7 @@ value_type_responds_to_via_exports_test_() ->
     {setup,
         fun() ->
             {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -1732,7 +1732,7 @@ value_type_module_info_is_not_a_method_test_() ->
     {setup,
         fun() ->
             {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             Forms = beamtalk_test_erl_forms:parse_forms([
                 "-module('bt@mod_info_plain_value').",
                 "-export([size/1]).",
@@ -1768,7 +1768,7 @@ module_for_value_tagged_variants_test_() ->
     {setup,
         fun() ->
             {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             ok
         end,
         fun(_) -> ok end, fun() ->
@@ -1812,7 +1812,7 @@ responds_to_beamtalk_object_non_class_test_() ->
     {setup,
         fun() ->
             {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-            beamtalk_stdlib:init(),
+            beamtalk_test_boot:boot_real_stdlib('Integer'),
             beamtalk_extensions:init(),
             ok
         end,
