@@ -29,7 +29,7 @@ Returns `{started, Pid}` when we started it, `{existing, Pid}` if already runnin
 setup_trace_store() ->
     %% telemetry must be running before start_link because init/1 calls
     %% attach_telemetry_handlers which calls gen_server:call(telemetry_handler_table, ...).
-    _ = application:ensure_all_started(telemetry),
+    {ok, _} = application:ensure_all_started(telemetry),
     case whereis(beamtalk_trace_store) of
         undefined ->
             {ok, Pid} = beamtalk_trace_store:start_link(),

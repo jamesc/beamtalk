@@ -39,7 +39,7 @@ machinery (already covered by that other module), so no
 
 setup() ->
     beamtalk_test_boot:compiler(),
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
     %% BT-4792: renameTo: classifies the class through the workspace callback.
     ok = beamtalk_workspace_callback:register(beamtalk_workspace_callback_impl),
     {ClassObj, _Pid} = beamtalk_test_dynamic_class:register('Bt3443RenameFreshnessSource'),

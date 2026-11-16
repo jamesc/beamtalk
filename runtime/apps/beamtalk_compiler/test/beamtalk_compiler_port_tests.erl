@@ -27,6 +27,7 @@ compiler_binary() ->
 
 %% Helper to open and close a port around a test
 with_port(Fun) ->
+    ok = beamtalk_test_boot:load_runtime_modules(),
     Port = beamtalk_compiler_port:open(compiler_binary()),
     try
         Fun(Port)

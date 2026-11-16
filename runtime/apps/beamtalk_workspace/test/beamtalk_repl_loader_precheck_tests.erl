@@ -27,7 +27,7 @@ uses, has no such module to seed from.
 
 precheck_setup() ->
     beamtalk_test_boot:compiler(),
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
     beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     %% `mode => run` for the same test-isolation reason
     %% `beamtalk_recheck_tests:recheck_setup/0` uses it — see that module's

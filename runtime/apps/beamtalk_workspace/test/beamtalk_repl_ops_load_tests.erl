@@ -1512,7 +1512,7 @@ module_atom_casing_parity_test_() ->
 
 parity_setup() ->
     beamtalk_test_boot:compiler(),
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
     Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Proj =
         Tmp ++ "/bt_ops_parity_" ++ beamtalk_test_unique:id(),
@@ -1949,7 +1949,7 @@ save_native_source_requires_source_test() ->
 
 setup_project_class(ClassName, Src) ->
     beamtalk_test_boot:compiler(),
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
     Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Proj = Tmp ++ "/bt_section_" ++ beamtalk_test_unique:id(),
     ok = file:make_dir(Proj),

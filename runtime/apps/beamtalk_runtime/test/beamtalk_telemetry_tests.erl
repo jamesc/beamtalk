@@ -54,7 +54,7 @@ telemetry_test_() ->
     ]}.
 
 setup() ->
-    _ = application:ensure_all_started(telemetry),
+    {ok, _} = application:ensure_all_started(telemetry),
     %% function_exported/3 is false until the module is loaded.
     {module, telemetry} = code:ensure_loaded(telemetry),
     ok.

@@ -21,7 +21,7 @@ pid, atom, class object tuple, and invalid inputs.
 %%====================================================================
 
 setup() ->
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
     beamtalk_stdlib:init(),
     ok.
 

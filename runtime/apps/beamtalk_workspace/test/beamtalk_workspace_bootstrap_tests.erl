@@ -16,7 +16,7 @@ project module activation.
 %%====================================================================
 
 ensure_runtime() ->
-    application:ensure_all_started(beamtalk_runtime).
+    {ok, _} = application:ensure_all_started(beamtalk_runtime).
 
 cleanup_singleton(Name) ->
     case erlang:whereis(Name) of

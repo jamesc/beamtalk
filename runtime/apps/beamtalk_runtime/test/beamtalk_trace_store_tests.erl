@@ -26,8 +26,8 @@ telemetry handler callbacks, and telemetry_poller VM stats.
 
 setup() ->
     %% Ensure telemetry is available
-    _ = application:ensure_all_started(telemetry),
-    _ = application:ensure_all_started(telemetry_poller),
+    {ok, _} = application:ensure_all_started(telemetry),
+    {ok, _} = application:ensure_all_started(telemetry_poller),
     %% Start the trace store if not already running
     case whereis(beamtalk_trace_store) of
         undefined ->

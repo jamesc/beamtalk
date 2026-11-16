@@ -16,7 +16,9 @@ Tests session lifecycle, eval, bindings, and gen_server callbacks.
 %%====================================================================
 
 setup() ->
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    %% show_codegen compiles through the real compiler port (BT-4934).
+    ok = beamtalk_test_boot:compiler(),
     ok.
 
 teardown(_) ->

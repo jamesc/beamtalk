@@ -20,7 +20,7 @@ method validation.
 %%====================================================================
 
 setup() ->
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
     beamtalk_stdlib:init(),
     ok.
 

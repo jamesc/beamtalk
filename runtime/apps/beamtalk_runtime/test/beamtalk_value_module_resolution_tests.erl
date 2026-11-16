@@ -48,6 +48,10 @@ metadata or atom-construction call.
 setup() ->
     {ok, _} = application:ensure_all_started(beamtalk_runtime),
     ok = beamtalk_stdlib:init(),
+    %% A release loads every module up front (embedded mode); a bare EUnit node
+    %% loads them lazily, and each lazy load is a code_server call that the
+    %% "no code_server call" assertions below would count (BT-4934).
+    ok = beamtalk_test_boot:load_runtime_modules(),
     ok = load_accessor_module(?MOD, x),
     ok = load_accessor_module(?MOD2, y),
     ok.
