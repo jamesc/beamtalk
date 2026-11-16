@@ -31,7 +31,10 @@ stdlib_setup() ->
     %% Protocol-only modules (e.g. Printable) register during stdlib load and
     %% their on_load `register_protocol/1` crashes on a missing ETS table.
     beamtalk_protocol_registry:init(),
-    beamtalk_stdlib:init(),
+    %% Cold-boot semantics: `boot_real_stdlib/1` reloads the stdlib modules when
+    %% an earlier suite left them loaded without their class processes or xref
+    %% rows, so the registration and xref-index assertions below see a real boot.
+    ok = beamtalk_test_boot:boot_real_stdlib('Printable'),
     ok.
 
 stdlib_teardown(_) ->
