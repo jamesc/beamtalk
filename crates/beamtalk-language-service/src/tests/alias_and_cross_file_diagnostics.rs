@@ -764,3 +764,128 @@ fn batch_indexing_expands_dependency_aliases_in_any_order() {
         );
     }
 }
+
+// -----------------------------------------------------------------------
+// ADR 0070 Phase 2 (BT-4928): `pkg@Class` qualifier validation in the LSP
+// -----------------------------------------------------------------------
+
+fn unknown_package_messages(service: &SimpleLanguageService, file: &Utf8PathBuf) -> Vec<String> {
+    service
+        .diagnostics(file)
+        .into_iter()
+        .map(|d| d.message.to_string())
+        .filter(|m| m.contains("Unknown package"))
+        .collect()
+}
+
+const QUALIFIED_REF_SOURCE: &str = "Object subclass: Foo\n  make => xml@Parser new\n";
+
+#[test]
+fn undeclared_package_qualifier_is_reported_under_a_registered_root() {
+    let mut service = SimpleLanguageService::new();
+    let root = Utf8PathBuf::from("proj");
+    let file = root.join("src").join("Foo.bt");
+    service.set_root_qualifier_packages(vec![(
+        root,
+        beamtalk_core::semantic_analysis::known_qualifier_packages(Some("app"), ["json"]),
+    )]);
+    service.update_file(file.clone(), QUALIFIED_REF_SOURCE.to_string());
+
+    let messages = unknown_package_messages(&service, &file);
+    assert_eq!(messages.len(), 1, "got: {messages:?}");
+    assert!(
+        messages[0].contains("Unknown package 'xml' in qualified reference"),
+        "got: {messages:?}"
+    );
+}
+
+#[test]
+fn declared_package_qualifier_is_not_reported() {
+    let mut service = SimpleLanguageService::new();
+    let root = Utf8PathBuf::from("proj");
+    let file = root.join("src").join("Foo.bt");
+    service.set_root_qualifier_packages(vec![(
+        root,
+        beamtalk_core::semantic_analysis::known_qualifier_packages(Some("app"), ["xml"]),
+    )]);
+    service.update_file(file.clone(), QUALIFIED_REF_SOURCE.to_string());
+
+    assert!(unknown_package_messages(&service, &file).is_empty());
+}
+
+#[test]
+fn package_qualifier_is_not_checked_without_a_package_set() {
+    // No manifest / unreadable manifest: no set registered, so no check -
+    // both for a file under no root and for a service never given a set.
+    let mut service = SimpleLanguageService::new();
+    let file = Utf8PathBuf::from("proj").join("src").join("Foo.bt");
+    service.update_file(file.clone(), QUALIFIED_REF_SOURCE.to_string());
+    assert!(unknown_package_messages(&service, &file).is_empty());
+
+    service.set_root_qualifier_packages(vec![(
+        Utf8PathBuf::from("other"),
+        beamtalk_core::semantic_analysis::known_qualifier_packages(Some("app"), []),
+    )]);
+    assert!(unknown_package_messages(&service, &file).is_empty());
+}
+
+#[test]
+fn package_qualifier_uses_the_most_specific_root_set() {
+    let mut service = SimpleLanguageService::new();
+    let outer = Utf8PathBuf::from("proj");
+    let inner = outer.join("deps").join("xmlpkg");
+    let file = inner.join("src").join("Foo.bt");
+    service.set_root_qualifier_packages(vec![
+        (
+            outer,
+            beamtalk_core::semantic_analysis::known_qualifier_packages(Some("app"), []),
+        ),
+        (
+            inner,
+            beamtalk_core::semantic_analysis::known_qualifier_packages(Some("xmlpkg"), ["xml"]),
+        ),
+    ]);
+    service.update_file(file.clone(), QUALIFIED_REF_SOURCE.to_string());
+
+    assert!(unknown_package_messages(&service, &file).is_empty());
+}
+
+#[test]
+fn unregistered_dependency_checkout_is_not_checked_against_the_consumer_set() {
+    let mut service = SimpleLanguageService::new();
+    let root = Utf8PathBuf::from("proj");
+    let stale = root
+        .join("_build")
+        .join("deps")
+        .join("removed")
+        .join("src")
+        .join("Foo.bt");
+    service.set_root_qualifier_packages(vec![(
+        root,
+        beamtalk_core::semantic_analysis::known_qualifier_packages(Some("app"), []),
+    )]);
+    service.update_file(stale.clone(), QUALIFIED_REF_SOURCE.to_string());
+
+    assert!(unknown_package_messages(&service, &stale).is_empty());
+}
+
+#[test]
+fn registered_dependency_checkout_uses_its_own_set() {
+    let mut service = SimpleLanguageService::new();
+    let root = Utf8PathBuf::from("proj");
+    let dep_root = root.join("_build").join("deps").join("xmlpkg");
+    let file = dep_root.join("src").join("Foo.bt");
+    service.set_root_qualifier_packages(vec![
+        (
+            root,
+            beamtalk_core::semantic_analysis::known_qualifier_packages(Some("app"), []),
+        ),
+        (
+            dep_root,
+            beamtalk_core::semantic_analysis::known_qualifier_packages(Some("xmlpkg"), []),
+        ),
+    ]);
+    service.update_file(file.clone(), QUALIFIED_REF_SOURCE.to_string());
+
+    assert_eq!(unknown_package_messages(&service, &file).len(), 1);
+}
