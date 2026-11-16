@@ -526,10 +526,12 @@ impl OtpTypeSpecs {
 /// the two spellings equal (`beamtalk_source_path_tests` pins the Erlang side
 /// and `dependency_beam_embeds_path_relative_to_its_own_package_root` this one).
 ///
-/// Line 1 is the root relative to the `ebin/` directory, so a consumer and its
-/// dependency moved together (`mv ws ws2`, a CI cache restore of `_build/`)
-/// still resolve without a rebuild. Line 2 is the absolute root, for a
-/// dependency outside the moved tree. Either line alone is accepted.
+/// Line 1 is the root relative to the `ebin/` directory; line 2 is the
+/// absolute root. The runtime prefers line 2 while it still holds a package
+/// (so a consumer moved next to a lookalike package is not misdirected) and
+/// falls back to line 1 once the old location is gone, which is the case for a
+/// consumer and dependency moved together (`mv ws ws2`, a CI cache restore of
+/// `_build/`). Either line alone is accepted.
 pub(crate) const SOURCE_ROOT_MARKER: &str = ".beamtalk-source-root";
 
 /// Write [`SOURCE_ROOT_MARKER`] into `ebin_path`, naming `dep_root`.

@@ -147,9 +147,11 @@ beam_root(Module) ->
 
 %% `absent`: no marker. `unreadable`: a marker names a root that cannot be
 %% decoded as text, so the package walk (which would find the consumer's root
-%% for a path dependency) must not run. Otherwise the root as a string: line 1
+%% for a path dependency) must not run. Otherwise the root as a string: line 2
 %% (absolute) when it still holds a package, else line 1 (relative to
-%% `EbinDir`) when it does, else line 2.
+%% `EbinDir`) when that holds one, else line 2. A copied (not moved) tree whose
+%% original is still on disk therefore resolves into the original until the
+%% dependency is rebuilt.
 -spec read_marker(file:filename_all()) -> file:filename_all() | unreadable | absent.
 read_marker(EbinDir) ->
     case file:read_file(filename:join(EbinDir, ".beamtalk-source-root")) of

@@ -186,8 +186,9 @@ module_info/0,1. The BIF works regardless of exports.
 Returns nil for stdlib/bootstrap/dynamically-created classes.
 
 The attribute holds a package-relative path (BT-4940); this returns it
-resolved to an absolute path via `beamtalk_source_path:resolve/2`, because
-every caller wants the file on disk. `embedded_source_from_module/1` returns
+resolved to an absolute path via `beamtalk_source_path:resolve_strict/2`,
+because every caller wants the file on disk; `nil` when the module's source
+root is recorded but unreadable (BT-4957). `embedded_source_from_module/1` returns
 the path exactly as embedded, for display.
 """.
 -spec source_file_from_module(atom()) -> binary() | 'nil'.
