@@ -27,12 +27,13 @@ Only when the module has no root of its own (compiled in memory by the REPL or
 `load_project`, or a release layout) are these tried, first existing file wins:
 
 3. the workspace's project root (`workspace_project_root` application env);
-4. the package root above the current directory.
+4. the package root above the current directory, then the current directory
+   itself (a cwd-relative path, as before BT-4940).
 
 An already-absolute path is returned as is (modules built before BT-4940).
-When nothing exists on disk the path is joined to the first root found; with no
-root at all it is returned unchanged, still relative. Callers that open the file
-treat that as "not found".
+With a module root, the result is that root joined with the path (it may not
+exist). Without one, a path that exists under no candidate is returned
+unchanged, still relative; callers that open the file treat that as "not found".
 """.
 
 -export([find_package_root/1, resolve/2, is_absolute/1]).
@@ -60,21 +61,31 @@ resolve(Module, Path) ->
         true ->
             Path;
         false ->
-            Roots = candidate_roots(Module),
-            case [J || R <- Roots, J <- [filename:join(R, Path)], filelib:is_file(J)] of
-                [Found | _] -> Found;
-                [] when Roots =/= [] -> filename:join(hd(Roots), Path);
-                [] -> Path
+            case beam_root(Module) of
+                %% The module's own root decides: a file missing under it is
+                %% reported there, never taken from another project.
+                undefined -> resolve_without_root(Path);
+                Root -> filename:join(Root, Path)
             end
     end.
 
--spec candidate_roots(module() | undefined) -> [file:filename_all()].
-candidate_roots(Module) ->
-    case beam_root(Module) of
-        undefined ->
-            dedupe([R || R <- [workspace_root(), cwd_root()], R =/= undefined]);
-        Root ->
-            [Root]
+%% A module with no root of its own (compiled in memory, or outside any
+%% package). First existing file wins; a path that exists nowhere is returned
+%% unchanged, still relative, so callers see "not found" and a cwd-relative
+%% path keeps meaning what it always did.
+-spec resolve_without_root(file:filename_all()) -> file:filename_all().
+resolve_without_root(Path) ->
+    Roots = dedupe([R || R <- [workspace_root(), cwd_root(), cwd()], R =/= undefined]),
+    case [J || R <- Roots, J <- [filename:join(R, Path)], filelib:is_file(J)] of
+        [Found | _] -> Found;
+        [] -> Path
+    end.
+
+-spec cwd() -> file:filename_all() | undefined.
+cwd() ->
+    case file:get_cwd() of
+        {ok, Cwd} -> Cwd;
+        _ -> undefined
     end.
 
 dedupe(L) -> dedupe(L, []).
@@ -104,9 +115,17 @@ beam_root(Module) ->
 read_marker(EbinDir) ->
     case file:read_file(filename:join(EbinDir, ".beamtalk-source-root")) of
         {ok, Bin} ->
-            case string:trim(unicode:characters_to_list(Bin)) of
-                [] -> undefined;
-                Root -> Root
+            %% A list when the bytes are UTF-8 (so paths join as strings); the raw
+            %% binary otherwise, which is still a valid filename here. Never
+            %% raises on a marker that is not UTF-8.
+            case string:trim(Bin) of
+                <<>> ->
+                    undefined;
+                Root ->
+                    case unicode:characters_to_list(Root) of
+                        List when is_list(List) -> List;
+                        _ -> Root
+                    end
             end;
         {error, _} ->
             undefined

@@ -533,7 +533,7 @@ fn write_source_root_marker(ebin_path: &Utf8Path, dep_root: &Utf8Path) -> Result
         .unwrap_or_else(|_| dep_root.as_std_path().to_path_buf());
     std::fs::write(
         ebin_path.join(SOURCE_ROOT_MARKER),
-        root.to_string_lossy().as_bytes(),
+        root.as_os_str().as_encoded_bytes(),
     )
     .into_diagnostic()
     .wrap_err_with(|| format!("Failed to write source-root marker in {ebin_path}"))

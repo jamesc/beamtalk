@@ -2418,7 +2418,8 @@ fn e2e_built_project_source_path_survives_reload_and_sync() {
 /// BT-4940: a path dependency's beams live under the consumer's
 /// `_build/deps/<name>/ebin` (outside any package) and embed a path relative
 /// to the dependency's own root. `sourceFile` must name the dependency's
-/// file, including when the consumer has a file at the same relative path.
+/// file (the consumer has no file at that relative path, so a resolver that
+/// used the consumer's root would answer a path that does not exist).
 #[test]
 #[ignore = "slow test - run with `just test-repl-protocol`"]
 #[serial(e2e)]

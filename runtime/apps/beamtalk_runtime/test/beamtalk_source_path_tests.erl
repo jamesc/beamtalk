@@ -98,3 +98,25 @@ missing_file_is_not_taken_from_another_root_test() ->
         code:delete(Mod),
         file:del_dir_r(Base)
     end.
+
+%% A module with no root of its own and a path relative to the current
+%% directory (a REPL `:load tests/x.bt` outside any package) resolves there,
+%% even when the workspace has a project root that lacks the file.
+cwd_relative_path_resolves_without_a_package_test() ->
+    Base = filename:absname("bt4940_cwdrel"),
+    Ws = filename:join(Base, "ws"),
+    Cwd = filename:join(Base, "cwd"),
+    ok = filelib:ensure_path(Ws),
+    ok = filelib:ensure_path(filename:join(Cwd, "fixtures")),
+    File = filename:join([Cwd, "fixtures", "z.bt"]),
+    ok = file:write_file(File, <<>>),
+    {ok, Old} = file:get_cwd(),
+    application:set_env(beamtalk_runtime, workspace_project_root, list_to_binary(Ws)),
+    try
+        ok = file:set_cwd(Cwd),
+        ?assertEqual(File, beamtalk_source_path:resolve(undefined, "fixtures/z.bt"))
+    after
+        file:set_cwd(Old),
+        application:unset_env(beamtalk_runtime, workspace_project_root),
+        file:del_dir_r(Base)
+    end.
