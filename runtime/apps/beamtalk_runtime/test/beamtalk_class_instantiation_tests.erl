@@ -1036,8 +1036,9 @@ test_check_init_args_registry_primary_inherited() ->
     %% `value` is inherited from `Counter`: it must be the fixture's, and the
     %% declared-fields memo must not carry an answer computed while it was absent
     %% or replaced by an earlier suite (BT-4934).
-    ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
+    ok = beamtalk_test_class:stop_graceful('LoggingCounter'),
+    ok = beamtalk_test_class:reload_fixture('Counter', 'bt@counter'),
+    ok = beamtalk_test_class:reload_fixture('LoggingCounter', 'bt@logging_counter'),
     beamtalk_class_derived_cache:invalidate(),
     BaseState = #{logCount => 0},
     InitArgs = #{value => 1, logCount => 2},
