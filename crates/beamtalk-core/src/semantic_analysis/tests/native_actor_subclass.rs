@@ -121,6 +121,21 @@ fn abstract_subclass_of_a_native_actor_is_not_reported() {
 }
 
 #[test]
+fn abstract_non_native_middle_class_with_a_native_redeclaring_child_is_silent() {
+    // The abstract class is never spawned and the concrete child has its own facade.
+    let src = format!(
+        "{NATIVE_ACTOR}abstract Counter subclass: Mid\n  extra => 1\n\
+         Mid subclass: Leaf native: leaf_backing\n  more -> Integer => self delegate\n"
+    );
+    let d = same_package(&src);
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+/// KNOWN GAP (BT-4964, needs-spec): `Queue subclass: MyQ` compiles, but
+/// `MyQ new` answers a plain `Queue`, so `MyQ`'s own methods are unreachable.
+/// Whether this becomes "make it work" or a compile error is undecided; this
+/// pins today's behaviour (no diagnostic) and flips with that decision.
+#[test]
 fn value_and_object_subclasses_of_native_classes_are_not_reported() {
     let src = "Value subclass: NVal native: nval_backing\n  size -> Integer => self delegate\n\
                NVal subclass: SubVal\n  extra => 1\n\

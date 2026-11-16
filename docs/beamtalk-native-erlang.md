@@ -223,7 +223,7 @@ This is the same first-keyword convention as inline FFI (`(Erlang mod) do: x wit
 
 **A concrete actor under a `native:` actor must redeclare `native:` (BT-4961).** A `native:` actor compiles to a facade module with no `init/1`, while a subclass without `native:` compiles to a full `gen_server` whose `init/1` calls its superclass's. So `Counter subclass: Sub` (with `Counter` a `native:` actor and no `native:` on `Sub`) used to compile and then fail at `Sub spawn` with an undefined `init/1`. It is now a compile error at the subclass: "Actor `Sub` subclasses the `native:` actor `Counter` and must declare its own `native:` backing module". It applies to a grandchild too, and to a parent from a compiled dependency (when that dependency was built with the `native` metadata flag; an older `.beam` is not checked). Write `Counter subclass: Sub native: sub_backing`, or derive from `Actor`.
 
-Not an error, and left as it was: an `abstract` subclass of a native actor (it is never spawned; its concrete descendants are checked), and a `Value` / `Object` subclass of a native `Value` / `Object` class (no `init/1` is involved).
+Not an error, and left as it was: an `abstract` subclass of a native actor (it is never spawned; its concrete descendants are checked), and a `Value` / `Object` subclass of a native `Value` / `Object` class (no `init/1` is involved). The Value/Object form has a separate known gap: `Queue subclass: MyQ` compiles, but `MyQ new` answers a plain `Queue`, so `MyQ`'s own methods are unreachable (BT-4964, undecided).
 
 ### `self delegate` must be in the class's own file (BT-4930)
 
