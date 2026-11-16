@@ -720,6 +720,22 @@ surface-specific. Cascade statements keep `cascade-drops-update`.
   `@expect discarded_update`.
 - The `setUp` lint does not warn again for a statement already flagged.
 
+### Package qualifier validation (ADR 0070 Phase 2, BT-4921)
+
+A `pkg@Class` qualifier must name a package in the known set
+`beamtalk_core::semantic_analysis::known_qualifier_packages`: the manifest's
+`[dependencies]`, the package itself and `stdlib`. An unknown one is the
+error "Unknown package 'pkg' in qualified reference …".
+
+| Surface | Wired | How |
+|---|---|---|
+| `build`, `check`, `test` | yes | `CompilerOptions::known_packages` from `PackageCheckerScope` |
+| `lint`, MCP `lint` | yes | `PackageCheckerScope::known_packages` through `lint_pipeline` |
+| REPL `load_project` / compile | yes | `ProjectAnalysisContext::known_packages` from the file's manifest |
+| LSP diagnostics | **no** | the language service has no view of the manifest's dependencies; its `$project` placeholder package is not a real one. A reference the build rejects shows no squiggle. Not `surface-specific` — a known gap. |
+
+A file with no manifest has no package set and is never checked. A dependency's own files are checked against its own manifest's set (`dependency_compile_options`), not the downstream package's. A transitive dependency is not in the set on any surface.
+
 ### Dependency extensions and the dependency guard (ADR 0070 WS3, ADR 0100, BT-4608)
 
 In a package with dependencies, whether does-not-understand hints and

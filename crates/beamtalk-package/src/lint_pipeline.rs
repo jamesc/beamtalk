@@ -373,6 +373,9 @@ pub struct FileContext<'a> {
     pub dependency_extensions_unknown: bool,
     /// The package name; E0401/E0402/E0403 only run when it is set.
     pub current_package: Option<&'a str>,
+    /// The package names a `pkg@Class` qualifier may name (ADR 0070 Phase 2);
+    /// `None` skips the check.
+    pub known_packages: Option<HashSet<String>>,
     /// Whether the file lives under the package's `stubs/`, where `declare
     /// native:` blocks are legal.
     pub is_stub_file: bool,
@@ -432,6 +435,7 @@ pub fn analyse_file_with_types(
         knowledge_scope: ctx.knowledge_scope,
         dependency_extensions_unknown: ctx.dependency_extensions_unknown,
         current_package: ctx.current_package.map(str::to_string),
+        known_packages: ctx.known_packages,
         stdlib_mode: ctx.stdlib_mode,
         known_erlang_modules: ctx.known_erlang_modules,
         ..Default::default()
@@ -609,6 +613,7 @@ pub fn analyse_package(
                 cross_file_extensions: Some(&extension_index),
                 dependency_extensions_unknown,
                 current_package,
+                known_packages: scope.known_packages.clone(),
                 is_stub_file,
                 file_stem: target.path.file_stem(),
                 stdlib_mode: package::is_under_stdlib_src_dir(target.path.as_std_path()),

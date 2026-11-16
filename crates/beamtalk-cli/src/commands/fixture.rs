@@ -135,6 +135,9 @@ impl FixtureCompiler<'_> {
                     current_package: current_package.map(str::to_string),
                     knowledge_scope: scope.knowledge_scope,
                     dependency_extensions_unknown: scope.has_package_dependencies,
+                    // ADR 0070 Phase 2: `pkg@Class` must name a declared
+                    // dependency, the package itself or the stdlib.
+                    known_packages: scope.known_packages.clone(),
                     // BT-4022: project-known Erlang modules so `unresolved_ffi`
                     // agrees with `build`/`lint` on hex-dep and own-`native/`.
                     known_erlang_modules: (*known_erlang_modules).clone(),
@@ -158,6 +161,8 @@ impl FixtureCompiler<'_> {
                     current_package: None,
                     knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope::default(),
                     dependency_extensions_unknown: false,
+                    // No manifest, so no package set to validate against.
+                    known_packages: None,
                     // No project on disk whose dependency/native modules could
                     // be collected (BT-4022), but the installed OTP applies.
                     known_erlang_modules:
