@@ -1219,7 +1219,7 @@ method_not_found_error_test_() ->
     {timeout, ?TEST_TIMEOUT_S, fun method_not_found_error/0}.
 
 method_not_found_error() ->
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_test_wait:class('Actor', ?ACTOR_WAIT_MS),
     Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
@@ -1430,7 +1430,7 @@ setup_super_test_classes() ->
     code:add_path("_build/test/lib/beamtalk_runtime/test"),
 
     %% Ensure application is started (bootstrap classes, pg, etc.)
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
 
     %% Load modules and register classes explicitly
     {module, 'bt@counter'} = code:ensure_loaded('bt@counter'),
@@ -1647,7 +1647,7 @@ unregistered_extension_gives_dnu_test_() ->
     {timeout, ?TEST_TIMEOUT_S, fun unregistered_extension_gives_dnu/0}.
 
 unregistered_extension_gives_dnu() ->
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_test_wait:class('Actor', ?ACTOR_WAIT_MS),
     Object = 'bt@counter':spawn(),
     Pid = element(4, Object),

@@ -222,7 +222,7 @@ trigger_code_change_3_dead_pid_test() ->
 %%====================================================================
 
 field_migration_setup() ->
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_stdlib:init(),
     ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = beamtalk_test_class:ensure_fixture_loaded('InitHookCounter', 'bt@init_hook_counter'),
@@ -390,7 +390,7 @@ test_field_migration_typed_no_default_class_adds_new_field() ->
 %% only for real actor spawns, and firing it during a code_change would
 %% double-report actor starts.
 test_field_migration_initialize_class_no_telemetry() ->
-    _ = application:ensure_all_started(telemetry),
+    {ok, _} = application:ensure_all_started(telemetry),
     HandlerId = {beamtalk_hot_reload_tests, make_ref()},
     ok = telemetry:attach(
         HandlerId,

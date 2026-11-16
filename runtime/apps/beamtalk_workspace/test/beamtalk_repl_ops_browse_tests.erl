@@ -481,7 +481,7 @@ find_module_row(Rows, Module) ->
 %% Ensure the stdlib package app is loaded so enumeration has a package to walk.
 ensure_stdlib() ->
     _ = application:load(beamtalk_stdlib),
-    _ = application:ensure_all_started(beamtalk_stdlib),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_stdlib),
     ok.
 
 %%====================================================================

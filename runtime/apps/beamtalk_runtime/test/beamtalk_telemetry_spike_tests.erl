@@ -25,7 +25,7 @@ to the full actor observability architecture:
 
 -doc "Ensure the telemetry application is started.".
 ensure_telemetry() ->
-    _ = application:ensure_all_started(telemetry),
+    {ok, _} = application:ensure_all_started(telemetry),
     ok.
 
 -doc "Start a minimal gen_server for testing telemetry:span/3 wrapping.".

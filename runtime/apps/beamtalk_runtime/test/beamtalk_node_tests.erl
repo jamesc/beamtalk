@@ -297,7 +297,7 @@ normalize_reason_test_() ->
 %% `beamtalk_dist_shape_skew_tests:setup/0` (see its doc).
 setup() ->
     beamtalk_dist_test_helper:ensure_distribution(),
-    {ok, _Started} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _Started} = beamtalk_test_boot:start_app(beamtalk_runtime),
     ok.
 
 cleanup(ok) ->

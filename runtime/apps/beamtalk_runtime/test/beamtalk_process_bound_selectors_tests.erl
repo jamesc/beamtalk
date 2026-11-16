@@ -24,7 +24,7 @@ clauses' own abstract code, so a clause added in Erlang without the Rust list
 -define(DISPATCH, beamtalk_class_dispatch).
 
 setup() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     ok = beamtalk_stdlib:init(),
     ok.
 

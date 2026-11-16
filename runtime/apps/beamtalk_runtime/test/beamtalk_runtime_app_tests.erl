@@ -22,6 +22,7 @@ gracefully to avoid test pollution issues.
 
 %% Helper to start runtime, handling already_started case
 start_runtime() ->
+    ok = beamtalk_test_boot:telemetry(),
     case beamtalk_runtime_app:start(normal, []) of
         {ok, Pid} -> {started, Pid};
         {error, {already_started, Pid}} -> {already_running, Pid}

@@ -224,7 +224,14 @@ send_erlang_module_print_string_test() ->
 %%% Erlang class-side proxy (construct ErlangModule)
 %%% ===================================================================
 
+%% These tests send to the `Erlang` class object, which dispatches through
+%% the compiled `bt@stdlib@erlang` and the extensions table; a fresh node has
+%% neither the runtime nor the stdlib class loaded (BT-4934).
+boot_erlang_class() ->
+    beamtalk_test_boot:boot_real_stdlib('Erlang').
+
 erlang_proxy_creates_module_proxy_test() ->
+    ok = boot_erlang_class(),
     ErlangObj = #{'$beamtalk_class' => 'Erlang'},
     Result = beamtalk_primitive:send(ErlangObj, 'lists', []),
     ?assertEqual('ErlangModule', maps:get('$beamtalk_class', Result)),
@@ -235,6 +242,7 @@ erlang_proxy_class_test() ->
     ?assertEqual('Erlang', beamtalk_primitive:send(ErlangObj, 'class', [])).
 
 erlang_proxy_print_string_test() ->
+    ok = boot_erlang_class(),
     ErlangObj = #{'$beamtalk_class' => 'Erlang'},
     ?assertEqual(<<"Erlang">>, beamtalk_primitive:send(ErlangObj, 'printString', [])).
 
@@ -243,6 +251,7 @@ erlang_proxy_print_string_test() ->
 %%% ===================================================================
 
 erlang_to_module_to_call_test() ->
+    ok = boot_erlang_class(),
     ErlangObj = #{'$beamtalk_class' => 'Erlang'},
     ListsProxy = beamtalk_primitive:send(ErlangObj, 'lists', []),
     Result = beamtalk_primitive:send(ListsProxy, 'reverse:', [[1, 2, 3]]),
@@ -276,6 +285,7 @@ responds_to_erlang_test() ->
 %%% ===================================================================
 
 erlang_keyword_selector_raises_test() ->
+    ok = boot_erlang_class(),
     %% Keyword selectors on Erlang proxy should raise, not create invalid module
     ErlangObj = #{'$beamtalk_class' => 'Erlang'},
     ?assertBtError(
@@ -290,6 +300,7 @@ dispatch_function_clause_error_wraps_test() ->
     ).
 
 erlang_proxy_with_args_raises_arity_mismatch_test() ->
+    ok = boot_erlang_class(),
     %% Module lookup should reject non-empty args
     ErlangObj = #{'$beamtalk_class' => 'Erlang'},
     ?assertBtError(

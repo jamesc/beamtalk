@@ -281,7 +281,7 @@ diagnostics_non_binary_mode_passed_through_unchanged_test() ->
 %%====================================================================
 
 diagnostics_for_success_returns_diagnostics_list_test() ->
-    application:ensure_all_started(compiler),
+    {ok, _} = application:ensure_all_started(compiler),
     StartResult = application:ensure_all_started(beamtalk_compiler),
     %% Let a freshly-started compiler port come up before compiling.
     case StartResult of
@@ -304,7 +304,7 @@ diagnostics_for_success_returns_diagnostics_list_test() ->
 %%====================================================================
 
 diagnostics_op_source_path_applies_project_table_test() ->
-    application:ensure_all_started(compiler),
+    {ok, _} = application:ensure_all_started(compiler),
     StartResult = application:ensure_all_started(beamtalk_compiler),
     case StartResult of
         {ok, [_ | _]} -> ok = beamtalk_test_wait:sync(beamtalk_compiler_server);
@@ -771,6 +771,8 @@ classify_receiver_self_resolves_against_edited_class_test() ->
     ).
 
 classify_receiver_super_resolves_against_superclass_test() ->
+    %% Needs the real `Integer` class, not whatever an earlier module left (BT-4934).
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     Super = beamtalk_runtime_api:superclass(beamtalk_runtime_api:whereis_class('Integer')),
     ?assert(is_atom(Super) andalso Super =/= none),
     ?assertEqual(
@@ -797,6 +799,8 @@ classify_receiver_self_without_context_is_an_ordinary_name_test() ->
     ).
 
 hover_docs_negative_and_radix_literal_receivers_match_integer_test() ->
+    %% Needs the real `Integer` class, not whatever an earlier module left (BT-4934).
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     %% BT-4927: hover shares the tokenizer, so `-5 factorial` / `16rFF factorial`
     %% hover exactly what `42 factorial` does.
     Expected = beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"42 factorial">>, <<>>, #{}),
@@ -809,6 +813,8 @@ hover_docs_negative_and_radix_literal_receivers_match_integer_test() ->
     ).
 
 hover_docs_self_unary_and_keyword_match_a_literal_receiver_test() ->
+    %% Needs the real `Integer` class, not whatever an earlier module left (BT-4934).
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     Ctx = {'Integer', instance},
     %% Unary: `self factorial` hovers exactly what `42 factorial` does.
     Expected = beamtalk_repl_ops_dev_complete:hover_docs(<<>>, <<"42 factorial">>, <<>>, #{}),
@@ -1761,6 +1767,8 @@ context_completion_radix_integer_literal() ->
     ).
 
 context_completion_negative_integer_literal() ->
+    %% Needs the real `Integer` class, not whatever an earlier module left (BT-4934).
+    ok = beamtalk_test_boot:boot_real_stdlib('Integer'),
     %% BT-4927: a negative literal is an Integer.
     Result = beamtalk_repl_ops_dev_complete:get_context_completions(<<"-5 ab">>),
     ?assert(lists:member(<<"abs">>, Result)),
@@ -2151,7 +2159,7 @@ session_codegen_test_() ->
     end}.
 
 setup_session() ->
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     {ok, Pid} = beamtalk_repl_shell:start_link(<<"ops-dev-codegen-session">>),
     Pid.
 

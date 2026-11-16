@@ -14,7 +14,7 @@ invalidation by every `beamtalk_class_metadata` write.
 -include_lib("eunit/include/eunit.hrl").
 
 setup() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     ok.
 
 cleanup(_) ->
@@ -117,7 +117,7 @@ key() ->
 %% BT-4416: generation/0 is what per-process memos (beamtalk_equality's
 %% `equals:` fast path) tag themselves with, so every invalidate/0 must move it.
 generation_moves_on_invalidate_test() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Gen0 = beamtalk_class_derived_cache:generation(),
     ?assert(is_integer(Gen0)),
     ok = beamtalk_class_derived_cache:invalidate(),

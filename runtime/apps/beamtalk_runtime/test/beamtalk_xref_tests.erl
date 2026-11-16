@@ -1591,12 +1591,12 @@ assert_single_miss(Class, Query) ->
     ?assertEqual([beamtalk, runtime], maps:get(domain, Meta)).
 setup_app() ->
     %% The miss policy needs both a live class registry (to report a class as
-    %% loaded) and a running xref server. Bring up the full runtime app when we
-    %% can; an earlier fixture in the same VM may have started xref bare, which
-    %% makes the supervised app start fail with `already_started` and skips
-    %% bootstrap's class registration. In every case, end by guaranteeing the
-    %% bootstrap stub classes are registered so at least one class is loaded.
-    _ = application:ensure_all_started(beamtalk_runtime),
+    %% loaded) and a running xref server. Bring up the full runtime app; an
+    %% earlier fixture in the same VM may have started xref bare, which
+    %% `start_app/1` stops before the supervised start (BT-4934). End by
+    %% guaranteeing the bootstrap stub classes are registered so at least one
+    %% class is loaded.
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     ensure_xref_running(),
     ensure_pg_running(),
     register_stub_classes(),

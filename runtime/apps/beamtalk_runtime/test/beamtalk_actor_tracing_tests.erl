@@ -27,7 +27,7 @@ recorded exactly once per send, and `Tracing enable` switches events on.
 
 setup() ->
     %% Ensure telemetry and runtime deps are available
-    _ = application:ensure_all_started(telemetry),
+    {ok, _} = application:ensure_all_started(telemetry),
     %% beamtalk_actor and beamtalk_trace_store gate on
     %% `erlang:function_exported(telemetry, ...)`, which is false until the
     %% `telemetry` module itself is loaded — starting the app does not load

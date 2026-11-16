@@ -576,9 +576,13 @@ assert_command_recognized(Command) ->
 module_name_for_path_matches_shared_corpus() ->
     Corpus = load_module_naming_corpus(),
     ?assert(length(Corpus) >= 10),
+    %% The port reply is decoded with `binary_to_term(_, [safe])`, which rejects
+    %% atoms the VM has not seen: intern every expected error reason before the
+    %% first call, not while comparing its result (BT-4934).
+    [binary_to_atom(Reason) || #{<<"error">> := Reason} <- Corpus],
     lists:foreach(
         fun(#{<<"path">> := Path, <<"package">> := Pkg, <<"root">> := Root} = Case) ->
-            RootKind = binary_to_existing_atom(Root),
+            RootKind = binary_to_atom(Root),
             Result = beamtalk_compiler:module_name_for_path(Path, Pkg, RootKind),
             case Case of
                 #{<<"module">> := Module} ->

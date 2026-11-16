@@ -55,7 +55,7 @@ apply_meta_override(Real) ->
 %%====================================================================
 
 setup() ->
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_stdlib:init(),
     ok = beamtalk_test_class:ensure_fixture_loaded('TypedFieldCounter', 'bt@typed_field_counter'),
     ok = beamtalk_test_class:ensure_fixture_loaded('ShapeChainCart', 'bt@shape_chain_cart'),

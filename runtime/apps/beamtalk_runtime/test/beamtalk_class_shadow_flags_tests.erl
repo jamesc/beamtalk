@@ -15,7 +15,7 @@ register and unregister on the same class concurrently).
 -include("beamtalk_class_vars_keys.hrl").
 
 setup_runtime() ->
-    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     ok = beamtalk_stdlib:init(),
     ok.
 

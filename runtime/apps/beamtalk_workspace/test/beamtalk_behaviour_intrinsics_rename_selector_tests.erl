@@ -50,7 +50,7 @@ start_fixture(Prefix, Files) ->
     %% BT-4792: the runtime reaches the workspace pipeline through this callback.
     ok = beamtalk_workspace_callback:register(beamtalk_workspace_callback_impl),
     beamtalk_test_boot:compiler(),
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     Unique = beamtalk_test_unique:id(),
     ProjDir = filename:join(beamtalk_test_fs:base_dir(), Prefix ++ "-" ++ Unique),

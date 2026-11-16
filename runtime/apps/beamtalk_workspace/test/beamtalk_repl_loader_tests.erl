@@ -679,7 +679,7 @@ method_source_binary_falls_back_to_list_expression_test() ->
 
 loader_setup() ->
     beamtalk_test_boot:compiler(),
-    application:ensure_all_started(beamtalk_runtime),
+    {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Proj = Tmp ++ "/bt_loader_proj_" ++ beamtalk_test_unique:id(),
     ok = file:make_dir(Proj),

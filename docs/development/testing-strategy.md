@@ -532,6 +532,28 @@ resolve_sets_value_test() ->
 
 ---
 
+#### Test-order isolation (BT-4934)
+
+`just test-runtime` runs the EUnit modules in one fixed order in one node, so a
+module that relies on state another module left behind (a registered class, a
+running `beamtalk_announcements`, a started app, an atom another module already
+created) passes there and fails alone. `just test-isolation <mode>` runs the
+suites in the orders that expose this, prints a table (module, tests,
+failures, time) and exits non-zero on any failure:
+
+| Mode | What it runs |
+|------|--------------|
+| `alone` | every module in its own fresh `erl` node, 4 at a time (`--jobs N`) |
+| `reverse` | the whole suite in reverse module order |
+| `random` | the whole suite in a shuffled order; the seed is printed, `--seed S` reproduces it |
+
+`--only M1,M2` narrows any mode to named modules. It runs nightly
+(`nightly.yml`, job `eunit-isolation`), not on PRs. A test must set up and tear
+down what it needs and assert its own preconditions
+(`{ok, _} = application:ensure_all_started(...)`, `beamtalk_test_boot`,
+`beamtalk_test_proc`, `beamtalk_test_class:with_class/2`); never skip or
+quarantine a test to make this check pass.
+
 ### 6. Integration Tests
 
 Test the interaction between the Rust compiler daemon and Erlang runtime.

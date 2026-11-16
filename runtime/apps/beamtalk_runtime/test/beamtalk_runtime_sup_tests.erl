@@ -246,6 +246,7 @@ exports_required_callbacks_test() ->
 %%% Startup smoke tests
 
 all_children_alive_test() ->
+    ok = beamtalk_test_boot:telemetry(),
     %% Set trap_exit before start_link to avoid dying if supervisor crashes early
     OldTrap = process_flag(trap_exit, true),
 
