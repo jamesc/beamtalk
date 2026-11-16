@@ -16,13 +16,20 @@ passes it to a `*_known` function. Nothing on the send path reads
 -define(CLASS_STATS_KEY(Class), {beamtalk_string, <<"class:", Class/binary>>}).
 
 setup() ->
+    {ok, _} = application:ensure_all_started(telemetry),
+    {module, telemetry} = code:ensure_loaded(telemetry),
+    case whereis(beamtalk_trace_store) of
+        undefined -> {ok, _} = beamtalk_trace_store:start_link();
+        _ -> ok
+    end,
     meck:new(beamtalk_object_instances, [passthrough]),
     meck:expect(beamtalk_object_instances, class_of, fun(_Pid) -> erlang:error(class_of_called) end),
     beamtalk_trace_store:clear(),
     ok.
 
 cleanup(_) ->
-    meck:unload(beamtalk_object_instances).
+    catch meck:unload(beamtalk_object_instances),
+    ok.
 
 class_travel_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
@@ -92,23 +99,39 @@ timeout_proxy_infinity() ->
 other_class_default_timeout() ->
     {ok, Pid} = test_marked_server:start_link('Counter'),
     try
-        ?assertNotEqual(infinity, traced_call_timeout(Pid))
+        ?assertEqual(default, traced_call_timeout(Pid))
     after
         gen_server:stop(Pid)
     end.
 
-%% The Timeout argument `sync_send/3` hands `gen:call/4` for a bare pid.
+%% The timeout `sync_send/3` gives `gen_server:call` for a bare pid: `default`
+%% for call/2, the explicit value for call/3. A process cannot receive its own
+%% trace messages, so a helper process relays them.
 traced_call_timeout(Pid) ->
     Self = self(),
-    erlang:trace_pattern({gen, call, 4}, true, [local]),
-    erlang:trace(Self, true, [call]),
+    Tracer = spawn_link(fun relay/0),
+    erlang:trace_pattern({gen_server, call, 2}, true, [local]),
+    erlang:trace_pattern({gen_server, call, 3}, true, [local]),
+    erlang:trace(Self, true, [call, {tracer, Tracer}]),
     try
         pong = beamtalk_actor:sync_send(Pid, ping, []),
+        erlang:trace(Self, false, [call]),
         receive
-            {trace, Self, call, {gen, call, [Pid, _Label, _Req, Timeout]}} -> Timeout
+            {traced, {trace, Self, call, {gen_server, call, [Pid, _Req]}}} -> default;
+            {traced, {trace, Self, call, {gen_server, call, [Pid, _Req, Timeout]}}} -> Timeout
         after 1000 -> no_call_traced
         end
     after
-        erlang:trace(Self, false, [call]),
-        erlang:trace_pattern({gen, call, 4}, false, [local])
+        catch erlang:trace(Self, false, [call]),
+        erlang:trace_pattern({gen_server, call, 2}, false, [local]),
+        erlang:trace_pattern({gen_server, call, 3}, false, [local]),
+        unlink(Tracer),
+        exit(Tracer, kill)
+    end.
+
+relay() ->
+    receive
+        {trace, Traced, _, _} = Msg ->
+            Traced ! {traced, Msg},
+            relay()
     end.
