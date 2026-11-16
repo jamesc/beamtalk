@@ -243,6 +243,10 @@ runtime_healthy() ->
             supervisor:which_children(beamtalk_runtime_sup)
         ).
 
+%% `beamtalk_announcements:subscription_count/0` is exported only under
+%% `-ifdef(TEST)`; this module lives in `src/` (compiled without TEST), so
+%% dialyzer cannot see it. The code that calls this runs with TEST defined.
+-dialyzer({no_missing_calls, system_announcer_subscribed/0}).
 system_announcer_subscribed() ->
     try
         beamtalk_announcements:subscription_count() > 0
