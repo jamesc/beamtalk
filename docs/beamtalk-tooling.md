@@ -968,6 +968,8 @@ false
 ok
 ```
 
+`Node current actors` and the workspace `actors` op (what MCP `list_actors`, the VS Code sidebar and the connect snapshot show) list the same set: every live actor on the node, including `native:` actors and the runtime's own actors such as `TranscriptStream`. The runtime's own actors are marked `"system": true` in the JSON. `inspect` works on them; `kill` refuses them with a `system_actor` error. A `native:` pid whose backing module is shared by several classes is listed once, under the alphabetically first class.
+
 ## MCP Server (AI Agent Interface)
 
 Beamtalk includes an MCP (Model Context Protocol) server that gives AI coding agents structured access to the live workspace. The MCP tools connect via the same WebSocket protocol as the REPL and VS Code extension — the agent interacts with the same running system.

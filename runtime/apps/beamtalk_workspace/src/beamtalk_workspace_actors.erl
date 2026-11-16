@@ -16,20 +16,33 @@ with the actors themselves.
 
 ## Metadata
 
-The same map the retired actor list process produced, so the wire output does
-not change: `#{pid, class, module, spawned_at}`. `module` is the backing module
-of `class` (`undefined` when the class is not loaded). `spawned_at` is seconds
-since the epoch, or `null` for an actor whose `init/1` has not written a start time yet.
+`#{pid, class, module, spawned_at, system}`. `module` is the backing module of
+`class` (`undefined` when the class is not loaded). `spawned_at` is seconds
+since the epoch, or `null` for an actor that never wrote a start time (a
+`native:` actor, or one whose `init/1` has not run yet). `system` is `true` for
+an actor the runtime started itself, `false` for every other.
 
 ## Which processes are listed
 
-Only actors that carry the `'$beamtalk_actor'` marker, i.e. what the retired
-list held for the REPL. The scan also finds `native:` backing gen_servers
-(ADR 0056) through their `'$initial_call'`; those include workspace
-infrastructure such as `TranscriptStream`, which `:actors` never listed, so
-they are left out here to keep the output unchanged. `Node current actors`
-(`beamtalk_actor_scan` direct) includes them. Whether the lists should agree
-on this is an owner decision (REPL output, AGENTS.md).
+Every actor the scan finds, the same set `Node current actors` reports
+(BT-4960, owner decision 16 Nov 2026): marked actors, and `native:` backing
+gen_servers (ADR 0056), found through their `'$initial_call'`. Before ADR 0150
+the retired list held only registered actors, so a `native:` actor was missing
+from `:actors`; that was an artifact of registration, not a decision.
+
+Each pid is listed once. A `native:` backing module shared by several classes
+gives the scan one entry per class; the class shown is the alphabetically
+first (`beamtalk_actor_scan:one_per_pid/1`, the rule `Node current actors`
+uses too), so both lists agree on it.
+
+## System actors
+
+An actor started by the runtime itself, such as `TranscriptStream`, is a
+child of `beamtalk_workspace_sup`; it is listed with `system => true` (on the
+wire the `system` key is present only when true). User actors, including
+`native:` ones a user spawned, are `system => false`. `kill` refuses a system
+actor (killing `Transcript` would drop its buffer and every subscriber);
+`inspect` works.
 
 ## Read-your-writes
 
@@ -68,7 +81,8 @@ covers. The index lives in the subscriber, never in the runtime.
     pid := pid(),
     class := atom(),
     module := atom(),
-    spawned_at := integer() | null
+    spawned_at := integer() | null,
+    system := boolean()
 }.
 
 -opaque feed() :: #{pid() => true}.
@@ -76,7 +90,8 @@ covers. The index lives in the subscriber, never in the runtime.
 -doc "Every live actor on this node: one scan, ordered by pid.".
 -spec list() -> [actor_metadata()].
 list() ->
-    Metas = [meta(E) || {Pid, _, _} = E <- beamtalk_actor_scan:scan_actors(), is_listed(Pid, E)],
+    System = system_pids(),
+    Metas = [meta(E, System) || E <- beamtalk_actor_scan:scan_actors_by_pid()],
     lists:sort(fun(#{pid := A}, #{pid := B}) -> A =< B end, Metas).
 
 -doc """
@@ -85,14 +100,9 @@ process or a non-actor is `{error, not_found}`.
 """.
 -spec lookup(pid()) -> {ok, actor_metadata()} | {error, not_found}.
 lookup(Pid) when is_pid(Pid), node(Pid) =:= node() ->
-    case beamtalk_actor_scan:info(Pid) of
-        [{Pid, _, _} = Entry | _] ->
-            case is_listed(Pid, Entry) of
-                true -> {ok, meta(Entry)};
-                false -> {error, not_found}
-            end;
-        [] ->
-            {error, not_found}
+    case beamtalk_actor_scan:one_per_pid(beamtalk_actor_scan:info(Pid)) of
+        [{Pid, _, _} = Entry] -> {ok, meta(Entry, system_pids())};
+        [] -> {error, not_found}
     end;
 lookup(Pid) when is_pid(Pid) ->
     {error, not_found}.
@@ -124,30 +134,30 @@ feed_event(_Event, Feed) ->
 %%% Internal
 %%% ---------------------------------------------------------------------
 
-%% A start time means the marker was written (`init/1` writes it second); an
-%% entry without one is either a mid-`init/1` actor or an unmarked `native:`
-%% process, told apart by the marker itself.
--spec is_listed(pid(), beamtalk_actor_scan:entry()) -> boolean().
-is_listed(_Pid, {_, _, StartedAt}) when is_integer(StartedAt) -> true;
-is_listed(Pid, _Entry) -> beamtalk_actor_registry:is_beamtalk_actor(Pid).
-
--spec meta(beamtalk_actor_scan:entry()) -> actor_metadata().
-meta({Pid, Class, StartedAt}) ->
+-spec meta(beamtalk_actor_scan:entry(), [pid()]) -> actor_metadata().
+meta({Pid, Class, StartedAt}, System) ->
     #{
         pid => Pid,
         class => Class,
         module => module_of(Class),
-        spawned_at => spawned_at(StartedAt)
+        spawned_at => spawned_at(StartedAt),
+        system => lists:member(Pid, System)
     }.
+
+%% The runtime's own actors: the children of the workspace supervisor
+%% (`Transcript`). One `which_children` call per list. `[]` when the workspace
+%% is not running (a bare runtime, or a unit test).
+-spec system_pids() -> [pid()].
+system_pids() ->
+    try supervisor:which_children(beamtalk_workspace_sup) of
+        Children -> [Pid || {_Id, Pid, _Type, _Mods} <- Children, is_pid(Pid)]
+    catch
+        exit:_ -> []
+    end.
 
 spawned_at(undefined) -> null;
 spawned_at(Micros) -> Micros div 1000000.
 
 -spec module_of(atom()) -> atom().
 module_of(Class) ->
-    try beamtalk_class_registry:whereis_class(Class) of
-        undefined -> undefined;
-        ClassPid -> beamtalk_object_class:module_name_safe(ClassPid)
-    catch
-        _:_ -> undefined
-    end.
+    beamtalk_class_registry:backing_module(Class).

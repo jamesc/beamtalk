@@ -47,6 +47,8 @@ each of them while `scan_actors/0` lists the pid once per class.
 -export([
     info/1,
     scan_actors/0,
+    scan_actors_by_pid/0,
+    one_per_pid/1,
     scan_class/1,
     scan_classes/1,
     scan_marked_classes/1
@@ -66,6 +68,35 @@ each of them while `scan_actors/0` lists the pid once per class.
 -spec scan_actors() -> [entry()].
 scan_actors() ->
     scan(fun(Entry, Acc) -> [Entry | Acc] end, []).
+
+-doc """
+Every live actor on this node, one entry per pid (`scan_actors/0` through
+`one_per_pid/1`). The lists a user reads (`Node current actors`, the workspace
+`actors` op) use this so they agree on which class a pid is shown under.
+""".
+-spec scan_actors_by_pid() -> [entry()].
+scan_actors_by_pid() ->
+    one_per_pid(scan_actors()).
+
+-doc """
+Reduce entries to one per pid. A `native:` backing module shared by several
+classes yields one entry per class for the same pid; the class shown is the
+alphabetically first, so the choice is deterministic and every reader of the
+list picks the same one. A marked actor has exactly one entry already.
+""".
+-spec one_per_pid([entry()]) -> [entry()].
+one_per_pid(Entries) ->
+    Best = lists:foldl(
+        fun({Pid, Class, _} = Entry, Acc) ->
+            case Acc of
+                #{Pid := {_, Kept, _}} when Kept =< Class -> Acc;
+                _ -> Acc#{Pid => Entry}
+            end
+        end,
+        #{},
+        Entries
+    ),
+    maps:values(Best).
 
 -doc "The live instances of `Class` (exactly that class, no descendants) as `{Pid, StartedAt}`.".
 -spec scan_class(atom()) -> [{pid(), integer() | undefined}].
