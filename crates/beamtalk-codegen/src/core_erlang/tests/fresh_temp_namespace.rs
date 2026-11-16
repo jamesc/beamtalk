@@ -242,7 +242,6 @@ const HAND_WRITTEN: &[&str] = &[
     "_InitRet",
     "_InitStack",
     "_InitType",
-    "_InstReg",
     "_IvaBadArgs",
     "_IvapBad",
     // `clean_state_let`'s committed-state key pattern (BT-4113):
@@ -267,10 +266,6 @@ const HAND_WRITTEN: &[&str] = &[
     "_PwaBadSel",
     "_Reason",
     "_Reg",
-    "_RegE",
-    "_RegOk",
-    "_RegS",
-    "_RegT",
     "_RestoreOk",
     "_RestorePdict",
     "_Result",

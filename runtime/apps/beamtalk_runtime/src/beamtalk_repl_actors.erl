@@ -7,19 +7,14 @@
 %%% **DDD Context:** REPL Session Context
 
 -moduledoc """
-Node-wide actor registry (registered as `beamtalk_actor_registry`).
+Node-wide actor list (registered as `beamtalk_actor_registry`).
 
-Owned by `beamtalk_runtime_sup`, so it exists in every boot context
-(`beamtalk test`, `run`, REPL, releases). It backs `Node current actors`
-(ADR 0129 amendment, BT-3633) and the REPL actor ops.
-
-## Lifecycle
-
-- Started by `beamtalk_runtime_sup` with the runtime application
-- Every actor is tracked automatically from its lifecycle-start telemetry
-  (`track_spawned/2`); the REPL spawn path additionally registers explicitly
-  (`register_actor/4`, idempotent)
-- Actors are automatically unregistered when they terminate (via monitor)
+**Dead since ADR 0150 (BT-4951).** Nothing registers an actor with this server
+any more: starting an actor writes no row here, and `Node current actors`, the
+workspace actor lists, `stop_class_actors` and `should_purge_module` read the
+processes themselves (`beamtalk_actor_scan`). The module is still started by
+`beamtalk_runtime_sup` and keeps the explicit `register_actor/4` API its own
+tests and the `beamtalk_test_actor_registry` fixture use; BT-4953 deletes both.
 
 ## Actor Metadata
 
@@ -33,8 +28,6 @@ Owned by `beamtalk_runtime_sup`, so it exists in every boot context
 ```
 """.
 
--include_lib("kernel/include/logger.hrl").
-
 %% Public API
 -export([
     start_link/1,
@@ -42,9 +35,7 @@ Owned by `beamtalk_runtime_sup`, so it exists in every boot context
     unregister_actor/2,
     list_actors/1,
     get_actor/2,
-    count_actors_for_module/2,
-    on_actor_spawned/4,
-    track_spawned/2
+    count_actors_for_module/2
 ]).
 
 %% gen_server callbacks
@@ -93,98 +84,6 @@ Monitors the actor so it can be automatically unregistered on termination.
 -spec register_actor(pid(), pid(), atom(), atom()) -> ok.
 register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
     gen_server:call(RegistryPid, {register, ActorPid, ClassName, ModuleName}).
-
--doc """
-Actor spawn callback for beamtalk_runtime integration.
-This is registered via application:set_env by beamtalk_workspace_app:start/2.
-Handles each tracking step individually: if registry registration fails,
-we skip workspace_meta registration to avoid inconsistent state.
-Returns ok on success, {error, Reason} on failure.
-""".
--spec on_actor_spawned(pid(), pid(), atom(), atom()) -> ok | {error, term()}.
-on_actor_spawned(RegistryPid, ActorPid, ClassName, ModuleName) ->
-    case try_register_actor(RegistryPid, ActorPid, ClassName, ModuleName) of
-        ok ->
-            %% Registry succeeded — notify the optional workspace hook
-            %% (set by beamtalk_workspace_app; absent under `beamtalk test`).
-            run_spawn_hook(ActorPid, ClassName),
-            ok;
-        {error, Reason} ->
-            ?LOG_ERROR("REPL actor registry registration failed", #{
-                registry_pid => RegistryPid,
-                actor_pid => ActorPid,
-                class => ClassName,
-                module => ModuleName,
-                reason => Reason,
-                domain => [beamtalk, runtime]
-            }),
-            {error, {registry_failed, Reason}}
-    end.
-
--doc """
-Register actor with the REPL actor registry (gen_server:call).
-Returns ok on success, or {error, Reason} if registration fails.
-""".
--spec try_register_actor(pid(), pid(), atom(), atom()) -> ok | {error, term()}.
-try_register_actor(RegistryPid, ActorPid, ClassName, ModuleName) ->
-    try
-        register_actor(RegistryPid, ActorPid, ClassName, ModuleName)
-    catch
-        exit:{noproc, _} ->
-            {error, registry_not_running};
-        exit:Reason ->
-            {error, {registry_exit, Reason}};
-        Kind:Reason ->
-            {error, {Kind, Reason}}
-    end.
-
--doc """
-Run the optional `actor_spawned_hook` (`{Module, Function}` in the
-`beamtalk_runtime` app env, called as `Module:Function(ActorPid, ClassName)`).
-The workspace application installs one to keep `beamtalk_workspace_meta`
-informed; the runtime itself has no dependency on the workspace. Failures are
-logged and never fail the spawn (the actor is already tracked by the registry).
-""".
--spec run_spawn_hook(pid(), atom()) -> ok.
-run_spawn_hook(ActorPid, ClassName) ->
-    case application:get_env(beamtalk_runtime, actor_spawned_hook) of
-        {ok, {Mod, Fun}} ->
-            %% bt-catcher-audit: not-applicable-no-block - workspace Erlang spawn hook, not a
-            %% Beamtalk block
-            try
-                Mod:Fun(ActorPid, ClassName),
-                ok
-            catch
-                Kind:Reason ->
-                    ?LOG_WARNING("Actor spawned hook failed", #{
-                        actor_pid => ActorPid,
-                        class => ClassName,
-                        kind => Kind,
-                        reason => Reason,
-                        domain => [beamtalk, runtime]
-                    }),
-                    ok
-            end;
-        _ ->
-            ok
-    end.
-
--doc """
-Track a freshly started actor (called from every actor's lifecycle-start
-telemetry, so registration does not depend on the REPL spawn path).
-
-Fire-and-forget (`gen_server:cast`) so actor init never blocks on, or fails
-because of, the registry. A no-op when the registry is not running. The
-class's backing module is resolved inside the registry process.
-""".
--spec track_spawned(pid(), atom()) -> ok.
-track_spawned(ActorPid, ClassName) when is_pid(ActorPid), is_atom(ClassName) ->
-    case erlang:whereis(beamtalk_actor_registry) of
-        undefined -> ok;
-        RegistryPid -> gen_server:cast(RegistryPid, {track, ActorPid, ClassName})
-    end;
-track_spawned(_ActorPid, _ClassName) ->
-    ok.
 
 -doc "Unregister an actor from the registry.".
 -spec unregister_actor(pid(), pid()) -> ok.
@@ -323,9 +222,6 @@ handle_call({pids_for_module, ModuleName}, _From, State) ->
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
-handle_cast({track, ActorPid, ClassName}, State) ->
-    {noreply,
-        do_register(ActorPid, ClassName, beamtalk_class_registry:backing_module(ClassName), State)};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
@@ -357,8 +253,8 @@ terminate(_Reason, _State) ->
 do_register(ActorPid, ClassName, ModuleName, #state{actors = Actors, monitors = Monitors} = State) ->
     case maps:is_key(ActorPid, Actors) of
         true ->
-            %% Already tracked (e.g. lifecycle track + REPL register): keep the
-            %% original entry, but upgrade an unresolved module.
+            %% Already registered: keep the original entry, but upgrade an
+            %% unresolved module.
             case maps:get(ActorPid, Actors) of
                 #{module := undefined} = Old when ModuleName =/= undefined ->
                     State#state{actors = Actors#{ActorPid => Old#{module => ModuleName}}};

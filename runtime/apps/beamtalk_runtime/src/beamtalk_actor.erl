@@ -95,7 +95,7 @@ so it runs for ALL spawn paths — direct, supervised, and named.
 | Path | Entry | Context | Initialize? |
 |------|-------|---------|-------------|
 | Module:spawn/0,1 | gen_server:start → init/1 (unlinked) | Batch/tests | Yes |
-| REPL spawn | Module:spawn/0,1 + register_spawned/4 | REPL | Yes |
+| REPL spawn | Module:spawn/0,1 (the same call as everywhere else) | REPL | Yes |
 | class_send → spawn | erlang:apply(Module, spawn, Args) | Runtime | Yes |
 | self spawn/spawnWith: | safe_spawn/2, unlinked (or linked if inside a `withClassMethod:` supervisor factory) | Class method | Yes |
 | self spawnAs:/spawnWith:as: | safe_spawn_named/5, unlinked after (or stays linked, same exception) | Class method | Yes |
@@ -141,8 +141,9 @@ class-gen-server case and keep the link instead of severing it.
 
 Key invariant: `initialize` dispatch lives in generated `init/1`, not
 in `spawn/0,1`. This ensures supervised children also run initialize.
-The `register_spawned/4` function handles REPL actor registry
-integration as a separate concern after spawn completes.
+No spawn path registers the actor anywhere (ADR 0150): its `init/1` writes the
+`'$beamtalk_actor'` marker and the readers that need to enumerate actors scan
+for it (`beamtalk_actor_scan`).
 
 ## Code Hot Reload
 
@@ -241,7 +242,7 @@ decode/encode helpers and the pending-action helpers.
 %% literal (AGENTS.md "No duplicate implementations").
 
 %% Public API
--export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
+-export([start_link/2, start_link/3, start_link_supervised/3]).
 -export([await_initialize/1, await_initialize/2, await_initialize/3, safe_spawn/2]).
 %% BT-4033: the awaited linked start of an anonymous supervised actor child.
 -export([safe_spawn_linked/2]).
@@ -425,64 +426,6 @@ Module:Function should spawn the actor and return {ok, Pid}.
 -spec start_link_supervised(module(), atom(), list()) -> {ok, pid()} | {error, term()}.
 start_link_supervised(Module, Function, Args) ->
     erlang:apply(Module, Function, Args).
-
--doc """
-Register an already-spawned actor with the REPL actor registry.
-Called by generated REPL code after Module:spawn() returns.
-This separates spawn lifecycle (handled by Module:spawn) from
-REPL tracking (handled here).
-
-Replaced the former spawn_with_registry/3,4 functions which both
-spawned and registered actors. initialize now runs inside
-init/1, so all spawn paths (including supervised) call it automatically.
-""".
--spec register_spawned(pid(), pid(), atom(), module()) -> ok | {error, term()}.
-register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
-    case application:get_env(beamtalk_runtime, actor_spawn_callback) of
-        {ok, CallbackMod} ->
-            %% bt-catcher-audit: not-applicable-no-block - Erlang workspace callback, not a
-            %% Beamtalk block
-            try
-                CallbackMod:on_actor_spawned(RegistryPid, ActorPid, ClassName, Module)
-            catch
-                error:undef ->
-                    %% Callback module doesn't implement on_actor_spawned/4
-                    ?LOG_WARNING("Actor spawn callback not implemented", #{
-                        callback => CallbackMod,
-                        registry_pid => RegistryPid,
-                        actor_pid => ActorPid,
-                        class => ClassName,
-                        domain => [beamtalk, runtime]
-                    }),
-                    {error, {callback_undef, CallbackMod}};
-                error:#beamtalk_error{} = BtError ->
-                    %% Structured beamtalk error from callback
-                    ?LOG_ERROR("Actor spawn callback failed with beamtalk error", #{
-                        callback => CallbackMod,
-                        error => BtError,
-                        registry_pid => RegistryPid,
-                        actor_pid => ActorPid,
-                        class => ClassName,
-                        domain => [beamtalk, runtime]
-                    }),
-                    {error, {beamtalk_error, BtError}};
-                Kind:Reason:Stacktrace ->
-                    %% Unexpected failure in callback
-                    ?LOG_ERROR("Actor spawn callback failed", #{
-                        callback => CallbackMod,
-                        kind => Kind,
-                        reason => Reason,
-                        stacktrace => Stacktrace,
-                        registry_pid => RegistryPid,
-                        actor_pid => ActorPid,
-                        class => ClassName,
-                        domain => [beamtalk, runtime]
-                    }),
-                    {error, {Kind, Reason}}
-            end;
-        undefined ->
-            ok
-    end.
 
 -doc """
 Wait for a started actor's `initialize` to finish — **sys-based fallback**.
@@ -1161,8 +1104,10 @@ register_native_started({global, Name} = Registration, Pid) ->
 %% so the key exists before the name can conflict; and only for `global`, the
 %% one scope the resolver reads, so anonymous and local starts pay nothing. A key
 %% the backing module already wrote is left alone. A backing process that does
-%% not answer the system message simply stays untimed (the pre-BT-4956
-%% behaviour: the other side wins, or `random_exit_name/3` if neither has one).
+%% not answer the system message within a second stays untimed until it drains
+%% its queue, and meanwhile behaves as before BT-4956: the other side wins, or
+%% `random_exit_name/3` if neither has one. The stamp it then writes still
+%% carries the registration time, taken before the request.
 -spec record_native_start_time(pid()) -> ok.
 record_native_start_time(Pid) ->
     StartedAt = erlang:system_time(microsecond),
@@ -3558,9 +3503,6 @@ Best-effort and fault-isolated via `do_announce_actor_lifecycle/2`.
 maybe_announce_lifecycle([beamtalk, actor, lifecycle, start], Metadata) ->
     Class = maps:get(class, Metadata, unknown),
     Pid = maps:get(pid, Metadata, self()),
-    %% BT-3633: every actor is tracked by the runtime-owned registry so
-    %% `Node current actors` holds in every boot context (fire-and-forget).
-    ok = beamtalk_repl_actors:track_spawned(Pid, Class),
     do_announce_actor_lifecycle('ActorSpawned', #{actorClass => Class, pid => Pid});
 maybe_announce_lifecycle([beamtalk, actor, lifecycle, stop], Metadata) ->
     Class = maps:get(class, Metadata, unknown),

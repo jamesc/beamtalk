@@ -401,9 +401,6 @@ impl CoreErlangGenerator {
                                                 INDENT,
                                                 docvec![
                                                     line(),
-                                                    // Instance registration for hot reload tracking
-                                                    Self::instance_registration_doc(&class_name),
-                                                    line(),
                                                     docvec![
                                                         "{'beamtalk_object', ",
                                                         leaf::atom(class_name.clone()),

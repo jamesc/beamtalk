@@ -376,9 +376,10 @@ code. The write is skipped if the backing module already wrote the key, and only
 never reads, do not. The cost is one system-message round trip, about 4 us
 against about 210 us for a whole global native start (single scheduler, measured
 in the PR). A backing process that does not answer the system message within a
-second stays untimed, as before BT-4956. It is written at registration, not at
-`init/1`, so it is a few microseconds later than the process's true start; that
-is far below the resolution at which two registrants of one name are ordered.
+second stays untimed until it drains its queue; until then it behaves as before
+BT-4956. It is written at registration, not at `init/1`, so it is a few
+microseconds later than the process's true start; that is far below the
+resolution at which two registrants of one name are ordered.
 
 OTP's `random_exit_name/3`, the fallback, is not random: it keeps the pid on
 the node with the lower name, and on the same node its second argument. Before

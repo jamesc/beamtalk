@@ -142,30 +142,6 @@ impl SpawnVariant {
 }
 
 impl CoreErlangGenerator {
-    /// Generates a Document for registering an actor instance with the hot reload
-    /// tracking registry. Uses try-catch to handle cases where the registry isn't
-    /// running (e.g., stdlib tests).
-    pub(super) fn instance_registration_doc(class_name: &str) -> Document<'static> {
-        docvec![
-            docvec![
-                "let _InstReg = try call 'beamtalk_object_instances':'register'(",
-                leaf::atom(class_name.to_string()),
-                ", Pid)",
-            ],
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    "of _RegOk -> _RegOk",
-                    line(),
-                    "catch <_RegT, _RegE, _RegS> -> 'ok'",
-                ]
-            ),
-            line(),
-            "in",
-        ]
-    }
-
     /// The `#beamtalk_object{}` a successful spawn of this class answers for
     /// the started `Pid`.
     fn spawned_object_doc(&mut self) -> Document<'static> {
@@ -306,16 +282,7 @@ impl CoreErlangGenerator {
                         docvec![
                             line(),
                             variant.ok_pattern(),
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    // Register instance for hot reload tracking
-                                    Self::instance_registration_doc(&class_name),
-                                    line(),
-                                    ok_body,
-                                ]
-                            ),
+                            nest(INDENT, docvec![line(), ok_body,]),
                             line(),
                             Self::spawn_error_arm_doc(&class_name, variant.selector()),
                         ]
@@ -434,16 +401,7 @@ impl CoreErlangGenerator {
                                         docvec![
                                             line(),
                                             variant.ok_pattern(),
-                                            nest(
-                                                INDENT,
-                                                docvec![
-                                                    line(),
-                                                    // Register instance for hot reload tracking
-                                                    Self::instance_registration_doc(&class_name),
-                                                    line(),
-                                                    ok_body,
-                                                ]
-                                            ),
+                                            nest(INDENT, docvec![line(), ok_body,]),
                                             line(),
                                             Self::spawn_error_arm_doc(&class_name, selector),
                                         ]
@@ -729,26 +687,6 @@ mod tests {
     }
 
     #[test]
-    fn instance_registration_doc_contains_register_call() {
-        let doc = CoreErlangGenerator::instance_registration_doc("counter");
-        let out = doc.to_pretty_string();
-        assert!(
-            out.contains("beamtalk_object_instances"),
-            "expected registry module: {out}"
-        );
-        assert!(out.contains("register"), "expected 'register': {out}");
-        assert!(out.contains("Pid"), "expected Pid variable: {out}");
-    }
-
-    #[test]
-    fn instance_registration_doc_contains_try_catch() {
-        let doc = CoreErlangGenerator::instance_registration_doc("counter");
-        let out = doc.to_pretty_string();
-        assert!(out.contains("try"), "expected try keyword: {out}");
-        assert!(out.contains("catch"), "expected catch clause: {out}");
-    }
-
-    #[test]
     fn generate_spawn_function_declares_spawn_0() {
         let mut g = generator();
         let m = empty_module();
@@ -810,7 +748,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_spawn_function_includes_instance_registration() {
+    fn generate_spawn_function_does_not_register_instance() {
         let mut g = generator();
         let m = empty_module();
         let out = g
@@ -818,8 +756,8 @@ mod tests {
             .unwrap()
             .to_pretty_string();
         assert!(
-            out.contains("beamtalk_object_instances"),
-            "expected instance registration: {out}"
+            !out.contains("beamtalk_object_instances"),
+            "spawn must not register the instance (ADR 0150): {out}"
         );
     }
 
@@ -904,7 +842,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_spawn_with_args_ok_arm_registers_and_returns_object() {
+    fn generate_spawn_with_args_ok_arm_returns_object_without_registering() {
         let mut g = generator();
         let m = empty_module();
         let out = g
@@ -916,8 +854,8 @@ mod tests {
             "expected beamtalk_object: {out}"
         );
         assert!(
-            out.contains("beamtalk_object_instances"),
-            "expected registration: {out}"
+            !out.contains("beamtalk_object_instances"),
+            "spawn/1 must not register the instance (ADR 0150): {out}"
         );
     }
 
@@ -1018,8 +956,8 @@ mod tests {
             "expected the {{Actor, MonRef}} answer: {out}"
         );
         assert!(
-            out.contains("beamtalk_object_instances"),
-            "expected hot-reload instance registration: {out}"
+            !out.contains("beamtalk_object_instances"),
+            "spawn_monitored must not register the instance (ADR 0150): {out}"
         );
         assert!(
             out.contains("'spawnMonitored'"),

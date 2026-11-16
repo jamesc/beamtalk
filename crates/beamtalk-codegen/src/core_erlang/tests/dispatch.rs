@@ -4182,49 +4182,46 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
 }
 
 #[test]
-fn test_actor_spawn_registers_instance_for_hot_reload() {
-    // spawn/0 and spawn/1 ok-branches must register the new pid with
-    // beamtalk_object_instances:register/2, wrapped in try-catch so a missing
-    // registry (e.g. in stdlib unit tests) does not crash the spawn.
+fn test_actor_spawn_does_not_register_instance() {
+    // ADR 0150 (BT-4951): no generated `spawn*` function touches the
+    // instance registry. The actor's own `init/1` writes the
+    // `'$beamtalk_actor'` marker; readers scan for it.
     let code = codegen_named("Actor subclass: Counter\n", "counter");
 
-    assert_has(
-        "instance registration success arm must return the ok value.",
+    for needle in ["'spawn'/0 = fun () ->", "'spawn'/1 = fun (InitArgs) ->"] {
+        assert!(code.contains(needle), "{needle} must be generated");
+    }
+    assert_lacks(
+        "no spawn variant may register the instance (ADR 0150).",
         &code,
-        &["of _RegOk -> _RegOk"],
+        &[
+            "beamtalk_object_instances",
+            "beamtalk_instance_registry",
+            "beamtalk_instance_class",
+            "_InstReg",
+            "_RegOk",
+        ],
+    );
+}
+
+#[test]
+fn test_native_facade_spawn_does_not_register_instance() {
+    // ADR 0150 (BT-4951): a `native:` facade's `spawn/0,1` starts the backing
+    // module and answers the object; it no longer registers the pid. Readers
+    // find a native actor through its `'$initial_call'`.
+    let code = codegen_named(
+        "Actor subclass: Wrapper native: my_mod\n  doIt => self delegate\n",
+        "wrapper",
     );
     assert_has(
-        "instance registration must swallow errors when registry is absent.",
+        "native facade must start the backing module",
         &code,
-        &["catch <_RegT, _RegE, _RegS> -> 'ok'"],
+        &["'my_mod':'start_link'"],
     );
-    // Check each spawn function independently so a missing registration in one
-    // is reported precisely rather than as a count mismatch.
-    let spawn0_start = code
-        .find("'spawn'/0 = fun () ->")
-        .expect("spawn/0 must be generated");
-    let spawn1_start = code
-        .find("'spawn'/1 = fun (InitArgs) ->")
-        .expect("spawn/1 must be generated");
-    let spawn1_end = code[spawn1_start..]
-        .find("'new'/0 = fun () ->")
-        .map_or(code.len(), |offset| spawn1_start + offset);
-    // spawn/0 and spawn/1 are emitted in that order, before new/0, in the generated module.
-    assert!(
-        spawn0_start < spawn1_start,
-        "spawn/0 must appear before spawn/1 in generated code"
-    );
-    let spawn0_body = &code[spawn0_start..spawn1_start];
-    let spawn1_body = &code[spawn1_start..spawn1_end];
-    assert_has(
-        "spawn/0 ok-branch must register the instance (spawn/0 body)",
-        spawn0_body,
-        &["let _InstReg = try call 'beamtalk_object_instances':'register'("],
-    );
-    assert_has(
-        "spawn/1 ok-branch must register the instance (spawn/1 body)",
-        spawn1_body,
-        &["let _InstReg = try call 'beamtalk_object_instances':'register'("],
+    assert_lacks(
+        "native facade spawn must not register the instance (ADR 0150).",
+        &code,
+        &["beamtalk_object_instances", "_InstReg", "_RegOk"],
     );
 }
 
