@@ -546,13 +546,32 @@ failures, time) and exits non-zero on any failure:
 | `alone` | every module in its own fresh `erl` node, 4 at a time (`--jobs N`) |
 | `reverse` | the whole suite in reverse module order |
 | `random` | the whole suite in a shuffled order; the seed is printed, `--seed S` reproduces it |
+| `forward` | the whole suite in sorted order (a control for the other two) |
+| `culprit M` | runs `[X, M]` in a fresh node for every other module X and lists the X after which `M` fails: who leaves state behind |
 
-`--only M1,M2` narrows any mode to named modules. It runs nightly
-(`nightly.yml`, job `eunit-isolation`), not on PRs. A test must set up and tear
-down what it needs and assert its own preconditions
-(`{ok, _} = application:ensure_all_started(...)`, `beamtalk_test_boot`,
-`beamtalk_test_proc`, `beamtalk_test_class:with_class/2`); never skip or
-quarantine a test to make this check pass.
+`--only M1,M2` narrows a mode to named modules and `--skip-prepare` reuses the
+existing `_build/test` (debugging only). The check runs nightly (`nightly.yml`,
+job `eunit-isolation`, one job per mode; a failure fails the Nightly run and is
+triaged like any other main-red), not on PRs: reverse and random take about six
+minutes each.
+
+A test must set up and tear down what it needs and assert its own
+preconditions; never skip or quarantine a test to make this check pass. The
+shared helpers:
+
+- `beamtalk_test_boot:start_app/1`: asserts an application start, stops a
+  bare-started child (`beamtalk_xref`, `beamtalk_alias_xref`, ...) that blocks
+  the supervised start, and restarts the runtime when an earlier suite left it
+  without the bootstrap `Object` class. Never call `ignore`d
+  `application:ensure_all_started` in a test.
+- `beamtalk_test_boot:boot_real_stdlib/1`: the stdlib classes a test uses. It
+  heals the state where stdlib modules are loaded but their class processes are
+  gone (`beamtalk_stdlib:init/0` skips loaded modules).
+- `beamtalk_test_boot:no_compiler/0` for tests of the no-compiler error paths;
+  `beamtalk_test_boot:compiler/0` for tests that need it.
+- `beamtalk_test_class:ensure_fixture_loaded/2` (replaces a stray class of the
+  same name), `with_class/2`, `snapshot_instances/1` + `stop_instances_since/1`
+  (stop actors a suite spawned through the evaluator), `beamtalk_test_proc`.
 
 ### 6. Integration Tests
 
