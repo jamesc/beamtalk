@@ -15,7 +15,8 @@ use super::super::threaded_rebind::{RebindLayout, RebindNaming};
 use super::super::{CodeGenError, CoreErlangGenerator, Result, threaded_ir};
 use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::{Document, INDENT, join, leaf, line, nest};
+use beamtalk_cerl_doc::form::{self, Layout};
+use beamtalk_cerl_doc::{Document, INDENT, join, leaf, nest};
 use beamtalk_core::ast::{
     Block, CascadeMessage, ClassDefinition, Expression, MessageSelector, MethodDefinition,
     MethodKind,
@@ -143,42 +144,52 @@ impl CoreErlangGenerator {
         // Build method clause as Document tree
         let has_params = !param_vars.is_empty();
         let body_doc: Document = if has_params {
+            let arity_case = form::case_of(
+                leaf::var("Args"),
+                [
+                    form::clause(
+                        [docvec![
+                            "[",
+                            join(
+                                param_vars.iter().map(|p| leaf::var(p.clone())),
+                                &Document::Str(", ")
+                            ),
+                            "]"
+                        ]],
+                        None,
+                        method_body_doc,
+                        Layout::Block,
+                    ),
+                    form::clause(
+                        [leaf::var("_")],
+                        None,
+                        form::tuple([
+                            leaf::atom("reply"),
+                            form::tuple([leaf::atom("error"), leaf::atom("bad_arity")]),
+                            leaf::var("State"),
+                        ]),
+                        Layout::Flat,
+                    ),
+                ],
+                Layout::Block,
+            );
             docvec![
-                "<",
-                leaf::atom(selector_name.to_string()),
-                "> when 'true' ->",
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        "case Args of",
-                        nest(
-                            INDENT,
-                            docvec![
-                                line(),
-                                "<[",
-                                join(
-                                    param_vars.iter().map(|p| leaf::var(p.clone())),
-                                    &Document::Str(", ")
-                                ),
-                                "]> when 'true' ->",
-                                nest(INDENT, docvec![line(), method_body_doc,]),
-                                line(),
-                                "<_> when 'true' -> {'reply', {'error', 'bad_arity'}, State}",
-                            ]
-                        ),
-                        line(),
-                        "end",
-                    ]
+                form::clause(
+                    [leaf::atom(selector_name.to_string())],
+                    None,
+                    arity_case,
+                    Layout::Block,
                 ),
                 "\n",
             ]
         } else {
             docvec![
-                "<",
-                leaf::atom(selector_name.to_string()),
-                "> when 'true' ->",
-                nest(INDENT, docvec![line(), method_body_doc,]),
+                form::clause(
+                    [leaf::atom(selector_name.to_string())],
+                    None,
+                    method_body_doc,
+                    Layout::Block,
+                ),
                 "\n",
             ]
         };
@@ -654,11 +665,10 @@ impl CoreErlangGenerator {
         stmts.push(ThreadedStmt::Bind {
             target: cf_state.clone(),
             source: VersionedVar::new(VersionPrefix::State, source_version, FrameId::ROOT),
-            op: BindOp::Direct(ValueRef::Doc(docvec![
-                "call 'erlang':'element'(2, ",
-                leaf::var(tuple_var.to_string()),
-                ")",
-            ])),
+            op: BindOp::Direct(ValueRef::Doc(docvec![form::element(
+                2,
+                leaf::var(tuple_var.to_string())
+            )])),
             span,
         });
         // BT-4369: every field write records itself for the loop checkout.
@@ -932,15 +942,11 @@ impl CoreErlangGenerator {
                     self.lower_cf_field_assignment_binds(
                         stmts,
                         docvec![
-                            "let ",
-                            leaf::var(tuple_var.clone()),
-                            " = ",
-                            rhs_str,
-                            " in let ",
-                            leaf::var(val_var.clone()),
-                            " = call 'erlang':'element'(1, ",
-                            leaf::var(tuple_var.clone()),
-                            ") in ",
+                            form::let_prefix(leaf::var(tuple_var.clone()), rhs_str),
+                            form::let_prefix(
+                                leaf::var(val_var.clone()),
+                                form::element(1, leaf::var(tuple_var.clone()))
+                            )
                         ],
                         &tuple_var,
                         &rhs_state,
@@ -981,11 +987,12 @@ impl CoreErlangGenerator {
                 let value_str = self.threaded_value_doc(&tv.value);
                 stmts.push(ThreadedStmt::Statement(
                     docvec![
-                        "let _ReturnValue = ",
-                        value_str,
-                        " in {'reply', _ReturnValue, ",
-                        leaf::var(final_state),
-                        "}",
+                        form::let_prefix(leaf::var("_ReturnValue"), value_str),
+                        form::tuple([
+                            leaf::atom("reply"),
+                            leaf::var("_ReturnValue"),
+                            leaf::var(final_state),
+                        ]),
                     ],
                     span,
                 ));
@@ -1029,11 +1036,12 @@ impl CoreErlangGenerator {
             let post_state = self.current_state_var();
             stmts.push(ThreadedStmt::Statement(
                 docvec![
-                    "let _Result = ",
-                    expr_str,
-                    " in {'reply', _Result, ",
-                    leaf::var(post_state),
-                    "}",
+                    form::let_prefix(leaf::var("_Result"), expr_str),
+                    form::tuple([
+                        leaf::atom("reply"),
+                        leaf::var("_Result"),
+                        leaf::var(post_state),
+                    ]),
                 ],
                 span,
             ));
@@ -1044,7 +1052,7 @@ impl CoreErlangGenerator {
             stmts.extend(tv.prelude);
             let expr_str = self.threaded_value_doc(&tv.value);
             stmts.push(ThreadedStmt::Statement(
-                docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in "],
+                docvec![form::let_prefix(leaf::var(tmp_var), expr_str)],
                 span,
             ));
         }
@@ -1053,10 +1061,6 @@ impl CoreErlangGenerator {
 
     // Self.field := expr where RHS is control flow returning {Value, State}
     // Not shared with the arm walker (`lower_arm_field_assignment_control_flow`); see `lower_reply_local_assign_pure`.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "one statement kind (FieldAssignmentControlFlow) of the statement walker"
-    )]
     fn lower_reply_field_assignment_control_flow(
         &mut self,
         cx: StmtCx<'_>,
@@ -1107,7 +1111,7 @@ impl CoreErlangGenerator {
                 self.finish_precompiled_scope(rhs_scope)?;
                 let source_version = self.state_version();
                 stmts.push(ThreadedStmt::Statement(
-                    docvec!["let ", leaf::var(val_var.clone()), " = ", value_str, " in "],
+                    docvec![form::let_prefix(leaf::var(val_var.clone()), value_str)],
                     span,
                 ));
                 // BT-4369: every field write records itself.
@@ -1141,15 +1145,11 @@ impl CoreErlangGenerator {
                 self.lower_cf_field_assignment_binds(
                     stmts,
                     docvec![
-                        "let ",
-                        leaf::var(tuple_var.clone()),
-                        " = ",
-                        value_str,
-                        " in let ",
-                        leaf::var(val_var.clone()),
-                        " = call 'erlang':'element'(1, ",
-                        leaf::var(tuple_var.clone()),
-                        ") in ",
+                        form::let_prefix(leaf::var(tuple_var.clone()), value_str),
+                        form::let_prefix(
+                            leaf::var(val_var.clone()),
+                            form::element(1, leaf::var(tuple_var.clone()))
+                        )
                     ],
                     &tuple_var,
                     &rhs_state,
@@ -1231,23 +1231,16 @@ impl CoreErlangGenerator {
             let source_version = self.state_version();
             stmts.push(ThreadedStmt::Statement(
                 docvec![
-                    "let ",
-                    leaf::var(name_var.clone()),
-                    " = ",
-                    name_code,
-                    " in let ",
-                    leaf::var(tuple_var.clone()),
-                    " = ",
-                    val_code,
-                    " in let ",
-                    leaf::var(val_var.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var.clone()),
-                    ") in let ",
-                    leaf::var(rhs_state.clone()),
-                    " = call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var),
-                    ") in ",
+                    form::let_prefix(leaf::var(name_var.clone()), name_code),
+                    form::let_prefix(leaf::var(tuple_var.clone()), val_code),
+                    form::let_prefix(
+                        leaf::var(val_var.clone()),
+                        form::element(1, leaf::var(tuple_var.clone()))
+                    ),
+                    form::let_prefix(
+                        leaf::var(rhs_state.clone()),
+                        form::element(2, leaf::var(tuple_var))
+                    )
                 ],
                 span,
             ));
@@ -1264,15 +1257,15 @@ impl CoreErlangGenerator {
                     source_version,
                     threaded_ir::FrameId::ROOT,
                 ),
-                op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                    "call 'maps':'put'(",
-                    leaf::var(name_var),
-                    ", ",
-                    leaf::var(val_var.clone()),
-                    ", ",
-                    leaf::var(rhs_state),
-                    ")",
-                ])),
+                op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(form::call(
+                    "maps",
+                    "put",
+                    [
+                        leaf::var(name_var),
+                        leaf::var(val_var.clone()),
+                        leaf::var(rhs_state),
+                    ],
+                ))),
                 span,
             });
             let field_state = self.current_state_var();
@@ -1334,15 +1327,11 @@ impl CoreErlangGenerator {
             let source_version = self.state_version();
             stmts.push(ThreadedStmt::Statement(
                 docvec![
-                    "let ",
-                    leaf::var(tuple_var.clone()),
-                    " = ",
-                    value_str,
-                    " in let ",
-                    leaf::var(actual_val.clone()),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var.clone()),
-                    ") in ",
+                    form::let_prefix(leaf::var(tuple_var.clone()), value_str),
+                    form::let_prefix(
+                        leaf::var(actual_val.clone()),
+                        form::element(1, leaf::var(tuple_var.clone()))
+                    )
                 ],
                 span,
             ));
@@ -1360,9 +1349,7 @@ impl CoreErlangGenerator {
                     threaded_ir::FrameId::ROOT,
                 ),
                 op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                    "call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var),
-                    ")",
+                    form::element(2, leaf::var(tuple_var))
                 ])),
                 span,
             });
@@ -1424,15 +1411,13 @@ impl CoreErlangGenerator {
             let source_version = self.state_version();
             stmts.push(ThreadedStmt::Statement(
                 docvec![
+                    form::let_prefix(leaf::var(tuple_var.clone()), value_str),
+                    // `in` follows a line break here, which `let_prefix` does not produce.
                     "let ",
-                    leaf::var(tuple_var.clone()),
-                    " = ",
-                    value_str,
-                    " in let ",
                     leaf::var(core_var),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var.clone()),
-                    ")\n in ",
+                    " = ",
+                    form::element(1, leaf::var(tuple_var.clone())),
+                    "\n in ",
                 ],
                 span,
             ));
@@ -1450,9 +1435,7 @@ impl CoreErlangGenerator {
                     threaded_ir::FrameId::ROOT,
                 ),
                 op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                    "call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var),
-                    ")",
+                    form::element(2, leaf::var(tuple_var))
                 ])),
                 span,
             });
@@ -1502,7 +1485,7 @@ impl CoreErlangGenerator {
                 let value_str = self.threaded_value_doc(&tv.value);
                 self.bind_var(var_name, &core_var);
                 stmts.push(ThreadedStmt::Statement(
-                    docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
+                    docvec![form::let_prefix(leaf::var(core_var), value_str)],
                     span,
                 ));
             } else {
@@ -1549,7 +1532,7 @@ impl CoreErlangGenerator {
             let value_str = self.threaded_value_doc(&tv.value);
             self.bind_var(var_name, &core_var);
             stmts.push(ThreadedStmt::Statement(
-                docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
+                docvec![form::let_prefix(leaf::var(core_var), value_str)],
                 span,
             ));
         }
@@ -1589,7 +1572,7 @@ impl CoreErlangGenerator {
             let value_str = self.generate_block_stateful(block, &captured_mutations)?;
             self.bind_var(var_name, &core_var);
             stmts.push(ThreadedStmt::Statement(
-                docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
+                docvec![form::let_prefix(leaf::var(core_var), value_str)],
                 span,
             ));
         }
@@ -1671,7 +1654,7 @@ impl CoreErlangGenerator {
                 let value_str = self.threaded_value_doc(&tv.value);
                 self.bind_var(var_name, &core_var);
                 stmts.push(ThreadedStmt::Statement(
-                    docvec!["let ", leaf::var(core_var), " = ", value_str, " in "],
+                    docvec![form::let_prefix(leaf::var(core_var), value_str)],
                     span,
                 ));
             }
@@ -1732,7 +1715,7 @@ impl CoreErlangGenerator {
             let tmp_var = self.fresh_temp_var("seq");
             let expr_str = self.expression_doc(expr)?;
             stmts.push(ThreadedStmt::Statement(
-                docvec!["let ", leaf::var(tmp_var), " = ", expr_str, " in "],
+                docvec![form::let_prefix(leaf::var(tmp_var), expr_str)],
                 span,
             ));
         }
@@ -1766,15 +1749,13 @@ impl CoreErlangGenerator {
             let source_version = self.state_version();
             stmts.push(ThreadedStmt::Statement(
                 docvec![
+                    form::let_prefix(leaf::var(tuple_var.clone()), expr_str),
+                    // `in` follows a line break here, which `let_prefix` does not produce.
                     "let ",
-                    leaf::var(tuple_var.clone()),
-                    " = ",
-                    expr_str,
-                    " in let ",
                     leaf::var(discard_var),
-                    " = call 'erlang':'element'(1, ",
-                    leaf::var(tuple_var.clone()),
-                    ")\n in ",
+                    " = ",
+                    form::element(1, leaf::var(tuple_var.clone())),
+                    "\n in ",
                 ],
                 span,
             ));
@@ -1792,9 +1773,7 @@ impl CoreErlangGenerator {
                     threaded_ir::FrameId::ROOT,
                 ),
                 op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                    "call 'erlang':'element'(2, ",
-                    leaf::var(tuple_var),
-                    ")",
+                    form::element(2, leaf::var(tuple_var))
                 ])),
                 span,
             });
@@ -1879,7 +1858,7 @@ impl CoreErlangGenerator {
                 self.finish_precompiled_scope(scope)?;
                 let seq_var = self.fresh_temp_var("seq");
                 stmts.push(ThreadedStmt::Statement(
-                    docvec!["let ", leaf::var(seq_var), " = ", expr_str, " in "],
+                    docvec![form::let_prefix(leaf::var(seq_var), expr_str)],
                     span,
                 ));
             } else {
@@ -1888,13 +1867,7 @@ impl CoreErlangGenerator {
                 self.finish_precompiled_scope(scope)?;
                 let source_version = self.state_version();
                 stmts.push(ThreadedStmt::Statement(
-                    docvec![
-                        "let ",
-                        leaf::var(tuple_var.clone()),
-                        " = ",
-                        expr_str,
-                        " in "
-                    ],
+                    docvec![form::let_prefix(leaf::var(tuple_var.clone()), expr_str)],
                     span,
                 ));
                 let _ = self.next_state_var();
@@ -1911,9 +1884,7 @@ impl CoreErlangGenerator {
                         threaded_ir::FrameId::ROOT,
                     ),
                     op: threaded_ir::BindOp::Direct(threaded_ir::ValueRef::Doc(docvec![
-                        "call 'erlang':'element'(2, ",
-                        leaf::var(tuple_var),
-                        ")",
+                        form::element(2, leaf::var(tuple_var))
                     ])),
                     span,
                 });
@@ -2016,15 +1987,20 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let tuple_var = self.fresh_temp_var(tuple_label);
         docvec![
-            "let ",
-            leaf::var(tuple_var.clone()),
-            " = ",
-            expr_doc,
-            " in let _Result = call 'erlang':'element'(1, ",
-            leaf::var(tuple_var.clone()),
-            ") in let _NewState = call 'erlang':'element'(2, ",
-            leaf::var(tuple_var),
-            ") in {'reply', _Result, _NewState}",
+            form::let_prefix(leaf::var(tuple_var.clone()), expr_doc),
+            form::let_prefix(
+                leaf::var("_Result"),
+                form::element(1, leaf::var(tuple_var.clone())),
+            ),
+            form::let_prefix(
+                leaf::var("_NewState"),
+                form::element(2, leaf::var(tuple_var)),
+            ),
+            form::tuple([
+                leaf::atom("reply"),
+                leaf::var("_Result"),
+                leaf::var("_NewState"),
+            ]),
         ]
     }
 
