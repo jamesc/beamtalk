@@ -425,6 +425,11 @@ impl SimpleLanguageService {
     /// (see [`beamtalk_core::semantic_analysis::known_qualifier_packages`]);
     /// a root with a missing or unreadable manifest is omitted, so its files
     /// are not checked rather than falsely flagged.
+    ///
+    /// Loaded once at startup (and when a new root is first opened), like
+    /// [`set_known_erlang_modules`](Self::set_known_erlang_modules): a later
+    /// edit to a manifest's `[dependencies]` needs an LSP restart, until
+    /// then a newly declared package still shows "Unknown package".
     pub fn set_root_qualifier_packages(
         &mut self,
         root_packages: Vec<(Utf8PathBuf, std::collections::HashSet<String>)>,
@@ -445,7 +450,7 @@ impl SimpleLanguageService {
         let (root, packages) =
             project_index::most_specific_root(&self.root_qualifier_packages, file)?;
         if project_index::is_dependency_checkout_file(file)
-            && !project_index::is_dependency_checkout_file(&root.join("src"))
+            && !project_index::is_dependency_checkout_file(root)
         {
             return None;
         }
