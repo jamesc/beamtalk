@@ -51,6 +51,8 @@ functions that call OTP APIs from the caller's process context.
     start_dynamic_supervisor_child/4,
     instance_pids/0,
     instances/0,
+    supervised_children_of/1,
+    supervised_children_of/2,
     current/1,
     static_init/2,
     static_init/3,
@@ -789,6 +791,85 @@ instances() ->
         end,
         instance_pids()
     ).
+
+-doc """
+Every supervisor child whose module is `Module` (BT-4936).
+
+Walks all live supervisor instances (`instance_pids/0`, which includes nested
+supervisors, static and dynamic) and returns one entry per child whose
+`modules` list contains `Module`, in any state (running, restarting,
+stopped). Used by `removeFromSystem` to refuse removing a class that a
+supervisor still holds. A dead supervisor is skipped; one that cannot be queried (timeout, or
+the caller is that supervisor) yields an entry with `id => unreachable`, so
+the caller fails closed.
+""".
+-spec supervised_children_of(module()) ->
+    [#{supervisor := atom() | nil, supervisor_pid := pid(), id := term(), pid := term()}].
+supervised_children_of(Module) ->
+    supervised_children_of(Module, []).
+
+-doc """
+`supervised_children_of/1`, also matching children whose pid is in `Pids`
+(a `withClassMethod:` factory child can carry a module other than the class's
+own, but its pid is a live actor of the class).
+""".
+-spec supervised_children_of(module(), [pid()]) ->
+    [#{supervisor := atom() | nil, supervisor_pid := pid(), id := term(), pid := term()}].
+supervised_children_of(Module, Pids) ->
+    lists:flatmap(
+        fun(SupPid) ->
+            SupClass =
+                case sup_dictionary_value(SupPid, ?SUP_CLASS_KEY) of
+                    {ok, {Cls, _}} -> Cls;
+                    _ -> nil
+                end,
+            case children_or_unreachable(SupPid) of
+                dead ->
+                    [];
+                unreachable ->
+                    %% Fail closed: a supervisor that cannot be asked (timeout,
+                    %% or removal running inside it) may hold a child.
+                    [
+                        #{
+                            supervisor => SupClass,
+                            supervisor_pid => SupPid,
+                            id => unreachable,
+                            pid => unreachable
+                        }
+                    ];
+                Children ->
+                    matching_children(SupClass, SupPid, Children, Module, Pids)
+            end
+        end,
+        instance_pids()
+    ).
+
+%% `which_children` with a bounded timeout. `dead` only for a gone supervisor.
+-spec children_or_unreachable(pid()) -> [tuple()] | dead | unreachable.
+children_or_unreachable(SupPid) when SupPid =:= self() ->
+    unreachable;
+children_or_unreachable(SupPid) ->
+    try
+        gen_server:call(SupPid, which_children, 5000)
+    catch
+        exit:{noproc, _} ->
+            dead;
+        _:_ ->
+            %% Decide by liveness, not exit reason: a supervisor that was
+            %% killed or crashed can still be listed in pg for a moment.
+            case is_process_alive(SupPid) of
+                false -> dead;
+                true -> unreachable
+            end
+    end.
+
+matching_children(SupClass, SupPid, Children, Module, Pids) ->
+    [
+        #{supervisor => SupClass, supervisor_pid => SupPid, id => Id, pid => P}
+     || {Id, P, _T, Mods} <- Children,
+        (is_list(Mods) andalso lists:member(Module, Mods)) orelse
+            (is_pid(P) andalso lists:member(P, Pids))
+    ].
 
 -doc """
 Build the `Kind` error (`supervisor_start_failed` for `supervise`,
