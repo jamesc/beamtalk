@@ -2112,13 +2112,18 @@ child_label(Id) -> io_lib:format("child id ~tp", [Id]).
 
 -spec class_actor_pids(atom()) -> [pid()].
 class_actor_pids(ClassName) ->
-    beamtalk_runtime_api:all_instances(ClassName).
+    %% Marked actors only: this feeds `removeFromSystem`, which kills what it
+    %% finds. The `native:` fallback would also match other classes' processes
+    %% and processes Beamtalk never started.
+    beamtalk_runtime_api:marked_instances(ClassName).
 
 -doc """
 Stop all live actors of a given class.
 
 Finds them by the process scan (`class_actor_pids/1`, ADR 0150: supervised and
-named children included, no actor list involved) and kills each one, waiting
+named children included, no actor list involved; marked actors only, so a
+`native:` backing module shared with another class or an OTP process is never
+killed) and kills each one, waiting
 for it to die. What is killed is unchanged from the list-based version; only
 how the pids are found differs.
 """.

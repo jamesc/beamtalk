@@ -15,6 +15,9 @@ would not see it.
 
 -include_lib("eunit/include/eunit.hrl").
 
+%% proc_lib entry point for the fake `native:` backing process.
+-export([init/1]).
+
 %%% ---------------------------------------------------------------------
 %%% Helpers
 %%% ---------------------------------------------------------------------
@@ -168,3 +171,72 @@ local_actor_at_uses_info_test() ->
             ?assertEqual(nil, beamtalk_node:local_actor_at(list_to_binary(pid_to_list(self()))))
         end)
     end).
+
+%%% ---------------------------------------------------------------------
+%%% Destructive readers see marked actors only
+%%% ---------------------------------------------------------------------
+
+%% proc_lib entry point for the fake `native:` backing process.
+init(_) ->
+    receive
+        stop -> ok
+    end.
+
+%% Classes A and B share one `native:` backing module and a bare OTP process
+%% runs it too. `allInstances` (listing) sees all of them; the readers that kill
+%% or migrate (`removeFromSystem`, hot reload) see none of them, and
+%% `A removeFromSystem` leaves B's instance and the bare process alive.
+native_fallback_is_listing_only_test() ->
+    beamtalk_class_registry:ensure_backing_module_index_table(),
+    ModAtom = bt4947_removable_mod,
+    {ok, ModAtom, Bin} = compile:forms(
+        [{attribute, 1, module, ModAtom}, {attribute, 2, export, []}], [return_errors]
+    ),
+    {module, ModAtom} = code:load_binary(ModAtom, "bt4947_removable_mod.erl", Bin),
+    ClassA = 'Bt4947NativeA',
+    ClassB = 'Bt4947NativeB',
+    PidA = beamtalk_test_class:start(ClassA, #{
+        name => ClassA,
+        module => ModAtom,
+        superclass => none,
+        instance_methods => #{},
+        class_methods => #{}
+    }),
+    PidB = beamtalk_test_class:start(ClassB, #{
+        name => ClassB,
+        module => ?MODULE,
+        superclass => none,
+        instance_methods => #{},
+        class_methods => #{}
+    }),
+    Shared = proc_lib:spawn(?MODULE, init, [x]),
+    Bare = proc_lib:spawn(?MODULE, init, [x]),
+    ok = beamtalk_test_wait:until(fun() ->
+        lists:all(
+            fun(P) ->
+                {dictionary, D} = erlang:process_info(P, dictionary),
+                lists:keymember('$initial_call', 1, D)
+            end,
+            [Shared, Bare]
+        )
+    end),
+    ets:insert(beamtalk_backing_module_index, [
+        {?MODULE, ClassA, PidA}, {?MODULE, ClassB, PidB}
+    ]),
+    try
+        %% listing: every process running the backing module, under each class
+        ?assert(lists:member(Shared, beamtalk_runtime_api:all_instances(ClassA))),
+        ?assert(lists:member(Bare, beamtalk_runtime_api:all_instances(ClassB))),
+        %% destructive readers: none
+        ?assertEqual([], beamtalk_runtime_api:marked_instances(ClassA)),
+        ?assertEqual([], beamtalk_runtime_api:marked_instances(ClassB)),
+        ?assertEqual(nil, beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(ClassA)),
+        ?assert(is_process_alive(Shared)),
+        ?assert(is_process_alive(Bare))
+    after
+        ets:match_delete(beamtalk_backing_module_index, {?MODULE, '_', '_'}),
+        Shared ! stop,
+        Bare ! stop,
+        beamtalk_test_class:stop(PidB),
+        beamtalk_test_class:stop(PidA)
+    end.

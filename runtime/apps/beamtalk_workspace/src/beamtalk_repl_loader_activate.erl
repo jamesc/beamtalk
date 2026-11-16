@@ -179,13 +179,15 @@ trigger_hot_reload(ModuleName, Classes) ->
         ])
     ),
     %% ADR 0150: one pass over the node's processes serves the whole reload —
+    %% marked actors only (the `native:` fallback would also match other
+    %% classes' and non-Beamtalk processes, which must not be migrated) —
     %% the reloaded classes and every descendant, grouped by class — and is
     %% taken here, after the new code is loaded, never cached from an earlier
     %% reload (owner condition (a): readers re-scan, no stale list).
     Instances =
         case Plan of
             [] -> #{};
-            _ -> beamtalk_actor_scan:scan_classes([C || {_, C} <- Plan])
+            _ -> beamtalk_actor_scan:scan_marked_classes([C || {_, C} <- Plan])
         end,
     lists:foreach(
         fun({Module, ClassName}) ->

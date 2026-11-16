@@ -8,7 +8,7 @@ Hot reload finds live instances by the process scan (ADR 0150, BT-4947):
 
 - every instance is migrated, whether created before the reload, spawned
   through a name (`spawnAs`), or an instance of a descendant class;
-- one `beamtalk_actor_scan:scan_classes/1` pass serves the whole reload (the
+- one `beamtalk_actor_scan:scan_marked_classes/1` pass serves the whole reload (the
   reloaded class and its descendants), not one query per class;
 - owner condition (a): nothing is cached between reloads, so an instance
   created after a reload is seen by the next reload and by `allInstances`.
@@ -63,6 +63,7 @@ migrated(Pid, Field) ->
 trace_scans(Fun) ->
     {module, beamtalk_actor_scan} = code:ensure_loaded(beamtalk_actor_scan),
     Tracer = spawn(fun() -> tracer_loop([]) end),
+    1 = erlang:trace_pattern({beamtalk_actor_scan, scan_marked_classes, 1}, true, [global]),
     1 = erlang:trace_pattern({beamtalk_actor_scan, scan_classes, 1}, true, [global]),
     1 = erlang:trace_pattern({beamtalk_actor_scan, scan_class, 1}, true, [global]),
     1 = erlang:trace_pattern({beamtalk_actor_scan, scan_actors, 0}, true, [global]),
@@ -123,7 +124,7 @@ hot_reload_scan_test_() ->
                             Calls = trace_scans(fun() ->
                                 {ok, _, _} = beamtalk_repl_loader:handle_load(ParentPath, S2)
                             end),
-                            ?assertEqual([{scan_classes, 1}], Calls),
+                            ?assertEqual([{scan_marked_classes, 1}], Calls),
                             ?assert(migrated(P1, extra)),
                             ?assert(migrated(Named, extra)),
                             ?assert(migrated(C1, extra)),
@@ -140,7 +141,7 @@ hot_reload_scan_test_() ->
                             Calls2 = trace_scans(fun() ->
                                 {ok, _, _} = beamtalk_repl_loader:handle_load(ParentPath, S2)
                             end),
-                            ?assertEqual([{scan_classes, 1}], Calls2),
+                            ?assertEqual([{scan_marked_classes, 1}], Calls2),
                             lists:foreach(
                                 fun(P) -> ?assert(migrated(P, more)) end, [P1, Named, P2, C1]
                             ),

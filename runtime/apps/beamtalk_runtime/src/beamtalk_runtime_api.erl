@@ -80,7 +80,8 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
 %%% Object Instances
 %%% ===================================================================
 -export([
-    all_instances/1
+    all_instances/1,
+    marked_instances/1
 ]).
 
 %%% ===================================================================
@@ -353,6 +354,17 @@ never on a hot path. Not a snapshot, and local node only.
 -spec all_instances(atom()) -> [pid()].
 all_instances(ClassName) ->
     [Pid || {Pid, _StartedAt} <- beamtalk_actor_scan:scan_class(ClassName)].
+
+-doc """
+Like `all_instances/1`, but only processes carrying the actor marker (no
+`native:` backing-module fallback). For readers that kill or migrate what they
+find: the fallback also matches other classes' processes and processes Beamtalk
+never started.
+""".
+-spec marked_instances(atom()) -> [pid()].
+marked_instances(ClassName) ->
+    #{ClassName := Instances} = beamtalk_actor_scan:scan_marked_classes([ClassName]),
+    [Pid || {Pid, _StartedAt} <- Instances].
 
 %%% ====================================================================
 %%% Message Dispatch Delegators
