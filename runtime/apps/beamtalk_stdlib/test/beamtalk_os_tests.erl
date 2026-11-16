@@ -122,7 +122,6 @@ run_invalid_utf8_output_test() ->
             %% inside collect/4 and the parse_error raise path.
             ?assertBtError(
                 parse_error,
-                'OS',
                 beamtalk_os:run(<<"printf '\\200'">>)
             );
         {win32, _} ->
@@ -135,7 +134,6 @@ run_timeout_invalid_utf8_output_test() ->
             %% Same path via run:timeout: to verify the selector is threaded correctly.
             ?assertBtError(
                 parse_error,
-                'OS',
                 beamtalk_os:run(<<"printf '\\200'">>, 5000)
             );
         {win32, _} ->
