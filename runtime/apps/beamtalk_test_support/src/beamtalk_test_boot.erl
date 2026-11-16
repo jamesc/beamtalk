@@ -29,11 +29,13 @@ idempotent (a normal stdlib load skips a module whose on_load already ran).
 
 -export([
     boot_real_stdlib/1,
+    reload_stdlib_modules/0,
     wait_for_class/2,
     registry/0,
     runtime/0,
     start_app/1,
     compiler/0,
+    no_compiler/0,
     telemetry/0,
     load_runtime_modules/0,
     workspace/1,
@@ -109,6 +111,13 @@ class_registered_within(ClassName, TimeoutMs) ->
         error:{class_not_registered, ClassName} -> false
     end.
 
+-doc """
+Unload every loaded `bt@stdlib@*` module so the next `beamtalk_stdlib:init/0`
+runs their `on_load` hooks again (class registration and baked xref rows).
+`init/0` skips a module that is already loaded, so a suite that asserts a cold
+stdlib boot calls this first.
+""".
+-spec reload_stdlib_modules() -> ok.
 reload_stdlib_modules() ->
     lists:foreach(
         fun beamtalk_test_module:unload/1,
@@ -188,16 +197,19 @@ start_app(App, Retries) ->
             error({app_start_failed, App, Reason})
     end.
 
-%% A suite that deliberately stops the bootstrap `Object` class leaves the
-%% runtime application "started" but without it, and a second
-%% `ensure_all_started` is then a no-op, so no later suite ever sees `Object`
-%% again (`class_not_registered 'Object'`). Restart the application once so its
-%% bootstrap child registers the stub classes again (BT-4934).
+%% A suite can leave the runtime application "started" but unhealthy, and a
+%% second `ensure_all_started` is then a no-op, so no later suite ever sees it
+%% repaired: the bootstrap `Object` class stopped on purpose
+%% (`class_not_registered 'Object'`), or a supervised server (the announcement
+%% bus, ...) killed and replaced by a bare `start_link` instance that is not the
+%% supervisor's child, which a restarted dependent never sees. Restart the
+%% application once so its children and the bootstrap classes are registered
+%% again (BT-4934).
 ensure_bootstrap_classes() ->
-    case beamtalk_class_registry:whereis_class('Object') of
-        Pid when is_pid(Pid) ->
+    case runtime_healthy() of
+        true ->
             ok;
-        undefined ->
+        false ->
             ok = application:stop(beamtalk_runtime),
             {ok, _} = application:ensure_all_started(beamtalk_runtime),
             wait_for_class('Object', 100),
@@ -210,10 +222,45 @@ ensure_bootstrap_classes() ->
             ok = repair_class_pid_index()
     end.
 
+%% `Object` is registered, the system announcer still holds its subscription on
+%% the announcement bus (a suite that wipes every subscription silences system
+%% events such as `NodeShapeSkew` for everyone after it), and every supervisor
+%% child that registers a name equal to its id is the process registered under
+%% that name.
+runtime_healthy() ->
+    is_pid(beamtalk_class_registry:whereis_class('Object')) andalso
+        system_announcer_subscribed() andalso
+        lists:all(
+            fun
+                ({Id, Pid, _Type, _Mods}) when is_atom(Id), is_pid(Pid) ->
+                    case whereis(Id) of
+                        undefined -> true;
+                        Registered -> Registered =:= Pid
+                    end;
+                ({_Id, _Restarting, _Type, _Mods}) ->
+                    false
+            end,
+            supervisor:which_children(beamtalk_runtime_sup)
+        ).
+
+%% `beamtalk_announcements:subscription_count/0` is exported only under
+%% `-ifdef(TEST)`; this module lives in `src/` (compiled without TEST), so
+%% dialyzer cannot see it. The code that calls this runs with TEST defined.
+-dialyzer({no_missing_calls, system_announcer_subscribed/0}).
+system_announcer_subscribed() ->
+    try
+        beamtalk_announcements:subscription_count() > 0
+    catch
+        _:_ -> false
+    end.
+
 -doc """
 Start the `beamtalk_runtime` application (and the bootstrap process, as
-`boot_real_stdlib/1` does) without loading stdlib. Returns a teardown handle
-that stops the application only if this call started it.
+`boot_real_stdlib/1` does) without loading stdlib on a normal start. Returns a
+teardown handle that stops the application only if this call started it.
+Started through `start_app/1`, so if an earlier suite left the app running
+without the bootstrap `Object` class it is restarted and the stdlib classes are
+reloaded (see `start_app/1`).
 """.
 -spec runtime() -> fun(() -> ok).
 runtime() ->
@@ -264,6 +311,18 @@ missing dependency fails here and not as a `noproc` inside a child (BT-4934).
 telemetry() ->
     {ok, _} = application:ensure_all_started(telemetry),
     {ok, _} = application:ensure_all_started(telemetry_poller),
+    ok.
+
+-doc """
+Establish "no compiler running": stop the compiler application and wait until
+its server is gone. For tests of the no-compiler / `noproc` error paths: many
+suites start the compiler and leave it up, so those tests must set the
+precondition themselves instead of relying on suite order (BT-4934).
+""".
+-spec no_compiler() -> ok.
+no_compiler() ->
+    _ = application:stop(beamtalk_compiler),
+    ok = beamtalk_test_wait:until(fun() -> whereis(beamtalk_compiler_server) =:= undefined end),
     ok.
 
 -doc """

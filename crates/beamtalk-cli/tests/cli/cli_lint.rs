@@ -1129,3 +1129,37 @@ fn lint_protocol_provided_method_qualifier_reported_once_with_users_in_other_fil
         .stderr(contains("Greets.bt"))
         .stderr(contains("1 error diagnostic found in"));
 }
+
+/// BT-4955: a directory listed in `.beamtalk-lint-exempt` is not reported on
+/// (and does not fail the run), while an identical finding elsewhere still
+/// fails, and the exempt files still feed cross-file context.
+#[test]
+fn lint_exempt_file_silences_listed_directory_only() {
+    let project = cli_common::fixture_project();
+    let body = "Object subclass: Shaped\n  go =>\n    ^1\n";
+    std::fs::create_dir_all(project.path().join("fixtures")).expect("mkdir fixtures");
+    std::fs::write(project.path().join("fixtures/shaped.bt"), body).expect("write fixture");
+    std::fs::write(
+        project.path().join(".beamtalk-lint-exempt"),
+        "# test\nfixtures/\n",
+    )
+    .expect("write exempt file");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success();
+
+    std::fs::write(
+        project.path().join("other.bt"),
+        body.replace("Shaped", "Other"),
+    )
+    .expect("write non-exempt file");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .failure()
+        .stderr(contains("redundant"));
+}
