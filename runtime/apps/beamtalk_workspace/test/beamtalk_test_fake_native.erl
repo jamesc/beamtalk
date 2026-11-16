@@ -53,7 +53,11 @@ with_index(Pid, Classes, Fun) ->
     after
         ets:match_delete(beamtalk_backing_module_index, {?MODULE, '_', '_'}),
         [beamtalk_test_class:stop(P) || {_, P} <- ClassProcs],
-        catch gen_server:stop(Pid)
+        try
+            gen_server:stop(Pid)
+        catch
+            exit:_ -> ok
+        end
     end.
 
 %% A real class process backed by this module, so `module_name_safe/1` answers.
