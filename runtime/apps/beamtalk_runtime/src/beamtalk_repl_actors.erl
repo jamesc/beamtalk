@@ -324,7 +324,8 @@ handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
 
 handle_cast({track, ActorPid, ClassName}, State) ->
-    {noreply, do_register(ActorPid, ClassName, beamtalk_class_registry:backing_module(ClassName), State)};
+    {noreply,
+        do_register(ActorPid, ClassName, beamtalk_class_registry:backing_module(ClassName), State)};
 handle_cast(_Msg, State) ->
     {noreply, State}.
 

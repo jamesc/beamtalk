@@ -174,7 +174,11 @@ hot_reload_scan_test_() ->
                             %% The native process was neither suspended nor migrated.
                             ?assert(is_process_alive(Native)),
                             ets:match_delete(beamtalk_backing_module_index, {?MODULE, '_', '_'}),
-                            beamtalk_test_proc:stop(Native),
+                            MRef = erlang:monitor(process, Native),
+                            exit(Native, kill),
+                            receive
+                                {'DOWN', MRef, process, Native, _} -> ok
+                            end,
 
                             %% Owner condition (a): readers re-scan, no stale list. An
                             %% instance made after the reload is seen immediately...
