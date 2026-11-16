@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Class-side method on a class with class variables: runs in the class process.
+Object subclass: VdStatefulMath
+  classState: calls :: Integer = 0
+
+  class double: x :: Integer -> Integer => x * 2
