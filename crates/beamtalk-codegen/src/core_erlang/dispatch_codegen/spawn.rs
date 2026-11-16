@@ -432,53 +432,20 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&args_preamble, call_doc, named.result_prefix()))
     }
 
-    /// Generates code for actor spawn with conditional REPL registry integration.
-    ///
-    /// When spawning an actor in the REPL, check for `__repl_actor_registry__` in
-    /// bindings and register the spawned actor. In all cases, the module's own
-    /// `spawn/0` or `spawn/1` is called (which handles initialize protocol).
-    /// In non-REPL contexts (regular code, tests), fall back to normal `module:spawn`.
-    ///
-    /// The emitted module atom is computed dynamically via `compiled_module_name`:
-    /// - Package mode: `bt@{package}@{class}` (e.g. `bt@my_pkg@counter`)
-    /// - Workspace/legacy mode: `bt@{class}` (e.g. `bt@counter`)
-    ///
-    /// # Arguments
-    ///
-    /// * `class_name` - The Beamtalk class name (e.g., "Counter")
-    /// * `init_args` - Optional initialization arguments for spawnWith:
-    ///
-    /// # Generated Code (REPL context, package mode with package `my_pkg`)
-    ///
-    /// ```erlang
-    /// case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of
-    ///   <'undefined'> when 'true' ->
-    ///     call 'bt@my_pkg@counter':'spawn'()
-    ///   <RegistryPid> when 'true' ->
-    ///     let SpawnResult = call 'bt@my_pkg@counter':'spawn'() in
-    ///     let {'beamtalk_object', _, _, SpawnPid} = SpawnResult in
-    ///     let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, 'Counter', 'bt@my_pkg@counter') in
-    ///     SpawnResult
-    /// end
-    /// ```
-    ///
-    /// # Generated Code (non-REPL context, package mode with package `my_pkg`)
-    ///
-    /// ```erlang
-    /// call 'bt@my_pkg@counter':'spawn'()
-    /// ```
     /// Generates actor spawn with optional package qualifier (ADR 0070 Phase 2).
     ///
     /// When `package` is `Some`, uses `resolve_qualified_module_name` to compute
     /// the BEAM module name directly (e.g., `json@Parser` → `bt@json@parser`).
     /// When `None`, falls back to `compiled_module_name` for standard resolution.
     ///
-    /// In REPL context, registers the spawned actor with the REPL actor registry.
-    /// In non-REPL contexts, calls the module's `spawn/0` or `spawn/1` directly.
+    /// Calls the module's `spawn/0,1` directly, in the REPL as everywhere else.
+    /// The REPL used to look up `__repl_actor_registry__` in the bindings and
+    /// register the pid after the call; under ADR 0150 (BT-4951) a started
+    /// actor is found by the `'$beamtalk_actor'` marker its `init/1` writes, so
+    /// there is nothing to register.
     ///
     /// `SpawnVariant::Monitored` (BT-4104) calls `spawn_monitored/0,1`
-    /// instead; its answer is `{ActorObject, MonRef}`, so the REPL arm takes
-    /// the pid from the pair's actor.
+    /// instead; its answer is `{ActorObject, MonRef}`.
     ///
     /// The module comes from [`Self::class_reference_spawn_module_doc`]: an
     /// unqualified shadowed class name (BT-4278) resolves it at call time
@@ -497,8 +464,7 @@ impl CoreErlangGenerator {
             selector_atom,
             SpawnTargetKind::Actor,
         );
-        // An atom is used as-is; a runtime lookup is bound once, since the
-        // REPL arm names the module twice.
+        // An atom is used as-is; a runtime lookup is bound to a temporary.
         let (module_binding, module_doc): (Option<(String, Document<'static>)>, Document<'static>) =
             if self.spawn_module_resolved_at_runtime(class_name, package) {
                 let var = self.fresh_temp_var("SpawnMod");
@@ -506,7 +472,7 @@ impl CoreErlangGenerator {
             } else {
                 (None, module_expr)
             };
-        let body = self.generate_actor_spawn_call(class_name, &module_doc, init_args, variant)?;
+        let body = self.generate_actor_spawn_call(&module_doc, init_args, variant)?;
         Ok(match module_binding {
             Some((var, lookup)) => docvec!["let ", leaf::var(var), " = ", lookup, " in ", body],
             None => body,
@@ -517,64 +483,22 @@ impl CoreErlangGenerator {
     /// expression (`module_doc`, an atom or a bound variable) is known.
     fn generate_actor_spawn_call(
         &mut self,
-        class_name: &str,
         module_doc: &Document<'static>,
         init_args: Option<&Expression>,
         variant: SpawnVariant,
     ) -> Result<Document<'static>> {
-        let in_repl_context = self.lookup_var("__bindings__").is_some();
-        let function = leaf::atom(variant.function_name());
-
         let args_doc = match init_args {
             Some(args) => self.expression_doc(args)?,
             None => Document::Nil,
         };
-
-        if in_repl_context {
-            let spawned_object: Document<'static> = match variant {
-                SpawnVariant::Plain => Document::Str("SpawnResult"),
-                SpawnVariant::Monitored | SpawnVariant::MonitoredAsync => {
-                    Document::Str("call 'erlang':'element'(1, SpawnResult)")
-                }
-            };
-            let doc = docvec![
-                "case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of ",
-                "<'undefined'> when 'true' -> call ",
-                module_doc.clone(),
-                ":",
-                function.clone(),
-                "(",
-                args_doc.clone(),
-                ") <RegistryPid> when 'true' -> let SpawnResult = call ",
-                module_doc.clone(),
-                ":",
-                function,
-                "(",
-                args_doc,
-                ") in ",
-                "let SpawnPid = call 'erlang':'element'(4, ",
-                spawned_object,
-                ") in ",
-                "let _RegResult = call 'beamtalk_actor':'register_spawned'(RegistryPid, SpawnPid, ",
-                leaf::atom(class_name.to_string()),
-                ", ",
-                module_doc.clone(),
-                ") in ",
-                "SpawnResult ",
-                "end"
-            ];
-            Ok(doc)
-        } else {
-            let doc = docvec![
-                "call ",
-                module_doc.clone(),
-                ":",
-                function,
-                "(",
-                args_doc,
-                ")"
-            ];
-            Ok(doc)
-        }
+        Ok(docvec![
+            "call ",
+            module_doc.clone(),
+            ":",
+            leaf::atom(variant.function_name()),
+            "(",
+            args_doc,
+            ")"
+        ])
     }
 }

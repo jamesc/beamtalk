@@ -327,8 +327,7 @@ run_node(Mods, Paths, Tag) ->
             "  T1 = erlang:monotonic_time(millisecond), "
             "  ok = file:write_file(filename:join(Dir, atom_to_list(M) ++ \".status\"), "
             "         io_lib:format(\"~~p.~~n~~p.~~n\", [R, T1 - T0])), "
-            "  Live = (catch lists:sort([C || {P, C} <- ets:tab2list(beamtalk_instance_class), "
-            "                                is_process_alive(P)])), "
+            "  Live = (catch lists:sort([C || {_P, C, _} <- beamtalk_actor_scan:scan_actors_by_pid()])), "
             "  ok = file:write_file(filename:join(Dir, atom_to_list(M) ++ \".leaks\"), "
             "         io_lib:format(\"~~p.~~n\", [Live])) "
             "end, Mods), halt(0).",

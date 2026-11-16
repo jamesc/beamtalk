@@ -171,8 +171,9 @@ stop_graceful(Name) ->
 Remember which actor instances are alive now, under `Key`. Pair with
 `stop_instances_since/1` in a suite whose tests spawn actors through the REPL
 evaluator or a compiled class and cannot stop each one: an actor left running
-stays in the instance registry and shows up in every later module's
-`bottlenecks`/`actor_health` scans (BT-4934).
+shows up in every later module's `bottlenecks`/`actor_health` scans (BT-4934).
+Instances are found by the process scan (ADR 0150), so supervised, named and
+`native:` actors are covered as well.
 """.
 -spec snapshot_instances(term()) -> ok.
 snapshot_instances(Key) ->
@@ -193,7 +194,4 @@ stop_instances_since(Key) ->
     end.
 
 live_instances() ->
-    case ets:info(beamtalk_instance_class) of
-        undefined -> [];
-        _ -> [Pid || {Pid, _Class} <- ets:tab2list(beamtalk_instance_class), is_process_alive(Pid)]
-    end.
+    [Pid || {Pid, _Class, _StartedAt} <- beamtalk_actor_scan:scan_actors_by_pid()].

@@ -19,10 +19,6 @@ module 'nlr_matching_token_class_method' ['start_link'/1, 'start_link'/2, 'init'
 'spawn'/0 = fun () ->
     case call 'beamtalk_actor':'safe_spawn'('nlr_matching_token_class_method', ~{}~) of
         <{'ok', Pid}> when 'true' ->
-            let _InstReg = try call 'beamtalk_object_instances':'register'('NlrClassCtr', Pid)
-                of _RegOk -> _RegOk
-                catch <_RegT, _RegE, _RegS> -> 'ok'
-            in
             {'beamtalk_object', 'NlrClassCtr', 'nlr_matching_token_class_method', Pid}
         <{'error', Reason}> when 'true' ->
             let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in
@@ -47,10 +43,6 @@ module 'nlr_matching_token_class_method' ['start_link'/1, 'start_link'/2, 'init'
         <'true'> when 'true' ->
             case call 'beamtalk_actor':'safe_spawn'('nlr_matching_token_class_method', InitArgs) of
                 <{'ok', Pid}> when 'true' ->
-                    let _InstReg = try call 'beamtalk_object_instances':'register'('NlrClassCtr', Pid)
-                        of _RegOk -> _RegOk
-                        catch <_RegT, _RegE, _RegS> -> 'ok'
-                    in
                     {'beamtalk_object', 'NlrClassCtr', 'nlr_matching_token_class_method', Pid}
                 <{'error', Reason}> when 'true' ->
                     let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in
@@ -69,10 +61,6 @@ module 'nlr_matching_token_class_method' ['start_link'/1, 'start_link'/2, 'init'
 'spawn_monitored'/0 = fun () ->
     case call 'beamtalk_actor':'safe_spawn_monitored'('nlr_matching_token_class_method', ~{}~) of
         <{'ok', {Pid, MonRef}}> when 'true' ->
-            let _InstReg = try call 'beamtalk_object_instances':'register'('NlrClassCtr', Pid)
-                of _RegOk -> _RegOk
-                catch <_RegT, _RegE, _RegS> -> 'ok'
-            in
             {{'beamtalk_object', 'NlrClassCtr', 'nlr_matching_token_class_method', Pid}, MonRef}
         <{'error', Reason}> when 'true' ->
             let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in
@@ -97,10 +85,6 @@ module 'nlr_matching_token_class_method' ['start_link'/1, 'start_link'/2, 'init'
         <'true'> when 'true' ->
             case call 'beamtalk_actor':'safe_spawn_monitored'('nlr_matching_token_class_method', InitArgs) of
                 <{'ok', {Pid, MonRef}}> when 'true' ->
-                    let _InstReg = try call 'beamtalk_object_instances':'register'('NlrClassCtr', Pid)
-                        of _RegOk -> _RegOk
-                        catch <_RegT, _RegE, _RegS> -> 'ok'
-                    in
                     {{'beamtalk_object', 'NlrClassCtr', 'nlr_matching_token_class_method', Pid}, MonRef}
                 <{'error', Reason}> when 'true' ->
                     let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in
@@ -119,10 +103,6 @@ module 'nlr_matching_token_class_method' ['start_link'/1, 'start_link'/2, 'init'
 'spawn_monitored_async'/0 = fun () ->
     case call 'beamtalk_actor':'safe_spawn_monitored_async'('nlr_matching_token_class_method', ~{}~) of
         <{'ok', {Pid, MonRef}}> when 'true' ->
-            let _InstReg = try call 'beamtalk_object_instances':'register'('NlrClassCtr', Pid)
-                of _RegOk -> _RegOk
-                catch <_RegT, _RegE, _RegS> -> 'ok'
-            in
             {{'beamtalk_object', 'NlrClassCtr', 'nlr_matching_token_class_method', Pid}, MonRef}
         <{'error', Reason}> when 'true' ->
             let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in
@@ -147,10 +127,6 @@ module 'nlr_matching_token_class_method' ['start_link'/1, 'start_link'/2, 'init'
         <'true'> when 'true' ->
             case call 'beamtalk_actor':'safe_spawn_monitored_async'('nlr_matching_token_class_method', InitArgs) of
                 <{'ok', {Pid, MonRef}}> when 'true' ->
-                    let _InstReg = try call 'beamtalk_object_instances':'register'('NlrClassCtr', Pid)
-                        of _RegOk -> _RegOk
-                        catch <_RegT, _RegE, _RegS> -> 'ok'
-                    in
                     {{'beamtalk_object', 'NlrClassCtr', 'nlr_matching_token_class_method', Pid}, MonRef}
                 <{'error', Reason}> when 'true' ->
                     let InitErr = call 'beamtalk_error':'extract_beamtalk_error'(Reason, 4) in
