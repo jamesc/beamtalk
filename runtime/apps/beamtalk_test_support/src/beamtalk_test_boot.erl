@@ -62,12 +62,61 @@ boot_real_stdlib(CanaryClass) ->
             ok
     end,
     beamtalk_stdlib:init(),
-    wait_for_class(CanaryClass, 50),
+    ok = repair_class_pid_index(),
+    case class_registered_within(CanaryClass, 500) of
+        true ->
+            ok;
+        false ->
+            %% The stdlib modules are loaded but their class processes are gone
+            %% (an earlier suite stopped the runtime or its class registry), and
+            %% `stdlib:init/0` skips a module that is already loaded. Unload the
+            %% stdlib modules so their `on_load` hooks register the classes (and
+            %% their xref rows) again (BT-4934).
+            ok = reload_stdlib_modules(),
+            beamtalk_stdlib:init(),
+            wait_for_class(CanaryClass, 50)
+    end,
     ok.
 
 -spec wait_for_class(atom(), non_neg_integer()) -> ok.
 wait_for_class(ClassName, Retries) ->
     beamtalk_test_wait:class(ClassName, Retries * 50).
+
+%% Stopping the runtime application stops `beamtalk_ets_heir`, which owns the
+%% shared registry tables (`beamtalk_class_pids`, ...); they die with it. Class
+%% processes that outlive the app are never re-recorded, so they read as
+%% unregistered (`class_identity/1` -> skip) even though they are in `pg`. In a
+%% release the heir never stops; here every live class is recorded again
+%% (BT-4934).
+repair_class_pid_index() ->
+    ok = beamtalk_class_registry:ensure_pid_table(),
+    lists:foreach(
+        fun(Pid) ->
+            try beamtalk_object_class:class_name(Pid) of
+                Name when is_atom(Name) ->
+                    beamtalk_class_registry:record_class_pid(Pid, Name)
+            catch
+                exit:_ -> ok
+            end
+        end,
+        beamtalk_class_registry:all_classes()
+    ).
+
+class_registered_within(ClassName, TimeoutMs) ->
+    try beamtalk_test_wait:class(ClassName, TimeoutMs) of
+        ok -> true
+    catch
+        error:{class_not_registered, ClassName} -> false
+    end.
+
+reload_stdlib_modules() ->
+    lists:foreach(
+        fun beamtalk_test_module:unload/1,
+        [M || {M, _} <- code:all_loaded(), is_stdlib_module(M)]
+    ).
+
+is_stdlib_module(Module) ->
+    lists:prefix("bt@stdlib@", atom_to_list(Module)).
 
 -doc """
 Bring up just the class-registry prerequisites (the `pg` scope and every

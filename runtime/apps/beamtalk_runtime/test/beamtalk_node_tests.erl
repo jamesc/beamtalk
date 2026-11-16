@@ -298,6 +298,8 @@ normalize_reason_test_() ->
 setup() ->
     beamtalk_dist_test_helper:ensure_distribution(),
     {ok, _Started} = beamtalk_test_boot:start_app(beamtalk_runtime),
+    %% The peer-node tests resolve `Node` on this node too (BT-4934).
+    ok = beamtalk_test_boot:boot_real_stdlib('Node'),
     ok.
 
 cleanup(ok) ->
