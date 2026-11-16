@@ -293,15 +293,13 @@ structural_from_state_nested_test() ->
 %% `beamtalk_object_class:start_link/1`.
 
 setup() ->
-    beamtalk_test_boot:registry().
+    beamtalk_test_boot:registry(),
+    %% The class processes alive now (real stdlib classes an earlier module left):
+    %% teardown stops only what these tests registered after this point. Stopping
+    %% every pg member took the stdlib down for the next module (BT-4962).
+    class_members().
 
-teardown(_) ->
-    Members =
-        try
-            pg:get_members(beamtalk_classes)
-        catch
-            _:_ -> []
-        end,
+teardown(Before) ->
     lists:foreach(
         fun(Pid) ->
             try
@@ -310,8 +308,15 @@ teardown(_) ->
                 _:_ -> ok
             end
         end,
-        Members
+        class_members() -- Before
     ).
+
+class_members() ->
+    try
+        pg:get_members(beamtalk_classes)
+    catch
+        _:_ -> []
+    end.
 
 %% Registers `ClassName` as a live class whose `__beamtalk_meta/0` declares
 %% `field_kinds => FieldKinds` — the B5b metadata `unassigned_late_fields/2`
