@@ -26,6 +26,7 @@ uses, has no such module to seed from.
 %%====================================================================
 
 precheck_setup() ->
+    ok = beamtalk_test_class:snapshot_instances(?MODULE),
     beamtalk_test_boot:compiler(),
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
     beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
@@ -50,6 +51,7 @@ precheck_setup() ->
     ok.
 
 precheck_teardown(_) ->
+    ok = beamtalk_test_class:stop_instances_since(?MODULE),
     beamtalk_test_proc:stop_registered(beamtalk_workspace_meta),
     beamtalk_test_proc:stop_registered(beamtalk_workspace_signature_store),
     beamtalk_test_repl:clear_xref(),

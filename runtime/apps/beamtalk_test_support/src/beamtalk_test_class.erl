@@ -19,7 +19,9 @@ module on demand. Replaces the per-file `start_class/N`, `stop_class/1`,
     with_class/2,
     ensure_fixture_loaded/2,
     ensure_counter_loaded/0,
-    stop_graceful/1
+    stop_graceful/1,
+    snapshot_instances/1,
+    stop_instances_since/1
 ]).
 
 -doc "`start/3` with the default `ClassInfo` overrides (none).".
@@ -146,4 +148,35 @@ stop_graceful(Name) ->
             gen_server:stop(Pid);
         _ ->
             ok
+    end.
+
+-doc """
+Remember which actor instances are alive now, under `Key`. Pair with
+`stop_instances_since/1` in a suite whose tests spawn actors through the REPL
+evaluator or a compiled class and cannot stop each one: an actor left running
+stays in the instance registry and shows up in every later module's
+`bottlenecks`/`actor_health` scans (BT-4934).
+""".
+-spec snapshot_instances(term()) -> ok.
+snapshot_instances(Key) ->
+    persistent_term:put({?MODULE, instances, Key}, live_instances()).
+
+-doc """
+Stop every actor instance that was not alive when `snapshot_instances(Key)`
+ran, and forget the snapshot. A no-op when no snapshot exists.
+""".
+-spec stop_instances_since(term()) -> ok.
+stop_instances_since(Key) ->
+    case persistent_term:get({?MODULE, instances, Key}, undefined) of
+        undefined ->
+            ok;
+        Before ->
+            _ = persistent_term:erase({?MODULE, instances, Key}),
+            lists:foreach(fun beamtalk_test_proc:stop/1, live_instances() -- Before)
+    end.
+
+live_instances() ->
+    case ets:info(beamtalk_instance_class) of
+        undefined -> [];
+        _ -> [Pid || {Pid, _Class} <- ets:tab2list(beamtalk_instance_class), is_process_alive(Pid)]
     end.

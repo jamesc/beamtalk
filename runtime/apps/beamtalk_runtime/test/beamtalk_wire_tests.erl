@@ -192,27 +192,35 @@ test_unknown_tier_raw_term() ->
 
 test_actor_ref_kept() ->
     Worker = 'bt@shape_hazard_worker':spawn(),
-    ?assertMatch(#beamtalk_object{}, Worker),
+    try
+        ?assertMatch(#beamtalk_object{}, Worker),
 
-    {ok, Encoded} = beamtalk_wire:encode(Worker),
-    ?assertEqual(Worker, Encoded),
+        {ok, Encoded} = beamtalk_wire:encode(Worker),
+        ?assertEqual(Worker, Encoded),
 
-    {ok, Decoded} = beamtalk_wire:decode(Encoded),
-    ?assertEqual(Worker, Decoded).
+        {ok, Decoded} = beamtalk_wire:decode(Encoded),
+        ?assertEqual(Worker, Decoded)
+    after
+        beamtalk_test_proc:stop(Worker#beamtalk_object.pid)
+    end.
 
 test_registered_ref_rewrite() ->
     Worker0 = 'bt@shape_hazard_worker':spawn(),
-    Worker = Worker0#beamtalk_object{pid = {registered, bt_3600_wire_test_worker}},
+    try
+        Worker = Worker0#beamtalk_object{pid = {registered, bt_3600_wire_test_worker}},
 
-    {ok, Encoded} = beamtalk_wire:encode(Worker),
-    ThisNode = node(),
-    ?assertMatch(
-        #beamtalk_object{pid = {registered, bt_3600_wire_test_worker, ThisNode}}, Encoded
-    ),
+        {ok, Encoded} = beamtalk_wire:encode(Worker),
+        ThisNode = node(),
+        ?assertMatch(
+            #beamtalk_object{pid = {registered, bt_3600_wire_test_worker, ThisNode}}, Encoded
+        ),
 
-    %% decode keeps an actor ref unchanged (no reverse rewrite needed).
-    {ok, Decoded} = beamtalk_wire:decode(Encoded),
-    ?assertEqual(Encoded, Decoded).
+        %% decode keeps an actor ref unchanged (no reverse rewrite needed).
+        {ok, Decoded} = beamtalk_wire:decode(Encoded),
+        ?assertEqual(Encoded, Decoded)
+    after
+        beamtalk_test_proc:stop(Worker0#beamtalk_object.pid)
+    end.
 
 %%====================================================================
 %% Class object rewrite
