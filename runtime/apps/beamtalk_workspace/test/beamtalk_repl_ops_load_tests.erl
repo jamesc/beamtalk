@@ -570,7 +570,7 @@ find_erl_files_includes_test_dir_when_flag_set_test() ->
 %%====================================================================
 
 compile_native_erl_files_empty_test() ->
-    {Errors, Count} = beamtalk_workspace_project_sync:compile_native_erl_files([], "/tmp"),
+    {Errors, Count} = beamtalk_workspace_project_sync:compile_native_erl_files([], "."),
     ?assertEqual([], Errors),
     ?assertEqual(0, Count).
 

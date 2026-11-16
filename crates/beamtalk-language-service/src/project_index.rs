@@ -110,6 +110,26 @@ fn dependency_package_for_path(file: &Utf8Path) -> Option<EcoString> {
     beamtalk_project::package::dep_name_for_path(file.as_std_path()).map(EcoString::from)
 }
 
+/// The entry of the most specific registered root containing `file`
+/// ("most specific" = longest root path, so a root nested inside another
+/// resolves to its own entry). The one root-containment rule alias stamping
+/// and `pkg@Class` qualifier validation share.
+pub(crate) fn most_specific_root<'a, T>(
+    roots: &'a [(Utf8PathBuf, T)],
+    file: &Utf8Path,
+) -> Option<&'a (Utf8PathBuf, T)> {
+    roots
+        .iter()
+        .filter(|(root, _)| file.starts_with(root))
+        .max_by_key(|(root, _)| root.as_str().len())
+}
+
+/// Whether `file` lives in a fetched dependency checkout
+/// (`_build/deps/<name>/…`), whose package is its own, never the consumer's.
+pub(crate) fn is_dependency_checkout_file(file: &Utf8Path) -> bool {
+    dependency_package_for_path(file).is_some()
+}
+
 /// Cross-file project index holding a merged class hierarchy.
 ///
 /// **DDD Context:** Language Service — Aggregate Root
@@ -891,14 +911,10 @@ impl ProjectIndex {
         if let Some(package) = dependency_package_for_path(file) {
             return package;
         }
-        self.root_packages
-            .iter()
-            .filter(|(root, _)| file.starts_with(root))
-            .max_by_key(|(root, _)| root.as_str().len())
-            .map_or_else(
-                || EcoString::from(CURRENT_PROJECT_PACKAGE_MARKER),
-                |(_, package)| package.clone(),
-            )
+        most_specific_root(&self.root_packages, file).map_or_else(
+            || EcoString::from(CURRENT_PROJECT_PACKAGE_MARKER),
+            |(_, package)| package.clone(),
+        )
     }
 
     /// Marks `file` as a stdlib source, without indexing it.

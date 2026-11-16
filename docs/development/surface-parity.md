@@ -732,9 +732,9 @@ error "Unknown package 'pkg' in qualified reference …".
 | `build`, `check`, `test` | yes | `CompilerOptions::known_packages` from `PackageCheckerScope` |
 | `lint`, MCP `lint` | yes | `PackageCheckerScope::known_packages` through `lint_pipeline` |
 | REPL `load_project` / compile | yes | `ProjectAnalysisContext::known_packages` from the file's manifest |
-| LSP diagnostics | **no** | the language service has no view of the manifest's dependencies; its `$project` placeholder package is not a real one. A reference the build rejects shows no squiggle. Not `surface-specific` — a known gap. |
+| LSP diagnostics | yes | `SimpleLanguageService::set_root_qualifier_packages`, filled by `load_root_packages` from each workspace root's (and each dependency checkout's) manifest through `package_checker_scope`; a file is checked against the set of the most specific root containing it. Loaded at startup and when a root is first opened: a manifest edit to `[dependencies]` needs an LSP restart (known gap, like the Erlang module set). |
 
-A file with no manifest has no package set and is never checked. A dependency's own files are checked against its own manifest's set (`dependency_compile_options`), not the downstream package's. A transitive dependency is not in the set on any surface.
+A file with no manifest, or whose manifest is unreadable, has no package set and is never checked (on the LSP: a file under no registered root). A dependency's own files are checked against its own manifest's set (`dependency_compile_options`), not the downstream package's. A transitive dependency is not in the set on any surface.
 
 ### Dependency extensions and the dependency guard (ADR 0070 WS3, ADR 0100, BT-4608)
 

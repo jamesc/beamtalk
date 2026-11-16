@@ -60,6 +60,8 @@ impl LintResult {
     pub(crate) fn fails(&self, warnings_as_errors: bool) -> bool {
         let gate = LintGate {
             lint: self.lint_failures,
+            // Error-severity diagnostics are in `errors`, checked below.
+            error: 0,
             live_recheck: self.live_recheck_failures,
         };
         !self.errors.is_empty() || (warnings_as_errors && gate.fails(true))

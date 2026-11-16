@@ -227,21 +227,11 @@ fn scan_method(
             file: file.path.clone(),
             class: class_name.to_string(),
             selector: method.selector.name().to_string(),
-            line: line_of(&file.source, block.span.start()),
+            line: block.span.line_number(&file.source) as usize,
             shape,
             reads,
         });
     }
-}
-
-fn line_of(source: &str, offset: u32) -> usize {
-    let end = offset as usize;
-    source
-        .char_indices()
-        .take_while(|(i, _)| *i < end)
-        .filter(|(_, c)| *c == '\n')
-        .count()
-        + 1
 }
 
 #[cfg(test)]

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Behaviour change: `beamtalk lint` exits non-zero on any error-severity diagnostic (BT-4942).**
+  - Changed: plain `beamtalk lint` used to fail only on lint-severity diagnostics, so an error such as an unknown `pkg@Class` package qualifier (BT-4921) was printed and the command still exited 0. It now exits 1 with "N error diagnostic(s) found in M file(s)" whenever it reports an error from any check, parse errors included. Warnings keep their exit behaviour. `--warnings-as-errors` is unchanged. MCP `lint` already reported failure for these errors. The stdlib and the in-repo examples lint clean.
+  - Do: fix the reported errors. A CI job that ran `beamtalk lint` and ignored its error output will now fail.
+- **Behaviour change: `removeFromSystem` refuses while a supervisor holds a child of the class (BT-4936).**
+  - Changed: `Foo removeFromSystem` now raises a `runtime_error` naming the supervisor and the child when any supervisor holds a child of `Foo`: a static child spec, a `DynamicSupervisor` child, a `withClassMethod:` factory child, a child in a nested tree, or a `transient` child that exited normally but whose spec remains. Nothing is stopped or removed when it refuses. Before, the child was killed, restarted at once on the module that was about to be deleted, and left running deleted code; its next crash made every restart fail with `undef` until the supervisor hit its restart limit and died.
+  - Do: remove the child from the supervisor first (`terminateChild:` then `deleteChild:`), then call `removeFromSystem`. Unsupervised actors are still stopped for you. A file-deletion sync of a supervised class now leaves the class loaded and its module registered, and logs a warning. A supervisor that does not answer within 5 seconds also refuses the removal. A child started by another process between the check and the module delete is not caught.
 - **`beamtalk deps update` re-resolves the whole dependency subtree (BT-4920).**
   - Changed: `deps update <name>` now re-resolves `<name>` and every package it pulls in, and a bare `deps update` re-resolves every git and registry lock entry. Before, only direct dependencies moved, so a new version that needed a newer transitive release (A@2 needs B@2) left B at the old version in `beamtalk.lock`. Four more behaviours follow from this:
     - `deps update <name>` removes the lock entry of a transitive package that the new version of `<name>` no longer depends on. A bare `deps update` removes every lock entry that nothing in the manifest graph reaches any more.
@@ -26,6 +32,10 @@
 - **Module names come from one path rule (BT-4868).**
   - Changed: test files are named `bt@{package}@test@{path}` by `beamtalk test` and the REPL alike (before, `beamtalk test` named them after the class; a test file under `src/` is named like any `src/` file, `bt@{package}@{path}`); `beamtalk test` fixtures and `@load` targets must now use only letters, digits and underscores in their names (`my-helper.bt` used to be normalised to `bt@my_helper`); a directory named `test` directly under `src/` is rejected (its modules would collide with `test/`); and the REPL now rejects a path segment outside `[A-Za-z0-9_]` the way `beamtalk build` does. A packaged workspace that loaded `my-class.bt` or `foo.v2.bt` now gets a compile error saying the path segment is invalid (`invalid path segment 'my-class' …`).
   - Do: rename such files to letters, digits and underscores. A loose test file outside a package's `test/` is named `bt@{stem}`, so two with the same stem in different directories collide; rename one.
+- **REPL tab completion after radix and negative integer literal receivers (BT-4927).** `16rFF` and `-42` are now recognised as `Integer` receivers for completion and hover, matching the Rust lexer's recognition. Floats, exponent forms and negative radix literals are not yet classified.
+- **Fix: Windows diagnostics no longer show the `\\?\` verbatim prefix in file paths (BT-4914).** Canonicalised source paths on Windows now strip the extended-length prefix before recording, so diagnostics, LSP locations and `beamtalk_source` display short paths.
+- **Fix: REPL dev-ops commands no longer crash on wrong-typed request parameters (BT-4896).** `inspect`, `kill` and `pid-stats` now report a missing-or-invalid-pid error instead of crashing with `badarg` when the `actor` parameter is not a string.
+- **Fix: REPL loader errors now show structured messages (BT-4897).** `class_not_found`, `core_compile_error` and `method_span_unresolved` loader reasons now produce readable messages instead of raw Erlang term dumps.
 
 ## 0.5.0 — 2026-11-15
 

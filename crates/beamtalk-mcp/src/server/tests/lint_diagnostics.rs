@@ -1105,4 +1105,10 @@ fn run_lint_structured_reports_unknown_package_qualifier() {
         .collect();
     assert_eq!(unknown.len(), 1, "only nosuchpkg is unknown: {result:?}");
     assert!(unknown[0].message.contains("nosuchpkg"), "{unknown:?}");
+    // BT-4942: same failure state as CLI `beamtalk lint`, which now exits
+    // non-zero on any error-severity diagnostic.
+    assert!(
+        result.fails(false),
+        "unknown package must fail lint: {result:?}"
+    );
 }

@@ -1130,10 +1130,6 @@ impl CoreErlangGenerator {
     /// - `fieldAt:put:` — Write instance variable by name
     /// - `hasField:` — Presence test for a named field (ADR 0124 §1/B4); never raises
     /// - `clearField:` — Return a `late` field to unassigned (ADR 0124 §1/B4)
-    #[expect(
-        clippy::too_many_lines,
-        reason = "fieldAt: and fieldAt:put: require verbose type guards for actor vs primitive dispatch"
-    )]
     fn try_generate_object_reflection(
         &mut self,
         receiver: &Expression,
@@ -1143,533 +1139,573 @@ impl CoreErlangGenerator {
         // `fieldNames` (well-known unary). The classifier validates
         // kind/arity, so explicit `arguments.is_empty()` becomes a `debug_assert!`.
         if matches!(selector.well_known(), Some(WellKnownSelector::FieldNames)) {
-            debug_assert!(arguments.is_empty());
-            // Fast-path for `self` receiver in actor context.
-            // `Self` is a `#beamtalk_object{..., pid: self()}` tuple, so the
-            // normal is_tuple branch would call sync_send(self()) which is
-            // gen_server:call(self(), ...) → deadlock.
-            // Use beamtalk_primitive:send(State, ...) directly instead.
-            if let Expression::Identifier(id) = receiver
-                && id.name == "self"
-                && self.context == super::super::CodeGenContext::Actor
-                && self.lookup_var("self").is_none()
-            {
-                let doc = docvec![
-                    "call 'beamtalk_primitive':'send'(",
-                    leaf::var(self.current_state_var()),
-                    ", 'fieldNames', [])",
-                ];
-                return Ok(Some(doc));
-            }
-
-            // Hoist open-scope receiver (e.g. class method self-send).
-            let mut seq = self.sequence_call(&[receiver], "FNames")?;
-            let recv_doc = seq.next();
-            let receiver_var = self.fresh_var("Receiver");
-
-            // Every receiver kind goes through
-            // `beamtalk_message_dispatch:send/3`, the same router the dynamic
-            // `perform: #fieldNames` path uses, so the two cannot disagree:
-            // its `classify_receiver` sends an actor `sync_send` (ADR 0043),
-            // a class object `class_send` (BT-4470), and every other value —
-            // maps (value objects, tagged stdlib maps) and raw BEAM terms
-            // (Integer, Binary, Bitstring, List, ...) — `beamtalk_primitive:send`.
-            // Guessing "not a map ⇒ actor" here sent `element(4, R)` a
-            // non-tuple and raised `badarg` (BT-4264). The call is nested in
-            // a `let`, so it carries its own line annotation (BT-4356).
-            let dispatch_call =
-                self.runtime_send_call(leaf::var(receiver_var.clone()), "fieldNames", vec![]);
-            let call_doc = docvec![
-                "let ",
-                leaf::var(receiver_var),
-                " = ",
-                recv_doc,
-                " in ",
-                dispatch_call,
-            ];
-            return Ok(Some(seq.close(self, call_doc, "FNamesRes")));
+            return self.object_field_names(receiver, arguments);
         }
         match selector {
             MessageSelector::Keyword(_) => {
                 // `respondsTo:` is well-known; dispatch via the enum first so arity
                 // correctness is guaranteed by the classifier.
                 if matches!(selector.well_known(), Some(WellKnownSelector::RespondsTo)) {
-                    debug_assert_eq!(arguments.len(), 1);
-                    // Hoist open-scope receiver + selector (e.g. class method self-sends).
-                    let mut seq = self.sequence_call(&[receiver, &arguments[0]], "RespTo")?;
-                    let recv_doc = seq.next();
-                    let sel_doc = seq.next();
-                    let receiver_var = self.fresh_var("Receiver");
-                    let selector_var = self.fresh_var("Selector");
-
-                    let call_doc = docvec![
-                        "let ",
-                        leaf::var(receiver_var.clone()),
-                        " = ",
-                        recv_doc,
-                        " in let ",
-                        leaf::var(selector_var.clone()),
-                        " = ",
-                        sel_doc,
-                        " in call 'beamtalk_primitive':'responds_to'(",
-                        leaf::var(receiver_var),
-                        ", ",
-                        leaf::var(selector_var),
-                        ")",
-                    ];
-                    return Ok(Some(seq.close(self, call_doc, "RespToRes")));
+                    return self.object_responds_to(receiver, arguments);
                 }
 
                 // `fieldAt:` and `fieldAt:put:` route via the enum so
                 // the classifier validates kind/arity (`fieldAt:put:` requires
                 // exactly two keyword parts, not a flattened single part).
                 match selector.well_known() {
-                    Some(WellKnownSelector::FieldAt) => {
-                        debug_assert_eq!(arguments.len(), 1);
-                        // Class-method `self fieldAt: k` reads the class
-                        // variable in place, like `self.x` (BT-4421):
-                        // `beamtalk_class_vars:field_at(ClassSelf, Name)`,
-                        // which applies the `Cls fieldAt:` read rule
-                        // (declared `late`, declared set) at run time, the
-                        // name being dynamic. A `class_send` would re-enter
-                        // the class's own gen_server (`dispatch_error`).
-                        if self.is_class_side_self_reflection(receiver) {
-                            let name_var = self.fresh_var("Name");
-                            let name_code = self.expression_doc(&arguments[0])?;
-                            let doc = docvec![
-                                "let ",
-                                leaf::var(name_var.clone()),
-                                " = ",
-                                name_code,
-                                " in ",
-                                self.class_var_read_helper_call_doc(
-                                    class_var_fn::FIELD_AT,
-                                    vec![leaf::var(name_var)],
-                                ),
-                            ];
-                            return Ok(Some(doc));
-                        }
-                        // Fast-path for `self` receiver in actor context.
-                        // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
-                        if let Expression::Identifier(id) = receiver
-                            && id.name == "self"
-                            && self.context == super::super::CodeGenContext::Actor
-                            && self.lookup_var("self").is_none()
-                        {
-                            let name_var = self.fresh_var("Name");
-                            let name_code = self.expression_doc(&arguments[0])?;
-                            let doc = docvec![
-                                "let ",
-                                leaf::var(name_var.clone()),
-                                " = ",
-                                name_code,
-                                " in call 'beamtalk_primitive':'send'(",
-                                leaf::var(self.current_state_var()),
-                                ", 'fieldAt:', [",
-                                leaf::var(name_var),
-                                "])",
-                            ];
-                            return Ok(Some(doc));
-                        }
-
-                        // Hoist open-scope receiver + name (e.g. class method self-sends).
-                        let mut seq = self.sequence_call(&[receiver, &arguments[0]], "FAt")?;
-                        let recv_doc = seq.next();
-                        let name_doc = seq.next();
-                        let receiver_var = self.fresh_var("Receiver");
-                        let name_var = self.fresh_var("Name");
-                        let class_var = self.fresh_var("Class");
-                        let error_base = self.fresh_var("Err");
-                        let error_sel = self.fresh_var("Err");
-                        let error_hint = self.fresh_var("Err");
-                        // primitive value types (Integer, String, etc.) have no slots;
-                        // user-defined value objects are maps and use beamtalk_reflection.
-                        let hint = leaf::binary_lit("Value types have no instance variables");
-
-                        // A `#beamtalk_object{}` receiver — an actor instance OR a
-                        // class object, which share that shape — goes through
-                        // `beamtalk_message_dispatch:send/3`, whose
-                        // `classify_receiver` tells them apart (actor →
-                        // `sync_send`; class object → `class_send`, reaching
-                        // `dispatch_class_method`'s `fieldAt:` clause; BT-4148).
-                        // Sending a class object the actor message shape
-                        // instead crashed the class gen_server.
-                        //
-                        // The non-object branch is split:
-                        //   - map receiver → delegate to beamtalk_primitive:send (routes
-                        //     through dispatch/3 which respects ClassKind::Value vs Object)
-                        //   - other (primitive literal) → raise immutable_value inline,
-                        //     keeping this intrinsic's own hint (the dynamic path's
-                        //     primitive `fieldAt:` arm words it differently).
-                        // The dispatch call is nested in a `case`, so it carries its
-                        // own line annotation (BT-4356).
-                        let dispatch_call = self.runtime_send_call(
-                            leaf::var(receiver_var.clone()),
-                            "fieldAt:",
-                            vec![leaf::var(name_var.clone())],
-                        );
-                        let call_doc = docvec![
-                            "let ",
-                            leaf::var(receiver_var.clone()),
-                            " = ",
-                            recv_doc,
-                            " in let ",
-                            leaf::var(name_var.clone()),
-                            " = ",
-                            name_doc,
-                            " in case case call 'erlang':'is_tuple'(",
-                            leaf::var(receiver_var.clone()),
-                            ") of <'true'> when 'true' -> case call 'erlang':'=='(call 'erlang':'tuple_size'(",
-                            leaf::var(receiver_var.clone()),
-                            "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
-                            leaf::var(receiver_var.clone()),
-                            "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
-                            "<'true'> when 'true' -> ",
-                            dispatch_call,
-                            // Non-actor: delegate map receivers to beamtalk_primitive:send
-                            // which routes through dispatch/3 (respects ClassKind)
-                            " <_> when 'true' -> case call 'erlang':'is_map'(",
-                            leaf::var(receiver_var.clone()),
-                            ") of <'true'> when 'true' -> call 'beamtalk_primitive':'send'(",
-                            leaf::var(receiver_var.clone()),
-                            ", 'fieldAt:', [",
-                            leaf::var(name_var),
-                            "]) <_> when 'true' -> let ",
-                            leaf::var(class_var.clone()),
-                            " = call 'beamtalk_primitive':'class_of'(",
-                            leaf::var(receiver_var),
-                            ") in ",
-                            super::super::errors::BeamtalkErrorChain::new(
-                                "immutable_value",
-                                leaf::var(class_var)
-                            )
-                            .selector(Document::Str("'fieldAt:'"))
-                            .hint(hint)
-                            .build(
-                                vec![
-                                    super::super::errors::ErrorBinding::plain(error_base),
-                                    super::super::errors::ErrorBinding::plain(error_sel),
-                                    super::super::errors::ErrorBinding::plain(error_hint.clone())
-                                ],
-                                Document::Str(" ")
-                            ),
-                            "call 'beamtalk_error':'raise'(",
-                            leaf::var(error_hint),
-                            ") end end",
-                        ];
-                        Ok(Some(seq.close(self, call_doc, "FAtRes")))
-                    }
+                    Some(WellKnownSelector::FieldAt) => self.object_field_at(receiver, arguments),
                     Some(WellKnownSelector::FieldAtPut) => {
-                        debug_assert_eq!(arguments.len(), 2);
-                        // Class-method `self fieldAt: k put: v` writes the
-                        // class variable in place, like `self.x := v`
-                        // (BT-4421): `beamtalk_class_vars:field_at_put`,
-                        // `put/3` after the `Cls fieldAt:put:` declared-set
-                        // check. Not a state-threaded write
-                        // (`is_self_field_at_put` excludes class methods,
-                        // ADR 0130); its order against sibling operands is
-                        // pinned by `is_class_side_effect`.
-                        if self.is_class_side_self_reflection(receiver) {
-                            let name_var = self.fresh_var("Name");
-                            let value_var = self.fresh_var("Value");
-                            let name_code = self.expression_doc(&arguments[0])?;
-                            let value_code = self.expression_doc(&arguments[1])?;
-                            let doc = docvec![
-                                "let ",
-                                leaf::var(name_var.clone()),
-                                " = ",
-                                name_code,
-                                " in let ",
-                                leaf::var(value_var.clone()),
-                                " = ",
-                                value_code,
-                                " in ",
-                                Self::class_var_helper_call_doc(
-                                    class_var_fn::FIELD_AT_PUT,
-                                    vec![leaf::var(name_var), leaf::var(value_var)],
-                                ),
-                            ];
-                            return Ok(Some(doc));
-                        }
-                        // Fast-path for `self` receiver in actor context.
-                        // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
-                        //
-                        // Method-body-level state threading is handled by
-                        // lower_body_exprs_with_reply via is_self_field_at_put/
-                        // lower_stmt_self_field_at_put, which intercepts before
-                        // expression_doc is called. This intrinsic path is a
-                        // deadlock-avoidance fallback for contexts where method-body
-                        // threading is unavailable (e.g., inside blocks). It delegates
-                        // to beamtalk_primitive:send(State, 'fieldAt:put:', ...) which
-                        // returns the assigned value but does NOT thread the updated
-                        // state back into the actor's State variable.
-                        if let Expression::Identifier(id) = receiver
-                            && id.name == "self"
-                            && self.context == super::super::CodeGenContext::Actor
-                            && self.lookup_var("self").is_none()
-                        {
-                            let name_var = self.fresh_var("Name");
-                            let value_var = self.fresh_var("Value");
-                            let name_code = self.expression_doc(&arguments[0])?;
-                            let value_code = self.expression_doc(&arguments[1])?;
-                            let doc = docvec![
-                                "let ",
-                                leaf::var(name_var.clone()),
-                                " = ",
-                                name_code,
-                                " in let ",
-                                leaf::var(value_var.clone()),
-                                " = ",
-                                value_code,
-                                " in call 'beamtalk_primitive':'send'(",
-                                leaf::var(self.current_state_var()),
-                                ", 'fieldAt:put:', [",
-                                leaf::var(name_var),
-                                ", ",
-                                leaf::var(value_var),
-                                "])",
-                            ];
-                            return Ok(Some(doc));
-                        }
-
-                        // Hoist open-scope receiver + name + value (e.g. class method self-sends).
-                        let mut seq = self
-                            .sequence_call(&[receiver, &arguments[0], &arguments[1]], "FAtPut")?;
-                        let recv_doc = seq.next();
-                        let name_doc = seq.next();
-                        let value_doc = seq.next();
-                        let receiver_var = self.fresh_var("Receiver");
-                        let name_var = self.fresh_var("Name");
-                        let value_var = self.fresh_var("Value");
-                        let class_var = self.fresh_var("Class");
-                        let error_base = self.fresh_var("Err");
-                        let error_sel = self.fresh_var("Err");
-                        let error_hint = self.fresh_var("Err");
-                        let hint =
-                            leaf::binary_lit(super::super::errors::VALUE_IMMUTABLE_SLOT_HINT);
-
-                        // As `fieldAt:` above: a `#beamtalk_object{}` receiver
-                        // (actor instance or class object) goes through
-                        // `beamtalk_message_dispatch:send/3` (BT-4148); anything
-                        // else raises `immutable_value` inline. The dispatch call
-                        // carries its own line annotation (BT-4356).
-                        let dispatch_call = self.runtime_send_call(
-                            leaf::var(receiver_var.clone()),
-                            "fieldAt:put:",
-                            vec![leaf::var(name_var.clone()), leaf::var(value_var.clone())],
-                        );
-                        let call_doc = docvec![
-                            "let ",
-                            leaf::var(receiver_var.clone()),
-                            " = ",
-                            recv_doc,
-                            " in let ",
-                            leaf::var(name_var.clone()),
-                            " = ",
-                            name_doc,
-                            " in let ",
-                            leaf::var(value_var.clone()),
-                            " = ",
-                            value_doc,
-                            " in case case call 'erlang':'is_tuple'(",
-                            leaf::var(receiver_var.clone()),
-                            ") of <'true'> when 'true' -> case call 'erlang':'=='(call 'erlang':'tuple_size'(",
-                            leaf::var(receiver_var.clone()),
-                            "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
-                            leaf::var(receiver_var.clone()),
-                            "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
-                            "<'true'> when 'true' -> ",
-                            dispatch_call,
-                            " <_> when 'true' -> let ",
-                            leaf::var(class_var.clone()),
-                            " = call 'beamtalk_primitive':'class_of'(",
-                            leaf::var(receiver_var),
-                            ") in ",
-                            super::super::errors::BeamtalkErrorChain::new(
-                                "immutable_value",
-                                leaf::var(class_var)
-                            )
-                            .selector(Document::Str("'fieldAt:put:'"))
-                            .hint(hint)
-                            .build(
-                                vec![
-                                    super::super::errors::ErrorBinding::plain(error_base),
-                                    super::super::errors::ErrorBinding::plain(error_sel),
-                                    super::super::errors::ErrorBinding::plain(error_hint.clone())
-                                ],
-                                Document::Str(" ")
-                            ),
-                            "call 'beamtalk_error':'raise'(",
-                            leaf::var(error_hint),
-                            ") end",
-                        ];
-                        Ok(Some(seq.close(self, call_doc, "FAtPutRes")))
+                        self.object_field_at_put(receiver, arguments)
                     }
                     // ADR 0124 §1/§9/B4: `hasField:` — a presence test that
                     // never raises. Routed via the enum so the classifier
                     // validates arity.
-                    Some(WellKnownSelector::HasField) => {
-                        debug_assert_eq!(arguments.len(), 1);
-                        // Class-method `self hasField: #x` is a presence test
-                        // on the class variables, in place (ADR 0130 §2):
-                        // `beamtalk_class_vars:has(ClassSelf, Name)`, which
-                        // never raises on the name.
-                        if self.is_class_side_self_reflection(receiver) {
-                            let name_var = self.fresh_var("Name");
-                            let name_code = self.expression_doc(&arguments[0])?;
-                            let doc = docvec![
-                                "let ",
-                                leaf::var(name_var.clone()),
-                                " = ",
-                                name_code,
-                                " in ",
-                                self.class_var_read_helper_call_doc(
-                                    class_var_fn::HAS,
-                                    vec![leaf::var(name_var)],
-                                ),
-                            ];
-                            return Ok(Some(doc));
-                        }
-                        // Fast-path for `self` receiver in actor instance
-                        // context. Avoids sync_send(self()) → deadlock.
-                        if let Expression::Identifier(id) = receiver
-                            && id.name == "self"
-                            && self.context == super::super::CodeGenContext::Actor
-                            && !self.in_class_method()
-                            && self.lookup_var("self").is_none()
-                        {
-                            let name_var = self.fresh_var("Name");
-                            let name_code = self.expression_doc(&arguments[0])?;
-                            let doc = docvec![
-                                "let ",
-                                leaf::var(name_var.clone()),
-                                " = ",
-                                name_code,
-                                " in call 'beamtalk_primitive':'send'(",
-                                leaf::var(self.current_state_var()),
-                                ", 'hasField:', [",
-                                leaf::var(name_var),
-                                "])",
-                            ];
-                            return Ok(Some(doc));
-                        }
-
-                        // General dispatch: delegate to
-                        // `beamtalk_message_dispatch:send/3`, which already
-                        // classifies the receiver correctly (actor instance
-                        // → `sync_send`; class object → `beamtalk_object_class:class_send`,
-                        // reaching this issue's `dispatch_class_method`
-                        // `'hasField:'` clause; value/tagged-map/primitive
-                        // → `beamtalk_primitive:send`, reaching the
-                        // `hasField:` arm every class's `dispatch/3` now
-                        // carries). A class object is also
-                        // `#beamtalk_object{}`-shaped, so treating it as an
-                        // actor instance would send it the wrong message
-                        // shape and crash the class gen_server;
-                        // `hasField:`/`clearField:` reuse the SAME general
-                        // dispatcher `perform:` already does (as
-                        // `fieldAt:`/`fieldAt:put:` do for their
-                        // `#beamtalk_object{}` receivers, BT-4148), so
-                        // `classify_receiver`'s actor/class/value
-                        // distinction lives in exactly one place.
-                        self.sequenced_runtime_call(
-                            "beamtalk_message_dispatch",
-                            "send",
-                            &[receiver, &arguments[0]],
-                            "HasF",
-                            |operands| runtime_send_args("hasField:", operands),
-                        )
-                        .map(Some)
-                    }
+                    Some(WellKnownSelector::HasField) => self.object_has_field(receiver, arguments),
                     // ADR 0124 §1/§4f/B4: `clearField:` — returns a `late`
-                    // slot to unassigned. A write; lowers exactly as
-                    // `fieldAt:put:` does.
+                    // slot to unassigned. A write; same shape as `fieldAt:put:`.
                     Some(WellKnownSelector::ClearField) => {
-                        debug_assert_eq!(arguments.len(), 1);
-                        // Class-side `self clearField: #x` removes the class
-                        // variable in place at any nesting depth (ADR 0130
-                        // §2): `beamtalk_class_vars:clear(ClassSelf, Name)`,
-                        // which answers `self`. Routing it through
-                        // `class_send` instead would deadlock on the class's
-                        // own process.
-                        if self.is_class_side_self_reflection(receiver) {
-                            let name_var = self.fresh_var("Name");
-                            let name_code = self.expression_doc(&arguments[0])?;
-                            let doc = docvec![
-                                "let ",
-                                leaf::var(name_var.clone()),
-                                " = ",
-                                name_code,
-                                " in ",
-                                Self::class_var_helper_call_doc(
-                                    class_var_fn::CLEAR,
-                                    vec![leaf::var(name_var)],
-                                ),
-                            ];
-                            return Ok(Some(doc));
-                        }
-                        // Fast-path for `self` receiver in actor instance
-                        // context. Avoids sync_send(self()) → deadlock.
-                        // Method-body-level state threading is handled by
-                        // `lower_body_exprs_with_reply`/`is_self_clear_field`/
-                        // `lower_stmt_self_clear_field`, which intercepts
-                        // before `expression_doc` is called. This intrinsic
-                        // path is a deadlock-avoidance fallback for contexts
-                        // where method-body threading is unavailable (e.g.,
-                        // inside blocks) — mirrors `fieldAt:put:` above. It
-                        // delegates to `beamtalk_primitive:send(State,
-                        // 'clearField:', ...)`, the same pre-existing
-                        // state-threading gap fieldAt:put: has (BT-1324):
-                        // it does NOT thread the updated state back into the
-                        // actor's `State` variable.
-                        if let Expression::Identifier(id) = receiver
-                            && id.name == "self"
-                            && self.context == super::super::CodeGenContext::Actor
-                            && self.lookup_var("self").is_none()
-                        {
-                            let name_var = self.fresh_var("Name");
-                            let name_code = self.expression_doc(&arguments[0])?;
-                            let doc = docvec![
-                                "let ",
-                                leaf::var(name_var.clone()),
-                                " = ",
-                                name_code,
-                                " in call 'beamtalk_primitive':'send'(",
-                                leaf::var(self.current_state_var()),
-                                ", 'clearField:', [",
-                                leaf::var(name_var),
-                                "])",
-                            ];
-                            return Ok(Some(doc));
-                        }
-
-                        // General dispatch: delegate to
-                        // `beamtalk_message_dispatch:send/3`, exactly like
-                        // `hasField:` above and for the identical reason —
-                        // a hand-rolled receiver check cannot tell a
-                        // class-object `#beamtalk_object{}` apart from an
-                        // actor-instance one, so it would send a live class
-                        // gen_server the wrong message shape and crash it.
-                        // A value/primitive receiver reaches the class's
-                        // own `dispatch/3`, whose `clearField:`
-                        // arm always raises `immutable_value` (added
-                        // unconditionally, not only for `ClassKind::Value`
-                        // — see `generate_primitive_dispatch`), so no
-                        // hand-rolled error construction is needed here
-                        // either.
-                        self.sequenced_runtime_call(
-                            "beamtalk_message_dispatch",
-                            "send",
-                            &[receiver, &arguments[0]],
-                            "ClrF",
-                            |operands| runtime_send_args("clearField:", operands),
-                        )
-                        .map(Some)
+                        self.object_clear_field(receiver, arguments)
                     }
                     _ => Ok(None),
                 }
             }
             MessageSelector::Unary(_) | MessageSelector::Binary(_) => Ok(None),
         }
+    }
+
+    /// `fieldNames` (well-known unary): the reflected field list of any receiver.
+    fn object_field_names(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        debug_assert!(arguments.is_empty());
+        // Fast-path for `self` receiver in actor context.
+        // `Self` is a `#beamtalk_object{..., pid: self()}` tuple, so the
+        // normal is_tuple branch would call sync_send(self()) which is
+        // gen_server:call(self(), ...) → deadlock.
+        // Use beamtalk_primitive:send(State, ...) directly instead.
+        if let Expression::Identifier(id) = receiver
+            && id.name == "self"
+            && self.context == super::super::CodeGenContext::Actor
+            && self.lookup_var("self").is_none()
+        {
+            let doc = docvec![
+                "call 'beamtalk_primitive':'send'(",
+                leaf::var(self.current_state_var()),
+                ", 'fieldNames', [])",
+            ];
+            return Ok(Some(doc));
+        }
+
+        // Hoist open-scope receiver (e.g. class method self-send).
+        let mut seq = self.sequence_call(&[receiver], "FNames")?;
+        let recv_doc = seq.next();
+        let receiver_var = self.fresh_var("Receiver");
+
+        // Every receiver kind goes through
+        // `beamtalk_message_dispatch:send/3`, the same router the dynamic
+        // `perform: #fieldNames` path uses, so the two cannot disagree:
+        // its `classify_receiver` sends an actor `sync_send` (ADR 0043),
+        // a class object `class_send` (BT-4470), and every other value —
+        // maps (value objects, tagged stdlib maps) and raw BEAM terms
+        // (Integer, Binary, Bitstring, List, ...) — `beamtalk_primitive:send`.
+        // Guessing "not a map ⇒ actor" here sent `element(4, R)` a
+        // non-tuple and raised `badarg` (BT-4264). The call is nested in
+        // a `let`, so it carries its own line annotation (BT-4356).
+        let dispatch_call =
+            self.runtime_send_call(leaf::var(receiver_var.clone()), "fieldNames", vec![]);
+        let call_doc = docvec![
+            "let ",
+            leaf::var(receiver_var),
+            " = ",
+            recv_doc,
+            " in ",
+            dispatch_call,
+        ];
+        Ok(Some(seq.close(self, call_doc, "FNamesRes")))
+    }
+
+    /// `respondsTo:` — dispatches through the runtime for any receiver.
+    fn object_responds_to(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        debug_assert_eq!(arguments.len(), 1);
+        // Hoist open-scope receiver + selector (e.g. class method self-sends).
+        let mut seq = self.sequence_call(&[receiver, &arguments[0]], "RespTo")?;
+        let recv_doc = seq.next();
+        let sel_doc = seq.next();
+        let receiver_var = self.fresh_var("Receiver");
+        let selector_var = self.fresh_var("Selector");
+
+        let call_doc = docvec![
+            "let ",
+            leaf::var(receiver_var.clone()),
+            " = ",
+            recv_doc,
+            " in let ",
+            leaf::var(selector_var.clone()),
+            " = ",
+            sel_doc,
+            " in call 'beamtalk_primitive':'responds_to'(",
+            leaf::var(receiver_var),
+            ", ",
+            leaf::var(selector_var),
+            ")",
+        ];
+        Ok(Some(seq.close(self, call_doc, "RespToRes")))
+    }
+
+    /// `fieldAt:` — read an instance variable by name.
+    fn object_field_at(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        debug_assert_eq!(arguments.len(), 1);
+        // Class-method `self fieldAt: k` reads the class
+        // variable in place, like `self.x` (BT-4421):
+        // `beamtalk_class_vars:field_at(ClassSelf, Name)`,
+        // which applies the `Cls fieldAt:` read rule
+        // (declared `late`, declared set) at run time, the
+        // name being dynamic. A `class_send` would re-enter
+        // the class's own gen_server (`dispatch_error`).
+        if self.is_class_side_self_reflection(receiver) {
+            let name_var = self.fresh_var("Name");
+            let name_code = self.expression_doc(&arguments[0])?;
+            let doc = docvec![
+                "let ",
+                leaf::var(name_var.clone()),
+                " = ",
+                name_code,
+                " in ",
+                self.class_var_read_helper_call_doc(
+                    class_var_fn::FIELD_AT,
+                    vec![leaf::var(name_var)],
+                ),
+            ];
+            return Ok(Some(doc));
+        }
+        // Fast-path for `self` receiver in actor context.
+        // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
+        if let Expression::Identifier(id) = receiver
+            && id.name == "self"
+            && self.context == super::super::CodeGenContext::Actor
+            && self.lookup_var("self").is_none()
+        {
+            let name_var = self.fresh_var("Name");
+            let name_code = self.expression_doc(&arguments[0])?;
+            let doc = docvec![
+                "let ",
+                leaf::var(name_var.clone()),
+                " = ",
+                name_code,
+                " in call 'beamtalk_primitive':'send'(",
+                leaf::var(self.current_state_var()),
+                ", 'fieldAt:', [",
+                leaf::var(name_var),
+                "])",
+            ];
+            return Ok(Some(doc));
+        }
+
+        // Hoist open-scope receiver + name (e.g. class method self-sends).
+        let mut seq = self.sequence_call(&[receiver, &arguments[0]], "FAt")?;
+        let recv_doc = seq.next();
+        let name_doc = seq.next();
+        let receiver_var = self.fresh_var("Receiver");
+        let name_var = self.fresh_var("Name");
+        let class_var = self.fresh_var("Class");
+        let error_base = self.fresh_var("Err");
+        let error_sel = self.fresh_var("Err");
+        let error_hint = self.fresh_var("Err");
+        // primitive value types (Integer, String, etc.) have no slots;
+        // user-defined value objects are maps and use beamtalk_reflection.
+        let hint = leaf::binary_lit("Value types have no instance variables");
+
+        // A `#beamtalk_object{}` receiver — an actor instance OR a
+        // class object, which share that shape — goes through
+        // `beamtalk_message_dispatch:send/3`, whose
+        // `classify_receiver` tells them apart (actor →
+        // `sync_send`; class object → `class_send`, reaching
+        // `dispatch_class_method`'s `fieldAt:` clause; BT-4148).
+        // Sending a class object the actor message shape
+        // instead crashed the class gen_server.
+        //
+        // The non-object branch is split:
+        //   - map receiver → delegate to beamtalk_primitive:send (routes
+        //     through dispatch/3 which respects ClassKind::Value vs Object)
+        //   - other (primitive literal) → raise immutable_value inline,
+        //     keeping this intrinsic's own hint (the dynamic path's
+        //     primitive `fieldAt:` arm words it differently).
+        // The dispatch call is nested in a `case`, so it carries its
+        // own line annotation (BT-4356).
+        let dispatch_call = self.runtime_send_call(
+            leaf::var(receiver_var.clone()),
+            "fieldAt:",
+            vec![leaf::var(name_var.clone())],
+        );
+        let call_doc = docvec![
+            "let ",
+            leaf::var(receiver_var.clone()),
+            " = ",
+            recv_doc,
+            " in let ",
+            leaf::var(name_var.clone()),
+            " = ",
+            name_doc,
+            " in case case call 'erlang':'is_tuple'(",
+            leaf::var(receiver_var.clone()),
+            ") of <'true'> when 'true' -> case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+            leaf::var(receiver_var.clone()),
+            "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
+            leaf::var(receiver_var.clone()),
+            "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
+            "<'true'> when 'true' -> ",
+            dispatch_call,
+            // Non-actor: delegate map receivers to beamtalk_primitive:send
+            // which routes through dispatch/3 (respects ClassKind)
+            " <_> when 'true' -> case call 'erlang':'is_map'(",
+            leaf::var(receiver_var.clone()),
+            ") of <'true'> when 'true' -> call 'beamtalk_primitive':'send'(",
+            leaf::var(receiver_var.clone()),
+            ", 'fieldAt:', [",
+            leaf::var(name_var),
+            "]) <_> when 'true' -> let ",
+            leaf::var(class_var.clone()),
+            " = call 'beamtalk_primitive':'class_of'(",
+            leaf::var(receiver_var),
+            ") in ",
+            super::super::errors::BeamtalkErrorChain::new("immutable_value", leaf::var(class_var))
+                .selector(Document::Str("'fieldAt:'"))
+                .hint(hint)
+                .build(
+                    vec![
+                        super::super::errors::ErrorBinding::plain(error_base),
+                        super::super::errors::ErrorBinding::plain(error_sel),
+                        super::super::errors::ErrorBinding::plain(error_hint.clone())
+                    ],
+                    Document::Str(" ")
+                ),
+            "call 'beamtalk_error':'raise'(",
+            leaf::var(error_hint),
+            ") end end",
+        ];
+        Ok(Some(seq.close(self, call_doc, "FAtRes")))
+    }
+
+    /// `fieldAt:put:` — write an instance variable by name.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "fieldAt:put: requires verbose type guards for actor vs primitive dispatch"
+    )]
+    fn object_field_at_put(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        debug_assert_eq!(arguments.len(), 2);
+        // Class-method `self fieldAt: k put: v` writes the
+        // class variable in place, like `self.x := v`
+        // (BT-4421): `beamtalk_class_vars:field_at_put`,
+        // `put/3` after the `Cls fieldAt:put:` declared-set
+        // check. Not a state-threaded write
+        // (`is_self_field_at_put` excludes class methods,
+        // ADR 0130); its order against sibling operands is
+        // pinned by `is_class_side_effect`.
+        if self.is_class_side_self_reflection(receiver) {
+            let name_var = self.fresh_var("Name");
+            let value_var = self.fresh_var("Value");
+            let name_code = self.expression_doc(&arguments[0])?;
+            let value_code = self.expression_doc(&arguments[1])?;
+            let doc = docvec![
+                "let ",
+                leaf::var(name_var.clone()),
+                " = ",
+                name_code,
+                " in let ",
+                leaf::var(value_var.clone()),
+                " = ",
+                value_code,
+                " in ",
+                Self::class_var_helper_call_doc(
+                    class_var_fn::FIELD_AT_PUT,
+                    vec![leaf::var(name_var), leaf::var(value_var)],
+                ),
+            ];
+            return Ok(Some(doc));
+        }
+        // Fast-path for `self` receiver in actor context.
+        // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
+        //
+        // Method-body-level state threading is handled by
+        // lower_body_exprs_with_reply via is_self_field_at_put/
+        // lower_stmt_self_field_at_put, which intercepts before
+        // expression_doc is called. This intrinsic path is a
+        // deadlock-avoidance fallback for contexts where method-body
+        // threading is unavailable (e.g., inside blocks). It delegates
+        // to beamtalk_primitive:send(State, 'fieldAt:put:', ...) which
+        // returns the assigned value but does NOT thread the updated
+        // state back into the actor's State variable.
+        if let Expression::Identifier(id) = receiver
+            && id.name == "self"
+            && self.context == super::super::CodeGenContext::Actor
+            && self.lookup_var("self").is_none()
+        {
+            let name_var = self.fresh_var("Name");
+            let value_var = self.fresh_var("Value");
+            let name_code = self.expression_doc(&arguments[0])?;
+            let value_code = self.expression_doc(&arguments[1])?;
+            let doc = docvec![
+                "let ",
+                leaf::var(name_var.clone()),
+                " = ",
+                name_code,
+                " in let ",
+                leaf::var(value_var.clone()),
+                " = ",
+                value_code,
+                " in call 'beamtalk_primitive':'send'(",
+                leaf::var(self.current_state_var()),
+                ", 'fieldAt:put:', [",
+                leaf::var(name_var),
+                ", ",
+                leaf::var(value_var),
+                "])",
+            ];
+            return Ok(Some(doc));
+        }
+
+        // Hoist open-scope receiver + name + value (e.g. class method self-sends).
+        let mut seq = self.sequence_call(&[receiver, &arguments[0], &arguments[1]], "FAtPut")?;
+        let recv_doc = seq.next();
+        let name_doc = seq.next();
+        let value_doc = seq.next();
+        let receiver_var = self.fresh_var("Receiver");
+        let name_var = self.fresh_var("Name");
+        let value_var = self.fresh_var("Value");
+        let class_var = self.fresh_var("Class");
+        let error_base = self.fresh_var("Err");
+        let error_sel = self.fresh_var("Err");
+        let error_hint = self.fresh_var("Err");
+        let hint = leaf::binary_lit(super::super::errors::VALUE_IMMUTABLE_SLOT_HINT);
+
+        // As `fieldAt:` above: a `#beamtalk_object{}` receiver
+        // (actor instance or class object) goes through
+        // `beamtalk_message_dispatch:send/3` (BT-4148); anything
+        // else raises `immutable_value` inline. The dispatch call
+        // carries its own line annotation (BT-4356).
+        let dispatch_call = self.runtime_send_call(
+            leaf::var(receiver_var.clone()),
+            "fieldAt:put:",
+            vec![leaf::var(name_var.clone()), leaf::var(value_var.clone())],
+        );
+        let call_doc = docvec![
+            "let ",
+            leaf::var(receiver_var.clone()),
+            " = ",
+            recv_doc,
+            " in let ",
+            leaf::var(name_var.clone()),
+            " = ",
+            name_doc,
+            " in let ",
+            leaf::var(value_var.clone()),
+            " = ",
+            value_doc,
+            " in case case call 'erlang':'is_tuple'(",
+            leaf::var(receiver_var.clone()),
+            ") of <'true'> when 'true' -> case call 'erlang':'=='(call 'erlang':'tuple_size'(",
+            leaf::var(receiver_var.clone()),
+            "), 4) of <'true'> when 'true' -> call 'erlang':'=='(call 'erlang':'element'(1, ",
+            leaf::var(receiver_var.clone()),
+            "), 'beamtalk_object') <_> when 'true' -> 'false' end <_> when 'true' -> 'false' end of ",
+            "<'true'> when 'true' -> ",
+            dispatch_call,
+            " <_> when 'true' -> let ",
+            leaf::var(class_var.clone()),
+            " = call 'beamtalk_primitive':'class_of'(",
+            leaf::var(receiver_var),
+            ") in ",
+            super::super::errors::BeamtalkErrorChain::new("immutable_value", leaf::var(class_var))
+                .selector(Document::Str("'fieldAt:put:'"))
+                .hint(hint)
+                .build(
+                    vec![
+                        super::super::errors::ErrorBinding::plain(error_base),
+                        super::super::errors::ErrorBinding::plain(error_sel),
+                        super::super::errors::ErrorBinding::plain(error_hint.clone())
+                    ],
+                    Document::Str(" ")
+                ),
+            "call 'beamtalk_error':'raise'(",
+            leaf::var(error_hint),
+            ") end",
+        ];
+        Ok(Some(seq.close(self, call_doc, "FAtPutRes")))
+    }
+
+    /// `hasField:` — presence test for a named field (ADR 0124 §1/§9/B4); never raises.
+    fn object_has_field(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        debug_assert_eq!(arguments.len(), 1);
+        // Class-method `self hasField: #x` is a presence test
+        // on the class variables, in place (ADR 0130 §2):
+        // `beamtalk_class_vars:has(ClassSelf, Name)`, which
+        // never raises on the name.
+        if self.is_class_side_self_reflection(receiver) {
+            let name_var = self.fresh_var("Name");
+            let name_code = self.expression_doc(&arguments[0])?;
+            let doc = docvec![
+                "let ",
+                leaf::var(name_var.clone()),
+                " = ",
+                name_code,
+                " in ",
+                self.class_var_read_helper_call_doc(class_var_fn::HAS, vec![leaf::var(name_var)]),
+            ];
+            return Ok(Some(doc));
+        }
+        // Fast-path for `self` receiver in actor instance
+        // context. Avoids sync_send(self()) → deadlock.
+        if let Expression::Identifier(id) = receiver
+            && id.name == "self"
+            && self.context == super::super::CodeGenContext::Actor
+            && !self.in_class_method()
+            && self.lookup_var("self").is_none()
+        {
+            let name_var = self.fresh_var("Name");
+            let name_code = self.expression_doc(&arguments[0])?;
+            let doc = docvec![
+                "let ",
+                leaf::var(name_var.clone()),
+                " = ",
+                name_code,
+                " in call 'beamtalk_primitive':'send'(",
+                leaf::var(self.current_state_var()),
+                ", 'hasField:', [",
+                leaf::var(name_var),
+                "])",
+            ];
+            return Ok(Some(doc));
+        }
+
+        // General dispatch: delegate to
+        // `beamtalk_message_dispatch:send/3`, which already
+        // classifies the receiver correctly (actor instance
+        // → `sync_send`; class object → `beamtalk_object_class:class_send`,
+        // reaching this issue's `dispatch_class_method`
+        // `'hasField:'` clause; value/tagged-map/primitive
+        // → `beamtalk_primitive:send`, reaching the
+        // `hasField:` arm every class's `dispatch/3` now
+        // carries). A class object is also
+        // `#beamtalk_object{}`-shaped, so treating it as an
+        // actor instance would send it the wrong message
+        // shape and crash the class gen_server;
+        // `hasField:`/`clearField:` reuse the SAME general
+        // dispatcher `perform:` already does (as
+        // `fieldAt:`/`fieldAt:put:` do for their
+        // `#beamtalk_object{}` receivers, BT-4148), so
+        // `classify_receiver`'s actor/class/value
+        // distinction lives in exactly one place.
+        self.sequenced_runtime_call(
+            "beamtalk_message_dispatch",
+            "send",
+            &[receiver, &arguments[0]],
+            "HasF",
+            |operands| runtime_send_args("hasField:", operands),
+        )
+        .map(Some)
+    }
+
+    /// `clearField:` — return a `late` field to unassigned (ADR 0124 §1/§4f/B4).
+    /// A write; same shape as `fieldAt:put:` (class-side in-place path, actor-`self` fast path).
+    fn object_clear_field(
+        &mut self,
+        receiver: &Expression,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        debug_assert_eq!(arguments.len(), 1);
+        // Class-side `self clearField: #x` removes the class
+        // variable in place at any nesting depth (ADR 0130
+        // §2): `beamtalk_class_vars:clear(ClassSelf, Name)`,
+        // which answers `self`. Routing it through
+        // `class_send` instead would deadlock on the class's
+        // own process.
+        if self.is_class_side_self_reflection(receiver) {
+            let name_var = self.fresh_var("Name");
+            let name_code = self.expression_doc(&arguments[0])?;
+            let doc = docvec![
+                "let ",
+                leaf::var(name_var.clone()),
+                " = ",
+                name_code,
+                " in ",
+                Self::class_var_helper_call_doc(class_var_fn::CLEAR, vec![leaf::var(name_var)]),
+            ];
+            return Ok(Some(doc));
+        }
+        // Fast-path for `self` receiver in actor instance
+        // context. Avoids sync_send(self()) → deadlock.
+        // Method-body-level state threading is handled by
+        // `lower_body_exprs_with_reply`/`is_self_clear_field`/
+        // `lower_stmt_self_clear_field`, which intercepts
+        // before `expression_doc` is called. This intrinsic
+        // path is a deadlock-avoidance fallback for contexts
+        // where method-body threading is unavailable (e.g.,
+        // inside blocks) — mirrors `fieldAt:put:` above. It
+        // delegates to `beamtalk_primitive:send(State,
+        // 'clearField:', ...)`, the same pre-existing
+        // state-threading gap fieldAt:put: has (BT-1324):
+        // it does NOT thread the updated state back into the
+        // actor's `State` variable.
+        if let Expression::Identifier(id) = receiver
+            && id.name == "self"
+            && self.context == super::super::CodeGenContext::Actor
+            && self.lookup_var("self").is_none()
+        {
+            let name_var = self.fresh_var("Name");
+            let name_code = self.expression_doc(&arguments[0])?;
+            let doc = docvec![
+                "let ",
+                leaf::var(name_var.clone()),
+                " = ",
+                name_code,
+                " in call 'beamtalk_primitive':'send'(",
+                leaf::var(self.current_state_var()),
+                ", 'clearField:', [",
+                leaf::var(name_var),
+                "])",
+            ];
+            return Ok(Some(doc));
+        }
+
+        // General dispatch: delegate to
+        // `beamtalk_message_dispatch:send/3`, exactly like
+        // `hasField:` above and for the identical reason —
+        // a hand-rolled receiver check cannot tell a
+        // class-object `#beamtalk_object{}` apart from an
+        // actor-instance one, so it would send a live class
+        // gen_server the wrong message shape and crash it.
+        // A value/primitive receiver reaches the class's
+        // own `dispatch/3`, whose `clearField:`
+        // arm always raises `immutable_value` (added
+        // unconditionally, not only for `ClassKind::Value`
+        // — see `generate_primitive_dispatch`), so no
+        // hand-rolled error construction is needed here
+        // either.
+        self.sequenced_runtime_call(
+            "beamtalk_message_dispatch",
+            "send",
+            &[receiver, &arguments[0]],
+            "ClrF",
+            |operands| runtime_send_args("clearField:", operands),
+        )
+        .map(Some)
     }
 }

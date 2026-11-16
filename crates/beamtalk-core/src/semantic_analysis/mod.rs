@@ -620,7 +620,7 @@ impl<'a> AnalysisContext<'a> {
 /// implicitly.
 ///
 /// The one rule every compile path shares (`build`, `check`, `lint`, `test`,
-/// the compiler port behind the REPL; the LSP is a known gap, BT-4928).
+/// the compiler port behind the REPL, the LSP).
 /// Callers with no package (single files, an unreadable manifest) pass no
 /// set at all, which skips the check.
 #[must_use]
