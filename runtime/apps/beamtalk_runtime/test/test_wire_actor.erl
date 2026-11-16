@@ -39,7 +39,6 @@ returned as a reply (`shapeAheadReply`), and a raise via
     'handle_setLate:'/2,
     handle_lateOp/2,
     handle_shapeAheadReply/2,
-    handle_boomWrapped/2,
     'handle_invokeBlockWith:'/2
 ]).
 
@@ -60,7 +59,6 @@ init(InitialValue) ->
             'setLate:' => fun ?MODULE:'handle_setLate:'/2,
             lateOp => fun ?MODULE:handle_lateOp/2,
             shapeAheadReply => fun ?MODULE:handle_shapeAheadReply/2,
-            boomWrapped => fun ?MODULE:handle_boomWrapped/2,
             'invokeBlockWith:' => fun ?MODULE:'handle_invokeBlockWith:'/2
         },
         value => InitialValue
@@ -122,21 +120,6 @@ handle_shapeAheadReply([], State) ->
             itemCount => 1, total => 0, tag => <<"none">>
         }},
     {reply, Envelope, State}.
-
--doc """
-Raises via `beamtalk_error:raise/1` (not a plain `error/1`) — the
-"double-wrap" case ADR 0126's Amendment (d) calls out: `raise/1` wraps the
-`#beamtalk_error{}` as an Exception tagged map itself, so
-`dispatch_user_method/4`'s first catch clause (which matches a *bare*
-`#beamtalk_error{}`) does not fire, and the reason a future rejects with is
-a fresh `runtime_error` whose `details.original_reason` holds the
-already-wrapped map — contrast `test_wirecheck_actor:handle_boom/2`, which
-raises the bare record directly.
-""".
-handle_boomWrapped([], _State) ->
-    beamtalk_error:raise(
-        beamtalk_error:new(runtime_error, 'WireActor', boomWrapped, <<"boom, wrapped">>)
-    ).
 
 -doc """
 Invoke a one-argument block passed as the sole argument, in this actor's own

@@ -284,7 +284,7 @@ late_slot_spawn_with_supplies_the_slot_test() ->
 async_message_creates_future_test() ->
     %% Test: Async message send creates a future
     State = counter_module_state(#{}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Simulate: future := actor increment
     Future = beamtalk_future:new(),
@@ -298,7 +298,7 @@ async_message_creates_future_test() ->
 async_message_uses_cast_tuple_test() ->
     %% Test: gen_server:cast with {Selector, Args, FuturePid} tuple
     State = counter_module_state(#{value => 0}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     Future = beamtalk_future:new(),
     %% This is the exact protocol the compiler generates
@@ -313,7 +313,7 @@ async_message_uses_cast_tuple_test() ->
 async_message_resolves_after_method_completes_test() ->
     %% Test: Future resolution after method completes
     State = counter_module_state(#{value => 10}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Send async increment
     Future = beamtalk_future:new(),
@@ -334,7 +334,7 @@ async_message_resolves_after_method_completes_test() ->
 async_await_on_pending_future_blocks_test() ->
     %% Test: await on a pending future blocks until resolved
     State = counter_module_state(#{value => 5}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     Future = beamtalk_future:new(),
     Parent = self(),
@@ -378,7 +378,7 @@ async_await_on_pending_future_blocks_test() ->
 async_await_on_resolved_future_returns_immediately_test() ->
     %% Test: await on an already-resolved future returns immediately
     State = counter_module_state(#{value => 20}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Send async message and await to ensure it's resolved
     Future = beamtalk_future:new(),
@@ -402,7 +402,7 @@ async_await_on_resolved_future_returns_immediately_test() ->
 async_future_rejection_on_method_error_test() ->
     %% Test: Future rejection when method returns error
     State = counter_module_state(#{value => 10}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Send async message that will error (divide by zero)
     Future = beamtalk_future:new(),
@@ -418,7 +418,7 @@ async_future_rejection_on_method_error_test() ->
 async_multiple_concurrent_messages_test() ->
     %% Test: Multiple concurrent async messages to same actor
     State = counter_module_state(#{value => 0}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Send 5 concurrent increment messages
     Futures = [
@@ -445,7 +445,7 @@ async_multiple_concurrent_messages_test() ->
 async_concurrent_messages_order_preserved_test() ->
     %% Test: Message order is preserved even with async
     State = counter_module_state(#{value => 100}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Send multiple async messages rapidly
     F1 = beamtalk_future:new(),
@@ -473,7 +473,7 @@ async_chained_operations_test() ->
     %% Test: Chained async operations (nested futures)
     %% Simulates: result1 := actor increment await. result2 := actor increment await.
     State = counter_module_state(#{value => 0}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% First async increment
     Future1 = beamtalk_future:new(),
@@ -494,8 +494,8 @@ async_nested_futures_different_actors_test() ->
     %% Simulates: actor1 increment await + actor2 increment await
     State1 = counter_module_state(#{value => 10}),
     State2 = counter_module_state(#{value => 20}),
-    {ok, Actor1} = gen_server:start_link(beamtalk_actor, State1, []),
-    {ok, Actor2} = gen_server:start_link(beamtalk_actor, State2, []),
+    {ok, Actor1} = gen_server:start_link(test_actor_host, State1, []),
+    {ok, Actor2} = gen_server:start_link(test_actor_host, State2, []),
 
     %% Send async messages to both actors
     F1 = beamtalk_future:new(),
@@ -518,7 +518,7 @@ async_nested_futures_different_actors_test() ->
 async_mixed_with_sync_messages_test() ->
     %% Test: Mixing synchronous and asynchronous messages
     State = counter_module_state(#{value => 0}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Sync increment
     ?assertEqual(1, gen_server:call(Actor, {increment, []})),
@@ -539,7 +539,7 @@ async_mixed_with_sync_messages_test() ->
 async_future_timeout_behavior_test() ->
     %% Test: Future await with timeout works correctly
     State = counter_module_state(#{value => 0}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     %% Create a future but DON'T send the message
     Future = beamtalk_future:new(),
@@ -563,7 +563,7 @@ async_future_timeout_behavior_test() ->
 async_multiple_awaits_same_future_test() ->
     %% Test: Multiple processes can await the same future
     State = counter_module_state(#{value => 0}),
-    {ok, Actor} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, Actor} = gen_server:start_link(test_actor_host, State, []),
 
     Future = beamtalk_future:new(),
     Parent = self(),

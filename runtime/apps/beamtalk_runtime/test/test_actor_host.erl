@@ -294,13 +294,11 @@ call_method(Run, Selector, State) ->
         throw:Nlr when ?IS_NLR(Nlr) ->
             {error, Nlr, State};
         Class:Reason:Stacktrace ->
-            ClassName = beamtalk_tagged_map:class_of(State, unknown),
-            Message = beamtalk_actor:format_method_error_message(
-                ClassName, Selector, Class, Reason, Stacktrace
+            #{error := Error} = beamtalk_exception_handler:ensure_wrapped(
+                Class, Reason, Stacktrace
             ),
-            Error0 = beamtalk_error:new(runtime_error, ClassName, Selector),
-            Error1 = beamtalk_error:with_message(Error0, Message),
-            {error, beamtalk_error:with_details(Error1, #{original_reason => Reason}), State}
+            ClassName = beamtalk_tagged_map:class_of(State, unknown),
+            {error, Error#beamtalk_error{class = ClassName, selector = Selector}, State}
     end.
 
 via_hierarchy(Selector, Args, State) ->

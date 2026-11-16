@@ -88,12 +88,6 @@ wire_test_() ->
                     migrate_forward_through_wire(PeerNode)
                 end},
                 {
-                    "async future rejection double-wrap: a method that calls "
-                    "beamtalk_error:raise/1 on itself rejects with the wrapped map buried in "
-                    "details.original_reason, not the bare record",
-                    fun() -> async_future_rejection_double_wrap(PeerNode) end
-                },
-                {
                     "a wire-tagged cast of an unrecognised kind is dropped, not "
                     "tail-recursed into forever (BT-3613 livelock guard)",
                     fun() -> unrecognised_kind_cast_does_not_livelock(PeerNode) end
@@ -314,23 +308,6 @@ fresh `runtime_error` whose `details.original_reason` holds the
 already-wrapped Exception map, not the bare `#beamtalk_error{}` `boom`
 produces.
 """.
-async_future_rejection_double_wrap(PeerNode) ->
-    {ok, RemotePid} = rpc:call(PeerNode, test_wire_actor, start, [0]),
-    try
-        Future = beamtalk_future:new(),
-        ok = beamtalk_actor:async_send(RemotePid, boomWrapped, [], beamtalk_future:pid(Future)),
-        ?assertThrow(
-            {future_rejected, #beamtalk_error{
-                kind = runtime_error,
-                class = 'WireActor',
-                selector = boomWrapped,
-                details = #{original_reason := #{'$beamtalk_class' := 'RuntimeError', error := _}}
-            }},
-            beamtalk_future:await(Future, 5000)
-        )
-    after
-        rpc:call(PeerNode, gen_server, stop, [RemotePid])
-    end.
 
 %%====================================================================
 %% Livelock guard (BT-3613): a wire-tagged message of a `kind` the

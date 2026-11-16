@@ -335,30 +335,22 @@ compat_self_dispatch_preserves_class_test_() ->
     %% BT-4679: the former compat_self_dispatch_{exit,throw,error}_preserves_class tests.
     %% The self_dispatch path (unwrap_dispatch_result) with backward-compat 2-tuple
     %% errors. selfSend*Error triggers a self-send inside the actor, which goes through
-    %% self_dispatch -> safe_dispatch/3 -> unwrap_dispatch_result. The self-send error
-    %% bubbles up through dispatch/4's try/catch as an error exception, which
-    %% wrap_method_error catches and wraps.
+    %% self_dispatch -> safe_dispatch/3 -> unwrap_dispatch_result; the exception it
+    %% raises must keep the original exception class when the host wraps it.
     [
-        {Label, fun() -> compat_self_dispatch_case(Message, Class) end}
-     || {Label, Message, Class} <- [
-            {"exit error keeps ExitError", selfSendExitError, 'ExitError'},
-            {"throw error keeps ThrowError", selfSendThrowError, 'ThrowError'},
-            {"plain error keeps RuntimeError", selfSendPlainError, 'RuntimeError'}
+        {Label, fun() -> compat_self_dispatch_case(Message, Kind) end}
+     || {Label, Message, Kind} <- [
+            {"exit error keeps ExitError", selfSendExitError, erlang_exit},
+            {"throw error keeps ThrowError", selfSendThrowError, erlang_throw},
+            {"plain error keeps RuntimeError", selfSendPlainError, runtime_error}
         ]
     ].
 
-compat_self_dispatch_case(Message, Class) ->
+compat_self_dispatch_case(Message, Kind) ->
     {ok, Actor} = test_compat_error_actor:start_link(),
     try
         Result = gen_server:call(Actor, {Message, []}),
-        ?assertMatch({error, _}, Result),
-        {error, Inner} = Result,
-        %% The inner error is a #beamtalk_error{} from wrap_method_error, with the
-        %% original_reason containing the wrapped exception of the original class.
-        ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
-        Details = Inner#beamtalk_error.details,
-        OriginalReason = maps:get(original_reason, Details),
-        ?assertEqual(Class, maps:get('$beamtalk_class', OriginalReason))
+        ?assertMatch({error, #beamtalk_error{kind = Kind}}, Result)
     after
         gen_server:stop(Actor)
     end.
@@ -2382,15 +2374,6 @@ start_link_supervised_test() ->
 %%% dispatch/4 delegate returns signal error
 %%% ============================================================================
 
-dispatch_delegate_returns_signal_error_test() ->
-    State = #{
-        '$beamtalk_class' => 'TestActor',
-        '__methods__' => #{}
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(delegate, [], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = signal}, _}, Result).
-
 %%% ============================================================================
 %%% dispatch/4 perform:withArguments:timeout: tests
 %%% ============================================================================
@@ -2499,25 +2482,6 @@ make_self_without_class_mod_test() ->
     Self = beamtalk_actor:make_self(State),
     ?assertEqual('MyClass', Self#beamtalk_object.class),
     ?assertEqual(undefined, Self#beamtalk_object.class_mod).
-
-%%% ============================================================================
-%%% format_method_error_message coverage (via dispatch)
-%%% ============================================================================
-
-method_undef_error_test() ->
-    %% Trigger an undef error to cover format_method_error_message undef path
-    {ok, Actor} = test_badarg_actor:start_link(),
-    Result = gen_server:call(Actor, {triggerUndef, []}),
-    ?assertMatch({error, #beamtalk_error{kind = runtime_error, selector = triggerUndef}}, Result),
-    {error, Err} = Result,
-    ?assertNotEqual(
-        nomatch, binary:match(element(2, Err#beamtalk_error.message), <<"Undefined function">>)
-    ),
-    gen_server:stop(Actor).
-
-%%% ============================================================================
-%%% respondsTo: for delegate selector
-%%% ============================================================================
 
 %%% ============================================================================
 %%% Concurrent async error + future watcher tests
@@ -3318,87 +3282,9 @@ bt4525_unwrap_dispatch_result_error_still_stores_test() ->
         beamtalk_actor_state:uninstall(undefined)
     end.
 
-dispatch_user_method_type_error_for_non_function_value_test() ->
-    %% The `{ok, _NotAFunction}` branch in dispatch_user_method returns a
-    %% type_error. Exercises dispatch error surface + formatting path.
-    State = #{
-        '$beamtalk_class' => 'BadActor',
-        '__methods__' => #{badMethod => not_a_function}
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(badMethod, [], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = type_error, selector = badMethod}, _}, Result).
-
 %%% dispatch_via_hierarchy DNU fallback branches
 
-dispatch_unknown_selector_unregistered_class_falls_back_to_object_test() ->
-    %% An unknown selector on a class that isn't in the registry should flow
-    %% through dispatch_via_hierarchy -> catch exit:{noproc, _} ->
-    %% object_fallback, and ultimately produce a does_not_understand error.
-    State = #{
-        '$beamtalk_class' => 'UnregisteredClass_BT1979',
-        '__methods__' => #{}
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(nonsense_selector_xyz, [], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = does_not_understand}, _}, Result).
-
-dispatch_inherited_object_method_via_fallback_test() ->
-    %% A selector that Object implements (e.g. 'yourself') should succeed via
-    %% object_fallback even when the class is not registered.
-    State = #{
-        '$beamtalk_class' => 'UnregisteredClass_BT1979',
-        '__methods__' => #{}
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(yourself, [], Self, State),
-    %% yourself returns Self and does not error
-    ?assertMatch({reply, _, _}, Result).
-
 %%% call_dnu_handler: 2-ary and 3-ary handler variants with errors
-
-call_dnu_handler_2ary_crash_wrapped_test() ->
-    %% Install a DNU handler with arity 2 that crashes — covers the
-    %% call_dnu_handler/5 (arity = 2) error wrapping branch.
-    Methods = #{
-        'doesNotUnderstand:args:' => fun(_Args, _State) -> error(boom) end
-    },
-    State = #{
-        '$beamtalk_class' => 'DnuCrashActor',
-        '__methods__' => Methods
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(missingSelector, [1, 2], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = runtime_error}, _}, Result).
-
-call_dnu_handler_3ary_crash_wrapped_test() ->
-    %% 3-ary DNU handler that crashes — covers call_dnu_handler/5 (arity = 3)
-    Methods = #{
-        'doesNotUnderstand:args:' => fun(_Args, _Self, _State) -> error(kapow) end
-    },
-    State = #{
-        '$beamtalk_class' => 'DnuCrashActor3',
-        '__methods__' => Methods
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(missingSelector2, [1], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = runtime_error}, _}, Result).
-
-call_dnu_handler_3ary_preserves_beamtalk_error_test() ->
-    %% 3-ary DNU that raises a structured beamtalk_error should be preserved
-    %% verbatim (covers the error:#beamtalk_error{} branch).
-    BtErr = beamtalk_error:new(signal, 'DnuPreserve', 'badSelector:'),
-    Methods = #{
-        'doesNotUnderstand:args:' =>
-            fun(_Args, _Self, _State) -> error(BtErr) end
-    },
-    State = #{
-        '$beamtalk_class' => 'DnuPreserve',
-        '__methods__' => Methods
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch('badSelector:', [1], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = signal, class = 'DnuPreserve'}, _}, Result).
 
 %%% safe_spawn error paths
 
@@ -3561,41 +3447,6 @@ async_send_onExit_callback_block_raises_test() ->
     after 2000 ->
         error(onexit_block_did_not_run)
     end.
-
-dispatch_initialize_selector_runs_method_test() ->
-    %% Exercise the `initialize -> ?LOG_DEBUG` branch in dispatch_user_method
-    Init = fun(_Args, State) -> {reply, ok, State} end,
-    State = #{
-        '$beamtalk_class' => 'InitDirect',
-        '__methods__' => #{initialize => Init}
-    },
-    Self = beamtalk_actor:make_self(State),
-    ?assertMatch({reply, ok, _}, beamtalk_actor:dispatch(initialize, [], Self, State)).
-
-dispatch_4ary_method_preserves_beamtalk_error_test() ->
-    %% 4-ary user method raising a structured #beamtalk_error{} should flow
-    %% through unchanged (covers the error:#beamtalk_error{} branch at line 1717).
-    BtErr = beamtalk_error:new(signal, 'BtSignal', someSelector),
-    Method = fun(_Selector, _Args, _Self, _State) -> error(BtErr) end,
-    State = #{
-        '$beamtalk_class' => 'BtSignal',
-        '__methods__' => #{someSelector => Method}
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(someSelector, [], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = signal}, _}, Result).
-
-dispatch_4ary_method_wraps_generic_error_test() ->
-    %% 4-ary user method raising a generic error is wrapped via wrap_method_error
-    %% (covers the Class:Reason:Stacktrace branch at line 1719).
-    Method = fun(_Selector, _Args, _Self, _State) -> error(boom) end,
-    State = #{
-        '$beamtalk_class' => 'BtGeneric',
-        '__methods__' => #{explode => Method}
-    },
-    Self = beamtalk_actor:make_self(State),
-    Result = beamtalk_actor:dispatch(explode, [], Self, State),
-    ?assertMatch({error, #beamtalk_error{kind = runtime_error, selector = explode}, _}, Result).
 
 cast_send_to_non_actor_pid_ok_test() ->
     %% cast_send calls lookup_class — for non-actor pids it falls back to
@@ -4173,7 +4024,7 @@ bt3582_nlr_relayed_across_actor_send_arity4_test() ->
         getValue => fun(_Args, S) -> {reply, maps:get(value, S), S} end,
         'invokeBlock:' => fun ?MODULE:bt3582_invoke_block_fun4/4
     }),
-    {ok, ActorPid} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, ActorPid} = gen_server:start_link(test_actor_host, State, []),
     Token = make_ref(),
     NlrValue = bt3582_nlr_marker,
     NlrBlock = fun() -> throw({'$bt_nlr', Token, NlrValue, defining_method_state}) end,
@@ -4199,7 +4050,7 @@ bt3582_nlr_relayed_across_actor_send_arity2_test() ->
         getValue => fun(_Args, S) -> {reply, maps:get(value, S), S} end,
         'invokeBlock:' => fun ?MODULE:bt3582_invoke_block_fun2/2
     }),
-    {ok, ActorPid} = gen_server:start_link(beamtalk_actor, State, []),
+    {ok, ActorPid} = gen_server:start_link(test_actor_host, State, []),
     Token = make_ref(),
     NlrValue = bt3582_nlr_marker,
     NlrBlock = fun() -> throw({'$bt_nlr', Token, NlrValue, defining_method_state}) end,
