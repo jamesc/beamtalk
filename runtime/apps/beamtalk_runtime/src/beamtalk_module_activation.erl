@@ -418,8 +418,14 @@ extract_source_path(ModuleName) ->
     try
         Attrs = erlang:get_module_info(ModuleName, attributes),
         case proplists:get_value(beamtalk_source, Attrs) of
-            [Path] when is_list(Path) -> beamtalk_source_path:resolve(ModuleName, Path);
-            _ -> undefined
+            [Path] when is_list(Path) ->
+                case beamtalk_source_path:resolve_strict(ModuleName, Path) of
+                    {ok, Resolved} -> Resolved;
+                    %% BT-4957: unreadable source root, never a relative path.
+                    unresolvable -> undefined
+                end;
+            _ ->
+                undefined
         end
     catch
         Class:Reason:Stacktrace ->
