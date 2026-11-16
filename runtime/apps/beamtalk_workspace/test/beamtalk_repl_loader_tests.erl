@@ -683,6 +683,8 @@ loader_setup() ->
     Tmp = unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())),
     Proj = Tmp ++ "/bt_loader_proj_" ++ beamtalk_test_unique:id(),
     ok = file:make_dir(Proj),
+    %% Remember the classes alive now; teardown stops what the tests loaded.
+    persistent_term:put({?MODULE, classes_before, Proj}, live_class_names()),
     %% A recorded root package (BT-3651: the launcher-set `root_package` env
     %% workspace_meta reads at init) exercises compute_package_module_name/1's
     %% package-qualified branch. The beamtalk.toml is still read by the loader's
@@ -723,6 +725,7 @@ loader_setup() ->
 
 loader_teardown(Proj) ->
     application:unset_env(beamtalk_runtime, root_package),
+    stop_classes_loaded_since(Proj),
     %% Stop the singleton servers this fixture started so later test modules
     %% (e.g. beamtalk_workspace_changelog_tests, which start_link their own
     %% registered server with a {ok, Pid} match) see a clean slate.
@@ -736,6 +739,28 @@ loader_teardown(Proj) ->
     %% Best-effort recursive cleanup of the temp project directory.
     beamtalk_test_fs:rm_rf(Proj),
     ok.
+
+live_class_names() ->
+    [Name || {Name, _Module, _Pid} <- beamtalk_class_registry:live_class_entries()].
+
+%% The tests load many uniquely named classes (and protocols); left running they
+%% stay registered with their xref rows and show up in later modules' global
+%% scans, e.g. as implementors of #bar (BT-4962).
+stop_classes_loaded_since(Proj) ->
+    Before = persistent_term:get({?MODULE, classes_before, Proj}, undefined),
+    _ = persistent_term:erase({?MODULE, classes_before, Proj}),
+    case Before of
+        undefined ->
+            ok;
+        _ ->
+            lists:foreach(
+                fun(Name) ->
+                    beamtalk_test_class:stop_graceful(Name),
+                    ok = beamtalk_xref:purge_class(Name)
+                end,
+                live_class_names() -- Before
+            )
+    end.
 
 %% Write a .bt file inside the project src dir and return its absolute path.
 write_bt(Proj, Name, Source) ->
