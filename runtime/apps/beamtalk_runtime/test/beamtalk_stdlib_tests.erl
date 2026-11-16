@@ -34,6 +34,14 @@ stdlib_setup() ->
     %% Cold-boot semantics: `boot_real_stdlib/1` reloads the stdlib modules when
     %% an earlier suite left them loaded without their class processes or xref
     %% rows, so the registration and xref-index assertions below see a real boot.
+    %% A surviving class is not re-created by the reload, so its baked xref rows
+    %% are not re-indexed after an earlier suite restarted the xref server.
+    %% Stop the classes whose index rows `method_bearing_classes_indexed_test`
+    %% asserts, so the reload registers them (and their rows) again.
+    lists:foreach(
+        fun beamtalk_test_class:stop_graceful/1,
+        ['Printable', 'TranscriptStream', 'Subprocess']
+    ),
     ok = beamtalk_test_boot:reload_stdlib_modules(),
     ok = beamtalk_test_boot:boot_real_stdlib('Printable'),
     ok.
