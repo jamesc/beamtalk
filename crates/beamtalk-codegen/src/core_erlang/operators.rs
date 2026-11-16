@@ -684,52 +684,56 @@ impl CoreErlangGenerator {
         let inner_no_match = self.case_clause_fallback("BinCoerceNoMatch");
 
         // BT-4836: the guarded BIF inside the `try` carries the send's line.
-        let guarded_bif = self.annotate_current_send_call(docvec![
-            "call 'erlang':'",
-            Document::Str(erlang_op),
-            "'(",
-            left_doc.clone(),
-            ", ",
-            right_doc.clone(),
-            ")",
-        ]);
-        docvec![
-            "try ",
-            guarded_bif,
-            " of <",
-            var(try_result_var.clone()),
-            "> -> ",
-            var(try_result_var),
-            " catch <",
-            var(type_var.clone()),
-            ", ",
-            var(error_var.clone()),
-            ", ",
-            var(stack_var.clone()),
-            "> -> case {",
-            var(type_var.clone()),
-            ", ",
-            var(error_var.clone()),
-            "} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(",
-            right_doc.clone(),
-            ") of <'true'> when 'true' -> ",
-            Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
-            " <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(",
-            right_doc,
-            ", ",
-            atom(selector),
-            ", [",
-            left_doc,
-            "], ",
-            atom(op.to_string()),
-            ")",
+        let guarded_bif = self.annotate_current_send_call(form::call(
+            "erlang",
+            erlang_op,
+            [left_doc.clone(), right_doc.clone()],
+        ));
+        let raise = Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone());
+        let flat_clause = |pattern, body| form::clause([pattern], None, body, form::Layout::Flat);
+        let coercion = docvec![
+            form::call(
+                "beamtalk_message_dispatch",
+                "send_number_coercion",
+                [
+                    right_doc.clone(),
+                    atom(selector),
+                    docvec!["[", left_doc, "]"],
+                    atom(op.to_string()),
+                ],
+            ),
             inner_no_match,
-            " end <",
-            var(other_pair_var),
-            "> when 'true' -> ",
-            Self::emit_raw_raise(type_var, error_var, stack_var),
-            " end",
-        ]
+        ];
+        let is_number_case = form::case_of(
+            form::call("erlang", "is_number", [right_doc]),
+            [
+                flat_clause(atom("true"), raise.clone()),
+                flat_clause(atom("false"), coercion),
+            ],
+            form::Layout::Flat,
+        );
+        let handler = form::case_of(
+            form::tuple([var(type_var.clone()), var(error_var.clone())]),
+            [
+                flat_clause(
+                    form::tuple([atom("error"), atom("badarith")]),
+                    is_number_case,
+                ),
+                flat_clause(
+                    var(other_pair_var),
+                    Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
+                ),
+            ],
+            form::Layout::Flat,
+        );
+        form::try_of_catch(
+            guarded_bif,
+            [var(try_result_var.clone())],
+            var(try_result_var),
+            [var(type_var), var(error_var), var(stack_var)],
+            handler,
+            form::Layout::Flat,
+        )
     }
 
     /// ADR 0116: the always-bare arithmetic path's number-on-the-left
@@ -759,15 +763,8 @@ impl CoreErlangGenerator {
             var(right_var.clone()),
         );
         docvec![
-            "let ",
-            var(left_var),
-            " = ",
-            left_code,
-            " in let ",
-            var(right_var),
-            " = ",
-            right_code,
-            " in ",
+            form::let_prefix(var(left_var), left_code),
+            form::let_prefix(var(right_var), right_code),
             try_catch,
         ]
     }
