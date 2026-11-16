@@ -249,7 +249,7 @@ pub struct CoreErlangGenerator {
     pub(in crate::core_erlang) current_class_var_types:
         std::collections::HashMap<String, crate::core_erlang::field_types::FieldTypeFact>,
     /// ADR 0118 phase 1a: sub-expressions `threaded_expression`'s
-    /// sequencing rule (`util.rs`) has already compiled — each one's value
+    /// sequencing rule (`threaded_prelude.rs`) has already compiled — each one's value
     /// (a sequencing temp, or a state-effecting producer's pure result
     /// reference) keyed by the sub-expression's paren-unwrapped `Span`.
     /// `generate_expression` consults this FIRST, for every node, so when

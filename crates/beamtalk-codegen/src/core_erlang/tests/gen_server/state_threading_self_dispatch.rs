@@ -846,7 +846,7 @@ fn threading_gates_agree_on_fixture_set() {
     // answered by several overlapping predicates — `control_flow_has_mutations`
     // (gen_server/methods.rs, used by the statement-level C11/C12 dispatch
     // to decide whether a `Match`/conditional send needs threaded lowering),
-    // `conditional_receiver_needs_threading` (util.rs, one disjunct of the
+    // `conditional_receiver_needs_threading` (threaded_prelude.rs, one disjunct of the
     // same question — renamed from `contains_hoistable_self_send` by ADR
     // 0118 phase 2b, which also moved it out of
     // `control_flow/conditionals.rs`), and the gate behind `ifTrue:`,
