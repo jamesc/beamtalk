@@ -234,7 +234,8 @@ pub(crate) fn check_cross_file_native_delegate(
 ///
 /// One rule, two messages. Exempt: the built-in classes identified by term
 /// shape ([`ClassHierarchy::is_term_shape_builtin_class`]), while compiling the
-/// stdlib. Not reported: a class that redeclares `native:`, and
+/// stdlib. Not reported: a class that redeclares `native:`, a subclass that
+/// already has the seal error (that is the one diagnostic), and
 /// an abstract class (never instantiated; its concrete descendants are
 /// checked). The ancestor
 /// may come from this module or from a dependency, as long as the dependency
@@ -254,6 +255,20 @@ pub(crate) fn check_native_subclass_declares_native(
         // `String` under `Binary`), and only while compiling the stdlib itself,
         // so a user class that reuses the name is still checked.
         if stdlib_mode && ClassHierarchy::is_term_shape_builtin_class(name) {
+            continue;
+        }
+        // A subclass of a sealed class that already has the seal error (same
+        // span, emitted when the hierarchy was built) gets no second error: the
+        // "declare your own `native:`" hint would suggest a form the seal
+        // forbids (BT-4964 review). If no seal error was emitted (a sealed
+        // parent from a dependency), this check still reports.
+        if let Some(superclass) = class.superclass.as_ref()
+            && diagnostics.iter().any(|d| {
+                d.severity == crate::source_analysis::Severity::Error
+                    && d.span == superclass.span
+                    && d.category == Some(DiagnosticCategory::Inheritance)
+            })
+        {
             continue;
         }
         let is_actor = hierarchy.is_actor_subclass(name);

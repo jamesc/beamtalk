@@ -218,19 +218,56 @@ fn builtin_string_under_native_binary_is_exempt_in_stdlib_mode() {
 #[test]
 fn user_class_named_string_outside_the_stdlib_is_not_exempt() {
     // Same name as the built-in, but not the stdlib build: still checked.
+    let d = same_package(&format!(
+        "{NATIVE_VALUE}NVal subclass: String\n  extra => 1\n"
+    ));
+    assert_one_error(&d, "NVal", "String");
+    // Under the sealed `Binary` it is still an error: the seal error.
     let d = same_package(STRING_UNDER_BINARY);
-    assert_one_error(&d, "Binary", "String");
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+    assert_eq!(sealed_errors(&d).len(), 1, "{d:?}");
 }
 
 #[test]
 fn exemption_does_not_extend_to_other_classes_in_stdlib_mode() {
-    let src = format!("{NATIVE_VALUE}sealed NVal subclass: SubVal\n  extra => 1\n");
+    let src = format!("{NATIVE_VALUE}NVal subclass: SubVal\n  extra => 1\n");
     assert_one_error(&stdlib_mode(&src), "NVal", "SubVal");
 }
 
+fn sealed_errors(d: &[Diagnostic]) -> Vec<&Diagnostic> {
+    d.iter()
+        .filter(|d| d.message.contains("Cannot subclass sealed class"))
+        .collect()
+}
+
 #[test]
-fn user_sealed_subclass_of_a_native_value_class_is_an_error() {
-    // `sealed` is a keyword a user can write; it grants no exemption.
+fn subclass_of_a_sealed_native_class_gets_only_the_seal_error() {
+    // The seal error is the one diagnostic; a second "declare your own
+    // `native:`" error would suggest a form the seal forbids.
+    let parent =
+        "sealed Value subclass: SVal native: sval_backing\n  size -> Integer => self delegate\n";
+    let d = same_package(&format!("{parent}SVal subclass: SubSVal\n  extra => 1\n"));
+    assert_eq!(sealed_errors(&d).len(), 1, "{d:?}");
+    assert!(missing_native(&d).is_empty(), "{d:?}");
+}
+
+#[test]
+fn subclass_of_a_sealed_native_class_from_a_dependency_is_still_an_error() {
+    // The hierarchy build emits no seal error for a dependency's class, so the
+    // native-subclass error must still fire: exactly one error either way.
+    let parent =
+        "sealed Value subclass: SVal native: sval_backing\n  size -> Integer => self delegate\n";
+    let d = from_dependency(parent, "SVal subclass: SubSVal\n  extra => 1\n");
+    assert_eq!(
+        sealed_errors(&d).len() + missing_native(&d).len(),
+        1,
+        "{d:?}"
+    );
+}
+
+#[test]
+fn user_sealed_subclass_of_a_non_sealed_native_class_is_an_error() {
+    // `sealed` on the subclass is a keyword a user can write; it grants no exemption.
     let d = same_package(&format!(
         "{NATIVE_VALUE}sealed NVal subclass: SubVal\n  extra => 1\n"
     ));
