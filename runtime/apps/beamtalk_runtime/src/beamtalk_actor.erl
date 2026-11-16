@@ -270,7 +270,7 @@ decode/encode helpers and the pending-action helpers.
 %% BT-4113: the same sends for a caller that already holds the actor's class
 %% (`beamtalk_message_dispatch`, from the `#beamtalk_object{}` record), so the
 %% send path never has to look it up.
--export([sync_send_known/4, sync_send_known/5, cast_send_known/4]).
+-export([sync_send_known/4, sync_send_known/5, cast_send_known/4, async_send_known/5]).
 
 %% Propagated context (ADR 0069 Phase 2b)
 -export([get_propagated_ctx/0, restore_propagated_ctx/1]).
@@ -1317,26 +1317,51 @@ For all other messages, checks if the actor is alive first:
     pid()
 ) ->
     ok.
+async_send(Ref, Selector, Args, FuturePid) ->
+    async_send_impl(Ref, Selector, Args, FuturePid, undefined).
+
+-doc """
+`async_send/4` for a caller that already holds the actor's class (BT-4949):
+the send reports `Class` instead of reading the actor's marker. A
+name-resolving proxy reference resolves as in `async_send/4`.
+""".
+-spec async_send_known(
+    pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()},
+    atom(),
+    atom(),
+    list(),
+    pid()
+) -> ok.
+async_send_known(Ref, Class, Selector, Args, FuturePid) ->
+    async_send_impl(Ref, Selector, Args, FuturePid, Class).
+
+-spec async_send_impl(
+    pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()},
+    atom(),
+    list(),
+    pid(),
+    atom() | undefined
+) -> ok.
 %% ADR 0079 / ADR 0126: name-resolving proxy fan-out. Name-only selectors
 %% answer from the proxy itself; other selectors resolve the name to the
 %% currently-registered pid and re-enter the pid-based clauses below.
-async_send(Ref, Selector, Args, FuturePid) when ?IS_PROXY_REF(Ref) ->
+async_send_impl(Ref, Selector, Args, FuturePid, ClassHint) when ?IS_PROXY_REF(Ref) ->
     case proxy_route(Ref, Selector, Args) of
         {answer, Value} ->
             beamtalk_future:resolve(FuturePid, Value),
             ok;
         {pid, Pid} ->
-            async_send(Pid, Selector, Args, FuturePid);
+            async_send_impl(Pid, Selector, Args, FuturePid, ClassHint);
         {error, Error} ->
             beamtalk_future:reject(FuturePid, Error),
             ok
     end;
-async_send(ActorPid, isAlive, [], FuturePid) ->
+async_send_impl(ActorPid, isAlive, [], FuturePid, _ClassHint) ->
     %% isAlive is handled locally - no message to the actor
     Result = beamtalk_pid:is_alive(ActorPid),
     beamtalk_future:resolve(FuturePid, Result),
     ok;
-async_send(ActorPid, isRemote, [], FuturePid) ->
+async_send_impl(ActorPid, isRemote, [], FuturePid, _ClassHint) ->
     %% isRemote must compare against the *caller's* node, so it cannot run
     %% in the actor — see is_remote/2.
     try sync_send(ActorPid, isRemote, []) of
@@ -1354,15 +1379,15 @@ async_send(ActorPid, isRemote, [], FuturePid) ->
             beamtalk_future:reject(FuturePid, Error)
     end,
     ok;
-async_send(ActorPid, stop, [], FuturePid) ->
+async_send_impl(ActorPid, stop, [], FuturePid, _ClassHint) ->
     %% stop is handled locally - gracefully stops the actor process
     %% No send-site telemetry for stop — terminate/2 handles it
     %% to avoid double-counting (request + termination).
     async_stop(ActorPid, normal, ?STOP_TIMEOUT, stop, FuturePid);
-async_send(ActorPid, 'stopWith:', [Reason], FuturePid) ->
+async_send_impl(ActorPid, 'stopWith:', [Reason], FuturePid, _ClassHint) ->
     %% BT-3967: stop with a caller-chosen exit reason.
     async_stop(ActorPid, Reason, ?STOP_TIMEOUT, 'stopWith:', FuturePid);
-async_send(ActorPid, 'stopWith:timeout:', [Reason, Timeout], FuturePid) ->
+async_send_impl(ActorPid, 'stopWith:timeout:', [Reason, Timeout], FuturePid, _ClassHint) ->
     case is_stop_timeout(Timeout) of
         true ->
             async_stop(ActorPid, Reason, Timeout, 'stopWith:timeout:', FuturePid);
@@ -1370,12 +1395,12 @@ async_send(ActorPid, 'stopWith:timeout:', [Reason, Timeout], FuturePid) ->
             beamtalk_future:reject(FuturePid, stop_timeout_type_error('stopWith:timeout:')),
             ok
     end;
-async_send(ActorPid, 'continueWith:' = Selector, [ContSelector], FuturePid) ->
+async_send_impl(ActorPid, 'continueWith:' = Selector, [ContSelector], FuturePid, _ClassHint) ->
     %% BT-3968: only meaningful on `self`; raises in the caller otherwise.
     async_request_continuation(ActorPid, Selector, ContSelector, none, FuturePid);
-async_send(ActorPid, 'continueWith:withArguments:' = Selector, [ContSelector, ContArgs], FuturePid) ->
+async_send_impl(ActorPid, 'continueWith:withArguments:' = Selector, [ContSelector, ContArgs], FuturePid, _ClassHint) ->
     async_request_continuation(ActorPid, Selector, ContSelector, {args, ContArgs}, FuturePid);
-async_send(ActorPid, kill, [], FuturePid) ->
+async_send_impl(ActorPid, kill, [], FuturePid, _ClassHint) ->
     %% kill is handled locally - forcefully kills the actor process.
     %% Telemetry, monitor-before-kill, and DOWN-wait are in kill_and_wait/1.
     case kill_and_wait(ActorPid) of
@@ -1387,20 +1412,20 @@ async_send(ActorPid, kill, [], FuturePid) ->
             beamtalk_future:reject(FuturePid, Error)
     end,
     ok;
-async_send(_ActorPid, delegate, [], FuturePid) ->
+async_send_impl(_ActorPid, delegate, [], FuturePid, _ClassHint) ->
     %% Non-native Actors do not have a backing Erlang module.
     beamtalk_future:reject(FuturePid, delegate_error(unknown)),
     ok;
-async_send(ActorPid, pid, [], FuturePid) ->
+async_send_impl(ActorPid, pid, [], FuturePid, _ClassHint) ->
     %% pid returns the raw Erlang PID backing the actor
     beamtalk_future:resolve(FuturePid, ActorPid),
     ok;
-async_send(ActorPid, monitor, [], FuturePid) ->
+async_send_impl(ActorPid, monitor, [], FuturePid, _ClassHint) ->
     %% monitor is handled locally - creates an Erlang monitor
     Ref = erlang:monitor(process, ActorPid),
     beamtalk_future:resolve(FuturePid, Ref),
     ok;
-async_send(ActorPid, 'onExit:', [Block], FuturePid) ->
+async_send_impl(ActorPid, 'onExit:', [Block], FuturePid, _ClassHint) ->
     %% onExit: monitors the actor and calls block with reason on exit.
     %% Synchronize with the watcher to ensure the monitor is set up before resolving.
     %% Use a unique ref token to correlate the ready message (prevents stale/parallel confusion).
@@ -1452,10 +1477,10 @@ async_send(ActorPid, 'onExit:', [Block], FuturePid) ->
             beamtalk_future:reject(FuturePid, Error)
     end,
     ok;
-async_send(ActorPid, Selector, Args, FuturePid) ->
+async_send_impl(ActorPid, Selector, Args, FuturePid, ClassHint) ->
     %% Instrumented dispatch span (ADR 0069 Phase 2a; BT-4113: events opt-in).
     %% Measures dispatch-to-mailbox time for async sends.
-    Class = lookup_class(ActorPid),
+    Class = resolve_class(ActorPid, ClassHint),
     %% Check liveness before sending, and spawn a watcher to detect
     %% actor death during message processing. The watcher monitors both the
     %% actor and future processes: if the actor dies before the future is
@@ -2925,20 +2950,25 @@ maybe_execute_telemetry(EventName, Measurements, Metadata) ->
     beamtalk_telemetry:emit(EventName, Measurements, Metadata).
 
 -doc """
-Resolve an actor's class name from the instance registry's pid-keyed index
-(`beamtalk_object_instances:class_of/1`): one `ets:lookup`, O(1) however
-many actors are live (BT-4113). Returns 'unknown' for a non-Beamtalk pid
-and for a remote pid — the registry is populated only on the node that
-spawned the actor. A caller that already holds the class (from a
-`#beamtalk_object{}` record) passes it to the `*_known` send functions
-instead (ADR 0126 §7.3), so the send path never calls this.
+Resolve an actor's class name from its `'$beamtalk_actor'` marker
+(`beamtalk_actor_scan:info/1`, ADR 0150): one `process_info/2` signal to the
+target. Returns `unknown` for a non-Beamtalk pid, a dead pid and a remote pid
+(the marker is local-only). A `native:` backing module shared by several
+classes answers its first class.
+
+Only a send through a bare pid pays this. A caller that already holds the
+class (from a `#beamtalk_object{}` record, or a generated facade's static
+class) passes it to the `*_known` send functions instead (ADR 0126 §7.3), so
+the send path never calls this (BT-4949).
 """.
 -spec lookup_class(pid()) -> atom().
-lookup_class(Pid) ->
-    case beamtalk_object_instances:class_of(Pid) of
-        undefined -> unknown;
-        Class -> Class
-    end.
+lookup_class(Pid) when node(Pid) =:= node() ->
+    case beamtalk_actor_scan:info(Pid) of
+        [{Pid, Class, _StartedAt} | _] -> Class;
+        [] -> unknown
+    end;
+lookup_class(_RemotePid) ->
+    unknown.
 
 -doc """
 Set application-level trace context key-value pairs.
