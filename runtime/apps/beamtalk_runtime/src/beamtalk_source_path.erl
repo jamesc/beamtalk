@@ -68,6 +68,10 @@ resolve(Module, Path) ->
                 %% The module's own root decides: a file missing under it is
                 %% reported there, never taken from another project.
                 undefined -> resolve_without_root(Path);
+                %% A root is recorded but cannot be read as text (a non-UTF-8
+                %% dependency path): the path stays unresolved. Never fall back
+                %% to another project's root.
+                unreadable -> Path;
                 Root -> filename:join(Root, Path)
             end
     end.
@@ -109,38 +113,38 @@ dedupe([H | T], Acc) ->
         false -> dedupe(T, [H | Acc])
     end.
 
--spec beam_root(module() | undefined) -> file:filename_all() | undefined.
+-spec beam_root(module() | undefined) -> file:filename_all() | unreadable | undefined.
 beam_root(undefined) ->
     undefined;
 beam_root(Module) ->
     case code:which(Module) of
         Beam when is_list(Beam), Beam =/= [] ->
             case read_marker(filename:dirname(Beam)) of
-                undefined -> find_package_root(Beam);
-                Root -> Root
+                absent -> find_package_root(Beam);
+                Found -> Found
             end;
         _ ->
             undefined
     end.
 
--spec read_marker(file:filename_all()) -> file:filename_all() | undefined.
+%% `absent`: no marker. `unreadable`: a marker names a root that cannot be
+%% decoded as text, so the package walk (which would find the consumer's root
+%% for a path dependency) must not run. Otherwise the root as a string.
+-spec read_marker(file:filename_all()) -> file:filename_all() | unreadable | absent.
 read_marker(EbinDir) ->
     case file:read_file(filename:join(EbinDir, ".beamtalk-source-root")) of
         {ok, Bin} ->
-            %% A marker that is not valid UTF-8 is treated as absent (the
-            %% package walk is the fallback), so a root is always a string and
-            %% callers' string()/binary() contracts hold.
             case unicode:characters_to_list(Bin) of
                 Decoded when is_list(Decoded) ->
                     case string:trim(Decoded) of
-                        [] -> undefined;
+                        [] -> absent;
                         Root -> Root
                     end;
                 _ ->
-                    undefined
+                    unreadable
             end;
         {error, _} ->
-            undefined
+            absent
     end.
 
 -spec workspace_root() -> file:filename_all() | undefined.

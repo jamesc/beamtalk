@@ -136,13 +136,16 @@ missing_file_in_workspace_resolves_under_the_project_test() ->
         application:unset_env(beamtalk_runtime, workspace_project_root)
     end.
 
-%% A marker that is not valid UTF-8 is ignored (falls back to the package
-%% walk) and never raises.
-non_utf8_marker_is_ignored_test() ->
+%% A marker that is not valid UTF-8 leaves the path unresolved: the package
+%% walk must NOT run, because for a path dependency it finds the consumer's
+%% root (and a same-named consumer file would be reloaded in its place).
+non_utf8_marker_never_resolves_against_the_consumer_test() ->
     Base = filename:absname("bt4940_badmarker"),
-    Ebin = filename:join([Base, "ebin"]),
+    Ebin = filename:join([Base, "_build", "deps", "dep", "ebin"]),
     ok = filelib:ensure_path(Ebin),
+    ok = filelib:ensure_path(filename:join(Base, "src")),
     ok = file:write_file(filename:join(Base, "beamtalk.toml"), <<"[package]\n">>),
+    ok = file:write_file(filename:join(Base, "src/a.bt"), <<>>),
     ok = file:write_file(filename:join(Ebin, ".beamtalk-source-root"), <<255, 254, 253>>),
     Mod = bt4940_badmarker_mod,
     {ok, Mod, Bin} = compile:forms([{attribute, 1, module, Mod}, {attribute, 2, export, []}]),
@@ -150,9 +153,7 @@ non_utf8_marker_is_ignored_test() ->
     ok = file:write_file(BeamFile, Bin),
     {module, Mod} = code:load_abs(filename:rootname(BeamFile)),
     try
-        ?assertEqual(
-            filename:join(Base, "src/a.bt"), beamtalk_source_path:resolve(Mod, "src/a.bt")
-        )
+        ?assertEqual("src/a.bt", beamtalk_source_path:resolve(Mod, "src/a.bt"))
     after
         code:purge(Mod),
         code:delete(Mod),

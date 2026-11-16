@@ -845,7 +845,12 @@ frame_source_path(#{module := Module} = Frame) ->
         Path ->
             %% BT-4940: a frame's own `file` is the package-relative path the
             %% compiler embedded; the snippet reader needs the file on disk.
-            unicode:characters_to_binary(beamtalk_source_path:resolve(Module, Path))
+            %% A stdlib module embeds a bare file name with no package above
+            %% it, so resolving it could pick a same-named user file: leave it.
+            case beamtalk_module_name:is_stdlib_module(Module) of
+                true -> unicode:characters_to_binary(Path);
+                false -> unicode:characters_to_binary(beamtalk_source_path:resolve(Module, Path))
+            end
     end;
 frame_source_path(_) ->
     nil.
