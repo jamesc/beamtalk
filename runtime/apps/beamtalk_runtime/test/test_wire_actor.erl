@@ -118,4 +118,3 @@ handle_shapeAheadReply([], State) ->
             itemCount => 1, total => 0, tag => <<"none">>
         }},
     {reply, Envelope, State}.
-

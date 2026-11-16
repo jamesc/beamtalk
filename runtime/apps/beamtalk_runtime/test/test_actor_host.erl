@@ -20,7 +20,8 @@ reuses the helpers `beamtalk_actor` keeps for generated code (`decode_wire_call/
 `take_init_ack/2`, `mailbox_continuation_check/2`, ...).
 
 A fixture's method table lives in its state under `'__methods__'`: selector to
-`fun(Args, State)` (or `fun(Selector, Args, Self, State)`) returning `{reply, V, S}` or `{noreply, S}`. Anything not in
+`fun(Args, State)` (or `fun(Selector, Args, Self, State)`) returning `{reply, V, S}`, `{noreply, S}` or
+`{error, Reason, S}`. Anything not in
 the table goes through the class hierarchy (`beamtalk_dispatch:lookup/5`), so
 Object's methods are reachable exactly as they are for a compiled actor.
 
