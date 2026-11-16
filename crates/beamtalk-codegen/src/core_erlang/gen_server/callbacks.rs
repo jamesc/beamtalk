@@ -743,6 +743,12 @@ impl CoreErlangGenerator {
     /// the subclass's marker — the leaf class name is what downstream lookups
     /// need.
     ///
+    /// BT-4937: the same branch also writes `'$beamtalk_actor_started_at'`
+    /// (`erlang:system_time(microsecond)`), the age `resolve_global_conflict/3`
+    /// compares. It is the writer for compiled actors; the interpretive
+    /// `beamtalk_actor:init/1` also writes it until that path is removed
+    /// (BT-4871).
+    ///
     /// BT-3596: when `traps_exit` is true (this class or an ancestor
     /// overrides `terminate:`, see `class_or_ancestor_overrides_terminate`),
     /// also sets `trap_exit` on this actor's own `gen_server` process — in the
@@ -767,6 +773,20 @@ impl CoreErlangGenerator {
                 leaf::atom(class_name.to_owned()),
             ],
         );
+        // BT-4937 / ADR 0126 §4: the start-time marker
+        // `beamtalk_actor_registry:resolve_global_conflict/3` reads (via
+        // `actor_started_at/1`, possibly from another node) to keep the older
+        // registrant. Written once per spawned process, in the same
+        // `__skip_initialize__`-guarded branch as the class marker.
+        let put_started_at = form::call(
+            "erlang",
+            "put",
+            [
+                leaf::atom("$beamtalk_actor_started_at"),
+                form::call("erlang", "system_time", [leaf::atom("microsecond")]),
+            ],
+        );
+        let put_markers = bind(leaf::var("_ClassMarker"), put_marker, put_started_at);
         let false_arm_body = if traps_exit {
             bind(
                 leaf::var("_TrapExit"),
@@ -775,10 +795,10 @@ impl CoreErlangGenerator {
                     "process_flag",
                     [leaf::atom("trap_exit"), leaf::atom("true")],
                 ),
-                put_marker,
+                put_markers,
             )
         } else {
-            put_marker
+            put_markers
         };
         bind(
             leaf::var("_Marker"),

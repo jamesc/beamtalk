@@ -599,18 +599,21 @@ reading the `'$beamtalk_actor_started_at'` process-dictionary marker
 `init/1` sets — possibly on the *other* node, via `erpc`) and keeps the
 older one, stopping the younger with `stop_global_conflict_loser/1`.
 
-Falls back to OTP's own `global:random_exit_name/3` tie-break when a start
-time cannot be read for either side (e.g. a raw, non-Beamtalk process
-happens to hold the conflicting registration, or the actor terminated in
-the narrow window between the conflict being detected and this function
-running) — `global_name_server` calls this synchronously and expects a
-decision back, never an exception, so this must always return one. Note
-this fallback (only reachable when ages genuinely cannot be compared, per
-ADR 0126 §4 "falling back to random_exit_name's choice") inherits
-`random_exit_name/3`'s own force-kill of the pid it does not return — the
-`stop_global_conflict_loser/1` call after it is then a harmless no-op on an
-already-dead pid. The comparable-ages path above never does this: it always
-resolves via a graceful stop, never a kill.
+When exactly one side reads `undefined` (no start time: an actor started by an
+older runtime during a rolling upgrade, ADR 0125, a `native:` actor, a raw
+non-Beamtalk process, or a process that has already exited) and the other has
+a time, the side with a time is kept (BT-4937). An `unreachable` read (the
+remote read failed) is not that case: it says nothing about age, so it takes
+the fallback below. Falls back to OTP's own `global:random_exit_name/3`
+tie-break when the start times cannot be compared (neither side has one, or
+either read was `unreachable`) — `global_name_server` calls this synchronously
+and expects a decision back, never an exception, so this must always return
+one. Note this fallback (only reachable when ages genuinely cannot be
+compared, per ADR 0126 §4 "falling back to random_exit_name's choice")
+inherits `random_exit_name/3`'s own force-kill of the pid it does not
+return — the `stop_global_conflict_loser/1` call after it is then a harmless
+no-op on an already-dead pid. The comparable-ages path above never does
+this: it always resolves via a graceful stop, never a kill.
 """.
 -spec resolve_global_conflict(term(), pid(), pid()) -> pid().
 resolve_global_conflict(Name, Pid1, Pid2) ->
@@ -623,6 +626,15 @@ resolve_global_conflict(Name, Pid1, Pid2) ->
                 end,
             stop_global_conflict_loser(Loser),
             Winner;
+        {T1, undefined} when is_integer(T1) ->
+            %% BT-4937 mixed case: only Pid1 has a start time (Pid2 was started
+            %% by an older runtime that never wrote one, or is a `native:`
+            %% backing process). Keep the one that has a time (ADR 0126 §4).
+            stop_global_conflict_loser(Pid2),
+            Pid1;
+        {undefined, T2} when is_integer(T2) ->
+            stop_global_conflict_loser(Pid1),
+            Pid2;
         _ ->
             %% `global:random_exit_name/3` always returns one of its two
             %% candidate pids (never `none`) per its own typespec.
@@ -672,12 +684,18 @@ Read `Pid`'s `'$beamtalk_actor_started_at'` process-dictionary marker
 another node — a netsplit-heal conflict is exactly the case where the two
 candidates most likely live on different (just-reconnected) nodes — so a
 remote `Pid` reads it via `erpc:call/5` to `started_at_from_dictionary/1`
-on `node(Pid)` rather than the local-only `erlang:process_info/2`. Returns
-`undefined` for a dead process, a non-Beamtalk process (no marker), or an
-unreachable node — `resolve_global_conflict/3` treats that as
-"can't compare" and falls back to OTP's own tie-break.
+on `node(Pid)` rather than the local-only `erlang:process_info/2`.
+
+Returns `undefined` when the read worked but there is no start time: a dead
+process, or a process without the key (a non-Beamtalk process, an actor
+started by a runtime older than BT-4937, a `native:` actor).
+`resolve_global_conflict/3` keeps the other side if that one has a time.
+Returns `unreachable` when the read itself failed (`erpc` timeout,
+`noconnection`, or a peer that lacks `started_at_from_dictionary/1`): that is
+a fact about the network, not the actor, so it says nothing about age and
+`resolve_global_conflict/3` falls back to OTP's tie-break.
 """.
--spec actor_started_at(pid()) -> integer() | undefined.
+-spec actor_started_at(pid()) -> integer() | undefined | unreachable.
 actor_started_at(Pid) when node(Pid) =:= node() ->
     started_at_from_dictionary(Pid);
 actor_started_at(Pid) ->
@@ -692,9 +710,9 @@ actor_started_at(Pid) ->
     of
         Result -> Result
     catch
-        error:{erpc, _ErpcReason} -> undefined;
-        error:{exception, _Reason, _Stack} -> undefined;
-        exit:{exception, _Reason} -> undefined
+        error:{erpc, _ErpcReason} -> unreachable;
+        error:{exception, _Reason, _Stack} -> unreachable;
+        exit:{exception, _Reason} -> unreachable
     end.
 
 -doc """
