@@ -16,7 +16,7 @@
 //!
 //! **Structure goes through these constructors, not string literals.** A new
 //! `let`, `case`, `try`, `do`, `call` or `primop` is built with
-//! [`let_in`] / [`let_values`], [`fun_of`], [`letrec`], [`case_of`] /
+//! [`let_in`] / [`let_values`], [`fun_of`], [`letrec`], [`tuple`] / [`values`], [`case_of`] /
 //! [`clause`], [`try_of_catch`], [`seq`], [`call`] or [`primop`]; never with a
 //! `"let "` / `" in "` / `"fun ("` / `"letrec "` / `"catch <"` fragment.
 //! Existing literal sites move to the constructors as their files are
@@ -69,6 +69,19 @@ fn comma_separated<'a>(items: impl IntoIterator<Item = Document<'a>>) -> Documen
 /// clause, an `of` branch or a `catch` branch.
 fn angle<'a>(items: impl IntoIterator<Item = Document<'a>>) -> Document<'a> {
     docvec!["<", comma_separated(items), ">"]
+}
+
+/// `{A, B}` — a Core Erlang tuple of already-built documents.
+#[must_use]
+pub fn tuple<'a>(items: impl IntoIterator<Item = Document<'a>>) -> Document<'a> {
+    docvec!["{", comma_separated(items), "}"]
+}
+
+/// `<A, B>` — a multi-value expression, as in the result of a `case` clause
+/// that feeds a [`let_values`], or a clause's pattern list.
+#[must_use]
+pub fn values<'a>(items: impl IntoIterator<Item = Document<'a>>) -> Document<'a> {
+    angle(items)
 }
 
 /// `call 'module':'function'(arg, …)`.
@@ -339,6 +352,14 @@ mod tests {
             docvec![line(), let_in(v("X"), v("Y"), v("X"), Layout::Block)],
         );
         assert_eq!(block.to_pretty_string(), "\n    let X = Y in\n    X");
+    }
+
+    #[test]
+    fn tuple_and_values_literals() {
+        assert_eq!(tuple([v("A"), v("B")]).to_pretty_string(), "{A, B}");
+        assert_eq!(tuple([]).to_pretty_string(), "{}");
+        assert_eq!(values([v("A"), v("B")]).to_pretty_string(), "<A, B>");
+        assert_eq!(values([v("A")]).to_pretty_string(), "<A>");
     }
 
     #[test]
