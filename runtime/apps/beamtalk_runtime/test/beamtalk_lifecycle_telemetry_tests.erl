@@ -135,7 +135,11 @@ announcements_same_in_both_modes() ->
 
 trace_store_records_with_events_off() ->
     ?assertEqual(
-        #{start => 1, stop => 1, trace_events => [{start, ok}, {stop, ok}]},
+        #{
+            start => 1,
+            stop => 1,
+            trace_events => [{<<"start">>, <<"ok">>}, {<<"stop">>, <<"ok">>}]
+        },
         trace_store_view(off)
     ).
 
@@ -185,7 +189,7 @@ kill_is_always_emitted() ->
     try
         Pid = spawn_box(),
         unlink(Pid),
-        ok = beamtalk_actor:kill_and_wait(Pid),
+        _ = beamtalk_actor:sync_send(Pid, kill, []),
         ?assertMatch({Kill, #{}, #{pid := Pid}}, expect_event(Kill))
     after
         telemetry:detach(Id)
@@ -324,29 +328,40 @@ trace_store_view(Mode) ->
     try
         Pid = spawn_box(),
         gen_server:stop(Pid),
-        Stats = beamtalk_trace_store:get_stats(),
+        Rows = beamtalk_trace_store:hot_methods(10000),
         Count = fun(Action) ->
             lists:sum([
-                maps:get(calls, S, 0)
-             || S <- maps:values(Stats), is_map(S), maps:get(selector, S, undefined) =:= Action
+                field(R, <<"calls">>)
+             || R <- Rows,
+                field(R, <<"class">>) =:= <<"BoxActor">>,
+                field(R, <<"selector">>) =:= Action
             ])
         end,
+        Mine = list_to_binary(pid_to_list(Pid)),
         Events = [
-            {maps:get(selector, E), maps:get(outcome, E)}
+            {field(E, <<"selector">>), field(E, <<"outcome">>)}
          || E <- beamtalk_trace_store:get_traces(),
-            maps:get(mode, E, undefined) =:= lifecycle,
-            maps:get(pid, E, undefined) =:= Pid
+            field(E, <<"mode">>) =:= <<"lifecycle">>,
+            field(E, <<"actor">>) =:= Mine
         ],
-        #{start => Count(start), stop => Count(stop), trace_events => lists:sort(fun order/2, Events)}
+        #{
+            start => Count(<<"start">>),
+            stop => Count(<<"stop">>),
+            trace_events => lists:sort(Events)
+        }
     after
         beamtalk_trace_store:disable(),
         beamtalk_trace_store:clear(),
         set_mode(off)
     end.
 
-order({start, _}, {stop, _}) -> true;
-order({stop, _}, {start, _}) -> false;
-order(_, _) -> true.
+%% A field of a Beamtalk-facing result map (String keys), String values
+%% flattened to binaries.
+field(Map, Name) ->
+    case maps:get({beamtalk_string, Name}, Map, undefined) of
+        {beamtalk_string, B} -> B;
+        Other -> Other
+    end.
 
 set_mode(on) -> ok = beamtalk_telemetry:enable_lifecycle_events();
 set_mode(off) -> ok = beamtalk_telemetry:disable_lifecycle_events().
