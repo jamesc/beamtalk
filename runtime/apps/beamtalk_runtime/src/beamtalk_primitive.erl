@@ -51,12 +51,22 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 ]).
 -endif.
 
+%% The one selector a Value rejects with `immutable_value`; shared by
+%% is_ivar_method/1 and the send_value_memoised/4 clause guard (BT-4984).
+-define(IMMUTABLE_SLOT_SELECTOR, 'fieldAt:put:').
+%% The per-process memo key of tagged_class_dispatch/1, also read by
+%% send_value_memoised/4 (BT-4984).
+-define(TAGGED_CLASS_MEMO_KEY(Class), {?MODULE, tagged_class_dispatch, Class}).
+
 %% The tagged-map classes `tagged_map_dispatch/1` routes to a fixed native
 %% module instead of their class's own module. Every such route lives here:
 %% this map is the one source the routing conformance test enumerates.
 -define(PROXY_ROUTES, #{'ErlangModule' => beamtalk_erlang_proxy}).
 
 -include("beamtalk.hrl").
+
+%% BT-4984: the untyped-Value send short path is one call fewer inlined.
+-compile({inline, [send_value_memoised/4]}).
 
 %% Compiled stdlib modules are generated from Core Erlang, not .erl source.
 % elp:fixme W0048 intentional suppression for dynamic dispatch
@@ -704,6 +714,10 @@ send(X, Selector, Args) when is_tuple(X) ->
         false ->
             dispatch_via_module(X, Selector, Args)
     end;
+send(#{'$beamtalk_class' := Class} = X, Selector, Args) when
+    is_atom(Class), Selector =/= ?IMMUTABLE_SLOT_SELECTOR, not is_map_key(Class, ?PROXY_ROUTES)
+->
+    send_value_memoised(X, Class, Selector, Args);
 send(X, Selector, Args) when is_map(X) ->
     send_map(X, Selector, Args);
 send(X, Selector, Args) when is_pid(X) ->
@@ -753,6 +767,37 @@ raise_bitstring_dnu(X, Error) ->
         )
     ),
     beamtalk_error:raise(beamtalk_error:with_hint(Error, Hint)).
+
+-doc """
+Short path for a send to a tagged-map Value whose class is memoised as
+`{value, Module}` (BT-4984): the memo *hit* of `tagged_class_dispatch/1`,
+`value_type_send/5`'s `function_exported` check and the `Module:dispatch/3`
+call, without the intermediate calls (~18 -> 9 calls per send).
+
+It reads the same per-process memo, under the same generation, as
+`tagged_class_dispatch/1`, so a hot reload, redefinition, reparenting, removal
+or extension change (each bumps the generation) turns it into a miss exactly
+when it does there. Nothing here caches anything new.
+
+`erlang:function_exported(Module, dispatch, 3)` is true only for a module with
+current code, so it also answers `resolved_module_loaded/2`, which the slow
+path asks first. Whatever is not that one case runs `send_map/3` unchanged: no
+memo or a stale one, an `exception` or `{stdlib, _}` answer, a module without
+`dispatch/3` (purged, module-less, no compiled dispatch). The caller's clause
+guard has already sent `fieldAt:put:` and proxy-routed classes there too.
+""".
+-spec send_value_memoised(map(), atom(), atom(), list()) -> term().
+send_value_memoised(X, Class, Selector, Args) ->
+    Gen = beamtalk_class_derived_cache:generation(),
+    case get(?TAGGED_CLASS_MEMO_KEY(Class)) of
+        {Gen, {value, Module}} when Gen =/= undefined ->
+            case erlang:function_exported(Module, dispatch, 3) of
+                true -> Module:dispatch(Selector, Args, X);
+                false -> send_map(X, Selector, Args)
+            end;
+        _ ->
+            send_map(X, Selector, Args)
+    end.
 
 -doc """
 Tagged map dispatch — resolves the map's class once through
@@ -1134,11 +1179,14 @@ out of `Exception` (directly or via an ancestor) or a removal turns every
 per-process memo into a miss. An answer `Compute` declines to cache is not
 memoised: `Compute` leaves a `nocache` marker under the memo key, which is
 erased after the fetch.
+
+A memo hit for a `{value, Module}` answer is also read directly by
+`send_value_memoised/4` (BT-4984), under the same generation test.
 """.
 -spec tagged_class_dispatch(atom()) -> exception | {stdlib, atom()} | {value, atom()}.
 tagged_class_dispatch(Class) ->
     Gen = beamtalk_class_derived_cache:generation(),
-    MemoKey = {?MODULE, tagged_class_dispatch, Class},
+    MemoKey = ?TAGGED_CLASS_MEMO_KEY(Class),
     case get(MemoKey) of
         {Gen, Resolved} when Gen =/= undefined ->
             case resolved_module_loaded(Class, Resolved) of
@@ -1428,7 +1476,7 @@ intrinsic and every Value `dispatch/3` arm, from the Rust
 `test/fixtures/value_immutable_slot_hint_conformance.json` (BT-4273).
 """.
 -spec is_ivar_method(atom()) -> {true, binary()} | false.
-is_ivar_method('fieldAt:put:') ->
+is_ivar_method(?IMMUTABLE_SLOT_SELECTOR) ->
     {true, <<"Cannot modify slot on value type — use withSlot: to create a new instance"/utf8>>};
 is_ivar_method(_) ->
     false.
