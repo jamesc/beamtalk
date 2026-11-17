@@ -316,7 +316,11 @@ maybe_add_sample(dummy, _Duration, _Outcome) ->
 
 add_sample(AtomicsRef, SlotBase, Duration, Outcome) ->
     atomics:add(AtomicsRef, SlotBase + ?SLOT_CALLS, 1),
-    atomics:add(AtomicsRef, SlotBase + ?SLOT_TOTAL_DURATION, Duration),
+    %% A zero duration (lifecycle events are instantaneous) adds nothing.
+    case Duration of
+        0 -> ok;
+        _ -> atomics:add(AtomicsRef, SlotBase + ?SLOT_TOTAL_DURATION, Duration)
+    end,
     case Outcome of
         ok -> atomics:add(AtomicsRef, SlotBase + ?SLOT_OK, 1);
         error -> atomics:add(AtomicsRef, SlotBase + ?SLOT_ERRORS, 1);
@@ -580,9 +584,16 @@ handle_lifecycle_event(EventName, _Measurements, Metadata, _Config) ->
     Outcome = lifecycle_outcome(Action, Metadata),
     %% Record aggregate stats with selector = lifecycle action (e.g., start, stop, kill)
     record_dispatch(Pid, Action, 0, Outcome, lifecycle, Class),
-    %% Record trace event with mode => lifecycle, duration 0 (instantaneous)
-    EventMeta = maps:without([pid, class], Metadata),
-    record_trace_event(Pid, Class, Action, lifecycle, 0, Outcome, EventMeta, stop),
+    %% Record trace event with mode => lifecycle, duration 0 (instantaneous).
+    %% Only while tracing is enabled does the event need its metadata built
+    %% (BT-4932: this handler runs on every actor start and stop).
+    case is_enabled() of
+        true ->
+            EventMeta = maps:without([pid, class], Metadata),
+            record_trace_event(Pid, Class, Action, lifecycle, 0, Outcome, EventMeta, stop);
+        false ->
+            ok
+    end,
     %% No cleanup here, even on stop: the class aggregates accumulate, and a
     %% pid row for this actor (tracing enabled) is swept once it is dead.
     ok.
