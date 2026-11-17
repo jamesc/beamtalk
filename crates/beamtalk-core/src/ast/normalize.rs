@@ -105,11 +105,13 @@
 //! handles the reversed form with no code of its own. The pass marks both arm
 //! blocks ([`Block::if_false_if_true_arm`]), and nothing else sets the mark:
 //! the restore reads it to put the send back without a record
-//! ([`written_if_false_if_true`]), and so does the one place that sends the
-//! selector to a non-Boolean receiver (`ifFalse:ifTrue:` is an ordinary
-//! message such a receiver may implement), which sends it as written. A send
-//! built any other way, such as the `ifTrue:ifFalse:` a guard rewrite
-//! synthesises with its arms in either source order, never carries the mark. The arguments are literal blocks, so
+//! ([`written_if_false_if_true`]). So do the two places that deal with a
+//! non-Boolean receiver, for which `ifFalse:ifTrue:` is an ordinary message it
+//! may implement: codegen's fallback send, which sends it as written, and the
+//! type checker, which resolves it under that selector
+//! ([`as_written_if_false_if_true`]). A send built any other way, such as the
+//! `ifTrue:ifFalse:` a guard rewrite synthesises with its arms in either
+//! source order, never carries the mark. The arguments are literal blocks, so
 //! swapping them changes no evaluation order; any other argument keeps the
 //! plain send, which `Boolean` answers.
 
@@ -439,30 +441,56 @@ pub fn written_if_false_if_true(selector: &MessageSelector, arguments: &[Express
     )
 }
 
+/// The `ifFalse:ifTrue:` send that `selector` and `arguments` were written as,
+/// when [`written_if_false_if_true`] holds: the keywords and arguments swapped
+/// back, each keyword with its span and each arm block unmarked. `None` for
+/// any other send. The one inverse of [`desugar_if_false_if_true`]: the
+/// restore and the type checker (which resolves a non-Boolean receiver under
+/// the selector as written) both read it.
+#[must_use]
+pub fn as_written_if_false_if_true(
+    selector: &MessageSelector,
+    arguments: &[Expression],
+) -> Option<(MessageSelector, Vec<Expression>)> {
+    if !written_if_false_if_true(selector, arguments) {
+        return None;
+    }
+    let MessageSelector::Keyword(parts) = selector else {
+        return None;
+    };
+    let (if_true, if_false) = (parts[0].span, parts[1].span);
+    let mut written: Vec<Expression> = arguments.to_vec();
+    written.swap(0, 1);
+    for argument in &mut written {
+        if let Expression::Block(block) = argument {
+            block.if_false_if_true_arm = false;
+        }
+    }
+    Some((
+        MessageSelector::Keyword(vec![
+            KeywordPart::new("ifFalse:", if_false),
+            KeywordPart::new("ifTrue:", if_true),
+        ]),
+        written,
+    ))
+}
+
 /// The inverse of [`desugar_if_false_if_true`] on `expr`'s tree.
 fn restore_if_false_if_true(expr: &mut Expression) {
     walk_expression_mut(expr, &mut |node| {
         let Expression::MessageSend {
-            selector: MessageSelector::Keyword(parts),
+            selector,
             arguments,
             ..
         } = node
         else {
             return;
         };
-        let selector = MessageSelector::Keyword(parts.clone());
-        if written_if_false_if_true(&selector, arguments) {
-            let (if_true, if_false) = (parts[0].span, parts[1].span);
-            *parts = vec![
-                KeywordPart::new("ifFalse:", if_false),
-                KeywordPart::new("ifTrue:", if_true),
-            ];
-            arguments.swap(0, 1);
-            for argument in arguments.iter_mut() {
-                if let Expression::Block(block) = argument {
-                    block.if_false_if_true_arm = false;
-                }
-            }
+        if let Some((written_selector, written_arguments)) =
+            as_written_if_false_if_true(selector, arguments)
+        {
+            *selector = written_selector;
+            *arguments = written_arguments;
         }
     });
 }
@@ -695,8 +723,9 @@ fn expr_first_unary_loop(expr: &Expression) -> Option<Span> {
 }
 
 /// `true` if the canonicalising pass ([`peel_operand_parens`]) would change
-/// `module`: a parenthesised send operand, a unary loop or a literal `ifFalse:ifTrue:`. The cheap scan a
-/// caller holding a shared reference runs before cloning.
+/// `module`: a parenthesised send operand, a unary loop or a literal
+/// `ifFalse:ifTrue:`. The cheap scan a caller holding a shared reference runs
+/// before cloning.
 #[must_use]
 pub fn needs_normalising(module: &Module) -> bool {
     let mut found = false;
