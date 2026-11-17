@@ -41,9 +41,13 @@ announce_test_() ->
         {"an actor already gone when observed is announced as crashed",
             fun already_gone_is_announced_as_crashed/0},
         {"a non-pid start result is ignored", fun non_pid_start_result_is_ignored/0},
-        {"the observer hibernates and still announces the stop",
-            fun observer_hibernates_and_wakes/0},
-        {"a stray message does not leave the observer awake", fun stray_message_rehibernates/0},
+        %% The waits below have a 30 s deadline; eunit's default is 5 s per test.
+        {timeout, 60,
+            {"the observer hibernates and still announces the stop",
+                fun observer_hibernates_and_wakes/0}},
+        {timeout, 60,
+            {"a stray message does not leave the observer awake",
+                fun stray_message_rehibernates/0}},
         {"the observer registers no name and creates no table", fun observer_leaves_no_trace/0}
     ]}.
 
@@ -134,8 +138,7 @@ observer_hibernates_and_wakes() ->
     with_subscription(fun() ->
         {ok, Pid} = beamtalk_actor:safe_spawn_linked(?FACADE, #{initial => 1}),
         expect('ActorSpawned', Pid),
-        {monitored_by, Monitors} = process_info(Pid, monitored_by),
-        ?assertEqual(ok, wait_until_one_hibernates(Monitors, 100)),
+        ?assertMatch({ok, _}, await_hibernated_observer(Pid)),
         stop(Pid),
         ?assertMatch(#{reason := crashed}, expect('ActorStopped', Pid))
     end).
@@ -147,38 +150,69 @@ stray_message_rehibernates() ->
     with_subscription(fun() ->
         {ok, Pid} = beamtalk_actor:safe_spawn_linked(?FACADE, #{initial => 1}),
         expect('ActorSpawned', Pid),
-        {monitored_by, Monitors} = process_info(Pid, monitored_by),
-        ?assertEqual(ok, wait_until_one_hibernates(Monitors, 100)),
-        [Observer | _] = [M || M <- Monitors, is_hibernated(M)],
+        {ok, Observer} = await_hibernated_observer(Pid),
         Observer ! stray,
-        %% It woke to handle the message; wait for it to settle again.
-        timer:sleep(50),
-        ?assertEqual(ok, wait_until_one_hibernates([Observer], 100)),
-        %% Hibernating again is only meaningful once the message was consumed.
-        ?assertEqual({message_queue_len, 0}, process_info(Observer, message_queue_len)),
+        %% Hibernating again is only meaningful once the message was consumed,
+        %% so wait for both together (read as one atomic snapshot): an empty
+        %% queue and a hibernated process mean it woke, dropped the message and
+        %% went back to sleep.
+        ?assertEqual(ok, await(fun() -> is_rehibernated(Observer) end)),
         stop(Pid),
         ?assertMatch(#{reason := crashed}, expect('ActorStopped', Pid))
     end).
+
+%% The deadline is generous on purpose: this waits on a condition, not a fixed
+%% time, so a loaded runner only makes it slower and a real failure (the
+%% observer never hibernating) still fails, just after the deadline.
+-define(AWAIT_DEADLINE_MS, 30000).
+-define(AWAIT_POLL_MS, 5).
+
+%% The observer is spawned by the start path and sets its monitor when it is first
+%% scheduled, which can be after the start has returned (BT-5000), so
+%% `monitored_by` is read again on every poll: a single early snapshot can miss
+%% the observer and never see it.
+await_hibernated_observer(Pid) ->
+    Probe = fun() ->
+        {monitored_by, Monitors} = process_info(Pid, monitored_by),
+        case [M || M <- Monitors, is_hibernated(M)] of
+            [Observer | _] -> {ok, Observer};
+            [] -> false
+        end
+    end,
+    await_value(Probe).
 
 is_hibernated(Pid) ->
     is_pid(Pid) andalso
         process_info(Pid, current_function) =:= {current_function, {erlang, hibernate, 3}}.
 
-wait_until_one_hibernates(_Monitors, 0) ->
-    timeout;
-wait_until_one_hibernates(Monitors, N) ->
-    Hibernated = [
-        M
-     || M <- Monitors,
-        is_pid(M),
-        process_info(M, current_function) =:= {current_function, {erlang, hibernate, 3}}
-    ],
-    case Hibernated of
-        [_ | _] ->
-            ok;
-        [] ->
-            timer:sleep(20),
-            wait_until_one_hibernates(Monitors, N - 1)
+is_rehibernated(Pid) ->
+    case process_info(Pid, [current_function, message_queue_len]) of
+        [{current_function, {erlang, hibernate, 3}}, {message_queue_len, 0}] -> true;
+        _ -> false
+    end.
+
+await(Cond) ->
+    case await_value(fun() -> Cond() andalso {ok, ok} end) of
+        {ok, ok} -> ok;
+        timeout -> timeout
+    end.
+
+%% Poll `Probe` until it answers `{ok, _}`; `timeout` once the deadline passes.
+await_value(Probe) ->
+    await_value(Probe, erlang:monotonic_time(millisecond) + ?AWAIT_DEADLINE_MS).
+
+await_value(Probe, Deadline) ->
+    case Probe() of
+        {ok, _} = Found ->
+            Found;
+        _ ->
+            case erlang:monotonic_time(millisecond) >= Deadline of
+                true ->
+                    timeout;
+                false ->
+                    timer:sleep(?AWAIT_POLL_MS),
+                    await_value(Probe, Deadline)
+            end
     end.
 
 observer_leaves_no_trace() ->
