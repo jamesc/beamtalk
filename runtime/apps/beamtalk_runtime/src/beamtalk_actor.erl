@@ -3345,7 +3345,7 @@ log_wire_cast_rejected(Selector, Error) ->
     }).
 
 -doc """
-Recognise and decode a `'\$beamtalk_wire'` cast/async envelope (ADR 0126
+Recognise and decode a `'\$beamtalk_wire'` cast or async envelope (ADR 0126
 §5.1) — shared the same way decode_wire_call/1 is (see its doc), by every
 compiled actor's generated `handle_cast/2`.
 
@@ -3356,13 +3356,14 @@ rejected. Any other message (not a wire envelope) passes through unchanged
 as `{redispatch, Msg}`.
 
 The async-with-future shape (`kind = async`, the 7-element form) is decoded
-here too. Its sender is `async_send_impl/5`, which wire-tags a remote async
-send this way (ADR 0126 §5.1), so the shape is live on the wire. No compiled
-actor decodes it, though: the generated `handle_cast/2` only matches the
-6-element `cast`-kind envelope and never calls this function for an `async`
-one, so a 7-element `async` envelope sent to a compiled actor falls through
-the generated callback's own catch-all to `{noreply, State}`. Only the test
-host (`test_actor_host`) routes it here.
+here too. Its sender is `async_send_impl/5`, reached through the exported
+`async_send/4` and `async_send_known/5`: no generated code or stdlib source
+calls those, only tests do (`beamtalk_dist_wirecheck_tests` scenario (d), via
+`test_actor_host`). No compiled actor decodes the shape: the generated
+`handle_cast/2` only matches the 6-element `cast`-kind envelope and never
+calls this function for an `async` one, so a 7-element `async` envelope sent
+to a compiled actor falls through the callback's own catch-all to
+`{noreply, State}`. Only the test host routes it here.
 """.
 -spec decode_wire_cast(term()) -> {redispatch, term()} | noreply.
 decode_wire_cast(
