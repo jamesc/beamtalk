@@ -374,9 +374,6 @@ fn is_literal_repeat(node: &Expression) -> bool {
 /// The keyword selector `ifFalse:ifTrue:` (BT-4991).
 pub const IF_FALSE_IF_TRUE: &str = "ifFalse:ifTrue:";
 
-/// The keyword selector `ifTrue:ifFalse:` it canonicalises to.
-const IF_TRUE_IF_FALSE: &str = "ifTrue:ifFalse:";
-
 /// Whether a conditional's two arms, in the `[true arm, false arm]` order the
 /// canonical `ifTrue:ifFalse:` holds them, were written false arm first: the
 /// true arm's span starts after the false arm's. The one rule for "this
@@ -402,7 +399,10 @@ fn is_literal_if_false_if_true(node: &Expression) -> bool {
         return false;
     };
     matches!(parts.as_slice(), [a, b] if a.keyword == "ifFalse:" && b.keyword == "ifTrue:")
-        && matches!(arguments.as_slice(), [Expression::Block(_), Expression::Block(_)])
+        && matches!(
+            arguments.as_slice(),
+            [Expression::Block(_), Expression::Block(_)]
+        )
 }
 
 /// Rewrites every `c ifFalse: [a] ifTrue: [b]` (two literal blocks) in
@@ -1537,8 +1537,10 @@ Protocol define: P
         );
         // The same tree the canonical spelling parses to, up to spans.
         let canonical = parse_bt("true ifTrue: [2] ifFalse: [1]");
-        let (Expression::MessageSend { selector: a, .. }, Expression::MessageSend { selector: b, .. }) =
-            (first_expr(&module), first_expr(&canonical))
+        let (
+            Expression::MessageSend { selector: a, .. },
+            Expression::MessageSend { selector: b, .. },
+        ) = (first_expr(&module), first_expr(&canonical))
         else {
             panic!("expected sends");
         };
@@ -1582,7 +1584,9 @@ Protocol define: P
     fn written_if_false_if_true_is_read_off_the_keyword_spans() {
         let canonical = parse_bt("x ifTrue: [2] ifFalse: [1]");
         let Expression::MessageSend {
-            selector, arguments, ..
+            selector,
+            arguments,
+            ..
         } = first_expr(&canonical)
         else {
             panic!("expected a send");
