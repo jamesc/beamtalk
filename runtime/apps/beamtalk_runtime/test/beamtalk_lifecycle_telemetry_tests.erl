@@ -247,14 +247,21 @@ retired_ids_stay_reserved() ->
     ?assert(lists:member(beamtalk_trace_store_lifecycle_start, Reserved)),
     ?assert(lists:member(beamtalk_trace_store_lifecycle_stop, Reserved)),
     %% And the trace store really has no start/stop handler any more.
-    ?assertEqual([], telemetry:list_handlers(?START) -- user_handlers(?START)),
-    ?assertEqual([], telemetry:list_handlers(?STOP) -- user_handlers(?STOP)).
+    ?assertNot(
+        lists:any(
+            fun(#{id := Id}) -> Id =:= beamtalk_trace_store_lifecycle_start end,
+            telemetry:list_handlers(?START)
+        )
+    ),
+    ?assertNot(
+        lists:any(
+            fun(#{id := Id}) -> Id =:= beamtalk_trace_store_lifecycle_stop end,
+            telemetry:list_handlers(?STOP)
+        )
+    ).
 
 %%% ---------------------------------------------------------------------
 %%% Helpers
-
-user_handlers(EventName) ->
-    telemetry:list_handlers(EventName).
 
 spawn_box() ->
     element(4, 'bt@box_actor':spawn()).

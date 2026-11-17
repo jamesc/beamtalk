@@ -3592,7 +3592,8 @@ handle_linked_exit(_Msg, _State, _HasHook) ->
 Normalise an OTP terminate reason to a stable Symbol for the `ActorStopped`
 event payload: `normal`/`shutdown` are clean stops, anything else is a
 `crashed`. Keeps the typed `reason :: Symbol` field flat (the raw reason term is
-still available in the telemetry stop event for diagnostics).
+available in the telemetry stop event for diagnostics, while lifecycle events are
+enabled, BT-4997).
 
 `{shutdown, global_name_conflict}` is its own Symbol (ADR 0126 §4,
 Phase 5, BT-3603): `resolve_global_conflict/3` stops the losing side of a

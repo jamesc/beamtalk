@@ -444,9 +444,10 @@ refresh_lifecycle_events() ->
 
 -doc """
 Emit a `telemetry:execute/3` event if telemetry is loaded, else do nothing.
-Moved from `beamtalk_actor:maybe_execute_telemetry/3` (BT-4025), which now
-adds only the actor-lifecycle announcement on top; `execute/3` is the
-validated Beamtalk-facing form.
+Moved from `beamtalk_actor:maybe_execute_telemetry/3` (BT-4025), now only a
+compatibility shim (BT-4997) that routes actor start and stop to
+`beamtalk_actor:lifecycle_started/1` / `lifecycle_stopped/2`; `execute/3` is
+the validated Beamtalk-facing form.
 """.
 -spec emit(list(), map(), map()) -> ok.
 emit(EventName, Measurements, Metadata) ->
