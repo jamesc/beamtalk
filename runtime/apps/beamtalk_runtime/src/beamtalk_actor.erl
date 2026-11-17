@@ -1088,16 +1088,21 @@ its `ActorStopped`.
 A compiled actor announces both from the lifecycle telemetry in its generated
 `init/1` and `terminate/2`. A `native:` backing gen_server (`beamtalk_subprocess`,
 a user module) runs neither and is not ours to change, so the start path
-announces for it, and a short-lived observer process monitors the pid and
-announces `ActorStopped` when it goes down. The observer is unregistered, owns
-no table and ends after that one message (ADR 0150: no registry). Nothing is
-done when the announcement bus is not running, as for a compiled actor.
+announces for it, and an observer process monitors the pid and announces
+`ActorStopped` when it goes down. The observer lives as long as the actor and
+ends after that one message; it is unregistered, unlinked, unsupervised and owns
+no table (ADR 0150: no registry). If it dies first, for instance because two
+reloads of this module purge the code it is waiting in, that actor's
+`ActorStopped` is never announced and a feed consumer keeps listing it until its
+next `actors` scan. Nothing is done when the announcement bus is not running, as
+for a compiled actor. A non-pid argument (a backing `start_link/1` that answered
+`{ok, NotAPid}`) is ignored: announcing never fails a start that succeeded.
 
 The class is the one the process scan reports for the pid
 (`beamtalk_actor_scan:one_per_pid/1`, the rule every actor list uses), or
 `unknown`, the same default a compiled actor's announcement falls back to.
 """.
--spec native_started(pid()) -> ok.
+-spec native_started(term()) -> ok.
 native_started(Pid) when is_pid(Pid) ->
     case erlang:whereis(beamtalk_announcements) of
         undefined ->
@@ -1115,29 +1120,27 @@ native_started(Pid) when is_pid(Pid) ->
             ok = do_announce_actor_lifecycle('ActorSpawned', #{actorClass => Class, pid => Pid}),
             _Observer = erlang:spawn(fun() -> native_stop_observer(Pid, Class) end),
             ok
-    end.
+    end;
+native_started(_NotAPid) ->
+    ok.
 
 %% The observer sets its monitor after `native_started/1` has returned (no wait
 %% on the start path). An actor that stopped in that window gives `'DOWN'` with
-%% reason `noproc`, and its real exit reason is not observable. The wire contract
-%% for `ActorStopped.reason` is the closed set `normal | shutdown | crashed`, and
-%% the likely case is a clean stop, so `noproc` is announced as `normal` rather
-%% than as a crash. The cost is that a process which crashed within microseconds
-%% of a successful start, or one that exited with the bare reason `noproc`, is
-%% announced as `normal`.
+%% reason `noproc`, and its real exit reason is not observable. It is announced
+%% as `crashed` (what `normalize_stop_reason/1` makes of any reason it does not
+%% know): a false alarm is cheaper than a crash reported as clean, and only the
+%% actor itself can stop it in that window, since only the starter holds the pid.
+%% The announced reason is always in `normalize_stop_reason/1`'s range (`normal`,
+%% `shutdown`, `crashed`, `'globalNameConflict'`).
 -spec native_stop_observer(pid(), atom()) -> ok.
 native_stop_observer(Pid, Class) ->
     MonRef = erlang:monitor(process, Pid),
     receive
         {'DOWN', MonRef, process, Pid, Reason} ->
             do_announce_actor_lifecycle('ActorStopped', #{
-                actorClass => Class, pid => Pid, reason => observed_stop_reason(Reason)
+                actorClass => Class, pid => Pid, reason => normalize_stop_reason(Reason)
             })
     end.
-
--spec observed_stop_reason(term()) -> normal | shutdown | crashed | 'globalNameConflict'.
-observed_stop_reason(noproc) -> normal;
-observed_stop_reason(Reason) -> normalize_stop_reason(Reason).
 
 %% BT-4577: register a just-started native actor under its name, or stop it
 %% when the name cannot be registered.

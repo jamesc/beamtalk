@@ -12,8 +12,8 @@ snapshot (WebSocket, LiveView, VS Code) stays current.
 
 The backing gen_server (`beamtalk_subprocess`, a user `native:` module) runs no
 lifecycle telemetry of its own, so the runtime announces from outside it: the
-start path announces `ActorSpawned` and hands the pid to a short-lived observer
-process, which announces `ActorStopped` when the actor goes down. Nothing is
+start path announces `ActorSpawned` and hands the pid to an observer process that
+lives as long as the actor and announces `ActorStopped` when it goes down. Nothing is
 registered and no table is written (ADR 0150), and a compiled actor's start
 path is untouched.
 """.
@@ -38,8 +38,9 @@ announce_test_() ->
         {"a named start announces once", fun named_start_announces_once/0},
         {"a failed start announces nothing", fun failed_start_announces_nothing/0},
         {"a failing class lookup does not fail the start", fun failing_lookup_does_not_fail/0},
-        {"an actor already gone when observed is not announced as crashed",
-            fun already_gone_is_not_crashed/0},
+        {"an actor already gone when observed is announced as crashed",
+            fun already_gone_is_announced_as_crashed/0},
+        {"a non-pid start result is ignored", fun non_pid_start_result_is_ignored/0},
         {"the observer registers no name and creates no table", fun observer_leaves_no_trace/0}
     ]}.
 
@@ -96,10 +97,10 @@ failing_lookup_does_not_fail() ->
 
 %% The observer sets its monitor after `native_started/1` returns. An actor that
 %% stopped in that window gives `'DOWN'` with reason `noproc`, whose real exit
-%% reason is not observable. The wire contract is the closed set
-%% `normal | shutdown | crashed`, and the likely case is a clean stop, so it is
-%% announced as `normal`, not as a crash.
-already_gone_is_not_crashed() ->
+%% reason is not observable without a wait on the start path. It is announced as
+%% `crashed`: a false alarm is cheaper than a hidden crash, and nothing but the
+%% actor itself can stop it in that window (only the starter holds the pid).
+already_gone_is_announced_as_crashed() ->
     with_subscription(fun() ->
         {Pid, MonRef} = spawn_monitor(fun() -> ok end),
         receive
@@ -107,8 +108,13 @@ already_gone_is_not_crashed() ->
         end,
         ok = beamtalk_actor:native_started(Pid),
         expect('ActorSpawned', Pid),
-        ?assertMatch(#{reason := normal}, expect('ActorStopped', Pid))
+        ?assertMatch(#{reason := crashed}, expect('ActorStopped', Pid))
     end).
+
+%% A backing `start_link/1` that answers `{ok, NotAPid}` already started its
+%% process; announcing is best-effort and must not turn that into a raw error.
+non_pid_start_result_is_ignored() ->
+    ?assertEqual(ok, beamtalk_actor:native_started(not_a_pid)).
 
 %% A pid on a node that is not this one and not connected: NEW_PID_EXT
 %% (tag 88), node name as an ATOM_UTF8_EXT, then id, serial and creation.

@@ -67,8 +67,11 @@ The feed covers every listed actor, `native:` ones included (BT-4970).
 actor's `init/1` / `terminate/2`, which a `native:` backing gen_server does not
 run, so the runtime announces for it from outside: the start path calls
 `beamtalk_actor:native_started/1` (from the facade's generated `spawn/1` and
-from `safe_start_native/4`), and a short-lived observer process monitors the
-pid and announces `ActorStopped` when it goes down. A backing module started
+from `safe_start_native/4`), and an observer process that lives as long as the
+actor monitors the pid and announces `ActorStopped` when it goes down. If that
+observer dies first (two reloads of `beamtalk_actor` purge the code it waits in),
+that actor's stop is not announced and a client keeps it listed until its next
+`actors` scan. A backing module started
 some other way, such as a `gen_server:start_link` that never goes through a
 Beamtalk facade, is in a snapshot (the scan finds it by `'$initial_call'`) but
 is not announced.
