@@ -67,6 +67,8 @@ dispatch_test_() ->
                 fun test_inherited_target_actor_intrinsics/0},
             {"BT-4995: an extension on the class or its superclass flips an Actor intrinsic verdict",
                 fun test_inherited_target_actor_intrinsic_extension_flips/0},
+            {"BT-4995: an extension on Actor itself keeps the value verdict for its intrinsics",
+                fun test_inherited_target_actor_intrinsic_owner_extension/0},
             {"BT-4260: inherited_target answers value for an Object method sent to a String",
                 fun test_inherited_target_value_owner/0},
             {"BT-4260: an extension anywhere on a value chain flips the verdict",
@@ -2195,6 +2197,30 @@ test_inherited_target_actor_intrinsic_extension_flips() ->
         end,
         ['continueWith:', 'stopWith:', 'terminate:']
     ).
+
+%% BT-4995: an extension on `Actor` itself (the owner) keeps the `value` verdict,
+%% i.e. today's slow route, whatever depth the receiver's class is at.
+test_inherited_target_actor_intrinsic_owner_extension() ->
+    ok = beamtalk_test_class:ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
+    ok = beamtalk_extensions:init(),
+    beamtalk_class_derived_cache:invalidate(),
+    Fun = fun(_Args, _Self, St) -> {ext4995, St} end,
+    Direct = {compiled, 'Actor', 'bt@stdlib@actor'},
+    Value = {value, 'Actor', 'bt@stdlib@actor'},
+    try
+        ?assertEqual(Direct, beamtalk_dispatch:inherited_target('LoggingCounter', 'terminate:')),
+        ok = beamtalk_extensions:register('Actor', 'terminate:', Fun, bt4995_test),
+        ?assertEqual(Value, beamtalk_dispatch:inherited_target('LoggingCounter', 'terminate:')),
+        ok = beamtalk_extensions:unregister('Actor', 'terminate:'),
+        ?assertEqual(Direct, beamtalk_dispatch:inherited_target('LoggingCounter', 'terminate:'))
+    after
+        try
+            beamtalk_extensions:unregister('Actor', 'terminate:')
+        catch
+            _:_ -> ok
+        end
+    end.
 
 %% BT-4280: `printString` resolves to Object, an owner without the actor-State
 %% flag, so the verdict is not `compiled`. (BT-4260: it is Object's `value`

@@ -106,7 +106,15 @@ prepared(Sel, Args) ->
 %% its `continueWith:` steps before its next message, so a `sys` request is
 %% answered only after them): the timed or traced run then starts from an idle actor.
 settle(Fs) ->
-    [sys:get_state(Pid) || {beamtalk_object, _, _, Pid} <- Fs],
+    [
+        try
+            sys:get_state(Pid)
+        catch
+            %% A row that stops its actor (`i2`) leaves nothing to drain.
+            exit:_ -> ok
+        end
+     || {beamtalk_object, _, _, Pid} <- Fs
+    ],
     ok.
 
 class_fun(Sel) -> list_to_atom("class_" ++ atom_to_list(Sel)).

@@ -307,7 +307,13 @@ compute_inherited_target(ClassName, Selector) ->
                             none ->
                                 slow;
                             value ->
-                                case state_free_actor_intrinsic(Owner, Module, Selector) of
+                                %% BT-4995: an extension on the owner itself keeps today's
+                                %% `value` (slow) verdict, so whatever the slow path does with
+                                %% it (BT-5002) is still what happens.
+                                case
+                                    state_free_actor_intrinsic(Owner, Module, Selector) andalso
+                                        check_extension(Owner, Selector) =:= not_found
+                                of
                                     true -> {compiled, Owner, Module};
                                     false -> {value, Owner, Module}
                                 end;
