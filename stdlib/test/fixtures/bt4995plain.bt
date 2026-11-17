@@ -132,16 +132,3 @@ Actor subclass: Bt4995Plain
     self.n := 41
     self stop
     #stillRunning
-
-Bt4995Plain subclass: Bt4995Recorder
-  // The class's own `terminate:` override: records the reason and the state
-  // it ran against.
-  terminate: reason =>
-    self note: #terminateReason value: reason
-    self note: #terminateN value: self.n
-
-Bt4995Plain subclass: Bt4995Mid
-
-Bt4995Mid subclass: Bt4995Leaf
-
-Bt4995Recorder subclass: Bt4995RecorderLeaf

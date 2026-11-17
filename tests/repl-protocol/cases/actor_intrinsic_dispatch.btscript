@@ -8,7 +8,18 @@
 // and the memoised inherited-target verdict is flushed by the patch. It must
 // hold before and after the Actor intrinsics are called directly.
 
-seen := Ets new: #bt4995Repl type: #set
+Actor subclass: IntrinsicReplSink
+  state: seen = #{}
+  put: key value: value => self.seen := self.seen at: key put: value
+// => "IntrinsicReplSink"
+
+IntrinsicReplSink >> lookup: key => self.seen at: key ifAbsent: [nil]
+// => "IntrinsicReplSink>>lookup:"
+
+seen := IntrinsicReplSink spawn
+// => Actor(IntrinsicReplSink, _)
+
+seen registerAs: #bt4995Sink
 // => _
 
 Actor subclass: IntrinsicReplBase
@@ -27,14 +38,14 @@ early bump
 // => 1
 
 // The ancestor gains a `terminate:` override while `early` is running.
-IntrinsicReplBase >> terminate: reason => (Ets named: #bt4995Repl) at: #ancestor put: reason
+IntrinsicReplBase >> terminate: reason => (IntrinsicReplSink named: #bt4995Sink) unwrap put: #ancestor value: reason
 // => "IntrinsicReplBase>>terminate:"
 
 early stopWith: #firstStop
-// => #ok
+// => ok
 
-seen at: #ancestor
-// => #firstStop
+seen lookup: #ancestor
+// => firstStop
 
 // An actor started after the ancestor's override.
 mid := IntrinsicReplLeaf spawn
@@ -44,14 +55,14 @@ mid bump
 // => 1
 
 // The leaf's own override, added while `mid` is running, beats the ancestor's.
-IntrinsicReplLeaf >> terminate: reason => (Ets named: #bt4995Repl) at: #leaf put: reason
+IntrinsicReplLeaf >> terminate: reason => (IntrinsicReplSink named: #bt4995Sink) unwrap put: #leaf value: reason
 // => "IntrinsicReplLeaf>>terminate:"
 
 mid stop
-// => #ok
+// => ok
 
-seen at: #leaf
-// => #normal
+seen lookup: #leaf
+// => normal
 
 // Removing the leaf's override restores the ancestor's on the next stop.
 IntrinsicReplLeaf removeSelector: #terminate:
@@ -61,10 +72,10 @@ late := IntrinsicReplLeaf spawn
 // => Actor(IntrinsicReplLeaf, _)
 
 late stopWith: #lateStop
-// => #ok
+// => ok
 
-seen at: #ancestor
-// => #lateStop
+seen lookup: #ancestor
+// => lateStop
 
 // Removing the ancestor's override too: stopping works with the default.
 IntrinsicReplBase removeSelector: #terminate:
@@ -74,10 +85,10 @@ plain := IntrinsicReplLeaf spawn
 // => Actor(IntrinsicReplLeaf, _)
 
 plain stopWith: #plainStop
-// => #ok
+// => ok
 
 plain isAlive
 // => false
 
-seen delete
+seen stop
 // => _
