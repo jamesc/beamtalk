@@ -189,8 +189,7 @@ module 'logging_init_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
                     {'ok', CleanState}
                 <'false'> when 'true' ->
                     let CleanState1 = call 'maps':'remove'('__skip_initialize__', FinalState) in
-                    let _TelPid = call 'erlang':'self'() in
-                    let _TelStart = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'start'], ~{}~, ~{'pid' => _TelPid, 'class' => 'LoggingInitCounter'}~) in
+                    let _TelStart = call 'beamtalk_actor':'lifecycle_started'('LoggingInitCounter') in
                     let AckState = call 'beamtalk_actor':'take_init_ack'(CleanState1, 'initializing') in
                     {'ok', AckState, {'continue', 'initialize'}}
             end
@@ -444,8 +443,7 @@ module 'logging_init_counter' ['start_link'/1, 'start_link'/2, 'init'/1, 'handle
 
 
 'terminate'/2 = fun (Reason, State) ->
-    let _TelPid = call 'erlang':'self'() in
-    let _TelStop = call 'beamtalk_actor':'maybe_execute_telemetry'(['beamtalk', 'actor', 'lifecycle', 'stop'], ~{}~, ~{'pid' => _TelPid, 'class' => 'LoggingInitCounter', 'reason' => Reason}~) in
+    let _TelStop = call 'beamtalk_actor':'lifecycle_stopped'('LoggingInitCounter', Reason) in
     %% Call terminate: method if defined — exceptions must not prevent shutdown
     let Self = call 'beamtalk_actor':'make_self'(State) in
     let _TermDisp = try call 'logging_init_counter':'dispatch'('terminate:', [Reason], Self, State)
