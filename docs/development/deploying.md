@@ -212,6 +212,12 @@ The value is a number of words from 1 to 1048576 (8 MiB per actor). It is read
 when the runtime starts;
 change it at run time with `application:set_env(beamtalk_runtime,
 actor_min_heap_size, Words)` followed by `beamtalk_actor:refresh_spawn_options()`.
+Do that once, not in a loop or at peak load: a changed value writes a
+`persistent_term`, which triggers a node-wide garbage collection. Call it again
+after lowering the VM's `max_heap_size` (`+hmax`, `system_flag/2`) below the
+setting, which the range check cannot see once it is cached, or every start fails
+until you do. Two refreshes racing around an env change can leave the older value
+until the next call.
 It applies to actors started afterwards through the runtime's own start paths:
 `spawn`, `spawnWith:`, the monitored variants, named actors and supervised
 children (`beamtalk_actor:safe_spawn*`). It does **not** apply to an actor an

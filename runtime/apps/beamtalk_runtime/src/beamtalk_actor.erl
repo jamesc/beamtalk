@@ -3064,8 +3064,12 @@ Unset gives `[]`, today's behaviour. A value that is not an integer in that
 range, or that the VM would refuse as a `min_heap_size` (for example above a
 `+hmax` limit), is ignored with a warning, so a typo cannot change how actors
 start or make every spawn fail. Called at runtime start; call it again after
-changing the env at run time. Actors that are already running keep the heap
-they have.
+changing the env at run time, and again after lowering the VM's
+`max_heap_size` (`+hmax`, `system_flag/2`), which the range check cannot see
+once it is cached. A change of value writes a `persistent_term`, a node-wide
+garbage collection, so make it once, not in a loop or at peak load. It is not
+serialised: two racing refreshes around an env change can leave the older value
+until the next call. Actors that are already running keep the heap they have.
 """.
 -spec refresh_spawn_options() -> ok.
 refresh_spawn_options() ->
@@ -3073,7 +3077,7 @@ refresh_spawn_options() ->
         case application:get_env(beamtalk_runtime, actor_min_heap_size) of
             undefined ->
                 [];
-            {ok, Words} = Setting ->
+            {ok, Words} ->
                 case vm_accepts_min_heap(Words) of
                     true ->
                         [{min_heap_size, Words}];
@@ -3081,7 +3085,7 @@ refresh_spawn_options() ->
                         ?LOG_WARNING(
                             "Ignoring beamtalk_runtime actor_min_heap_size: expected an integer "
                             "number of words from 1 to 1048576 that the VM accepts",
-                            #{value => element(2, Setting), domain => [beamtalk, runtime]}
+                            #{value => Words, domain => [beamtalk, runtime]}
                         ),
                         []
                 end
