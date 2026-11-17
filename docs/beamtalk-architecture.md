@@ -467,9 +467,10 @@ FuturePid
 
 Every compiled actor class generates its own `dispatch/4`: a `case` on the
 selector, one clause per method the class defines, and a final clause for any
-other selector. That final clause tries, in order, the inherited method
-(`beamtalk_dispatch`), an extension method, and the class's own
-`doesNotUnderstand:args:` method if it defines one. If none applies it returns a
+other selector. That final clause tries, in order, the memoised inherited
+compiled method, an extension method, the superclass walk
+(`beamtalk_dispatch:super`), and the class's own `doesNotUnderstand:args:`
+method if it defines one. If none applies it returns a
 `does_not_understand` `#beamtalk_error{}` (`dispatch(Selector, Args, Self, State)`
 returns `{reply, Result, NewState}` or `{error, Error, State}`).
 

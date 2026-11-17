@@ -424,9 +424,9 @@ sequenceDiagram
 ```
 
 The class's generated `dispatch/4` selects the method: a `case` on the selector
-with one clause per method the class defines. Any other selector falls to the
-inherited-method lookup (`beamtalk_dispatch`), then extensions, then the DNU
-handler below.
+with one clause per method the class defines. Any other selector tries the
+memoised inherited compiled method, then extensions, then the superclass walk
+(`beamtalk_dispatch:super`), then the DNU handler below.
 
 ### doesNotUnderstand Handler
 
