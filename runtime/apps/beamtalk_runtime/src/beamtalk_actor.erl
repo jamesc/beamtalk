@@ -1366,6 +1366,10 @@ Handles lifecycle methods locally without involving the actor process:
 For all other messages, checks if the actor is alive first:
 - If alive, sends via gen_server:cast (normal async path)
 - If dead, rejects the Future with an `actor_dead` error
+
+A pid on another node is not supported (ADR 0126 Amendment BT-4989): the
+Future is rejected with an `unsupported_operation` error and the same error
+is raised to the caller, before anything is sent.
 """.
 -spec async_send(
     pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()},
@@ -1380,7 +1384,8 @@ async_send(Ref, Selector, Args, FuturePid) ->
 -doc """
 `async_send/4` for a caller that already holds the actor's class (BT-4949):
 the send reports `Class` instead of reading the actor's marker. A
-name-resolving proxy reference resolves as in `async_send/4`.
+name-resolving proxy reference resolves as in `async_send/4`, and a remote
+pid raises as there.
 """.
 -spec async_send_known(
     pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()},
@@ -1540,13 +1545,16 @@ async_send_impl(ActorPid, 'onExit:', [Block], FuturePid, _ClassHint) ->
             beamtalk_future:reject(FuturePid, Error)
     end,
     ok;
-async_send_impl(ActorPid, Selector, _Args, _FuturePid, ClassHint) when
+async_send_impl(ActorPid, Selector, _Args, FuturePid, ClassHint) when
     node(ActorPid) =/= node()
 ->
     %% ADR 0126 (Amendment BT-4989): a remote async send is not supported. No
     %% compiled actor decodes an async wire envelope, so the future would
-    %% never resolve. Fail at once, before anything is sent.
-    beamtalk_error:raise(remote_async_unsupported_error(Selector, ClassHint));
+    %% never resolve. Settle the future and fail at once, before anything is
+    %% sent, so no process is left waiting on it.
+    Error = remote_async_unsupported_error(Selector, ClassHint),
+    beamtalk_future:reject(FuturePid, Error),
+    beamtalk_error:raise(Error);
 async_send_impl(ActorPid, Selector, Args, FuturePid, ClassHint) ->
     %% Instrumented dispatch span (ADR 0069 Phase 2a; BT-4113: events opt-in).
     %% Measures dispatch-to-mailbox time for async sends.

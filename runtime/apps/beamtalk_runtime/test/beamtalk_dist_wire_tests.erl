@@ -16,15 +16,17 @@ prelude, and the reply/future-resolution encode path — rather than
 BT-3600) or the raw block/NLR/future mechanics the Phase 0.5 spike already
 proved (`beamtalk_dist_wirecheck_tests.erl`, BT-3579/BT-3582).
 
-Two of the ADR's required scenarios — NLR relay over a sync call, and async
-future resolution/rejection across nodes — are **not** duplicated here:
+One of the ADR's required scenarios — NLR relay over a sync call — is **not**
+duplicated here (async future resolution across nodes is withdrawn: remote
+async sends are unsupported and raise, asserted by
+`remote_async_send_raises_instead_of_hanging` below, BT-4989):
 every remote send this issue's sender-side changes make now goes through
 the `'\$beamtalk_wire'` tag automatically (decided purely by
 `node(ActorPid) =/= node()`, ADR 0126 §5.1), so
-`beamtalk_dist_wirecheck_tests.erl`'s existing (c) and (d) scenarios already
-exercise the real wire path once this issue lands — re-running that
-unmodified suite is the regression check for both, not a second copy of the
-same assertions here.
+`beamtalk_dist_wirecheck_tests.erl`'s existing (c) scenario already
+exercises the real wire path once this issue lands — re-running that
+unmodified suite is the regression check, not a second copy of the same
+assertions here.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -378,33 +380,17 @@ remote_async_send_raises_instead_of_hanging(PeerNode) ->
     RemotePid = erpc:call(PeerNode, ?MODULE, spawn_unlinked_box_actor, []),
     try
         Future = beamtalk_future:new(),
-        Outcome =
-            try
-                beamtalk_actor:async_send(RemotePid, volume, [], beamtalk_future:pid(Future))
-            catch
-                error:Err -> {raised, Err}
-            end,
-        case Outcome of
-            {raised, _} ->
-                ok;
-            ok ->
-                %% Today's behaviour: the send "succeeds", the actor drops the
-                %% envelope, and the future never resolves.
-                ?assertEqual(
-                    {error, timeout},
-                    try
-                        beamtalk_future:await(Future, 1000)
-                    catch
-                        error:#{error := #beamtalk_error{kind = timeout}} -> {error, timeout}
-                    end
-                )
-        end,
-        ?assertMatch(
-            {raised, #{
+        ?assertError(
+            #{
                 '$beamtalk_class' := _,
                 error := #beamtalk_error{kind = unsupported_operation, selector = volume}
-            }},
-            Outcome
+            },
+            beamtalk_actor:async_send(RemotePid, volume, [], beamtalk_future:pid(Future))
+        ),
+        %% The future is settled too, so nothing is left waiting on it.
+        ?assertThrow(
+            {future_rejected, #beamtalk_error{kind = unsupported_operation, selector = volume}},
+            beamtalk_future:await(Future, 1000)
         )
     after
         rpc:call(PeerNode, gen_server, stop, [RemotePid])

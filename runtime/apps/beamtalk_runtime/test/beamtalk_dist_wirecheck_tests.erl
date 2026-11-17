@@ -31,7 +31,7 @@ back into `docs/ADR/0126-distribution-location-transparent-actors.md` as a
 Phase 0.5 amendment, not just left in this module's comments.
 
 Two simplifications from the full ADR machinery, deliberate for a spike:
-  - (b), (c), (d) use raw `__methods__`-map actor fixtures
+  - (b), (c) use raw `__methods__`-map actor fixtures
     (`test_wirecheck_actor.erl`, mirroring `test_counter.erl`) rather than
     compiled `.bt` classes — blocks are already plain Erlang funs and NLR is
     already the raw `{'$bt_nlr', ...}` tuple at this layer, so a compiled
