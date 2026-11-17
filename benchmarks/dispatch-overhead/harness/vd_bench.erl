@@ -80,16 +80,34 @@ fixture(int) -> 42.
 vd() -> beamtalk_class_registry:resolve_class_object('VdBench').
 
 fun_for(Sel, Args) ->
+    {Build, Run} = prepared(Sel, Args),
+    fun(N) -> Run(N, Build()) end.
+
+%% `{Build, Run}`: `Build()` answers the fixtures in argument order, `Run(N, Fs)`
+%% the operation loop. A `fresh_` fixture is built by every `Build()` call, so a
+%% row that stops its actor (BT-4995) gets a new one outside the timed and
+%% traced region; every other fixture is built once.
+prepared(Sel, Args) ->
     Self = vd(),
-    %% A `fresh_` fixture is built for every call: a row that stops its actor
-    %% (BT-4995) cannot reuse one between the warm-up and the traced run.
-    Fresh = lists:any(fun(A) -> A =:= fresh_counter end, Args),
-    Fixed = [fixture(A) || A <- Args, A =/= fresh_counter],
-    fun(N) ->
-        Fs = [fixture(A) || A <- Args, A =:= fresh_counter] ++ Fixed,
-        _ = Fresh,
-        erlang:apply(?BT, class_fun(Sel), [Self, N | Fs])
-    end.
+    Fixed = maps:from_list([{A, fixture(A)} || A <- Args, A =/= fresh_counter]),
+    Build = fun() ->
+        [
+            case A of
+                fresh_counter -> fixture(A);
+                _ -> maps:get(A, Fixed)
+            end
+         || A <- Args
+        ]
+    end,
+    Run = fun(N, Fs) -> erlang:apply(?BT, class_fun(Sel), [Self, N | Fs]) end,
+    {Build, Run}.
+
+%% Wait until every actor fixture has handled what a run queued (an actor runs
+%% its `continueWith:` steps before its next message, so a `sys` request is
+%% answered only after them): the timed or traced run then starts from an idle actor.
+settle(Fs) ->
+    [sys:get_state(Pid) || {beamtalk_object, _, _, Pid} <- Fs],
+    ok.
 
 class_fun(Sel) -> list_to_atom("class_" ++ atom_to_list(Sel)).
 
@@ -181,13 +199,17 @@ fmt(X) -> lists:flatten(io_lib:format("~.1f", [X])).
 
 call_counts({_, _, _, N0, Sel, Args}) ->
     N = min(N0, 2000),
-    Fun = fun_for(Sel, Args),
-    _ = Fun(N),
+    {Build, Run} = prepared(Sel, Args),
+    _ = Run(N, Build()),
+    Fs = Build(),
+    _ = Run(N, Fs),
+    settle(Fs),
+    Fs1 = Build(),
     Session = trace:session_create(vd_bench_count, self(), []),
     Mods = [M || {M, _} <- code:all_loaded(), M =/= ?MODULE, not traceless(M)],
     MFAs = [{M, F, A} || M <- Mods, {F, A} <- erlang:get_module_info(M, functions)],
     [trace:function(Session, {M, '_', '_'}, true, [local, call_count]) || M <- Mods],
-    _ = Fun(N),
+    _ = Run(N, Fs1),
     Counts = [
         {C * (N0 / N), MFA}
      || MFA <- MFAs,
@@ -294,14 +316,17 @@ median(L) ->
 
 %% One fresh worker per measurement: warm up, then time N operations.
 measure({_, _, _, N, Sel, Args}) ->
-    Fun = fun_for(Sel, Args),
+    {Build, Run} = prepared(Sel, Args),
     Parent = self(),
     {Pid, Ref} = spawn_monitor(fun() ->
-        _ = Fun(min(N, 2000)),
+        Warm = Build(),
+        _ = Run(min(N, 2000), Warm),
+        settle(Warm),
+        Fs = Build(),
         garbage_collect(),
         {reductions, R0} = process_info(self(), reductions),
         T0 = erlang:monotonic_time(nanosecond),
-        _ = Fun(N),
+        _ = Run(N, Fs),
         T1 = erlang:monotonic_time(nanosecond),
         {reductions, R1} = process_info(self(), reductions),
         Parent ! {self(), {(T1 - T0) / N, (R1 - R0) / N}}

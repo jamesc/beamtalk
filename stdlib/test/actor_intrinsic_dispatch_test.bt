@@ -270,7 +270,8 @@ TestCase subclass: ActorIntrinsicDispatchTest
     self assert: (self seen: #stepSaw) equals: 2
     self assert: (self.table at: #extContinue) isNil
 
-  // Pinned as observed before BT-4995: an extension on `Actor` itself does not
+  // PIN-BUG BT-5002 (pinned as observed before BT-4995; a fix flips this): an
+  // extension on `Actor` itself does not
   // intercept a self-sent `stopWith:` (the actor stops with the requested
   // reason); one on an ancestor below `Actor` does (next test).
   testStopWithExtensionOnActorDoesNotInterceptASelfSend =>
@@ -309,7 +310,8 @@ TestCase subclass: ActorIntrinsicDispatchTest
     self assert: (self seen: #terminateReason) equals: #partial
     self assert: (self.table at: #extStop) isNil
 
-  // Pinned as observed before BT-4995: an extension on `Actor` itself is not
+  // PIN-BUG BT-5002 (pinned as observed before BT-4995; a fix flips these three):
+  // an extension on `Actor` itself is not
   // seen from a class three levels below it (`Actor`'s own compiled method
   // wins); it is seen from a direct subclass (tests above).
   testTerminateExtensionOnActorIsIgnoredByADeepSubclass =>
