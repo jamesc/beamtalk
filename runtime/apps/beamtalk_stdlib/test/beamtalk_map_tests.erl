@@ -360,3 +360,7 @@ pairs_for_threading_tagged_map_raises_type_error_test() ->
 
 pairs_for_threading_non_map_raises_type_error_test() ->
     ?assertBtError(type_error, _, 'doWithKey:', beamtalk_map:pairs_for_threading(42, 'doWithKey:')).
+
+%%% Module-level fixture (BT-4962): loading a compiled `bt@stdlib@*` module starts
+%%% class processes; with no runtime app to own them they would outlive this suite.
+eunit_wrapper_(Tests) -> beamtalk_test_class_teardown:leak_free(Tests).

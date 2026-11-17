@@ -506,3 +506,7 @@ parse_invalid_utf8_input_answers_result_error_test() ->
     %% (Byte 255 as an explicit segment: never valid UTF-8.)
     R = beamtalk_json:parse(<<"\"abc", 255, "def\"">>),
     ?assertBtResultObjError(parse_error, R).
+
+%%% Module-level fixture (BT-4962): loading a compiled `bt@stdlib@*` module starts
+%%% class processes; with no runtime app to own them they would outlive this suite.
+eunit_wrapper_(Tests) -> beamtalk_test_class_teardown:leak_free(Tests).
