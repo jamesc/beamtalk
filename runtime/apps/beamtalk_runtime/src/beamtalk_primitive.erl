@@ -54,6 +54,12 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 %% The tagged-map classes `tagged_map_dispatch/1` routes to a fixed native
 %% module instead of their class's own module. Every such route lives here:
 %% this map is the one source the routing conformance test enumerates.
+%% The one selector a Value rejects with `immutable_value`; shared by
+%% is_ivar_method/1 and the send_value_memoised/4 clause guard (BT-4984).
+-define(IMMUTABLE_SLOT_SELECTOR, 'fieldAt:put:').
+%% The per-process memo key of tagged_class_dispatch/1, also read by
+%% send_value_memoised/4 (BT-4984).
+-define(TAGGED_CLASS_MEMO_KEY(Class), {?MODULE, tagged_class_dispatch, Class}).
 -define(PROXY_ROUTES, #{'ErlangModule' => beamtalk_erlang_proxy}).
 
 -include("beamtalk.hrl").
@@ -708,7 +714,7 @@ send(X, Selector, Args) when is_tuple(X) ->
             dispatch_via_module(X, Selector, Args)
     end;
 send(#{'$beamtalk_class' := Class} = X, Selector, Args) when
-    is_atom(Class), Selector =/= 'fieldAt:put:', not is_map_key(Class, ?PROXY_ROUTES)
+    is_atom(Class), Selector =/= ?IMMUTABLE_SLOT_SELECTOR, not is_map_key(Class, ?PROXY_ROUTES)
 ->
     send_value_memoised(X, Class, Selector, Args);
 send(X, Selector, Args) when is_map(X) ->
@@ -782,7 +788,7 @@ guard has already sent `fieldAt:put:` and proxy-routed classes there too.
 -spec send_value_memoised(map(), atom(), atom(), list()) -> term().
 send_value_memoised(X, Class, Selector, Args) ->
     Gen = beamtalk_class_derived_cache:generation(),
-    case get({?MODULE, tagged_class_dispatch, Class}) of
+    case get(?TAGGED_CLASS_MEMO_KEY(Class)) of
         {Gen, {value, Module}} when Gen =/= undefined ->
             case erlang:function_exported(Module, dispatch, 3) of
                 true -> Module:dispatch(Selector, Args, X);
@@ -1179,7 +1185,7 @@ A memo hit for a `{value, Module}` answer is also read directly by
 -spec tagged_class_dispatch(atom()) -> exception | {stdlib, atom()} | {value, atom()}.
 tagged_class_dispatch(Class) ->
     Gen = beamtalk_class_derived_cache:generation(),
-    MemoKey = {?MODULE, tagged_class_dispatch, Class},
+    MemoKey = ?TAGGED_CLASS_MEMO_KEY(Class),
     case get(MemoKey) of
         {Gen, Resolved} when Gen =/= undefined ->
             case resolved_module_loaded(Class, Resolved) of
@@ -1469,7 +1475,7 @@ intrinsic and every Value `dispatch/3` arm, from the Rust
 `test/fixtures/value_immutable_slot_hint_conformance.json` (BT-4273).
 """.
 -spec is_ivar_method(atom()) -> {true, binary()} | false.
-is_ivar_method('fieldAt:put:') ->
+is_ivar_method(?IMMUTABLE_SLOT_SELECTOR) ->
     {true, <<"Cannot modify slot on value type — use withSlot: to create a new instance"/utf8>>};
 is_ivar_method(_) ->
     false.

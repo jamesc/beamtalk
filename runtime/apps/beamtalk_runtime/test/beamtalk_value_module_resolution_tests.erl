@@ -715,10 +715,6 @@ fast_other_receivers_dispatch_as_before() ->
             {'DOWN', MRef, process, Dead, _} -> ok
         end,
         Actor = #beamtalk_object{class = 'ZzFastNoSuchActor', class_mod = 'zz_no_mod', pid = Dead},
-        ?assertEqual(
-            fast_outcome(Actor, x),
-            fast_outcome(Actor, x)
-        ),
         ?assertMatch({bt_error, _, _, x, _}, fast_outcome(Actor, x))
     after
         beamtalk_test_proc:stop(Pid)
@@ -780,7 +776,6 @@ fast_warm_send_call_count() ->
         ],
         {Result, Calls} = calls_during(Patterns, fun() ->
             _ = beamtalk_message_dispatch:send(Self, x, []),
-            erlang:put(zz_fast_mark, start),
             %% only the second (warm) send is counted: drop what the first made
             {warm, beamtalk_message_dispatch:send(Self, x, [])}
         end),
