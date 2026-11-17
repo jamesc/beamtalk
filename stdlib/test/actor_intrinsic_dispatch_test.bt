@@ -309,6 +309,46 @@ TestCase subclass: ActorIntrinsicDispatchTest
     self assert: (self seen: #terminateReason) equals: #partial
     self assert: (self.table at: #extStop) isNil
 
+  // An extension on `Actor` itself, seen from a class three levels below it
+  // (so `Actor` is not the direct superclass).
+  testTerminateExtensionOnActorReachesADeepSubclass =>
+    self
+      registerExt: #Actor
+      selector: #terminate:
+      key: #extTerminate
+    [
+      a := self spawnPlain: Bt4995Leaf
+      a stop
+      self waitDead: a
+      self.table at: #deepTerminateSeen put: (self.table at: #extTerminate) isNil not
+    ] ensure: [Actor removeSelector: #terminate: ifAbsent: [nil]]
+    self assert: (self.table at: #deepTerminateSeen) equals: true
+
+  testContinueWithExtensionOnActorReachesADeepSubclass =>
+    self
+      registerExt: #Actor
+      selector: #continueWith:
+      key: #extContinue
+    [
+      a := self spawnPlain: Bt4995Leaf
+      a partialThenContinue
+      self.table at: #deepContinueSeen put: (self seen: #extContinue) isNil not
+    ] ensure: [Actor removeSelector: #continueWith: ifAbsent: [nil]]
+    self assert: (self.table at: #deepContinueSeen) equals: true
+
+  testStopWithExtensionOnActorReachesADeepSubclass =>
+    self
+      registerExt: #Actor
+      selector: #stopWith:
+      key: #extStop
+    [
+      a := self spawnPlain: Bt4995Leaf
+      a stopAfterPartial
+      Timer sleep: 200
+      self.table at: #deepStopSeen put: (self.table at: #extStop) isNil not
+    ] ensure: [Actor removeSelector: #stopWith: ifAbsent: [nil]]
+    self assert: (self.table at: #deepStopSeen) equals: true
+
   // === the other Actor intrinsics keep their path ===
   testOnExitSeesTheStopReason =>
     a := self spawnPlain: Bt4995Plain

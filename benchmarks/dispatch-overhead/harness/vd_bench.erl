@@ -42,6 +42,9 @@ rows() ->
         {"s2", self_send, "sealed Value: self helper", 100000, 'selfHelperSealed:p:', [point]},
         {"s3", self_send, "open Value: self helper", 100000, 'selfHelperOpen:p:', [open_point]},
         {"s4", self_send, "actor method: self count", 20000, 'selfActor:c:', [counter]},
+        {"i1", actor_intrinsic, "Actor intrinsic: self continueWith: #noop", 2000, 'intrinsicContinue:c:', [counter]},
+        {"i2", actor_intrinsic, "Actor intrinsic: self stopWith: #normal", 2000, 'intrinsicStop:c:', [fresh_counter]},
+        {"i3", actor_intrinsic, "Actor intrinsic: self terminate: #normal (default)", 2000, 'intrinsicTerminate:c:', [counter]},
         {"c1", class_side, "`class sealed` on a sealed class", 100000, 'classSealedStatic:', []},
         {"c2", class_side, "class method on a sealed class", 100000, 'classSealedPlain:', []},
         {"c3", class_side, "class method on an open class", 100000, 'classOpen:', []},
@@ -65,6 +68,7 @@ rows() ->
 fixture(point) -> ?BT:class_point(vd());
 fixture(open_point) -> ?BT:class_openPoint(vd());
 fixture(counter) -> ?BT:class_counter(vd());
+fixture(fresh_counter) -> ?BT:class_counter(vd());
 fixture(tuple) -> ?BT:class_tuple(vd());
 fixture(dict) -> ?BT:class_dict(vd());
 fixture(list10) -> ?BT:class_list10(vd());
@@ -76,9 +80,16 @@ fixture(int) -> 42.
 vd() -> beamtalk_class_registry:resolve_class_object('VdBench').
 
 fun_for(Sel, Args) ->
-    Fs = [fixture(A) || A <- Args],
     Self = vd(),
-    fun(N) -> erlang:apply(?BT, class_fun(Sel), [Self, N | Fs]) end.
+    %% A `fresh_` fixture is built for every call: a row that stops its actor
+    %% (BT-4995) cannot reuse one between the warm-up and the traced run.
+    Fresh = lists:any(fun(A) -> A =:= fresh_counter end, Args),
+    Fixed = [fixture(A) || A <- Args, A =/= fresh_counter],
+    fun(N) ->
+        Fs = [fixture(A) || A <- Args, A =:= fresh_counter] ++ Fixed,
+        _ = Fresh,
+        erlang:apply(?BT, class_fun(Sel), [Self, N | Fs])
+    end.
 
 class_fun(Sel) -> list_to_atom("class_" ++ atom_to_list(Sel)).
 

@@ -15,11 +15,17 @@
 sealed Object subclass: VdBench
 
   class point -> VdPoint => VdPoint x: 1 y: 2
+
   class openPoint -> VdOpenPoint => VdOpenPoint x: 1 y: 2
+
   class counter -> VdCounter => VdCounter spawn
+
   class tuple -> Tuple => Tuple withAll: #(1, 2, 3)
+
   class dict -> Dictionary(Symbol, Integer) => #{#a => 1, #b => 2}
+
   class list10 -> List(Integer) => (1 to: 10) asList
+
   class openMath => VdOpenMath
 
   class baseline: n :: Integer -> Integer =>
@@ -62,6 +68,16 @@ sealed Object subclass: VdBench
     last := 0
     n timesRepeat: [last := c count]
     last
+
+  // === Actor intrinsics (BT-4995) ===
+  class intrinsicContinue: n :: Integer c: c :: VdCounter -> Integer =>
+    c intrinsicContinue: n
+
+  class intrinsicStop: n :: Integer c: c :: VdCounter -> Integer =>
+    c intrinsicStop: n
+
+  class intrinsicTerminate: n :: Integer c: c :: VdCounter -> Integer =>
+    c intrinsicTerminate: n
 
   // === Self sends ===
   class selfTwiceSealed: n :: Integer p: p :: VdPoint -> Integer =>
@@ -118,7 +134,11 @@ sealed Object subclass: VdBench
 
   class ffiBinary: n :: Integer a: a :: Integer -> String =>
     last := ""
-    n timesRepeat: [s :: String := Erlang erlang integer_to_binary: a. last := s]
+    n
+      timesRepeat: [
+        s :: String := Erlang erlang integer_to_binary: a
+        last := s
+      ]
     last
 
   class ffiIolistSize: n :: Integer s: s :: String -> Integer =>
