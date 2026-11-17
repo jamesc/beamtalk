@@ -385,11 +385,12 @@ pub fn receiver_takes_inline_conditional(receiver: &Expression) -> bool {
     ) && !receiver.is_self()
 }
 
-/// Whether `node` itself is an `ifFalse:ifTrue:` send [`desugar_if_false_if_true`]
-/// rewrites (a cascade's first message aside, which the caller excludes): two literal blocks without parameters (a block with parameters
-/// keeps today's run-time arity error, which the inline lowering leaves to
-/// dynamic dispatch) sent to a receiver that can take the inline lowering
-/// ([`receiver_takes_inline_conditional`]).
+/// Whether `node` itself is an `ifFalse:ifTrue:` send
+/// [`desugar_if_false_if_true`] rewrites (a cascade's first message aside,
+/// which the caller excludes): two literal blocks without parameters (a block
+/// with parameters keeps today's run-time arity error, which the inline
+/// lowering leaves to dynamic dispatch) sent to a receiver that can take the
+/// inline lowering ([`receiver_takes_inline_conditional`]).
 fn is_literal_if_false_if_true(node: &Expression) -> bool {
     let Expression::MessageSend {
         receiver,
