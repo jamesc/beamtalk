@@ -242,7 +242,10 @@ takes only its own:
   through that module's `dispatch/3`. A value-type `dispatch/3` default arm
   (String, Binary, a `Value subclass:`, ...) then calls `Module:dispatch/3`
   directly instead of delegating one superclass `dispatch/3` at a time, each
-  with its own extension lookup. An actor arm treats it as `slow`.
+  with its own extension lookup. An actor arm treats it as `slow`, except for
+  the three `Actor` methods `state_free_actor_intrinsic/3` names (BT-4995),
+  which are answered `compiled` instead, unless `Actor` itself has an extension
+  for the selector (that keeps `value`, so the slow route decides, see BT-5002).
 - `slow` for everything else; the arm then takes today's path byte for byte:
   an extension on `ClassName` or its superclass, an owner that does not define
   `Selector` among its own compiled methods (an extension on an ancestor
@@ -302,8 +305,21 @@ compute_inherited_target(ClassName, Selector) ->
                 of
                     {owner, Owner, Module} ->
                         case owner_convention(Module, Selector) of
-                            none -> slow;
-                            Convention -> {Convention, Owner, Module}
+                            none ->
+                                slow;
+                            value ->
+                                %% BT-4995: an extension on the owner itself keeps today's
+                                %% `value` (slow) verdict, so whatever the slow path does with
+                                %% it (BT-5002) is still what happens.
+                                case
+                                    state_free_actor_intrinsic(Owner, Module, Selector) andalso
+                                        check_extension(Owner, Selector) =:= not_found
+                                of
+                                    true -> {compiled, Owner, Module};
+                                    false -> {value, Owner, Module}
+                                end;
+                            Convention ->
+                                {Convention, Owner, Module}
                         end;
                     _ ->
                         slow
@@ -312,6 +328,35 @@ compute_inherited_target(ClassName, Selector) ->
         {ok, _} ->
             {cache, slow}
     end.
+
+%% BT-4995: the Actor methods an actor start runs through its dispatch/4
+%% default arm that provably run no user code and read or write no actor
+%% `State`, so they satisfy the `compiled` verdict's contract vacuously (they
+%% "store before every call that may run user code": they make none) and the
+%% arm may call `invoke_resolved/6` instead of `super/5` under
+%% `beamtalk_actor_state:call_foreign/3`:
+%%
+%%   - `continueWith:` and `stopWith:` are sealed `@intrinsic`s of `Actor`
+%%     (`actorContinueWith`, `actorStopWith`). `beamtalk_actor:dispatch/3`
+%%     maps each to `sync_send/3` to `self()`, which validates its arguments
+%%     and records a pending request in the process dictionary. The reason of
+%%     `stopWith:` is stored, never called.
+%%   - the default `terminate:` is `Actor`'s compiled body `nil`. A stdlib
+%%     class's source is not available to a live patch (`Actor >> terminate:`
+%%     is refused), and an extension or an override on a class below `Actor` is
+%%     seen by `compute_inherited_target/2` before this point. An extension on
+%%     `Actor` itself is checked there too (`check_extension(Owner, ...)`), and
+%%     keeps the `value` verdict: today's slow route, whatever BT-5002 decides.
+%%
+%% The three are named here, not derived: `actorOnExit` stores a block,
+%% `actorMonitor`, `delegate` and the rest of `Actor`'s intrinsics are left on
+%% the `value` route. `beamtalk_dispatch_tests` pins that each name below is an
+%% `Actor` intrinsic or compiled `nil` method in `actor.bt`.
+-spec state_free_actor_intrinsic(class_name(), module(), selector()) -> boolean().
+state_free_actor_intrinsic('Actor', 'bt@stdlib@actor', 'continueWith:') -> true;
+state_free_actor_intrinsic('Actor', 'bt@stdlib@actor', 'stopWith:') -> true;
+state_free_actor_intrinsic('Actor', 'bt@stdlib@actor', 'terminate:') -> true;
+state_free_actor_intrinsic(_Owner, _Module, _Selector) -> false.
 
 %% How a direct call reaches the owner's compiled method for `Selector`, read
 %% from the owner module alone: `compiled` when its meta carries
