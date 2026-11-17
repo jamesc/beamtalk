@@ -280,6 +280,24 @@ fn declined_character_if_false_if_true_dispatches_as_written() {
     );
 }
 
+/// BT-4991: the first message of a cascade is always a dynamic send (cascade
+/// codegen never inlines a conditional), so `x ifFalse: [a] ifTrue: [b];
+/// yourself` goes out as `ifFalse:ifTrue:` with the arms in the order written.
+#[test]
+fn cascade_if_false_if_true_is_sent_as_written() {
+    let src = "Value subclass: Probe\n  check: x => x ifFalse: [1] ifTrue: [2]; yourself\n";
+    let code = codegen_named(src, "bt@probe_cascade_if_false_if_true");
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("'ifFalse:ifTrue:',[fun()->1,fun()->2]"),
+        "cascade must send `ifFalse:ifTrue:` with the arms as written. Got:\n{code}"
+    );
+    assert!(
+        !compact.contains("'ifTrue:ifFalse:'"),
+        "cascade must not send `ifTrue:ifFalse:`. Got:\n{code}"
+    );
+}
+
 #[test]
 fn and_pure_short_circuits_to_literal_false() {
     let src = "Value subclass: Probe\n  check: flag =>\n    flag and: [flag]\n";

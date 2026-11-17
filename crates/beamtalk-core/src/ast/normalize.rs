@@ -116,8 +116,8 @@
 //! plain send, which `Boolean` answers.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::{HashMap, HashSet};
 
 use super::{
     Block, Expression, ExpressionStatement, Identifier, KeywordPart, MessageSelector,
@@ -320,13 +320,6 @@ pub fn is_uncanonicalised_loop(node: &Expression) -> bool {
     unary_loop_keyword(node).is_some() || is_literal_repeat(node)
 }
 
-/// Whether `node` itself is a send the canonicalising pass rewrites besides
-/// the parentheses: an uncanonicalised loop ([`is_uncanonicalised_loop`]) or
-/// a literal `ifFalse:ifTrue:` ([`desugar_if_false_if_true`]).
-fn is_uncanonicalised_send(node: &Expression) -> bool {
-    is_uncanonicalised_loop(node) || is_literal_if_false_if_true(node)
-}
-
 /// The keyword selector `node` canonicalises to when it is a unary loop send
 /// with a literal block receiver (parentheses around it included, which the
 /// peel removes first), or `None`.
@@ -393,7 +386,7 @@ pub fn receiver_takes_inline_conditional(receiver: &Expression) -> bool {
 }
 
 /// Whether `node` itself is an `ifFalse:ifTrue:` send [`desugar_if_false_if_true`]
-/// rewrites: two literal blocks without parameters (a block with parameters
+/// rewrites (a cascade's first message aside, which the caller excludes): two literal blocks without parameters (a block with parameters
 /// keeps today's run-time arity error, which the inline lowering leaves to
 /// dynamic dispatch) sent to a receiver that can take the inline lowering
 /// ([`receiver_takes_inline_conditional`]).
@@ -417,12 +410,31 @@ fn is_literal_if_false_if_true(node: &Expression) -> bool {
         && receiver_takes_inline_conditional(receiver)
 }
 
+/// The spans of the folded first sends of the cascades in `expr`'s tree
+/// (`Cascade::receiver`, which the parser makes of a cascade's first message).
+/// Cascade codegen sends each of its messages by its own selector, never
+/// through the conditional lowering, so [`desugar_if_false_if_true`] leaves
+/// these alone: a cascade's `ifFalse:ifTrue:` goes out as written, and
+/// nothing has to turn a rewritten one back. The one list of those sends, for
+/// the rewrite and for the scans that must agree with it.
+fn cascade_first_sends(expr: &Expression) -> HashSet<Span> {
+    let mut spans = HashSet::new();
+    walk_expression(expr, &mut |node| {
+        if let Expression::Cascade { receiver, .. } = node {
+            spans.insert(receiver.span());
+        }
+    });
+    spans
+}
+
 /// Rewrites every `c ifFalse: [a] ifTrue: [b]` (two literal blocks) in
 /// `expr`'s tree as `c ifTrue: [b] ifFalse: [a]`, each keyword keeping its
-/// written span. Idempotent: the rewritten send is an `ifTrue:ifFalse:`.
+/// written span. Idempotent: the rewritten send is an `ifTrue:ifFalse:`. A
+/// cascade's first message is not rewritten ([`cascade_first_sends`]).
 pub fn desugar_if_false_if_true(expr: &mut Expression) {
+    let cascade_firsts = cascade_first_sends(expr);
     walk_expression_mut(expr, &mut |node| {
-        if !is_literal_if_false_if_true(node) {
+        if !is_literal_if_false_if_true(node) || cascade_firsts.contains(&node.span()) {
             return;
         }
         if let Expression::MessageSend {
@@ -734,9 +746,12 @@ pub fn restore_unary_loops_in_module(module: &mut Module) {
 /// The span of the first send in `expr`'s tree that [`desugar_unary_loops`] or
 /// [`desugar_if_false_if_true`] would rewrite, or `None`.
 fn expr_first_uncanonical_send(expr: &Expression) -> Option<Span> {
+    let cascade_firsts = cascade_first_sends(expr);
     let mut found = None;
     walk_expression(expr, &mut |node| {
-        if found.is_none() && is_uncanonicalised_send(node) {
+        let uncanonical = is_uncanonicalised_loop(node)
+            || (is_literal_if_false_if_true(node) && !cascade_firsts.contains(&node.span()));
+        if found.is_none() && uncanonical {
             found = Some(node.span());
         }
     });
@@ -1656,6 +1671,38 @@ Protocol define: P
             };
             assert_eq!(receiver_takes_inline_conditional(receiver), takes, "{src}");
         }
+    }
+
+    #[test]
+    fn a_cascades_first_if_false_if_true_stays_as_written() {
+        // Cascade codegen sends its messages by their own selector, so the
+        // folded first send is neither rewritten nor reported by the scans.
+        let module = peeled("x ifFalse: [1] ifTrue: [2]; yourself");
+        assert!(!needs_normalising(&module));
+        assert_operands_normalised(&module, "test");
+        let Expression::Cascade { receiver, .. } = first_expr(&module) else {
+            panic!("expected a cascade");
+        };
+        let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = receiver.as_ref()
+        else {
+            panic!("expected the folded first send");
+        };
+        assert_eq!(selector.name(), "ifFalse:ifTrue:");
+        assert!(!written_if_false_if_true(selector, arguments));
+
+        // A send elsewhere in the same cascade is still rewritten.
+        let module = peeled("x ifFalse: [1] ifTrue: [2]; foo: (y ifFalse: [3] ifTrue: [4])");
+        let Expression::Cascade { messages, .. } = first_expr(&module) else {
+            panic!("expected a cascade");
+        };
+        let Expression::MessageSend { selector, .. } = &messages[0].arguments[0] else {
+            panic!("expected a send argument");
+        };
+        assert_eq!(selector.name(), "ifTrue:ifFalse:");
     }
 
     #[test]

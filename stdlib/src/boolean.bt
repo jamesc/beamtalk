@@ -43,8 +43,9 @@ abstract sealed Value subclass: Boolean
   ///
   /// With two literal block arguments the compiler lowers it as
   /// `ifTrue:ifFalse:` with the blocks swapped (inlined, no closures), for
-  /// any receiver; this method answers a send whose block arguments are not
-  /// both literal blocks.
+  /// any receiver except `self`, `super` or a class reference; this method
+  /// answers every other send: block arguments that are not both literal
+  /// blocks, blocks that take parameters, and those receivers.
   ifFalse: _falseBlock :: Block(R) ifTrue: _trueBlock :: Block(R) -> R =>
     self subclassResponsibility
 
