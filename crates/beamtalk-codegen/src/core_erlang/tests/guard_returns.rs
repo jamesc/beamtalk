@@ -561,3 +561,16 @@ fn two_branch_tail_with_a_non_tail_conditional_keeps_its_frame() {
     );
     assert!(code.contains("make_ref"), "{code}");
 }
+
+#[test]
+fn two_branch_tail_with_a_class_reference_keeps_its_frame() {
+    // A class reference is a registry lookup that raises `class_not_found`;
+    // the helper evaluates both values before sending, which would move that
+    // error ahead of the receiver's own `does_not_understand`.
+    let code = codegen(
+        "Object subclass: T\n\
+         \x20 both: x => x ifTrue: [^Object] ifFalse: [^nil]\n",
+    );
+    assert!(code.contains("make_ref"), "{code}");
+    assert!(!code.contains("two_branch"), "{code}");
+}

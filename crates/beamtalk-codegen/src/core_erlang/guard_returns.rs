@@ -620,14 +620,12 @@ fn two_branch_returns(parts: &[KeywordPart], arguments: &[Expression]) -> Option
     first
 }
 
-/// Whether `expr` is a literal, a variable or a class reference: it has no
-/// effect, cannot raise, and answers the same wherever it is evaluated
-/// (unlike a field, which a receiver's method could change).
+/// Whether `expr` is a literal or a variable: it has no effect, cannot raise,
+/// and answers the same wherever it is evaluated (unlike a field, which a
+/// receiver's method could change, or a class reference, which is a registry
+/// lookup that raises `class_not_found`).
 fn is_plain_value(expr: &Expression) -> bool {
-    matches!(
-        expr,
-        Expression::Literal(..) | Expression::Identifier(..) | Expression::ClassReference { .. }
-    )
+    matches!(expr, Expression::Literal(..) | Expression::Identifier(..))
 }
 
 /// The inlined conditional `expr` with each literal block's body rewritten
