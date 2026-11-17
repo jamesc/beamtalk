@@ -667,7 +667,7 @@ pub fn written_unary_loop(
 /// swapped ([`written_if_false_if_true`]): the cheap scan that lets a reflection caller
 /// with nothing peeled skip the restoring clone.
 #[must_use]
-pub fn method_has_desugared_unary_loop(method: &MethodDefinition) -> bool {
+pub fn method_has_desugared_send(method: &MethodDefinition) -> bool {
     let mut found = false;
     for stmt in &method.body {
         if found {
@@ -733,7 +733,7 @@ pub fn restore_unary_loops_in_module(module: &mut Module) {
 
 /// The span of the first send in `expr`'s tree that [`desugar_unary_loops`] or
 /// [`desugar_if_false_if_true`] would rewrite, or `None`.
-fn expr_first_unary_loop(expr: &Expression) -> Option<Span> {
+fn expr_first_uncanonical_send(expr: &Expression) -> Option<Span> {
     let mut found = None;
     walk_expression(expr, &mut |node| {
         if found.is_none() && is_uncanonicalised_send(node) {
@@ -759,7 +759,7 @@ pub fn needs_normalising(module: &Module) -> bool {
 /// [`needs_normalising`] for one expression tree (the REPL entries).
 #[must_use]
 pub fn expr_needs_normalising(expr: &Expression) -> bool {
-    expr_has_parenthesised_operand(expr) || expr_first_unary_loop(expr).is_some()
+    expr_has_parenthesised_operand(expr) || expr_first_uncanonical_send(expr).is_some()
 }
 
 /// Puts back, in `method`'s body, the operand parentheses `peeled` recorded
@@ -855,7 +855,7 @@ pub fn expr_first_parenthesised_operand(expr: &Expression) -> Option<Span> {
 pub fn assert_operands_normalised(module: &Module, context: &str) {
     let mut unary_loop = None;
     for_each_root(module, &mut |_, root| {
-        unary_loop = unary_loop.or_else(|| expr_first_unary_loop(root));
+        unary_loop = unary_loop.or_else(|| expr_first_uncanonical_send(root));
     });
     assert_no_unary_loop(unary_loop, context);
     if let Some(span) = first_parenthesised_operand(module) {
@@ -875,7 +875,10 @@ pub fn assert_operands_normalised(module: &Module, context: &str) {
 /// When a send operand in `expressions` is still parenthesised, or a unary
 /// loop was not canonicalised.
 pub fn assert_expr_operands_normalised(expressions: &[Expression], context: &str) {
-    assert_no_unary_loop(expressions.iter().find_map(expr_first_unary_loop), context);
+    assert_no_unary_loop(
+        expressions.iter().find_map(expr_first_uncanonical_send),
+        context,
+    );
     if let Some(span) = expressions
         .iter()
         .find_map(expr_first_parenthesised_operand)
@@ -1767,7 +1770,7 @@ Protocol define: P
                 .iter()
                 .find(|method| method.selector.name() == name)
                 .unwrap_or_else(|| panic!("no method {name}"));
-            method_has_desugared_unary_loop(method)
+            method_has_desugared_send(method)
         };
         for name in ["lit", "nested", "inLoop"] {
             assert!(has(&peeled, name), "{name}");

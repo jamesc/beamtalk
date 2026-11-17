@@ -259,6 +259,27 @@ fn declined_if_false_if_true_sends_are_emitted_as_written() {
     }
 }
 
+/// BT-4991: a Character-typed receiver's `ifFalse:ifTrue:` the inline lowering
+/// declines (here inside the fallback closure of an outer pure conditional) is
+/// routed to `Character dispatch/3` under the selector as written, with the
+/// arms in the order written: `character_typed` runs before the conditional
+/// lowering and must not hand the canonical `ifTrue:ifFalse:` to its own
+/// re-walk of the handlers or to its final dispatch.
+#[test]
+fn declined_character_if_false_if_true_dispatches_as_written() {
+    let src = "Value subclass: Probe\n  check: x =>\n    x ifTrue: [$a ifFalse: [1] ifTrue: [2]] ifFalse: [0]\n";
+    let code = codegen_named(src, "bt@probe_declined_character");
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("'bt@stdlib@character':'dispatch'('ifFalse:ifTrue:'"),
+        "Character dispatch must carry `ifFalse:ifTrue:`. Got:\n{code}"
+    );
+    assert!(
+        !compact.contains("'bt@stdlib@character':'dispatch'('ifTrue:ifFalse:'"),
+        "Character dispatch must not carry `ifTrue:ifFalse:`. Got:\n{code}"
+    );
+}
+
 #[test]
 fn and_pure_short_circuits_to_literal_false() {
     let src = "Value subclass: Probe\n  check: flag =>\n    flag and: [flag]\n";

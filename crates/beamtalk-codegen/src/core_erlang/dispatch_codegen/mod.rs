@@ -355,17 +355,46 @@ impl CoreErlangGenerator {
 
         // dispatch priority for every remaining message shape is
         // `HANDLERS` — see its doc for why `character_typed` leads the list.
-        //
-        // BT-4991: a literal-block `ifFalse:ifTrue:` arrives rewritten as
-        // `ifTrue:ifFalse:` (`ast::normalize`), which only the conditional
-        // lowering ([`CONDITIONAL_LOWERING_HANDLER`], and the handlers before
-        // it) reads. A send none of them claims is an ordinary message: it
-        // goes out under the selector the user wrote, with the arguments in
-        // the order written. Built on first need, so an inlined conditional
-        // never pays for the clone.
+        self.dispatch_send_through_handlers(
+            receiver,
+            selector,
+            arguments,
+            None,
+            Self::generate_runtime_dispatch,
+        )
+    }
+
+    /// Offers a send to [`HANDLERS`] in priority order (skipping the entry
+    /// named `skip`), then to `fallback` when none claims it.
+    ///
+    /// BT-4991: a literal-block `ifFalse:ifTrue:` arrives rewritten as
+    /// `ifTrue:ifFalse:` (`ast::normalize`), which only the conditional
+    /// lowering ([`CONDITIONAL_LOWERING_HANDLER`], and the handlers before it)
+    /// reads. A send none of them claims is an ordinary message: every later
+    /// handler, and `fallback`, get it under the selector the user wrote, with
+    /// the arguments in the order written. Built on first need, so an inlined
+    /// conditional never pays for the clone. The one place that switch lives:
+    /// `generate_message_send` and the Character-typed handler (which runs
+    /// before the conditional lowering and walks the table itself) both call it.
+    pub(in crate::core_erlang) fn dispatch_send_through_handlers(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+        skip: Option<&str>,
+        fallback: fn(
+            &mut Self,
+            &Expression,
+            &MessageSelector,
+            &[Expression],
+        ) -> Result<Document<'static>>,
+    ) -> Result<Document<'static>> {
         let mut written: Option<Option<(MessageSelector, Vec<Expression>)>> = None;
         let mut past_conditional_lowering = false;
         for (name, handler) in HANDLERS {
+            if Some(*name) == skip {
+                continue;
+            }
             let as_written = if past_conditional_lowering {
                 written
                     .get_or_insert_with(|| {
@@ -387,17 +416,14 @@ impl CoreErlangGenerator {
             past_conditional_lowering |= *name == CONDITIONAL_LOWERING_HANDLER;
         }
 
-        // Unified dispatch via beamtalk_message_dispatch:send/3
         let as_written = written
             .get_or_insert_with(|| {
                 beamtalk_core::ast::normalize::as_written_if_false_if_true(selector, arguments)
             })
             .as_ref();
         match as_written {
-            Some((selector, arguments)) => {
-                self.generate_runtime_dispatch(receiver, selector, arguments)
-            }
-            None => self.generate_runtime_dispatch(receiver, selector, arguments),
+            Some((selector, arguments)) => fallback(self, receiver, selector, arguments),
+            None => fallback(self, receiver, selector, arguments),
         }
     }
 

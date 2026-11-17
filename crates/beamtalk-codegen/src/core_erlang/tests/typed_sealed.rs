@@ -1453,11 +1453,14 @@ fn send_handlers_keep_priority_positions() {
 
 #[test]
 fn conditional_lowering_handler_position() {
-    // BT-4991: `generate_message_send` hands the canonical `ifTrue:ifFalse:`
-    // to the handlers up to and including `CONDITIONAL_LOWERING_HANDLER`, and
-    // the selector as written (`ifFalse:ifTrue:`) to every one after it. The
-    // entry must exist exactly once, and only these receiver-typed handlers,
-    // none of which claims `ifTrue:ifFalse:`, may precede it.
+    // BT-4991: `dispatch_send_through_handlers` hands the canonical
+    // `ifTrue:ifFalse:` to the handlers up to and including
+    // `CONDITIONAL_LOWERING_HANDLER`, and the selector as written
+    // (`ifFalse:ifTrue:`) to every one after it and to the fallback. The entry
+    // must exist exactly once, and only these receiver-typed handlers may
+    // precede it. `character_typed` is among them and does claim a Character
+    // receiver's send, but it walks the table through the same helper, so
+    // the switch holds there too (`declined_character_if_false_if_true_...`).
     use crate::core_erlang::dispatch_codegen::{CONDITIONAL_LOWERING_HANDLER, HANDLERS};
     let names: Vec<&str> = HANDLERS.iter().map(|(name, _)| *name).collect();
     assert_eq!(
