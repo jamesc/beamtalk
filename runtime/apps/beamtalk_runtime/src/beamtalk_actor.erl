@@ -401,7 +401,10 @@ decode/encode helpers and the pending-action helpers.
 %% this module's private call-from machinery, so they stay here (BT-4701).
 -export([takeDeferredCall/1, replyToDeferred/2, replyErrorToDeferred/2]).
 
-%% Lifecycle telemetry (called from compiled actor init/terminate)
+%% Lifecycle start/stop (called from compiled actor init/terminate, BT-4997)
+-export([lifecycle_started/1, lifecycle_stopped/2]).
+%% Compatibility for a `.beam` built before BT-4997 (generated init/terminate
+%% called this): not called by current generated code.
 -export([maybe_execute_telemetry/3]).
 
 %%% Public API
@@ -2450,7 +2453,7 @@ Called by both `async_send/4` and `sync_send/3` for the `kill` selector.
 kill_and_wait(ActorPid) ->
     %% Emit lifecycle telemetry event for kill request.
     Class = lookup_class(ActorPid),
-    maybe_execute_telemetry(
+    beamtalk_telemetry:emit(
         [beamtalk, actor, lifecycle, kill],
         #{},
         #{pid => ActorPid, class => Class}
@@ -2998,24 +3001,74 @@ delegate_error(ClassName) ->
     }.
 
 -doc """
-Emit an actor lifecycle telemetry event (`[beamtalk, actor, lifecycle, _]`)
-and mirror `start`/`stop` into ActorSpawned/ActorStopped announcements.
-Called from compiled actor `init/1`/`terminate/2` and the runtime's own
-spawn/stop/kill paths. The telemetry emit itself is
-`beamtalk_telemetry:emit/3` (BT-4025); this function only adds the
-actor-specific announcement.
+Compatibility shim (BT-4997) for a `.beam` compiled before the change, whose
+generated `init/1` and `terminate/2` call this with the event metadata already
+built. A `start` or `stop` event is handed to `lifecycle_started/1` /
+`lifecycle_stopped/2`, so announcements, aggregates and the opt-in telemetry
+behave as for a rebuilt class; any other event is emitted as given. Current
+generated code does not call it.
 """.
 -spec maybe_execute_telemetry(list(), map(), map()) -> ok.
+maybe_execute_telemetry([beamtalk, actor, lifecycle, start], _Measurements, #{class := Class}) ->
+    lifecycle_started(Class);
+maybe_execute_telemetry([beamtalk, actor, lifecycle, stop], _Measurements, #{class := Class} = M) ->
+    lifecycle_stopped(Class, maps:get(reason, M, normal));
 maybe_execute_telemetry(EventName, Measurements, Metadata) ->
-    %% ADR 0093 §2: the lifecycle start/stop telemetry call is the one
-    %% universal hook every actor-spawn path runs through — generated `init/1`
-    %% emits `[beamtalk, actor, lifecycle, start]` (codegen) and `terminate/2`
-    %% emits `[..., stop]`. Mirror those into ActorSpawned/ActorStopped system
-    %% announcements here so the announce is published from every spawn/stop path
-    %% without a codegen change (ADR 0069 §4: a spawn can produce both a telemetry
-    %% counter and an announcement). Best-effort and fault-isolated.
-    maybe_announce_lifecycle(EventName, Metadata),
     beamtalk_telemetry:emit(EventName, Measurements, Metadata).
+
+-doc """
+An actor of `Class` has started: called by the generated `init/1` (and the
+test host) in the new actor's own process (BT-4997; it replaces the
+`maybe_execute_telemetry/3` call that built the event metadata at every
+start). It does, in order:
+
+1. announce `ActorSpawned` on the `SystemAnnouncer` bus (ADR 0093 §2). An
+   announcement is not telemetry and is published in both modes;
+2. record the always-on `{Class, start}` aggregate and, while tracing is
+   enabled, the `start` trace event (`beamtalk_trace_store:record_lifecycle/4`);
+3. emit `[beamtalk, actor, lifecycle, start]` with measurements `#{}` and
+   metadata `#{pid, class}` only while `beamtalk_telemetry:lifecycle_events_enabled/0`
+   is true (ADR 0069, BT-4997). With it off nothing is built.
+""".
+-spec lifecycle_started(atom()) -> ok.
+lifecycle_started(Class) ->
+    Pid = self(),
+    ok = do_announce_actor_lifecycle('ActorSpawned', #{actorClass => Class, pid => Pid}),
+    ok = beamtalk_trace_store:record_lifecycle(start, Pid, Class, undefined),
+    case beamtalk_telemetry:lifecycle_events_enabled() of
+        true ->
+            beamtalk_telemetry:emit(
+                [beamtalk, actor, lifecycle, start], #{}, #{pid => Pid, class => Class}
+            );
+        false ->
+            ok
+    end.
+
+-doc """
+An actor of `Class` is stopping with `Reason`: called by the generated
+`terminate/2`. The counterpart of `lifecycle_started/1`: announce
+`ActorStopped` (with the normalised reason), record the `{Class, stop}`
+aggregate and trace event, and emit `[beamtalk, actor, lifecycle, stop]` with
+metadata `#{pid, class, reason}` (the raw reason) only while lifecycle events
+are enabled.
+""".
+-spec lifecycle_stopped(atom(), term()) -> ok.
+lifecycle_stopped(Class, Reason) ->
+    Pid = self(),
+    ok = do_announce_actor_lifecycle('ActorStopped', #{
+        actorClass => Class, pid => Pid, reason => normalize_stop_reason(Reason)
+    }),
+    ok = beamtalk_trace_store:record_lifecycle(stop, Pid, Class, Reason),
+    case beamtalk_telemetry:lifecycle_events_enabled() of
+        true ->
+            beamtalk_telemetry:emit(
+                [beamtalk, actor, lifecycle, stop],
+                #{},
+                #{pid => Pid, class => Class, reason => Reason}
+            );
+        false ->
+            ok
+    end.
 
 -doc """
 Resolve an actor's class name from its `'$beamtalk_actor'` marker
@@ -3539,7 +3592,8 @@ handle_linked_exit(_Msg, _State, _HasHook) ->
 Normalise an OTP terminate reason to a stable Symbol for the `ActorStopped`
 event payload: `normal`/`shutdown` are clean stops, anything else is a
 `crashed`. Keeps the typed `reason :: Symbol` field flat (the raw reason term is
-still available in the telemetry stop event for diagnostics).
+available in the telemetry stop event for diagnostics, while lifecycle events are
+enabled, BT-4997).
 
 `{shutdown, global_name_conflict}` is its own Symbol (ADR 0126 §4,
 Phase 5, BT-3603): `resolve_global_conflict/3` stops the losing side of a
@@ -3554,31 +3608,6 @@ normalize_stop_reason(shutdown) -> shutdown;
 normalize_stop_reason({shutdown, global_name_conflict}) -> 'globalNameConflict';
 normalize_stop_reason({shutdown, _}) -> shutdown;
 normalize_stop_reason(_Other) -> crashed.
-
--doc """
-Mirror a lifecycle telemetry event into an ActorSpawned/ActorStopped system
-announcement (ADR 0093 §2).
-
-Matches only the two lifecycle telemetry event names that every actor
-spawn/stop path emits — `[beamtalk, actor, lifecycle, start]` and `[..., stop]`
-— and ignores all other telemetry (`kill`, dispatch spans, …). The actor class,
-pid, and (for stop) terminate reason are read from the telemetry `Metadata` map.
-Best-effort and fault-isolated via `do_announce_actor_lifecycle/2`.
-""".
--spec maybe_announce_lifecycle(list(), map()) -> ok.
-maybe_announce_lifecycle([beamtalk, actor, lifecycle, start], Metadata) ->
-    Class = maps:get(class, Metadata, unknown),
-    Pid = maps:get(pid, Metadata, self()),
-    do_announce_actor_lifecycle('ActorSpawned', #{actorClass => Class, pid => Pid});
-maybe_announce_lifecycle([beamtalk, actor, lifecycle, stop], Metadata) ->
-    Class = maps:get(class, Metadata, unknown),
-    Pid = maps:get(pid, Metadata, self()),
-    Reason = normalize_stop_reason(maps:get(reason, Metadata, normal)),
-    do_announce_actor_lifecycle('ActorStopped', #{
-        actorClass => Class, pid => Pid, reason => Reason
-    });
-maybe_announce_lifecycle(_EventName, _Metadata) ->
-    ok.
 
 -doc """
 Publish an actor-lifecycle system event on the `SystemAnnouncer` bus.

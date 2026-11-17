@@ -33,26 +33,27 @@ fn test_code_change_delegates_to_beamtalk_hot_reload() {
 
 #[test]
 fn test_terminate_lifecycle_stop_telemetry() {
-    // generate_terminate must emit lifecycle-stop telemetry via
-    // beamtalk_actor:maybe_execute_telemetry with the 'stop' event path.
+    // generate_terminate must report the stop through
+    // beamtalk_actor:lifecycle_stopped(Class, Reason) (BT-4997): it builds no
+    // event metadata itself.
     let code = codegen("Actor subclass: TestActor\n  state: x = 0\n");
     assert!(
         code.contains("'terminate'/2"),
         "Module must export terminate/2. Got:\n{code}"
     );
     assert!(
-        code.contains("call 'beamtalk_actor':'maybe_execute_telemetry'("),
-        "terminate/2 must emit lifecycle telemetry. Got:\n{code}"
+        code.contains("call 'beamtalk_actor':'lifecycle_stopped'('TestActor', Reason)"),
+        "terminate/2 must report the stop. Got:\n{code}"
     );
     assert!(
-        code.contains("'lifecycle', 'stop']"),
-        "terminate/2 telemetry must include the lifecycle 'stop' event name. Got:\n{code}"
+        !code.contains("maybe_execute_telemetry"),
+        "generated code must not build lifecycle event metadata. Got:\n{code}"
     );
 }
 
 #[test]
 fn test_terminate_uses_class_name_for_telemetry_metadata() {
-    // terminate/2 telemetry 'class' metadata must use the clean Beamtalk
+    // terminate/2's lifecycle call must pass the clean Beamtalk
     // class name (e.g. 'EventStore'), not the compiled module name (e.g.
     // 'bt@event_store'). This matches how dispatch traces report class names.
     let src = "Actor subclass: EventStore\n  state: count = 0\n";
@@ -61,8 +62,8 @@ fn test_terminate_uses_class_name_for_telemetry_metadata() {
     let code = generate_module(&module, CodegenOptions::new("bt@event_store"))
         .expect("codegen should succeed");
     assert!(
-        code.contains("'class' => 'EventStore'"),
-        "terminate/2 must use class name 'EventStore' in telemetry metadata. Got:\n{code}"
+        code.contains("call 'beamtalk_actor':'lifecycle_stopped'('EventStore', Reason)"),
+        "terminate/2 must use class name 'EventStore' for the lifecycle stop. Got:\n{code}"
     );
 }
 
@@ -117,7 +118,7 @@ fn test_terminate_plain_module_uses_module_name_as_class_label() {
         "Plain module must still export terminate/2. Got:\n{code}"
     );
     assert!(
-        code.contains("'class' => 'bt_module'"),
+        code.contains("call 'beamtalk_actor':'lifecycle_stopped'('bt_module', Reason)"),
         "Plain module terminate/2 must use module name 'bt_module' as class label. Got:\n{code}"
     );
 }

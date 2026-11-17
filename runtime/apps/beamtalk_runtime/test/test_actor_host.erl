@@ -58,11 +58,7 @@ init(State) when is_map(State) ->
                 true ->
                     erlang:put('$beamtalk_actor', Class),
                     erlang:put('$beamtalk_actor_started_at', erlang:system_time(microsecond)),
-                    beamtalk_actor:maybe_execute_telemetry(
-                        [beamtalk, actor, lifecycle, start],
-                        #{},
-                        #{pid => self(), class => Class}
-                    ),
+                    ok = beamtalk_actor:lifecycle_started(Class),
                     {ok, beamtalk_actor:take_init_ack(State, initialized)};
                 false ->
                     {stop, {missing_key, '__methods__'}}
@@ -98,11 +94,7 @@ code_change(OldVsn, State, Extra) -> beamtalk_hot_reload:code_change(OldVsn, Sta
 
 terminate(Reason, State) ->
     Class = beamtalk_tagged_map:class_of(State, unknown),
-    beamtalk_actor:maybe_execute_telemetry(
-        [beamtalk, actor, lifecycle, stop],
-        #{},
-        #{pid => self(), class => Class, reason => Reason}
-    ),
+    ok = beamtalk_actor:lifecycle_stopped(Class, Reason),
     ok.
 
 %%====================================================================

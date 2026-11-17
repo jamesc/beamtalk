@@ -398,6 +398,9 @@ test_field_migration_typed_no_default_class_adds_new_field() ->
 %% double-report actor starts.
 test_field_migration_initialize_class_no_telemetry() ->
     {ok, _} = application:ensure_all_started(telemetry),
+    %% The start/stop events are opt-in (BT-4997): without this the test would
+    %% pass whatever the migration did.
+    ok = beamtalk_telemetry:enable_lifecycle_events(),
     HandlerId = {beamtalk_hot_reload_tests, make_ref()},
     ok = telemetry:attach(
         HandlerId,
@@ -421,9 +424,20 @@ test_field_migration_initialize_class_no_telemetry() ->
                 ?assert(false)
         after 200 ->
             ok
+        end,
+        %% The handler is live: a real start does reach it.
+        ok = beamtalk_actor:lifecycle_started('HotReloadListenerCheck'),
+        receive
+            {telemetry_event, [beamtalk, actor, lifecycle, start], _, #{
+                class := 'HotReloadListenerCheck'
+            }} ->
+                ok
+        after 1000 ->
+            ?assert(false)
         end
     after
-        telemetry:detach(HandlerId)
+        telemetry:detach(HandlerId),
+        ok = beamtalk_telemetry:disable_lifecycle_events()
     end.
 
 %% BT-3532, updated for ADR 0123 Phase 2 (BT-3536): an init/1 return that is

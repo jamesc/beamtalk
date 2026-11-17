@@ -808,44 +808,29 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// Generate the lifecycle start telemetry call for init/1.
+    /// Generate the lifecycle call for `init/1` (`start`) and `terminate/2` (`stop`).
     ///
-    /// Emits `[beamtalk, actor, lifecycle, start]` via `beamtalk_actor:maybe_execute_telemetry/3`.
-    /// Uses a `let` binding for `self()` since Core Erlang map literals cannot contain calls.
-    /// Takes the clean Beamtalk class name (e.g., `EventStore`), not the
-    /// compiled module name, so lifecycle traces match dispatch trace format.
-    fn lifecycle_telemetry_let(
-        event: &'static str,
+    /// Emits `call 'beamtalk_actor':'lifecycle_started'(Class)` or
+    /// `'lifecycle_stopped'(Class, Reason)` (BT-4997). The runtime function
+    /// announces `ActorSpawned` / `ActorStopped`, records the trace-store
+    /// aggregate, and builds and emits the `[beamtalk, actor, lifecycle, _]`
+    /// telemetry event only while lifecycle events are enabled, so the generated
+    /// code builds no event metadata itself. Takes the clean Beamtalk class name
+    /// (e.g., `EventStore`), not the compiled module name, so lifecycle traces
+    /// match dispatch trace format.
+    fn lifecycle_call_let(
+        function: &'static str,
         telemetry_var: &'static str,
         class_name: &str,
-        extra_metadata: Document<'static>,
+        extra_args: Vec<Document<'static>>,
         body: Document<'static>,
     ) -> Document<'static> {
+        let mut args = vec![leaf::atom(class_name.to_owned())];
+        args.extend(extra_args);
         bind(
-            leaf::var("_TelPid"),
-            form::call("erlang", "self", []),
-            bind(
-                leaf::var(telemetry_var),
-                form::call(
-                    "beamtalk_actor",
-                    "maybe_execute_telemetry",
-                    [
-                        docvec![
-                            "['beamtalk', 'actor', 'lifecycle', ",
-                            leaf::atom(event),
-                            "]"
-                        ],
-                        Document::Str("~{}~"),
-                        docvec![
-                            "~{'pid' => _TelPid, 'class' => ",
-                            leaf::atom(class_name.to_owned()),
-                            extra_metadata,
-                            "}~"
-                        ],
-                    ],
-                ),
-                body,
-            ),
+            leaf::var(telemetry_var),
+            form::call("beamtalk_actor", function, args),
+            body,
         )
     }
 
@@ -875,11 +860,11 @@ impl CoreErlangGenerator {
                 ),
                 arm(
                     [leaf::atom("false")],
-                    Self::lifecycle_telemetry_let(
-                        "start",
+                    Self::lifecycle_call_let(
+                        "lifecycle_started",
                         "_TelStart",
                         class_name,
-                        Document::Nil,
+                        Vec::new(),
                         // BT-3992: strip the starter's initialize-ack
                         // target and ack at once — no `initialize` step
                         // follows, so startup ends here.
@@ -941,11 +926,11 @@ impl CoreErlangGenerator {
                             [leaf::atom("__skip_initialize__"), leaf::var("FinalState")],
                         ),
                         // Emit lifecycle start telemetry before returning
-                        Self::lifecycle_telemetry_let(
-                            "start",
+                        Self::lifecycle_call_let(
+                            "lifecycle_started",
                             "_TelStart",
                             class_name,
-                            Document::Nil,
+                            Vec::new(),
                             // BT-3992: strip the starter's initialize-ack
                             // target and keep it for handle_continue's
                             // `initialize` step, which acks once it succeeds.
@@ -2677,11 +2662,11 @@ impl CoreErlangGenerator {
                 "terminate",
                 [leaf::var("Reason"), leaf::var("State")],
                 // Emit lifecycle stop telemetry from compiled terminate
-                Self::lifecycle_telemetry_let(
-                    "stop",
+                Self::lifecycle_call_let(
+                    "lifecycle_stopped",
                     "_TelStop",
                     &class_name,
-                    Document::Str(", 'reason' => Reason"),
+                    vec![leaf::var("Reason")],
                     docvec![
                         "%% Call terminate: method if defined — exceptions must not prevent shutdown",
                         line(),

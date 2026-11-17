@@ -83,12 +83,14 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
     disable/0,
     is_enabled/0,
     clear/0,
-    %% Dispatch-events flag serialization (beamtalk_telemetry only, BT-4113)
+    %% Event-flag serialization (beamtalk_telemetry only, BT-4113; it serializes
+    %% the lifecycle flag too, BT-4997, under the unchanged name)
     serialize_dispatch_flag/1,
     %% Write-path helpers (called in the sending process, NOT via gen_server)
     record_dispatch/6,
     record_dispatch_stop/2,
     record_dispatch_exception/2,
+    record_lifecycle/4,
     record_trace_event/8,
     %% Query API
     get_traces/0,
@@ -483,16 +485,16 @@ max_events(Size) when is_integer(Size), Size > 0 ->
 
 -doc """
 Check whether the trace store's telemetry handlers (the actor lifecycle
-events) are attached. Returns false if telemetry is unavailable or the
+`kill` event and the VM measurements) are attached. Returns false if telemetry is unavailable or the
 handlers failed to attach. Dispatch samples do not go through telemetry
 (BT-4113): `beamtalk_telemetry:dispatch_span/5` records them directly.
 """.
 -spec telemetry_attached() -> boolean().
 telemetry_attached() ->
     try
-        Handlers = telemetry:list_handlers([beamtalk, actor, lifecycle, stop]),
+        Handlers = telemetry:list_handlers([beamtalk, actor, lifecycle, kill]),
         lists:any(
-            fun(#{id := Id}) -> Id =:= beamtalk_trace_store_lifecycle_stop end,
+            fun(#{id := Id}) -> Id =:= beamtalk_trace_store_lifecycle_kill end,
             Handlers
         )
     catch
@@ -571,22 +573,48 @@ record_dispatch_exception(_Metadata, _Duration) ->
     ok.
 
 -doc """
-Handler for [beamtalk, actor, lifecycle, *] events.
-Lifecycle events (start, stop, kill) are instantaneous — no duration.
-Recorded in the shared trace ring buffer with mode => lifecycle.
+Record one actor `start` or `stop` (BT-4997): the always-on `{Class, Action}`
+aggregate and, while tracing is enabled, a trace event with `mode => lifecycle`
+and duration 0 (lifecycle events are instantaneous). Called directly by
+`beamtalk_actor:lifecycle_started/1` / `lifecycle_stopped/2`, in the actor's
+own process, so the start/stop telemetry events can stay off when nobody
+listens (the same split as `record_dispatch_stop/2`). `Reason` is the
+terminate reason for `stop` and `undefined` for `start`.
+
+Total: a missing table drops the sample (`record_dispatch/6`), and the trace
+event is built only while tracing is enabled.
+""".
+-spec record_lifecycle(start | stop, pid(), atom(), term()) -> ok.
+record_lifecycle(Action, Pid, Class, Reason) ->
+    %% The metadata the telemetry event carried (minus pid and class).
+    EventMeta =
+        case Action of
+            stop -> #{reason => Reason};
+            start -> #{}
+        end,
+    Outcome = lifecycle_outcome(Action, EventMeta),
+    record_dispatch(Pid, Action, 0, Outcome, lifecycle, Class),
+    case is_enabled() of
+        true ->
+            record_trace_event(Pid, Class, Action, lifecycle, 0, Outcome, EventMeta, stop);
+        false ->
+            ok
+    end,
+    ok.
+
+-doc """
+Handler for the `[beamtalk, actor, lifecycle, kill]` event (still always
+emitted, it is rare). `start` and `stop` no longer arrive here: they are
+recorded by `record_lifecycle/4` (BT-4997). The handler still accepts every
+lifecycle action, for a handler left attached across a hot upgrade.
 """.
 -spec handle_lifecycle_event([atom()], map(), map(), map()) -> ok.
 handle_lifecycle_event(EventName, _Measurements, Metadata, _Config) ->
     #{pid := Pid, class := Class} = Metadata,
-    %% Extract lifecycle action from event name: [beamtalk, actor, lifecycle, Action]
     Action = lists:last(EventName),
-    %% Derive outcome from reason for stop events: normal/shutdown = ok, crash = error
     Outcome = lifecycle_outcome(Action, Metadata),
-    %% Record aggregate stats with selector = lifecycle action (e.g., start, stop, kill)
     record_dispatch(Pid, Action, 0, Outcome, lifecycle, Class),
-    %% Record trace event with mode => lifecycle, duration 0 (instantaneous).
-    %% Only while tracing is enabled does the event need its metadata built
-    %% (BT-4932: this handler runs on every actor start and stop).
+    %% Only while tracing is enabled does the event need its metadata built.
     case is_enabled() of
         true ->
             EventMeta = maps:without([pid, class], Metadata),
@@ -653,6 +681,8 @@ init([]) ->
     %% BT-4113: the opt-in dispatch events follow the trace store's enabled
     %% state (kept across a restart in persistent_term) and the app env.
     ok = beamtalk_telemetry:refresh_dispatch_events(),
+    %% BT-4997: and the lifecycle start/stop events follow the app env.
+    ok = beamtalk_telemetry:refresh_lifecycle_events(),
 
     %% Start periodic sweep timer
     TimerRef = start_sweep_timer(),
@@ -770,6 +800,7 @@ code_change(OldVsn, State, Extra) ->
     %% next refresh. Runs inline: this is the trace store's own process.
     lists:foreach(fun beamtalk_telemetry:detach_handler/1, retired_telemetry_handler_ids()),
     ok = beamtalk_telemetry:refresh_dispatch_events(),
+    ok = beamtalk_telemetry:refresh_lifecycle_events(),
     beamtalk_hot_reload:code_change(OldVsn, upgrade_state(State), Extra).
 
 -doc """
@@ -1215,11 +1246,9 @@ telemetry_handlers() ->
         %% No dispatch handlers (BT-4113): `beamtalk_telemetry:dispatch_span/5`
         %% records dispatch samples directly (record_dispatch_stop/2), so the
         %% dispatch events can stay off when nobody listens.
-        %% Lifecycle event handlers (start, stop, kill)
-        {beamtalk_trace_store_lifecycle_start, [beamtalk, actor, lifecycle, start],
-            fun ?MODULE:handle_lifecycle_event/4},
-        {beamtalk_trace_store_lifecycle_stop, [beamtalk, actor, lifecycle, stop],
-            fun ?MODULE:handle_lifecycle_event/4},
+        %% No start/stop handlers either (BT-4997): `beamtalk_actor` records
+        %% those through record_lifecycle/4, so the start/stop events can stay
+        %% off. Only the rare kill event still arrives as telemetry.
         {beamtalk_trace_store_lifecycle_kill, [beamtalk, actor, lifecycle, kill],
             fun ?MODULE:handle_lifecycle_event/4},
         {beamtalk_trace_store_vm_measurements, [vm, memory], fun ?MODULE:handle_vm_measurements/4}
@@ -1227,7 +1256,7 @@ telemetry_handlers() ->
 
 -doc """
 The trace store's telemetry handler ids, refused by `Telemetry attach:` and
-`Telemetry detach:`. Includes the retired pre-BT-4113 dispatch ids, which
+`Telemetry detach:`. Includes the retired pre-BT-4113 dispatch ids and the BT-4997 lifecycle start/stop ids, which
 `attach_telemetry_handlers/0` detaches on every (re)start: a user handler
 under one of those ids would otherwise be silently dropped.
 """.
@@ -1235,11 +1264,18 @@ under one of those ids would otherwise be silently dropped.
 telemetry_handler_ids() ->
     [Id || {Id, _EventName, _Handler} <- telemetry_handlers()] ++ retired_telemetry_handler_ids().
 
-%% Pre-BT-4113 dispatch handler ids. An older trace store can leave them
-%% attached across a hot upgrade, and their functions are gone.
+%% Retired handler ids: the pre-BT-4113 dispatch handlers and the BT-4997
+%% lifecycle start/stop handlers. An older trace store can leave them
+%% attached across a hot upgrade; they are detached on every (re)start.
 -spec retired_telemetry_handler_ids() -> [atom()].
 retired_telemetry_handler_ids() ->
-    [beamtalk_trace_store_dispatch_stop, beamtalk_trace_store_dispatch_exception].
+    [
+        beamtalk_trace_store_dispatch_stop,
+        beamtalk_trace_store_dispatch_exception,
+        %% BT-4997: recorded directly now, see record_lifecycle/4.
+        beamtalk_trace_store_lifecycle_start,
+        beamtalk_trace_store_lifecycle_stop
+    ].
 
 -doc """
 Attach telemetry event handlers.

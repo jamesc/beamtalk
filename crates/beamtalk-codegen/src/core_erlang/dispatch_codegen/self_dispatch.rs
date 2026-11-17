@@ -73,8 +73,8 @@ impl CoreErlangGenerator {
     /// `'unknown'` only for a process that carries no marker.
     ///
     /// Core Erlang map literals (`~{...}~`) cannot contain `call` expressions
-    /// (see `lifecycle_telemetry_let` in `gen_server/callbacks.rs` for the
-    /// same constraint), so the lookup is hoisted into a `let` binding inside
+    /// (the lifecycle calls in `gen_server/callbacks.rs` avoid building a map
+    /// for the same reason), so the lookup is hoisted into a `let` binding inside
     /// the clause body before the map is constructed. This only runs on the
     /// error path — no overhead on the success path.
     ///

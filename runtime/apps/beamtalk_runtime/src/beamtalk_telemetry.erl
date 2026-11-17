@@ -60,6 +60,32 @@ Attach and detach refresh only when the handler's event names fall under
 (because it raised) keeps the flag on until the next refresh, which only
 costs the events.
 
+## Lifecycle start/stop events are opt-in (BT-4997)
+
+`[beamtalk, actor, lifecycle, start | stop]` follow the same rule through
+`lifecycle_events_enabled/0`: with the flag off (the default) an actor start
+and stop build no metadata and call `telemetry:execute/3` not at all. The flag
+is true when any of these holds:
+
+- a Beamtalk handler attached through `attach/3` / `attachMany/3` listens to
+  `[beamtalk, actor, lifecycle, start]` or `[..., stop]` (cleared when the
+  last one detaches);
+- the app env `{beamtalk_runtime, lifecycle_telemetry}` is `true` (read at
+  startup and on every refresh), for Erlang/Elixir code that calls
+  `telemetry:attach/4` directly;
+- `enable_lifecycle_events/0` was called (undone by
+  `disable_lifecycle_events/0`, which leaves the other sources alone).
+
+Tracing does not need the events. The always-on `{Class, start | stop}`
+aggregates and the trace events for starts and stops are recorded directly by
+`beamtalk_actor:lifecycle_started/1` / `lifecycle_stopped/2` through
+`beamtalk_trace_store:record_lifecycle/4`, as dispatch is (BT-4113). The
+`ActorSpawned` / `ActorStopped` announcements are not telemetry and are
+published in both modes. `[beamtalk, actor, lifecycle, kill]` is rare and
+stays always emitted. The flag is read once per start and once per stop, and
+can be switched at run time: an actor started while it was off emits its
+`stop` event if the flag is on when it stops.
+
 Every entry point degrades gracefully when the `telemetry` application is not
 loaded (a partial test harness): emitting becomes a no-op and spans just run
 their body.
@@ -109,7 +135,12 @@ raises (and logs it).
     dispatch_events_enabled/0,
     enable_dispatch_events/0,
     disable_dispatch_events/0,
-    refresh_dispatch_events/0
+    refresh_dispatch_events/0,
+    %% lifecycle start/stop event opt-in (BT-4997)
+    lifecycle_events_enabled/0,
+    enable_lifecycle_events/0,
+    disable_lifecycle_events/0,
+    refresh_lifecycle_events/0
 ]).
 
 %% persistent_term keys (BT-4113). PT_DISPATCH_EVENTS is the flag the send
@@ -117,6 +148,11 @@ raises (and logs it).
 -define(PT_DISPATCH_EVENTS, beamtalk_dispatch_events).
 -define(PT_DISPATCH_FORCED, beamtalk_dispatch_events_forced).
 -define(DISPATCH_PREFIX, [beamtalk, actor, dispatch]).
+%% BT-4997: the same pair for the lifecycle start/stop events.
+-define(PT_LIFECYCLE_EVENTS, beamtalk_lifecycle_events).
+-define(PT_LIFECYCLE_FORCED, beamtalk_lifecycle_events_forced).
+-define(LIFECYCLE_START, [beamtalk, actor, lifecycle, start]).
+-define(LIFECYCLE_STOP, [beamtalk, actor, lifecycle, stop]).
 
 %%====================================================================
 %% stdlib facade
@@ -202,13 +238,19 @@ detach(HandlerId) ->
     check_handler_id(HandlerId, Sel),
     check_not_reserved(HandlerId, Sel),
     %% Read before detaching: afterwards the handler's events are gone.
-    WasDispatch = lists:any(fun(#{id := Id}) -> Id =:= HandlerId end, dispatch_handlers()),
+    WasDispatch = lists:any(fun(#{id := Id}) -> Id =:= HandlerId end, family_handlers(dispatch)),
+    WasLifecycle = lists:any(fun(#{id := Id}) -> Id =:= HandlerId end, family_handlers(lifecycle)),
     nil = detach_handler(HandlerId),
     %% BT-4113: the last Beamtalk dispatch handler gone switches the
     %% dispatch events back off (unless another source keeps them on). A
     %% handler on other events cannot change the flag: skip the refresh.
     case WasDispatch of
         true -> ok = refresh_dispatch_events();
+        false -> ok
+    end,
+    %% BT-4997: the same for the lifecycle start/stop events.
+    case WasLifecycle of
+        true -> ok = refresh_lifecycle_events();
         false -> ok
     end,
     nil.
@@ -332,22 +374,14 @@ them with `telemetry:attach/4` directly. Stays on until
 `disable_dispatch_events/0`.
 """.
 -spec enable_dispatch_events() -> ok.
-enable_dispatch_events() ->
-    with_dispatch_lock(fun() ->
-        persistent_term:put(?PT_DISPATCH_FORCED, true),
-        do_refresh_dispatch_events()
-    end).
+enable_dispatch_events() -> enable_family(dispatch).
 
 -doc """
 Undo `enable_dispatch_events/0`. The events stay on while another source
 (tracing, a Beamtalk dispatch handler, the app env) still asks for them.
 """.
 -spec disable_dispatch_events() -> ok.
-disable_dispatch_events() ->
-    with_dispatch_lock(fun() ->
-        _ = persistent_term:erase(?PT_DISPATCH_FORCED),
-        do_refresh_dispatch_events()
-    end).
+disable_dispatch_events() -> disable_family(dispatch).
 
 -doc """
 Recompute the dispatch-events flag from its sources (module doc). Called
@@ -356,14 +390,46 @@ after anything that can change one: trace store start and `enable/0` /
 `persistent_term` only when the value changes.
 """.
 -spec refresh_dispatch_events() -> ok.
-refresh_dispatch_events() ->
-    with_dispatch_lock(fun do_refresh_dispatch_events/0).
+refresh_dispatch_events() -> refresh_family(dispatch).
+
+-doc """
+Whether the actor lifecycle `start` / `stop` telemetry events are emitted
+(BT-4997): one `persistent_term` read. See the module doc for what turns it
+on.
+""".
+-spec lifecycle_events_enabled() -> boolean().
+lifecycle_events_enabled() ->
+    persistent_term:get(?PT_LIFECYCLE_EVENTS, false).
+
+-doc """
+Turn the lifecycle start/stop events on, for Erlang/Elixir code that attaches
+to them with `telemetry:attach/4` directly. Stays on until
+`disable_lifecycle_events/0`.
+""".
+-spec enable_lifecycle_events() -> ok.
+enable_lifecycle_events() -> enable_family(lifecycle).
+
+-doc """
+Undo `enable_lifecycle_events/0`. The events stay on while another source (a
+Beamtalk handler, the app env) still asks for them.
+""".
+-spec disable_lifecycle_events() -> ok.
+disable_lifecycle_events() -> disable_family(lifecycle).
+
+-doc """
+Recompute the lifecycle-events flag from its sources (module doc). Called at
+trace store start and after a Beamtalk handler on a lifecycle start/stop event
+is attached or detached.
+""".
+-spec refresh_lifecycle_events() -> ok.
+refresh_lifecycle_events() -> refresh_family(lifecycle).
 
 -doc """
 Emit a `telemetry:execute/3` event if telemetry is loaded, else do nothing.
-Moved from `beamtalk_actor:maybe_execute_telemetry/3` (BT-4025), which now
-adds only the actor-lifecycle announcement on top; `execute/3` is the
-validated Beamtalk-facing form.
+Moved from `beamtalk_actor:maybe_execute_telemetry/3` (BT-4025), now only a
+compatibility shim (BT-4997) that routes actor start and stop to
+`beamtalk_actor:lifecycle_started/1` / `lifecycle_stopped/2`; `execute/3` is
+the validated Beamtalk-facing form.
 """.
 -spec emit(list(), map(), map()) -> ok.
 emit(EventName, Measurements, Metadata) ->
@@ -510,39 +576,88 @@ record_dispatch_exit({exception, ExcMeta, Duration}) ->
 %% Internal: dispatch-event flag
 %%====================================================================
 
-%% Serialize a read-compute-write of the flag's persistent_terms through the
-%% node-local trace store gen_server, so concurrent refreshes cannot
-%% interleave their reads and the write. Its own init/1 and enable/disable
-%% calls already run in that process (serialized), so they run `Fun`
-%% directly; without a trace store (a partial harness) there is no
-%% concurrent flipper to serialize against.
-with_dispatch_lock(Fun) ->
+%% The two opt-in event families (dispatch, BT-4113; lifecycle start/stop,
+%% BT-4997) share one flag implementation. A family is a persistent_term for
+%% the flag the hot path reads, one for the "forced on" source, the app env key
+%% (`{beamtalk_runtime, Key}` being `true`), the event-name prefixes a Beamtalk
+%% handler listens on, and whether trace capture is also a source.
+-spec family(dispatch | lifecycle) ->
+    #{
+        events := atom(),
+        forced := atom(),
+        env := atom(),
+        prefixes := [[atom()]],
+        tracing := boolean()
+    }.
+family(dispatch) ->
+    #{
+        events => ?PT_DISPATCH_EVENTS,
+        forced => ?PT_DISPATCH_FORCED,
+        env => dispatch_telemetry,
+        prefixes => [?DISPATCH_PREFIX],
+        tracing => true
+    };
+family(lifecycle) ->
+    #{
+        events => ?PT_LIFECYCLE_EVENTS,
+        forced => ?PT_LIFECYCLE_FORCED,
+        env => lifecycle_telemetry,
+        prefixes => [?LIFECYCLE_START, ?LIFECYCLE_STOP],
+        tracing => false
+    }.
+
+enable_family(Family) ->
+    #{forced := Forced} = family(Family),
+    with_flag_lock(fun() ->
+        persistent_term:put(Forced, true),
+        do_refresh_family(Family)
+    end).
+
+disable_family(Family) ->
+    #{forced := Forced} = family(Family),
+    with_flag_lock(fun() ->
+        _ = persistent_term:erase(Forced),
+        do_refresh_family(Family)
+    end).
+
+refresh_family(Family) ->
+    with_flag_lock(fun() -> do_refresh_family(Family) end).
+
+%% Serialize a read-compute-write of a flag's persistent_terms through the
+%% node-local trace store gen_server (both families share its one lock), so
+%% concurrent refreshes cannot interleave their reads and the write. Its own
+%% init/1 and enable/disable calls already run in that process (serialized),
+%% so they run `Fun` directly; without a trace store (a partial harness) there
+%% is no concurrent flipper to serialize against.
+with_flag_lock(Fun) ->
     case whereis(beamtalk_trace_store) of
         undefined -> Fun();
         Self when Self =:= self() -> Fun();
         _Pid -> beamtalk_trace_store:serialize_dispatch_flag(Fun)
     end.
 
-do_refresh_dispatch_events() ->
+do_refresh_family(Family) ->
+    #{events := Key, forced := Forced, env := Env, tracing := Tracing} = family(Family),
     New =
-        beamtalk_trace_store:is_enabled() orelse
-            persistent_term:get(?PT_DISPATCH_FORCED, false) orelse
-            application:get_env(beamtalk_runtime, dispatch_telemetry, false) =:= true orelse
-            beamtalk_dispatch_handler_attached(),
-    case dispatch_events_enabled() of
+        (Tracing andalso beamtalk_trace_store:is_enabled()) orelse
+            persistent_term:get(Forced, false) orelse
+            application:get_env(beamtalk_runtime, Env, false) =:= true orelse
+            beamtalk_handler_attached(Family),
+    case persistent_term:get(Key, false) of
         New -> ok;
-        _ -> persistent_term:put(?PT_DISPATCH_EVENTS, New)
+        _ -> persistent_term:put(Key, New)
     end,
     ok.
 
-%% A Beamtalk-attached handler (handle_event/4) on any dispatch event.
-beamtalk_dispatch_handler_attached() ->
+%% A Beamtalk-attached handler (handle_event/4) on any event of the family.
+beamtalk_handler_attached(Family) ->
     Fun = fun ?MODULE:handle_event/4,
-    lists:any(fun(#{function := F}) -> F =:= Fun end, dispatch_handlers()).
+    lists:any(fun(#{function := F}) -> F =:= Fun end, family_handlers(Family)).
 
-%% Every telemetry handler on an event under [beamtalk, actor, dispatch].
-dispatch_handlers() ->
-    list_handlers(?DISPATCH_PREFIX).
+%% Every telemetry handler on an event of the family.
+family_handlers(Family) ->
+    #{prefixes := Prefixes} = family(Family),
+    lists:append([list_handlers(Prefix) || Prefix <- Prefixes]).
 
 %% Every telemetry handler on an event under Prefix; none when `telemetry` is
 %% not loaded or its handler table is not running.
@@ -554,9 +669,13 @@ list_handlers(Prefix) ->
         exit:{noproc, _} -> []
     end.
 
-%% Whether any of these event names is a dispatch event.
-any_dispatch_event(EventNames) ->
-    lists:any(fun(Name) -> lists:prefix(?DISPATCH_PREFIX, Name) end, EventNames).
+%% Whether any of these event names is an event of the family.
+any_family_event(Family, EventNames) ->
+    #{prefixes := Prefixes} = family(Family),
+    lists:any(
+        fun(Name) -> lists:any(fun(Prefix) -> lists:prefix(Prefix, Name) end, Prefixes) end,
+        EventNames
+    ).
 
 %% Same rule as telemetry:span/3: a caller-supplied context wins.
 with_span_context(#{telemetry_span_context := _} = Meta, _Ctx) -> Meta;
@@ -583,8 +702,13 @@ do_attach(HandlerId, EventNames, Block, Sel) ->
         ok ->
             %% BT-4113: a handler on a dispatch event switches the opt-in
             %% dispatch events on; one on other events cannot change the flag.
-            case any_dispatch_event(EventNames) of
+            case any_family_event(dispatch, EventNames) of
                 true -> ok = refresh_dispatch_events();
+                false -> ok
+            end,
+            %% BT-4997: and a handler on lifecycle start/stop, the lifecycle events.
+            case any_family_event(lifecycle, EventNames) of
+                true -> ok = refresh_lifecycle_events();
                 false -> ok
             end,
             beamtalk_result:from_tagged_tuple({ok, nil});

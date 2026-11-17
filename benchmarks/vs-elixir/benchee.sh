@@ -7,6 +7,7 @@
 #
 #   benchmarks/vs-elixir/benchee.sh            # env knobs: see actors.exs
 #   ERL_FLAGS="+S 1:1" BENCHEE_PARALLEL=1 benchmarks/vs-elixir/benchee.sh
+#   BENCH_SCRIPT=bench/reductions.exs benchmarks/vs-elixir/benchee.sh   # exact reductions per start (BT-4997)
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,4 +49,4 @@ cd "$here/elixir"
 # Same launch as run.sh (plain erl, -pa so the consolidated protocols shadow
 # the unconsolidated ones); the script is evaluated once Elixir is started.
 exec erl -noshell +B -kernel logger_level error -pa "${paths[@]}" -eval \
-  "{ok,_}=application:ensure_all_started(elixir), 'Elixir.Code':require_file(<<\"bench/actors.exs\">>), halt()."
+  "{ok,_}=application:ensure_all_started(elixir), 'Elixir.Code':require_file(<<\"${BENCH_SCRIPT:-bench/actors.exs}\">>), halt()."
