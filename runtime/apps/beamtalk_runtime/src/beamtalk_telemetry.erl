@@ -582,7 +582,13 @@ record_dispatch_exit({exception, ExcMeta, Duration}) ->
 %% (`{beamtalk_runtime, Key}` being `true`), the event-name prefixes a Beamtalk
 %% handler listens on, and whether trace capture is also a source.
 -spec family(dispatch | lifecycle) ->
-    #{events := atom(), forced := atom(), env := atom(), prefixes := [[atom()]], tracing := boolean()}.
+    #{
+        events := atom(),
+        forced := atom(),
+        env := atom(),
+        prefixes := [[atom()]],
+        tracing := boolean()
+    }.
 family(dispatch) ->
     #{
         events => ?PT_DISPATCH_EVENTS,
