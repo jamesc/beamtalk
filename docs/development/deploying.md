@@ -190,6 +190,47 @@ Once a console is up, `beamtalk repl --host <host> --port <port>` attaches
 over the same WebSocket protocol dev uses, with the identical op vocabulary
 minus the release's compiler-dependent refusals (below).
 
+### Tuning: minimum actor heap (`actor_min_heap_size`)
+
+By default a compiled actor's process starts with the VM's default heap (233
+words) and grows as it works. Starting an actor then costs about five garbage
+collections (BT-4932 measured this at 1.3–1.5 µs per start). A larger minimum
+heap removes them, at the price of memory for **every** actor, idle ones too:
+the heap is allocated up front. The VM rounds the request up to its next heap
+size, so 600, 2000 and 6000 words give heaps of 610, 2586 and 6772 words
+(8 bytes each on a 64-bit VM). Measured on an idle `VbCounter`, per actor: about
+2.7 KB with the setting unset, 5.7 KB at 600, 21.5 KB at 2000 and 55 KB at 6000
+(OTP 28, `benchmarks/vs-elixir/elixir/bench/actor_memory.exs`). It is **off by
+default**, so nothing changes until you set it.
+
+```erlang
+% config/sys.config (or: ERL_FLAGS="-beamtalk_runtime actor_min_heap_size 2000")
+[{beamtalk_runtime, [{actor_min_heap_size, 2000}]}].
+```
+
+The value is a number of words from 1 to 1048576 (8 MiB per actor). It is read
+when the runtime starts;
+change it at run time with `application:set_env(beamtalk_runtime,
+actor_min_heap_size, Words)` followed by `beamtalk_actor:refresh_spawn_options()`.
+Do that once, not in a loop or at peak load: a changed value writes a
+`persistent_term`, which triggers a node-wide garbage collection. Call it again
+after lowering the VM's `max_heap_size` (`+hmax`, `system_flag/2`) below the
+setting, which the range check cannot see once it is cached, or every start fails
+until you do. Two refreshes racing around an env change can leave the older value
+until the next call.
+It applies to actors started afterwards through the runtime's own start paths:
+`spawn`, `spawnWith:`, the monitored variants, named actors and supervised
+children (`beamtalk_actor:safe_spawn*`). It does **not** apply to an actor an
+Erlang/Elixir host starts itself in its own supervision tree through the
+generated `Module:start_link/1,2` or `beamtalk_actor:start_link/2,3`, nor to
+`native:` actors started by their own backing module. A value outside the range,
+or one the VM refuses (above a `+hmax` limit, say), is ignored with a warning, so
+a typo cannot change how actors start.
+
+Measure before choosing a size: `benchmarks/vs-elixir/benchee.sh` with
+`BENCH_SCRIPT=bench/actor_memory.exs` reports bytes per idle actor, and rows
+16a/16c/16d (`BENCHEE_ROWS=16a,16c,16d`) report the start cost.
+
 ### Hardening: `-start_epmd false`
 
 Every release runs loopback-bound Erlang distribution and, by OTP default,

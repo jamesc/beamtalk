@@ -403,6 +403,8 @@ decode/encode helpers and the pending-action helpers.
 
 %% Lifecycle start/stop (called from compiled actor init/terminate, BT-4997)
 -export([lifecycle_started/1, lifecycle_stopped/2]).
+%% Actor spawn options (BT-4997): the opt-in `actor_min_heap_size` setting.
+-export([spawn_options/0, gen_start_options/0, refresh_spawn_options/0]).
 %% Compatibility for a `.beam` built before BT-4997 (generated init/terminate
 %% called this): not called by current generated code.
 -export([maybe_execute_telemetry/3]).
@@ -798,7 +800,7 @@ with `Reason`) and `ignore` (exit `normal`).
 safe_spawn_monitored_async(Module, InitArgs) ->
     {Pid, MonRef} = proc_lib:spawn_opt(
         fun() -> async_init_and_loop(Module, InitArgs) end,
-        [monitor]
+        [monitor | spawn_options()]
     ),
     {ok, {Pid, MonRef}}.
 
@@ -844,7 +846,7 @@ async_init_and_loop(Module, InitArgs) ->
     {ok, {pid(), reference()}} | {error, term()}.
 start_monitor_and_await(Module, InitArgs, Mode) ->
     {AckArgs, AckRef} = with_init_ack(InitArgs),
-    case gen_server:start_monitor(Module, AckArgs, []) of
+    case gen_server:start_monitor(Module, AckArgs, gen_start_options()) of
         {ok, {Pid, MonRef}} -> await_initialize_or_kill_unlinked(Pid, MonRef, AckRef, Mode);
         {error, Reason} -> {error, Reason};
         ignore -> {error, ignore}
@@ -873,7 +875,9 @@ safe_spawn_linked(Module, InitArgs) ->
     case native_backing_module(Module) of
         none ->
             start_link_and_await(
-                fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs, linked
+                fun(Args) -> gen_server:start_link(Module, Args, gen_start_options()) end,
+                InitArgs,
+                linked
             );
         Backing ->
             safe_start_native(Backing, InitArgs, none, linked)
@@ -949,12 +953,16 @@ safe_spawn_named(Scope, Link, Name, Module, InitArgs) ->
     {ok, pid()} | {error, term()}.
 safe_spawn_gen_named(local, Link, Name, Module, InitArgs) ->
     start_link_and_await(
-        fun(Args) -> gen_server:start_link({local, Name}, Module, Args, []) end, InitArgs, Link
+        fun(Args) -> gen_server:start_link({local, Name}, Module, Args, gen_start_options()) end,
+        InitArgs,
+        Link
     );
 safe_spawn_gen_named(global, Link, Name, Module, InitArgs) ->
     case
         start_link_and_await(
-            fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs, Link
+            fun(Args) -> gen_server:start_link(Module, Args, gen_start_options()) end,
+            InitArgs,
+            Link
         )
     of
         {ok, Pid} ->
@@ -3015,6 +3023,93 @@ maybe_execute_telemetry([beamtalk, actor, lifecycle, stop], _Measurements, #{cla
     lifecycle_stopped(Class, maps:get(reason, M, normal));
 maybe_execute_telemetry(EventName, Measurements, Metadata) ->
     beamtalk_telemetry:emit(EventName, Measurements, Metadata).
+
+-define(PT_SPAWN_OPTIONS, beamtalk_actor_spawn_options).
+%% The largest `actor_min_heap_size` accepted: 1 Mi words = 8 MiB per actor. A
+%% value past it is a typo (an extra zero turns 2000 into 20000000, 160 MB for
+%% every actor), so it is ignored, not applied.
+-define(MAX_ACTOR_MIN_HEAP_WORDS, 1048576).
+
+-doc """
+Extra `erlang:spawn_opt/2` options for a compiled actor's process (BT-4997).
+`[]` by default, which leaves every spawn call exactly as it was. With the
+application env `{beamtalk_runtime, actor_min_heap_size}` set to a positive
+integer, `[{min_heap_size, Words}]`: the actor starts with a heap of at least
+that many words instead of the default 233, which avoids the garbage
+collections an actor's first messages otherwise trigger, at the price of
+`Words` words of memory for every actor (a word is 8 bytes on a 64-bit VM).
+
+Read from a `persistent_term` that `refresh_spawn_options/0` fills (at runtime
+start and on request), so a spawn pays one lookup, not an application-env read.
+""".
+-spec spawn_options() -> [{min_heap_size, pos_integer()}].
+spawn_options() ->
+    persistent_term:get(?PT_SPAWN_OPTIONS, []).
+
+-doc """
+`spawn_options/0` in the form `gen_server:start*` takes: `[]` when there is
+nothing to add, else `[{spawn_opt, Options}]`.
+""".
+-spec gen_start_options() -> [{spawn_opt, [{min_heap_size, pos_integer()}]}].
+gen_start_options() ->
+    case spawn_options() of
+        [] -> [];
+        SpawnOptions -> [{spawn_opt, SpawnOptions}]
+    end.
+
+-doc """
+Recompute the actor spawn options from the application env
+`{beamtalk_runtime, actor_min_heap_size}` (a number of words, 1 to 1 Mi).
+Unset gives `[]`, today's behaviour. A value that is not an integer in that
+range, or that the VM would refuse as a `min_heap_size` (for example above a
+`+hmax` limit), is ignored with a warning, so a typo cannot change how actors
+start or make every spawn fail. Called at runtime start; call it again after
+changing the env at run time, and again after lowering the VM's
+`max_heap_size` (`+hmax`, `system_flag/2`), which the range check cannot see
+once it is cached. A change of value writes a `persistent_term`, a node-wide
+garbage collection, so make it once, not in a loop or at peak load. It is not
+serialised: two racing refreshes around an env change can leave the older value
+until the next call. Actors that are already running keep the heap they have.
+""".
+-spec refresh_spawn_options() -> ok.
+refresh_spawn_options() ->
+    New =
+        case application:get_env(beamtalk_runtime, actor_min_heap_size) of
+            undefined ->
+                [];
+            {ok, Words} ->
+                case vm_accepts_min_heap(Words) of
+                    true ->
+                        [{min_heap_size, Words}];
+                    false ->
+                        ?LOG_WARNING(
+                            "Ignoring beamtalk_runtime actor_min_heap_size: expected an integer "
+                            "number of words from 1 to 1048576 that the VM accepts",
+                            #{value => Words, domain => [beamtalk, runtime]}
+                        ),
+                        []
+                end
+        end,
+    case persistent_term:get(?PT_SPAWN_OPTIONS, []) of
+        New -> ok;
+        _ -> persistent_term:put(?PT_SPAWN_OPTIONS, New)
+    end,
+    ok.
+
+%% Whether `Words` is a usable `min_heap_size`: an integer in range that
+%% `spawn_opt` accepts (it refuses one above a `+hmax` limit, say). The probe
+%% process allocates the heap once and exits at once.
+-spec vm_accepts_min_heap(term()) -> boolean().
+vm_accepts_min_heap(Words) when
+    is_integer(Words), Words >= 1, Words =< ?MAX_ACTOR_MIN_HEAP_WORDS
+->
+    try erlang:spawn_opt(fun() -> ok end, [{min_heap_size, Words}]) of
+        Pid when is_pid(Pid) -> true
+    catch
+        error:badarg -> false
+    end;
+vm_accepts_min_heap(_Other) ->
+    false.
 
 -doc """
 An actor of `Class` has started: called by the generated `init/1` (and the
