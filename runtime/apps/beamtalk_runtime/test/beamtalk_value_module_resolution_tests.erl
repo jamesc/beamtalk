@@ -123,7 +123,8 @@ untyped_value_send_test_() ->
             fun fast_other_receivers_dispatch_as_before/0},
         {"BT-4984: does_not_understand and immutable_value errors are the same cold and warm",
             fun fast_errors_are_same_cold_and_warm/0},
-        {"BT-4984: a warm untyped Value send makes at most 9 calls", fun fast_warm_send_call_count/0}
+        {"BT-4984: a warm untyped Value send makes at most 9 calls",
+            fun fast_warm_send_call_count/0}
     ]}.
 
 package_value_send_makes_no_code_server_call() ->
@@ -740,7 +741,9 @@ fast_errors_are_same_cold_and_warm() ->
         ?assertEqual(Imm, fast_outcome(Self, 'fieldAt:put:', [x, 1])),
         %% a class whose module has no dispatch/3: the value-type fallback
         beamtalk_test_module:unload(?FMOD),
-        ok = beamtalk_test_module:load(?FMOD, "-module('" ++ atom_to_list(?FMOD) ++ "'). -export([]).\n"),
+        ok = beamtalk_test_module:load(
+            ?FMOD, "-module('" ++ atom_to_list(?FMOD) ++ "'). -export([]).\n"
+        ),
         NoDispatch = fast_cold_outcome(Self, nope),
         ?assertEqual(
             {bt_error, does_not_understand, ?FCLASS, nope,
@@ -794,8 +797,10 @@ fast_warm_send_call_count() ->
 split_at_each_send(Calls) ->
     lists:foldl(
         fun
-            ({beamtalk_message_dispatch, send, [_, _, _]} = C, Acc) -> Acc ++ [[C]];
-            (C, []) -> [[C]];
+            ({beamtalk_message_dispatch, send, [_, _, _]} = C, Acc) ->
+                Acc ++ [[C]];
+            (C, []) ->
+                [[C]];
             (C, Acc) ->
                 Init = lists:droplast(Acc),
                 Init ++ [lists:last(Acc) ++ [C]]
