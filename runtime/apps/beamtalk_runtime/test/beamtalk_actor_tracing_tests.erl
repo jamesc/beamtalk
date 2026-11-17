@@ -42,6 +42,9 @@ setup() ->
             ok
     end,
     ok = beamtalk_telemetry:enable_dispatch_events(),
+    %% The lifecycle start/stop events are opt-in too (BT-4997): the tests
+    %% below attach with telemetry:attach/4, as Erlang code must turn them on.
+    ok = beamtalk_telemetry:enable_lifecycle_events(),
     ok.
 
 -doc "Like setup/0, but leaves dispatch events at their default (off).".
@@ -52,6 +55,7 @@ quiet_setup() ->
 
 cleanup(_State) ->
     ok = beamtalk_telemetry:disable_dispatch_events(),
+    ok = beamtalk_telemetry:disable_lifecycle_events(),
     try
         beamtalk_trace_store:clear(),
         beamtalk_trace_store:disable()

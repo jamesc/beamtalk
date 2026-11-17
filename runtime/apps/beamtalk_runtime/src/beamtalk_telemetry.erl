@@ -60,6 +60,32 @@ Attach and detach refresh only when the handler's event names fall under
 (because it raised) keeps the flag on until the next refresh, which only
 costs the events.
 
+## Lifecycle start/stop events are opt-in (BT-4997)
+
+`[beamtalk, actor, lifecycle, start | stop]` follow the same rule through
+`lifecycle_events_enabled/0`: with the flag off (the default) an actor start
+and stop build no metadata and call `telemetry:execute/3` not at all. The flag
+is true when any of these holds:
+
+- a Beamtalk handler attached through `attach/3` / `attachMany/3` listens to
+  `[beamtalk, actor, lifecycle, start]` or `[..., stop]` (cleared when the
+  last one detaches);
+- the app env `{beamtalk_runtime, lifecycle_telemetry}` is `true` (read at
+  startup and on every refresh), for Erlang/Elixir code that calls
+  `telemetry:attach/4` directly;
+- `enable_lifecycle_events/0` was called (undone by
+  `disable_lifecycle_events/0`, which leaves the other sources alone).
+
+Tracing does not need the events. The always-on `{Class, start | stop}`
+aggregates and the trace events for starts and stops are recorded directly by
+`beamtalk_actor:lifecycle_started/1` / `lifecycle_stopped/2` through
+`beamtalk_trace_store:record_lifecycle/4`, as dispatch is (BT-4113). The
+`ActorSpawned` / `ActorStopped` announcements are not telemetry and are
+published in both modes. `[beamtalk, actor, lifecycle, kill]` is rare and
+stays always emitted. The flag is read once per start and once per stop, and
+can be switched at run time: an actor started while it was off emits its
+`stop` event if the flag is on when it stops.
+
 Every entry point degrades gracefully when the `telemetry` application is not
 loaded (a partial test harness): emitting becomes a no-op and spans just run
 their body.
@@ -109,7 +135,12 @@ raises (and logs it).
     dispatch_events_enabled/0,
     enable_dispatch_events/0,
     disable_dispatch_events/0,
-    refresh_dispatch_events/0
+    refresh_dispatch_events/0,
+    %% lifecycle start/stop event opt-in (BT-4997)
+    lifecycle_events_enabled/0,
+    enable_lifecycle_events/0,
+    disable_lifecycle_events/0,
+    refresh_lifecycle_events/0
 ]).
 
 %% persistent_term keys (BT-4113). PT_DISPATCH_EVENTS is the flag the send
@@ -117,6 +148,11 @@ raises (and logs it).
 -define(PT_DISPATCH_EVENTS, beamtalk_dispatch_events).
 -define(PT_DISPATCH_FORCED, beamtalk_dispatch_events_forced).
 -define(DISPATCH_PREFIX, [beamtalk, actor, dispatch]).
+%% BT-4997: the same pair for the lifecycle start/stop events.
+-define(PT_LIFECYCLE_EVENTS, beamtalk_lifecycle_events).
+-define(PT_LIFECYCLE_FORCED, beamtalk_lifecycle_events_forced).
+-define(LIFECYCLE_START, [beamtalk, actor, lifecycle, start]).
+-define(LIFECYCLE_STOP, [beamtalk, actor, lifecycle, stop]).
 
 %%====================================================================
 %% stdlib facade
@@ -203,12 +239,18 @@ detach(HandlerId) ->
     check_not_reserved(HandlerId, Sel),
     %% Read before detaching: afterwards the handler's events are gone.
     WasDispatch = lists:any(fun(#{id := Id}) -> Id =:= HandlerId end, dispatch_handlers()),
+    WasLifecycle = lists:any(fun(#{id := Id}) -> Id =:= HandlerId end, lifecycle_handlers()),
     nil = detach_handler(HandlerId),
     %% BT-4113: the last Beamtalk dispatch handler gone switches the
     %% dispatch events back off (unless another source keeps them on). A
     %% handler on other events cannot change the flag: skip the refresh.
     case WasDispatch of
         true -> ok = refresh_dispatch_events();
+        false -> ok
+    end,
+    %% BT-4997: the same for the lifecycle start/stop events.
+    case WasLifecycle of
+        true -> ok = refresh_lifecycle_events();
         false -> ok
     end,
     nil.
@@ -358,6 +400,47 @@ after anything that can change one: trace store start and `enable/0` /
 -spec refresh_dispatch_events() -> ok.
 refresh_dispatch_events() ->
     with_dispatch_lock(fun do_refresh_dispatch_events/0).
+
+-doc """
+Whether the actor lifecycle `start` / `stop` telemetry events are emitted
+(BT-4997): one `persistent_term` read. See the module doc for what turns it
+on.
+"""
+-spec lifecycle_events_enabled() -> boolean().
+lifecycle_events_enabled() ->
+    persistent_term:get(?PT_LIFECYCLE_EVENTS, false).
+
+-doc """
+Turn the lifecycle start/stop events on, for Erlang/Elixir code that attaches
+to them with `telemetry:attach/4` directly. Stays on until
+`disable_lifecycle_events/0`.
+"""
+-spec enable_lifecycle_events() -> ok.
+enable_lifecycle_events() ->
+    with_dispatch_lock(fun() ->
+        persistent_term:put(?PT_LIFECYCLE_FORCED, true),
+        do_refresh_lifecycle_events()
+    end).
+
+-doc """
+Undo `enable_lifecycle_events/0`. The events stay on while another source (a
+Beamtalk handler, the app env) still asks for them.
+"""
+-spec disable_lifecycle_events() -> ok.
+disable_lifecycle_events() ->
+    with_dispatch_lock(fun() ->
+        _ = persistent_term:erase(?PT_LIFECYCLE_FORCED),
+        do_refresh_lifecycle_events()
+    end).
+
+-doc """
+Recompute the lifecycle-events flag from its sources (module doc). Called at
+trace store start and after a Beamtalk handler on a lifecycle start/stop event
+is attached or detached.
+"""
+-spec refresh_lifecycle_events() -> ok.
+refresh_lifecycle_events() ->
+    with_dispatch_lock(fun do_refresh_lifecycle_events/0).
 
 -doc """
 Emit a `telemetry:execute/3` event if telemetry is loaded, else do nothing.
@@ -535,6 +618,30 @@ do_refresh_dispatch_events() ->
     end,
     ok.
 
+do_refresh_lifecycle_events() ->
+    New =
+        persistent_term:get(?PT_LIFECYCLE_FORCED, false) orelse
+            application:get_env(beamtalk_runtime, lifecycle_telemetry, false) =:= true orelse
+            beamtalk_lifecycle_handler_attached(),
+    case lifecycle_events_enabled() of
+        New -> ok;
+        _ -> persistent_term:put(?PT_LIFECYCLE_EVENTS, New)
+    end,
+    ok.
+
+%% A Beamtalk-attached handler (handle_event/4) on a lifecycle start/stop event.
+beamtalk_lifecycle_handler_attached() ->
+    Fun = fun ?MODULE:handle_event/4,
+    lists:any(fun(#{function := F}) -> F =:= Fun end, lifecycle_handlers()).
+
+%% Every telemetry handler on the lifecycle start or stop event.
+lifecycle_handlers() ->
+    list_handlers(?LIFECYCLE_START) ++ list_handlers(?LIFECYCLE_STOP).
+
+%% Whether any of these event names is a lifecycle start/stop event.
+any_lifecycle_event(EventNames) ->
+    lists:any(fun(Name) -> Name =:= ?LIFECYCLE_START orelse Name =:= ?LIFECYCLE_STOP end, EventNames).
+
 %% A Beamtalk-attached handler (handle_event/4) on any dispatch event.
 beamtalk_dispatch_handler_attached() ->
     Fun = fun ?MODULE:handle_event/4,
@@ -585,6 +692,11 @@ do_attach(HandlerId, EventNames, Block, Sel) ->
             %% dispatch events on; one on other events cannot change the flag.
             case any_dispatch_event(EventNames) of
                 true -> ok = refresh_dispatch_events();
+                false -> ok
+            end,
+            %% BT-4997: and a handler on lifecycle start/stop, the lifecycle events.
+            case any_lifecycle_event(EventNames) of
+                true -> ok = refresh_lifecycle_events();
                 false -> ok
             end,
             beamtalk_result:from_tagged_tuple({ok, nil});

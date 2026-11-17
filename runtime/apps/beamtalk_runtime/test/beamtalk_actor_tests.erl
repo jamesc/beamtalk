@@ -2964,22 +2964,32 @@ ensure_counter_class_pid() ->
 %%% Additional actor system coverage
 %%% ============================================================================
 
-%%% maybe_execute_telemetry/3 conditional paths
+%%% lifecycle_started/1 and lifecycle_stopped/2 (BT-4997)
 
-maybe_execute_telemetry_returns_ok_test() ->
-    %% Exercises the public maybe_execute_telemetry/3 surface. In the unit
-    %% test environment telemetry is loaded, so the telemetry:execute/3
-    %% path runs; the function must still return ok to the caller.
-    Result = beamtalk_actor:maybe_execute_telemetry(
-        [beamtalk, actor, unit_test, event],
-        #{count => 1},
-        #{test => true}
+maybe_execute_telemetry_shim_test() ->
+    %% A pre-BT-4997 .beam still calls maybe_execute_telemetry/3; it must keep
+    %% working, and other events are emitted as given.
+    ?assertEqual(
+        ok,
+        beamtalk_actor:maybe_execute_telemetry(
+            [beamtalk, actor, lifecycle, start], #{}, #{pid => self(), class => 'ShimClass'}
+        )
     ),
-    ?assertEqual(ok, Result).
-
-maybe_execute_telemetry_with_empty_metadata_test() ->
-    %% Minimal call: empty measurements and metadata should still return ok
+    ?assertEqual(
+        ok,
+        beamtalk_actor:maybe_execute_telemetry(
+            [beamtalk, actor, lifecycle, stop],
+            #{},
+            #{pid => self(), class => 'ShimClass', reason => normal}
+        )
+    ),
     ?assertEqual(ok, beamtalk_actor:maybe_execute_telemetry([a, b], #{}, #{})).
+
+lifecycle_started_stopped_return_ok_test() ->
+    %% Both work in any process and with the events off (the default): they
+    %% announce, record the aggregate, and emit nothing.
+    ?assertEqual(ok, beamtalk_actor:lifecycle_started('LifecycleUnitClass')),
+    ?assertEqual(ok, beamtalk_actor:lifecycle_stopped('LifecycleUnitClass', normal)).
 
 %%% sync_send_remote error paths (exit reasons)
 
