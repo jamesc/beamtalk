@@ -1452,6 +1452,41 @@ fn send_handlers_keep_priority_positions() {
 }
 
 #[test]
+fn conditional_lowering_handler_position() {
+    // BT-4991: `generate_message_send` hands the canonical `ifTrue:ifFalse:`
+    // to the handlers up to and including `CONDITIONAL_LOWERING_HANDLER`, and
+    // the selector as written (`ifFalse:ifTrue:`) to every one after it. The
+    // entry must exist exactly once, and only these receiver-typed handlers,
+    // none of which claims `ifTrue:ifFalse:`, may precede it.
+    use crate::core_erlang::dispatch_codegen::{CONDITIONAL_LOWERING_HANDLER, HANDLERS};
+    let names: Vec<&str> = HANDLERS.iter().map(|(name, _)| *name).collect();
+    assert_eq!(
+        names
+            .iter()
+            .filter(|n| **n == CONDITIONAL_LOWERING_HANDLER)
+            .count(),
+        1,
+        "{CONDITIONAL_LOWERING_HANDLER} must appear in HANDLERS exactly once: {names:?}"
+    );
+    let position = names
+        .iter()
+        .position(|n| *n == CONDITIONAL_LOWERING_HANDLER)
+        .expect("counted above");
+    assert_eq!(
+        &names[..position],
+        [
+            "character_typed",
+            "protoobject",
+            "object",
+            "block",
+            "dict",
+            "list"
+        ],
+        "only these handlers may run before the conditional lowering"
+    );
+}
+
+#[test]
 fn non_tagged_exclusions_are_sealed_builtin_values() {
     // Every non-tagged-map row of the routing table must still be a sealed
     // builtin of Value- or Object-kind. The routing table keeps these classes

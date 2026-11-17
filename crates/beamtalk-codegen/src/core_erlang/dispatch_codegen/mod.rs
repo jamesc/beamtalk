@@ -124,6 +124,14 @@ impl ClassSendArgs<'_> {
     }
 }
 
+/// The [`HANDLERS`] entry that lowers the Boolean conditionals inline
+/// (`try_generate_boolean_protocol`). A literal-block `ifFalse:ifTrue:` is
+/// rewritten to `ifTrue:ifFalse:` for this handler and the ones before it;
+/// `generate_message_send` sends it under the selector as written to every
+/// handler after it (BT-4991). Named once so the table and that switch cannot
+/// disagree; pinned by `typed_sealed::conditional_lowering_handler_position`.
+pub(in crate::core_erlang) const CONDITIONAL_LOWERING_HANDLER: &str = "boolean_protocol";
+
 /// `generate_message_send`'s dispatch priority as data, replacing
 /// what were 15 source-ordered `if let Some(doc) = self.try_*()?` calls (two
 /// of them a duplicated `is_character_typed_receiver` check — see
@@ -151,7 +159,7 @@ pub(in crate::core_erlang) const HANDLERS: &[(&str, SendHandler)] = &[
     ("dict", CoreErlangGenerator::try_generate_dict_message),
     ("list", CoreErlangGenerator::try_generate_list_message),
     (
-        "boolean_protocol",
+        CONDITIONAL_LOWERING_HANDLER,
         CoreErlangGenerator::try_generate_boolean_protocol,
     ),
     ("spawn_await", CoreErlangGenerator::try_handle_spawn_await),
@@ -350,27 +358,42 @@ impl CoreErlangGenerator {
         //
         // BT-4991: a literal-block `ifFalse:ifTrue:` arrives rewritten as
         // `ifTrue:ifFalse:` (`ast::normalize`), which only the conditional
-        // lowering (`boolean_protocol`, and the handlers before it) reads.
-        // A send none of them claims is an ordinary message: it goes out under
-        // the selector the user wrote, with the arguments in the order written.
-        let written =
-            beamtalk_core::ast::normalize::as_written_if_false_if_true(selector, arguments);
+        // lowering ([`CONDITIONAL_LOWERING_HANDLER`], and the handlers before
+        // it) reads. A send none of them claims is an ordinary message: it
+        // goes out under the selector the user wrote, with the arguments in
+        // the order written. Built on first need, so an inlined conditional
+        // never pays for the clone.
+        let mut written: Option<Option<(MessageSelector, Vec<Expression>)>> = None;
         let mut past_conditional_lowering = false;
         for (name, handler) in HANDLERS {
-            let (selector, arguments) = match &written {
-                Some((selector, arguments)) if past_conditional_lowering => {
-                    (selector, arguments.as_slice())
-                }
-                _ => (selector, arguments),
+            let as_written = if past_conditional_lowering {
+                written
+                    .get_or_insert_with(|| {
+                        beamtalk_core::ast::normalize::as_written_if_false_if_true(
+                            selector, arguments,
+                        )
+                    })
+                    .as_ref()
+            } else {
+                None
+            };
+            let (selector, arguments) = match as_written {
+                Some((selector, arguments)) => (selector, arguments.as_slice()),
+                None => (selector, arguments),
             };
             if let Some(doc) = handler(self, receiver, selector, arguments)? {
                 return Ok(doc);
             }
-            past_conditional_lowering |= *name == "boolean_protocol";
+            past_conditional_lowering |= *name == CONDITIONAL_LOWERING_HANDLER;
         }
 
         // Unified dispatch via beamtalk_message_dispatch:send/3
-        match &written {
+        let as_written = written
+            .get_or_insert_with(|| {
+                beamtalk_core::ast::normalize::as_written_if_false_if_true(selector, arguments)
+            })
+            .as_ref();
+        match as_written {
             Some((selector, arguments)) => {
                 self.generate_runtime_dispatch(receiver, selector, arguments)
             }
