@@ -221,6 +221,44 @@ fn written_if_true_if_false_fallback_is_never_swapped() {
     assert!(!compact.contains("'ifFalse:ifTrue:'"), "Got:\n{code}");
 }
 
+/// BT-4991: a literal-block `ifFalse:ifTrue:` the inline lowering declines is
+/// still sent as `ifFalse:ifTrue:` with the arguments in the order written —
+/// a `self`/`super`/class receiver, arms that take parameters. The rewrite to
+/// `ifTrue:ifFalse:` is for the inline path only: a class that defines its own
+/// `ifFalse:ifTrue:` must keep being called.
+#[test]
+fn declined_if_false_if_true_sends_are_emitted_as_written() {
+    for (name, src) in [
+        (
+            "self_receiver",
+            "Object subclass: Tri\n  ifFalse: f ifTrue: t => #mine\n  probe => self ifFalse: [1] ifTrue: [2]\n",
+        ),
+        (
+            "super_receiver",
+            "Object subclass: Tri\n  probe => super ifFalse: [1] ifTrue: [2]\n",
+        ),
+        (
+            "class_receiver",
+            "Object subclass: Tri\n  probe => Tri ifFalse: [1] ifTrue: [2]\n",
+        ),
+        (
+            "block_params",
+            "Object subclass: Tri\n  probe: o => o ifFalse: [:x | 1] ifTrue: [:y | 2]\n",
+        ),
+    ] {
+        let code = codegen_named(src, &format!("bt@probe_declined_{name}"));
+        let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(
+            compact.contains("ifFalse:ifTrue:"),
+            "{name}: must send `ifFalse:ifTrue:`. Got:\n{code}"
+        );
+        assert!(
+            !compact.contains("'ifTrue:ifFalse:'"),
+            "{name}: must not send `ifTrue:ifFalse:`. Got:\n{code}"
+        );
+    }
+}
+
 #[test]
 fn and_pure_short_circuits_to_literal_false() {
     let src = "Value subclass: Probe\n  check: flag =>\n    flag and: [flag]\n";

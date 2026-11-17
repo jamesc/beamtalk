@@ -377,10 +377,29 @@ fn is_literal_repeat(node: &Expression) -> bool {
 /// The keyword selector `ifFalse:ifTrue:` (BT-4991).
 pub const IF_FALSE_IF_TRUE: &str = "ifFalse:ifTrue:";
 
-/// Whether `node` itself is an `ifFalse:ifTrue:` send with two literal block
-/// arguments, which [`desugar_if_false_if_true`] rewrites.
+/// Whether a conditional sent to `receiver` can take the inline lowering: not
+/// `self`, `super` (parentheses looked through, as the lowering's own gate
+/// does) or a class reference, whose sends run the object's or class's own
+/// methods and keep their dispatch. The one receiver rule of the inline
+/// conditional gate (`pure_boolean_shape`) and of the `ifFalse:ifTrue:` rewrite
+/// ([`desugar_if_false_if_true`]), so the rewrite is never applied to a send
+/// the lowering would decline for its receiver.
+#[must_use]
+pub fn receiver_takes_inline_conditional(receiver: &Expression) -> bool {
+    !matches!(
+        receiver.unwrap_parens(),
+        Expression::Super(_) | Expression::ClassReference { .. }
+    ) && !receiver.is_self()
+}
+
+/// Whether `node` itself is an `ifFalse:ifTrue:` send [`desugar_if_false_if_true`]
+/// rewrites: two literal blocks without parameters (a block with parameters
+/// keeps today's run-time arity error, which the inline lowering leaves to
+/// dynamic dispatch) sent to a receiver that can take the inline lowering
+/// ([`receiver_takes_inline_conditional`]).
 fn is_literal_if_false_if_true(node: &Expression) -> bool {
     let Expression::MessageSend {
+        receiver,
         selector: MessageSelector::Keyword(parts),
         arguments,
         is_cast: false,
@@ -392,8 +411,10 @@ fn is_literal_if_false_if_true(node: &Expression) -> bool {
     matches!(parts.as_slice(), [a, b] if a.keyword == "ifFalse:" && b.keyword == "ifTrue:")
         && matches!(
             arguments.as_slice(),
-            [Expression::Block(_), Expression::Block(_)]
+            [Expression::Block(f), Expression::Block(t)]
+                if f.parameters.is_empty() && t.parameters.is_empty()
         )
+        && receiver_takes_inline_conditional(receiver)
 }
 
 /// Rewrites every `c ifFalse: [a] ifTrue: [b]` (two literal blocks) in
@@ -1584,6 +1605,53 @@ Protocol define: P
             let module = peeled(src);
             assert_eq!(unparse_module(&module).trim(), src, "{src}");
             assert!(!needs_normalising(&module), "{src}");
+        }
+    }
+
+    #[test]
+    fn if_false_if_true_the_inline_lowering_declines_stays_a_plain_send() {
+        // A `self`/`super`/class receiver keeps its dispatch, and a block with
+        // parameters keeps its run-time arity error: the rewrite leaves both
+        // exactly as written.
+        for src in [
+            "self ifFalse: [1] ifTrue: [2]",
+            "(self) ifFalse: [1] ifTrue: [2]",
+            "Object ifFalse: [1] ifTrue: [2]",
+            "x ifFalse: [:a | 1] ifTrue: [2]",
+            "x ifFalse: [1] ifTrue: [:b | 2]",
+        ] {
+            let module = peeled(src);
+            assert!(!needs_normalising(&module), "{src}");
+            let Expression::MessageSend {
+                selector,
+                arguments,
+                ..
+            } = first_expr(&module)
+            else {
+                panic!("expected a send: {src}");
+            };
+            assert_eq!(selector.name(), "ifFalse:ifTrue:", "{src}");
+            assert!(!written_if_false_if_true(selector, arguments), "{src}");
+        }
+        let module = peeled("Object subclass: A\n  m => super ifFalse: [1] ifTrue: [2]\n");
+        assert!(!needs_normalising(&module));
+    }
+
+    #[test]
+    fn the_receiver_rule_is_the_inline_conditional_gates() {
+        for (src, takes) in [
+            ("x foo", true),
+            ("true foo", true),
+            ("1 foo", true),
+            ("self foo", false),
+            ("(self) foo", false),
+            ("Object foo", false),
+        ] {
+            let module = parse_bt(src);
+            let Expression::MessageSend { receiver, .. } = first_expr(&module) else {
+                panic!("expected a send: {src}");
+            };
+            assert_eq!(receiver_takes_inline_conditional(receiver), takes, "{src}");
         }
     }
 

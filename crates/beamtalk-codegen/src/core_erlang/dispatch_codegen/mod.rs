@@ -347,14 +347,35 @@ impl CoreErlangGenerator {
 
         // dispatch priority for every remaining message shape is
         // `HANDLERS` — see its doc for why `character_typed` leads the list.
-        for (_, handler) in HANDLERS {
+        //
+        // BT-4991: a literal-block `ifFalse:ifTrue:` arrives rewritten as
+        // `ifTrue:ifFalse:` (`ast::normalize`), which only the conditional
+        // lowering (`boolean_protocol`, and the handlers before it) reads.
+        // A send none of them claims is an ordinary message: it goes out under
+        // the selector the user wrote, with the arguments in the order written.
+        let written =
+            beamtalk_core::ast::normalize::as_written_if_false_if_true(selector, arguments);
+        let mut past_conditional_lowering = false;
+        for (name, handler) in HANDLERS {
+            let (selector, arguments) = match &written {
+                Some((selector, arguments)) if past_conditional_lowering => {
+                    (selector, arguments.as_slice())
+                }
+                _ => (selector, arguments),
+            };
             if let Some(doc) = handler(self, receiver, selector, arguments)? {
                 return Ok(doc);
             }
+            past_conditional_lowering |= *name == "boolean_protocol";
         }
 
         // Unified dispatch via beamtalk_message_dispatch:send/3
-        self.generate_runtime_dispatch(receiver, selector, arguments)
+        match &written {
+            Some((selector, arguments)) => {
+                self.generate_runtime_dispatch(receiver, selector, arguments)
+            }
+            None => self.generate_runtime_dispatch(receiver, selector, arguments),
+        }
     }
 
     /// Generates a cast (fire-and-forget) message send.

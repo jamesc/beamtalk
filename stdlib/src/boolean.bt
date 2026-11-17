@@ -42,9 +42,9 @@ abstract sealed Value subclass: Boolean
   /// value, exactly as `ifTrue:ifFalse:` does.
   ///
   /// With two literal block arguments the compiler lowers it as
-  /// `ifTrue:ifFalse:` with the blocks swapped (inlined, no closures); this
-  /// method answers every other send (non-literal blocks, an untyped
-  /// receiver).
+  /// `ifTrue:ifFalse:` with the blocks swapped (inlined, no closures), for
+  /// any receiver; this method answers a send whose block arguments are not
+  /// both literal blocks.
   ifFalse: _falseBlock :: Block(R) ifTrue: _trueBlock :: Block(R) -> R =>
     self subclassResponsibility
 
