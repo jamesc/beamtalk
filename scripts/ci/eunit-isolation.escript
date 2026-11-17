@@ -23,7 +23,10 @@
 %% running rebar3 first (debugging only: it must be up to date).
 %%
 %% Modes:
-%%   alone    every suite in its own fresh `erl` node, N nodes at a time.
+%%   alone    every suite in its own fresh `erl` node, N nodes at a time. Also
+%%            prints `DIRTY after M: ...` for a suite that leaves a bare-started
+%%            `beamtalk_*` server, or class processes with no runtime app, behind
+%%            (the things that make a later module's runtime start fail).
 %%   reverse  every suite, in one node per group, in reverse module order.
 %%   random   as reverse, in a shuffled order; the seed is printed, and
 %%            `--seed S` reproduces it.
@@ -317,9 +320,10 @@ run_node(Mods, Paths, Tag) ->
     %% earlier run would make a node that died before reporting look green.
     _ = file:del_dir_r(Dir),
     ok = filelib:ensure_dir(filename:join(Dir, "x")),
+    PROBE = "Probe = fun() -> Bare = [N || N <- registered(), lists:prefix(\"beamtalk\", atom_to_list(N)), P <- [whereis(N)], is_pid(P), (case process_info(P, dictionary) of {dictionary, D} -> (case proplists:get_value('$ancestors', D) of [A | _] when is_pid(A) -> not is_process_alive(A); _ -> false end); _ -> false end)], Heirless = lists:sort([T || T <- ets:all(), is_atom(T), lists:prefix(\"beamtalk\", atom_to_list(T)), ets:info(T, heir) =:= none]), AppUp = lists:keymember(beamtalk_runtime, 1, application:which_applications()), Classes = (catch length(pg:get_members(beamtalk_classes))), {lists:sort(Bare), Heirless, AppUp, Classes} end",
     Eval = lists:flatten(
         io_lib:format(
-            "Dir = ~p, Mods = ~p, "
+            "Dir = ~p, Mods = ~p, ~s, "
             "lists:foreach(fun(M) -> "
             "  io:format(user, \"~~n===== ~~s =====~~n\", [M]), "
             "  T0 = erlang:monotonic_time(millisecond), "
@@ -327,12 +331,14 @@ run_node(Mods, Paths, Tag) ->
             "  T1 = erlang:monotonic_time(millisecond), "
             "  ok = file:write_file(filename:join(Dir, atom_to_list(M) ++ \".status\"), "
             "         io_lib:format(\"~~p.~~n~~p.~~n\", [R, T1 - T0])), "
+            "  ok = file:write_file(filename:join(Dir, atom_to_list(M) ++ \".dirty\"), "
+            "         io_lib:format(\"~~p.~~n\", [(catch Probe())])), "
             "  Live = (catch lists:sort([C || {P, C, _} <- beamtalk_actor_scan:scan_actors_by_pid(), "
             "                                (catch beamtalk_workspace_actors:is_system(P)) =/= true])), "
             "  ok = file:write_file(filename:join(Dir, atom_to_list(M) ++ \".leaks\"), "
             "         io_lib:format(\"~~p.~~n\", [Live])) "
             "end, Mods), halt(0).",
-            [Dir, [list_to_atom(M) || M <- Mods]]
+            [Dir, [list_to_atom(M) || M <- Mods], PROBE]
         )
     ),
     Args = lists:append([["-pa", P] || P <- Paths]) ++
@@ -347,7 +353,34 @@ run_node(Mods, Paths, Tag) ->
     T0 = erlang:monotonic_time(millisecond),
     {_Status, Out} = cmd("erl", Args, node_env()),
     Wall = erlang:monotonic_time(millisecond) - T0,
-    [collect(M, Dir, Out, Wall, length(Mods)) || M <- Mods].
+    Rs = [collect(M, Dir, Out, Wall, length(Mods)) || M <- Mods],
+    [dirty_report(Dir, M) || M <- Mods, length(Mods) =:= 1],
+    Rs.
+
+%% Single-module (alone) runs only: what the module left behind in a fresh node.
+%% `bare_processes`: registered `beamtalk_*` processes whose starter (the first
+%% `$ancestors` entry, a pid) is dead, i.e. started with a bare `start_link` by a
+%% test process that has since exited. They survive that exit (a normal exit
+%% signal does not kill a process that is not trapping exits) and make the next
+%% module's `ensure_all_started(beamtalk_runtime)` fail with `already_started`.
+%% `class_processes_without_app`: class processes alive while `beamtalk_runtime`
+%% is not running (a stdlib module loaded before the app, whose on_load started
+%% them), which later own the boot tables with no heir.
+dirty_report(Dir, Mod) ->
+    case file:consult(filename:join(Dir, Mod ++ ".dirty")) of
+        {ok, [{Bare, Heirless, AppUp, Classes}]} ->
+            %% Heir-less boot tables are not reported: a fresh node always has some
+            %% (pg, the xref tables, ...) and there is no per-node baseline to
+            %% subtract.
+            _ = Heirless,
+            Issues =
+                [{bare_processes, Bare} || Bare =/= []] ++
+                [{class_processes_without_app, Classes} || not AppUp, is_integer(Classes), Classes > 0],
+            Issues =:= [] orelse io:format("  DIRTY after ~s: ~w~n", [Mod, Issues]),
+            ok;
+        _ ->
+            ok
+    end.
 
 report_dir(Tag) ->
     filename:absname(filename:join(["_build", "isolation", Tag])).
