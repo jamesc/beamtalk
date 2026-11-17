@@ -182,3 +182,7 @@ format_for_display_plain_map_test() ->
     ?assert(is_binary(Result)),
     %% Should be io_lib:format output, not "a ..." format
     ?assertNot(binary:match(Result, <<"a ">>) =:= {0, 2}).
+
+%%% Module-level fixture (BT-4962): loading a compiled `bt@stdlib@*` module starts
+%%% class processes; with no runtime app to own them they would outlive this suite.
+eunit_wrapper_(Tests) -> beamtalk_test_class_teardown:leak_free(Tests).

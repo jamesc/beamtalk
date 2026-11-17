@@ -88,3 +88,7 @@ ensure_beamtalk_loaded() ->
     {module, ?ISSUE_MODULE} = code:ensure_loaded(?ISSUE_MODULE),
     {module, 'bt@stdlib@integer'} = code:ensure_loaded('bt@stdlib@integer'),
     ok.
+
+%%% Module-level fixture (BT-4962): loading a compiled `bt@stdlib@*` module starts
+%%% class processes; with no runtime app to own them they would outlive this suite.
+eunit_wrapper_(Tests) -> beamtalk_test_class_teardown:leak_free(Tests).

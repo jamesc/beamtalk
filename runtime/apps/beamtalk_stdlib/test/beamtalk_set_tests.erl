@@ -19,6 +19,9 @@ Tests cover:
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
+%% Loading 'bt@stdlib@set' starts class processes with no app to own them (BT-4962).
+eunit_wrapper_(Tests) -> beamtalk_test_class_teardown:leak_free(Tests).
+
 %%% ============================================================================
 %%% Creation Tests
 %%% ============================================================================

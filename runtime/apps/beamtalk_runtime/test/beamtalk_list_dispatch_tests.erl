@@ -115,3 +115,7 @@ primitive_send_collect_test() ->
         [2, 4, 6],
         beamtalk_primitive:send([1, 2, 3], 'collect:', [fun(X) -> X * 2 end])
     ).
+
+%%% Module-level fixture (BT-4962): loading a compiled `bt@stdlib@*` module starts
+%%% class processes; with no runtime app to own them they would outlive this suite.
+eunit_wrapper_(Tests) -> beamtalk_test_class_teardown:leak_free(Tests).

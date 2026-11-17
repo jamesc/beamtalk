@@ -24,7 +24,31 @@ use it (see `beamtalk_test_corpus`'s moduledoc for why shared test helpers
 live in this app).
 """.
 
--export([stop_pg_class_processes/0, stop_class_process/1, is_class_process/1]).
+-export([
+    stop_pg_class_processes/0,
+    stop_class_process/1,
+    is_class_process/1,
+    leak_free/1
+]).
+
+-doc """
+Module-level EUnit wrapper for a suite that loads compiled `bt@stdlib@*` modules
+without starting the runtime app (BT-4962). Loading such a module runs its
+`on_load`, which starts bare class processes; with no app, they outlive the
+suite and later own the class boot tables with no heir. Use it as the suite's
+`eunit_wrapper_/1`: `eunit_wrapper_(Tests) -> beamtalk_test_class_teardown:leak_free(Tests).`
+After the suite it stops the class processes, but only when `beamtalk_runtime`
+is not running: with the app up the classes belong to it.
+""".
+-spec leak_free(term()) -> term().
+leak_free(Tests) ->
+    {setup, fun() -> ok end, fun(ok) -> stop_classes_without_app() end, Tests}.
+
+stop_classes_without_app() ->
+    case lists:keymember(beamtalk_runtime, 1, application:which_applications()) of
+        true -> ok;
+        false -> stop_pg_class_processes()
+    end.
 
 -doc """
 Stop every live class process: the members of the `beamtalk_classes` pg group,
