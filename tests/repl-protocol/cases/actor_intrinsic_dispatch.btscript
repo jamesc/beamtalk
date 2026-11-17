@@ -1,0 +1,83 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4995: the workspace half of stdlib/test/actor_intrinsic_dispatch_test.bt.
+// A live patch that adds a `terminate:` override to an actor's class, or to an
+// ancestor, while an actor of that class is running (or before one starts) is
+// seen by the next stop: the default `terminate:` is dispatched, not skipped,
+// and the memoised inherited-target verdict is flushed by the patch. It must
+// hold before and after the Actor intrinsics are called directly.
+
+seen := Ets new: #bt4995Repl type: #set
+// => _
+
+Actor subclass: IntrinsicReplBase
+  state: n = 0
+  bump => self.n := self.n + 1
+// => "IntrinsicReplBase"
+
+IntrinsicReplBase subclass: IntrinsicReplLeaf
+// => "IntrinsicReplLeaf"
+
+// An actor that started before any override exists.
+early := IntrinsicReplLeaf spawn
+// => Actor(IntrinsicReplLeaf, _)
+
+early bump
+// => 1
+
+// The ancestor gains a `terminate:` override while `early` is running.
+IntrinsicReplBase >> terminate: reason => (Ets named: #bt4995Repl) at: #ancestor put: reason
+// => "IntrinsicReplBase>>terminate:"
+
+early stopWith: #firstStop
+// => #ok
+
+seen at: #ancestor
+// => #firstStop
+
+// An actor started after the ancestor's override.
+mid := IntrinsicReplLeaf spawn
+// => Actor(IntrinsicReplLeaf, _)
+
+mid bump
+// => 1
+
+// The leaf's own override, added while `mid` is running, beats the ancestor's.
+IntrinsicReplLeaf >> terminate: reason => (Ets named: #bt4995Repl) at: #leaf put: reason
+// => "IntrinsicReplLeaf>>terminate:"
+
+mid stop
+// => #ok
+
+seen at: #leaf
+// => #normal
+
+// Removing the leaf's override restores the ancestor's on the next stop.
+IntrinsicReplLeaf removeSelector: #terminate:
+// => IntrinsicReplLeaf
+
+late := IntrinsicReplLeaf spawn
+// => Actor(IntrinsicReplLeaf, _)
+
+late stopWith: #lateStop
+// => #ok
+
+seen at: #ancestor
+// => #lateStop
+
+// Removing the ancestor's override too: stopping works with the default.
+IntrinsicReplBase removeSelector: #terminate:
+// => IntrinsicReplBase
+
+plain := IntrinsicReplLeaf spawn
+// => Actor(IntrinsicReplLeaf, _)
+
+plain stopWith: #plainStop
+// => #ok
+
+plain isAlive
+// => false
+
+seen delete
+// => _
