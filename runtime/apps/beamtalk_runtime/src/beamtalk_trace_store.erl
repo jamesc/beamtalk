@@ -83,7 +83,8 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
     disable/0,
     is_enabled/0,
     clear/0,
-    %% Dispatch-events flag serialization (beamtalk_telemetry only, BT-4113)
+    %% Event-flag serialization (beamtalk_telemetry only, BT-4113; it serializes
+    %% the lifecycle flag too, BT-4997, under the unchanged name)
     serialize_dispatch_flag/1,
     %% Write-path helpers (called in the sending process, NOT via gen_server)
     record_dispatch/6,

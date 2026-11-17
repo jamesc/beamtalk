@@ -16,8 +16,15 @@
 :ok = :vs_bench.boot()
 
 bt = :bt@vs_elixir_bench@vb_bench
-bt_self = :beamtalk_class_registry.resolve_class_object(:VbBench)
+
+bt_self =
+  case :beamtalk_class_registry.resolve_class_object(:VbBench) do
+    :undefined -> raise "VbBench not registered"
+    c -> c
+  end
+
 n = String.to_integer(System.get_env("RED_N") || "3000")
+if n < 100, do: raise("RED_N must be at least 100 (row 16d starts 100 actors per call)")
 
 # {row, class method, calls, starts per call}
 rows = [
