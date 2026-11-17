@@ -3345,7 +3345,7 @@ log_wire_cast_rejected(Selector, Error) ->
     }).
 
 -doc """
-Recognise and decode a `'\$beamtalk_wire'` cast/async envelope (ADR 0126
+Recognise and decode a `'\$beamtalk_wire'` cast envelope (ADR 0126
 §5.1) — shared the same way decode_wire_call/1 is (see its doc), by every
 compiled actor's generated `handle_cast/2`.
 
@@ -3355,31 +3355,15 @@ been logged and dropped (cast direction, §5.2) or the pending future
 rejected. Any other message (not a wire envelope) passes through unchanged
 as `{redispatch, Msg}`.
 
-The async-with-future shape (`kind = async`, the 7-element form) is decoded
-here too. Its sender is `async_send_impl/5`, which wire-tags a remote async
-send this way (ADR 0126 §5.1), so the shape is live on the wire. No compiled
-actor decodes it, though: the generated `handle_cast/2` only matches the
-6-element `cast`-kind envelope and never calls this function for an `async`
-one, so a 7-element `async` envelope sent to a compiled actor falls through
-the generated callback's own catch-all to `{noreply, State}`. Only the test
-host (`test_actor_host`) routes it here.
+Only the 6-element `cast` kind is decoded here. The 7-element `async` kind
+(`{'\$beamtalk_wire', V, async, Selector, WireArgs, FuturePid, PropCtx}`) has
+no decoder: `async_send_impl/5` can still build it for a remote target, but
+generated code and the stdlib never call `async_send/4` or
+`async_send_known/5` (only tests do), and a compiled actor's generated
+`handle_cast/2` only matches the `cast` kind, so it would fall through to the
+callback's catch-all.
 """.
 -spec decode_wire_cast(term()) -> {redispatch, term()} | noreply.
-decode_wire_cast(
-    {?BT_WIRE_TAG, ?BT_WIRE_VERSION, async, Selector, WireArgs, FuturePid, PropCtx}
-) ->
-    case beamtalk_wire:decode(WireArgs) of
-        {ok, Args} ->
-            {redispatch, {Selector, Args, FuturePid, PropCtx}};
-        {error, Error} ->
-            beamtalk_future:reject(FuturePid, Error#beamtalk_error{selector = Selector}),
-            noreply
-    end;
-decode_wire_cast(
-    {?BT_WIRE_TAG, SentVersion, async, Selector, _WireArgs, FuturePid, _PropCtx}
-) ->
-    beamtalk_future:reject(FuturePid, wire_version_unsupported_error(Selector, SentVersion)),
-    noreply;
 decode_wire_cast({?BT_WIRE_TAG, ?BT_WIRE_VERSION, cast, Selector, WireArgs, PropCtx}) ->
     case beamtalk_wire:decode(WireArgs) of
         {ok, Args} ->
