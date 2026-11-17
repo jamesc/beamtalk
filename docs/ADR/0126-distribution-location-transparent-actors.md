@@ -423,19 +423,19 @@ not a lookup feature, and belong with a future "cluster announcements" ADR.
 
 When the target of a send is on another node, the sender encodes the payload
 through a single new module, `beamtalk_wire`, and sends a **tagged wire
-message** instead of the local form. All three send kinds, and both result
-paths, are covered:
+message** instead of the local form. Sync and cast sends are covered; a remote
+async send is **not supported** (see the Amendment (BT-4989) section):
 
 | Send kind | Local message (unchanged) | Remote message |
 |-----------|---------------------------|----------------|
 | sync (`.`) | `{Selector, Args, PropCtx}` via `gen_server:call` | `{'$beamtalk_wire', 1, call, Selector, WireArgs, PropCtx}` |
-| async (Future) | `{Selector, Args, FuturePid, PropCtx}` via `gen_server:cast` | `{'$beamtalk_wire', 1, async, Selector, WireArgs, FuturePid, PropCtx}` |
+| async (Future) | `{Selector, Args, FuturePid, PropCtx}` via `gen_server:cast` | none: `beamtalk_actor:async_send/4,5` raises `unsupported_operation` for a remote target (BT-4989) |
 | cast (`!`) | `{cast, Selector, Args, PropCtx}` via `gen_server:cast` | `{'$beamtalk_wire', 1, cast, Selector, WireArgs, PropCtx}` |
 
 | Result path | Encoded when |
 |-------------|--------------|
 | sync reply (`{ok, R}` / `{error, E}`) | callee side, `node(FromPid) =/= node()` |
-| future resolution (`beamtalk_future:resolve/2`) | callee side, `node(FuturePid) =/= node()` |
+| future resolution (`beamtalk_future:resolve/2`) | callee side, `node(FuturePid) =/= node()` (only a future the callee was handed some other way; see the Amendment (BT-4989) section) |
 
 "Remote" is decided by `node(Pid) =/= node()` at send time (for
 `{registered, N, Node}` / `{global, N}` refs, by the resolved node). This is
@@ -1308,8 +1308,9 @@ there, `dispatch_user_method/4` needs the same `?IS_NLR` relay
 `beamtalk_class_dispatch.erl` already has — filed as BT-3582, a
 prerequisite tracked against this ADR's epic (BT-3577).
 
-**(d) Async futures resolve across nodes — holds, with two usage notes
-(§5.1).** An async send from A to an actor on B resolves A's future with
+**(d) Async futures resolve across nodes — held for the spike's fixture,
+later withdrawn (BT-4989; see the Amendment (BT-4989) section). The finding
+below describes what the hand-written fixture did, not a supported path.** An async send from A to an actor on B resolves A's future with
 the correct value via `beamtalk_future:resolve/2`, and rejects it on error.
 Two things a Phase 3 implementer should not assume: `beamtalk_future:
 await/2` signals rejection as a **`throw`** of `{future_rejected, Reason}`,
@@ -1369,6 +1370,34 @@ cross the wire per §5.1. Failures are `Error` values tagged `node_down`,
   `connectedWithSkew` are removed; the `nodes` surface operation (§10) maps
   `shapeSkew` over `Node connected`.
 - `Node` stays a stateless `Value` with no class state.
+
+## Amendment (BT-4989): remote async sends are not supported
+
+Phase 0.5 scenario (d) showed a remote async send resolving its future. That
+only worked against `test_actor_host`, a test-only receiver. No compiled actor
+ever decoded the 7-element `async` envelope: the generated `handle_cast/2`
+matches only the 6-element `cast` envelope, so a remote `async_send/4` to a
+compiled actor fell through the callback's catch-all and its future never
+resolved. No generated code or stdlib code calls `async_send/4` or
+`async_send_known/5`, so nothing in the language reached the path.
+
+**Decision (owner, 17 Nov 2026): remove the remote async path rather than
+implement the receiver.** The `'$beamtalk_wire', 1, async, ...` envelope no
+longer exists. `beamtalk_actor:async_send/4` and `async_send_known/5` to a
+pid on another node raise `unsupported_operation` (selector = the sent
+selector) immediately, before anything is sent and before any future watcher
+starts, so a caller can never be left waiting. Local async sends are
+unchanged. Sync sends (`.`) and casts (`!`) are the cross-node send kinds.
+
+Removed with it: the remote branch of `async_send_impl/5`, the `async` clauses
+of `decode_wire_cast/1`, the `async` clause of `beamtalk_actor_redaction`'s
+request redaction, `test_actor_host`'s `async` routing clause, and Phase 0.5
+scenario (d). A new `beamtalk_dist_wire_tests` case sends a remote
+`async_send` to a compiled actor on a second node and asserts the error.
+
+If remote async sends are wanted later, that is a new decision: the receiver
+must be generated code (`handle_cast/2` decoding the envelope and resolving the
+future), which changes the Core Erlang of every actor.
 
 ## Migration Path
 

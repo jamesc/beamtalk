@@ -33,6 +33,7 @@ same assertions here.
 
 -export([
     ensure_fixture_loaded/2,
+    spawn_unlinked_box_actor/0,
     install_meta_stub/2,
     restore_meta_stub/1
 ]).
@@ -91,6 +92,11 @@ wire_test_() ->
                     "a wire-tagged cast of an unrecognised kind is dropped, not "
                     "tail-recursed into forever (BT-3613 livelock guard)",
                     fun() -> unrecognised_kind_cast_does_not_livelock(PeerNode) end
+                },
+                {
+                    "a remote async_send to a compiled actor raises at once and never "
+                    "leaves a future pending (BT-4989)",
+                    fun() -> remote_async_send_raises_instead_of_hanging(PeerNode) end
                 },
                 {
                     "a wire-tagged call of an unrecognised kind falls through to "
@@ -343,6 +349,65 @@ unrecognised_kind_call_does_not_livelock(PeerNode) ->
         ),
         %% The actor survived and is still responsive.
         ?assertEqual(0, beamtalk_actor:sync_send(RemotePid, getValue, []))
+    after
+        rpc:call(PeerNode, gen_server, stop, [RemotePid])
+    end.
+
+%%====================================================================
+%% Remote async_send is unsupported and fails loudly (BT-4989, ADR 0126 §5.1)
+%%====================================================================
+
+-doc """
+Runs ON the peer: load the compiled `BoxActor` fixture, spawn an instance and
+unlink it from the `erpc` worker so it outlives the call (the same
+spawn-then-unlink sequence `beamtalk_dist_wirecheck_tests:spawn_via_erpc/2`
+uses).
+""".
+-spec spawn_unlinked_box_actor() -> pid().
+spawn_unlinked_box_actor() ->
+    ok = ensure_fixture_loaded(box_actor, 'BoxActor'),
+    Pid = element(4, 'bt@box_actor':spawn()),
+    unlink(Pid),
+    Pid.
+
+%% No compiled actor decodes an async wire envelope, so a remote `async_send/4`
+%% used to cast one into the generated `handle_cast/2` catch-all and leave the
+%% future pending forever. It must now raise before anything is sent. The whole
+%% attempt is bounded by a timeout so a regression fails instead of hanging.
+remote_async_send_raises_instead_of_hanging(PeerNode) ->
+    RemotePid = erpc:call(PeerNode, ?MODULE, spawn_unlinked_box_actor, []),
+    try
+        Future = beamtalk_future:new(),
+        Outcome =
+            try
+                beamtalk_actor:async_send(RemotePid, volume, [], beamtalk_future:pid(Future))
+            catch
+                error:Err -> {raised, Err}
+            end,
+        case Outcome of
+            {raised, _} ->
+                ok;
+            ok ->
+                %% Today's behaviour: the send "succeeds", the actor drops the
+                %% envelope, and the future never resolves.
+                ?assertEqual(
+                    {error, timeout},
+                    try
+                        beamtalk_future:await(Future, 1000)
+                    catch
+                        error:timeout -> {error, timeout};
+                        exit:timeout -> {error, timeout};
+                        throw:{timeout, _} -> {error, timeout}
+                    end
+                )
+        end,
+        ?assertMatch(
+            {raised, #{
+                '$beamtalk_class' := _,
+                error := #beamtalk_error{kind = unsupported_operation, selector = volume}
+            }},
+            Outcome
+        )
     after
         rpc:call(PeerNode, gen_server, stop, [RemotePid])
     end.
