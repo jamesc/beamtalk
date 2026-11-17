@@ -105,6 +105,27 @@ value_module_resolution_test_() ->
         {"without a generation nothing is memoised (BT-4623)", fun no_generation_memoises_nothing/0}
     ]}.
 
+%% BT-4984: an untyped send to a Value whose class module exports `dispatch/3`
+%% takes a short path through `beamtalk_primitive:send/3`. These tests pin the
+%% behaviour that path must keep (they pass on the tree before it), and the one
+%% thing it must change (the call count).
+untyped_value_send_test_() ->
+    {setup, fun setup/0, fun fast_cleanup/1, [
+        {"BT-4984: reload that changes, removes or adds a method is seen by the next send",
+            fun fast_reload_is_seen_by_next_send/0},
+        {"BT-4984: re-registration under another module is seen by the next send",
+            fun fast_reregistration_is_seen_by_next_send/0},
+        {"BT-4984: an extension added or removed at run time is seen by the next send",
+            fun fast_extension_change_is_seen_by_next_send/0},
+        {"BT-4984: an inherited method follows a reload of the superclass module",
+            fun fast_inherited_follows_superclass_reload/0},
+        {"BT-4984: receivers that are not a tagged-map Value dispatch as before",
+            fun fast_other_receivers_dispatch_as_before/0},
+        {"BT-4984: does_not_understand and immutable_value errors are the same cold and warm",
+            fun fast_errors_are_same_cold_and_warm/0},
+        {"BT-4984: a warm untyped Value send makes at most 9 calls", fun fast_warm_send_call_count/0}
+    ]}.
+
 package_value_send_makes_no_code_server_call() ->
     %% Neither naming-convention candidate exists, so probing either one would
     %% be a code_server miss.
@@ -560,6 +581,288 @@ no_generation_memoises_nothing() ->
         beamtalk_class_derived_cache:invalidate(),
         beamtalk_test_proc:stop(Pid)
     end.
+
+%%% ============================================================================
+%%% BT-4984: untyped Value send
+%%% ============================================================================
+
+-define(FCLASS, 'ZzFastValue').
+-define(FMOD, 'bt@zzfast@zz_fast_value').
+-define(FMOD2, 'bt@zzfast2@zz_fast_value').
+-define(FPARENT, 'ZzFastParent').
+-define(FPMOD, 'bt@zzfast@zz_fast_parent').
+%% The hint the fixture's DNU carries, as the error record holds it.
+-define(FHINT, {beamtalk_string, <<"fixture hint">>}).
+
+fast_cleanup(_) ->
+    lists:foreach(fun beamtalk_test_module:unload/1, [?FMOD, ?FMOD2, ?FPMOD]).
+
+fast_reload_is_seen_by_next_send() ->
+    Pid = beamtalk_test_class:start(?FCLASS, class_info(?FMOD)),
+    Self = #{'$beamtalk_class' => ?FCLASS, x => 7},
+    try
+        ok = fast_load(?FMOD, ?FCLASS, v1, [x], none),
+        ?assertEqual({v1, x}, fast_send(Self, x)),
+        %% warm: the memo is populated, then the class module is reloaded
+        ?assertEqual({v1, x}, fast_send(Self, x)),
+        %% method changed
+        ok = fast_reload(?FMOD, ?FCLASS, v2, [x], none),
+        ?assertEqual({v2, x}, fast_send(Self, x)),
+        %% method removed
+        ok = fast_reload(?FMOD, ?FCLASS, v3, [], none),
+        ?assertEqual(
+            {bt_error, does_not_understand, ?FCLASS, x, ?FHINT}, fast_outcome(Self, x)
+        ),
+        %% method added
+        ok = fast_reload(?FMOD, ?FCLASS, v4, [x, y], none),
+        ?assertEqual({v4, x}, fast_send(Self, x)),
+        ?assertEqual({v4, y}, fast_send(Self, y))
+    after
+        beamtalk_test_proc:stop(Pid)
+    end.
+
+fast_reregistration_is_seen_by_next_send() ->
+    Pid = beamtalk_test_class:start(?FCLASS, class_info(?FMOD)),
+    Self = #{'$beamtalk_class' => ?FCLASS, x => 7},
+    try
+        ok = fast_load(?FMOD, ?FCLASS, v1, [x], none),
+        ok = fast_load(?FMOD2, ?FCLASS, other, [x], none),
+        ?assertEqual({v1, x}, fast_send(Self, x)),
+        ?assertEqual({v1, x}, fast_send(Self, x)),
+        ok = beamtalk_class_metadata:merge_identity(?FCLASS, ?FMOD2, [], none, false),
+        ?assertEqual({other, x}, fast_send(Self, x)),
+        ?assertEqual({other, x}, fast_send(Self, x)),
+        ok = beamtalk_class_metadata:merge_identity(?FCLASS, ?FMOD, [], none, false),
+        ?assertEqual({v1, x}, fast_send(Self, x))
+    after
+        beamtalk_test_proc:stop(Pid)
+    end.
+
+fast_extension_change_is_seen_by_next_send() ->
+    Pid = beamtalk_test_class:start(?FCLASS, class_info(?FMOD)),
+    Self = #{'$beamtalk_class' => ?FCLASS, x => 7},
+    try
+        ok = fast_load(?FMOD, ?FCLASS, v1, [x], none),
+        ?assertEqual({v1, x}, fast_send(Self, x)),
+        ?assertMatch({bt_error, does_not_understand, ?FCLASS, ext, _}, fast_outcome(Self, ext)),
+        Gen0 = beamtalk_class_derived_cache:generation(),
+        ok = beamtalk_extensions:register(
+            ?FCLASS, ext, fun(Args, _Self) -> {ext, Args} end, zz_fast_owner
+        ),
+        ?assertNotEqual(Gen0, beamtalk_class_derived_cache:generation()),
+        ?assertEqual({ext, [1]}, fast_send(Self, ext, [1])),
+        ?assertEqual({v1, x}, fast_send(Self, x)),
+        Gen1 = beamtalk_class_derived_cache:generation(),
+        ok = beamtalk_extensions:unregister(?FCLASS, ext),
+        ?assertNotEqual(Gen1, beamtalk_class_derived_cache:generation()),
+        ?assertMatch({bt_error, does_not_understand, ?FCLASS, ext, _}, fast_outcome(Self, ext)),
+        ?assertEqual({v1, x}, fast_send(Self, x))
+    after
+        _ = beamtalk_extensions:unregister(?FCLASS, ext),
+        beamtalk_test_proc:stop(Pid)
+    end.
+
+fast_inherited_follows_superclass_reload() ->
+    PPid = beamtalk_test_class:start(?FPARENT, class_info(?FPMOD, 'Object')),
+    CPid = beamtalk_test_class:start(?FCLASS, class_info(?FMOD, ?FPARENT)),
+    Self = #{'$beamtalk_class' => ?FCLASS, x => 7},
+    try
+        ok = fast_load(?FPMOD, ?FPARENT, pv1, [base], none),
+        ok = fast_load(?FMOD, ?FCLASS, v1, [x], ?FPMOD),
+        ?assertEqual({pv1, base}, fast_send(Self, base)),
+        ?assertEqual({pv1, base}, fast_send(Self, base)),
+        ok = fast_reload(?FPMOD, ?FPARENT, pv2, [base], none),
+        ?assertEqual({pv2, base}, fast_send(Self, base)),
+        %% inherited method removed from the superclass
+        ok = fast_reload(?FPMOD, ?FPARENT, pv3, [], none),
+        ?assertMatch(
+            {bt_error, does_not_understand, ?FPARENT, base, _}, fast_outcome(Self, base)
+        ),
+        ?assertEqual({v1, x}, fast_send(Self, x)),
+        %% the superclass becomes an Exception: the subclass follows it
+        ok = beamtalk_class_metadata:merge_identity(
+            ?FPARENT, ?FPARENT, [], 'Exception', false
+        ),
+        ?assertEqual({module, 'bt@stdlib@exception'}, beamtalk_primitive:tagged_map_dispatch(Self))
+    after
+        beamtalk_test_proc:stop(CPid),
+        beamtalk_test_proc:stop(PPid)
+    end.
+
+fast_other_receivers_dispatch_as_before() ->
+    Pid = beamtalk_test_class:start(?FCLASS, class_info(?FMOD)),
+    try
+        ok = fast_load(?FMOD, ?FCLASS, v1, [x], none),
+        %% warm the Value memo first, so a wrongly shared fast path would show
+        ?assertEqual({v1, x}, fast_send(#{'$beamtalk_class' => ?FCLASS}, x)),
+        %% primitives, nil, a foreign term and an untagged map (Dictionary)
+        ?assertEqual(7, fast_send(3, '+', [4])),
+        ?assertEqual(true, fast_send(nil, isNil)),
+        ?assertEqual(false, fast_send(make_ref(), isNil)),
+        ?assertEqual(1, fast_send(#{a => 1}, size)),
+        %% a tag that is not a class atom is not a Value of that class
+        ?assertEqual(false, fast_send(#{'$beamtalk_class' => <<"x">>}, isNil)),
+        %% a tagged map of an unregistered class is not routed to ?FMOD
+        ?assertMatch(
+            {bt_error, does_not_understand, 'ZzFastUnregistered', x, _},
+            fast_outcome(#{'$beamtalk_class' => 'ZzFastUnregistered'}, x)
+        ),
+        %% an actor-shaped record whose process is gone
+        Dead = spawn(fun() -> ok end),
+        MRef = erlang:monitor(process, Dead),
+        receive
+            {'DOWN', MRef, process, Dead, _} -> ok
+        end,
+        Actor = #beamtalk_object{class = 'ZzFastNoSuchActor', class_mod = 'zz_no_mod', pid = Dead},
+        ?assertEqual(
+            fast_outcome(Actor, x),
+            fast_outcome(Actor, x)
+        ),
+        ?assertMatch({bt_error, _, _, x, _}, fast_outcome(Actor, x))
+    after
+        beamtalk_test_proc:stop(Pid)
+    end.
+
+fast_errors_are_same_cold_and_warm() ->
+    Pid = beamtalk_test_class:start(?FCLASS, class_info(?FMOD)),
+    Self = #{'$beamtalk_class' => ?FCLASS, x => 7},
+    try
+        ok = fast_load(?FMOD, ?FCLASS, v1, [x], none),
+        %% unknown selector answered by the compiled dispatch/3
+        DnuCold = fast_cold_outcome(Self, nope),
+        ?assertEqual(
+            {bt_error, does_not_understand, ?FCLASS, nope, ?FHINT}, DnuCold
+        ),
+        ?assertEqual(DnuCold, fast_outcome(Self, nope)),
+        %% a Value cannot be mutated through fieldAt:put:
+        Imm = fast_cold_outcome(Self, 'fieldAt:put:', [x, 1]),
+        ?assertMatch({bt_error, immutable_value, ?FCLASS, 'fieldAt:put:', _}, Imm),
+        ?assertEqual(Imm, fast_outcome(Self, 'fieldAt:put:', [x, 1])),
+        %% a class whose module has no dispatch/3: the value-type fallback
+        beamtalk_test_module:unload(?FMOD),
+        ok = beamtalk_test_module:load(?FMOD, "-module('" ++ atom_to_list(?FMOD) ++ "'). -export([]).\n"),
+        NoDispatch = fast_cold_outcome(Self, nope),
+        ?assertEqual(
+            {bt_error, does_not_understand, ?FCLASS, nope,
+                {beamtalk_string, <<"Value type does not understand this message">>}},
+            NoDispatch
+        ),
+        ?assertEqual(NoDispatch, fast_outcome(Self, nope))
+    after
+        beamtalk_test_proc:stop(Pid)
+    end.
+
+fast_warm_send_call_count() ->
+    %% Before BT-4984 a warm send made 17 calls (18 in bench-dispatch p3, which
+    %% also counts the loop closure): send/3 x2, send_map/3, tagged_map_dispatch/1,
+    %% tagged_class_dispatch/1, class_of/1, maps:find/2, generation/0,
+    %% persistent_term:get/2, atomics:get/2, resolved_module_loaded/2,
+    %% module_loaded/1, value_type_send/5, is_ivar_method/1, function_exported/3,
+    %% dispatch/3 and the method.
+    Pid = beamtalk_test_class:start(?FCLASS, class_info(?FMOD)),
+    Self = #{'$beamtalk_class' => ?FCLASS, x => 7},
+    try
+        ok = fast_load(?FMOD, ?FCLASS, v1, [x], none),
+        Patterns = [
+            {beamtalk_message_dispatch, '_', '_'},
+            {beamtalk_primitive, '_', '_'},
+            {beamtalk_tagged_map, '_', '_'},
+            {beamtalk_class_derived_cache, '_', '_'},
+            {?FMOD, '_', '_'},
+            {erlang, function_exported, 3},
+            {erlang, module_loaded, 1},
+            {persistent_term, get, 2},
+            {atomics, get, 2},
+            {maps, find, 2}
+        ],
+        {Result, Calls} = calls_during(Patterns, fun() ->
+            _ = beamtalk_message_dispatch:send(Self, x, []),
+            erlang:put(zz_fast_mark, start),
+            %% only the second (warm) send is counted: drop what the first made
+            {warm, beamtalk_message_dispatch:send(Self, x, [])}
+        end),
+        ?assertEqual({warm, {v1, x}}, Result),
+        %% the first send's calls precede the second's; count the second send
+        %% by locating the last entry into beamtalk_message_dispatch:send/3
+        Warm = lists:last(split_at_each_send(Calls)),
+        ?assert(length(Warm) =< 9, {warm_send_calls, Warm})
+    after
+        beamtalk_test_proc:stop(Pid)
+    end.
+
+%% Split a call list into one list per top-level beamtalk_message_dispatch:send/3.
+split_at_each_send(Calls) ->
+    lists:foldl(
+        fun
+            ({beamtalk_message_dispatch, send, [_, _, _]} = C, Acc) -> Acc ++ [[C]];
+            (C, []) -> [[C]];
+            (C, Acc) ->
+                Init = lists:droplast(Acc),
+                Init ++ [lists:last(Acc) ++ [C]]
+        end,
+        [],
+        Calls
+    ).
+
+fast_send(Self, Selector) ->
+    fast_send(Self, Selector, []).
+
+fast_send(Self, Selector, Args) ->
+    beamtalk_message_dispatch:send(Self, Selector, Args).
+
+%% What a send did, as a comparable term: the result, or the structured error.
+fast_outcome(Self, Selector) ->
+    fast_outcome(Self, Selector, []).
+
+fast_outcome(Self, Selector, Args) ->
+    try
+        {ok, fast_send(Self, Selector, Args)}
+    catch
+        error:#{error := #beamtalk_error{kind = K, class = C, selector = S, hint = H}} ->
+            {bt_error, K, C, S, H};
+        Class:Reason ->
+            {Class, Reason}
+    end.
+
+%% fast_outcome/3 with this process's memo of the class erased first.
+fast_cold_outcome(Self, Selector) ->
+    fast_cold_outcome(Self, Selector, []).
+
+fast_cold_outcome(Self, Selector, Args) ->
+    erase({beamtalk_primitive, tagged_class_dispatch, ?FCLASS}),
+    fast_outcome(Self, Selector, Args).
+
+fast_load(Module, Class, Version, Selectors, Parent) ->
+    beamtalk_test_module:load(Module, fast_source(Module, Class, Version, Selectors, Parent)).
+
+fast_reload(Module, Class, Version, Selectors, Parent) ->
+    _ = code:purge(Module),
+    fast_load(Module, Class, Version, Selectors, Parent).
+
+%% Source of a throwaway Value class module in the shape of a compiled one:
+%% `dispatch/3` answers `{Version, Selector}` for its own selectors, then asks
+%% the extension table, then the parent module (or raises the DNU).
+fast_source(Module, Class, Version, Selectors, Parent) ->
+    Own = [io_lib:format("'~s' -> {~s, '~s'};~n", [S, Version, S]) || S <- Selectors],
+    Fallback =
+        case Parent of
+            none ->
+                io_lib:format(
+                    "case beamtalk_extensions:lookup('~s', Sel) of~n"
+                    "  {ok, Fun, _} -> Fun(Args, Self);~n"
+                    "  not_found -> beamtalk_error:raise(beamtalk_error:new("
+                    "does_not_understand, '~s', Sel, <<\"fixture hint\">>))~n"
+                    "end",
+                    [Class, Class]
+                );
+            _ ->
+                io_lib:format("'~s':dispatch(Sel, Args, Self)", [Parent])
+        end,
+    io_lib:format(
+        "-module('~s').~n-export([dispatch/3]).~n"
+        "dispatch(Sel, Args, Self) ->~n  case Sel of~n~s  _ -> ~s~n  end.~n",
+        [Module, Own, Fallback]
+    ).
 
 %%% ============================================================================
 %%% Helpers
