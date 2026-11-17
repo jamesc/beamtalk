@@ -90,5 +90,153 @@ plain stopWith: #plainStop
 plain isAlive
 // => false
 
+
+// === Extensions on `Actor` itself (global, so they live in this serial script) ===
+//
+// PIN-BUG BT-5002 (pinned as observed before BT-4995; a fix flips the "ignored"
+// lines): an extension on `Actor` is seen by a direct subclass but ignored by a
+// class below it.
+
+IntrinsicReplBase >> go => self continueWith: #bump
+// => "IntrinsicReplBase>>go"
+
+IntrinsicReplBase >> bump => self.n := self.n + 1
+// => "IntrinsicReplBase>>bump"
+
+IntrinsicReplBase >> count => self.n
+// => "IntrinsicReplBase>>count"
+
+IntrinsicReplBase >> stopMe => self stopWith: #why
+// => "IntrinsicReplBase>>stopMe"
+
+Erlang beamtalk_extensions register: #Actor selector: #'terminate:' fun: [:args :receiver | (IntrinsicReplSink named: #bt4995Sink) unwrap put: #actorTerminate value: args first] owner: #bt4995
+// => _
+
+direct := IntrinsicReplBase spawn
+// => Actor(IntrinsicReplBase, _)
+
+deep := IntrinsicReplLeaf spawn
+// => Actor(IntrinsicReplLeaf, _)
+
+direct stop
+// => ok
+
+seen lookup: #actorTerminate
+// => normal
+
+seen put: #actorTerminate value: #cleared
+// => _
+
+deep stop
+// => ok
+
+seen lookup: #actorTerminate
+// => cleared
+
+// An actor that started before the extension was removed no longer calls it.
+before := IntrinsicReplBase spawn
+// => Actor(IntrinsicReplBase, _)
+
+Actor removeSelector: #terminate:
+// => Actor
+
+before stop
+// => ok
+
+seen lookup: #actorTerminate
+// => cleared
+
+// A class's own `terminate:` beats an `Actor` extension.
+Erlang beamtalk_extensions register: #Actor selector: #'terminate:' fun: [:args :receiver | (IntrinsicReplSink named: #bt4995Sink) unwrap put: #actorTerminate value: args first] owner: #bt4995
+// => _
+
+IntrinsicReplBase >> terminate: reason => (IntrinsicReplSink named: #bt4995Sink) unwrap put: #own value: reason
+// => "IntrinsicReplBase>>terminate:"
+
+own := IntrinsicReplBase spawn
+// => Actor(IntrinsicReplBase, _)
+
+own stop
+// => ok
+
+seen lookup: #own
+// => normal
+
+seen lookup: #actorTerminate
+// => cleared
+
+IntrinsicReplBase removeSelector: #terminate:
+// => IntrinsicReplBase
+
+Actor removeSelector: #terminate:
+// => Actor
+
+// `continueWith:`: the extension runs for the direct subclass (the step does
+// not), and is ignored below it (the step runs).
+Erlang beamtalk_extensions register: #Actor selector: #'continueWith:' fun: [:args :receiver | (IntrinsicReplSink named: #bt4995Sink) unwrap put: #actorContinue value: args first] owner: #bt4995
+// => _
+
+cont := IntrinsicReplBase spawn
+// => Actor(IntrinsicReplBase, _)
+
+cont go
+// => _
+
+seen lookup: #actorContinue
+// => bump
+
+cont count
+// => 0
+
+deepCont := IntrinsicReplLeaf spawn
+// => Actor(IntrinsicReplLeaf, _)
+
+deepCont go
+// => _
+
+deepCont count
+// => 1
+
+Actor removeSelector: #continueWith:
+// => Actor
+
+// `stopWith:` sent to self: the extension intercepts it for the direct subclass
+// (the actor stays alive), and is ignored below it (the actor stops).
+Erlang beamtalk_extensions register: #Actor selector: #'stopWith:' fun: [:args :receiver | (IntrinsicReplSink named: #bt4995Sink) unwrap put: #actorStop value: args first] owner: #bt4995
+// => _
+
+stopper := IntrinsicReplBase spawn
+// => Actor(IntrinsicReplBase, _)
+
+stopper stopMe
+// => _
+
+stopper isAlive
+// => true
+
+seen lookup: #actorStop
+// => why
+
+seen put: #actorStop value: #cleared
+// => _
+
+deepStopper := IntrinsicReplLeaf spawn
+// => Actor(IntrinsicReplLeaf, _)
+
+deepStopper stopMe
+// => _
+
+deepStopper isAlive
+// => false
+
+seen lookup: #actorStop
+// => cleared
+
+Actor removeSelector: #stopWith:
+// => Actor
+
+stopper stop
+// => ok
+
 seen stop
 // => _

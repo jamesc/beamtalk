@@ -2183,7 +2183,11 @@ test_inherited_target_actor_intrinsic_extension_flips() ->
                             Direct, beamtalk_dispatch:inherited_target('LoggingCounter', Selector)
                         )
                     after
-                        catch beamtalk_extensions:unregister(Class, Selector)
+                        try
+                            beamtalk_extensions:unregister(Class, Selector)
+                        catch
+                            _:_ -> ok
+                        end
                     end
                 end,
                 ['LoggingCounter', 'Counter']
