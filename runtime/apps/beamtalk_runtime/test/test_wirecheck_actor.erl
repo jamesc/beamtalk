@@ -12,8 +12,7 @@ Mirrors `test_counter.erl`'s shape (raw `__methods__` map, not a compiled
 `.bt` class — see that module's doc and BT-3579's "if needed" note on `.bt`
 fixtures) and adds the two operations the spike's block/NLR scenarios need
 that `test_counter` has no reason to carry: invoking a caller-supplied block
-(`'invokeBlock:'`) and raising a structured error on demand (`boom`, for the
-async-future rejection case).
+(`'invokeBlock:'`).
 """.
 
 %% API
@@ -32,8 +31,7 @@ async-future rejection case).
 %% Method implementations
 -export([
     handle_getValue/2,
-    'handle_invokeBlock:'/2,
-    handle_boom/2
+    'handle_invokeBlock:'/2
 ]).
 
 start_link(InitialValue) ->
@@ -49,8 +47,7 @@ init(InitialValue) ->
         '__class_mod__' => 'wirecheck_actor',
         '__methods__' => #{
             getValue => fun ?MODULE:handle_getValue/2,
-            'invokeBlock:' => fun ?MODULE:'handle_invokeBlock:'/2,
-            boom => fun ?MODULE:handle_boom/2
+            'invokeBlock:' => fun ?MODULE:'handle_invokeBlock:'/2
         },
         value => InitialValue
     }).
@@ -79,18 +76,3 @@ escaping `{'$bt_nlr', ...}` throw, not to paper over it here.
 'handle_invokeBlock:'([Block], State) when is_function(Block, 0) ->
     Result = Block(),
     {reply, Result, State}.
-
--doc """
-Raise a structured error unconditionally — drives the async-future
-rejection case (BT-3579 (d)).
-
-Raises the bare `#beamtalk_error{}` record with a plain `error/1`, matching
-`dispatch_user_method/4`'s *first* catch clause (`error:#beamtalk_error{} =
-BtError -> {error, BtError, State}`) — not `beamtalk_error:raise/1`, whose
-`beamtalk_exception_handler:wrap/1` step is for errors escaping to a
-top-level caller (REPL/CLI) that expects the `'$beamtalk_class'`-tagged map
-shape, and would double-wrap here since dispatch already performs its own
-wrapping before this error reaches `sync_send`/`async_send`'s caller.
-""".
-handle_boom([], _State) ->
-    error(beamtalk_error:new(runtime_error, 'WirecheckActor', boom, <<"boom">>)).

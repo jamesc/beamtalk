@@ -1873,12 +1873,9 @@ impl CoreErlangGenerator {
     /// implementations"). A decoded envelope re-dispatches, by a recursive
     /// self-call, through the `{'cast', ...}` clause below exactly as if it
     /// had arrived locally; a decode/version failure has already been
-    /// logged and dropped by the shared helper. The 7-tuple `async`-kind
-    /// wire shape is deliberately not matched here: no compiled `.bt`
-    /// construct reaches the async-with-future protocol at all (see
-    /// `decode_wire_cast/1`'s own doc), so an async-tagged wire cast falls
-    /// through to the ordinary catch-all below exactly like an
-    /// un-wire-tagged one already does today.
+    /// logged and dropped by the shared helper. There is no `async`-kind
+    /// wire shape: remote async sends are unsupported and raise at the
+    /// sender (ADR 0126 Amendment BT-4989).
     #[allow(clippy::unnecessary_wraps)] // uniform Result<Document> codegen interface
     pub(in crate::core_erlang) fn generate_handle_cast(
         &mut self,

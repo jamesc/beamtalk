@@ -1540,6 +1540,13 @@ async_send_impl(ActorPid, 'onExit:', [Block], FuturePid, _ClassHint) ->
             beamtalk_future:reject(FuturePid, Error)
     end,
     ok;
+async_send_impl(ActorPid, Selector, _Args, _FuturePid, ClassHint) when
+    node(ActorPid) =/= node()
+->
+    %% ADR 0126 (Amendment BT-4989): a remote async send is not supported. No
+    %% compiled actor decodes an async wire envelope, so the future would
+    %% never resolve. Fail at once, before anything is sent.
+    beamtalk_error:raise(remote_async_unsupported_error(Selector, ClassHint));
 async_send_impl(ActorPid, Selector, Args, FuturePid, ClassHint) ->
     %% Instrumented dispatch span (ADR 0069 Phase 2a; BT-4113: events opt-in).
     %% Measures dispatch-to-mailbox time for async sends.
@@ -1552,40 +1559,29 @@ async_send_impl(ActorPid, Selector, Args, FuturePid, ClassHint) ->
         case beamtalk_pid:is_alive(ActorPid) of
             true ->
                 PropCtx = get_propagated_ctx(),
-                %% ADR 0126 §5.1: the only added cost for a local send is this
-                %% one node/1 comparison — a remote target wire-encodes Args
-                %% and tags the cast so the receiver's handle_cast prelude
-                %% recognises it.
-                case node(ActorPid) =/= node() of
-                    true ->
-                        case beamtalk_wire:encode(Args) of
-                            {ok, WireArgs} ->
-                                gen_server:cast(
-                                    ActorPid,
-                                    {?BT_WIRE_TAG, ?BT_WIRE_VERSION, async, Selector, WireArgs,
-                                        FuturePid, PropCtx}
-                                ),
-                                spawn_future_watcher(ActorPid, FuturePid, Selector),
-                                {ok, ok};
-                            {error, EncErr} ->
-                                %% Sender-side encode failure (request direction,
-                                %% ADR 0126 §5.2) — never reaches the network.
-                                beamtalk_future:reject(
-                                    FuturePid, EncErr#beamtalk_error{selector = Selector}
-                                ),
-                                {ok, error}
-                        end;
-                    false ->
-                        gen_server:cast(ActorPid, {Selector, Args, FuturePid, PropCtx}),
-                        spawn_future_watcher(ActorPid, FuturePid, Selector),
-                        {ok, ok}
-                end;
+                gen_server:cast(ActorPid, {Selector, Args, FuturePid, PropCtx}),
+                spawn_future_watcher(ActorPid, FuturePid, Selector),
+                {ok, ok};
             false ->
                 beamtalk_future:reject(FuturePid, actor_dead_error_record(Selector)),
                 {ok, error}
         end
     end),
     ok.
+
+-spec remote_async_unsupported_error(atom(), atom() | undefined) -> #beamtalk_error{}.
+remote_async_unsupported_error(Selector, ClassHint) ->
+    Class =
+        case ClassHint of
+            undefined -> unknown;
+            _ -> ClassHint
+        end,
+    beamtalk_error:new(
+        unsupported_operation,
+        Class,
+        Selector,
+        <<"Async sends to an actor on another node are not supported (ADR 0126); use a sync send (.) or a cast (!)">>
+    ).
 
 -doc """
 Send a fire-and-forget message to an actor (no future, no return value).
@@ -3427,42 +3423,20 @@ log_wire_cast_rejected(Selector, Error) ->
     }).
 
 -doc """
-Recognise and decode a `'\$beamtalk_wire'` cast or async envelope (ADR 0126
+Recognise and decode a `'\$beamtalk_wire'` cast envelope (ADR 0126
 §5.1) — shared the same way decode_wire_call/1 is (see its doc), by every
 compiled actor's generated `handle_cast/2`.
 
-Returns `{redispatch, Msg}` with a plain local cast/async 4-tuple on a
-successful decode, or `noreply` once a decode/version failure has already
-been logged and dropped (cast direction, §5.2) or the pending future
-rejected. Any other message (not a wire envelope) passes through unchanged
+Returns `{redispatch, Msg}` with a plain local cast tuple on a successful
+decode, or `noreply` once a decode/version failure has already been logged and
+dropped (cast direction, §5.2). Any other message (not a wire envelope) passes through unchanged
 as `{redispatch, Msg}`.
 
-The async-with-future shape (`kind = async`, the 7-element form) is decoded
-here too. Its sender is `async_send_impl/5`, reached through the exported
-`async_send/4` and `async_send_known/5`: no generated code or stdlib source
-calls those, only tests do (`beamtalk_dist_wirecheck_tests` scenario (d), via
-`test_actor_host`). No compiled actor decodes the shape: the generated
-`handle_cast/2` only matches the 6-element `cast`-kind envelope and never
-calls this function for an `async` one, so a 7-element `async` envelope sent
-to a compiled actor falls through the callback's own catch-all to
-`{noreply, State}`. Only the test host routes it here.
+There is no async-with-future envelope: remote async sends are not supported
+(ADR 0126 Amendment BT-4989), so a 7-element `async` tuple is just an unknown
+message and passes through unchanged.
 """.
 -spec decode_wire_cast(term()) -> {redispatch, term()} | noreply.
-decode_wire_cast(
-    {?BT_WIRE_TAG, ?BT_WIRE_VERSION, async, Selector, WireArgs, FuturePid, PropCtx}
-) ->
-    case beamtalk_wire:decode(WireArgs) of
-        {ok, Args} ->
-            {redispatch, {Selector, Args, FuturePid, PropCtx}};
-        {error, Error} ->
-            beamtalk_future:reject(FuturePid, Error#beamtalk_error{selector = Selector}),
-            noreply
-    end;
-decode_wire_cast(
-    {?BT_WIRE_TAG, SentVersion, async, Selector, _WireArgs, FuturePid, _PropCtx}
-) ->
-    beamtalk_future:reject(FuturePid, wire_version_unsupported_error(Selector, SentVersion)),
-    noreply;
 decode_wire_cast({?BT_WIRE_TAG, ?BT_WIRE_VERSION, cast, Selector, WireArgs, PropCtx}) ->
     case beamtalk_wire:decode(WireArgs) of
         {ok, Args} ->

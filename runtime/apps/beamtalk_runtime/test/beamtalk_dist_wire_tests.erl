@@ -395,9 +395,7 @@ remote_async_send_raises_instead_of_hanging(PeerNode) ->
                     try
                         beamtalk_future:await(Future, 1000)
                     catch
-                        error:timeout -> {error, timeout};
-                        exit:timeout -> {error, timeout};
-                        throw:{timeout, _} -> {error, timeout}
+                        error:#{error := #beamtalk_error{kind = timeout}} -> {error, timeout}
                     end
                 )
         end,
