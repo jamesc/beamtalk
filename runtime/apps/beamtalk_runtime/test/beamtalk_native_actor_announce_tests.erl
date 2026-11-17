@@ -46,8 +46,7 @@ announce_test_() ->
             {"the observer hibernates and still announces the stop",
                 fun observer_hibernates_and_wakes/0}},
         {timeout, 60,
-            {"a stray message does not leave the observer awake",
-                fun stray_message_rehibernates/0}},
+            {"a stray message does not leave the observer awake", fun stray_message_rehibernates/0}},
         {"the observer registers no name and creates no table", fun observer_leaves_no_trace/0}
     ]}.
 
