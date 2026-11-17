@@ -354,32 +354,55 @@ run_node(Mods, Paths, Tag) ->
     {_Status, Out} = cmd("erl", Args, node_env()),
     Wall = erlang:monotonic_time(millisecond) - T0,
     Rs = [collect(M, Dir, Out, Wall, length(Mods)) || M <- Mods],
-    [dirty_report(Dir, M) || M <- Mods, length(Mods) =:= 1],
-    Rs.
+    case Mods of
+        [Only] -> [leak_verdict(Dir, Only, R) || R <- Rs];
+        _ -> Rs
+    end.
+
+%% A module run alone that leaves a bare-started server behind fails: the next
+%% module's `ensure_all_started(beamtalk_runtime)` would fail with
+%% `already_started`. Class processes left with no runtime app are printed as INFO
+%% only: `beamtalk_test_boot:start_app/1` reclaims them (BT-4962).
+leak_verdict(Dir, Mod, R = #{failures := F, detail := Detail}) ->
+    case dirty_issues(Dir, Mod) of
+        {Servers, Info} ->
+            Info =:= [] orelse io:format("  INFO after ~s: ~w~n", [Mod, Info]),
+            case Servers of
+                [] ->
+                    R;
+                _ ->
+                    io:format("  LEAKED SERVERS after ~s: ~w~n", [Mod, Servers]),
+                    R#{
+                        failures := F + 1,
+                        detail := iolist_to_binary([
+                            Detail,
+                            io_lib:format(
+                                "\n--- leak report ---\n~s left bare-started servers running: ~w~n",
+                                [Mod, Servers]
+                            )
+                        ])
+                    }
+            end;
+        none ->
+            R
+    end.
 
 %% Single-module (alone) runs only: what the module left behind in a fresh node.
-%% `bare_processes`: registered `beamtalk_*` processes whose starter (the first
-%% `$ancestors` entry, a pid) is dead, i.e. started with a bare `start_link` by a
-%% test process that has since exited. They survive that exit (a normal exit
-%% signal does not kill a process that is not trapping exits) and make the next
-%% module's `ensure_all_started(beamtalk_runtime)` fail with `already_started`.
-%% `class_processes_without_app`: class processes alive while `beamtalk_runtime`
-%% is not running (a stdlib module loaded before the app, whose on_load started
-%% them), which later own the boot tables with no heir.
-dirty_report(Dir, Mod) ->
+%% `Servers`: registered `beamtalk_*` servers whose starter (the first `$ancestors`
+%% entry, a pid) is dead, i.e. started with a bare `start_link` by a test process
+%% that has since exited. They survive that exit (a normal exit signal does not
+%% kill a process that is not trapping exits) and make the next module's
+%% `ensure_all_started(beamtalk_runtime)` fail with `already_started`.
+%% `Info`: class processes alive while `beamtalk_runtime` is not running (a stdlib
+%% module loaded before the app, whose on_load started them).
+dirty_issues(Dir, Mod) ->
     case file:consult(filename:join(Dir, Mod ++ ".dirty")) of
-        {ok, [{Bare, Heirless, AppUp, Classes}]} ->
-            %% Heir-less boot tables are not reported: a fresh node always has some
-            %% (pg, the xref tables, ...) and there is no per-node baseline to
-            %% subtract.
-            _ = Heirless,
-            Issues =
-                [{bare_processes, Bare} || Bare =/= []] ++
-                [{class_processes_without_app, Classes} || not AppUp, is_integer(Classes), Classes > 0],
-            Issues =:= [] orelse io:format("  DIRTY after ~s: ~w~n", [Mod, Issues]),
-            ok;
+        {ok, [{Bare, _Heirless, AppUp, Classes}]} ->
+            Servers = [N || N <- Bare, not lists:prefix("beamtalk_class_", atom_to_list(N))],
+            Info = [{class_processes_without_app, Classes} || not AppUp, is_integer(Classes), Classes > 0],
+            {Servers, Info};
         _ ->
-            ok
+            none
     end.
 
 report_dir(Tag) ->
