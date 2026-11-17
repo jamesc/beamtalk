@@ -17,7 +17,8 @@ assumptions the rest of ADR 0126 depends on that reading code cannot settle:
   (c) a non-local return (`^`) thrown by a block invoked on a remote actor
       during a sync call (ADR 0041/0110) relays back to the defining method
       (§5.5, §5.1).
-  (d) an async send's future resolves across nodes, on both the success and
+  (d) [withdrawn, BT-4989: remote async sends are unsupported and raise; see
+      `beamtalk_dist_wire_tests`] an async send's future resolves across nodes, on both the success and
       error paths (§5.1).
   (e) a class object returned from a remote actor carries the remote class
       gen_server's pid today, and a by-name rewrite/resolve fixes a
@@ -30,7 +31,7 @@ back into `docs/ADR/0126-distribution-location-transparent-actors.md` as a
 Phase 0.5 amendment, not just left in this module's comments.
 
 Two simplifications from the full ADR machinery, deliberate for a spike:
-  - (b), (c), (d) use raw `__methods__`-map actor fixtures
+  - (b), (c) use raw `__methods__`-map actor fixtures
     (`test_wirecheck_actor.erl`, mirroring `test_counter.erl`) rather than
     compiled `.bt` classes — blocks are already plain Erlang funs and NLR is
     already the raw `{'$bt_nlr', ...}` tuple at this layer, so a compiled
@@ -84,12 +85,6 @@ wirecheck_test_() ->
                     fun() -> block_different_version_raises(PeerNode) end},
                 {"(c) NLR thrown by a block invoked on a remote actor during a sync call", fun() ->
                     nlr_across_nodes(PeerNode)
-                end},
-                {"(d) async future resolves across nodes on success", fun() ->
-                    async_future_resolves(PeerNode)
-                end},
-                {"(d) async future resolves (rejects) across nodes on error", fun() ->
-                    async_future_rejects(PeerNode)
                 end},
                 {
                     "(e) class object returned from a remote actor carries the remote class pid; "
@@ -291,44 +286,6 @@ nlr_across_nodes(PeerNode) ->
         %% The callee node must still be alive and answer further sends —
         %% the relay unwinds the caller's stack, not the callee's.
         ?assertEqual(0, beamtalk_actor:sync_send(RemotePid, getValue, []))
-    after
-        rpc:call(PeerNode, gen_server, stop, [RemotePid])
-    end.
-
-%%====================================================================
-%% (d) Async futures resolve across nodes (ADR 0126 §5.1)
-%%====================================================================
-
-async_future_resolves(PeerNode) ->
-    {ok, RemotePid} = rpc:call(PeerNode, test_wirecheck_actor, start, [42]),
-    try
-        Future = beamtalk_future:new(),
-        ok = beamtalk_actor:async_send(RemotePid, getValue, [], beamtalk_future:pid(Future)),
-        ?assertEqual(42, beamtalk_future:await(Future, 5000))
-    after
-        rpc:call(PeerNode, gen_server, stop, [RemotePid])
-    end.
-
-async_future_rejects(PeerNode) ->
-    {ok, RemotePid} = rpc:call(PeerNode, test_wirecheck_actor, start, [0]),
-    try
-        Future = beamtalk_future:new(),
-        ok = beamtalk_actor:async_send(RemotePid, boom, [], beamtalk_future:pid(Future)),
-        %% beamtalk_future:await/2's own doc: rejection surfaces as a
-        %% *throw* of `{future_rejected, Reason}`, not an `error/1` —
-        %% and `Reason` here is the bare `#beamtalk_error{}` record
-        %% `dispatch_user_method/4`'s handle_cast path rejects the future
-        %% with directly (`test_actor_host:handle_cast/2` →
-        %% `beamtalk_future:reject(FuturePid, Reason)`), not map-wrapped —
-        %% the map-wrap in (c)'s finding above is specific to the
-        %% *sync* path's `beamtalk_exception_handler:reraise/1` at the
-        %% caller.
-        ?assertThrow(
-            {future_rejected, #beamtalk_error{
-                kind = runtime_error, class = 'WirecheckActor', selector = boom
-            }},
-            beamtalk_future:await(Future, 5000)
-        )
     after
         rpc:call(PeerNode, gen_server, stop, [RemotePid])
     end.
