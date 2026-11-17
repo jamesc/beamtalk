@@ -1117,15 +1117,27 @@ native_started(Pid) when is_pid(Pid) ->
             ok
     end.
 
+%% The observer sets its monitor after `native_started/1` has returned (no wait
+%% on the start path). An actor that stopped in that window gives `'DOWN'` with
+%% reason `noproc`, and its real exit reason is not observable. The wire contract
+%% for `ActorStopped.reason` is the closed set `normal | shutdown | crashed`, and
+%% the likely case is a clean stop, so `noproc` is announced as `normal` rather
+%% than as a crash. The cost is that a process which crashed within microseconds
+%% of a successful start, or one that exited with the bare reason `noproc`, is
+%% announced as `normal`.
 -spec native_stop_observer(pid(), atom()) -> ok.
 native_stop_observer(Pid, Class) ->
     MonRef = erlang:monitor(process, Pid),
     receive
         {'DOWN', MonRef, process, Pid, Reason} ->
             do_announce_actor_lifecycle('ActorStopped', #{
-                actorClass => Class, pid => Pid, reason => normalize_stop_reason(Reason)
+                actorClass => Class, pid => Pid, reason => observed_stop_reason(Reason)
             })
     end.
+
+-spec observed_stop_reason(term()) -> normal | shutdown | crashed | 'globalNameConflict'.
+observed_stop_reason(noproc) -> normal;
+observed_stop_reason(Reason) -> normalize_stop_reason(Reason).
 
 %% BT-4577: register a just-started native actor under its name, or stop it
 %% when the name cannot be registered.

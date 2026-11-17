@@ -38,6 +38,8 @@ announce_test_() ->
         {"a named start announces once", fun named_start_announces_once/0},
         {"a failed start announces nothing", fun failed_start_announces_nothing/0},
         {"a failing class lookup does not fail the start", fun failing_lookup_does_not_fail/0},
+        {"an actor already gone when observed is not announced as crashed",
+            fun already_gone_is_not_crashed/0},
         {"the observer registers no name and creates no table", fun observer_leaves_no_trace/0}
     ]}.
 
@@ -90,6 +92,22 @@ failing_lookup_does_not_fail() ->
         ?assertMatch(
             #{pid := RemotePid, actorClass := unknown}, expect('ActorSpawned', RemotePid)
         )
+    end).
+
+%% The observer sets its monitor after `native_started/1` returns. An actor that
+%% stopped in that window gives `'DOWN'` with reason `noproc`, whose real exit
+%% reason is not observable. The wire contract is the closed set
+%% `normal | shutdown | crashed`, and the likely case is a clean stop, so it is
+%% announced as `normal`, not as a crash.
+already_gone_is_not_crashed() ->
+    with_subscription(fun() ->
+        {Pid, MonRef} = spawn_monitor(fun() -> ok end),
+        receive
+            {'DOWN', MonRef, process, Pid, _} -> ok
+        end,
+        ok = beamtalk_actor:native_started(Pid),
+        expect('ActorSpawned', Pid),
+        ?assertMatch(#{reason := normal}, expect('ActorStopped', Pid))
     end).
 
 %% A pid on a node that is not this one and not connected: NEW_PID_EXT
