@@ -150,6 +150,42 @@ fn if_true_if_false_pure_inlines_both_branches() {
     assert_compiles_through_erlc("bt@probe_if_true_if_false_pure", &code);
 }
 
+/// BT-4991: `ifFalse:ifTrue:` with two literal blocks lowers as
+/// `ifTrue:ifFalse:` with the arms swapped: the same inline `case`, no
+/// dynamic send on the Boolean arms, and — for a non-Boolean receiver — the
+/// fallback sends `ifFalse:ifTrue:` with the closures in the order written.
+#[test]
+fn if_false_if_true_pure_inlines_like_if_true_if_false() {
+    let src = "Value subclass: Probe\n  check: flag =>\n    flag ifFalse: [2] ifTrue: [1]\n";
+    let code = codegen_named(src, "bt@probe_if_false_if_true_pure");
+    let scope = case_scope(&code);
+
+    assert_eq!(
+        arm_between(scope, "<'true'> when 'true' ->", "<'false'>"),
+        "1",
+        "true arm must inline the `ifTrue:` block. Got:\n{code}"
+    );
+    assert_eq!(
+        arm_between(scope, "<'false'> when 'true' ->", "<_CondNoMatch"),
+        "2",
+        "false arm must inline the `ifFalse:` block. Got:\n{code}"
+    );
+    assert!(
+        !boolean_arms(scope).contains("beamtalk_message_dispatch':'send'"),
+        "Boolean arms must hold no dynamic send. Got:\n{code}"
+    );
+    let compact: String = scope.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("'ifFalse:ifTrue:',[fun()->2,fun()->1]"),
+        "fallback must send `ifFalse:ifTrue:` with the arms as written. Got:\n{code}"
+    );
+    assert!(
+        !compact.contains("'ifTrue:ifFalse:'"),
+        "no `ifTrue:ifFalse:` send may appear. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@probe_if_false_if_true_pure", &code);
+}
+
 #[test]
 fn and_pure_short_circuits_to_literal_false() {
     let src = "Value subclass: Probe\n  check: flag =>\n    flag and: [flag]\n";
