@@ -55,7 +55,9 @@ cleanup(_Pid) ->
     %% Don't stop the server — supervised in the runtime app. Clear all rows so
     %% the next test starts empty even if it picks up the same gen_server.
     clear_all_subscriptions(),
-    ok.
+    %% A bus (and heir) the tests started bare must not outlive the module (BT-4962).
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_announcements),
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_ets_heir).
 
 clear_all_subscriptions() ->
     %% Tables are `public`, so we can wipe them directly. Route the monitor-state

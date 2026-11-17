@@ -11,7 +11,9 @@ construction and cross-reference table reset. Replaces the per-file
 `make_msg/3` and `clear_xref/0` copies.
 """.
 
--export([make_msg/3, clear_xref/0, ensure_xref/0, assert_error_response/1, fake_self/2]).
+-export([
+    make_msg/3, clear_xref/0, ensure_xref/0, release_xref/0, assert_error_response/1, fake_self/2
+]).
 
 -doc "Build a REPL `protocol_msg` with no params.".
 -spec make_msg(binary(), binary(), binary() | undefined) -> tuple().
@@ -55,6 +57,14 @@ ensure_xref() ->
         _ -> ok
     end,
     clear_xref().
+
+-doc """
+The `cleanup` half of `ensure_xref/0`: stop the `beamtalk_xref` server if
+`ensure_xref/0` started it bare (a supervised one is left alone).
+""".
+-spec release_xref() -> ok.
+release_xref() ->
+    beamtalk_test_proc:stop_if_bare(beamtalk_xref).
 
 -doc """
 Decode a JSON-encoded REPL response, assert it is a `done`/`error` response with

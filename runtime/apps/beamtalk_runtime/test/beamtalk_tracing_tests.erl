@@ -39,7 +39,7 @@ cleanup(_State) ->
     catch
         _:_ -> ok
     end,
-    ok.
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_trace_store).
 
 %%====================================================================
 %% Tests: Lifecycle

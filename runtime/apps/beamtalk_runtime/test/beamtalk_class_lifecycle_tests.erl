@@ -33,7 +33,7 @@ setup() ->
     ok.
 
 teardown(_) ->
-    ok.
+    ok = beamtalk_test_repl:release_xref().
 
 %% True when beamtalk_compiler_server is reachable — some standalone EUnit
 %% runs of just this app may not have started the beamtalk_compiler
