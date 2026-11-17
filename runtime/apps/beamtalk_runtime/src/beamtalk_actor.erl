@@ -248,6 +248,9 @@ decode/encode helpers and the pending-action helpers.
 -export([safe_spawn_linked/2]).
 %% BT-4577: the backing module of a `native:` actor's facade, or `none`.
 -export([native_backing_module/1]).
+%% BT-4970: announce a `native:` actor's start and, when it goes down, its stop.
+%% Called by the facade's generated `spawn/1` and by `safe_start_native/4`.
+-export([native_started/1]).
 %% BT-4104: an anonymous start that leaves the caller monitoring the actor,
 %% with the monitor created atomically with the process.
 -export([safe_spawn_monitored/2]).
@@ -1069,11 +1072,56 @@ start_native_trapped(Backing, Config, Registration, Link) ->
             _:CrashReason -> {error, CrashReason}
         end,
     case Result of
-        {ok, Started} -> ok = maybe_unlink_started(Link, Started);
-        {error, _} -> ok
+        {ok, Started} ->
+            ok = maybe_unlink_started(Link, Started),
+            ok = native_started(Started);
+        {error, _} ->
+            ok
     end,
     erlang:process_flag(trap_exit, OldTrap),
     Result.
+
+-doc """
+BT-4970: announce a started `native:` actor as `ActorSpawned`, and arrange for
+its `ActorStopped`.
+
+A compiled actor announces both from the lifecycle telemetry in its generated
+`init/1` and `terminate/2`. A `native:` backing gen_server (`beamtalk_subprocess`,
+a user module) runs neither and is not ours to change, so the start path
+announces for it, and a short-lived observer process monitors the pid and
+announces `ActorStopped` when it goes down. The observer is unregistered, owns
+no table and ends after that one message (ADR 0150: no registry). Nothing is
+done when the announcement bus is not running, as for a compiled actor.
+
+The class is the one the process scan reports for the pid
+(`beamtalk_actor_scan:one_per_pid/1`, the rule every actor list uses), or
+`unknown`, the same default a compiled actor's announcement falls back to.
+""".
+-spec native_started(pid()) -> ok.
+native_started(Pid) when is_pid(Pid) ->
+    case erlang:whereis(beamtalk_announcements) of
+        undefined ->
+            ok;
+        _Bus ->
+            Class =
+                case beamtalk_actor_scan:one_per_pid(beamtalk_actor_scan:info(Pid)) of
+                    [{Pid, Found, _StartedAt} | _] -> Found;
+                    [] -> unknown
+                end,
+            ok = do_announce_actor_lifecycle('ActorSpawned', #{actorClass => Class, pid => Pid}),
+            _Observer = erlang:spawn(fun() -> native_stop_observer(Pid, Class) end),
+            ok
+    end.
+
+-spec native_stop_observer(pid(), atom()) -> ok.
+native_stop_observer(Pid, Class) ->
+    MonRef = erlang:monitor(process, Pid),
+    receive
+        {'DOWN', MonRef, process, Pid, Reason} ->
+            do_announce_actor_lifecycle('ActorStopped', #{
+                actorClass => Class, pid => Pid, reason => normalize_stop_reason(Reason)
+            })
+    end.
 
 %% BT-4577: register a just-started native actor under its name, or stop it
 %% when the name cannot be registered.
