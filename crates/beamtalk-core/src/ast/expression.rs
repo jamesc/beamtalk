@@ -940,7 +940,9 @@ pub struct Block {
 
 // Manual `Debug`/`PartialEq`: the id is identity, not content — it is
 // excluded so AST snapshots stay deterministic and structural equality keeps
-// comparing what the block says, not when it was built.
+// comparing what the block says, not when it was built. The
+// `if_false_if_true_arm` mark is likewise a note on the node, not part of what
+// it says: a re-parse of the unparsed rewritten send is the same program.
 #[allow(clippy::missing_fields_in_debug)]
 impl std::fmt::Debug for Block {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -948,17 +950,13 @@ impl std::fmt::Debug for Block {
             .field("parameters", &self.parameters)
             .field("body", &self.body)
             .field("span", &self.span)
-            .field("if_false_if_true_arm", &self.if_false_if_true_arm)
             .finish()
     }
 }
 
 impl PartialEq for Block {
     fn eq(&self, other: &Self) -> bool {
-        self.parameters == other.parameters
-            && self.body == other.body
-            && self.span == other.span
-            && self.if_false_if_true_arm == other.if_false_if_true_arm
+        self.parameters == other.parameters && self.body == other.body && self.span == other.span
     }
 }
 

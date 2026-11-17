@@ -1678,6 +1678,14 @@ Protocol define: P
     fn restore_gives_back_if_false_if_true_as_written() {
         for (restored, raw) in restored_and_raw(IF_FALSE_IF_TRUE_SOURCE) {
             assert_eq!(restored, raw);
+            // Block equality ignores the mark, so check it is cleared.
+            let mut marked = false;
+            for stmt in &restored.body {
+                walk_expression(&stmt.expression, &mut |node| {
+                    marked |= matches!(node, Expression::Block(b) if b.if_false_if_true_arm);
+                });
+            }
+            assert!(!marked, "a restored method keeps no arm mark");
         }
     }
 
