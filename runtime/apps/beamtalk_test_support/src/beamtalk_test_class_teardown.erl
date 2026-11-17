@@ -24,7 +24,7 @@ use it (see `beamtalk_test_corpus`'s moduledoc for why shared test helpers
 live in this app).
 """.
 
--export([stop_pg_class_processes/0, stop_class_process/1]).
+-export([stop_pg_class_processes/0, stop_class_process/1, is_class_process/1]).
 
 -doc """
 Stop every live class process: the members of the `beamtalk_classes` pg group,
@@ -45,8 +45,11 @@ stop_pg_class_processes() ->
     Pids = lists:usort(Members ++ Named),
     lists:foreach(fun stop_class_process/1, Pids).
 
-%% A class gen_server (`beamtalk_object_class`), as opposed to the other
-%% processes registered under a `beamtalk_class_*` name (sup, monitor, caches).
+-doc """
+True for a class gen_server (`beamtalk_object_class`), as opposed to the other
+processes registered under a `beamtalk_class_*` name (sup, monitor, caches).
+""".
+-spec is_class_process(term()) -> boolean().
 is_class_process(Pid) when is_pid(Pid) ->
     try proc_lib:translate_initial_call(Pid) of
         {beamtalk_object_class, _, _} -> true;

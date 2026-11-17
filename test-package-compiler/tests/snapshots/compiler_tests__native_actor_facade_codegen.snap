@@ -24,6 +24,7 @@ module 'native_actor_facade' ['spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_
             in
             case StartResult of
                 <{'ok', Pid}> when 'true' ->
+                    let _NativeAnnounced = call 'beamtalk_actor':'native_started'(Pid) in
                     {'beamtalk_object', 'NativeWorker', 'native_actor_facade', Pid}
                 <{'error', Reason}> when 'true' ->
                     let SpawnErr0 = call 'beamtalk_error':'new'('instantiation_error', 'NativeWorker') in
