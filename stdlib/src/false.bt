@@ -25,6 +25,15 @@ sealed Boolean subclass: False
   ifTrue: _trueBlock :: Block(R) ifFalse: falseBlock :: Block(R) -> R =>
     falseBlock value
 
+  /// If false, evaluate `falseBlock`; otherwise evaluate `trueBlock`. Returns `falseBlock` result.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// false ifFalse: ["no"] ifTrue: ["yes"]   // => "no"
+  /// ```
+  ifFalse: falseBlock :: Block(R) ifTrue: _trueBlock :: Block(R) -> R =>
+    falseBlock value
+
   /// If true, evaluate `trueBlock`. Returns self (false) since condition is false.
   ///
   /// ## Examples
