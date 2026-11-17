@@ -122,7 +122,10 @@ precedent:
 `beamtalk_codegen_simulation_tests.erl`'s module doc and the
 `counter_module_state/1` doc comment explain what stayed simulated and why
 (the async future-cast protocol tested there has no compiled `.bt` source
-construct that reaches it).
+construct that reaches it). That simulated path runs on `test_actor_host`, a
+test-only gen_server stand-in; the interpretive path in `beamtalk_actor` that
+it replaced was deleted in BT-4871. Compiled actors are the only production
+actors.
 
 ### bif_fallback_test_case.bt (BT-3251)
 

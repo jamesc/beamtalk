@@ -3262,9 +3262,9 @@ encode_reply_for(From, Selector, ReplyPayload) ->
 Like `encode_reply_for/3`, but always outer-tagged `{ok, _} | {error, _}` —
 `ok` for both the remote-encoded-success case AND the local no-op-passthrough
 case, `error` only for a genuine remote encode failure. `encode_reply_for/3`
-(the hand-written `handle_call/3` path's own reply, never branched on by its
-caller) can use the untagged passthrough safely; `handle_call_dispatch_case`
-(the generated compiled-actor path, BT-3613) cannot — its success arm has to
+(whose callers never branch on the result) can use the untagged passthrough
+safely; `handle_call_dispatch_case` (the generated compiled-actor path,
+BT-3613) cannot — its success arm has to
 choose the outer `{'reply', {'ok', _}, _}` vs `{'reply', {'error', _}, _}`
 shape *based on* whether encoding failed, and a plain shape-match against
 `encode_reply_for/3`'s untagged local-passthrough result is ambiguous: a
@@ -3310,7 +3310,8 @@ the caller re-dispatches that plain 3-tuple through its own ordinary local
 clause, exactly the shape `handle_call/3`'s own next clause already
 matches. Returns `{reply, ReplyVal}` for a decode failure or an unsupported
 wire version (request-direction skew, §5.2): the caller replies `ReplyVal`
-immediately with its pre-call `State` untouched — `dispatch/4` never runs.
+immediately with its pre-call `State` untouched — the generated `dispatch/4`
+never runs.
 Any other message (not a wire envelope) passes through unchanged as
 `{redispatch, Msg}`, so a caller can route *every* `handle_call/3` message
 through this function uniformly if it chooses to.
@@ -3354,15 +3355,14 @@ been logged and dropped (cast direction, §5.2) or the pending future
 rejected. Any other message (not a wire envelope) passes through unchanged
 as `{redispatch, Msg}`.
 
-The async-with-future shape (`kind = async`) is decoded here too, for
-the 7-element form — but no compiled
-`.bt` construct reaches it: a genuinely compiled actor's generated
-`handle_cast/2` only ever pattern-matches the 6-element `cast`-kind wire
-envelope, so a 7-element `async`-kind one sent to a compiled actor simply
-never reaches this function at all and falls through the generated
-callback's own catch-all to `{noreply, State}` — exactly like an
-un-wire-tagged async cast to a compiled actor already does today
-(`beamtalk_codegen_simulation_tests.erl`'s documented gap).
+The async-with-future shape (`kind = async`, the 7-element form) is decoded
+here too. Its sender is `async_send_impl/5`, which wire-tags a remote async
+send this way (ADR 0126 §5.1), so the shape is live on the wire. No compiled
+actor decodes it, though: the generated `handle_cast/2` only matches the
+6-element `cast`-kind envelope and never calls this function for an `async`
+one, so a 7-element `async` envelope sent to a compiled actor falls through
+the generated callback's own catch-all to `{noreply, State}`. Only the test
+host (`test_actor_host`) routes it here.
 """.
 -spec decode_wire_cast(term()) -> {redispatch, term()} | noreply.
 decode_wire_cast(

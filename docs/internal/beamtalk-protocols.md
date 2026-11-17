@@ -423,33 +423,19 @@ sequenceDiagram
     end
 ```
 
-The dispatch function looks up the method in the actor's `__methods__` map:
-
-```erlang
-dispatch(Selector, Args, State) ->
-    Methods = maps:get('__methods__', State),
-    case maps:find(Selector, Methods) of
-        {ok, Fun} when is_function(Fun, 2) ->
-            Fun(Args, State);
-        error ->
-            handle_dnu(Selector, Args, State)
-    end.
-```
+The class's generated `dispatch/4` selects the method: a `case` on the selector
+with one clause per method the class defines. Any other selector falls to the
+inherited-method lookup (`beamtalk_dispatch`), then extensions, then the DNU
+handler below.
 
 ### doesNotUnderstand Handler
 
 When a message selector is not found, the actor attempts to call `doesNotUnderstand:args:` if defined:
 
-```erlang
-handle_dnu(Selector, Args, State) ->
-    Methods = maps:get('__methods__', State),
-    case maps:find('doesNotUnderstand:args:', Methods) of
-        {ok, DnuFun} ->
-            DnuFun([Selector, Args], State);
-        error ->
-            {error, {unknown_message, Selector}, State}
-    end.
-```
+The generated `dispatch/4` checks the class's `method_table/0` for
+`doesNotUnderstand:args:` and, if present, dispatches to it with
+`[Selector, Args]`. Otherwise it returns
+`{error, #beamtalk_error{kind = does_not_understand}, State}`.
 
 **Beamtalk example:**
 ```

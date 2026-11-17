@@ -465,19 +465,13 @@ gen_server:cast(CounterPid, {increment, [], FuturePid}),
 FuturePid
 ```
 
-The dispatch function looks up the method:
-
-```erlang
-dispatch(Selector, Args, State) ->
-    Methods = maps:get('__methods__', State),
-    case maps:find(Selector, Methods) of
-        {ok, Fun} ->
-            Fun(Args, State);
-        error ->
-            %% doesNotUnderstand: handler
-            handle_dnu(Selector, Args, State)
-    end.
-```
+Every compiled actor class generates its own `dispatch/4`: a `case` on the
+selector, one clause per method the class defines, and a final clause for any
+other selector. That final clause tries, in order, the inherited method
+(`beamtalk_dispatch`), an extension method, and the class's own
+`doesNotUnderstand:args:` method if it defines one. If none applies it returns a
+`does_not_understand` `#beamtalk_error{}` (`dispatch(Selector, Args, Self, State)`
+returns `{reply, Result, NewState}` or `{error, Error, State}`).
 
 ### doesNotUnderstand: Metaprogramming
 
@@ -492,16 +486,10 @@ Actor subclass: Proxy
     self.target perform: selector withArgs: args
 ```
 
-```erlang
-handle_dnu(Selector, Args, State) ->
-    case maps:find('doesNotUnderstand:args:', maps:get('__methods__', State)) of
-        {ok, Fun} ->
-            Fun([Selector, Args], State);
-        error ->
-            %% No handler - crash (let supervisor handle)
-            error({unknown_message, Selector})
-    end.
-```
+The generated `dispatch/4` calls the class's `doesNotUnderstand:args:` method
+(found in the module's `method_table/0`) with `[Selector, Args]` when the
+lookup fails. Without one, the caller gets a `does_not_understand`
+`#beamtalk_error{}`; it does not crash the actor.
 
 ---
 
