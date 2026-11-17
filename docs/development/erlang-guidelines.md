@@ -895,9 +895,7 @@ handle_call({method, MethodName}, _From, State) ->
 
 %% ✅ SAFE - validate against the class's known methods first
 handle_call({method, MethodName}, _From, State) ->
-    %% Module: the actor's generated class module. method_table/0 has atom keys and
-    %% only the class's own methods; inherited selectors need beamtalk_dispatch.
-    Methods = Module:method_table(),
+    Methods = Module:method_table(),   % Module: the actor's generated class module (atom keys)
     try binary_to_existing_atom(MethodName, utf8) of
         Selector ->
             case maps:is_key(Selector, Methods) of

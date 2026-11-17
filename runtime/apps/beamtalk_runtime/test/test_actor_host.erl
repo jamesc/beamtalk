@@ -159,6 +159,8 @@ reply_for(From, Selector, Payload) ->
 
 do_cast({?BT_WIRE_TAG, _, cast, _, _, _} = Msg, State) ->
     wire_cast(Msg, State);
+do_cast({?BT_WIRE_TAG, _, async, _, _, _, _} = Msg, State) ->
+    wire_cast(Msg, State);
 do_cast({cast, Selector, Args, PropCtx}, State) when
     is_atom(Selector), is_list(Args), is_map(PropCtx)
 ->
