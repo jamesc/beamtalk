@@ -91,6 +91,17 @@
 //!   before; `v` having no effects, it does not matter that it is evaluated
 //!   after the receiver's method has unwound rather than inside it.
 //!
+//! # Tail two-branch conditionals (BT-4998)
+//!
+//! `c ifTrue: [^a] ifFalse: [^b]` (or `ifFalse:ifTrue:`) as the last statement
+//! of a tail body, with `a` and `b` literals or variables, is rewritten to
+//! `c ifTrue: [a] ifFalse: [b]` on **any** receiver. A Boolean takes a plain
+//! `case` arm. A non-Boolean receiver is still sent the selector as written,
+//! by `beamtalk_guard_return:two_branch/3`, whose blocks return the values
+//! from the method through a frame the helper owns, so the method has none.
+//! Values with a send or a field read keep the method's frame: a receiver's
+//! own `ifTrue:ifFalse:` would evaluate them inside the block it calls.
+//!
 //! # When it applies
 //!
 //! Only to a method that holds a block NLR as written and none once

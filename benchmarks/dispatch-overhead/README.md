@@ -31,7 +31,7 @@ picks the compiler (its sysroot supplies the runtime and stdlib), as in
 | c1-c5 | class-side sends | `class sealed`, sealed class, open class, class with `classState:`, class held in a variable |
 | f1-f6 | FFI | typed arguments (proved, direct call), untyped arguments (the `direct_call/4` proxy path) |
 | e1-e2 | exceptions | `on:do:` and `ensure:` with no raise |
-| r1-r4 | `^` in blocks | inlined `ifTrue:`, `do:` taken, `to:do:` taken, `do:` never taken |
+| r1-r5 | `^` in blocks | inlined `ifTrue:`, `do:` taken, `to:do:` taken, `do:` never taken, `^` in both branches of a tail `ifTrue:ifFalse:` (untyped receiver) |
 
 ## Methods
 

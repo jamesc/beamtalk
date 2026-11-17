@@ -58,7 +58,8 @@ rows() ->
         {"r1", nlr, "`^` in an inlined ifTrue:", 100000, 'retInlinedIf:', []},
         {"r2", nlr, "`^` in a do: block, taken", 50000, 'retInDo:l:', [list10]},
         {"r3", nlr, "`^` in an inlined to:do:, taken", 100000, 'retInToDo:', []},
-        {"r4", nlr, "`^` in a do: block, never taken", 50000, 'noRetInDo:l:', [list10]}
+        {"r4", nlr, "`^` in a do: block, never taken", 50000, 'noRetInDo:l:', [list10]},
+        {"r5", nlr, "`^` in both branches of a tail ifTrue:ifFalse:, untyped receiver", 100000, 'retBothBranches:', []}
     ].
 
 fixture(point) -> ?BT:class_point(vd());
