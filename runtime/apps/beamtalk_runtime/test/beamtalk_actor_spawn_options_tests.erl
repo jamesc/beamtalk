@@ -201,9 +201,17 @@ spawn_unlinked() ->
     {Pid, fun() -> stop_linked(Pid) end}.
 
 stop(Pid, MonRef) ->
-    catch gen_server:stop(Pid),
+    safe_stop(Pid),
     erlang:demonitor(MonRef, [flush]).
 
 stop_linked(Pid) ->
     unlink(Pid),
-    catch gen_server:stop(Pid).
+    safe_stop(Pid).
+
+%% The actor may already be gone: stopping it must not fail the test.
+safe_stop(Pid) ->
+    try
+        gen_server:stop(Pid)
+    catch
+        exit:_ -> ok
+    end.
