@@ -82,14 +82,25 @@
 //!   BT-4823): its kind guard answers a Boolean while the declaration holds,
 //!   and only a receiver that broke it can reach the helper, so any block
 //!   ending in `^` is accepted. A declared comparison is not a Boolean by
-//!   construction, so the other shapes (two-branch, tail position) keep
-//!   their NLR frame. Its receiver is then recorded
+//!   construction, so the other shapes keep their NLR frame, except a tail
+//!   two-branch conditional with plain values (see below). Its receiver is then recorded
 //!   in [`GuardRewrite::conditions`], and codegen
 //!   ([`CoreErlangGenerator::guard_condition_doc`]) decides the branch with
 //!   `beamtalk_guard_return`, which sends a non-Boolean the guard's own
 //!   selector with a block whose call it catches. A taken `^` returns `v` as
 //!   before; `v` having no effects, it does not matter that it is evaluated
 //!   after the receiver's method has unwound rather than inside it.
+//!
+//! # Tail two-branch conditionals (BT-4998)
+//!
+//! `c ifTrue: [^a] ifFalse: [^b]` (or `ifFalse:ifTrue:`) as the last statement
+//! of a tail body, with `a` and `b` literals or variables, is rewritten to
+//! `c ifTrue: [a] ifFalse: [b]` on **any** receiver. A Boolean takes a plain
+//! `case` arm. A non-Boolean receiver is still sent the selector as written,
+//! by `beamtalk_guard_return:two_branch/3`, whose blocks return the values
+//! from the method through a frame the helper owns, so the method has none.
+//! Values with a send or a field read keep the method's frame: a receiver's
+//! own `ifTrue:ifFalse:` would evaluate them inside the block it calls.
 //!
 //! # When it applies
 //!
@@ -186,7 +197,15 @@ pub(in crate::core_erlang) struct GuardRewrite {
     /// codegen must lower to a bare comparison BIF
     /// ([`CoreErlangGenerator::record_comparison_lowering`]).
     pub(in crate::core_erlang) boolean_comparisons: HashSet<GuardConditionKey>,
+    /// The tail two-branch conditionals (BT-4998) whose non-Boolean fallback
+    /// codegen must send through `beamtalk_guard_return:two_branch/3`, keyed
+    /// by the span of the earlier of the two branch blocks.
+    pub(in crate::core_erlang) two_branch: HashSet<GuardConditionKey>,
 }
+
+/// The `beamtalk_guard_return` function a tail two-branch conditional's
+/// non-Boolean fallback calls (BT-4998).
+pub(in crate::core_erlang) const TWO_BRANCH_HELPER: &str = "two_branch";
 
 impl GuardRewrite {
     #[cfg(test)]
@@ -220,6 +239,9 @@ pub(in crate::core_erlang) fn rewrite_guard_returns(module: &mut Module) -> Guar
                     .into_iter()
                     .map(|left| (key.clone(), left)),
             );
+            rewrite
+                .two_branch
+                .extend(rw.two_branch.into_iter().map(|span| (key.clone(), span)));
             rewrite.bodies.insert(key, original);
         }
     }
@@ -274,6 +296,9 @@ struct Rewriter {
     /// The left-operand spans of the typed comparisons the rewrite relied on
     /// as Booleans by construction.
     boolean_comparisons: HashSet<Span>,
+    /// The first-block spans of the tail two-branch conditionals the rewrite
+    /// left to `beamtalk_guard_return:two_branch/3` (BT-4998).
+    two_branch: HashSet<Span>,
     /// The method's parameters whose comparison kind is only *declared*
     /// ([`trusted_param_types`] with a [`ComparisonKinds`] kind). A comparison
     /// on one carries a kind guard that dispatches a wrong-kind receiver
@@ -293,6 +318,7 @@ impl Rewriter {
         let mut rw = Self {
             conditions: HashMap::new(),
             boolean_comparisons: HashSet::new(),
+            two_branch: HashSet::new(),
             declared_params: trusted_param_types(method)
                 .into_iter()
                 .filter(|(_, ty)| ComparisonKinds::of_type_name(ty).is_some())
@@ -492,6 +518,30 @@ fn rewrite_tail_expression(expr: Expression, rw: &mut Rewriter) -> Expression {
             arguments,
             is_cast: false,
             span,
+        } if !rw.is_boolean(&receiver)
+            && let Some(first) = two_branch_returns(&parts, &arguments) =>
+        {
+            // BT-4998: `c ifTrue: [^a] ifFalse: [^b]` on a receiver that may
+            // not be a Boolean. Its fallback sends the selector as written
+            // through the helper, so the arms are the plain values.
+            rw.two_branch.insert(first);
+            rewrite_conditional_branches(
+                Expression::MessageSend {
+                    receiver,
+                    selector: MessageSelector::Keyword(parts),
+                    arguments,
+                    is_cast: false,
+                    span,
+                },
+                rw,
+            )
+        }
+        Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            is_cast: false,
+            span,
         } if is_inlined_conditional(&parts, &arguments)
             && (family_of(&parts) == Family::Nil || rw.is_boolean(&receiver)) =>
         {
@@ -530,6 +580,52 @@ fn rewrite_tail_expression(expr: Expression, rw: &mut Rewriter) -> Expression {
         },
         other => other,
     }
+}
+
+/// The span of the first branch block when `parts`/`arguments` are a
+/// two-branch Boolean conditional (`ifTrue:ifFalse:` / `ifFalse:ifTrue:`)
+/// whose two literal blocks are each exactly `^ v` with a `v` that
+/// [`is_plain_value`] (BT-4998).
+fn two_branch_returns(parts: &[KeywordPart], arguments: &[Expression]) -> Option<Span> {
+    if parts.len() != 2
+        || !is_inlined_conditional(parts, arguments)
+        || family_of(parts) != Family::Boolean
+    {
+        return None;
+    }
+    let mut first = None;
+    for arg in arguments {
+        let Expression::Block(block) = arg else {
+            return None;
+        };
+        let [stmt] = block.body.as_slice() else {
+            return None;
+        };
+        let Expression::Return { value, .. } = &stmt.expression else {
+            return None;
+        };
+        if !block.parameters.is_empty() || !is_plain_value(value) {
+            return None;
+        }
+        // Written order differs from the true/false order codegen sees for
+        // `ifFalse:ifTrue:`, so key on the earlier block, which both agree on.
+        first = Some(first.map_or(block.span, |f: Span| {
+            if block.span.start() < f.start() {
+                block.span
+            } else {
+                f
+            }
+        }));
+    }
+    first
+}
+
+/// Whether `expr` is a literal or a variable: it has no effect, cannot raise,
+/// and answers the same wherever it is evaluated (unlike a field, which a
+/// receiver's method could change, or a class reference, which is a registry
+/// lookup that raises `class_not_found`).
+fn is_plain_value(expr: &Expression) -> bool {
+    matches!(expr, Expression::Literal(..) | Expression::Identifier(..))
 }
 
 /// The inlined conditional `expr` with each literal block's body rewritten
@@ -880,6 +976,21 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// BT-4998: whether the conditional whose first branch block is `first`
+    /// is a recorded tail two-branch conditional. Marks it consumed.
+    pub(in crate::core_erlang) fn take_two_branch(&mut self, first: Span) -> bool {
+        let Some(method) = self.current_guard_method.clone() else {
+            return false;
+        };
+        let key = (method, first);
+        if self.guard_rewrite.two_branch.contains(&key) {
+            self.guard_conditions_used.insert(key);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Whether `receiver` is a recorded guard's, in the method being
     /// generated.
     pub(in crate::core_erlang) fn is_guard_condition(&self, receiver: &Expression) -> bool {
@@ -935,6 +1046,7 @@ impl CoreErlangGenerator {
             .guard_rewrite
             .conditions
             .keys()
+            .chain(self.guard_rewrite.two_branch.iter())
             .filter(|key| !used.contains(key))
             .cloned()
             .collect();
@@ -1158,12 +1270,17 @@ mod tests {
     fn declared_param_comparison_in_other_shapes_is_not_rewritten() {
         // A two-branch guard and a tail conditional need a Boolean, which a
         // declared comparison is not by construction: the frame stays.
-        for body in [
-            "    x <= 0 ifTrue: [^1] ifFalse: [self foo]\n    2",
-            "    x > 0 ifTrue: [^1] ifFalse: [^2]",
-        ] {
-            assert_eq!(rewritten(&typed_class(body)), None, "{body}");
-        }
+        let body = "    x <= 0 ifTrue: [^1] ifFalse: [self foo]\n    2";
+        assert_eq!(rewritten(&typed_class(body)), None, "{body}");
+    }
+
+    #[test]
+    fn declared_param_comparison_two_branch_tail_returns_go_through_the_helper() {
+        // BT-4998: plain values in both branches of a tail conditional need
+        // no Boolean: a non-Boolean receiver is sent through
+        // `beamtalk_guard_return:two_branch/3`.
+        let body = "    x > 0 ifTrue: [^1] ifFalse: [^2]";
+        assert!(rewritten(&typed_class(body)).is_some(), "{body}");
     }
 
     #[test]

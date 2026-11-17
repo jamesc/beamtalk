@@ -38,12 +38,12 @@ non-Boolean.
 
 -include("beamtalk.hrl").
 
--export([if_true/1, if_false/1]).
+-export([if_true/1, if_false/1, two_branch/3]).
 
 %% The block `block_called/2` hands the receiver only ever throws: that is how
 %% its call is observed, so Dialyzer's "created fun only terminates with
 %% explicit exception" is expected there.
--dialyzer({nowarn_function, [block_called/2]}).
+-dialyzer({nowarn_function, [block_called/2, two_branch/3]}).
 
 -doc """
 The branch `c ifTrue: [^v]. rest` takes: `true` returns `v`, `false` runs the
@@ -73,4 +73,24 @@ block_called(Receiver, Selector) ->
         _ -> false
     catch
         throw:Signal when ?IS_NLR(Signal), element(2, Signal) =:= Token -> true
+    end.
+
+-doc """
+The non-Boolean arm of a tail `c ifTrue: [^a] ifFalse: [^b]` (BT-4998), where
+`a` and `b` are plain values (literals and variables). Sends `Selector`
+(`ifTrue:ifFalse:` or `ifFalse:ifTrue:`, as written) to `Receiver` with one
+block per value, in the order written, each of which returns its value from
+the method when called: it throws the signal a `^` throws (`?NLR/3`), caught
+here. If the receiver calls neither block, the answer to the send is the
+method's result, as it is when the method is written with the frame.
+""".
+-spec two_branch(term(), atom(), [term()]) -> term().
+two_branch(Receiver, Selector, Values) ->
+    Token = make_ref(),
+    Blocks = [fun() -> throw(?NLR(Token, Value, nil)) end || Value <- Values],
+    try
+        beamtalk_message_dispatch:send(Receiver, Selector, Blocks)
+    catch
+        throw:Signal when ?IS_NLR(Signal), element(2, Signal) =:= Token ->
+            element(3, Signal)
     end.
