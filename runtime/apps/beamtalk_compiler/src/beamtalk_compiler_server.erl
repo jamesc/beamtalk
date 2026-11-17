@@ -983,6 +983,7 @@ compile_core_forms(CoreModule, Options) ->
 %%% gen_server callbacks
 
 init(_Args) ->
+    ok = beamtalk_logging_config:set_domain(runtime),
     process_flag(trap_exit, true),
     Port = open_port(),
     %% ADR 0050 Phase 3: Recover class cache synchronously on start/restart.

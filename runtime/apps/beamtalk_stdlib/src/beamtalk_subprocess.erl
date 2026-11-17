@@ -120,6 +120,7 @@ field has its `$beamtalk_class` key stripped if present.
 """.
 -spec init(config()) -> {ok, map()} | {stop, term()}.
 init(Config) ->
+    ok = beamtalk_logging_config:set_domain(stdlib),
     case validate_config(Config) of
         {ok, #{executable := Executable, args := Args} = ValidConfig} ->
             Options = maps:with([env, dir], ValidConfig),

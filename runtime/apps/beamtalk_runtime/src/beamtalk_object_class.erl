@@ -203,7 +203,7 @@ do_start(ClassName, ClassInfo) ->
                             "beamtalk_class_sup not running — starting class "
                             "'~p' unsupervised",
                             [ClassName],
-                            #{class => ClassName}
+                            #{class => ClassName, domain => [beamtalk, runtime]}
                         )
                 end,
                 RegName = beamtalk_class_registry:registry_name(ClassName),
@@ -1097,6 +1097,7 @@ class_flag(ClassPid, Flag, CallMsg) ->
 %%====================================================================
 
 init({ClassName, ClassInfo}) ->
+    ok = beamtalk_logging_config:set_domain(runtime),
     ok = join_class_registry(),
     Superclass = maps:get(superclass, ClassInfo, none),
     Module = maps:get(module, ClassInfo, ClassName),
