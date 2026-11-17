@@ -983,7 +983,9 @@ compile_core_forms(CoreModule, Options) ->
 %%% gen_server callbacks
 
 init(_Args) ->
-    ok = beamtalk_logging_config:set_domain(runtime),
+    %% Not via beamtalk_logging_config:set_domain/1 — this app must start
+    %% without beamtalk_runtime on the code path (see recover_from_beam_modules/0).
+    ok = logger:set_process_metadata(#{domain => [beamtalk, compiler]}),
     process_flag(trap_exit, true),
     Port = open_port(),
     %% ADR 0050 Phase 3: Recover class cache synchronously on start/restart.
