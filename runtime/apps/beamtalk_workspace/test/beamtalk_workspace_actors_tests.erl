@@ -248,6 +248,43 @@ feed_non_actor_event_is_emitted_unchanged_test() ->
     S0 = beamtalk_workspace_actors:feed_new([]),
     ?assertEqual({emit, S0}, beamtalk_workspace_actors:feed_event(#{other => 1}, S0)).
 
+%% BT-4970: the contract holds for a `native:` actor, end to end on the real
+%% announcement bus. A native backing process runs no lifecycle telemetry, so the
+%% runtime announces for it (`beamtalk_actor:native_started/1`): subscribe, take
+%% the snapshot, and the spawn that the snapshot already holds is dropped; the
+%% stop is emitted and clears the pid.
+native_actor_snapshot_plus_feed_test() ->
+    Collector = self(),
+    Handler = fun(Event) -> Collector ! {got, Event} end,
+    {ok, S1} = beamtalk_announcements:subscribe('ActorSpawned', Collector, Handler, false),
+    {ok, S2} = beamtalk_announcements:subscribe('ActorStopped', Collector, Handler, false),
+    try
+        beamtalk_test_fake_native:with_native(['Bt4970Native'], fun(Pid) ->
+            %% Started after subscribing, before the snapshot: in both.
+            ok = beamtalk_actor:native_started(Pid),
+            Snapshot = beamtalk_workspace_actors:list(),
+            ?assert(lists:member(Pid, pids(Snapshot))),
+            Feed0 = beamtalk_workspace_actors:feed_new(Snapshot),
+            Spawned = receive_event('ActorSpawned', Pid),
+            ?assertMatch(#{actorClass := 'Bt4970Native'}, Spawned),
+            {drop, Feed1} = beamtalk_workspace_actors:feed_event(Spawned, Feed0),
+            %% Its stop is announced from outside the backing process.
+            exit(Pid, kill),
+            Stopped = receive_event('ActorStopped', Pid),
+            ?assertMatch(#{actorClass := 'Bt4970Native', reason := crashed}, Stopped),
+            ?assertMatch({emit, _}, beamtalk_workspace_actors:feed_event(Stopped, Feed1))
+        end)
+    after
+        beamtalk_announcements:unsubscribe(S1),
+        beamtalk_announcements:unsubscribe(S2)
+    end.
+
+receive_event(Class, Pid) ->
+    receive
+        {got, #{'$beamtalk_class' := Class, pid := Pid} = Event} -> Event
+    after 2000 -> error({no_announcement, Class, Pid})
+    end.
+
 %% No actor spawned between subscribe and scan is lost or duplicated: every
 %% pid that exists after the race appears exactly once in snapshot + emitted
 %% spawns, whichever side of the scan it landed on.
