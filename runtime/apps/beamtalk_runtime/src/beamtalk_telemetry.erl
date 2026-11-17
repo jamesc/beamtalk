@@ -640,7 +640,9 @@ lifecycle_handlers() ->
 
 %% Whether any of these event names is a lifecycle start/stop event.
 any_lifecycle_event(EventNames) ->
-    lists:any(fun(Name) -> Name =:= ?LIFECYCLE_START orelse Name =:= ?LIFECYCLE_STOP end, EventNames).
+    lists:any(
+        fun(Name) -> Name =:= ?LIFECYCLE_START orelse Name =:= ?LIFECYCLE_STOP end, EventNames
+    ).
 
 %% A Beamtalk-attached handler (handle_event/4) on any dispatch event.
 beamtalk_dispatch_handler_attached() ->
