@@ -929,6 +929,13 @@ pub struct Block {
     /// Node identity (see [`BlockId`]). Assigned by [`Block::new`]; construct
     /// blocks through it, never as struct literals.
     pub id: BlockId,
+    /// Whether this block is an arm of an `ifFalse:ifTrue:` send that
+    /// [`desugar_if_false_if_true`](super::normalize::desugar_if_false_if_true)
+    /// rewrote to `ifTrue:ifFalse:` (BT-4991). Only that pass sets it, and the
+    /// restore clears it: a send built any other way (a parsed
+    /// `ifTrue:ifFalse:`, a guard rewrite's synthesised one) never carries it,
+    /// so it is the one test for "this was written `ifFalse:ifTrue:`".
+    pub if_false_if_true_arm: bool,
 }
 
 // Manual `Debug`/`PartialEq`: the id is identity, not content — it is
@@ -941,13 +948,17 @@ impl std::fmt::Debug for Block {
             .field("parameters", &self.parameters)
             .field("body", &self.body)
             .field("span", &self.span)
+            .field("if_false_if_true_arm", &self.if_false_if_true_arm)
             .finish()
     }
 }
 
 impl PartialEq for Block {
     fn eq(&self, other: &Self) -> bool {
-        self.parameters == other.parameters && self.body == other.body && self.span == other.span
+        self.parameters == other.parameters
+            && self.body == other.body
+            && self.span == other.span
+            && self.if_false_if_true_arm == other.if_false_if_true_arm
     }
 }
 
@@ -964,6 +975,7 @@ impl Block {
             body,
             span,
             id: BlockId::fresh(),
+            if_false_if_true_arm: false,
         }
     }
 

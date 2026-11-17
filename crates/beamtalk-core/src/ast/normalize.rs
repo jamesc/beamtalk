@@ -102,13 +102,14 @@
 //! `c ifTrue: [b] ifFalse: [a]`: [`desugar_if_false_if_true`] swaps the
 //! keywords and the arguments, so every analysis and codegen path that knows
 //! `ifTrue:ifFalse:` (inlining, narrowing, state threading, `^` handling)
-//! handles the reversed form with no code of its own. Each keyword keeps the
-//! span it was written with, so the swapped send is the one whose keywords
-//! run backwards through the source ([`written_if_false_if_true`]): the
-//! restore puts it back without a record, and the one place that sends the
+//! handles the reversed form with no code of its own. The pass marks both arm
+//! blocks ([`Block::if_false_if_true_arm`]), and nothing else sets the mark:
+//! the restore reads it to put the send back without a record
+//! ([`written_if_false_if_true`]), and so does the one place that sends the
 //! selector to a non-Boolean receiver (`ifFalse:ifTrue:` is an ordinary
-//! message such a receiver may implement) reads the same test to send it as
-//! written ([`arms_written_swapped`]). The arguments are literal blocks, so
+//! message such a receiver may implement), which sends it as written. A send
+//! built any other way, such as the `ifTrue:ifFalse:` a guard rewrite
+//! synthesises with its arms in either source order, never carries the mark. The arguments are literal blocks, so
 //! swapping them changes no evaluation order; any other argument keeps the
 //! plain send, which `Boolean` answers.
 
@@ -374,18 +375,6 @@ fn is_literal_repeat(node: &Expression) -> bool {
 /// The keyword selector `ifFalse:ifTrue:` (BT-4991).
 pub const IF_FALSE_IF_TRUE: &str = "ifFalse:ifTrue:";
 
-/// Whether a conditional's two arms, in the `[true arm, false arm]` order the
-/// canonical `ifTrue:ifFalse:` holds them, were written false arm first: the
-/// true arm's span starts after the false arm's. The one rule for "this
-/// `ifTrue:ifFalse:` was written `ifFalse:ifTrue:`" (BT-4991), over keyword
-/// spans ([`written_if_false_if_true`]) or block spans (codegen's fallback
-/// send, which holds only the blocks). Nodes built without source positions
-/// (equal spans) read as written the canonical way.
-#[must_use]
-pub fn arms_written_swapped(true_arm: Span, false_arm: Span) -> bool {
-    true_arm.start() > false_arm.start()
-}
-
 /// Whether `node` itself is an `ifFalse:ifTrue:` send with two literal block
 /// arguments, which [`desugar_if_false_if_true`] rewrites.
 fn is_literal_if_false_if_true(node: &Expression) -> bool {
@@ -425,25 +414,29 @@ pub fn desugar_if_false_if_true(expr: &mut Expression) {
                 KeywordPart::new("ifFalse:", if_false),
             ];
             arguments.swap(0, 1);
+            for argument in arguments.iter_mut() {
+                if let Expression::Block(block) = argument {
+                    block.if_false_if_true_arm = true;
+                }
+            }
         }
     });
 }
 
 /// Whether `selector` and `arguments` are an `ifTrue:ifFalse:` that
-/// [`desugar_if_false_if_true`] produced: its keywords run backwards through
-/// the source ([`arms_written_swapped`]). `false` for any send written
-/// `ifTrue:ifFalse:`.
+/// [`desugar_if_false_if_true`] produced: both arguments are blocks it marked
+/// ([`Block::if_false_if_true_arm`]). `false` for any other send, a parsed
+/// `ifTrue:ifFalse:` included.
 #[must_use]
 pub fn written_if_false_if_true(selector: &MessageSelector, arguments: &[Expression]) -> bool {
-    let MessageSelector::Keyword(parts) = selector else {
-        return false;
-    };
     matches!(
-        parts.as_slice(),
-        [t, f] if t.keyword == "ifTrue:"
-            && f.keyword == "ifFalse:"
-            && arms_written_swapped(t.span, f.span)
-    ) && arguments.len() == 2
+        selector,
+        MessageSelector::Keyword(parts)
+            if matches!(parts.as_slice(), [t, f] if t.keyword == "ifTrue:" && f.keyword == "ifFalse:")
+    ) && matches!(
+        arguments,
+        [Expression::Block(t), Expression::Block(f)] if t.if_false_if_true_arm && f.if_false_if_true_arm
+    )
 }
 
 /// The inverse of [`desugar_if_false_if_true`] on `expr`'s tree.
@@ -465,6 +458,11 @@ fn restore_if_false_if_true(expr: &mut Expression) {
                 KeywordPart::new("ifTrue:", if_true),
             ];
             arguments.swap(0, 1);
+            for argument in arguments.iter_mut() {
+                if let Expression::Block(block) = argument {
+                    block.if_false_if_true_arm = false;
+                }
+            }
         }
     });
 }
@@ -1581,7 +1579,7 @@ Protocol define: P
     }
 
     #[test]
-    fn written_if_false_if_true_is_read_off_the_keyword_spans() {
+    fn written_if_false_if_true_is_read_off_the_arm_marks() {
         let canonical = parse_bt("x ifTrue: [2] ifFalse: [1]");
         let Expression::MessageSend {
             selector,
@@ -1611,11 +1609,40 @@ Protocol define: P
     }
 
     #[test]
-    fn arms_written_swapped_reads_the_source_order_of_the_arms() {
-        assert!(arms_written_swapped(Span::new(10, 14), Span::new(0, 4)));
-        assert!(!arms_written_swapped(Span::new(0, 4), Span::new(10, 14)));
-        // Built without source positions: written the canonical way.
-        assert!(!arms_written_swapped(Span::new(0, 0), Span::new(0, 0)));
+    fn the_swap_mark_is_set_by_the_pass_only() {
+        let arms = |module: &Module| -> Vec<bool> {
+            let Expression::MessageSend { arguments, .. } = first_expr(module) else {
+                panic!("expected a send");
+            };
+            arguments
+                .iter()
+                .map(|a| matches!(a, Expression::Block(b) if b.if_false_if_true_arm))
+                .collect()
+        };
+        assert_eq!(
+            arms(&parse_bt("x ifFalse: [1] ifTrue: [2]")),
+            [false, false]
+        );
+        assert_eq!(arms(&peeled("x ifFalse: [1] ifTrue: [2]")), [true, true]);
+        // A parsed `ifTrue:ifFalse:`, whatever its source order, is unmarked.
+        assert_eq!(arms(&peeled("x ifTrue: [2] ifFalse: [1]")), [false, false]);
+    }
+
+    #[test]
+    fn a_synthesised_if_true_if_false_with_reversed_arms_is_not_read_as_written_swapped() {
+        // The guard rewrite builds `ifTrue:ifFalse:` sends from user blocks in
+        // either source order; none carries the mark.
+        let mut module = parse_bt("x ifTrue: [2] ifFalse: [1]");
+        let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = &mut module.expressions[0].expression
+        else {
+            panic!("expected a send");
+        };
+        arguments.swap(0, 1);
+        assert!(!written_if_false_if_true(selector, arguments));
     }
 
     #[test]

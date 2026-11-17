@@ -186,6 +186,41 @@ fn if_false_if_true_pure_inlines_like_if_true_if_false() {
     assert_compiles_through_erlc("bt@probe_if_false_if_true_pure", &code);
 }
 
+/// BT-4991: an `ifFalse: [^x]` guard is rewritten by `guard_returns` into a
+/// synthesised `ifTrue:ifFalse:` whose arms sit in the reverse of their source
+/// order. A non-Boolean receiver must still be sent `ifTrue:ifFalse:` (the
+/// guard's own two-branch form), never `ifFalse:ifTrue:`: only a send written
+/// `ifFalse:ifTrue:` is marked, so an unmarked send's fallback is never
+/// swapped, whatever order its arms are in.
+#[test]
+fn guard_return_fallback_still_sends_if_true_if_false() {
+    let src = "Value subclass: Probe\n  early: x =>\n    x ifFalse: [^#early]\n    #late\n";
+    let code = codegen_named(src, "bt@probe_guard_return_fallback");
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("'ifTrue:ifFalse:',[fun()->'late',fun()->'early']"),
+        "guard fallback must send `ifTrue:ifFalse:` with the arms as synthesised. Got:\n{code}"
+    );
+    assert!(
+        !compact.contains("'ifFalse:ifTrue:'"),
+        "a guard return must never send `ifFalse:ifTrue:`. Got:\n{code}"
+    );
+}
+
+/// BT-4991: a written `ifTrue:ifFalse:` whose blocks come in the reverse of the
+/// order a guard rewrite uses is also never swapped.
+#[test]
+fn written_if_true_if_false_fallback_is_never_swapped() {
+    let src = "Value subclass: Probe\n  check: flag =>\n    flag ifTrue: [1] ifFalse: [2]\n";
+    let code = codegen_named(src, "bt@probe_written_if_true_if_false");
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("'ifTrue:ifFalse:',[fun()->1,fun()->2]"),
+        "Got:\n{code}"
+    );
+    assert!(!compact.contains("'ifFalse:ifTrue:'"), "Got:\n{code}");
+}
+
 #[test]
 fn and_pure_short_circuits_to_literal_false() {
     let src = "Value subclass: Probe\n  check: flag =>\n    flag and: [flag]\n";

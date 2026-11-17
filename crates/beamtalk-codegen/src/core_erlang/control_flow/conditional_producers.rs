@@ -14,7 +14,7 @@ use super::conditionals::{
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::normalize::{IF_FALSE_IF_TRUE, arms_written_swapped};
+use beamtalk_core::ast::normalize::IF_FALSE_IF_TRUE;
 use beamtalk_core::ast::{Block, Expression, MatchArm};
 use beamtalk_core::semantic_analysis::block_facts::match_arm_block;
 use beamtalk_core::source_analysis::Span;
@@ -683,7 +683,8 @@ impl CoreErlangGenerator {
         let (selector_atom, blocks) = match blocks {
             [true_block, false_block]
                 if selector_atom == IF_TRUE_IF_FALSE
-                    && arms_written_swapped(true_block.span, false_block.span) =>
+                    && true_block.if_false_if_true_arm
+                    && false_block.if_false_if_true_arm =>
             {
                 swapped = vec![*false_block, *true_block];
                 (IF_FALSE_IF_TRUE, swapped.as_slice())
