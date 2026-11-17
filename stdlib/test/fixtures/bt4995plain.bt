@@ -14,8 +14,9 @@ Actor subclass: Bt4995Plain
   state: stashed = nil
 
   note: key value: value =>
-    self.tableName isNil
-      ifFalse: [(Ets named: self.tableName) at: key put: value]
+    self.tableName isNil ifFalse: [
+      (Ets named: self.tableName) at: key put: value
+    ]
 
   n => self.n
 

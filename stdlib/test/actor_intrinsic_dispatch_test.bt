@@ -38,7 +38,6 @@ TestCase subclass: ActorIntrinsicDispatchTest
     self deny: anActor isAlive
 
   // === continueWith: commit point ===
-
   testWritesAfterTheRequestAreSeenByTheContinuation =>
     a := self spawnPlain: Bt4995Plain
     self assert: a partialThenContinue equals: #queued
@@ -87,7 +86,6 @@ TestCase subclass: ActorIntrinsicDispatchTest
     self waitDead: a
 
   // === stopWith: commit point (terminate: sees the final State) ===
-
   testStopAfterPartialChangesTerminatesWithTheFinalState =>
     a := self spawnPlain: Bt4995Recorder
     self assert: a stopAfterPartial equals: #stillRunning
@@ -125,7 +123,6 @@ TestCase subclass: ActorIntrinsicDispatchTest
     self waitDead: a
 
   // === the default terminate: (no override anywhere) ===
-
   testDefaultTerminateLetsAnActorStopWithItsReason =>
     a := self spawnPlain: Bt4995Plain
     a onExit: [:reason | self.table at: #exitReason put: reason]
@@ -144,99 +141,131 @@ TestCase subclass: ActorIntrinsicDispatchTest
   //
   // `register:selector:fun:owner:` installs an extension the way `Cls extend`
   // does (ADR 0066). The fun records what it was sent into the table.
-
   registerExt: className selector: sel key: key =>
     Erlang beamtalk_extensions
       register: className
       selector: sel
-      fun: [:args :receiver | self.table at: key put: args. #ok]
+      fun: [:args :receiver |
+        self.table at: key put: args
+        #ok
+      ]
       owner: #bt4995
 
   testTerminateExtensionOnActorAddedBeforeTheActorStarted =>
-    self registerExt: #Actor selector: #'terminate:' key: #extTerminate
+    self
+      registerExt: #Actor
+      selector: #terminate:
+      key: #extTerminate
     [
       a := self spawnPlain: Bt4995Plain
       a stop
       self assert: (self seen: #extTerminate) equals: #(#normal)
-    ] ensure: [Actor removeSelector: #'terminate:' ifAbsent: [nil]]
+    ] ensure: [Actor removeSelector: #terminate: ifAbsent: [nil]]
 
   testTerminateExtensionOnActorAddedAfterTheActorStarted =>
     a := self spawnPlain: Bt4995Plain
     a n
-    self registerExt: #Actor selector: #'terminate:' key: #extTerminate
+    self
+      registerExt: #Actor
+      selector: #terminate:
+      key: #extTerminate
     [
       a stop
       self assert: (self seen: #extTerminate) equals: #(#normal)
-    ] ensure: [Actor removeSelector: #'terminate:' ifAbsent: [nil]]
+    ] ensure: [Actor removeSelector: #terminate: ifAbsent: [nil]]
 
   testTerminateExtensionRemovedAfterTheActorStartedIsNoLongerCalled =>
-    self registerExt: #Actor selector: #'terminate:' key: #extTerminate
+    self
+      registerExt: #Actor
+      selector: #terminate:
+      key: #extTerminate
     a := self spawnPlain: Bt4995Plain
     a n
-    Actor removeSelector: #'terminate:' ifAbsent: [nil]
+    Actor removeSelector: #terminate: ifAbsent: [nil]
     a stop
     self waitDead: a
     self assert: (self.table at: #extTerminate) isNil
 
   testTerminateExtensionOnTheSuperclassBeatsTheActorDefault =>
-    self registerExt: #Bt4995Plain selector: #'terminate:' key: #extTerminate
+    self
+      registerExt: #Bt4995Plain
+      selector: #terminate:
+      key: #extTerminate
     [
       a := self spawnPlain: Bt4995Mid
       a stop
       self assert: (self seen: #extTerminate) equals: #(#normal)
-    ] ensure: [Bt4995Plain removeSelector: #'terminate:' ifAbsent: [nil]]
+    ] ensure: [Bt4995Plain removeSelector: #terminate: ifAbsent: [nil]]
 
   testTerminateExtensionOnTheAncestorTwoLevelsUpWins =>
-    self registerExt: #Bt4995Plain selector: #'terminate:' key: #extTerminate
+    self
+      registerExt: #Bt4995Plain
+      selector: #terminate:
+      key: #extTerminate
     [
       a := self spawnPlain: Bt4995Leaf
       a n
       a stop
       self assert: (self seen: #extTerminate) equals: #(#normal)
-    ] ensure: [Bt4995Plain removeSelector: #'terminate:' ifAbsent: [nil]]
+    ] ensure: [Bt4995Plain removeSelector: #terminate: ifAbsent: [nil]]
 
   testTerminateExtensionOnTheClassItselfWins =>
-    self registerExt: #Bt4995Leaf selector: #'terminate:' key: #extTerminate
+    self
+      registerExt: #Bt4995Leaf
+      selector: #terminate:
+      key: #extTerminate
     [
       a := self spawnPlain: Bt4995Leaf
       a stop
       self assert: (self seen: #extTerminate) equals: #(#normal)
-    ] ensure: [Bt4995Leaf removeSelector: #'terminate:' ifAbsent: [nil]]
+    ] ensure: [Bt4995Leaf removeSelector: #terminate: ifAbsent: [nil]]
 
   testClassOverrideBeatsAnActorTerminateExtension =>
-    self registerExt: #Actor selector: #'terminate:' key: #extTerminate
+    self
+      registerExt: #Actor
+      selector: #terminate:
+      key: #extTerminate
     [
       a := self spawnPlain: Bt4995Recorder
       a stop
       self assert: (self seen: #terminateReason) equals: #normal
       self waitDead: a
       self assert: (self.table at: #extTerminate) isNil
-    ] ensure: [Actor removeSelector: #'terminate:' ifAbsent: [nil]]
+    ] ensure: [Actor removeSelector: #terminate: ifAbsent: [nil]]
 
   testContinueWithExtensionAddedAfterTheActorStartedIsSeenOnTheNextSend =>
     a := self spawnPlain: Bt4995Plain
     self assert: a partialThenContinue equals: #queued
     self assert: (self seen: #stepSaw) equals: 2
     self.table removeKey: #stepSaw
-    self registerExt: #Actor selector: #'continueWith:' key: #extContinue
+    self
+      registerExt: #Actor
+      selector: #continueWith:
+      key: #extContinue
     [
       self assert: a partialThenContinue equals: #queued
       self assert: (self seen: #extContinue) equals: #(#stepAfterPartial)
       self assert: (self.table at: #stepSaw) isNil
-    ] ensure: [Actor removeSelector: #'continueWith:' ifAbsent: [nil]]
+    ] ensure: [Actor removeSelector: #continueWith: ifAbsent: [nil]]
 
   testContinueWithExtensionOnAnAncestorWins =>
-    self registerExt: #Bt4995Plain selector: #'continueWith:' key: #extContinue
+    self
+      registerExt: #Bt4995Plain
+      selector: #continueWith:
+      key: #extContinue
     [
       a := self spawnPlain: Bt4995Leaf
       self assert: a partialThenContinue equals: #queued
       self assert: (self seen: #extContinue) equals: #(#stepAfterPartial)
-    ] ensure: [Bt4995Plain removeSelector: #'continueWith:' ifAbsent: [nil]]
+    ] ensure: [Bt4995Plain removeSelector: #continueWith: ifAbsent: [nil]]
 
   testContinueWithExtensionRemovedRestoresTheIntrinsic =>
     a := self spawnPlain: Bt4995Plain
-    self registerExt: #Actor selector: #'continueWith:' key: #extContinue
-    Actor removeSelector: #'continueWith:' ifAbsent: [nil]
+    self
+      registerExt: #Actor
+      selector: #continueWith:
+      key: #extContinue
+    Actor removeSelector: #continueWith: ifAbsent: [nil]
     self assert: a partialThenContinue equals: #queued
     self assert: (self seen: #stepSaw) equals: 2
     self assert: (self.table at: #extContinue) isNil
@@ -247,32 +276,40 @@ TestCase subclass: ActorIntrinsicDispatchTest
   testStopWithExtensionOnActorDoesNotInterceptASelfSend =>
     a := self spawnPlain: Bt4995Recorder
     a n
-    self registerExt: #Actor selector: #'stopWith:' key: #extStop
+    self
+      registerExt: #Actor
+      selector: #stopWith:
+      key: #extStop
     [
       self assert: a stopAfterPartial equals: #stillRunning
       self assert: (self seen: #terminateReason) equals: #partial
       self assert: (self.table at: #extStop) isNil
-    ] ensure: [Actor removeSelector: #'stopWith:' ifAbsent: [nil]]
+    ] ensure: [Actor removeSelector: #stopWith: ifAbsent: [nil]]
 
   testStopWithExtensionOnAnAncestorWins =>
-    self registerExt: #Bt4995Plain selector: #'stopWith:' key: #extStop
+    self
+      registerExt: #Bt4995Plain
+      selector: #stopWith:
+      key: #extStop
     [
       a := self spawnPlain: Bt4995Leaf
       self assert: a stopAfterPartial equals: #stillRunning
       self assert: (self seen: #extStop) equals: #(#partial)
       self assert: a isAlive
-    ] ensure: [Bt4995Plain removeSelector: #'stopWith:' ifAbsent: [nil]]
+    ] ensure: [Bt4995Plain removeSelector: #stopWith: ifAbsent: [nil]]
 
   testStopWithExtensionRemovedRestoresTheIntrinsic =>
     a := self spawnPlain: Bt4995Recorder
-    self registerExt: #Actor selector: #'stopWith:' key: #extStop
-    Actor removeSelector: #'stopWith:' ifAbsent: [nil]
+    self
+      registerExt: #Actor
+      selector: #stopWith:
+      key: #extStop
+    Actor removeSelector: #stopWith: ifAbsent: [nil]
     self assert: a stopAfterPartial equals: #stillRunning
     self assert: (self seen: #terminateReason) equals: #partial
     self assert: (self.table at: #extStop) isNil
 
   // === the other Actor intrinsics keep their path ===
-
   testOnExitSeesTheStopReason =>
     a := self spawnPlain: Bt4995Plain
     a onExit: [:reason | self.table at: #exitReason put: reason]
