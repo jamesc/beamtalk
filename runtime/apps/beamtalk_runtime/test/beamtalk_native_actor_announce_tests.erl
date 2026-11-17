@@ -154,6 +154,8 @@ stray_message_rehibernates() ->
         %% It woke to handle the message; wait for it to settle again.
         timer:sleep(50),
         ?assertEqual(ok, wait_until_one_hibernates([Observer], 100)),
+        %% Hibernating again is only meaningful once the message was consumed.
+        ?assertEqual({message_queue_len, 0}, process_info(Observer, message_queue_len)),
         stop(Pid),
         ?assertMatch(#{reason := crashed}, expect('ActorStopped', Pid))
     end).
