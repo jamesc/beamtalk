@@ -71,7 +71,7 @@ init_applies_defaults_and_writes_marker_test() ->
     {{ok, State}, Marker} = compiled_init(#{}),
     ?assertEqual(0, maps:get(value, State)),
     ?assertEqual('bt@counter', maps:get('__class_mod__', State)),
-    ?assertEqual('bt@counter', Marker).
+    ?assertEqual('Counter', Marker).
 
 init_args_override_defaults_test() ->
     {{ok, State}, _Marker} = compiled_init(#{value => 7}),
