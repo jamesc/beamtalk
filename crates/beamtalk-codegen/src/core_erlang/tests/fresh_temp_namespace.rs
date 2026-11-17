@@ -279,7 +279,6 @@ const HAND_WRITTEN: &[&str] = &[
     "_State",
     "_StateChanged",
     "_T",
-    "_TelPid",
     "_TelStart",
     "_TelStop",
     "_TermDisp",
