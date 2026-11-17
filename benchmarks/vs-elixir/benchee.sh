@@ -8,6 +8,7 @@
 #   benchmarks/vs-elixir/benchee.sh            # env knobs: see actors.exs
 #   ERL_FLAGS="+S 1:1" BENCHEE_PARALLEL=1 benchmarks/vs-elixir/benchee.sh
 #   BENCH_SCRIPT=bench/reductions.exs benchmarks/vs-elixir/benchee.sh   # exact reductions per start (BT-4997)
+#   BENCH_SCRIPT=bench/actor_memory.exs benchmarks/vs-elixir/benchee.sh # memory per idle actor (BT-4997)
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

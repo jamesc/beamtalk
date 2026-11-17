@@ -190,6 +190,33 @@ Once a console is up, `beamtalk repl --host <host> --port <port>` attaches
 over the same WebSocket protocol dev uses, with the identical op vocabulary
 minus the release's compiler-dependent refusals (below).
 
+### Tuning: minimum actor heap (`actor_min_heap_size`)
+
+By default a compiled actor's process starts with the VM's default heap (233
+words) and grows as it works. Starting an actor then costs about five garbage
+collections (BT-4932 measured this at 1.3–1.5 µs per start). A larger minimum
+heap removes them, at the price of memory for **every** actor, idle ones too:
+the heap is allocated up front (a word is 8 bytes on a 64-bit VM, so 2000 words
+is about 16 KB, before the process's other overhead). It is **off by default**,
+so nothing changes until you set it.
+
+```erlang
+% config/sys.config (or: ERL_FLAGS="-beamtalk_runtime actor_min_heap_size 2000")
+[{beamtalk_runtime, [{actor_min_heap_size, 2000}]}].
+```
+
+The value is a positive number of words. It is read when the runtime starts;
+change it at run time with `application:set_env(beamtalk_runtime,
+actor_min_heap_size, Words)` followed by `beamtalk_actor:refresh_spawn_options()`.
+It applies to actors started afterwards and to every start path of a compiled
+actor (`spawn`, `spawnWith:`, the monitored variants, named and supervised
+children); `native:` actors started by their own backing module are not
+affected. A value that is not a positive integer is ignored with a warning.
+
+Measure before choosing a size: `benchmarks/vs-elixir/benchee.sh` with
+`BENCH_SCRIPT=bench/actor_memory.exs` reports bytes per idle actor, and rows
+16a/16c/16d (`BENCHEE_ROWS=16a,16c,16d`) report the start cost.
+
 ### Hardening: `-start_epmd false`
 
 Every release runs loopback-bound Erlang distribution and, by OTP default,

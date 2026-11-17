@@ -23,6 +23,10 @@ start(_StartType, _StartArgs) ->
     %% logger framework (OTP 21+) and are captured by the workspace file handler.
     application:set_env(sasl, sasl_error_logger, false),
 
+    %% Actor spawn options from the app env (BT-4997): none unless
+    %% `actor_min_heap_size` is set.
+    ok = beamtalk_actor:refresh_spawn_options(),
+
     %% Initialize extension registry ETS tables
     beamtalk_extensions:init(),
 
