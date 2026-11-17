@@ -448,3 +448,116 @@ fn and_guard_with_non_boolean_operand_keeps_its_frame() {
     );
     assert!(code.contains("make_ref"), "{code}");
 }
+
+// BT-4998: `c ifTrue: [^a] ifFalse: [^b]` in tail position on a receiver that
+// is not a Boolean by construction, with effect-free values. The Boolean arms
+// return plainly; a non-Boolean receiver is still sent the selector as
+// written, through `beamtalk_guard_return:two_branch/3`, which owns the
+// frame, so the method has none.
+
+#[test]
+fn two_branch_tail_returns_have_no_frame_on_every_method_kind() {
+    for (label, src) in [
+        (
+            "object",
+            "Object subclass: T\n\
+             \x20 both: x => x ifTrue: [^#yes] ifFalse: [^#no]\n",
+        ),
+        (
+            "class-side",
+            "Object subclass: T\n\
+             \x20 class both: x => x ifTrue: [^#yes] ifFalse: [^#no]\n",
+        ),
+        (
+            "value",
+            "Value subclass: T\n\
+             \x20 both: x => x ifTrue: [^#yes] ifFalse: [^#no]\n",
+        ),
+        (
+            "actor",
+            "Actor subclass: T\n\
+             \x20 state: n = 0\n\
+             \x20 both: x =>\n\
+             \x20   self.n := self.n + 1\n\
+             \x20   x ifTrue: [^#yes] ifFalse: [^#no]\n",
+        ),
+    ] {
+        let code = codegen(src);
+        assert_no_nlr_frame(&code);
+        assert!(
+            !code.contains("call 'erlang':'throw'"),
+            "{label}: no throw for the `^`:\n{code}"
+        );
+        assert!(
+            code.contains("call 'beamtalk_guard_return':'two_branch'"),
+            "{label}: the non-Boolean arm goes through the helper:\n{code}"
+        );
+        assert!(
+            code.contains("'ifTrue:ifFalse:'"),
+            "{label}: the selector as written is sent:\n{code}"
+        );
+    }
+}
+
+#[test]
+fn two_branch_tail_if_false_if_true_sends_the_selector_as_written() {
+    let code = codegen(
+        "Object subclass: T\n\
+         \x20 both: x => x ifFalse: [^1] ifTrue: [^2]\n",
+    );
+    assert_no_nlr_frame(&code);
+    assert!(
+        code.contains("call 'beamtalk_guard_return':'two_branch'")
+            && code.contains("'ifFalse:ifTrue:'"),
+        "{code}"
+    );
+}
+
+#[test]
+fn two_branch_tail_nested_in_an_inlined_conditional_has_no_frame() {
+    let code = codegen(
+        "Object subclass: T\n\
+         \x20 nested: x inner: y =>\n\
+         \x20   x =:= 1 ifTrue: [y ifTrue: [^1] ifFalse: [^2]] ifFalse: [^3]\n",
+    );
+    assert_no_nlr_frame(&code);
+    assert!(
+        code.contains("call 'beamtalk_guard_return':'two_branch'"),
+        "{code}"
+    );
+}
+
+#[test]
+fn two_branch_tail_on_a_boolean_by_construction_needs_no_helper() {
+    let code = codegen(
+        "Object subclass: T\n\
+         \x20 both: x => x =:= 1 ifTrue: [^#yes] ifFalse: [^#no]\n",
+    );
+    assert_no_nlr_frame(&code);
+    assert!(!code.contains("beamtalk_guard_return"), "{code}");
+}
+
+#[test]
+fn two_branch_tail_with_a_send_value_keeps_its_frame() {
+    // The residue BT-4998 leaves for the owner (options A/B): a value with a
+    // send is evaluated inside the block a non-Boolean receiver calls, which
+    // the helper cannot do without a closure and a frame.
+    let code = codegen(
+        "Object subclass: T\n\
+         \x20 foo: n => n\n\
+         \x20 both: x => x ifTrue: [^self foo: 1] ifFalse: [^self foo: 2]\n",
+    );
+    assert!(code.contains("make_ref"), "{code}");
+}
+
+#[test]
+fn two_branch_tail_with_a_non_tail_conditional_keeps_its_frame() {
+    // Not in tail position: the receiver's answer is not the method's result.
+    let code = codegen(
+        "Object subclass: T\n\
+         \x20 both: x =>\n\
+         \x20   x ifTrue: [^#yes] ifFalse: [^#no]\n\
+         \x20   #unreachable\n",
+    );
+    assert!(code.contains("make_ref"), "{code}");
+}

@@ -691,6 +691,34 @@ impl CoreErlangGenerator {
             }
             _ => (selector_atom, blocks),
         };
+        // BT-4998: a recorded tail `ifTrue: [^a] ifFalse: [^b]` was rewritten
+        // to the plain values `a` / `b`. A non-Boolean receiver is sent the
+        // selector as written by `beamtalk_guard_return:two_branch/3`, which
+        // owns the frame its blocks return through, so the method has none.
+        if let Some(first) = blocks.iter().map(|b| b.span).min_by_key(|s| s.start())
+            && self.take_two_branch(first)
+        {
+            let values = blocks
+                .iter()
+                .map(|block| match block.body.as_slice() {
+                    [stmt] => self.generate_expression(&stmt.expression),
+                    _ => unreachable!("a recorded two-branch arm is one value"),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            return Ok(docvec![
+                "call ",
+                leaf::atom("beamtalk_guard_return"),
+                ":",
+                leaf::atom(crate::core_erlang::guard_returns::TWO_BRANCH_HELPER),
+                "(",
+                leaf::var(cond_var.to_string()),
+                ", ",
+                leaf::atom(selector_atom),
+                ", [",
+                beamtalk_cerl_doc::join(values, &Document::Str(", ")),
+                "])",
+            ]);
+        }
         let at = blocks.first().map(|b| b.span).unwrap_or_default();
         // The send's `^`-holding arms that go as closures are checked
         // whichever path lowered the conditional (the mutation path never

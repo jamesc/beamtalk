@@ -99,3 +99,44 @@ TestCase subclass: GuardReturnTest
     self assert: a count equals: 1
     self assert: (a early: true) equals: #early
     self assert: a count equals: 1
+
+  // BT-4998: `^` in both branches of a two-branch conditional in tail position.
+  testBothBranchesReturnOnBooleans =>
+    self assert: (GuardReturnObject both: true) equals: #yes
+    self assert: (GuardReturnObject both: false) equals: #no
+    self assert: (GuardReturnObject bothFalseFirst: true) equals: #yes
+    self assert: (GuardReturnObject bothFalseFirst: false) equals: #no
+    self assert: (GuardReturnObject bothVars: true with: 1 with: 2) equals: 1
+    self assert: (GuardReturnObject bothVars: false with: 1 with: 2) equals: 2
+
+  testBothBranchesNonBooleanThatCallsTheBlockReturnsFromTheMethod =>
+    r := NonBooleanCondCalling new
+    self assert: (GuardReturnObject both: r) equals: #no
+    self assert: (GuardReturnObject bothVars: r with: 1 with: 2) equals: 2
+
+  testBothBranchesNonBooleanThatIgnoresTheBlockAnswersTheSend =>
+    r := NonBooleanCondIgnoring new
+    self assert: (GuardReturnObject both: r) equals: #ignoredIfTrueIfFalse
+
+  testBothBranchesFalseTrueNonBooleanTakesTheSelectorAsWritten =>
+    self should: [GuardReturnObject bothFalseFirst: NonBooleanCondCalling new] raise: #does_not_understand
+    self should: [GuardReturnObject both: nil] raise: #does_not_understand
+
+  testBothBranchesNestedInsideAnotherConditional =>
+    self assert: (GuardReturnObject nested: true inner: true) equals: #tt
+    self assert: (GuardReturnObject nested: true inner: false) equals: #tf
+    self assert: (GuardReturnObject nested: false inner: true) equals: #f
+    self assert: (GuardReturnObject nested: true inner: NonBooleanCondCalling new) equals: #tf
+
+  testBothBranchesEnsureStillRuns =>
+    a := GuardReturnActor spawn
+    self assert: (GuardReturnObject bothEnsure: true on: a) equals: #yes
+    self assert: (GuardReturnObject bothEnsure: false on: a) equals: #no
+    self assert: a count equals: 2
+
+  testBothBranchesInActorMethod =>
+    a := GuardReturnActor spawn
+    self assert: (a both: true) equals: #yes
+    self assert: (a both: false) equals: #no
+    self assert: (a both: NonBooleanCondCalling new) equals: #no
+    self assert: a count equals: 3

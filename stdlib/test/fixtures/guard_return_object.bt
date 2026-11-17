@@ -42,3 +42,24 @@ Object subclass: GuardReturnObject
   class earlyIfFalse: x =>
     x ifFalse: [^#early]
     #late
+
+  // BT-4998: `^` in both branches, as the method's last statement, on an
+  // untyped receiver. Effect-free values.
+  class both: x =>
+    x ifTrue: [^#yes] ifFalse: [^#no]
+
+  class bothFalseFirst: x =>
+    x ifFalse: [^#no] ifTrue: [^#yes]
+
+  class bothVars: x with: a with: b =>
+    x ifTrue: [^a] ifFalse: [^b]
+
+  // Nested inside another inlined conditional's branch (tail position).
+  class nested: x inner: y =>
+    x
+      ifTrue: [y ifTrue: [^#tt] ifFalse: [^#tf]]
+      ifFalse: [^#f]
+
+  // With an `ensure:` running around the conditional.
+  class bothEnsure: x on: counter =>
+    [x ifTrue: [^#yes] ifFalse: [^#no]] ensure: [counter bump: 0]
