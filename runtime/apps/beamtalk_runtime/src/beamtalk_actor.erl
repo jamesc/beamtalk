@@ -1150,7 +1150,11 @@ native_stop_observer_wait(MonRef, Pid, Class) ->
         {'DOWN', MonRef, process, Pid, Reason} ->
             do_announce_actor_lifecycle('ActorStopped', #{
                 actorClass => Class, pid => Pid, reason => normalize_stop_reason(Reason)
-            })
+            });
+        _Stray ->
+            %% Nothing sends this process anything; if something does, drop it and
+            %% hibernate again so no stack stays in this module's code.
+            erlang:hibernate(?MODULE, native_stop_observer_wait, [MonRef, Pid, Class])
     end.
 
 %% BT-4577: register a just-started native actor under its name, or stop it

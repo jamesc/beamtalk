@@ -43,6 +43,7 @@ announce_test_() ->
         {"a non-pid start result is ignored", fun non_pid_start_result_is_ignored/0},
         {"the observer hibernates and still announces the stop",
             fun observer_hibernates_and_wakes/0},
+        {"a stray message does not leave the observer awake", fun stray_message_rehibernates/0},
         {"the observer registers no name and creates no table", fun observer_leaves_no_trace/0}
     ]}.
 
@@ -138,6 +139,28 @@ observer_hibernates_and_wakes() ->
         stop(Pid),
         ?assertMatch(#{reason := crashed}, expect('ActorStopped', Pid))
     end).
+
+%% A message that is not the actor's `'DOWN'` wakes the observer out of
+%% hibernation. It must drop it and hibernate again, or it would sit in a
+%% `receive` inside the module's code, where two reloads of that module kill it.
+stray_message_rehibernates() ->
+    with_subscription(fun() ->
+        {ok, Pid} = beamtalk_actor:safe_spawn_linked(?FACADE, #{initial => 1}),
+        expect('ActorSpawned', Pid),
+        {monitored_by, Monitors} = process_info(Pid, monitored_by),
+        ?assertEqual(ok, wait_until_one_hibernates(Monitors, 100)),
+        [Observer | _] = [M || M <- Monitors, is_hibernated(M)],
+        Observer ! stray,
+        %% It woke to handle the message; wait for it to settle again.
+        timer:sleep(50),
+        ?assertEqual(ok, wait_until_one_hibernates([Observer], 100)),
+        stop(Pid),
+        ?assertMatch(#{reason := crashed}, expect('ActorStopped', Pid))
+    end).
+
+is_hibernated(Pid) ->
+    is_pid(Pid) andalso
+        process_info(Pid, current_function) =:= {current_function, {erlang, hibernate, 3}}.
 
 wait_until_one_hibernates(_Monitors, 0) ->
     timeout;
