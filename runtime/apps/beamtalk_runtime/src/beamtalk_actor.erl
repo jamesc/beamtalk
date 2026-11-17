@@ -1103,10 +1103,14 @@ native_started(Pid) when is_pid(Pid) ->
         undefined ->
             ok;
         _Bus ->
+            %% Best-effort, like the announcement: the backing process has
+            %% already started, so a failing lookup must not fail the start.
             Class =
-                case beamtalk_actor_scan:one_per_pid(beamtalk_actor_scan:info(Pid)) of
+                try beamtalk_actor_scan:one_per_pid(beamtalk_actor_scan:info(Pid)) of
                     [{Pid, Found, _StartedAt} | _] -> Found;
                     [] -> unknown
+                catch
+                    _:_ -> unknown
                 end,
             ok = do_announce_actor_lifecycle('ActorSpawned', #{actorClass => Class, pid => Pid}),
             _Observer = erlang:spawn(fun() -> native_stop_observer(Pid, Class) end),

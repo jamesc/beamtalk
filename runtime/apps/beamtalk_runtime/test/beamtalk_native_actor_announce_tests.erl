@@ -37,6 +37,7 @@ announce_test_() ->
         {"a crash is announced as ActorStopped with reason crashed", fun crash_is_announced/0},
         {"a named start announces once", fun named_start_announces_once/0},
         {"a failed start announces nothing", fun failed_start_announces_nothing/0},
+        {"a failing class lookup does not fail the start", fun failing_lookup_does_not_fail/0},
         {"the observer registers no name and creates no table", fun observer_leaves_no_trace/0}
     ]}.
 
@@ -76,6 +77,26 @@ failed_start_announces_nothing() ->
         {error, _} = beamtalk_actor:safe_spawn_linked(?FACADE, not_a_map),
         ?assertEqual(none, next_any(200))
     end).
+
+%% Announcing is best-effort and must never fail or delay a start: the class
+%% lookup (`beamtalk_actor_scan:info/1` raises `function_clause` for a pid on
+%% another node) falls back to `unknown` instead of raising after the backing
+%% process has already started.
+failing_lookup_does_not_fail() ->
+    with_subscription(fun() ->
+        RemotePid = remote_pid(),
+        ?assertNotEqual(node(), node(RemotePid)),
+        ?assertEqual(ok, beamtalk_actor:native_started(RemotePid)),
+        ?assertMatch(
+            #{pid := RemotePid, actorClass := unknown}, expect('ActorSpawned', RemotePid)
+        )
+    end).
+
+%% A pid on a node that is not this one and not connected: NEW_PID_EXT
+%% (tag 88), node name as an ATOM_UTF8_EXT, then id, serial and creation.
+remote_pid() ->
+    Node = <<"bt4970_fake@nowhere">>,
+    binary_to_term(<<131, 88, 119, (byte_size(Node)), Node/binary, 1:32, 0:32, 1:32>>).
 
 observer_leaves_no_trace() ->
     TablesBefore = lists:sort(ets:all()),
