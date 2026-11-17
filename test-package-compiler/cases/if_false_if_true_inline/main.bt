@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Snapshot test for `ifFalse:ifTrue:` codegen (BT-4991).
+//
+// With two literal blocks `ifFalse:ifTrue:` lowers exactly as `ifTrue:ifFalse:`
+// with the blocks swapped: an inline `case` over the receiver, no closure and
+// no send on the Boolean arms. `^` inside a block is a plain return.
+
+Value subclass: IfFalseIfTrueProbe
+
+  // Both arms inline: `true -> 1`, `false -> 2`.
+  pick: flag => flag ifFalse: [2] ifTrue: [1]
+
+  // Same, with a typed receiver.
+  typed: flag :: Boolean -> Integer => flag ifFalse: [20] ifTrue: [10]
+
+  // `^` in the false arm is a plain early return (no throw/catch).
+  early: flag =>
+    flag ifFalse: [^"early"] ifTrue: ["value"]
+    "fell through"
+
+  // Non-literal blocks keep the ordinary send.
+  blocks: flag false: falseBlock true: trueBlock =>
+    flag ifFalse: falseBlock ifTrue: trueBlock

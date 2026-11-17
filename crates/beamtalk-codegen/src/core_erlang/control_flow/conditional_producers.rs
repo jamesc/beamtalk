@@ -14,6 +14,7 @@ use super::conditionals::{
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
+use beamtalk_core::ast::normalize::{IF_FALSE_IF_TRUE, arms_written_swapped};
 use beamtalk_core::ast::{Block, Expression, MatchArm};
 use beamtalk_core::semantic_analysis::block_facts::match_arm_block;
 use beamtalk_core::source_analysis::Span;
@@ -674,6 +675,21 @@ impl CoreErlangGenerator {
         blocks: &[&Block],
         bracketed: bool,
     ) -> Result<Document<'static>> {
+        // BT-4991: an `ifFalse:ifTrue:` written with two literal blocks is
+        // lowered as `ifTrue:ifFalse:` (`ast::normalize`), but a non-Boolean
+        // receiver may implement `ifFalse:ifTrue:` itself: send it as
+        // written, the arms in the order they were written.
+        let swapped: Vec<&Block>;
+        let (selector_atom, blocks) = match blocks {
+            [true_block, false_block]
+                if selector_atom == IF_TRUE_IF_FALSE
+                    && arms_written_swapped(true_block.span, false_block.span) =>
+            {
+                swapped = vec![*false_block, *true_block];
+                (IF_FALSE_IF_TRUE, swapped.as_slice())
+            }
+            _ => (selector_atom, blocks),
+        };
         let at = blocks.first().map(|b| b.span).unwrap_or_default();
         // The send's `^`-holding arms that go as closures are checked
         // whichever path lowered the conditional (the mutation path never

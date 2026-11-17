@@ -95,6 +95,22 @@
 //! `[b] repeat` back. Before, codegen lowered `repeat` on its own path, which
 //! no state-threading recognizer knew: a body that wrote a REPL binding was a
 //! stateful block applied with no arguments (`arity_mismatch`).
+//!
+//! # `ifFalse:ifTrue:` (BT-4991)
+//!
+//! `c ifFalse: [a] ifTrue: [b]` with two literal block arguments is
+//! `c ifTrue: [b] ifFalse: [a]`: [`desugar_if_false_if_true`] swaps the
+//! keywords and the arguments, so every analysis and codegen path that knows
+//! `ifTrue:ifFalse:` (inlining, narrowing, state threading, `^` handling)
+//! handles the reversed form with no code of its own. Each keyword keeps the
+//! span it was written with, so the swapped send is the one whose keywords
+//! run backwards through the source ([`written_if_false_if_true`]): the
+//! restore puts it back without a record, and the one place that sends the
+//! selector to a non-Boolean receiver (`ifFalse:ifTrue:` is an ordinary
+//! message such a receiver may implement) reads the same test to send it as
+//! written ([`arms_written_swapped`]). The arguments are literal blocks, so
+//! swapping them changes no evaluation order; any other argument keeps the
+//! plain send, which `Boolean` answers.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -274,6 +290,7 @@ fn peel_in_scope(expr: &mut Expression, scope: PeelScope, record: &mut PeeledPar
     visit_operands_mut(expr, &mut |operand| peel_operand(operand, scope, record));
     // After the peel, so `([c]) whileTrue` has its literal receiver.
     desugar_unary_loops(expr);
+    desugar_if_false_if_true(expr);
 }
 
 /// The unary loop selectors and the keyword loop each one is
@@ -298,6 +315,13 @@ pub fn written_unary_loop_selectors() -> [&'static str; 3] {
 #[must_use]
 pub fn is_uncanonicalised_loop(node: &Expression) -> bool {
     unary_loop_keyword(node).is_some() || is_literal_repeat(node)
+}
+
+/// Whether `node` itself is a send the canonicalising pass rewrites besides
+/// the parentheses: an uncanonicalised loop ([`is_uncanonicalised_loop`]) or
+/// a literal `ifFalse:ifTrue:` ([`desugar_if_false_if_true`]).
+fn is_uncanonicalised_send(node: &Expression) -> bool {
+    is_uncanonicalised_loop(node) || is_literal_if_false_if_true(node)
 }
 
 /// The keyword selector `node` canonicalises to when it is a unary loop send
@@ -345,6 +369,104 @@ fn is_literal_repeat(node: &Expression) -> bool {
             && arguments.is_empty()
             && matches!(receiver.unwrap_parens(), Expression::Block(b) if b.parameters.is_empty())
     )
+}
+
+/// The keyword selector `ifFalse:ifTrue:` (BT-4991).
+pub const IF_FALSE_IF_TRUE: &str = "ifFalse:ifTrue:";
+
+/// The keyword selector `ifTrue:ifFalse:` it canonicalises to.
+const IF_TRUE_IF_FALSE: &str = "ifTrue:ifFalse:";
+
+/// Whether a conditional's two arms, in the `[true arm, false arm]` order the
+/// canonical `ifTrue:ifFalse:` holds them, were written false arm first: the
+/// true arm's span starts after the false arm's. The one rule for "this
+/// `ifTrue:ifFalse:` was written `ifFalse:ifTrue:`" (BT-4991), over keyword
+/// spans ([`written_if_false_if_true`]) or block spans (codegen's fallback
+/// send, which holds only the blocks). Nodes built without source positions
+/// (equal spans) read as written the canonical way.
+#[must_use]
+pub fn arms_written_swapped(true_arm: Span, false_arm: Span) -> bool {
+    true_arm.start() > false_arm.start()
+}
+
+/// Whether `node` itself is an `ifFalse:ifTrue:` send with two literal block
+/// arguments, which [`desugar_if_false_if_true`] rewrites.
+fn is_literal_if_false_if_true(node: &Expression) -> bool {
+    let Expression::MessageSend {
+        selector: MessageSelector::Keyword(parts),
+        arguments,
+        is_cast: false,
+        ..
+    } = node
+    else {
+        return false;
+    };
+    matches!(parts.as_slice(), [a, b] if a.keyword == "ifFalse:" && b.keyword == "ifTrue:")
+        && matches!(arguments.as_slice(), [Expression::Block(_), Expression::Block(_)])
+}
+
+/// Rewrites every `c ifFalse: [a] ifTrue: [b]` (two literal blocks) in
+/// `expr`'s tree as `c ifTrue: [b] ifFalse: [a]`, each keyword keeping its
+/// written span. Idempotent: the rewritten send is an `ifTrue:ifFalse:`.
+pub fn desugar_if_false_if_true(expr: &mut Expression) {
+    walk_expression_mut(expr, &mut |node| {
+        if !is_literal_if_false_if_true(node) {
+            return;
+        }
+        if let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = node
+        {
+            let (if_false, if_true) = (parts[0].span, parts[1].span);
+            *parts = vec![
+                KeywordPart::new("ifTrue:", if_true),
+                KeywordPart::new("ifFalse:", if_false),
+            ];
+            arguments.swap(0, 1);
+        }
+    });
+}
+
+/// Whether `selector` and `arguments` are an `ifTrue:ifFalse:` that
+/// [`desugar_if_false_if_true`] produced: its keywords run backwards through
+/// the source ([`arms_written_swapped`]). `false` for any send written
+/// `ifTrue:ifFalse:`.
+#[must_use]
+pub fn written_if_false_if_true(selector: &MessageSelector, arguments: &[Expression]) -> bool {
+    let MessageSelector::Keyword(parts) = selector else {
+        return false;
+    };
+    matches!(
+        parts.as_slice(),
+        [t, f] if t.keyword == "ifTrue:"
+            && f.keyword == "ifFalse:"
+            && arms_written_swapped(t.span, f.span)
+    ) && arguments.len() == 2
+}
+
+/// The inverse of [`desugar_if_false_if_true`] on `expr`'s tree.
+fn restore_if_false_if_true(expr: &mut Expression) {
+    walk_expression_mut(expr, &mut |node| {
+        let Expression::MessageSend {
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            ..
+        } = node
+        else {
+            return;
+        };
+        let selector = MessageSelector::Keyword(parts.clone());
+        if written_if_false_if_true(&selector, arguments) {
+            let (if_true, if_false) = (parts[0].span, parts[1].span);
+            *parts = vec![
+                KeywordPart::new("ifFalse:", if_false),
+                KeywordPart::new("ifTrue:", if_true),
+            ];
+            arguments.swap(0, 1);
+        }
+    });
 }
 
 /// The span of the empty body block [`desugar_unary_loops`] gives the unary
@@ -457,6 +579,9 @@ pub fn selector_as_written(
     if written_repeat(receiver, selector, arguments) {
         return "repeat".into();
     }
+    if written_if_false_if_true(selector, arguments) {
+        return IF_FALSE_IF_TRUE.into();
+    }
     match written_unary_loop(selector, arguments) {
         Some(unary) => unary.into(),
         None => selector.name(),
@@ -491,7 +616,8 @@ pub fn written_unary_loop(
 }
 
 /// Whether `method`'s body holds a loop [`desugar_unary_loops`] produced
-/// ([`written_unary_loop`]): the cheap scan that lets a reflection caller
+/// ([`written_unary_loop`]) or an `ifFalse:ifTrue:` [`desugar_if_false_if_true`]
+/// swapped ([`written_if_false_if_true`]): the cheap scan that lets a reflection caller
 /// with nothing peeled skip the restoring clone.
 #[must_use]
 pub fn method_has_desugared_unary_loop(method: &MethodDefinition) -> bool {
@@ -513,7 +639,8 @@ pub fn method_has_desugared_unary_loop(method: &MethodDefinition) -> bool {
             {
                 found = found
                     || written_unary_loop(selector, arguments).is_some()
-                    || written_repeat(receiver, selector, arguments);
+                    || written_repeat(receiver, selector, arguments)
+                    || written_if_false_if_true(selector, arguments);
             }
         });
     }
@@ -525,6 +652,7 @@ pub fn method_has_desugared_unary_loop(method: &MethodDefinition) -> bool {
 /// becomes the unary send again, and a `whileTrue:` whose condition the pass
 /// added ([`written_repeat`]) becomes `<body> repeat`.
 fn restore_unary_loops(expr: &mut Expression) {
+    restore_if_false_if_true(expr);
     walk_expression_mut(expr, &mut |node| {
         let Expression::MessageSend {
             receiver,
@@ -556,12 +684,12 @@ pub fn restore_unary_loops_in_module(module: &mut Module) {
     for_each_root_mut(module, &mut |_, root| restore_unary_loops(root));
 }
 
-/// The span of the first unary loop send in `expr`'s tree that
-/// [`desugar_unary_loops`] would rewrite, or `None`.
+/// The span of the first send in `expr`'s tree that [`desugar_unary_loops`] or
+/// [`desugar_if_false_if_true`] would rewrite, or `None`.
 fn expr_first_unary_loop(expr: &Expression) -> Option<Span> {
     let mut found = None;
     walk_expression(expr, &mut |node| {
-        if found.is_none() && is_uncanonicalised_loop(node) {
+        if found.is_none() && is_uncanonicalised_send(node) {
             found = Some(node.span());
         }
     });
@@ -569,7 +697,7 @@ fn expr_first_unary_loop(expr: &Expression) -> Option<Span> {
 }
 
 /// `true` if the canonicalising pass ([`peel_operand_parens`]) would change
-/// `module`: a parenthesised send operand or a unary loop. The cheap scan a
+/// `module`: a parenthesised send operand, a unary loop or a literal `ifFalse:ifTrue:`. The cheap scan a
 /// caller holding a shared reference runs before cloning.
 #[must_use]
 pub fn needs_normalising(module: &Module) -> bool {
@@ -717,8 +845,9 @@ pub fn assert_expr_operands_normalised(expressions: &[Expression], context: &str
 fn assert_no_unary_loop(unary_loop: Option<Span>, context: &str) {
     if let Some(span) = unary_loop {
         panic!(
-            "{context}: unary loop send at {}..{} was not canonicalised; \
-             run `ast::normalize::peel_operand_parens` before this point (BT-4313)",
+            "{context}: unary loop or `ifFalse:ifTrue:` send at {}..{} was not \
+             canonicalised; run `ast::normalize::peel_operand_parens` before this \
+             point (BT-4313, BT-4991)",
             span.start(),
             span.end()
         );
@@ -1386,6 +1515,130 @@ Protocol define: P
     fn restore_gives_back_repeat_as_written() {
         for (restored, raw) in restored_and_raw(REPEAT_SOURCE) {
             assert_eq!(restored, raw);
+        }
+    }
+    // === `ifFalse:ifTrue:` (BT-4991) ===
+
+    const IF_FALSE_IF_TRUE_SOURCE: &str = "Object subclass: A
+  lit => true ifFalse: [1] ifTrue: [2]
+  nested => (x ifFalse: [a ifFalse: [1] ifTrue: [2]] ifTrue: [3]) foo
+  inLoop => #(1) do: [:e | e ifFalse: [^1] ifTrue: [2]]
+  nonLiteral: f and: g => x ifFalse: f ifTrue: g
+  mixed: f => x ifFalse: [1] ifTrue: f
+  canonical => x ifTrue: [2] ifFalse: [1]
+";
+
+    #[test]
+    fn if_false_if_true_with_literal_blocks_is_canonicalised_to_if_true_if_false() {
+        let module = peeled("true ifFalse: [1] ifTrue: [2]");
+        assert_eq!(
+            unparse_module(&module).trim(),
+            "true ifTrue: [2] ifFalse: [1]"
+        );
+        // The same tree the canonical spelling parses to, up to spans.
+        let canonical = parse_bt("true ifTrue: [2] ifFalse: [1]");
+        let (Expression::MessageSend { selector: a, .. }, Expression::MessageSend { selector: b, .. }) =
+            (first_expr(&module), first_expr(&canonical))
+        else {
+            panic!("expected sends");
+        };
+        assert_eq!(a.name(), b.name());
+    }
+
+    #[test]
+    fn if_false_if_true_with_a_non_literal_argument_stays_a_plain_send() {
+        for src in [
+            "x ifFalse: f ifTrue: g",
+            "x ifFalse: [1] ifTrue: g",
+            "x ifFalse: f ifTrue: [2]",
+        ] {
+            let module = peeled(src);
+            assert_eq!(unparse_module(&module).trim(), src, "{src}");
+            assert!(!needs_normalising(&module), "{src}");
+        }
+    }
+
+    #[test]
+    fn if_false_if_true_canonicalising_is_found_by_the_scans_and_idempotent() {
+        let raw = parse_bt("x ifFalse: [1] ifTrue: [2]");
+        assert!(needs_normalising(&raw));
+        assert!(expr_needs_normalising(first_expr(&raw)));
+        let once = peeled("x ifFalse: [1] ifTrue: [2]");
+        assert!(!needs_normalising(&once));
+        let mut twice = once.clone();
+        peel_operand_parens(&mut twice);
+        assert_eq!(once, twice);
+        assert_operands_normalised(&once, "test");
+        assert!(matches!(normalised(&once), Cow::Borrowed(_)));
+    }
+
+    #[test]
+    #[should_panic(expected = "was not canonicalised")]
+    fn the_normalisation_assertion_rejects_a_literal_if_false_if_true() {
+        assert_operands_normalised(&parse_bt("x ifFalse: [1] ifTrue: [2]"), "test");
+    }
+
+    #[test]
+    fn written_if_false_if_true_is_read_off_the_keyword_spans() {
+        let canonical = parse_bt("x ifTrue: [2] ifFalse: [1]");
+        let Expression::MessageSend {
+            selector, arguments, ..
+        } = first_expr(&canonical)
+        else {
+            panic!("expected a send");
+        };
+        assert!(!written_if_false_if_true(selector, arguments));
+
+        let swapped = peeled("x ifFalse: [1] ifTrue: [2]");
+        let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            ..
+        } = first_expr(&swapped)
+        else {
+            panic!("expected a send");
+        };
+        assert!(written_if_false_if_true(selector, arguments));
+        assert_eq!(
+            selector_as_written(receiver, selector, arguments),
+            "ifFalse:ifTrue:"
+        );
+    }
+
+    #[test]
+    fn arms_written_swapped_reads_the_source_order_of_the_arms() {
+        assert!(arms_written_swapped(Span::new(10, 14), Span::new(0, 4)));
+        assert!(!arms_written_swapped(Span::new(0, 4), Span::new(10, 14)));
+        // Built without source positions: written the canonical way.
+        assert!(!arms_written_swapped(Span::new(0, 0), Span::new(0, 0)));
+    }
+
+    #[test]
+    fn restore_gives_back_if_false_if_true_as_written() {
+        for (restored, raw) in restored_and_raw(IF_FALSE_IF_TRUE_SOURCE) {
+            assert_eq!(restored, raw);
+        }
+    }
+
+    #[test]
+    fn method_scan_sees_a_swapped_if_false_if_true() {
+        let raw = parse_bt(IF_FALSE_IF_TRUE_SOURCE);
+        let peeled = peeled(IF_FALSE_IF_TRUE_SOURCE);
+        let has = |m: &Module, name: &str| {
+            let method = m.classes[0]
+                .methods
+                .iter()
+                .find(|method| method.selector.name() == name)
+                .unwrap_or_else(|| panic!("no method {name}"));
+            method_has_desugared_unary_loop(method)
+        };
+        for name in ["lit", "nested", "inLoop"] {
+            assert!(has(&peeled, name), "{name}");
+            assert!(!has(&raw, name), "{name}");
+        }
+        for name in ["nonLiteral:and:", "mixed:", "canonical"] {
+            assert!(!has(&peeled, name), "{name}");
         }
     }
 }
