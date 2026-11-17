@@ -54,43 +54,34 @@ fixture_teardown(ActorsBefore) ->
 %%% Tests
 
 %%% Initialization tests
+%%
+%% These drive a compiled actor's generated `init/1` (the `bt@counter` fixture),
+%% the callback every real actor runs. `init/1` writes the actor marker into its
+%% process: run it in a fresh process, or every later scan lists the shared test
+%% process as an actor (ADR 0150).
 
-init_with_valid_state_test() ->
-    State = #{
-        '$beamtalk_class' => 'TestActor',
-        '__methods__' => #{test => fun(_Args, S) -> {reply, ok, S} end},
-        data => 123
-    },
-    %% init/1 writes the actor marker into its process: keep it off the shared
-    %% test process, or every later scan lists that process as an actor (ADR 0150).
-    ?assertEqual(
-        {ok, State},
-        beamtalk_test_proc:in_fresh_process(fun() -> test_actor_host:init(State) end)
-    ).
+compiled_init(InitArgs) ->
+    ok = beamtalk_test_class:ensure_fixture_loaded('Counter', 'bt@counter'),
+    beamtalk_test_proc:in_fresh_process(fun() ->
+        Result = 'bt@counter':init(InitArgs),
+        {Result, erlang:get('$beamtalk_actor')}
+    end).
 
-init_without_class_test() ->
-    State = #{
-        '__methods__' => #{test => fun(_Args, S) -> {reply, ok, S} end}
-    },
-    ?assertEqual({stop, {missing_key, '$beamtalk_class'}}, test_actor_host:init(State)).
+init_applies_defaults_and_writes_marker_test() ->
+    {{ok, State}, Marker} = compiled_init(#{}),
+    ?assertEqual(0, maps:get(value, State)),
+    ?assertEqual('bt@counter', maps:get('__class_mod__', State)),
+    ?assertEqual('Counter', Marker).
 
-init_with_non_atom_class_test() ->
-    State = #{
-        '$beamtalk_class' => "StringNotAtom",
-        '__methods__' => #{test => fun(_Args, S) -> {reply, ok, S} end}
-    },
-    ?assertEqual({stop, {invalid_value, '$beamtalk_class'}}, test_actor_host:init(State)).
+init_args_override_defaults_test() ->
+    {{ok, State}, _Marker} = compiled_init(#{value => 7}),
+    ?assertEqual(7, maps:get(value, State)).
 
-init_without_methods_test() ->
-    State = #{
-        '$beamtalk_class' => 'TestActor'
-    },
-    ?assertEqual({stop, {missing_key, '__methods__'}}, test_actor_host:init(State)).
-
-init_with_non_map_test() ->
-    ?assertEqual({stop, {invalid_state, not_a_map}}, test_actor_host:init("not a map")),
-    ?assertEqual({stop, {invalid_state, not_a_map}}, test_actor_host:init([1, 2, 3])),
-    ?assertEqual({stop, {invalid_state, not_a_map}}, test_actor_host:init(123)).
+init_skip_initialize_leaves_no_marker_test() ->
+    {Result, Marker} = compiled_init(#{'__skip_initialize__' => true}),
+    ?assertMatch({ok, #{value := 0}}, Result),
+    ?assertNot(maps:is_key('__skip_initialize__', element(2, Result))),
+    ?assertEqual(undefined, Marker).
 
 %%% Sync message dispatch tests
 

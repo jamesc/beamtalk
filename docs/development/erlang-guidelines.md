@@ -93,16 +93,15 @@ call 'erlang':'+'(_cor0, _cor1)
 
 ### gen_server for Actors
 
-Beamtalk actors map to `gen_server`:
+Beamtalk actors map to `gen_server`. The compiler generates the whole
+callback module (`init/1`, `handle_call/3`, `handle_cast/2`, `dispatch/4`,
+`method_table/0`, ...); there is no hand-written actor callback path.
 
 ```erlang
-%% Actor state structure
+%% Actor state structure (what a compiled Counter's init/1 builds)
 #{
-  '__class__' => 'Counter',
-  '__methods__' => #{
-    increment => fun handle_increment/2,
-    getValue => fun handle_getValue/2
-  },
+  '__class_mod__' => 'bt@counter',
+  '__shape_version__' => 1,
   %% User-defined state
   value => 0
 }
@@ -110,8 +109,8 @@ Beamtalk actors map to `gen_server`:
 
 **Best practices:**
 - Use maps for state (not records) - easier hot code reload
-- Store class name in `'__class__'` for reflection
-- Store method dispatch table in `'__methods__'`
+- The class module sits in `'__class_mod__'`; reflection and `safe_dispatch/3` go through it
+- Methods live in the generated module (`dispatch/4`, `method_table/0`), not in the state map
 - Delegate to `beamtalk_actor` module for common behavior
 
 ### Supervision Trees
@@ -894,11 +893,19 @@ handle_call({method, MethodName}, _From, State) ->
     Method = binary_to_atom(MethodName, utf8),  % DANGEROUS!
     dispatch(Method, State).
 
-%% ✅ SAFE - validate against known methods first
+%% ✅ SAFE - validate against the class's known methods first
 handle_call({method, MethodName}, _From, State) ->
-    case maps:get(MethodName, maps:get('__methods__', State, #{}), undefined) of
-        undefined -> {reply, {error, method_not_found}, State};
-        MethodFun -> {reply, MethodFun(State), State}
+    %% Module: the actor's generated class module. method_table/0 has atom keys and
+    %% only the class's own methods; inherited selectors need beamtalk_dispatch.
+    Methods = Module:method_table(),
+    try binary_to_existing_atom(MethodName, utf8) of
+        Selector ->
+            case maps:is_key(Selector, Methods) of
+                false -> {reply, {error, method_not_found}, State};
+                true -> {reply, dispatch(Selector, State), State}
+            end
+    catch
+        error:badarg -> {reply, {error, method_not_found}, State}
     end.
 ```
 

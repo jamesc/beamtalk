@@ -680,23 +680,18 @@ impl LanguageService {
 
 **Example Domain Logic:**
 
+The class's generated `dispatch/4` selects the method, and `safe_dispatch/3,4`
+wraps it so an error in a method comes back to the caller instead of crashing
+the instance (from Flavors):
+
 ```erlang
-%% Message dispatch with error isolation (from Flavors)
+%% Sketch of the generated shape, not hand-written source
 dispatch(Selector, Args, Self, State) ->
-    Methods = maps:get('__methods__', State),
-    case maps:find(Selector, Methods) of
-        {ok, Fun} ->
-            try
-                {Result, NewState} = Fun(Self, State, Args),
-                {reply, Result, NewState}
-            catch
-                error:Error -> {error, {error, Error}, State};
-                exit:Exit -> {error, {exit, Exit}, State};
-                throw:Thrown -> {error, {throw, Thrown}, State}
-            end;
-        error ->
-            handle_dnu(Selector, Args, Self, State)
+    case Selector of
+        increment -> {reply, Result, NewState};   %% one clause per method
+        Other     -> inherited_extension_or_dnu(Other, Args, Self, State)
     end.
+%% Result: {reply, Result, NewState} | {error, #beamtalk_error{}, State}
 ```
 
 ### Concurrency Context
