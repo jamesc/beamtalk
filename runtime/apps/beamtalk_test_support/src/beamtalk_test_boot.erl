@@ -241,6 +241,7 @@ start_app(App) ->
 start_app(App, Retries) ->
     case application:ensure_all_started(App) of
         {ok, _} = Ok when App =:= beamtalk_runtime ->
+            ok = reclaim_class_owned_tables(),
             ok = ensure_bootstrap_classes(),
             ok = ensure_boot_tables(),
             Ok;
@@ -275,19 +276,47 @@ ensure_boot_tables() ->
 %% again (BT-4934).
 ensure_bootstrap_classes() ->
     case runtime_healthy() of
-        true ->
+        true -> ok;
+        false -> restart_runtime()
+    end.
+
+restart_runtime() ->
+    ok = application:stop(beamtalk_runtime),
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    wait_for_class('Object', 100),
+    %% Stopping the app took every class process with it, but stdlib
+    %% modules stay loaded and `stdlib:init/0` skips loaded modules:
+    %% reload them so `Integer`, `Subprocess`, ... register again.
+    ok = reload_stdlib_modules(),
+    beamtalk_stdlib:init(),
+    wait_for_class('Integer', 100),
+    ok = repair_class_pid_index().
+
+%% A stdlib class loaded before the runtime app was up (an `on_load` in a test
+%% process) creates the boot tables from its class process, with no heir, and the
+%% app started later keeps using them. The first test that stops that class (e.g.
+%% `restart_class/2` on `Counter`) then destroys every class table with it. Stop
+%% those class processes and restart the app so it owns the tables, with the heir
+%% (BT-4962).
+reclaim_class_owned_tables() ->
+    Orphans = lists:usort([
+        Owner
+     || T <- ets:all(),
+        is_atom(T),
+        ets:info(T, heir) =:= none,
+        Owner <- [ets:info(T, owner)],
+        is_pid(Owner),
+        beamtalk_test_class_teardown:is_class_process(Owner)
+    ]),
+    case Orphans of
+        [] ->
             ok;
-        false ->
-            ok = application:stop(beamtalk_runtime),
-            {ok, _} = application:ensure_all_started(beamtalk_runtime),
-            wait_for_class('Object', 100),
-            %% Stopping the app took every class process with it, but stdlib
-            %% modules stay loaded and `stdlib:init/0` skips loaded modules:
-            %% reload them so `Integer`, `Subprocess`, ... register again.
-            ok = reload_stdlib_modules(),
-            beamtalk_stdlib:init(),
-            wait_for_class('Integer', 100),
-            ok = repair_class_pid_index()
+        _ ->
+            %% Every class process predates the app and is stale, not only the table
+            %% owners: a bare `Object` left running keeps its registered name, so the
+            %% restarted stdlib's `Object` never registers.
+            beamtalk_test_class_teardown:stop_pg_class_processes(),
+            restart_runtime()
     end.
 
 %% `Object` is registered, the system announcer still holds its subscription on

@@ -134,7 +134,7 @@ A bounded context is an explicit boundary within which a domain model is defined
 │  ┌───────────────────────────────────────────────────────────────┐  │
 │  │              OBJECT SYSTEM CONTEXT (Erlang)                    │ │
 │  │  - Class Registry: Global class metadata                      │  │
-│  │  - Instance Tracking: ETS-based instance registry             │  │
+│  │  - Instance Tracking: process-marker scan (no registry)       │  │
 │  │  - Method Dispatch: Super dispatch, DNU handling              │  │
 │  └───────────────────────────────────────────────────────────────┘  │
 │                              ▲                                      │
@@ -262,7 +262,7 @@ A shared vocabulary used consistently across team, code, and documentation. Term
 | **Method Dispatch** | Routing selector to implementation | OBJECT SYSTEM |
 | **Super Dispatch** | Invoke superclass method implementation | OBJECT SYSTEM |
 | **Class Registry** | Global map of class metadata | OBJECT SYSTEM |
-| **Instance Tracking** | ETS table of all live instances | OBJECT SYSTEM |
+| **Instance Tracking** | Scan of processes carrying the actor marker (ADR 0150) | OBJECT SYSTEM |
 | **Hot Reload** | Loading new code into running system | HOT RELOAD |
 | **Code Upgrade** | BEAM's hot swap mechanism | HOT RELOAD |
 | **State Migration** | Transforming state for new code version | HOT RELOAD |
@@ -667,7 +667,7 @@ impl LanguageService {
 - `MessageDispatcher`: Routes selector to method implementation
 - `SuperDispatcher`: Walks class chain for super method
 - `ErrorIsolator`: Catches errors, converts to future rejections (from Flavors)
-- `NameRegistry` (`beamtalk_actor_registry`): Named registration over OTP's local registry and `global` (ADR 0079, ADR 0126 §4): `register_name/2`, `spawnAs/2,3`, `spawnAsGlobal/2,3`, the reserved-name policy, pid → class / name lookups, and the `global` partition-heal conflict resolver. Not the `beamtalk_actor_registry` *process* (the node-wide actor tracker in `beamtalk_repl_actors`), which only shares its name
+- `NameRegistry` (`beamtalk_actor_registry`): Named registration over OTP's local registry and `global` (ADR 0079, ADR 0126 §4): `register_name/2`, `spawnAs/2,3`, `spawnAsGlobal/2,3`, the reserved-name policy, pid → class / name lookups, and the `global` partition-heal conflict resolver. Not the `beamtalk_actor_registry` *process* (a node-wide actor tracker, `beamtalk_repl_actors`, deleted by ADR 0150), which only shares its name
 - `RemoteSpawner` (`beamtalk_actor_remote`): Remote spawn and lookup (ADR 0126 §3): the `erpc` origin entry points and their `*_target` functions that run on the peer node
 - `ActorFfi` (`beamtalk_actor_ffi`): The `(Erlang beamtalk_actor_ffi)` shims behind `stdlib/src/actor.bt` (`doSpawn*`, `registerAs:`, `named:`, `spawnOn:` and friends). The deferred-reply shims (`takeDeferredCall`, `ReplyTo`) stay in `beamtalk_actor`, next to the call-from machinery they read
 - `beamtalk_actor` keeps one-line delegates for the functions peers or persisted MFAs address by module name (the `erpc` targets, `spawnAs`/`spawnAsGlobal`, the `global` resolve function) so mixed-version clusters keep working; see BT-4701
@@ -680,23 +680,18 @@ impl LanguageService {
 
 **Example Domain Logic:**
 
+The class's generated `dispatch/4` selects the method, and `safe_dispatch/3,4`
+wraps it so an error in a method comes back to the caller instead of crashing
+the instance (from Flavors):
+
 ```erlang
-%% Message dispatch with error isolation (from Flavors)
+%% Sketch of the generated shape, not hand-written source
 dispatch(Selector, Args, Self, State) ->
-    Methods = maps:get('__methods__', State),
-    case maps:find(Selector, Methods) of
-        {ok, Fun} ->
-            try
-                {Result, NewState} = Fun(Self, State, Args),
-                {reply, Result, NewState}
-            catch
-                error:Error -> {error, {error, Error}, State};
-                exit:Exit -> {error, {exit, Exit}, State};
-                throw:Thrown -> {error, {throw, Thrown}, State}
-            end;
-        error ->
-            handle_dnu(Selector, Args, Self, State)
+    case Selector of
+        increment -> {reply, Result, NewState};   %% one clause per method
+        Other     -> inherited_extension_or_dnu(Other, Args, Self, State)
     end.
+%% Result: {reply, Result, NewState} | {error, #beamtalk_error{}, State}
 ```
 
 ### Concurrency Context
@@ -803,19 +798,18 @@ resolved(Value) ->
 
 **Repositories:**
 - `ClassRegistry`: gen_server holding class map
-- `InstanceRegistry`: ETS table tracking live instances
+- (none for instances: live actors are found by scanning for the process marker, `beamtalk_actor_scan`; ADR 0150)
 
 **Domain Services:**
 - `ClassLookup`: Find class by name
 - `InheritanceWalker`: Traverse class hierarchy
 - `MethodResolver`: Find method in class or superclasses
-- `InstanceTracker`: Monitor and count instances
+- `InstanceTracker`: Enumerate live instances by scanning for the actor marker (`beamtalk_actor_scan`)
 
 **Key Patterns:**
 - **Centralized Registry:** Single gen_server for all class metadata
-- **ETS for Instances:** Fast concurrent instance lookup
-- **Process Monitors:** Auto-unregister instances on termination
-- **Lazy Instance Tracking:** Only track if `allInstances` used
+- **Marker Scan for Instances:** Every actor's `init/1` writes a `'$beamtalk_actor'` process-dictionary marker; `allInstances` scans for it on demand (ADR 0150)
+- **No Per-Start Registration:** Nothing is written to a table or sent to a server when an actor starts, so there is nothing to clean up on termination
 
 **Example Domain Logic:**
 
@@ -1016,7 +1010,7 @@ handle_info({'DOWN', _MonRef, process, Pid, _Reason}, State) ->
 - `ProtocolHandler` (`beamtalk_repl_protocol`): Encodes/decodes JSON WebSocket frames. Detects legacy vs. nREPL-style format. Routes ops to operation handlers.
 - `IoCapture` (`beamtalk_io_capture`): Intercepts `io:format` and `io:put_chars` calls during evaluation; forwards chunks to streaming subscriber for real-time output delivery (BT-696).
 - `ModuleTracker` (`beamtalk_repl_modules`): Tracks which modules were loaded in this session, their source files, and load timestamps. Used by `modules` and `unload` ops.
-- `ActorRegistry` (`beamtalk_repl_actors`): Per-session registry of spawned actors (pid → class mapping). Used by `actors`, `inspect`, `kill` ops.
+- `ActorScan` (`beamtalk_actor_scan`): Finds the live actors by scanning processes for the actor marker (pid → class). Used by `actors`, `inspect`, `kill` ops. There is no actor registry process (ADR 0150).
 
 **Operation Handlers (Domain Services):**
 - `OpsEval` (`beamtalk_repl_ops_eval`): `eval`, `show-codegen`, `stdin`
@@ -1283,19 +1277,20 @@ Domain events represent significant occurrences in the system. They enable loose
 
 **Status:** Accepted
 
-### ADR-5: ETS-based Instance Tracking
+### ADR-5: Process-Marker Instance Tracking (amended by ADR 0150; first ETS-based)
 
 **Context:** Need to implement `Class allInstances` for introspection
 
-**Decision:** Use an ETS table with process monitors for auto-cleanup. The table is an `ordered_set` keyed `{Class, Pid}` (BT-4842; it was a `bag` keyed by class, where insert and delete cost O(instances of the class))
+**Decision:** Each actor's `init/1` writes a `'$beamtalk_actor'` marker (the class) and a start time into its own process dictionary, and `allInstances` and the other readers enumerate actors by scanning processes for the marker (`beamtalk_actor_scan`). This replaces the original ETS table with process monitors (an `ordered_set` keyed `{Class, Pid}` since BT-4842), which put two registrations on every actor start (ADR 0150, option D, no table).
 
 **Alternatives Considered:**
 - Global heap scan: Impossible on BEAM (per-process heaps)
 - Manual registration: Requires discipline, error-prone
+- ETS table with process monitors (the original decision): a synchronous registration on every start, which dominated start cost under load (ADR 0150)
 
 **Rationale:**
-- ETS provides fast concurrent access
-- Process monitors enable automatic cleanup on termination
+- No cost on the start path, and nothing to clean up when an actor dies
+- A scan costs about 1.3 µs per process, paid only by the reader (ADR 0150)
 - More efficient than Smalltalk's heap scan for large systems
 
 **Status:** Accepted

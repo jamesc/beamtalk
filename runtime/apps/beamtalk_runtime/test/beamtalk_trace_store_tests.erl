@@ -49,7 +49,11 @@ cleanup(_State) ->
     catch
         _:_ -> ok
     end,
-    ok.
+    %% A bare-started store (and the heir some tests stand up) must not outlive the
+    %% module: the next one's `ensure_all_started(beamtalk_runtime)` would fail with
+    %% `already_started` (BT-4962).
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_trace_store),
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_ets_heir).
 
 %%====================================================================
 %% Test: Direct insert and query
@@ -1782,6 +1786,35 @@ min_max_duration_test_() ->
                 ?assertNotEqual(#{}, beamtalk_trace_store:get_stats()),
                 ?assertEqual([], beamtalk_trace_store:get_traces())
             end)},
+        {"lifecycle handler still counts the class aggregate when tracing is disabled (BT-4932)",
+            ?_test(begin
+                beamtalk_trace_store:clear(),
+                beamtalk_trace_store:disable(),
+                TestPid = self(),
+                Metadata = #{pid => TestPid, class => 'LifecycleOff', reason => normal},
+                [
+                    beamtalk_trace_store:handle_lifecycle_event(
+                        [beamtalk, actor, lifecycle, Action], #{}, Metadata, #{}
+                    )
+                 || Action <- [start, stop, stop]
+                ],
+                %% No trace event and no per-actor row while tracing is off ...
+                ?assertEqual([], beamtalk_trace_store:get_traces()),
+                ?assertEqual(#{}, beamtalk_trace_store:get_stats(TestPid)),
+                %% ... but the always-on class aggregate counts each lifecycle
+                %% action once per event, with a zero duration.
+                #{
+                    {beamtalk_string, <<"methods">>} := #{
+                        {beamtalk_string, <<"start">>} := Start,
+                        {beamtalk_string, <<"stop">>} := Stop
+                    }
+                } = class_entry(<<"LifecycleOff">>),
+                ?assertEqual(1, maps:get({beamtalk_string, <<"calls">>}, Start)),
+                ?assertEqual(2, maps:get({beamtalk_string, <<"calls">>}, Stop)),
+                ?assertEqual(2, maps:get({beamtalk_string, <<"ok">>}, Stop)),
+                ?assertEqual(0, maps:get({beamtalk_string, <<"errors">>}, Stop)),
+                ?assertEqual(0, maps:get({beamtalk_string, <<"total_duration_ns">>}, Stop))
+            end)},
         %%====================================================================
         %% Test: Unknown request handling
         %%====================================================================
@@ -1813,10 +1846,6 @@ tmp_export_path(Tag) ->
 churn_setup() ->
     setup(),
     {module, telemetry} = code:ensure_loaded(telemetry),
-    case whereis(beamtalk_object_instances) of
-        undefined -> {ok, _} = beamtalk_object_instances:start_link();
-        _ -> ok
-    end,
     beamtalk_trace_store:clear(),
     beamtalk_trace_store:disable(),
     ok.
@@ -1839,9 +1868,6 @@ or, when `Kill` is true, an untrapped `kill` (no `terminate/2`).
 """.
 churn_one_actor(Kill) ->
     {ok, Pid} = test_counter:start(0),
-    %% Register like a compiled actor spawn does, so dispatch telemetry
-    %% attributes to 'Counter' (the registry is unregistered on death).
-    ok = beamtalk_object_instances:register('Counter', Pid),
     ?assertEqual(0, beamtalk_actor:sync_send(Pid, getValue, [])),
     MRef = erlang:monitor(process, Pid),
     case Kill of
@@ -1895,7 +1921,6 @@ actor_churn_stays_flat_test_() ->
                 StorePid = whereis(beamtalk_trace_store),
                 ?assertEqual([], element(2, erlang:process_info(StorePid, monitors))),
                 {ok, Live} = test_counter:start(0),
-                ok = beamtalk_object_instances:register('Counter', Live),
                 ?assertEqual(0, beamtalk_actor:sync_send(Live, getValue, [])),
                 {monitored_by, MonitoredBy} = erlang:process_info(Live, monitored_by),
                 ?assertNot(lists:member(StorePid, MonitoredBy)),

@@ -58,7 +58,8 @@ teardown(ClassNames) ->
             end
         end,
         ClassNames
-    ).
+    ),
+    ok = beamtalk_test_repl:release_xref().
 
 %% Create a class and return {ClassObj, Pid}.
 register_class(ClassName, FieldSpecs, MethodSpecs) ->

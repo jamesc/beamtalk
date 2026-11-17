@@ -8,6 +8,8 @@ Implemented (2026-09-30) — accepted 2026-09-25; all phases (0a–6 and validat
 Amends ADRs 0010, 0019, 0040, 0081 and 0125 (see [Amended ADRs](#amended-adrs)).
 Settles BT-3632 (§6).
 
+> **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** `Node current actors` is a scan of actor markers; the process `beamtalk_repl_actors` registered as `beamtalk_actor_registry` is deleted, and no actor registers itself with anything on start.
+
 ## Implementation Tracking
 
 **Epic:** BT-3636
@@ -1104,7 +1106,7 @@ operations stay on `Workspace`.
 
 | ADR 0040 selector | New home | Notes |
 |---|---|---|
-| `Workspace actors` / `actorsOf:` / `actorAt:` | `aNode actors` / `actorsOf:` / `actorAt:` | `Result(…, Error)` on every receiver, `Node current` included; a peer is queried via `erpc` (ADR 0126 §5.1, §7). Backed by `beamtalk_actor_registry`, now started by `beamtalk_runtime_sup`, so it holds in every boot context. Every actor tracks itself from its lifecycle-start telemetry; the REPL spawn path's explicit registration is idempotent. |
+| `Workspace actors` / `actorsOf:` / `actorAt:` | `aNode actors` / `actorsOf:` / `actorAt:` | `Result(…, Error)` on every receiver, `Node current` included; a peer is queried via `erpc` (ADR 0126 §5.1, §7). Backed by a scan of actor markers (ADR 0150), so it holds in every boot context and no actor registers itself on start. (This row first named the `beamtalk_actor_registry` process, started by `beamtalk_runtime_sup`, which ADR 0150 deleted.) |
 | `Workspace processes` | `aNode processes` | `Result(SupervisionTree, Error)`, the `default`-scope tree (ADR 0092), `== (ProcessNavigation on: aNode) unwrap tree`. |
 | `Workspace supervisors` | `aNode supervisors` | Root application supervisor plus workspace-attached ones. |
 | `Workspace nodes` | `Node connected` + `aNode shapeSkew` | `shapeSkew` is a per-node accessor on the queryable skew tally. `connectedWithSkew` is removed; the MCP `nodes` tool and the LiveView `nodes` op map `shapeSkew` over `Node connected`. |

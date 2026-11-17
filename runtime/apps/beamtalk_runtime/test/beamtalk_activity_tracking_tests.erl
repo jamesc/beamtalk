@@ -83,8 +83,8 @@ actor_spawn_updates_activity_test() ->
         %% Wait for the second-resolution clock to tick past the initial time
         ok = wait_clock_after(InitialTime),
 
-        %% Simulate actor spawn by calling update_activity
-        %% (This is what beamtalk_actor:register_spawned does after registration)
+        %% Simulate actor spawn by calling update_activity directly (this test
+        %% pins the activity clock, not a spawn path)
         ok = beamtalk_workspace_meta:update_activity(),
 
         %% Verify activity time was updated

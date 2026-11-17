@@ -3595,6 +3595,7 @@ These message sends are Tier 1 optimized — the compiler generates inlined tail
 
 | Construct | Example | Mutations Allowed |
 |-----------|---------|-------------------|
+| `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:` / `ifFalse:ifTrue:` | `flag ifFalse: [n := 0] ifTrue: [n := 1]` | ✅ |
 | `whileTrue:` / `whileFalse:` | `[count < 10] whileTrue: [count := count + 1]` | ✅ |
 | `whileTrue` / `whileFalse` (unary: the receiver block is condition and body, so it runs at least once) | `[self.count := self.count + 1. self.count < 10] whileTrue` | ✅ (below) |
 | `timesRepeat:` | `5 timesRepeat: [sum := sum + n]` | ✅ |
@@ -3605,6 +3606,8 @@ These message sends are Tier 1 optimized — the compiler generates inlined tail
 The unary `[...] whileTrue` / `[...] whileFalse` is the keyword loop with an empty body (`[...] whileTrue: []`), so its receiver follows the rule for a `whileTrue:` condition ([BT-4313](https://linear.app/beamtalk/issue/BT-4313)). A local written in a `whileTrue:`/`whileFalse:` condition threads in every method kind and at the REPL, the unary forms included, whatever the condition or body does ([BT-4602](https://linear.app/beamtalk/issue/BT-4602)): `count := 0. [count := count + 1. count < 10] whileTrue` leaves `count` at 10. The condition runs once more than the body. The one exception is a keyword loop whose body is not a block literal (`[count := count + 1. count < 10] whileTrue: aBlock`): the loop runs its condition as a closure, so a local written in it is a compile error ([BT-4062](https://linear.app/beamtalk/issue/BT-4062)); wrap the block value in a literal (`whileTrue: [aBlock value]`).
 
 A `repeat` sent to a block literal is the loop `[true] whileTrue: [...]` ([BT-4589](https://linear.app/beamtalk/issue/BT-4589)), so its receiver is a loop body: the locals and REPL bindings it writes are carried from one iteration to the next, and are visible after a `^` ends the loop. An error that ends it follows the protected-region rule like any other loop.
+
+`ifFalse:ifTrue:` is the two-branch conditional with the arms in the other order ([BT-4991](https://linear.app/beamtalk/issue/BT-4991)): `c ifFalse: [a] ifTrue: [b]` answers what `c ifTrue: [b] ifFalse: [a]` answers. With two literal block arguments that take no parameters, the compiler lowers it as that `ifTrue:ifFalse:`, so inlining, narrowing, local threading and `^` inside a block behave exactly as they do for `ifTrue:ifFalse:` (a `^` in one arm still uses the non-local-return throw/catch, as it does there). This holds for an untyped receiver too: the inline `case` sends the message only for a value that is not a Boolean. It does not apply to a `self`, `super` or class-reference receiver, or to the first message of a cascade; those, and any send with a block held in a variable, are ordinary sends, which `Boolean` answers. A receiver that is not a Boolean is sent `ifFalse:ifTrue:` as written, and the type checker resolves it under that selector, so a `Boolean | C` receiver loses the Boolean narrowing inside the arms.
 
 ### Local Variable Mutations
 

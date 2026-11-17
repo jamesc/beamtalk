@@ -95,7 +95,7 @@ so it runs for ALL spawn paths — direct, supervised, and named.
 | Path | Entry | Context | Initialize? |
 |------|-------|---------|-------------|
 | Module:spawn/0,1 | gen_server:start → init/1 (unlinked) | Batch/tests | Yes |
-| REPL spawn | Module:spawn/0,1 + register_spawned/4 | REPL | Yes |
+| REPL spawn | Module:spawn/0,1 (the same call as everywhere else) | REPL | Yes |
 | class_send → spawn | erlang:apply(Module, spawn, Args) | Runtime | Yes |
 | self spawn/spawnWith: | safe_spawn/2, unlinked (or linked if inside a `withClassMethod:` supervisor factory) | Class method | Yes |
 | self spawnAs:/spawnWith:as: | safe_spawn_named/5, unlinked after (or stays linked, same exception) | Class method | Yes |
@@ -141,8 +141,9 @@ class-gen-server case and keep the link instead of severing it.
 
 Key invariant: `initialize` dispatch lives in generated `init/1`, not
 in `spawn/0,1`. This ensures supervised children also run initialize.
-The `register_spawned/4` function handles REPL actor registry
-integration as a separate concern after spawn completes.
+No spawn path registers the actor anywhere (ADR 0150): its `init/1` writes the
+`'$beamtalk_actor'` marker and the readers that need to enumerate actors scan
+for it (`beamtalk_actor_scan`).
 
 ## Code Hot Reload
 
@@ -241,12 +242,17 @@ decode/encode helpers and the pending-action helpers.
 %% literal (AGENTS.md "No duplicate implementations").
 
 %% Public API
--export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
+-export([start_link/2, start_link/3, start_link_supervised/3]).
 -export([await_initialize/1, await_initialize/2, await_initialize/3, safe_spawn/2]).
 %% BT-4033: the awaited linked start of an anonymous supervised actor child.
 -export([safe_spawn_linked/2]).
 %% BT-4577: the backing module of a `native:` actor's facade, or `none`.
 -export([native_backing_module/1]).
+%% BT-4970: announce a `native:` actor's start and, when it goes down, its stop.
+%% Called by the facade's generated `spawn/1` and by `safe_start_native/4`.
+-export([native_started/1]).
+%% BT-4970: the observer's wait loop, exported so it can hibernate into it.
+-export([native_stop_observer_wait/3]).
 %% BT-4104: an anonymous start that leaves the caller monitoring the actor,
 %% with the monitor created atomically with the process.
 -export([safe_spawn_monitored/2]).
@@ -425,64 +431,6 @@ Module:Function should spawn the actor and return {ok, Pid}.
 -spec start_link_supervised(module(), atom(), list()) -> {ok, pid()} | {error, term()}.
 start_link_supervised(Module, Function, Args) ->
     erlang:apply(Module, Function, Args).
-
--doc """
-Register an already-spawned actor with the REPL actor registry.
-Called by generated REPL code after Module:spawn() returns.
-This separates spawn lifecycle (handled by Module:spawn) from
-REPL tracking (handled here).
-
-Replaced the former spawn_with_registry/3,4 functions which both
-spawned and registered actors. initialize now runs inside
-init/1, so all spawn paths (including supervised) call it automatically.
-""".
--spec register_spawned(pid(), pid(), atom(), module()) -> ok | {error, term()}.
-register_spawned(RegistryPid, ActorPid, ClassName, Module) ->
-    case application:get_env(beamtalk_runtime, actor_spawn_callback) of
-        {ok, CallbackMod} ->
-            %% bt-catcher-audit: not-applicable-no-block - Erlang workspace callback, not a
-            %% Beamtalk block
-            try
-                CallbackMod:on_actor_spawned(RegistryPid, ActorPid, ClassName, Module)
-            catch
-                error:undef ->
-                    %% Callback module doesn't implement on_actor_spawned/4
-                    ?LOG_WARNING("Actor spawn callback not implemented", #{
-                        callback => CallbackMod,
-                        registry_pid => RegistryPid,
-                        actor_pid => ActorPid,
-                        class => ClassName,
-                        domain => [beamtalk, runtime]
-                    }),
-                    {error, {callback_undef, CallbackMod}};
-                error:#beamtalk_error{} = BtError ->
-                    %% Structured beamtalk error from callback
-                    ?LOG_ERROR("Actor spawn callback failed with beamtalk error", #{
-                        callback => CallbackMod,
-                        error => BtError,
-                        registry_pid => RegistryPid,
-                        actor_pid => ActorPid,
-                        class => ClassName,
-                        domain => [beamtalk, runtime]
-                    }),
-                    {error, {beamtalk_error, BtError}};
-                Kind:Reason:Stacktrace ->
-                    %% Unexpected failure in callback
-                    ?LOG_ERROR("Actor spawn callback failed", #{
-                        callback => CallbackMod,
-                        kind => Kind,
-                        reason => Reason,
-                        stacktrace => Stacktrace,
-                        registry_pid => RegistryPid,
-                        actor_pid => ActorPid,
-                        class => ClassName,
-                        domain => [beamtalk, runtime]
-                    }),
-                    {error, {Kind, Reason}}
-            end;
-        undefined ->
-            ok
-    end.
 
 -doc """
 Wait for a started actor's `initialize` to finish — **sys-based fallback**.
@@ -1126,11 +1074,88 @@ start_native_trapped(Backing, Config, Registration, Link) ->
             _:CrashReason -> {error, CrashReason}
         end,
     case Result of
-        {ok, Started} -> ok = maybe_unlink_started(Link, Started);
-        {error, _} -> ok
+        {ok, Started} ->
+            ok = maybe_unlink_started(Link, Started),
+            ok = native_started(Started);
+        {error, _} ->
+            ok
     end,
     erlang:process_flag(trap_exit, OldTrap),
     Result.
+
+-doc """
+BT-4970: announce a started `native:` actor as `ActorSpawned`, and arrange for
+its `ActorStopped`.
+
+A compiled actor announces both from the lifecycle telemetry in its generated
+`init/1` and `terminate/2`. A `native:` backing gen_server (`beamtalk_subprocess`,
+a user module) runs neither and is not ours to change, so the start path
+announces for it, and an observer process monitors the pid and announces
+`ActorStopped` when it goes down. The observer lives as long as the actor and
+ends after that one message; it is unregistered, unlinked, unsupervised and owns
+no table (ADR 0150: no registry). After setting its monitor it hibernates into
+`native_stop_observer_wait/3`, so it holds no reference into this module's code
+(a code purge cannot kill it) and keeps a minimal heap for the actor's whole
+life. Nothing is done when the announcement bus is not running, as for a
+compiled actor. A non-pid argument (a backing `start_link/1` that answered
+`{ok, NotAPid}`) is ignored: announcing never fails a start that succeeded.
+
+The class is the one the process scan reports for the pid
+(`beamtalk_actor_scan:one_per_pid/1`, the rule every actor list uses), or
+`unknown`, the same default a compiled actor's announcement falls back to.
+""".
+-spec native_started(term()) -> ok.
+native_started(Pid) when is_pid(Pid) ->
+    case erlang:whereis(beamtalk_announcements) of
+        undefined ->
+            ok;
+        _Bus ->
+            %% Best-effort, like the announcement: the backing process has
+            %% already started, so a failing lookup must not fail the start.
+            Class =
+                try beamtalk_actor_scan:one_per_pid(beamtalk_actor_scan:info(Pid)) of
+                    [{Pid, Found, _StartedAt} | _] -> Found;
+                    [] -> unknown
+                catch
+                    _:_ -> unknown
+                end,
+            ok = do_announce_actor_lifecycle('ActorSpawned', #{actorClass => Class, pid => Pid}),
+            _Observer = erlang:spawn(fun() -> native_stop_observer(Pid, Class) end),
+            ok
+    end;
+native_started(_NotAPid) ->
+    ok.
+
+%% The observer sets its monitor when it is first scheduled, which can be after
+%% `native_started/1` has returned and after the starter has handed the actor
+%% back (a named start is also reachable by its name before that). An actor that
+%% stops in that window gives `'DOWN'` with reason `noproc`, and its real exit
+%% reason is not observable without making the start wait for the observer. It
+%% is announced as `crashed` (what `normalize_stop_reason/1` makes of a reason it
+%% does not know). That can report a prompt clean `stop` as a crash; it was
+%% chosen over `normal` because a false alarm is cheaper than a crash reported
+%% as clean.
+%%
+%% The announced reason is always in `normalize_stop_reason/1`'s range (`normal`,
+%% `shutdown`, `crashed`, `'globalNameConflict'`).
+-spec native_stop_observer(pid(), atom()) -> no_return().
+native_stop_observer(Pid, Class) ->
+    MonRef = erlang:monitor(process, Pid),
+    erlang:hibernate(?MODULE, native_stop_observer_wait, [MonRef, Pid, Class]).
+
+-doc false.
+-spec native_stop_observer_wait(reference(), pid(), atom()) -> ok.
+native_stop_observer_wait(MonRef, Pid, Class) ->
+    receive
+        {'DOWN', MonRef, process, Pid, Reason} ->
+            do_announce_actor_lifecycle('ActorStopped', #{
+                actorClass => Class, pid => Pid, reason => normalize_stop_reason(Reason)
+            });
+        _Stray ->
+            %% Nothing sends this process anything; if something does, drop it and
+            %% hibernate again so no stack stays in this module's code.
+            erlang:hibernate(?MODULE, native_stop_observer_wait, [MonRef, Pid, Class])
+    end.
 
 %% BT-4577: register a just-started native actor under its name, or stop it
 %% when the name cannot be registered.
@@ -1161,8 +1186,10 @@ register_native_started({global, Name} = Registration, Pid) ->
 %% so the key exists before the name can conflict; and only for `global`, the
 %% one scope the resolver reads, so anonymous and local starts pay nothing. A key
 %% the backing module already wrote is left alone. A backing process that does
-%% not answer the system message simply stays untimed (the pre-BT-4956
-%% behaviour: the other side wins, or `random_exit_name/3` if neither has one).
+%% not answer the system message within a second stays untimed until it drains
+%% its queue, and meanwhile behaves as before BT-4956: the other side wins, or
+%% `random_exit_name/3` if neither has one. The stamp it then writes still
+%% carries the registration time, taken before the request.
 -spec record_native_start_time(pid()) -> ok.
 record_native_start_time(Pid) ->
     StartedAt = erlang:system_time(microsecond),
@@ -3317,9 +3344,9 @@ encode_reply_for(From, Selector, ReplyPayload) ->
 Like `encode_reply_for/3`, but always outer-tagged `{ok, _} | {error, _}` —
 `ok` for both the remote-encoded-success case AND the local no-op-passthrough
 case, `error` only for a genuine remote encode failure. `encode_reply_for/3`
-(the hand-written `handle_call/3` path's own reply, never branched on by its
-caller) can use the untagged passthrough safely; `handle_call_dispatch_case`
-(the generated compiled-actor path, BT-3613) cannot — its success arm has to
+(whose callers never branch on the result) can use the untagged passthrough
+safely; `handle_call_dispatch_case` (the generated compiled-actor path,
+BT-3613) cannot — its success arm has to
 choose the outer `{'reply', {'ok', _}, _}` vs `{'reply', {'error', _}, _}`
 shape *based on* whether encoding failed, and a plain shape-match against
 `encode_reply_for/3`'s untagged local-passthrough result is ambiguous: a
@@ -3365,7 +3392,8 @@ the caller re-dispatches that plain 3-tuple through its own ordinary local
 clause, exactly the shape `handle_call/3`'s own next clause already
 matches. Returns `{reply, ReplyVal}` for a decode failure or an unsupported
 wire version (request-direction skew, §5.2): the caller replies `ReplyVal`
-immediately with its pre-call `State` untouched — `dispatch/4` never runs.
+immediately with its pre-call `State` untouched — the generated `dispatch/4`
+never runs.
 Any other message (not a wire envelope) passes through unchanged as
 `{redispatch, Msg}`, so a caller can route *every* `handle_call/3` message
 through this function uniformly if it chooses to.
@@ -3399,7 +3427,7 @@ log_wire_cast_rejected(Selector, Error) ->
     }).
 
 -doc """
-Recognise and decode a `'\$beamtalk_wire'` cast/async envelope (ADR 0126
+Recognise and decode a `'\$beamtalk_wire'` cast or async envelope (ADR 0126
 §5.1) — shared the same way decode_wire_call/1 is (see its doc), by every
 compiled actor's generated `handle_cast/2`.
 
@@ -3409,15 +3437,15 @@ been logged and dropped (cast direction, §5.2) or the pending future
 rejected. Any other message (not a wire envelope) passes through unchanged
 as `{redispatch, Msg}`.
 
-The async-with-future shape (`kind = async`) is decoded here too, for
-the 7-element form — but no compiled
-`.bt` construct reaches it: a genuinely compiled actor's generated
-`handle_cast/2` only ever pattern-matches the 6-element `cast`-kind wire
-envelope, so a 7-element `async`-kind one sent to a compiled actor simply
-never reaches this function at all and falls through the generated
-callback's own catch-all to `{noreply, State}` — exactly like an
-un-wire-tagged async cast to a compiled actor already does today
-(`beamtalk_codegen_simulation_tests.erl`'s documented gap).
+The async-with-future shape (`kind = async`, the 7-element form) is decoded
+here too. Its sender is `async_send_impl/5`, reached through the exported
+`async_send/4` and `async_send_known/5`: no generated code or stdlib source
+calls those, only tests do (`beamtalk_dist_wirecheck_tests` scenario (d), via
+`test_actor_host`). No compiled actor decodes the shape: the generated
+`handle_cast/2` only matches the 6-element `cast`-kind envelope and never
+calls this function for an `async` one, so a 7-element `async` envelope sent
+to a compiled actor falls through the callback's own catch-all to
+`{noreply, State}`. Only the test host routes it here.
 """.
 -spec decode_wire_cast(term()) -> {redispatch, term()} | noreply.
 decode_wire_cast(
@@ -3558,9 +3586,6 @@ Best-effort and fault-isolated via `do_announce_actor_lifecycle/2`.
 maybe_announce_lifecycle([beamtalk, actor, lifecycle, start], Metadata) ->
     Class = maps:get(class, Metadata, unknown),
     Pid = maps:get(pid, Metadata, self()),
-    %% BT-3633: every actor is tracked by the runtime-owned registry so
-    %% `Node current actors` holds in every boot context (fire-and-forget).
-    ok = beamtalk_repl_actors:track_spawned(Pid, Class),
     do_announce_actor_lifecycle('ActorSpawned', #{actorClass => Class, pid => Pid});
 maybe_announce_lifecycle([beamtalk, actor, lifecycle, stop], Metadata) ->
     Class = maps:get(class, Metadata, unknown),

@@ -25,25 +25,17 @@ Tests cover:
 %%====================================================================
 
 setup() ->
-    %% Ensure instance registry is available
-    case whereis(beamtalk_object_instances) of
-        undefined ->
-            {ok, _} = beamtalk_object_instances:start_link();
-        _ ->
-            ok
-    end,
     ok.
 
 cleanup(_) ->
     ok.
 
--doc "Start a test counter actor and register it in the instance registry.".
+-doc "Start a test counter actor.".
 start_test_counter() ->
     start_test_counter(0).
 
 start_test_counter(InitialValue) ->
     {ok, Pid} = beamtalk_test_native_counter:start_link(#{initial => InitialValue}),
-    beamtalk_object_instances:register('TestCounter', Pid),
     Pid.
 
 stop_test_counter(Pid) ->

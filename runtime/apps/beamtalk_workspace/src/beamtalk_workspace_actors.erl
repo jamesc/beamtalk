@@ -62,12 +62,18 @@ double-count an actor that starts around it. The protocol:
 2. take the snapshot (`list/0`) and `feed_new/1` from it;
 3. pass each announcement through `feed_event/2`.
 
-The feed covers marked actors only. `ActorSpawned` / `ActorStopped` come from
-the lifecycle telemetry of a compiled actor's `init/1` / `terminate/2`, which a
-`native:` backing gen_server does not run. A `native:` actor is in the snapshot
-taken at connect, but a later start or stop of one is not announced; a client
-sees it on its next `actors` call. System actors live as long as the workspace,
-so this only matters for user `native:` actors.
+The feed covers every listed actor, `native:` ones included (BT-4970).
+`ActorSpawned` / `ActorStopped` come from the lifecycle telemetry of a compiled
+actor's `init/1` / `terminate/2`, which a `native:` backing gen_server does not
+run, so the runtime announces for it from outside: the start path calls
+`beamtalk_actor:native_started/1` (from the facade's generated `spawn/1` and
+from `safe_start_native/4`), and an observer process that lives as long as the
+actor monitors the pid and announces `ActorStopped` when it goes down. The
+observer hibernates into an exported function, so a reload of `beamtalk_actor`
+does not kill it. A backing module started
+some other way, such as a `gen_server:start_link` that never goes through a
+Beamtalk facade, is in a snapshot (the scan finds it by `'$initial_call'`) but
+is not announced.
 
 An actor that started before the subscription is in the snapshot; one that
 started after the scan is announced and not in it; one that started in between
@@ -79,6 +85,7 @@ covers. The index lives in the subscriber, never in the runtime.
     list/0,
     lookup/1,
     count_for_module/1,
+    is_system/1,
     feed_new/1,
     feed_event/2
 ]).
@@ -156,6 +163,7 @@ meta({Pid, Class, StartedAt}) ->
 %% first in `'$ancestors'` (the supervisor's registered name, or its pid when
 %% unnamed). No call into the supervisor, so a busy or restarting supervisor
 %% never stalls a pid check.
+-doc "Is `Pid` an actor the runtime itself started (a child of `beamtalk_workspace_sup`)?".
 -spec is_system(pid()) -> boolean().
 is_system(Pid) ->
     %% Keyed form: reads one entry instead of copying the whole dictionary. A

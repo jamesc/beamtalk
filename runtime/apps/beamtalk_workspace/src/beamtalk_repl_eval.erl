@@ -82,7 +82,6 @@ module loading to beamtalk_repl_loader.
 ]).
 -endif.
 
--define(INTERNAL_REGISTRY_KEY, '__repl_actor_registry__').
 -define(WORKSPACE_BINDINGS_KEY, '__workspace_user_bindings__').
 
 -doc """
@@ -1535,27 +1534,23 @@ maybe_await_future(Value) ->
 -spec strip_internal_bindings(map()) -> map().
 strip_internal_bindings(Bindings) ->
     %% Strip workspace-only binding keys injected by do_eval.
-    Stripped =
-        case maps:find(?WORKSPACE_BINDINGS_KEY, Bindings) of
-            {ok, WorkspaceOnlyBindings} when is_map(WorkspaceOnlyBindings) ->
-                WithoutMeta = maps:remove(?WORKSPACE_BINDINGS_KEY, Bindings),
-                maps:fold(
-                    fun(Key, OriginalValue, Acc) ->
-                        % elp:fixme W0032 maps:find with complex branch logic
-                        case maps:find(Key, Acc) of
-                            {ok, OriginalValue} -> maps:remove(Key, Acc);
-                            _ -> Acc
-                        end
-                    end,
-                    WithoutMeta,
-                    WorkspaceOnlyBindings
-                );
-            _ ->
-                Bindings
-        end,
-    %% No longer injected (BT-4950); still stripped so a binding map from an older
-    %% session never leaks the key into user-visible bindings.
-    maps:remove(?INTERNAL_REGISTRY_KEY, Stripped).
+    case maps:find(?WORKSPACE_BINDINGS_KEY, Bindings) of
+        {ok, WorkspaceOnlyBindings} when is_map(WorkspaceOnlyBindings) ->
+            WithoutMeta = maps:remove(?WORKSPACE_BINDINGS_KEY, Bindings),
+            maps:fold(
+                fun(Key, OriginalValue, Acc) ->
+                    % elp:fixme W0032 maps:find with complex branch logic
+                    case maps:find(Key, Acc) of
+                        {ok, OriginalValue} -> maps:remove(Key, Acc);
+                        _ -> Acc
+                    end
+                end,
+                WithoutMeta,
+                WorkspaceOnlyBindings
+            );
+        _ ->
+            Bindings
+    end.
 
 -doc "Inject captured output and warnings into an eval result tuple.".
 -spec inject_output(

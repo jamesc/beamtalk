@@ -20,9 +20,8 @@ Split out of `beamtalk_actor` (BT-4701). Owns:
 - the `global` partition-heal conflict resolver (ADR 0126 §4,
   `resolve_global_conflict/3`).
 
-Not to be confused with the `beamtalk_actor_registry` *process* (the
-node-wide REPL actor tracker started by `beamtalk_repl_actors`): this module
-shares the name but not the concern.
+This module is the only thing called `beamtalk_actor_registry`: there is no
+node-wide actor list process (ADR 0150), and actors are found by scanning.
 
 ## Wire / persisted-MFA compatibility
 

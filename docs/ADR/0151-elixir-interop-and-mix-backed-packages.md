@@ -8,8 +8,10 @@ Evidence for every factual claim marked "verified" below is in
 versions (Elixir 1.20.1, OTP 28.5, rebar3 3.27.0, `rebar_mix` 0.5.1, Hex 2.7.0,
 Beamtalk 0.5.0-edge+02378f0) and a list of what was **not** run.
 
-## Decisions the maintainer has to make
+## Open decisions
 
+This ADR was merged as Proposed at the owner's request; implementation is to be
+looked at later. D1-D6 remain open and the recommendations below are unchanged.
 Each is argued in the section named. The recommendation is the first option in
 each section.
 

@@ -285,10 +285,8 @@ impl CoreErlangGenerator {
         // A `self`/`super`/class receiver keeps today's dispatch (see the
         // doc comment). Parens are transparent here — this is a receiver
         // classification, not the block-argument shape match below.
-        match receiver.unwrap_parens() {
-            Expression::Super(_) | Expression::ClassReference { .. } => return None,
-            recv if super::super::expr_shape::is_self_identifier(recv) => return None,
-            _ => {}
+        if !beamtalk_core::ast::normalize::receiver_takes_inline_conditional(receiver) {
+            return None;
         }
 
         // `and:`/`or:` are not `WellKnownSelector`s (see

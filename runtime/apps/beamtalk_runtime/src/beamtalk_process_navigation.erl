@@ -622,7 +622,6 @@ infra_deny_list() ->
             beamtalk_xref,
             beamtalk_bootstrap,
             beamtalk_stdlib,
-            beamtalk_object_instances,
             beamtalk_trace_store,
             beamtalk_subprocess_sup,
             beamtalk_reactive_subprocess_sup,

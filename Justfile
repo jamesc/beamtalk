@@ -924,6 +924,15 @@ bench:
 bench-vs-elixir MODE="bench" ROUNDS="7" ROWS="":
     @benchmarks/vs-elixir/run.sh {{MODE}} {{ROUNDS}} {{ROWS}}
 
+# Per-call dispatch overhead micro-benchmark (BT-4983, benchmarks/dispatch-overhead).
+# MODE is `count` (calls per operation, deterministic), `time` (ns and reductions per
+# operation), `cost` (isolated cost of each leaf mechanism), `report` (time x count x
+# cost, share per mechanism) or `keys` (what each persistent_term read fetches).
+# ARGS are the rounds (time, report) and/or row ids. No Elixir needed.
+[unix]
+bench-dispatch MODE="count" *ARGS="":
+    @benchmarks/dispatch-overhead/run.sh {{MODE}} {{ARGS}}
+
 # Benchee port of the concurrent actor rows 16a-16d (BT-4935), same node setup as
 # bench-vs-elixir. Knobs: BENCHEE_PARALLEL, BENCHEE_TIME, BENCHEE_ROWS, BENCHEE_SAVE,
 # BENCHEE_LOAD, BENCHEE_OVERHEAD=1; ERL_FLAGS="+S 1:1" picks the scheduler count.

@@ -813,7 +813,7 @@ maybe_stop_builder(Pid) when is_pid(Pid) ->
 
 -doc """
 Notify class_load_callback module that a class was loaded.
-Checks application env `class_load_callback` — same pattern as `actor_spawn_callback`.
+Checks application env `class_load_callback`.
 Safe to call if the callback module is not running.
 """.
 -spec notify_class_loaded(atom()) -> ok.

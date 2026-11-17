@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-06-08)
 
+> **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** `ActorSpawned` / `ActorStopped` are unchanged. They are now the only incremental feed of actor starts and stops: the former `actor_spawned_hook` / `actor_spawn_callback` and the actor list server `beamtalk_repl_actors` are deleted, and `beamtalk_workspace_meta` learns of actors by subscribing to `ActorSpawned`.
+
 ## Context
 
 ### The problem

@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Class-side methods on a sealed stateless class.
+sealed Object subclass: VdSealedMath
+  class sealed double: x :: Integer -> Integer => x * 2
+  class triple: x :: Integer -> Integer => x * 3

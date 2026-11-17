@@ -23,7 +23,10 @@
 %% running rebar3 first (debugging only: it must be up to date).
 %%
 %% Modes:
-%%   alone    every suite in its own fresh `erl` node, N nodes at a time.
+%%   alone    every suite in its own fresh `erl` node, N nodes at a time. Also
+%%            prints `DIRTY after M: ...` for a suite that leaves a bare-started
+%%            `beamtalk_*` server, or class processes with no runtime app, behind
+%%            (the things that make a later module's runtime start fail).
 %%   reverse  every suite, in one node per group, in reverse module order.
 %%   random   as reverse, in a shuffled order; the seed is printed, and
 %%            `--seed S` reproduces it.
@@ -317,9 +320,10 @@ run_node(Mods, Paths, Tag) ->
     %% earlier run would make a node that died before reporting look green.
     _ = file:del_dir_r(Dir),
     ok = filelib:ensure_dir(filename:join(Dir, "x")),
+    PROBE = "Probe = fun() -> Bare = [N || N <- registered(), lists:prefix(\"beamtalk\", atom_to_list(N)), P <- [whereis(N)], is_pid(P), (case process_info(P, dictionary) of {dictionary, D} -> (case proplists:get_value('$ancestors', D) of [A | _] when is_pid(A) -> not is_process_alive(A); _ -> false end); _ -> false end)], Heirless = lists:sort([T || T <- ets:all(), is_atom(T), lists:prefix(\"beamtalk\", atom_to_list(T)), ets:info(T, heir) =:= none]), AppUp = lists:keymember(beamtalk_runtime, 1, application:which_applications()), Classes = (catch length(pg:get_members(beamtalk_classes))), {lists:sort(Bare), Heirless, AppUp, Classes} end",
     Eval = lists:flatten(
         io_lib:format(
-            "Dir = ~p, Mods = ~p, "
+            "Dir = ~p, Mods = ~p, ~s, "
             "lists:foreach(fun(M) -> "
             "  io:format(user, \"~~n===== ~~s =====~~n\", [M]), "
             "  T0 = erlang:monotonic_time(millisecond), "
@@ -327,12 +331,14 @@ run_node(Mods, Paths, Tag) ->
             "  T1 = erlang:monotonic_time(millisecond), "
             "  ok = file:write_file(filename:join(Dir, atom_to_list(M) ++ \".status\"), "
             "         io_lib:format(\"~~p.~~n~~p.~~n\", [R, T1 - T0])), "
-            "  Live = (catch lists:sort([C || {P, C} <- ets:tab2list(beamtalk_instance_class), "
-            "                                is_process_alive(P)])), "
+            "  ok = file:write_file(filename:join(Dir, atom_to_list(M) ++ \".dirty\"), "
+            "         io_lib:format(\"~~p.~~n\", [(catch Probe())])), "
+            "  Live = (catch lists:sort([C || {P, C, _} <- beamtalk_actor_scan:scan_actors_by_pid(), "
+            "                                (catch beamtalk_workspace_actors:is_system(P)) =/= true])), "
             "  ok = file:write_file(filename:join(Dir, atom_to_list(M) ++ \".leaks\"), "
             "         io_lib:format(\"~~p.~~n\", [Live])) "
             "end, Mods), halt(0).",
-            [Dir, [list_to_atom(M) || M <- Mods]]
+            [Dir, [list_to_atom(M) || M <- Mods], PROBE]
         )
     ),
     Args = lists:append([["-pa", P] || P <- Paths]) ++
@@ -347,7 +353,57 @@ run_node(Mods, Paths, Tag) ->
     T0 = erlang:monotonic_time(millisecond),
     {_Status, Out} = cmd("erl", Args, node_env()),
     Wall = erlang:monotonic_time(millisecond) - T0,
-    [collect(M, Dir, Out, Wall, length(Mods)) || M <- Mods].
+    Rs = [collect(M, Dir, Out, Wall, length(Mods)) || M <- Mods],
+    case Mods of
+        [Only] -> [leak_verdict(Dir, Only, R) || R <- Rs];
+        _ -> Rs
+    end.
+
+%% A module run alone that leaves a bare-started server behind fails: the next
+%% module's `ensure_all_started(beamtalk_runtime)` would fail with
+%% `already_started`. Class processes left with no runtime app are printed as INFO
+%% only: `beamtalk_test_boot:start_app/1` reclaims them (BT-4962).
+leak_verdict(Dir, Mod, R = #{failures := F, detail := Detail}) ->
+    case dirty_issues(Dir, Mod) of
+        {Servers, Info} ->
+            Info =:= [] orelse io:format("  INFO after ~s: ~w~n", [Mod, Info]),
+            case Servers of
+                [] ->
+                    R;
+                _ ->
+                    io:format("  LEAKED SERVERS after ~s: ~w~n", [Mod, Servers]),
+                    R#{
+                        failures := F + 1,
+                        detail := iolist_to_binary([
+                            Detail,
+                            io_lib:format(
+                                "\n--- leak report ---\n~s left bare-started servers running: ~w~n",
+                                [Mod, Servers]
+                            )
+                        ])
+                    }
+            end;
+        none ->
+            R
+    end.
+
+%% Single-module (alone) runs only: what the module left behind in a fresh node.
+%% `Servers`: registered `beamtalk_*` servers whose starter (the first `$ancestors`
+%% entry, a pid) is dead, i.e. started with a bare `start_link` by a test process
+%% that has since exited. They survive that exit (a normal exit signal does not
+%% kill a process that is not trapping exits) and make the next module's
+%% `ensure_all_started(beamtalk_runtime)` fail with `already_started`.
+%% `Info`: class processes alive while `beamtalk_runtime` is not running (a stdlib
+%% module loaded before the app, whose on_load started them).
+dirty_issues(Dir, Mod) ->
+    case file:consult(filename:join(Dir, Mod ++ ".dirty")) of
+        {ok, [{Bare, _Heirless, AppUp, Classes}]} ->
+            Servers = [N || N <- Bare, not lists:prefix("beamtalk_class_", atom_to_list(N))],
+            Info = [{class_processes_without_app, Classes} || not AppUp, is_integer(Classes), Classes > 0],
+            {Servers, Info};
+        _ ->
+            none
+    end.
 
 report_dir(Tag) ->
     filename:absname(filename:join(["_build", "isolation", Tag])).

@@ -34,13 +34,6 @@ setup() ->
     %% it. Load it so this suite does not depend on an earlier suite in the
     %% same VM having done so.
     {module, telemetry} = code:ensure_loaded(telemetry),
-    %% Start instance registry if not running
-    case whereis(beamtalk_object_instances) of
-        undefined ->
-            {ok, _} = beamtalk_object_instances:start_link();
-        _ ->
-            ok
-    end,
     %% Start trace store if not running
     case whereis(beamtalk_trace_store) of
         undefined ->
@@ -65,6 +58,7 @@ cleanup(_State) ->
     catch
         _:_ -> ok
     end,
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_trace_store),
     %% Clean up causal trace context from process dictionary
     erase('$beamtalk_trace_id'),
     erase('$beamtalk_span_id'),
@@ -85,10 +79,9 @@ attach_handler(EventName) ->
     ),
     HandlerId.
 
--doc "Start a test counter actor and register it in the instance registry.".
-start_registered_counter(InitialValue) ->
+-doc "Start a test counter actor.".
+start_counter(InitialValue) ->
     {ok, Pid} = test_counter:start_link(InitialValue),
-    ok = beamtalk_object_instances:register('Counter', Pid),
     Pid.
 
 %%====================================================================
@@ -100,7 +93,7 @@ sync_send_emits_stop_event_test_() ->
         ?_test(begin
             StopHandler = attach_handler([beamtalk, actor, dispatch, stop]),
             try
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 try
                     %% Sync send: getValue
                     Result = beamtalk_actor:sync_send(Pid, getValue, []),
@@ -136,7 +129,7 @@ sync_send_emits_stop_event_test_() ->
         ?_test(begin
             StopHandler = attach_handler([beamtalk, actor, dispatch, stop]),
             try
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 try
                     %% Create a future to receive the async result
                     {beamtalk_future, FuturePid} = beamtalk_future:new(),
@@ -168,7 +161,7 @@ sync_send_emits_stop_event_test_() ->
         ?_test(begin
             StopHandler = attach_handler([beamtalk, actor, dispatch, stop]),
             try
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 try
                     beamtalk_actor:cast_send(Pid, increment, []),
 
@@ -198,7 +191,7 @@ sync_send_emits_stop_event_test_() ->
         ?_test(begin
             StopHandler = attach_handler([beamtalk, actor, dispatch, stop]),
             try
-                Pid = start_registered_counter(42),
+                Pid = start_counter(42),
                 try
                     _Result = beamtalk_actor:sync_send(Pid, getValue, []),
                     receive
@@ -221,7 +214,7 @@ sync_send_emits_stop_event_test_() ->
         ?_test(begin
             StopHandler = attach_handler([beamtalk, actor, dispatch, stop]),
             try
-                %% Start counter WITHOUT registering in instance registry
+                %% Start counter (no class hint, so the class is read from the actor marker)
                 {ok, Pid} = test_counter:start_link(0),
                 try
                     _Result = beamtalk_actor:sync_send(Pid, getValue, []),
@@ -244,7 +237,7 @@ sync_send_emits_stop_event_test_() ->
         %%====================================================================
         ?_test(begin
             beamtalk_trace_store:clear(),
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             try
                 %% Multiple sync dispatches
                 beamtalk_actor:sync_send(Pid, increment, []),
@@ -278,7 +271,7 @@ sync_send_emits_stop_event_test_() ->
         %%====================================================================
         ?_test(begin
             beamtalk_trace_store:clear(),
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             try
                 %% Dispatch without tracing enabled — no trace events
                 beamtalk_actor:sync_send(Pid, increment, []),
@@ -322,7 +315,7 @@ sync_send_emits_stop_event_test_() ->
         %% Test: Error handling preserved — actor_dead produces structured error
         %%====================================================================
         ?_test(begin
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             gen_server:stop(Pid),
             beamtalk_test_wait:dead(Pid),
 
@@ -345,7 +338,7 @@ sync_send_emits_stop_event_test_() ->
         ?_test(begin
             StopHandler = attach_handler([beamtalk, actor, dispatch, stop]),
             try
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 gen_server:stop(Pid),
                 beamtalk_test_wait:dead(Pid),
 
@@ -370,7 +363,7 @@ sync_send_emits_stop_event_test_() ->
         ?_test(begin
             StopHandler = attach_handler([beamtalk, actor, dispatch, stop]),
             try
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 try
                     %% isAlive is a lifecycle method — should NOT emit telemetry
                     _Alive = beamtalk_actor:sync_send(Pid, isAlive, []),
@@ -406,7 +399,6 @@ sync_send_emits_stop_event_test_() ->
             try
                 %% Start a throwing actor that raises on specific message
                 {ok, Pid} = test_throwing_actor:start_link(),
-                ok = beamtalk_object_instances:register('ThrowingActor', Pid),
                 try
                     %% Call the throwing method — should raise but also emit exception event.
                     %% The actor catches the error in safe_dispatch and returns
@@ -441,8 +433,7 @@ sync_send_emits_stop_event_test_() ->
                         gen_server:stop(Pid)
                     catch
                         _:_ -> ok
-                    end,
-                    beamtalk_object_instances:unregister('ThrowingActor', Pid)
+                    end
                 end
             after
                 telemetry:detach(ExcHandler)
@@ -454,7 +445,7 @@ sync_send_emits_stop_event_test_() ->
         ?_test(begin
             StopHandler = attach_handler([beamtalk, actor, dispatch, stop]),
             try
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 gen_server:stop(Pid),
                 beamtalk_test_wait:dead(Pid),
 
@@ -479,7 +470,7 @@ sync_send_emits_stop_event_test_() ->
         %%====================================================================
         ?_test(begin
             beamtalk_trace_store:clear(),
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             try
                 %% Mix of sync and cast sends
                 beamtalk_actor:sync_send(Pid, increment, []),
@@ -517,7 +508,7 @@ sync_send_emits_stop_event_test_() ->
         ?_test(begin
             StartHandler = attach_handler([beamtalk, actor, lifecycle, start]),
             try
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 try
                     %% Verify lifecycle start event was emitted
                     receive
@@ -541,7 +532,7 @@ sync_send_emits_stop_event_test_() ->
         ?_test(begin
             StopHandler = attach_handler([beamtalk, actor, lifecycle, stop]),
             try
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 %% Gracefully stop the actor — triggers terminate/2
                 gen_server:stop(Pid),
                 %% Verify lifecycle stop event was emitted from terminate/2
@@ -565,7 +556,7 @@ sync_send_emits_stop_event_test_() ->
         ?_test(begin
             StopHandler = attach_handler([beamtalk, actor, lifecycle, stop]),
             try
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 %% Use sync_send stop which emits lifecycle event
                 beamtalk_actor:sync_send(Pid, stop, []),
                 %% Verify lifecycle stop event was emitted
@@ -588,7 +579,7 @@ sync_send_emits_stop_event_test_() ->
             KillHandler = attach_handler([beamtalk, actor, lifecycle, kill]),
             OldTrap = process_flag(trap_exit, true),
             try
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 %% Use sync_send kill which emits lifecycle event
                 beamtalk_actor:sync_send(Pid, kill, []),
                 %% Flush the EXIT message from the linked actor
@@ -615,7 +606,7 @@ sync_send_emits_stop_event_test_() ->
         ?_test(begin
             beamtalk_trace_store:clear(),
             beamtalk_trace_store:enable(),
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             %% Stop the actor to trigger lifecycle events
             beamtalk_actor:sync_send(Pid, stop, []),
             beamtalk_test_wait:dead(Pid),
@@ -653,7 +644,7 @@ sync_send_emits_stop_event_test_() ->
         %%====================================================================
         ?_test(begin
             beamtalk_trace_store:clear(),
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             %% Stop the actor to trigger lifecycle events
             beamtalk_actor:sync_send(Pid, stop, []),
             beamtalk_test_wait:dead(Pid),
@@ -683,7 +674,7 @@ sync_send_emits_stop_event_test_() ->
             StopHandler = attach_handler([beamtalk, actor, lifecycle, stop]),
             OldTrap = process_flag(trap_exit, true),
             try
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 %% Kill the actor — terminate/2 receives {killed, ...} reason
                 exit(Pid, kill),
                 %% Flush the EXIT message from the linked actor
@@ -715,7 +706,7 @@ sync_send_emits_stop_event_test_() ->
         ?_test(begin
             StopHandler = attach_handler([beamtalk, actor, lifecycle, stop]),
             try
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 {beamtalk_future, FuturePid} = beamtalk_future:new(),
                 beamtalk_actor:async_send(Pid, stop, [], FuturePid),
                 %% Verify lifecycle stop event was emitted
@@ -738,7 +729,7 @@ sync_send_emits_stop_event_test_() ->
             KillHandler = attach_handler([beamtalk, actor, lifecycle, kill]),
             OldTrap = process_flag(trap_exit, true),
             try
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 {beamtalk_future, FuturePid} = beamtalk_future:new(),
                 beamtalk_actor:async_send(Pid, kill, [], FuturePid),
                 %% Flush the EXIT message from the linked actor
@@ -805,7 +796,7 @@ sync_send_emits_stop_event_test_() ->
             %% Set trace context in THIS process (caller side)
             beamtalk_actor:set_trace_context(#{workflowId => <<"wf-trace-1">>}),
 
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             try
                 %% Sync send — telemetry handler runs in caller process
                 _Result = beamtalk_actor:sync_send(Pid, getValue, []),
@@ -840,7 +831,7 @@ sync_send_emits_stop_event_test_() ->
             %% Do NOT set any trace context
             erase('$beamtalk_trace_ctx'),
 
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             try
                 _Result = beamtalk_actor:sync_send(Pid, getValue, []),
                 ok = beamtalk_test_wait:sync(Pid),
@@ -921,7 +912,7 @@ sync_send_emits_stop_event_test_() ->
             erase('$beamtalk_span_id'),
             erase('$beamtalk_parent_span_id'),
 
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             try
                 %% Sync send — first dispatch creates a root span
                 _Result = beamtalk_actor:sync_send(Pid, getValue, []),
@@ -963,7 +954,7 @@ sync_send_emits_stop_event_test_() ->
             erase('$beamtalk_span_id'),
             erase('$beamtalk_parent_span_id'),
 
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             try
                 %% First dispatch — creates root span
                 _Result1 = beamtalk_actor:sync_send(Pid, getValue, []),
@@ -1000,7 +991,7 @@ sync_send_emits_stop_event_test_() ->
             erase('$beamtalk_span_id'),
             erase('$beamtalk_parent_span_id'),
 
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             try
                 %% First dispatch — root span with trace_id T1
                 _Result1 = beamtalk_actor:sync_send(Pid, getValue, []),
@@ -1059,7 +1050,7 @@ sync_send_emits_stop_event_test_() ->
             %% All done in the same process to test the context propagation logic.
 
             %% Hop 1: Actor A dispatches (root span)
-            PidA = start_registered_counter(0),
+            PidA = start_counter(0),
             try
                 _ResultA = beamtalk_actor:sync_send(PidA, getValue, []),
                 ok = beamtalk_test_wait:sync(PidA),
@@ -1134,7 +1125,7 @@ sync_send_emits_stop_event_test_() ->
             erase('$beamtalk_span_id'),
             erase('$beamtalk_parent_span_id'),
 
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             try
                 %% Dispatch with tracing disabled
                 _Result = beamtalk_actor:sync_send(Pid, getValue, []),
@@ -1210,9 +1201,8 @@ dispatch_events_off_still_record_aggregates_once_test_() ->
                     [beamtalk, actor, dispatch, exception]
                 ]
             ],
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             {ok, Thrower} = test_throwing_actor:start_link(),
-            ok = beamtalk_object_instances:register('ThrowingActor', Thrower),
             try
                 _ = beamtalk_actor:sync_send(Pid, increment, []),
                 _ = beamtalk_actor:sync_send(Pid, increment, []),
@@ -1239,7 +1229,6 @@ dispatch_events_off_still_record_aggregates_once_test_() ->
                 catch
                     _:_ -> ok
                 end,
-                beamtalk_object_instances:unregister('ThrowingActor', Thrower),
                 [telemetry:detach(H) || H <- Handlers]
             end
         end)
@@ -1253,7 +1242,7 @@ dispatch_events_on_record_aggregates_once_test_() ->
         [
             ?_test(begin
                 beamtalk_trace_store:clear(),
-                Pid = start_registered_counter(0),
+                Pid = start_counter(0),
                 try
                     _ = beamtalk_actor:sync_send(Pid, increment, []),
                     _ = beamtalk_actor:sync_send(Pid, increment, []),
@@ -1273,7 +1262,7 @@ tracing_enable_turns_dispatch_events_on_test_() ->
             ok = beamtalk_trace_store:enable(),
             ?assert(beamtalk_telemetry:dispatch_events_enabled()),
             StopHandler = attach_handler([beamtalk, actor, dispatch, stop]),
-            Pid = start_registered_counter(0),
+            Pid = start_counter(0),
             try
                 0 = beamtalk_actor:sync_send(Pid, getValue, []),
                 ?assertEqual(
@@ -1291,7 +1280,7 @@ tracing_enable_turns_dispatch_events_on_test_() ->
     ]}.
 
 flat_send_cost_with_many_live_actors_test_() ->
-    %% BT-4113: the send path never scans the instance registry, so a
+    %% BT-4113: the send path never scans the node's actors, so a
     %% send's cost does not grow with the number of live actors. Counted in
     %% reductions, which (unlike wall time) are deterministic.
     %% Own fixture (differs from the shared per-test setup): kept as {setup, ...}.
@@ -1299,13 +1288,13 @@ flat_send_cost_with_many_live_actors_test_() ->
         [
             {timeout, 60,
                 ?_test(begin
-                    Pid = start_registered_counter(0),
-                    Fillers = [spawn_registered_filler() || _ <- lists:seq(1, 10)],
+                    Pid = start_counter(0),
+                    Fillers = [spawn_marked_filler() || _ <- lists:seq(1, 10)],
                     Small = send_reductions(Pid),
-                    MoreFillers = [spawn_registered_filler() || _ <- lists:seq(1, 9990)],
+                    MoreFillers = [spawn_marked_filler() || _ <- lists:seq(1, 9990)],
                     Large = send_reductions(Pid),
                     try
-                        %% A registry scan would cost thousands of reductions
+                        %% A node-wide scan would cost thousands of reductions
                         %% more at 10,000 actors; allow a little noise.
                         ?assert(Large =< Small + 10)
                     after
@@ -1316,14 +1305,19 @@ flat_send_cost_with_many_live_actors_test_() ->
         ]
     end}.
 
-spawn_registered_filler() ->
+-doc "A idle process carrying the actor marker, so a node-wide scan counts it.".
+spawn_marked_filler() ->
+    Parent = self(),
     F = spawn(fun() ->
+        erlang:put('$beamtalk_actor', 'Filler'),
+        Parent ! {filler_ready, self()},
         receive
             stop -> ok
         end
     end),
-    ok = beamtalk_object_instances:register('Filler', F),
-    F.
+    receive
+        {filler_ready, F} -> F
+    end.
 
 -doc "Minimum reductions one sync send costs the caller, over a few tries.".
 send_reductions(Pid) ->

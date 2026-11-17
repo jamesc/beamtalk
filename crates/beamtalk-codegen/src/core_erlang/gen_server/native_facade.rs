@@ -20,7 +20,7 @@ use super::super::util::omit_late_defaultless_slot;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use super::spawn::SpawnVariant;
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::{Document, INDENT, join, leaf, line, nest};
+use beamtalk_cerl_doc::{Document, INDENT, form, join, leaf, line, nest};
 use beamtalk_core::ast::{MethodDefinition, MethodKind, Module};
 use beamtalk_core::unparse::unparse_method_display_signature;
 
@@ -401,16 +401,24 @@ impl CoreErlangGenerator {
                                                 INDENT,
                                                 docvec![
                                                     line(),
-                                                    // Instance registration for hot reload tracking
-                                                    Self::instance_registration_doc(&class_name),
-                                                    line(),
-                                                    docvec![
-                                                        "{'beamtalk_object', ",
-                                                        leaf::atom(class_name.clone()),
-                                                        ", ",
-                                                        leaf::atom(module_name.clone()),
-                                                        ", Pid}",
-                                                    ],
+                                                    // BT-4970: announce the start (and arrange the
+                                                    // stop) from outside the backing gen_server.
+                                                    form::let_in(
+                                                        leaf::var("_NativeAnnounced"),
+                                                        form::call(
+                                                            "beamtalk_actor",
+                                                            "native_started",
+                                                            [leaf::var("Pid")],
+                                                        ),
+                                                        docvec![
+                                                            "{'beamtalk_object', ",
+                                                            leaf::atom(class_name.clone()),
+                                                            ", ",
+                                                            leaf::atom(module_name.clone()),
+                                                            ", Pid}",
+                                                        ],
+                                                        form::Layout::Block,
+                                                    ),
                                                 ]
                                             ),
                                             line(),

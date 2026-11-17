@@ -47,7 +47,7 @@ setup() ->
 
 teardown(_) ->
     clear_subscriptions(),
-    ok.
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_announcements).
 
 clear_subscriptions() ->
     try

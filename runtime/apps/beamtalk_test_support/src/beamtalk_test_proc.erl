@@ -18,6 +18,7 @@ stop/kill. Every stop waits on a monitor `'DOWN'`, never a `timer:sleep`.
     shutdown/1,
     await_down/2,
     stop_registered/1,
+    stop_if_bare/1,
     restart/1,
     in_fresh_process/1
 ]).
@@ -103,6 +104,32 @@ nothing is registered under `Name`. Replaces the hand-written
 -spec stop_registered(atom()) -> ok.
 stop_registered(Name) ->
     stop(whereis(Name)).
+
+-doc """
+Stop the process registered as `Name` only when a test started it bare: its
+`$ancestors` start with a pid (a bare `start_link/0` from a test or fixture
+process), not with a supervisor's registered name. A supervised child of the
+runtime is left alone. For a fixture's cleanup half of "start it if it is not
+running": a bare-started singleton outlives the test (a normal exit signal does not
+kill a process that is not trapping exits) and makes the next module's
+`ensure_all_started(beamtalk_runtime)` fail with `already_started` (BT-4962).
+""".
+-spec stop_if_bare(atom()) -> ok.
+stop_if_bare(Name) ->
+    case whereis(Name) of
+        undefined ->
+            ok;
+        Pid ->
+            case process_info(Pid, dictionary) of
+                {dictionary, Dict} ->
+                    case proplists:get_value('$ancestors', Dict) of
+                        [Starter | _] when is_pid(Starter) -> stop(Pid);
+                        _ -> ok
+                    end;
+                undefined ->
+                    ok
+            end
+    end.
 
 -doc """
 Stop the singleton registered as `Name` (if any), then start a fresh one with

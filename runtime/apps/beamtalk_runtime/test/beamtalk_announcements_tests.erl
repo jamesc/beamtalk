@@ -55,7 +55,9 @@ cleanup(_Pid) ->
     %% Don't stop the server — supervised in the runtime app. Clear all rows so
     %% the next test starts empty even if it picks up the same gen_server.
     clear_all_subscriptions(),
-    ok.
+    %% A bus (and heir) the tests started bare must not outlive the module (BT-4962).
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_announcements),
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_ets_heir).
 
 clear_all_subscriptions() ->
     %% Tables are `public`, so we can wipe them directly. Route the monitor-state
@@ -1686,3 +1688,90 @@ unrelated_subscription_no_superclass_walk_test_() ->
             end
         end)
     ]}.
+
+%%====================================================================
+%% subscribed_classes/1 (BT-4932): the classes with a subscription on one
+%% announcer, each once, in class order. Every announce on the system bus
+%% reads it, and an actor start/stop announces, so it is a hot path.
+%%====================================================================
+
+subscribed_classes_test_() ->
+    {foreach, fun setup/0, fun cleanup/1, [
+        {"no subscriptions: no classes",
+            ?_test(begin
+                ?assertEqual([], beamtalk_announcements:subscribed_classes(system_bus()))
+            end)},
+        {"each class once, in class order, however many subscriptions it has",
+            ?_test(begin
+                Sub = spawn_subscriber(self()),
+                try
+                    [
+                        {ok, _} = beamtalk_announcements:subscribe(Class, Sub, h, false)
+                     || Class <- ['Charlie', 'Bravo', 'Bravo', 'Alpha', 'Bravo']
+                    ],
+                    ?assertEqual(
+                        ['Alpha', 'Bravo', 'Charlie'],
+                        beamtalk_announcements:subscribed_classes(system_bus())
+                    )
+                after
+                    stop_subscriber(Sub)
+                end
+            end)},
+        {"only the asked announcer's classes, whichever side of it others sort on",
+            ?_test(begin
+                Sub = spawn_subscriber(self()),
+                Per = make_ref(),
+                %% Atoms sorting before and after the system announcer's name,
+                %% and a reference announcer, all with classes of their own.
+                Before = aaa_announcer,
+                After = zzz_announcer,
+                try
+                    Subs = [
+                        {system_bus(), 'Mid'},
+                        {Before, 'BeforeOnly'},
+                        {Before, 'Shared'},
+                        {After, 'AfterOnly'},
+                        {After, 'Shared'},
+                        {Per, 'PerInstance'},
+                        {Per, 'Shared'}
+                    ],
+                    [
+                        {ok, _} = beamtalk_announcements:subscribe(A, Class, Sub, h, false)
+                     || {A, Class} <- Subs
+                    ],
+                    ?assertEqual(['Mid'], beamtalk_announcements:subscribed_classes(system_bus())),
+                    ?assertEqual(
+                        ['BeforeOnly', 'Shared'], beamtalk_announcements:subscribed_classes(Before)
+                    ),
+                    ?assertEqual(
+                        ['AfterOnly', 'Shared'], beamtalk_announcements:subscribed_classes(After)
+                    ),
+                    ?assertEqual(
+                        ['PerInstance', 'Shared'], beamtalk_announcements:subscribed_classes(Per)
+                    ),
+                    ?assertEqual([], beamtalk_announcements:subscribed_classes(make_ref()))
+                after
+                    stop_subscriber(Sub)
+                end
+            end)},
+        {"an unsubscribed class drops out once its last subscription goes",
+            ?_test(begin
+                Sub = spawn_subscriber(self()),
+                try
+                    {ok, R1} = beamtalk_announcements:subscribe('Alpha', Sub, h1, false),
+                    {ok, R2} = beamtalk_announcements:subscribe('Alpha', Sub, h2, false),
+                    {ok, _} = beamtalk_announcements:subscribe('Bravo', Sub, h, false),
+                    ok = beamtalk_announcements:unsubscribe(R1),
+                    ?assertEqual(
+                        ['Alpha', 'Bravo'], beamtalk_announcements:subscribed_classes(system_bus())
+                    ),
+                    ok = beamtalk_announcements:unsubscribe(R2),
+                    ?assertEqual(['Bravo'], beamtalk_announcements:subscribed_classes(system_bus()))
+                after
+                    stop_subscriber(Sub)
+                end
+            end)}
+    ]}.
+
+%% The system bus's announcer namespace (`?SYSTEM_ANNOUNCER_REF`).
+system_bus() -> beamtalk_system_announcer.

@@ -70,11 +70,10 @@ See also: beamtalk_actor for the runtime implementation
 %% generated dispatch/4 case-statement module
 %% (crates/beamtalk-core/src/codegen/core_erlang/gen_server/*); they never
 %% store a `'__methods__'` map of funs in actor state. That funs-table shape
-%% is a *runtime* representation: it is what `beamtalk_actor:dispatch/4` and
-%% `test_actor_host:handle_cast/2`'s async future-cast branch
-%% (`{Selector, Args, FuturePid}`) operate on directly, and it is the same
-%% shape produced by Beamtalk's dynamic class-building API
-%% (`Object classBuilder ... classMethods: #{...}; register`).
+%% is what `test_actor_host` (the test-only gen_server stand-in; BT-4871
+%% deleted the interpretive path that used to live in `beamtalk_actor`)
+%% dispatches on, including its async future-cast branch
+%% (`{Selector, Args, FuturePid}`).
 %%
 %% Everything that can be expressed as compiled `.bt` source and reached via
 %% the ordinary `{Selector, Args}` synchronous call protocol is instead
@@ -96,8 +95,8 @@ See also: beamtalk_actor for the runtime implementation
 %% Consistency-Test Disposition Rule's documented exception ("a runtime-only
 %% failure path that has no corresponding source construct"), the async
 %% section below stays on this hand-built state+methods fixture, which is a
-%% legitimate direct input to `beamtalk_actor:dispatch/4` rather than a
-%% "simulated compiler output" fixture.
+%% direct input to `test_actor_host` rather than a "simulated compiler
+%% output" fixture.
 -spec counter_module_state(InitArgs :: map()) -> map().
 counter_module_state(InitArgs) ->
     DefaultState = #{
