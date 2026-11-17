@@ -82,8 +82,8 @@
 //!   BT-4823): its kind guard answers a Boolean while the declaration holds,
 //!   and only a receiver that broke it can reach the helper, so any block
 //!   ending in `^` is accepted. A declared comparison is not a Boolean by
-//!   construction, so the other shapes (two-branch, tail position) keep
-//!   their NLR frame. Its receiver is then recorded
+//!   construction, so the other shapes keep their NLR frame, except a tail
+//!   two-branch conditional with plain values (see below). Its receiver is then recorded
 //!   in [`GuardRewrite::conditions`], and codegen
 //!   ([`CoreErlangGenerator::guard_condition_doc`]) decides the branch with
 //!   `beamtalk_guard_return`, which sends a non-Boolean the guard's own
