@@ -40,6 +40,7 @@ spawn_options_test_() ->
         {"set: every compiled spawn path applies it", fun set_applies_on_every_path/0},
         {"changing the env needs a refresh, and refresh undoes it", fun refresh_follows_env/0},
         {"an invalid value is ignored", fun invalid_value_is_ignored/0},
+        {"the largest accepted value is applied", fun largest_value_is_accepted/0},
         {"actors already running keep their heap", fun running_actors_keep_heap/0}
     ]}.
 
@@ -112,8 +113,13 @@ invalid_value_is_ignored() ->
                 ok = beamtalk_actor:refresh_spawn_options()
             end
         end,
-        [0, -5, 1.5, big, <<"2000">>]
+        [0, -5, 1.5, big, <<"2000">>, 1048577, 20000000, 1 bsl 70]
     ).
+
+largest_value_is_accepted() ->
+    with_words(1048576, fun() ->
+        ?assertEqual([{min_heap_size, 1048576}], beamtalk_actor:spawn_options())
+    end).
 
 running_actors_keep_heap() ->
     {Pid, Stop} = spawn_unlinked(),
@@ -174,6 +180,14 @@ spawn_paths() ->
         {safe_spawn_linked, fun() ->
             {ok, Pid} = beamtalk_actor:safe_spawn_linked(?CLASS_MOD, #{}),
             {Pid, fun() -> stop_linked(Pid) end}
+        end},
+        {safe_spawn_named_global, fun() ->
+            Name = beamtalk_test_unique:atom("bt4997_heap_global"),
+            {ok, Pid} = beamtalk_actor:safe_spawn_named(global, unlinked, Name, ?CLASS_MOD, #{}),
+            {Pid, fun() ->
+                global:unregister_name(Name),
+                stop_linked(Pid)
+            end}
         end},
         {safe_spawn_named_local, fun() ->
             Name = beamtalk_test_unique:atom("bt4997_heap"),

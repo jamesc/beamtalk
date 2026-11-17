@@ -3025,6 +3025,10 @@ maybe_execute_telemetry(EventName, Measurements, Metadata) ->
     beamtalk_telemetry:emit(EventName, Measurements, Metadata).
 
 -define(PT_SPAWN_OPTIONS, beamtalk_actor_spawn_options).
+%% The largest `actor_min_heap_size` accepted: 1 Mi words = 8 MiB per actor. A
+%% value past it is a typo (an extra zero turns 2000 into 20000000, 160 MB for
+%% every actor), so it is ignored, not applied.
+-define(MAX_ACTOR_MIN_HEAP_WORDS, 1048576).
 
 -doc """
 Extra `erlang:spawn_opt/2` options for a compiled actor's process (BT-4997).
@@ -3055,11 +3059,13 @@ gen_start_options() ->
 
 -doc """
 Recompute the actor spawn options from the application env
-`{beamtalk_runtime, actor_min_heap_size}` (a positive number of words).
-Unset gives `[]`, today's behaviour. A value that is not a positive integer is
-ignored with a warning, so a typo cannot change how actors start. Called at
-runtime start; call it again after changing the env at run time. Actors that
-are already running keep the heap they have.
+`{beamtalk_runtime, actor_min_heap_size}` (a number of words, 1 to 1 Mi).
+Unset gives `[]`, today's behaviour. A value that is not an integer in that
+range, or that the VM would refuse as a `min_heap_size` (for example above a
+`+hmax` limit), is ignored with a warning, so a typo cannot change how actors
+start or make every spawn fail. Called at runtime start; call it again after
+changing the env at run time. Actors that are already running keep the heap
+they have.
 """.
 -spec refresh_spawn_options() -> ok.
 refresh_spawn_options() ->
@@ -3067,20 +3073,39 @@ refresh_spawn_options() ->
         case application:get_env(beamtalk_runtime, actor_min_heap_size) of
             undefined ->
                 [];
-            {ok, Words} when is_integer(Words), Words > 0 ->
-                [{min_heap_size, Words}];
-            {ok, Other} ->
-                ?LOG_WARNING(
-                    "Ignoring beamtalk_runtime actor_min_heap_size: expected a positive integer",
-                    #{value => Other, domain => [beamtalk, runtime]}
-                ),
-                []
+            {ok, Words} = Setting ->
+                case vm_accepts_min_heap(Words) of
+                    true ->
+                        [{min_heap_size, Words}];
+                    false ->
+                        ?LOG_WARNING(
+                            "Ignoring beamtalk_runtime actor_min_heap_size: expected an integer "
+                            "number of words from 1 to 1048576 that the VM accepts",
+                            #{value => element(2, Setting), domain => [beamtalk, runtime]}
+                        ),
+                        []
+                end
         end,
     case persistent_term:get(?PT_SPAWN_OPTIONS, []) of
         New -> ok;
         _ -> persistent_term:put(?PT_SPAWN_OPTIONS, New)
     end,
     ok.
+
+%% Whether `Words` is a usable `min_heap_size`: an integer in range that
+%% `spawn_opt` accepts (it refuses one above a `+hmax` limit, say). The probe
+%% process allocates the heap once and exits at once.
+-spec vm_accepts_min_heap(term()) -> boolean().
+vm_accepts_min_heap(Words) when
+    is_integer(Words), Words >= 1, Words =< ?MAX_ACTOR_MIN_HEAP_WORDS
+->
+    try erlang:spawn_opt(fun() -> ok end, [{min_heap_size, Words}]) of
+        Pid when is_pid(Pid) -> true
+    catch
+        error:badarg -> false
+    end;
+vm_accepts_min_heap(_Other) ->
+    false.
 
 -doc """
 An actor of `Class` has started: called by the generated `init/1` (and the

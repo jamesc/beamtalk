@@ -208,13 +208,18 @@ default**, so nothing changes until you set it.
 [{beamtalk_runtime, [{actor_min_heap_size, 2000}]}].
 ```
 
-The value is a positive number of words. It is read when the runtime starts;
+The value is a number of words from 1 to 1048576 (8 MiB per actor). It is read
+when the runtime starts;
 change it at run time with `application:set_env(beamtalk_runtime,
 actor_min_heap_size, Words)` followed by `beamtalk_actor:refresh_spawn_options()`.
-It applies to actors started afterwards and to every start path of a compiled
-actor (`spawn`, `spawnWith:`, the monitored variants, named and supervised
-children); `native:` actors started by their own backing module are not
-affected. A value that is not a positive integer is ignored with a warning.
+It applies to actors started afterwards through the runtime's own start paths:
+`spawn`, `spawnWith:`, the monitored variants, named actors and supervised
+children (`beamtalk_actor:safe_spawn*`). It does **not** apply to an actor an
+Erlang/Elixir host starts itself in its own supervision tree through the
+generated `Module:start_link/1,2` or `beamtalk_actor:start_link/2,3`, nor to
+`native:` actors started by their own backing module. A value outside the range,
+or one the VM refuses (above a `+hmax` limit, say), is ignored with a warning, so
+a typo cannot change how actors start.
 
 Measure before choosing a size: `benchmarks/vs-elixir/benchee.sh` with
 `BENCH_SCRIPT=bench/actor_memory.exs` reports bytes per idle actor, and rows
