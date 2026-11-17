@@ -1255,7 +1255,7 @@ telemetry_handlers() ->
 
 -doc """
 The trace store's telemetry handler ids, refused by `Telemetry attach:` and
-`Telemetry detach:`. Includes the retired pre-BT-4113 dispatch ids, which
+`Telemetry detach:`. Includes the retired pre-BT-4113 dispatch ids and the BT-4997 lifecycle start/stop ids, which
 `attach_telemetry_handlers/0` detaches on every (re)start: a user handler
 under one of those ids would otherwise be silently dropped.
 """.
@@ -1264,8 +1264,8 @@ telemetry_handler_ids() ->
     [Id || {Id, _EventName, _Handler} <- telemetry_handlers()] ++ retired_telemetry_handler_ids().
 
 %% Retired handler ids: the pre-BT-4113 dispatch handlers and the BT-4997
-lifecycle start/stop handlers. An older trace store can leave them
-%% attached across a hot upgrade, and their functions are gone.
+%% lifecycle start/stop handlers. An older trace store can leave them
+%% attached across a hot upgrade; they are detached on every (re)start.
 -spec retired_telemetry_handler_ids() -> [atom()].
 retired_telemetry_handler_ids() ->
     [

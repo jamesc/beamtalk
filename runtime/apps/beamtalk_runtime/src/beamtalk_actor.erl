@@ -3007,7 +3007,7 @@ built. A `start` or `stop` event is handed to `lifecycle_started/1` /
 `lifecycle_stopped/2`, so announcements, aggregates and the opt-in telemetry
 behave as for a rebuilt class; any other event is emitted as given. Current
 generated code does not call it.
-"""
+""".
 -spec maybe_execute_telemetry(list(), map(), map()) -> ok.
 maybe_execute_telemetry([beamtalk, actor, lifecycle, start], _Measurements, #{class := Class}) ->
     lifecycle_started(Class);

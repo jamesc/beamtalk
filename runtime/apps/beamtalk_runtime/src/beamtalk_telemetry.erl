@@ -405,7 +405,7 @@ refresh_dispatch_events() ->
 Whether the actor lifecycle `start` / `stop` telemetry events are emitted
 (BT-4997): one `persistent_term` read. See the module doc for what turns it
 on.
-"""
+""".
 -spec lifecycle_events_enabled() -> boolean().
 lifecycle_events_enabled() ->
     persistent_term:get(?PT_LIFECYCLE_EVENTS, false).
@@ -414,7 +414,7 @@ lifecycle_events_enabled() ->
 Turn the lifecycle start/stop events on, for Erlang/Elixir code that attaches
 to them with `telemetry:attach/4` directly. Stays on until
 `disable_lifecycle_events/0`.
-"""
+""".
 -spec enable_lifecycle_events() -> ok.
 enable_lifecycle_events() ->
     with_dispatch_lock(fun() ->
@@ -425,7 +425,7 @@ enable_lifecycle_events() ->
 -doc """
 Undo `enable_lifecycle_events/0`. The events stay on while another source (a
 Beamtalk handler, the app env) still asks for them.
-"""
+""".
 -spec disable_lifecycle_events() -> ok.
 disable_lifecycle_events() ->
     with_dispatch_lock(fun() ->
@@ -437,7 +437,7 @@ disable_lifecycle_events() ->
 Recompute the lifecycle-events flag from its sources (module doc). Called at
 trace store start and after a Beamtalk handler on a lifecycle start/stop event
 is attached or detached.
-"""
+""".
 -spec refresh_lifecycle_events() -> ok.
 refresh_lifecycle_events() ->
     with_dispatch_lock(fun do_refresh_lifecycle_events/0).
