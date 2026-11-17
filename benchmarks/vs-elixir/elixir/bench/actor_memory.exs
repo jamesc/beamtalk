@@ -42,7 +42,7 @@ per_proc =
 
 min_heap =
   sample
-  |> Enum.map(fn p -> :erlang.process_info(p, :garbage_collection)[:garbage_collection] end)
+  |> Enum.map(fn p -> elem(:erlang.process_info(p, :garbage_collection), 1) end)
   |> Enum.map(fn gc -> Keyword.get(gc, :min_heap_size) end)
   |> Enum.uniq()
 
