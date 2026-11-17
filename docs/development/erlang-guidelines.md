@@ -895,10 +895,15 @@ handle_call({method, MethodName}, _From, State) ->
 
 %% ✅ SAFE - validate against the class's known methods first
 handle_call({method, MethodName}, _From, State) ->
-    Methods = Module:method_table(),   % Module: the actor's generated class module
-    case maps:is_key(MethodName, Methods) of
-        false -> {reply, {error, method_not_found}, State};
-        true -> {reply, dispatch(MethodName, State), State}
+    Methods = Module:method_table(),   % Module: the actor's generated class module (atom keys)
+    try binary_to_existing_atom(MethodName, utf8) of
+        Selector ->
+            case maps:is_key(Selector, Methods) of
+                false -> {reply, {error, method_not_found}, State};
+                true -> {reply, dispatch(Selector, State), State}
+            end
+    catch
+        error:badarg -> {reply, {error, method_not_found}, State}
     end.
 ```
 

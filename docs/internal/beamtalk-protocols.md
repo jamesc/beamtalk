@@ -418,7 +418,7 @@ sequenceDiagram
             Actor->>Actor: Call DNU handler
             Actor->>Future: resolve(FuturePid, Result)
         else no handler
-            Actor->>Future: reject(FuturePid, {unknown_message, Selector})
+            Actor->>Future: reject(FuturePid, #beamtalk_error{kind = does_not_understand})
         end
     end
 ```
