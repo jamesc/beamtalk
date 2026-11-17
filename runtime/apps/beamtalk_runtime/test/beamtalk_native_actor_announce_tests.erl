@@ -100,8 +100,9 @@ failing_lookup_does_not_fail() ->
 %% The observer sets its monitor after `native_started/1` returns. An actor that
 %% stopped in that window gives `'DOWN'` with reason `noproc`, whose real exit
 %% reason is not observable without a wait on the start path. It is announced as
-%% `crashed`: a false alarm is cheaper than a hidden crash, and nothing but the
-%% actor itself can stop it in that window (only the starter holds the pid).
+%% `crashed`. That also reports a prompt clean `stop` in that window as a crash
+%% (a named start is reachable by its name before the observer is scheduled): a
+%% false alarm is cheaper than a hidden crash.
 already_gone_is_announced_as_crashed() ->
     with_subscription(fun() ->
         {Pid, MonRef} = spawn_monitor(fun() -> ok end),
