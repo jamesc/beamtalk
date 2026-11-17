@@ -253,7 +253,16 @@ feed_non_actor_event_is_emitted_unchanged_test() ->
 %% runtime announces for it (`beamtalk_actor:native_started/1`): subscribe, take
 %% the snapshot, and the spawn that the snapshot already holds is dropped; the
 %% stop is emitted and clears the pid.
-native_actor_snapshot_plus_feed_test() ->
+native_actor_snapshot_plus_feed_test_() ->
+    %% The announcement bus is a runtime worker; this module otherwise runs without it.
+    {setup,
+        fun() ->
+            {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
+            ok
+        end,
+        fun(_) -> ok end, fun native_actor_snapshot_plus_feed/0}.
+
+native_actor_snapshot_plus_feed() ->
     Collector = self(),
     Handler = fun(Event) -> Collector ! {got, Event} end,
     {ok, S1} = beamtalk_announcements:subscribe('ActorSpawned', Collector, Handler, false),
