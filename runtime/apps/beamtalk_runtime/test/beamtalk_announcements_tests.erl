@@ -1775,3 +1775,7 @@ subscribed_classes_test_() ->
 
 %% The system bus's announcer namespace (`?SYSTEM_ANNOUNCER_REF`).
 system_bus() -> beamtalk_system_announcer.
+
+%%% Module-level fixture (BT-4962): loading a compiled `bt@stdlib@*` module starts
+%%% class processes; with no runtime app to own them they would outlive this suite.
+eunit_wrapper_(Tests) -> beamtalk_test_class_teardown:leak_free(Tests).
