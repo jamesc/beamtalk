@@ -51,15 +51,16 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 ]).
 -endif.
 
-%% The tagged-map classes `tagged_map_dispatch/1` routes to a fixed native
-%% module instead of their class's own module. Every such route lives here:
-%% this map is the one source the routing conformance test enumerates.
 %% The one selector a Value rejects with `immutable_value`; shared by
 %% is_ivar_method/1 and the send_value_memoised/4 clause guard (BT-4984).
 -define(IMMUTABLE_SLOT_SELECTOR, 'fieldAt:put:').
 %% The per-process memo key of tagged_class_dispatch/1, also read by
 %% send_value_memoised/4 (BT-4984).
 -define(TAGGED_CLASS_MEMO_KEY(Class), {?MODULE, tagged_class_dispatch, Class}).
+
+%% The tagged-map classes `tagged_map_dispatch/1` routes to a fixed native
+%% module instead of their class's own module. Every such route lives here:
+%% this map is the one source the routing conformance test enumerates.
 -define(PROXY_ROUTES, #{'ErlangModule' => beamtalk_erlang_proxy}).
 
 -include("beamtalk.hrl").
