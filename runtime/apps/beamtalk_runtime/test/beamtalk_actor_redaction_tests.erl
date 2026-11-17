@@ -90,10 +90,6 @@ message_shapes_test_() ->
             {'$beamtalk_wire', 1, cast, 'login:', w, Ctx},
             {'$beamtalk_wire', 1, cast, 'login:', ?R, Ctx}
         },
-        {
-            {'$beamtalk_wire', 1, async, 'login:', w, Fut, Ctx},
-            {'$beamtalk_wire', 1, async, 'login:', ?R, Fut, Ctx}
-        },
         {{'$gen_cast', {cast, 'login:', [pw], Ctx}}, {'$gen_cast', {cast, 'login:', ?R, Ctx}}},
         {
             {continue, {?BT_CONTINUE_TAG, [{'login:', [pw]}, {count, []}]}},

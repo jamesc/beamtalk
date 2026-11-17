@@ -165,6 +165,15 @@ sealed Object subclass: VdBench
     x > 2 ifTrue: [^x]
     0
 
+  // BT-4998: `^` in both branches of a tail `ifTrue:ifFalse:` on an untyped
+  // receiver: a plain return on a Boolean, no frame.
+  class retBothBranches: n :: Integer -> Object =>
+    last := 0
+    n timesRepeat: [last := VdBench pickBoth: true]
+    last
+
+  class pickBoth: x => x ifTrue: [^1] ifFalse: [^2]
+
   // `^` inside a `do:` block over a list: the block is a real closure.
   class retInDo: n :: Integer l: l :: List(Integer) -> Integer =>
     last := 0
