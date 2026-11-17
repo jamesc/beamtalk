@@ -58,6 +58,7 @@ cleanup(_State) ->
     catch
         _:_ -> ok
     end,
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_trace_store),
     %% Clean up causal trace context from process dictionary
     erase('$beamtalk_trace_id'),
     erase('$beamtalk_span_id'),

@@ -37,7 +37,8 @@ setup() ->
     ok.
 
 teardown(_) ->
-    ok.
+    %% Stop it only if `setup/0` started it bare (BT-4962).
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_file_handle_registry).
 
 -doc "A unique relative temp path — never /tmp, per testing-strategy.md.".
 temp_path(Tag) ->

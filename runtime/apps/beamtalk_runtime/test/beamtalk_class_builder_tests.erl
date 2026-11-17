@@ -898,7 +898,8 @@ xref_setup() ->
 
 xref_teardown(Acc) ->
     beamtalk_test_repl:clear_xref(),
-    teardown(Acc).
+    teardown(Acc),
+    ok = beamtalk_test_repl:release_xref().
 
 %% True when the compiler AST FFI walker that backs runtime xref send-parsing
 %% is loaded and reachable. A bare EUnit node may lack the compiler port, in

@@ -293,7 +293,8 @@ xref_setup() ->
     whereis(beamtalk_xref).
 
 xref_cleanup(_Pid) ->
-    beamtalk_test_repl:clear_xref().
+    beamtalk_test_repl:clear_xref(),
+    ok = beamtalk_test_repl:release_xref().
 
 nav_query_test_() ->
     {setup, fun xref_setup/0, fun xref_cleanup/1, fun nav_tests/1}.
@@ -863,7 +864,7 @@ delegate_callers_cleanup(#{class := {ClassName, ClassPid, Owned}}) ->
             ok
     end,
     beamtalk_test_repl:clear_xref(),
-    ok.
+    ok = beamtalk_test_repl:release_xref().
 
 delegate_method_row(Selector, Line, Sends) ->
     #{

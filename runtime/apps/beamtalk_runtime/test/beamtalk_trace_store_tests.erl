@@ -49,7 +49,11 @@ cleanup(_State) ->
     catch
         _:_ -> ok
     end,
-    ok.
+    %% A bare-started store (and the heir some tests stand up) must not outlive the
+    %% module: the next one's `ensure_all_started(beamtalk_runtime)` would fail with
+    %% `already_started` (BT-4962).
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_trace_store),
+    ok = beamtalk_test_proc:stop_if_bare(beamtalk_ets_heir).
 
 %%====================================================================
 %% Test: Direct insert and query
