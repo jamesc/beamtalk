@@ -360,6 +360,7 @@ trace_store_view(Mode) ->
 field(Map, Name) ->
     case maps:get({beamtalk_string, Name}, Map, undefined) of
         {beamtalk_string, B} -> B;
+        A when is_atom(A), A =/= undefined -> atom_to_binary(A, utf8);
         Other -> Other
     end.
 
