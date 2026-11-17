@@ -1367,9 +1367,10 @@ For all other messages, checks if the actor is alive first:
 - If alive, sends via gen_server:cast (normal async path)
 - If dead, rejects the Future with an `actor_dead` error
 
-A pid on another node is not supported (ADR 0126 Amendment BT-4989): the
-Future is rejected with an `unsupported_operation` error and the same error
-is raised to the caller, before anything is sent.
+For any selector not handled locally above, a pid on another node is not
+supported (ADR 0126 Amendment BT-4989): the Future is rejected with an
+`unsupported_operation` error and the same error is raised to the caller,
+before anything is sent.
 """.
 -spec async_send(
     pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()},

@@ -1385,8 +1385,10 @@ resolved. No generated code or stdlib code calls `async_send/4` or
 implement the receiver.** The `'$beamtalk_wire', 1, async, ...` envelope no
 longer exists. `beamtalk_actor:async_send/4` and `async_send_known/5` to a
 pid on another node raise `unsupported_operation` (selector = the sent
-selector) immediately, before anything is sent and before any future watcher
-starts, so a caller can never be left waiting. Local async sends are
+selector) immediately, for any selector not answered locally (`isAlive`,
+`stop`, `kill`, `monitor`, `onExit:`, …, which behave as before). The future
+is rejected first, and nothing is sent and no future watcher starts, so a
+caller can never be left waiting. Local async sends are
 unchanged. Sync sends (`.`) and casts (`!`) are the cross-node send kinds.
 
 Removed with it: the remote branch of `async_send_impl/5`, the `async` clauses
