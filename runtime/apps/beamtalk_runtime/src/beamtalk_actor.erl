@@ -251,6 +251,8 @@ decode/encode helpers and the pending-action helpers.
 %% BT-4970: announce a `native:` actor's start and, when it goes down, its stop.
 %% Called by the facade's generated `spawn/1` and by `safe_start_native/4`.
 -export([native_started/1]).
+%% BT-4970: the observer's wait loop, exported so it can hibernate into it.
+-export([native_stop_observer_wait/3]).
 %% BT-4104: an anonymous start that leaves the caller monitoring the actor,
 %% with the monitor created atomically with the process.
 -export([safe_spawn_monitored/2]).
@@ -1091,11 +1093,11 @@ a user module) runs neither and is not ours to change, so the start path
 announces for it, and an observer process monitors the pid and announces
 `ActorStopped` when it goes down. The observer lives as long as the actor and
 ends after that one message; it is unregistered, unlinked, unsupervised and owns
-no table (ADR 0150: no registry). If it dies first, for instance because two
-reloads of this module purge the code it is waiting in, that actor's
-`ActorStopped` is never announced and a feed consumer keeps listing it until its
-next `actors` scan. Nothing is done when the announcement bus is not running, as
-for a compiled actor. A non-pid argument (a backing `start_link/1` that answered
+no table (ADR 0150: no registry). After setting its monitor it hibernates into
+`native_stop_observer_wait/3`, so it holds no reference into this module's code
+(a code purge cannot kill it) and keeps a minimal heap for the actor's whole
+life. Nothing is done when the announcement bus is not running, as for a
+compiled actor. A non-pid argument (a backing `start_link/1` that answered
 `{ok, NotAPid}`) is ignored: announcing never fails a start that succeeded.
 
 The class is the one the process scan reports for the pid
@@ -1124,17 +1126,26 @@ native_started(Pid) when is_pid(Pid) ->
 native_started(_NotAPid) ->
     ok.
 
-%% The observer sets its monitor after `native_started/1` has returned (no wait
-%% on the start path). An actor that stopped in that window gives `'DOWN'` with
-%% reason `noproc`, and its real exit reason is not observable. It is announced
-%% as `crashed` (what `normalize_stop_reason/1` makes of any reason it does not
-%% know): a false alarm is cheaper than a crash reported as clean, and only the
-%% actor itself can stop it in that window, since only the starter holds the pid.
+%% The observer sets its monitor when it is first scheduled, which can be after
+%% `native_started/1` has returned and after the starter has handed the actor
+%% back (a named start is also reachable by its name before that). An actor that
+%% stops in that window gives `'DOWN'` with reason `noproc`, and its real exit
+%% reason is not observable without making the start wait for the observer. It
+%% is announced as `crashed` (what `normalize_stop_reason/1` makes of a reason it
+%% does not know). That can report a prompt clean `stop` as a crash; it was
+%% chosen over `normal` because a false alarm is cheaper than a crash reported
+%% as clean.
+%%
 %% The announced reason is always in `normalize_stop_reason/1`'s range (`normal`,
 %% `shutdown`, `crashed`, `'globalNameConflict'`).
--spec native_stop_observer(pid(), atom()) -> ok.
+-spec native_stop_observer(pid(), atom()) -> no_return().
 native_stop_observer(Pid, Class) ->
     MonRef = erlang:monitor(process, Pid),
+    erlang:hibernate(?MODULE, native_stop_observer_wait, [MonRef, Pid, Class]).
+
+-doc false.
+-spec native_stop_observer_wait(reference(), pid(), atom()) -> ok.
+native_stop_observer_wait(MonRef, Pid, Class) ->
     receive
         {'DOWN', MonRef, process, Pid, Reason} ->
             do_announce_actor_lifecycle('ActorStopped', #{

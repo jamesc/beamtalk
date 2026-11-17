@@ -41,6 +41,8 @@ announce_test_() ->
         {"an actor already gone when observed is announced as crashed",
             fun already_gone_is_announced_as_crashed/0},
         {"a non-pid start result is ignored", fun non_pid_start_result_is_ignored/0},
+        {"the observer hibernates and still announces the stop",
+            fun observer_hibernates_and_wakes/0},
         {"the observer registers no name and creates no table", fun observer_leaves_no_trace/0}
     ]}.
 
@@ -121,6 +123,37 @@ non_pid_start_result_is_ignored() ->
 remote_pid() ->
     Node = <<"bt4970_fake@nowhere">>,
     binary_to_term(<<131, 88, 119, (byte_size(Node)), Node/binary, 1:32, 0:32, 1:32>>).
+
+%% The observer sits in `erlang:hibernate/3` into an exported function, so it
+%% holds no stack or fun into the module code it started in: a code purge of
+%% `beamtalk_actor` cannot kill it (which would lose the stop), and it keeps a
+%% minimal heap for the actor's whole life.
+observer_hibernates_and_wakes() ->
+    with_subscription(fun() ->
+        {ok, Pid} = beamtalk_actor:safe_spawn_linked(?FACADE, #{initial => 1}),
+        expect('ActorSpawned', Pid),
+        {monitored_by, Monitors} = process_info(Pid, monitored_by),
+        ?assertEqual(ok, wait_until_one_hibernates(Monitors, 100)),
+        stop(Pid),
+        ?assertMatch(#{reason := crashed}, expect('ActorStopped', Pid))
+    end).
+
+wait_until_one_hibernates(_Monitors, 0) ->
+    timeout;
+wait_until_one_hibernates(Monitors, N) ->
+    Hibernated = [
+        M
+     || M <- Monitors,
+        is_pid(M),
+        process_info(M, current_function) =:= {current_function, {erlang, hibernate, 3}}
+    ],
+    case Hibernated of
+        [_ | _] ->
+            ok;
+        [] ->
+            timer:sleep(20),
+            wait_until_one_hibernates(Monitors, N - 1)
+    end.
 
 observer_leaves_no_trace() ->
     TablesBefore = lists:sort(ets:all()),
