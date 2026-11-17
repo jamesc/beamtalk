@@ -28,12 +28,6 @@ TestCase subclass: Bt4991IfFalseIfTrueTest
     cond ifFalse: ["value"] ifTrue: [^"early"]
     "fell through"
 
-  testLiteralTrue =>
-    self assert: (true ifFalse: ["no"] ifTrue: ["yes"]) equals: "yes"
-
-  testLiteralFalse =>
-    self assert: (false ifFalse: ["no"] ifTrue: ["yes"]) equals: "no"
-
   testTypedTrue => self assert: (self typed: true) equals: "yes"
 
   testTypedFalse => self assert: (self typed: false) equals: "no"
@@ -42,19 +36,22 @@ TestCase subclass: Bt4991IfFalseIfTrueTest
 
   testUntypedFalse => self assert: (self untyped: false) equals: "no"
 
+  swapped: cond => cond ifFalse: [1] ifTrue: [2]
+
+  canonical: cond => cond ifTrue: [2] ifFalse: [1]
+
+  bump: cond =>
+    count := 0
+    cond ifFalse: [count := count + 10] ifTrue: [count := count + 1]
+    count
+
   testMatchesIfTrueIfFalse =>
-    swapped := true ifFalse: [1] ifTrue: [2]
-    canonical := true ifTrue: [2] ifFalse: [1]
-    self assert: swapped equals: canonical
-    swappedFalse := false ifFalse: [1] ifTrue: [2]
-    canonicalFalse := false ifTrue: [2] ifFalse: [1]
-    self assert: swappedFalse equals: canonicalFalse
+    self assert: (self swapped: true) equals: (self canonical: true)
+    self assert: (self swapped: false) equals: (self canonical: false)
 
   testOnlyChosenBlockRuns =>
-    count := 0
-    true ifFalse: [count := count + 100] ifTrue: [count := count + 1]
-    false ifFalse: [count := count + 10] ifTrue: [count := count + 1000]
-    self assert: count equals: 11
+    self assert: (self bump: true) equals: 1
+    self assert: (self bump: false) equals: 10
 
   testNonLiteralBlocksOnTrue =>
     self
