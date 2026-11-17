@@ -249,6 +249,7 @@ const HAND_WRITTEN: &[&str] = &[
     "_Key",
     "_Marker",
     "_Msg",
+    "_NativeAnnounced",
     "_NewState",
     "_NotDeferred",
     "_OldPdict",
