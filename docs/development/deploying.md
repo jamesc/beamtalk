@@ -196,9 +196,12 @@ By default a compiled actor's process starts with the VM's default heap (233
 words) and grows as it works. Starting an actor then costs about five garbage
 collections (BT-4932 measured this at 1.3–1.5 µs per start). A larger minimum
 heap removes them, at the price of memory for **every** actor, idle ones too:
-the heap is allocated up front (a word is 8 bytes on a 64-bit VM, so 2000 words
-is about 16 KB, before the process's other overhead). It is **off by default**,
-so nothing changes until you set it.
+the heap is allocated up front. The VM rounds the request up to its next heap
+size, so 600, 2000 and 6000 words give heaps of 610, 2586 and 6772 words
+(8 bytes each on a 64-bit VM). Measured on an idle `VbCounter`, per actor: about
+2.7 KB with the setting unset, 5.7 KB at 600, 21.5 KB at 2000 and 55 KB at 6000
+(OTP 28, `benchmarks/vs-elixir/elixir/bench/actor_memory.exs`). It is **off by
+default**, so nothing changes until you set it.
 
 ```erlang
 % config/sys.config (or: ERL_FLAGS="-beamtalk_runtime actor_min_heap_size 2000")
