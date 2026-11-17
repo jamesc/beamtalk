@@ -8,8 +8,8 @@
 -moduledoc """
 BT-4949 (ADR 0150): the class travels with a send. A bare-pid send reads the
 `'$beamtalk_actor'` marker (`lookup_class/1`); a caller that holds the class
-passes it to a `*_known` function. Nothing on the send path reads
-`beamtalk_object_instances:class_of/1` any more.
+passes it to a `*_known` function. `beamtalk_object_instances` is deleted
+(BT-4953), so a send path that still asked it would fail with `undef`.
 """.
 -include_lib("eunit/include/eunit.hrl").
 
@@ -22,22 +22,15 @@ setup() ->
         undefined -> {ok, _} = beamtalk_trace_store:start_link();
         _ -> ok
     end,
-    meck:new(beamtalk_object_instances, [passthrough]),
-    meck:expect(beamtalk_object_instances, class_of, fun(_Pid) -> erlang:error(class_of_called) end),
     beamtalk_trace_store:clear(),
     ok.
 
 cleanup(_) ->
-    try
-        meck:unload(beamtalk_object_instances)
-    catch
-        _:_ -> ok
-    end,
     ok.
 
 class_travel_test_() ->
     {foreach, fun setup/0, fun cleanup/1, [
-        {"bare-pid sends never read object_instances:class_of/1", fun no_class_of_reads/0},
+        {"bare-pid sends need no instance registry module", fun no_instance_registry/0},
         {"bare-pid send reports the marker class", fun bare_pid_reports_marker_class/0},
         {"async_send_known reports the caller's class", fun async_known_reports_hint/0},
         {"remote and non-actor pids resolve to unknown", fun unknown_pids/0},
@@ -45,7 +38,8 @@ class_travel_test_() ->
         {"other bare pids keep the default call timeout", fun other_class_default_timeout/0}
     ]}.
 
-no_class_of_reads() ->
+no_instance_registry() ->
+    ?assertEqual(non_existing, code:which(beamtalk_object_instances)),
     {ok, Pid} = test_counter:start(0),
     try
         0 = beamtalk_actor:sync_send(Pid, getValue, []),
@@ -55,7 +49,7 @@ no_class_of_reads() ->
         _ = beamtalk_future:await(F),
         %% `kill` goes through kill_and_wait/1, which also read the class.
         ok = beamtalk_actor:sync_send(Pid, kill, []),
-        ?assertEqual(0, meck:num_calls(beamtalk_object_instances, class_of, '_'))
+        ok
     after
         try
             gen_server:stop(Pid)
@@ -84,8 +78,7 @@ async_known_reports_hint() ->
         _ = beamtalk_future:await(F),
         ok = beamtalk_test_wait:sync(Pid),
         Stats = beamtalk_trace_store:get_stats(),
-        ?assert(maps:is_key(?CLASS_STATS_KEY(<<"Hinted">>), Stats)),
-        ?assertEqual(0, meck:num_calls(beamtalk_object_instances, class_of, '_'))
+        ?assert(maps:is_key(?CLASS_STATS_KEY(<<"Hinted">>), Stats))
     after
         gen_server:stop(Pid)
     end.

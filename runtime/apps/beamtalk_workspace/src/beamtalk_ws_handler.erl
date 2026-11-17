@@ -196,13 +196,13 @@ websocket_info({transcript_output, Text}, State = #ws_state{authenticated = true
     {[{text, Push}], State};
 %% Actor / class / flush system announcements (SystemAnnouncer bus),
 %% re-encoded to the existing JSON push frames. The legacy bespoke channels
-%% (`beamtalk_repl_actors` lifecycle, `beamtalk_class_events`,
+%% (the actor-list lifecycle channel, `beamtalk_class_events`,
 %% `beamtalk_flush_events`) were retired; consumers now discriminate on the
 %% announced class atom.
 %%
 %% ADR 0017 Phase 2: actor lifecycle. The live `spawned` frame carries
 %% `{class, pid}` only — `spawned_at` is no longer on the live event (it is still
-%% present on the connect snapshot, read from the registry). `stopped` carries the
+%% present on the connect snapshot, read from the actor scan). `stopped` carries the
 %% normalized reason symbol (`#normal`/`#shutdown`/`#crashed`).
 websocket_info(
     {beamtalk_announcement, _SubRef, 'ActorSpawned', _Handler, Event},
@@ -1193,7 +1193,7 @@ normalise_file_kind_entry(Other) ->
 Encode an `ActorSpawned` announcement payload for the `actors`/`spawned`
 push frame. The typed event carries `actorClass` (a Symbol) and `pid`; the live
 frame is `{class, pid}` — `spawned_at` is no longer present on the live event
-(the connect snapshot still carries it, read from the registry).
+(the connect snapshot still carries it, read from the actor scan).
 """.
 -spec encode_actor_spawned_event(map()) -> map().
 encode_actor_spawned_event(Event) ->

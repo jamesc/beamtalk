@@ -305,23 +305,12 @@ is_stdlib_path_embedded_lib_test() ->
 
 %%% strip_internal_bindings tests
 
-strip_internal_bindings_removes_registry_test() ->
-    Bindings = #{'__repl_actor_registry__' => self(), x => 42, y => 100},
-    Result = beamtalk_repl_eval:strip_internal_bindings(Bindings),
-    ?assertEqual(false, maps:is_key('__repl_actor_registry__', Result)),
-    ?assertEqual(42, maps:get(x, Result)),
-    ?assertEqual(100, maps:get(y, Result)).
-
 strip_internal_bindings_empty_map_test() ->
     ?assertEqual(#{}, beamtalk_repl_eval:strip_internal_bindings(#{})).
 
 strip_internal_bindings_no_internal_keys_test() ->
     Bindings = #{a => 1, b => 2, c => 3},
     ?assertEqual(Bindings, beamtalk_repl_eval:strip_internal_bindings(Bindings)).
-
-strip_internal_bindings_only_registry_test() ->
-    Bindings = #{'__repl_actor_registry__' => self()},
-    ?assertEqual(#{}, beamtalk_repl_eval:strip_internal_bindings(Bindings)).
 
 %%% cleanup_module tests (BT-4945)
 
@@ -608,7 +597,7 @@ handle_load_empty_file_test() ->
 %%% is_internal_key/1 tests
 
 is_internal_key_double_underscore_test() ->
-    ?assert(beamtalk_repl_compiler:is_internal_key('__repl_actor_registry__')).
+    ?assert(beamtalk_repl_compiler:is_internal_key('__workspace_user_bindings__')).
 
 is_internal_key_single_underscore_test() ->
     ?assertNot(beamtalk_repl_compiler:is_internal_key('_error')).

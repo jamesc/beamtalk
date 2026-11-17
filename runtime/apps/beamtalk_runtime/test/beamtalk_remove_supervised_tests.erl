@@ -160,14 +160,7 @@ with_fixture(Restart, Shape, Fun) ->
     {ok, Sup} = start_sup(Shape, Restart, Mod),
     try
         Child = first_child(Sup, Shape),
-        Registry = spawn(fun() -> registry_loop(Class, Child) end),
-        beamtalk_test_actor_registry:with_registered(Registry, fun() ->
-            try
-                Fun(#{class => Class, module => Mod, sup => Sup, child => Child})
-            after
-                exit(Registry, kill)
-            end
-        end)
+        Fun(#{class => Class, module => Mod, sup => Sup, child => Child})
     after
         try
             unlink(Sup),
@@ -258,16 +251,3 @@ init({dynamic, Restart, Mod}) ->
         {#{strategy => simple_one_for_one, intensity => 3, period => 5}, [
             (child_spec(undefined, Restart, Mod))#{id => dyn}
         ]}}.
-
-registry_loop(Class, Child) ->
-    receive
-        {'$gen_call', From, list_actors} ->
-            gen_server:reply(From, [#{pid => Child, class => Class}]),
-            registry_loop(Class, Child);
-        {'$gen_call', From, {kill, Pid}} ->
-            exit(Pid, kill),
-            gen_server:reply(From, ok),
-            registry_loop(Class, Child);
-        _ ->
-            registry_loop(Class, Child)
-    end.

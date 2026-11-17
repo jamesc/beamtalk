@@ -3,6 +3,8 @@
 ## Status
 Accepted | Implemented (2026-03-21). Amended 2026-10-21 (BT-4025): Beamtalk code can emit and attach to application `telemetry` events through a `Telemetry` facade; see "Amendment (2026-10-21): application events (BT-4025)" below. Amended 2026-10-22 (BT-4103): always-on aggregates are keyed by `{Class, Selector}` and per-actor detail exists only while tracing is enabled; the per-actor monitor and retirement are gone — see "Amendment (2026-10-22): class-keyed always-on aggregates (BT-4103)" below. Amended 2026-10-28 (BT-4113): the `[beamtalk, actor, dispatch, *]` telemetry events are opt-in, and the aggregates are recorded directly — see "Amendment (2026-10-28): dispatch events are opt-in (BT-4113)" below.
 
+> **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** Class lookup no longer uses the `beamtalk_object_instances` ETS bag (deleted). The class travels with the send (`*_known` functions, from the `#beamtalk_object{}` record), and a bare pid reads the `'$beamtalk_actor'` marker (`beamtalk_actor:lookup_class/1`, via `beamtalk_actor_scan:info/1`). `bottlenecks:` scans actors by marker. The statements below about `beamtalk_object_instances` describe the original design.
+
 ## Amendment (2026-10-21): application events (BT-4025)
 
 This amendment is additive. It widens the scope of the `telemetry` dependency from "the runtime's actor events, with Erlang-level handlers for operators" to "an event bus Beamtalk code can emit to and attach to". Nothing in the original decision is withdrawn.
@@ -54,7 +56,7 @@ Per-pid counters for every process, always on, are also not how OTP does it: Erl
 
 - **Always-on aggregates keyed by `{Class, Selector}` only** (`beamtalk_agg_class_stats`), updated in the caller with lock-free atomics. No per-pid ETS write, no gen_server call or cast, no monitor on the dispatch path. Class rows are sticky: `clear/0` zeroes their slots in place and readers skip zero-call rows, so the table is bounded by classes × selectors and a cleared store still reports `#{}`. Counters grow by switching to a fresh array of double the size; rows keep their birth array forever, so in-flight writers can never lose a sample to a grow. (The copying grow this replaces — copy the array, then re-point every row — could drop hit-path writes landing between the copy and the re-pointing. Per-pid keys never exposed it: a burst of new actors is all key-misses, and the alloc path re-pointed safely. Class keys make concurrent hits-during-grow the common case, so the race had to go.)
 - **Per-actor stats only while tracing is enabled** (`beamtalk_agg_pid`, capped at 100,000 keys). New keys past the cap are not tracked until room frees up. Dead pids' rows are reclaimed by the existing 1 s sweep — no monitors, off the dispatch path. The sweep walks the table in chunks of 2,000 rows (`ets:select/3`), one chunk per gen_server turn, and yields to queued queries and counter grows between chunks via a self-message (BT-4124). `disable/0` drops the whole pid table.
-- **`bottlenecks:` scans the instance registry** instead of the aggregate index, so it covers every live actor whether or not tracing is enabled. It runs in the calling process (it reads the public registry table and `process_info` only), so a large scan never queues behind or in front of the trace store gen_server (BT-4124). `healthFor:`/`systemHealth` are unchanged (live `process_info` snapshots).
+- **`bottlenecks:` scans the live actors** (by marker; ADR 0150) instead of the aggregate index, so it covers every live actor whether or not tracing is enabled. It runs in the calling process (it reads process markers and `process_info` only), so a large scan never queues behind or in front of the trace store gen_server (BT-4124). `healthFor:`/`systemHealth` are unchanged (live `process_info` snapshots).
 - **Upgrading resets the aggregates** (the old per-pid index, pid→class map and retired rollup are deleted once on first boot) but keeps the captured trace events.
 
 ### API shapes
@@ -246,7 +248,7 @@ sync_send(ActorPid, Selector, Args) ->
 
 `telemetry:span/3` automatically emits `start`, `stop`, and `exception` events with timing. The `stop` event includes `duration` in native time units.
 
-**Class name resolution:** The actor's class name is not accessible from the caller's process (it lives in the gen_server's state map). The `beamtalk_object_instances` ETS table already maintains a `{Class, Pid}` registry populated at actor spawn time — a reverse lookup (`ets:match` on the bag table by Pid) provides the class name. This is a single ETS read (~50-100ns), acceptable within the overhead budget. If the Pid is not found (e.g., Erlang process, not a Beamtalk actor), the class defaults to `unknown`.
+**Class name resolution:** The actor's class name is not accessible from the caller's process (it lives in the gen_server's state map). The caller usually holds it already (the `#beamtalk_object{}` record carries the class and is passed to the `*_known` send functions); for a bare pid, `beamtalk_actor:lookup_class/1` reads the actor's `'$beamtalk_actor'` process-dictionary marker (ADR 0150). The original design used a `{Class, Pid}` ETS registry (`beamtalk_object_instances`), populated at spawn time. If the Pid is not found (e.g., Erlang process, not a Beamtalk actor), the class defaults to `unknown`.
 
 **What the timing measures:** Send-wrapper instrumentation captures different things depending on the send mode:
 - **`sync_send`** — **caller-perspective round-trip time**: the full duration from `gen_server:call` to reply, including message queue wait and scheduling jitter. This is NOT actor method execution time.
@@ -320,7 +322,7 @@ The gen_server is the owner and lifecycle manager, NOT the write path:
 | `telemetry` handler dispatch | ~10-50ns | Always |
 | `counters:add/3` (aggregate increment) | ~50ns | Always |
 | `persistent_term` check (trace enabled?) | ~5ns | Always |
-| Class lookup (`beamtalk_object_instances`) | ~50-100ns | Always |
+| Class lookup (hint from the reference, else the actor marker) | ~50-100ns | Always |
 | ETS `insert` (trace event) | ~300-500ns | Only when tracing enabled |
 | **Total per-call** | **~150ns (tracing off) / ~500ns (tracing on)** | |
 
@@ -726,7 +728,7 @@ Place `enableTracing` / `disableTracing` / `tracingEnabled` on `Beamtalk`, with 
 - New dependencies: `telemetry` + `telemetry_poller` (mitigated: zero transitive deps, pure Erlang, de facto BEAM standard)
 - ~150ns overhead per actor message send (always-on aggregates via `counters`) — negligible but non-zero
 - BEAM VM crash (SIGKILL, OOM) loses all in-memory tracing data (mitigated: tracing data is ephemeral by nature; a future enhancement could periodically checkpoint aggregates to the workspace log)
-- Trace events reference PIDs which are opaque after actor death (mitigated: class name is captured at record time via `beamtalk_object_instances` lookup)
+- Trace events reference PIDs which are opaque after actor death (mitigated: class name is captured at record time from the send's class hint or the actor marker)
 - Aggregate `{Pid, Selector}` space would grow without bound in long-running sessions with actor churn (PIDs are not reused within a BEAM session). Resolved by BT-4066: dead actors' entries are folded into a per-class rollup and their counter slots reused; the cost is that per-pid stats for dead actors are not available
 - Standalone `Tracing` class is temporarily inconsistent with ADR 0064's pattern of logging config on `Beamtalk` (mitigated: planned `Logging` class migration will make both consistent)
 
@@ -748,7 +750,7 @@ Prove the core assumptions before committing to the full architecture:
    - The `stop` event fires with correct duration
    - The `exception` event fires on timeout and preserves the `exit:{timeout, _}` shape (critical: existing `sync_send/3` error handling depends on this)
    - An attached handler can write to ETS / increment `counters` from the calling process
-3. Verify `beamtalk_object_instances` reverse lookup (Pid → Class) works and measure overhead
+3. Verify the Pid → Class lookup works and measure overhead (originally the `beamtalk_object_instances` reverse lookup; now the actor marker)
 4. Microbenchmark: `telemetry:span/3` + `counters:add/3` under the actual scheduler count — validate the ~150ns budget
 5. Verify `telemetry_poller` can emit periodic VM stats (scheduler utilization, memory) as telemetry events
 

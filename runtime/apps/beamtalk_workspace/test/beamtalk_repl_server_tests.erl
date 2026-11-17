@@ -149,10 +149,6 @@ tcp_setup() ->
     process_flag(trap_exit, true),
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_workspace),
     ok = stdlib_ready(),
-    %% The node-wide actor registry (BT-3633) replays every tracked actor to a
-    %% newly subscribed session; earlier suites leave actors in it, so run this
-    %% fixture against an empty one.
-    ok = beamtalk_test_actor_registry:begin_isolated(),
     %% An earlier suite may have left a workspace supervisor and its cowboy
     %% listener running; starting the workspace again then fails with
     %% `listen_failed, already_started`, or silently reuses that workspace and
@@ -205,7 +201,6 @@ tcp_start_workspace(Retries) ->
     end.
 
 tcp_cleanup({_Port, SupPid}) ->
-    ok = beamtalk_test_actor_registry:end_isolated(),
     %% Stop cowboy listener before killing supervisor (ADR 0020)
     _ = cowboy:stop_listener(beamtalk_repl_ws),
     case is_pid(SupPid) andalso is_process_alive(SupPid) of

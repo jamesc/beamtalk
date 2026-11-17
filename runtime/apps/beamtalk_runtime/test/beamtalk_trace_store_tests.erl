@@ -1813,10 +1813,6 @@ tmp_export_path(Tag) ->
 churn_setup() ->
     setup(),
     {module, telemetry} = code:ensure_loaded(telemetry),
-    case whereis(beamtalk_object_instances) of
-        undefined -> {ok, _} = beamtalk_object_instances:start_link();
-        _ -> ok
-    end,
     beamtalk_trace_store:clear(),
     beamtalk_trace_store:disable(),
     ok.
@@ -1839,9 +1835,6 @@ or, when `Kill` is true, an untrapped `kill` (no `terminate/2`).
 """.
 churn_one_actor(Kill) ->
     {ok, Pid} = test_counter:start(0),
-    %% Register like a compiled actor spawn does, so dispatch telemetry
-    %% attributes to 'Counter' (the registry is unregistered on death).
-    ok = beamtalk_object_instances:register('Counter', Pid),
     ?assertEqual(0, beamtalk_actor:sync_send(Pid, getValue, [])),
     MRef = erlang:monitor(process, Pid),
     case Kill of
@@ -1895,7 +1888,6 @@ actor_churn_stays_flat_test_() ->
                 StorePid = whereis(beamtalk_trace_store),
                 ?assertEqual([], element(2, erlang:process_info(StorePid, monitors))),
                 {ok, Live} = test_counter:start(0),
-                ok = beamtalk_object_instances:register('Counter', Live),
                 ?assertEqual(0, beamtalk_actor:sync_send(Live, getValue, [])),
                 {monitored_by, MonitoredBy} = erlang:process_info(Live, monitored_by),
                 ?assertNot(lists:member(StorePid, MonitoredBy)),

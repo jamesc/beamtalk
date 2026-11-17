@@ -3,6 +3,8 @@
 ## Status
 Implemented (2026-06-03)
 
+> **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** `beamtalk_object_instances` (item 4 of the start order below) is deleted. Start order otherwise unchanged: xref, bootstrap, announcements, stdlib, then the remaining workers.
+
 ## Implementation Tracking
 
 **Epic:** [BT-2228](https://linear.app/beamtalk/issue/BT-2228) — Runtime: maintained selector→sites xref index for SystemNavigation queries

@@ -296,7 +296,6 @@ deny_list_parity_test() ->
         beamtalk_ets_heir,
         beamtalk_xref,
         beamtalk_stdlib,
-        beamtalk_object_instances,
         beamtalk_trace_store,
         beamtalk_subprocess_sup,
         beamtalk_reactive_subprocess_sup,

@@ -830,7 +830,7 @@ The following functions are exposed by `beamtalk_runtime_api`:
 | `superclass/1` | `beamtalk_object_class:superclass/1` |
 | `is_sealed/1` | `beamtalk_object_class:is_sealed/1` |
 | `is_abstract/1` | `beamtalk_object_class:is_abstract/1` |
-| `all_instances/1` | `beamtalk_object_instances:all/1` |
+| `all_instances/1` | `beamtalk_actor_scan:scan_class/1` (scan of actor markers; ADR 0150) |
 | `dispatch_lookup/5` | `beamtalk_dispatch:lookup/5` |
 | `message_send/3` | `beamtalk_message_dispatch:send/3` |
 | `message_send/4` | `beamtalk_message_dispatch:send/4` |

@@ -1,11 +1,11 @@
 # ADR 0150: Actor Registration Off the Start Path
 
 ## Status
-Accepted (2026-11-16). Decision: **option D, no table**, with the two owner conditions below and option C (the minimal table design) kept as the stated fallback. Proposed 2026-11-15; revised the same day after owner review, which sent the first draft back. Issue BT-4854; the rest of the start path is BT-4932.
+Implemented (2026-11-16) — Epic BT-4943. The registrations were removed from the start path by BT-4951, and BT-4953 deleted the registry modules and amended the earlier ADRs; condition (b), the owner's re-measure (BT-4952), is met: the owner measured rows 16a/16c/16d at `+S 18:18` with tracing off (2.8x, 6.0x and 3.2x faster; one scan over 1,000,082 idle processes took 1.2 to 1.4 s) and said "go" before the registries were deleted, so option C is no longer the fallback. Accepted 2026-11-16. Decision: **option D, no table**, with the two owner conditions below and, at acceptance, option C (the minimal table design) as the stated fallback. Proposed 2026-11-15; revised the same day after owner review, which sent the first draft back. Issue BT-4854; the rest of the start path is BT-4932.
 
-> **Revision note.** The first draft decided "insert, then monitor" with a table, a bounded pending buffer, a drain pass, a backstop reaper and a scan rebuild, and dismissed a no-table design in six lines. This revision puts four options side by side, corrects the facts the first draft got wrong, and **recommended the no-table design (D)**, with the minimal table design (C) as the fallback if one of the acceptance conditions below fails; the owner accepted D on 2026-11-16. Nothing in this ADR is implemented. The WIP prototype of the first draft is on `bt-4854-registry-impl`; it is evidence, not a decision.
+> **Revision note.** The first draft decided "insert, then monitor" with a table, a bounded pending buffer, a drain pass, a backstop reaper and a scan rebuild, and dismissed a no-table design in six lines. This revision puts four options side by side, corrects the facts the first draft got wrong, and **recommended the no-table design (D)**, with the minimal table design (C) as the fallback if one of the acceptance conditions below fails; the owner accepted D on 2026-11-16. The WIP prototype of the first draft is on `bt-4854-registry-impl`; it is evidence, not a decision.
 
-Amends, if accepted: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md), [0009](0009-otp-application-structure.md), [0069](0069-actor-observability-and-tracing.md), [0079](0079-named-actor-registration.md), [0093](0093-announcements-event-substrate.md), [0123](0123-versioned-state-migration.md), [0126](0126-distribution-location-transparent-actors.md), [0129](0129-class-side-system-facades.md) and ADR-5 of `docs/beamtalk-ddd-model.md` (see [Consequences for earlier ADRs](#consequences-for-earlier-adrs)). Those documents are edited by the implementation PR, after acceptance.
+Amends: [ADR 0005](0005-beam-object-model-pragmatic-hybrid.md), [0009](0009-otp-application-structure.md), [0069](0069-actor-observability-and-tracing.md), [0079](0079-named-actor-registration.md), [0093](0093-announcements-event-substrate.md), [0123](0123-versioned-state-migration.md), [0126](0126-distribution-location-transparent-actors.md), [0129](0129-class-side-system-facades.md) and ADR-5 of `docs/beamtalk-ddd-model.md` (see [Consequences for earlier ADRs](#consequences-for-earlier-adrs)). Those documents were edited by the cleanup PR (BT-4953).
 
 ## Context
 
@@ -153,7 +153,7 @@ Who is hurt: a node with ~1M processes that runs hot reload, `removeFromSystem` 
 - **(a) Readers re-scan after a hot reload.** A hot reload replaces code and can change which classes and actors exist; no reader may serve a list, count or snapshot it took before the reload. Every scan-backed reader (the actor lists, `Node current actors`, an IDE feed) re-scans after a reload, and a test pins it.
 - **(b) Re-measure before the implementation merges.** Rows 16a/16c/16d are re-measured at `+S 18` on the owner's machine **with the harness's tracing off**, before and after. The M5 Max numbers in BT-4854 are probably inflated about 2× by GC tracing, so they cannot be used as the baseline. The implementation PR is not merged until this is reported.
 
-**Acceptance conditions.** D is accepted only if each of these holds when measured; if one fails, fall back to **C**, which stays the stated fallback:
+**Acceptance conditions.** D is accepted only if each of these holds when measured; if one fails, fall back to **C**, which was the stated fallback at acceptance (both conditions held, so it was not needed):
 1. Rows 16a/16c/16d on the maintainer's machine at `+S 18` with tracing off (condition b), before and after, and the nightly vs-elixir gate does not regress. (The cloud-VM numbers in this ADR are not sufficient to accept either design; contention is the thing they cannot show.)
 2. One enumeration at the process counts of the project's real nodes (the maintainer's, and a buccaneer load test), including with 100k–1M live processes, stays inside a bound the owner accepts for hot reload and the REPL actor list.
 3. The `'$beamtalk_actor_started_at'` write in generated `init/1` costs less than the registry hop it replaces.
@@ -302,6 +302,7 @@ Follow-up issue (filed, not done here): `beamtalk-buccaneer` makes HTTP/2 stream
 | [0123](0123-versioned-state-migration.md) | Hot-reload migration enumerates by one scan and includes supervised actors; a failed migration leaves a supervised actor suspended and a supervisor shutdown waits out its timeout. |
 | [0126](0126-distribution-location-transparent-actors.md) | `local_actors/0`, `local_actor_at/1` become scans; the `unknown` class note for a missing row goes away; `actor_started_at/1` returns values for compiled actors. |
 | [0129](0129-class-side-system-facades.md) | `Node current actors` "backed by `beamtalk_actor_registry`" (the process `beamtalk_repl_actors`) becomes a scan. |
+| [0010](0010-global-objects-and-singleton-dispatch.md), [0087](0087-maintained-xref-index-for-system-navigation.md) | Supervision tree / start order lists `beamtalk_object_instances`; amendment note only. |
 | `docs/beamtalk-ddd-model.md` ADR-5 | "ETS table with process monitors" becomes "process marker, enumerated on demand" (D). |
 
 ## References

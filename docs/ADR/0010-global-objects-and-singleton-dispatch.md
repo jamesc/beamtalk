@@ -5,6 +5,8 @@ Implemented (2026-02-15). Follow-on legacy gen_server removal (BT-1093) complete
 
 > **Amended by [ADR 0142](0142-class-process-owns-only-class-state.md) (2026-10-30), class sends are no longer "zero overhead".** The "zero overhead on class method sends" claims below (Decision, Steelman counter, Consequences) describe the unguarded static calls of the time. A literal class send to a method the class itself defines now compiles to a *guarded* direct call: one `persistent_term` read (`beamtalk_class_shadow_flags:direct_call_ok/2`), an `erlang:function_exported/3` check and the class's pid for the real class reference, about 7 reductions (`benchmarks/vs-elixir/results/bench-bt4301.md`). Every other class send goes through `beamtalk_class_dispatch:class_send/3`, which runs the method in the caller when the class's chain has no class variables. The workspace-binding decision of this ADR is unaffected.
 
+> **Amended by [ADR 0150](0150-actor-registry-off-the-start-path.md) (2026-11-16, BT-4953).** `beamtalk_object_instances` is deleted and no longer a child of `beamtalk_runtime_sup`; the supervision tree below shows the structure at the time of this decision. Actors are found by scanning for the process marker.
+
 ## Migration Status (BT-1093)
 
 **Outcome (2026-03-05): migration complete.** BT-1108, BT-1109, BT-1110 and BT-1111 are all Done. Both Phase 1 gen_server modules were deleted. (A `beamtalk_interface.erl` exists again in `beamtalk_stdlib` today, but it is the stateless method-implementation module for the `Beamtalk` sealed Object — no gen_server process — not the legacy gen_server.) The "Current state (2026-03-04)" snapshot below is kept for history.
