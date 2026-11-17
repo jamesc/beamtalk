@@ -244,7 +244,8 @@ takes only its own:
   directly instead of delegating one superclass `dispatch/3` at a time, each
   with its own extension lookup. An actor arm treats it as `slow`, except for
   the three `Actor` methods `state_free_actor_intrinsic/3` names (BT-4995),
-  which are answered `compiled` instead.
+  which are answered `compiled` instead, unless `Actor` itself has an extension
+  for the selector (that keeps `value`, so the slow route decides, see BT-5002).
 - `slow` for everything else; the arm then takes today's path byte for byte:
   an extension on `ClassName` or its superclass, an owner that does not define
   `Selector` among its own compiled methods (an extension on an ancestor
@@ -343,7 +344,9 @@ compute_inherited_target(ClassName, Selector) ->
 %%   - the default `terminate:` is `Actor`'s compiled body `nil`. A stdlib
 %%     class's source is not available to a live patch (`Actor >> terminate:`
 %%     is refused), and an extension or an override on a class below `Actor` is
-%%     seen by `compute_inherited_target/2` before this point.
+%%     seen by `compute_inherited_target/2` before this point. An extension on
+%%     `Actor` itself is checked there too (`check_extension(Owner, ...)`), and
+%%     keeps the `value` verdict: today's slow route, whatever BT-5002 decides.
 %%
 %% The three are named here, not derived: `actorOnExit` stores a block,
 %% `actorMonitor`, `delegate` and the rest of `Actor`'s intrinsics are left on
