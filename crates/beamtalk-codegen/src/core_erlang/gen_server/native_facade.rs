@@ -309,6 +309,8 @@ impl CoreErlangGenerator {
     fn generate_native_spawn_1(&mut self, backing_module: &str) -> Result<Document<'static>> {
         let class_name = self.class_name();
         let module_name = self.module_name.clone();
+        // BT-4970: the fresh temp holding the (ignored) announce result.
+        let announced_var = self.fresh_temp_var("NativeAnnounced");
 
         // Helper: build an instantiation_error with reason in details
         let spawn_error_with_reason = |class: &str, reason_var: &str| -> Document<'static> {
@@ -404,7 +406,7 @@ impl CoreErlangGenerator {
                                                     // BT-4970: announce the start (and arrange the
                                                     // stop) from outside the backing gen_server.
                                                     form::let_in(
-                                                        leaf::var("_NativeAnnounced"),
+                                                        leaf::var(announced_var.clone()),
                                                         form::call(
                                                             "beamtalk_actor",
                                                             "native_started",
