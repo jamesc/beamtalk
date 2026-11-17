@@ -403,15 +403,14 @@ jobs:
   # the seed is printed in the log, rerun with
   # `just test-isolation random --seed S`). See scripts/ci/eunit-isolation.escript.
   #
-  # A failure here is a real order dependency in a test module, not a flaky run.
-  # `alone` and `reverse` are deterministic and clean on main: a failure fails
-  # the Nightly run like any other job and is triaged by ci-triage.yml.
-  # `random` (a new seed every night) still finds order dependencies in about a
-  # third of seeds, so it is reported but does not fail the run yet
-  # (`continue-on-error`); the open ones are tracked in BT-4934's follow-up and
-  # the job log prints the seed. Remove the `random` exemption when a batch of
-  # fresh seeds is clean. Reproduce with `just test-isolation random --seed S`,
-  # minimise with `escript scripts/ci/eunit-isolation.escript random --seed S
+  # A failure here is a real order dependency in a test module or leaked state.
+  # All three modes fail the Nightly run like any other job and are triaged by
+  # ci-triage.yml. `alone` also fails a module that leaves a bare-started
+  # `beamtalk_*` server behind (it breaks the next module's runtime start), and
+  # `random` (a new seed every night) is blocking since BT-4962: 30 consecutive
+  # fresh seeds were clean on main before the exemption was removed. Reproduce
+  # with `just test-isolation random --seed S`, minimise with
+  # `escript scripts/ci/eunit-isolation.escript random --seed S
   # --print-order` + `forward --order <modules>`, and find which earlier module
   # pollutes a failing one with `just test-isolation culprit <module>`. It does
   # not gate `publish-nightly` (the distribution builds are independent).
@@ -420,7 +419,6 @@ jobs:
     if: needs.check-activity.outputs.has_commits == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    continue-on-error: ${{ matrix.mode == 'random' }}
     strategy:
       fail-fast: false
       matrix:
