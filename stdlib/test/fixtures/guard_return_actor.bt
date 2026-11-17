@@ -29,3 +29,8 @@ Actor subclass: GuardReturnActor
       ]
     self.count := self.count + x
     self.count
+
+  // BT-4998: `^` in both branches in an actor method, after a state write.
+  both: x =>
+    self.count := self.count + 1
+    x ifTrue: [^#yes] ifFalse: [^#no]
