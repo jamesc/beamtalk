@@ -15,7 +15,7 @@ use crate::core_erlang::expr_shape::is_character_typed_receiver;
 use crate::core_erlang::routing;
 use crate::core_erlang::{CodeGenError, CoreErlangGenerator, Result};
 
-use super::{HANDLERS, runtime_send_doc, send_arg_list_doc};
+use super::{runtime_send_doc, send_arg_list_doc};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -293,23 +293,23 @@ impl CoreErlangGenerator {
         // position in `HANDLERS` is exactly what's being looked up, so
         // slicing past index 0 would silently self-recurse if a reorder
         // ever moved `character_typed` elsewhere in the table.
-        for (name, handler) in HANDLERS {
-            if *name == "character_typed" {
-                continue;
-            }
-            if let Some(doc) = handler(self, receiver, selector, arguments)? {
-                return Ok(Some(doc));
-            }
-        }
-
+        //
         // at the BEAM level a Character value is a plain
         // integer, so the generic fallback (`generate_runtime_dispatch`,
         // keyed on runtime `class_of/1`) would route it to
         // `bt@stdlib@integer:dispatch/3`. Reach the Character module's
         // dispatch instead, e.g. for `$A asInteger`, `$A printString`, `$A
         // uppercase`, `(Character value: 10) asString`.
-        Ok(Some(self.generate_character_typed_dispatch(
-            receiver, selector, arguments,
+        //
+        // One walk for both, so a literal-block `ifFalse:ifTrue:` the
+        // conditional lowering declines reaches the later handlers and the
+        // Character dispatch under the selector as written (BT-4991).
+        Ok(Some(self.dispatch_send_through_handlers(
+            receiver,
+            selector,
+            arguments,
+            Some("character_typed"),
+            Self::generate_character_typed_dispatch,
         )?))
     }
 

@@ -150,6 +150,154 @@ fn if_true_if_false_pure_inlines_both_branches() {
     assert_compiles_through_erlc("bt@probe_if_true_if_false_pure", &code);
 }
 
+/// BT-4991: `ifFalse:ifTrue:` with two literal blocks lowers as
+/// `ifTrue:ifFalse:` with the arms swapped: the same inline `case`, no
+/// dynamic send on the Boolean arms, and — for a non-Boolean receiver — the
+/// fallback sends `ifFalse:ifTrue:` with the closures in the order written.
+#[test]
+fn if_false_if_true_pure_inlines_like_if_true_if_false() {
+    let src = "Value subclass: Probe\n  check: flag =>\n    flag ifFalse: [2] ifTrue: [1]\n";
+    let code = codegen_named(src, "bt@probe_if_false_if_true_pure");
+    let scope = case_scope(&code);
+
+    assert_eq!(
+        arm_between(scope, "<'true'> when 'true' ->", "<'false'>"),
+        "1",
+        "true arm must inline the `ifTrue:` block. Got:\n{code}"
+    );
+    assert_eq!(
+        arm_between(scope, "<'false'> when 'true' ->", "<_CondNoMatch"),
+        "2",
+        "false arm must inline the `ifFalse:` block. Got:\n{code}"
+    );
+    assert!(
+        !boolean_arms(scope).contains("beamtalk_message_dispatch':'send'"),
+        "Boolean arms must hold no dynamic send. Got:\n{code}"
+    );
+    let compact: String = scope.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("'ifFalse:ifTrue:',[fun()->2,fun()->1]"),
+        "fallback must send `ifFalse:ifTrue:` with the arms as written. Got:\n{code}"
+    );
+    assert!(
+        !compact.contains("'ifTrue:ifFalse:'"),
+        "no `ifTrue:ifFalse:` send may appear. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@probe_if_false_if_true_pure", &code);
+}
+
+/// BT-4991: an `ifFalse: [^x]` guard is rewritten by `guard_returns` into a
+/// synthesised `ifTrue:ifFalse:` whose arms sit in the reverse of their source
+/// order. A non-Boolean receiver must still be sent `ifTrue:ifFalse:` (the
+/// guard's own two-branch form), never `ifFalse:ifTrue:`: only a send written
+/// `ifFalse:ifTrue:` is marked, so an unmarked send's fallback is never
+/// swapped, whatever order its arms are in.
+#[test]
+fn guard_return_fallback_still_sends_if_true_if_false() {
+    let src = "Value subclass: Probe\n  early: x =>\n    x ifFalse: [^#early]\n    #late\n";
+    let code = codegen_named(src, "bt@probe_guard_return_fallback");
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("'ifTrue:ifFalse:',[fun()->'late',fun()->'early']"),
+        "guard fallback must send `ifTrue:ifFalse:` with the arms as synthesised. Got:\n{code}"
+    );
+    assert!(
+        !compact.contains("'ifFalse:ifTrue:'"),
+        "a guard return must never send `ifFalse:ifTrue:`. Got:\n{code}"
+    );
+}
+
+/// BT-4991: a written `ifTrue:ifFalse:` whose blocks come in the reverse of the
+/// order a guard rewrite uses is also never swapped.
+#[test]
+fn written_if_true_if_false_fallback_is_never_swapped() {
+    let src = "Value subclass: Probe\n  check: flag =>\n    flag ifTrue: [1] ifFalse: [2]\n";
+    let code = codegen_named(src, "bt@probe_written_if_true_if_false");
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("'ifTrue:ifFalse:',[fun()->1,fun()->2]"),
+        "Got:\n{code}"
+    );
+    assert!(!compact.contains("'ifFalse:ifTrue:'"), "Got:\n{code}");
+}
+
+/// BT-4991: a literal-block `ifFalse:ifTrue:` the inline lowering declines is
+/// still sent as `ifFalse:ifTrue:` with the arguments in the order written —
+/// a `self`/`super`/class receiver, arms that take parameters. The rewrite to
+/// `ifTrue:ifFalse:` is for the inline path only: a class that defines its own
+/// `ifFalse:ifTrue:` must keep being called.
+#[test]
+fn declined_if_false_if_true_sends_are_emitted_as_written() {
+    for (name, src) in [
+        (
+            "self_receiver",
+            "Object subclass: Tri\n  ifFalse: f ifTrue: t => #mine\n  probe => self ifFalse: [1] ifTrue: [2]\n",
+        ),
+        (
+            "super_receiver",
+            "Object subclass: Tri\n  probe => super ifFalse: [1] ifTrue: [2]\n",
+        ),
+        (
+            "class_receiver",
+            "Object subclass: Tri\n  probe => Tri ifFalse: [1] ifTrue: [2]\n",
+        ),
+        (
+            "block_params",
+            "Object subclass: Tri\n  probe: o => o ifFalse: [:x | 1] ifTrue: [:y | 2]\n",
+        ),
+    ] {
+        let code = codegen_named(src, &format!("bt@probe_declined_{name}"));
+        let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(
+            compact.contains("ifFalse:ifTrue:"),
+            "{name}: must send `ifFalse:ifTrue:`. Got:\n{code}"
+        );
+        assert!(
+            !compact.contains("'ifTrue:ifFalse:'"),
+            "{name}: must not send `ifTrue:ifFalse:`. Got:\n{code}"
+        );
+    }
+}
+
+/// BT-4991: a Character-typed receiver's `ifFalse:ifTrue:` the inline lowering
+/// declines (here inside the fallback closure of an outer pure conditional) is
+/// routed to `Character dispatch/3` under the selector as written, with the
+/// arms in the order written: `character_typed` runs before the conditional
+/// lowering and must not hand the canonical `ifTrue:ifFalse:` to its own
+/// re-walk of the handlers or to its final dispatch.
+#[test]
+fn declined_character_if_false_if_true_dispatches_as_written() {
+    let src = "Value subclass: Probe\n  check: x =>\n    x ifTrue: [$a ifFalse: [1] ifTrue: [2]] ifFalse: [0]\n";
+    let code = codegen_named(src, "bt@probe_declined_character");
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("'bt@stdlib@character':'dispatch'('ifFalse:ifTrue:'"),
+        "Character dispatch must carry `ifFalse:ifTrue:`. Got:\n{code}"
+    );
+    assert!(
+        !compact.contains("'bt@stdlib@character':'dispatch'('ifTrue:ifFalse:'"),
+        "Character dispatch must not carry `ifTrue:ifFalse:`. Got:\n{code}"
+    );
+}
+
+/// BT-4991: the first message of a cascade is always a dynamic send (cascade
+/// codegen never inlines a conditional), so `x ifFalse: [a] ifTrue: [b];
+/// yourself` goes out as `ifFalse:ifTrue:` with the arms in the order written.
+#[test]
+fn cascade_if_false_if_true_is_sent_as_written() {
+    let src = "Value subclass: Probe\n  check: x => x ifFalse: [1] ifTrue: [2]; yourself\n";
+    let code = codegen_named(src, "bt@probe_cascade_if_false_if_true");
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("'ifFalse:ifTrue:',[fun()->1,fun()->2]"),
+        "cascade must send `ifFalse:ifTrue:` with the arms as written. Got:\n{code}"
+    );
+    assert!(
+        !compact.contains("'ifTrue:ifFalse:'"),
+        "cascade must not send `ifTrue:ifFalse:`. Got:\n{code}"
+    );
+}
+
 #[test]
 fn and_pure_short_circuits_to_literal_false() {
     let src = "Value subclass: Probe\n  check: flag =>\n    flag and: [flag]\n";

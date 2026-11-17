@@ -124,6 +124,14 @@ impl ClassSendArgs<'_> {
     }
 }
 
+/// The [`HANDLERS`] entry that lowers the Boolean conditionals inline
+/// (`try_generate_boolean_protocol`). A literal-block `ifFalse:ifTrue:` is
+/// rewritten to `ifTrue:ifFalse:` for this handler and the ones before it;
+/// `generate_message_send` sends it under the selector as written to every
+/// handler after it (BT-4991). Named once so the table and that switch cannot
+/// disagree; pinned by `typed_sealed::conditional_lowering_handler_position`.
+pub(in crate::core_erlang) const CONDITIONAL_LOWERING_HANDLER: &str = "boolean_protocol";
+
 /// `generate_message_send`'s dispatch priority as data, replacing
 /// what were 15 source-ordered `if let Some(doc) = self.try_*()?` calls (two
 /// of them a duplicated `is_character_typed_receiver` check — see
@@ -151,7 +159,7 @@ pub(in crate::core_erlang) const HANDLERS: &[(&str, SendHandler)] = &[
     ("dict", CoreErlangGenerator::try_generate_dict_message),
     ("list", CoreErlangGenerator::try_generate_list_message),
     (
-        "boolean_protocol",
+        CONDITIONAL_LOWERING_HANDLER,
         CoreErlangGenerator::try_generate_boolean_protocol,
     ),
     ("spawn_await", CoreErlangGenerator::try_handle_spawn_await),
@@ -347,14 +355,76 @@ impl CoreErlangGenerator {
 
         // dispatch priority for every remaining message shape is
         // `HANDLERS` — see its doc for why `character_typed` leads the list.
-        for (_, handler) in HANDLERS {
+        self.dispatch_send_through_handlers(
+            receiver,
+            selector,
+            arguments,
+            None,
+            Self::generate_runtime_dispatch,
+        )
+    }
+
+    /// Offers a send to [`HANDLERS`] in priority order (skipping the entry
+    /// named `skip`), then to `fallback` when none claims it.
+    ///
+    /// BT-4991: a literal-block `ifFalse:ifTrue:` arrives rewritten as
+    /// `ifTrue:ifFalse:` (`ast::normalize`), which only the conditional
+    /// lowering ([`CONDITIONAL_LOWERING_HANDLER`], and the handlers before it)
+    /// reads. A send none of them claims is an ordinary message: every later
+    /// handler, and `fallback`, get it under the selector the user wrote, with
+    /// the arguments in the order written. Built on first need, so an inlined
+    /// conditional never pays for the clone. The one place that switch lives:
+    /// `generate_message_send` and the Character-typed handler (which runs
+    /// before the conditional lowering and walks the table itself) both call it.
+    pub(in crate::core_erlang) fn dispatch_send_through_handlers(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+        skip: Option<&str>,
+        fallback: fn(
+            &mut Self,
+            &Expression,
+            &MessageSelector,
+            &[Expression],
+        ) -> Result<Document<'static>>,
+    ) -> Result<Document<'static>> {
+        let mut written: Option<Option<(MessageSelector, Vec<Expression>)>> = None;
+        let mut past_conditional_lowering = false;
+        for (name, handler) in HANDLERS {
+            if Some(*name) == skip {
+                continue;
+            }
+            let as_written = if past_conditional_lowering {
+                written
+                    .get_or_insert_with(|| {
+                        beamtalk_core::ast::normalize::as_written_if_false_if_true(
+                            selector, arguments,
+                        )
+                    })
+                    .as_ref()
+            } else {
+                None
+            };
+            let (selector, arguments) = match as_written {
+                Some((selector, arguments)) => (selector, arguments.as_slice()),
+                None => (selector, arguments),
+            };
             if let Some(doc) = handler(self, receiver, selector, arguments)? {
                 return Ok(doc);
             }
+            past_conditional_lowering |= *name == CONDITIONAL_LOWERING_HANDLER;
         }
 
-        // Unified dispatch via beamtalk_message_dispatch:send/3
-        self.generate_runtime_dispatch(receiver, selector, arguments)
+        let as_written = written
+            .get_or_insert_with(|| {
+                beamtalk_core::ast::normalize::as_written_if_false_if_true(selector, arguments)
+            })
+            .as_ref();
+        match as_written {
+            Some((selector, arguments)) => fallback(self, receiver, selector, arguments),
+            None => fallback(self, receiver, selector, arguments),
+        }
     }
 
     /// Generates a cast (fire-and-forget) message send.

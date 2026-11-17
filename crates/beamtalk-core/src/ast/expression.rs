@@ -929,11 +929,20 @@ pub struct Block {
     /// Node identity (see [`BlockId`]). Assigned by [`Block::new`]; construct
     /// blocks through it, never as struct literals.
     pub id: BlockId,
+    /// Whether this block is an arm of an `ifFalse:ifTrue:` send that
+    /// [`desugar_if_false_if_true`](super::normalize::desugar_if_false_if_true)
+    /// rewrote to `ifTrue:ifFalse:` (BT-4991). Only that pass sets it, and the
+    /// restore clears it: a send built any other way (a parsed
+    /// `ifTrue:ifFalse:`, a guard rewrite's synthesised one) never carries it,
+    /// so it is the one test for "this was written `ifFalse:ifTrue:`".
+    pub if_false_if_true_arm: bool,
 }
 
 // Manual `Debug`/`PartialEq`: the id is identity, not content — it is
 // excluded so AST snapshots stay deterministic and structural equality keeps
-// comparing what the block says, not when it was built.
+// comparing what the block says, not when it was built. The
+// `if_false_if_true_arm` mark is likewise a note on the node, not part of what
+// it says: a re-parse of the unparsed rewritten send is the same program.
 #[allow(clippy::missing_fields_in_debug)]
 impl std::fmt::Debug for Block {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -964,6 +973,7 @@ impl Block {
             body,
             span,
             id: BlockId::fresh(),
+            if_false_if_true_arm: false,
         }
     }
 

@@ -73,6 +73,21 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
+        // BT-4991: normalisation rewrote `c ifFalse: [a] ifTrue: [b]` to
+        // `ifTrue:ifFalse:`. A receiver that is not a Boolean is sent
+        // `ifFalse:ifTrue:` as written (codegen's fallback does), so resolve
+        // it under that selector: its DNU names what was written, and its
+        // return type comes from the method that runs. A Boolean-only
+        // receiver keeps the canonical form (and its narrowing).
+        let written = if has_non_boolean_member(&receiver_ty) {
+            crate::ast::normalize::as_written_if_false_if_true(selector, arguments)
+        } else {
+            None
+        };
+        let (selector, arguments) = match &written {
+            Some((selector, arguments)) => (selector, arguments.as_slice()),
+            None => (selector, arguments),
+        };
         let ty = self.infer_message_send_with_receiver_ty_inner(
             receiver,
             receiver_ty,
@@ -1769,5 +1784,18 @@ impl TypeChecker {
         // the return type is just the union of the non-Nil return types
         // (Nil was skipped, so it's not in return_types).
         InferredType::union_of(&return_types)
+    }
+}
+
+/// Whether `ty` names a class other than `Boolean`/`True`/`False`, directly or
+/// as a union member. `Dynamic` and the other non-class types name none, so a
+/// send to them keeps the canonical selector.
+fn has_non_boolean_member(ty: &InferredType) -> bool {
+    match ty {
+        InferredType::Known { class_name, .. } => {
+            !matches!(class_name.as_str(), "Boolean" | "True" | "False")
+        }
+        InferredType::Union { members, .. } => members.iter().any(has_non_boolean_member),
+        _ => false,
     }
 }
