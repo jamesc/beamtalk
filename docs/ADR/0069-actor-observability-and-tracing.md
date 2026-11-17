@@ -144,6 +144,7 @@ BT-4932 measured the actor start path after ADR 0150. Emitting the two events wa
 - A handler that `telemetry` detaches on its own (because it raised) keeps the flag on until the next refresh. That only costs the events.
 - Flipping the flag writes a `persistent_term`, a global GC scan; flips are rare control-plane operations.
 - During a hot upgrade, until the trace store's `code_change/3` runs, an old trace store's `beamtalk_trace_store_lifecycle_start` / `_stop` handlers are still attached. If the lifecycle events are on in that window, each start or stop is counted twice (once by `record_lifecycle/4`, once by the old handler). The window is short and `code_change/3` detaches the old handlers, so it is accepted.
+- The reverse order matters too: if a relup loads the new `beamtalk_actor` before the new `beamtalk_trace_store`, an actor start or stop in that gap calls the not-yet-existing `beamtalk_trace_store:record_lifecycle/4` and fails with `undef`. Load `beamtalk_trace_store` first in any relup. A restart upgrade is unaffected.
 
 ## Context
 
