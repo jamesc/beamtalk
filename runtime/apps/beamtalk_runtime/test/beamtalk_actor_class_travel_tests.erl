@@ -18,14 +18,21 @@ passes it to a `*_known` function. `beamtalk_object_instances` is deleted
 setup() ->
     {ok, _} = application:ensure_all_started(telemetry),
     {module, telemetry} = code:ensure_loaded(telemetry),
-    case whereis(beamtalk_trace_store) of
-        undefined -> {ok, _} = beamtalk_trace_store:start_link();
-        _ -> ok
-    end,
+    Started =
+        case whereis(beamtalk_trace_store) of
+            undefined ->
+                {ok, _} = beamtalk_trace_store:start_link(),
+                true;
+            _ ->
+                false
+        end,
     beamtalk_trace_store:clear(),
-    ok.
+    Started.
 
-cleanup(_) ->
+%% A bare `beamtalk_trace_store` left running makes the next module's
+%% `ensure_all_started(beamtalk_runtime)` fail with `already_started` (BT-4962).
+cleanup(Started) ->
+    Started andalso beamtalk_test_proc:stop_registered(beamtalk_trace_store),
     ok.
 
 class_travel_test_() ->
