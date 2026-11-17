@@ -40,7 +40,7 @@ assertions here.
     restore_meta_stub/1
 ]).
 
-%%=============================================================
+%%====================================================================
 %% Shared fixture
 %%====================================================================
 
@@ -395,7 +395,7 @@ remote_async_send_raises_instead_of_hanging(PeerNode) ->
     after
         rpc:call(PeerNode, gen_server, stop, [RemotePid])
     end.
-=======
+
 %%% Module-level fixture (BT-4962): loading a compiled `bt@stdlib@*` module starts
 %%% class processes; with no runtime app to own them they would outlive this suite.
 eunit_wrapper_(Tests) -> beamtalk_test_class_teardown:leak_free(Tests).
