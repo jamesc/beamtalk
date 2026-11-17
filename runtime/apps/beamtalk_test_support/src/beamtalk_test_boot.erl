@@ -312,7 +312,10 @@ reclaim_class_owned_tables() ->
         [] ->
             ok;
         _ ->
-            lists:foreach(fun beamtalk_test_class_teardown:stop_class_process/1, Orphans),
+            %% Every class process predates the app and is stale, not only the table
+            %% owners: a bare `Object` left running keeps its registered name, so the
+            %% restarted stdlib's `Object` never registers.
+            beamtalk_test_class_teardown:stop_pg_class_processes(),
             restart_runtime()
     end.
 
