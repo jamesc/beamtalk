@@ -17,15 +17,13 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream, UdpSocket};
 use std::time::Duration;
 
 use super::storage::workspace_dir;
+use beamtalk_workspace::epmd::epmd_port;
 
 pub(super) use beamtalk_workspace::epmd::wait_for_epmd_deregistration;
 // Only exercised by this module's own tests below — everything else in the
 // CLI that needs the raw names list goes through `wait_for_epmd_deregistration`.
 #[cfg(test)]
 use beamtalk_workspace::epmd::query_epmd_names;
-
-/// epmd binary protocol port.
-const EPMD_PORT: u16 = 4369;
 
 /// Short connect timeout (ms) for the loopback-posture preflight probes.
 const EPMD_POSTURE_PROBE_TIMEOUT_MS: u64 = 300;
@@ -103,7 +101,7 @@ fn primary_non_loopback_ipv4() -> Option<Ipv4Addr> {
 /// preflight timeout. A refused/timed-out connection means epmd is not reachable
 /// at that address (the loopback-only / not-running cases).
 fn epmd_reachable_at(addr: IpAddr) -> bool {
-    let socket = SocketAddr::new(addr, EPMD_PORT);
+    let socket = SocketAddr::new(addr, epmd_port());
     TcpStream::connect_timeout(
         &socket,
         Duration::from_millis(EPMD_POSTURE_PROBE_TIMEOUT_MS),
@@ -144,8 +142,9 @@ pub(super) fn check_epmd_loopback() -> EpmdPosture {
 pub(super) fn warn_if_epmd_promiscuous() -> EpmdPosture {
     let posture = check_epmd_loopback();
     if let EpmdPosture::Promiscuous(ip) = posture {
+        let port = epmd_port();
         eprintln!(
-            "⚠️  epmd is reachable on a non-loopback interface ({ip}:{EPMD_PORT}).\n   \
+            "⚠️  epmd is reachable on a non-loopback interface ({ip}:{port}).\n   \
              Erlang distribution should stay off untrusted networks (ADR 0091). A pre-existing\n   \
              epmd was started promiscuously (likely bound to 0.0.0.0) by other tooling; the\n   \
              workspace node will register with it and be visible off-host.\n   \
@@ -160,28 +159,6 @@ pub(super) fn warn_if_epmd_promiscuous() -> EpmdPosture {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn query_epmd_names_returns_empty_when_not_running() {
-        // epmd is almost certainly not running on port 4369 in a unit test
-        // environment (or if it is, we just get names back — either is fine).
-        // The key property: this must not panic or hang.
-        let result = query_epmd_names();
-        assert!(
-            result.is_ok(),
-            "query_epmd_names should not error: {result:?}"
-        );
-    }
-
-    #[test]
-    fn wait_for_epmd_deregistration_succeeds_when_epmd_not_running() {
-        // If epmd isn't running, the node is trivially not registered.
-        let result = wait_for_epmd_deregistration("nonexistent@localhost", 1);
-        assert!(
-            result.is_ok(),
-            "should succeed immediately when epmd is not running: {result:?}"
-        );
-    }
 
     #[test]
     fn is_epmd_name_conflict_returns_false_for_unknown_workspace() {
@@ -283,9 +260,10 @@ mod tests {
         // for how to tell an external stray epmd apart from a regression here.
         if let EpmdPosture::Promiscuous(ip) = check_epmd_loopback() {
             let names = query_epmd_names();
+            let port = epmd_port();
             panic!(
                 "default deployment must not expose epmd on a public interface: \
-                 epmd answered on {ip}:{EPMD_PORT}.\n\
+                 epmd answered on {ip}:{port}.\n\
                  epmd -names reports: {names:?}\n\
                  epmd is a shared, per-user daemon — this is usually *other* Erlang/OTP \
                  tooling on this host that started it without ERL_EPMD_ADDRESS pinned to \

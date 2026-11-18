@@ -21,8 +21,29 @@ use std::time::Duration;
 
 use miette::{IntoDiagnostic, Result, miette};
 
-/// epmd binary protocol port.
-const EPMD_PORT: u16 = 4369;
+/// epmd's default TCP port.
+pub const DEFAULT_EPMD_PORT: u16 = 4369;
+
+/// Environment variable Erlang tooling uses to point at a non-default epmd port.
+pub const EPMD_PORT_ENV_VAR: &str = "ERL_EPMD_PORT";
+
+/// Parse an `ERL_EPMD_PORT` value, falling back to [`DEFAULT_EPMD_PORT`] when
+/// it is unset or not a valid non-zero port.
+#[must_use]
+pub fn parse_epmd_port(value: Option<&str>) -> u16 {
+    value
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        .filter(|p| *p != 0)
+        .unwrap_or(DEFAULT_EPMD_PORT)
+}
+
+/// The epmd port this process should talk to: `ERL_EPMD_PORT` when set to a
+/// valid port, else [`DEFAULT_EPMD_PORT`]. The BEAM nodes we start inherit the
+/// same variable, so the client must honour it to see their registrations.
+#[must_use]
+pub fn epmd_port() -> u16 {
+    parse_epmd_port(std::env::var(EPMD_PORT_ENV_VAR).ok().as_deref())
+}
 
 /// TCP connect timeout for epmd queries in milliseconds.
 const EPMD_CONNECT_TIMEOUT_MS: u64 = 500;
@@ -32,7 +53,7 @@ const EPMD_READ_TIMEOUT_MS: u64 = 1000;
 
 /// Query epmd's registered node names directly over TCP using the `NAMES_REQ` protocol.
 ///
-/// Connects to `localhost:4369` and sends a `NAMES_REQ` (3 bytes: big-endian u16
+/// Connects to `localhost` on [`epmd_port`] (4369 unless `ERL_EPMD_PORT` says otherwise) and sends a `NAMES_REQ` (3 bytes: big-endian u16
 /// length=1, then `0x6e`). epmd responds with a 4-byte big-endian u32 (its own
 /// port, discarded), followed by lines of the form `"name <short> at port <N>\n"`
 /// until EOF.
@@ -48,7 +69,7 @@ const EPMD_READ_TIMEOUT_MS: u64 = 1000;
 /// unexpected I/O error occurs while writing the request or reading the
 /// response.
 pub fn query_epmd_names() -> Result<Vec<String>> {
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], EPMD_PORT));
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], epmd_port()));
 
     let mut stream =
         match TcpStream::connect_timeout(&addr, Duration::from_millis(EPMD_CONNECT_TIMEOUT_MS)) {
@@ -107,7 +128,7 @@ pub fn query_epmd_names() -> Result<Vec<String>> {
 /// Wait for a node name to be deregistered from epmd.
 ///
 /// After force-killing a BEAM node, epmd may still hold the registration
-/// briefly. This polls epmd's `NAMES_REQ` TCP protocol (port 4369) until the
+/// briefly. This polls epmd's `NAMES_REQ` TCP protocol (see [`epmd_port`]) until the
 /// node name disappears or the timeout is reached.
 ///
 /// Returns `Ok(())` once deregistered, or if epmd is not running.
@@ -124,9 +145,11 @@ pub fn wait_for_epmd_deregistration(node_name: &str, timeout_secs: u64) -> Resul
     let short_name = node_name.split('@').next().unwrap_or(node_name);
     let interval = Duration::from_millis(100);
     let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
-    let mut last_query_err: Option<String> = None;
+    let mut last_query_err: Option<String>;
 
-    while std::time::Instant::now() < deadline {
+    // Query at least once, even for a zero timeout, then keep polling until the
+    // deadline.
+    loop {
         match query_epmd_names() {
             Ok(names) if !names.iter().any(|n| n == short_name) => return Ok(()),
             Ok(_) => {
@@ -137,6 +160,9 @@ pub fn wait_for_epmd_deregistration(node_name: &str, timeout_secs: u64) -> Resul
                 // treating the failure as absence. Only explicit absence is success.
                 last_query_err = Some(e.to_string());
             }
+        }
+        if std::time::Instant::now() >= deadline {
+            break;
         }
         std::thread::sleep(interval);
     }
@@ -193,6 +219,24 @@ mod tests {
             result.is_ok(),
             "should succeed immediately when epmd is not running: {result:?}"
         );
+    }
+
+    #[test]
+    fn parse_epmd_port_honours_erl_epmd_port() {
+        assert_eq!(parse_epmd_port(None), DEFAULT_EPMD_PORT);
+        assert_eq!(parse_epmd_port(Some("5000")), 5000);
+        assert_eq!(parse_epmd_port(Some(" 5000 ")), 5000);
+        // Invalid values fall back to the default rather than failing.
+        assert_eq!(parse_epmd_port(Some("0")), DEFAULT_EPMD_PORT);
+        assert_eq!(parse_epmd_port(Some("nope")), DEFAULT_EPMD_PORT);
+        assert_eq!(parse_epmd_port(Some("70000")), DEFAULT_EPMD_PORT);
+    }
+
+    #[test]
+    fn wait_for_epmd_deregistration_zero_timeout_still_queries_once() {
+        // epmd not running (or the name absent): a zero timeout must still
+        // report success rather than erroring without ever polling.
+        assert!(wait_for_epmd_deregistration("nonexistent@localhost", 0).is_ok());
     }
 
     #[test]
