@@ -335,7 +335,7 @@ load_probe_module(Name) ->
     beamtalk_test_module:load(Name, Src).
 
 probe_name() ->
-    list_to_atom("bt4945_probe_" ++ integer_to_list(erlang:unique_integer([positive]))).
+    beamtalk_test_unique:atom("bt4945_probe").
 
 cleanup_module_no_process_runs_it_test() ->
     Mod = probe_name(),
@@ -376,7 +376,7 @@ cleanup_module_fun_holder_keeps_working_test() ->
     %% keeps working after cleanup (the module is not deleted).
     Mod = probe_name(),
     ok = load_probe_module(Mod),
-    Fun = Mod:make(erlang:unique_integer()),
+    Fun = Mod:make(held_value),
     Holder = spawn(fun() ->
         receive
             {call, From} -> From ! {result, Fun()}

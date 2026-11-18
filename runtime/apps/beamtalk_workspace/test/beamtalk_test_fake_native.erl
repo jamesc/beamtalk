@@ -71,7 +71,7 @@ start_class(Class) ->
     }).
 
 native_name() ->
-    list_to_atom("bt4960_native_" ++ integer_to_list(erlang:unique_integer([positive]))).
+    beamtalk_test_unique:atom("bt4960_native").
 
 start_link() ->
     gen_server:start_link(?MODULE, [], []).

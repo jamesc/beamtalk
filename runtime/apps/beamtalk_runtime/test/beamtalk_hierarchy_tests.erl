@@ -222,10 +222,7 @@ walk_or_warn_node_name_renders_rider_and_returns_partial_acc_test() ->
 with_captured_logs(Fun) ->
     OldLevel = maps:get(level, logger:get_primary_config()),
     ok = logger:set_primary_config(level, all),
-    % elp:fixme W0023 intentional atom creation
-    HandlerId = list_to_atom(
-        "bt4892_hierarchy_" ++ integer_to_list(erlang:unique_integer([positive]))
-    ),
+    HandlerId = beamtalk_test_unique:atom("bt4892_hierarchy"),
     ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{parent => self()}, level => all}),
     try
         Result = Fun(),

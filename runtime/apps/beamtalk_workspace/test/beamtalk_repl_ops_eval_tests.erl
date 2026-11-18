@@ -31,18 +31,16 @@ Covers:
 %%====================================================================
 
 setup(SessionId) ->
-    {ok, _} = application:ensure_all_started(compiler),
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-    {ok, _} = beamtalk_test_boot:start_app(beamtalk_compiler),
+    ok = beamtalk_test_boot:compiler(),
     %% Allow the runtime to register its bootstrap classes before compiling.
     ok = beamtalk_test_wait:class('Object'),
     {ok, SessionPid} = beamtalk_repl_shell:start_link(SessionId),
     SessionPid.
 
 setup_with_stdlib(SessionId) ->
-    {ok, _} = application:ensure_all_started(compiler),
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_runtime),
-    {ok, _} = beamtalk_test_boot:start_app(beamtalk_compiler),
+    ok = beamtalk_test_boot:compiler(),
     {ok, _} = beamtalk_test_boot:start_app(beamtalk_stdlib),
     %% Poll until the Program class is registered (stdlib loads classes asynchronously).
     ok = beamtalk_test_wait:class('Program', 1500),
