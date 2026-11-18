@@ -508,10 +508,11 @@ activeDebugTargets() ->
 -spec disableAllDebug() -> nil.
 disableAllDebug() ->
     ensure_table(),
-    Targets = ets:tab2list(?DEBUG_TABLE),
     %% Rows go first: the watcher keeps the monitor of any pid that still has a
     %% row, so an `unwatch` must not be sent while its row is in the table.
-    ets:delete_all_objects(?DEBUG_TABLE),
+    %% Draining row by row means a row enabled meanwhile is either cleaned up
+    %% here or left for its own disable, never deleted uncleaned.
+    Targets = drain_table(),
     lists:foreach(
         fun
             ({Target, subsystem, FilterIds}) ->
@@ -542,6 +543,18 @@ disableAllDebug() ->
     ),
     sync_actor_filter(),
     nil.
+
+-doc "Remove and return every row of the debug table, one `ets:take/2` at a time.".
+-spec drain_table() -> [tuple()].
+drain_table() ->
+    drain_table(ets:first(?DEBUG_TABLE), []).
+
+-spec drain_table(term(), [tuple()]) -> [tuple()].
+drain_table('$end_of_table', Acc) ->
+    Acc;
+drain_table(Key, Acc) ->
+    Rows = ets:take(?DEBUG_TABLE, Key),
+    drain_table(ets:first(?DEBUG_TABLE), Rows ++ Acc).
 
 -doc "Return a formatted string describing the current logger state.".
 -spec loggerInfo() -> beamtalk_string:t().
@@ -669,8 +682,10 @@ exits, so the setting does not outlive the process.
 enable_actor_debug(Pid, ClassName) ->
     ensure_table(),
     ets:insert(?DEBUG_TABLE, {Pid, actor_instance, ClassName}),
-    ok = beamtalk_debug_actor_watcher:watch(Pid),
+    %% Sync before watch: if the watcher call exits (timeout), the enable is
+    %% still complete -- the row and the filter agree.
     sync_actor_filter(),
+    ok = beamtalk_debug_actor_watcher:watch(Pid),
     nil.
 
 -doc "Disable debug logging for a specific actor process.".

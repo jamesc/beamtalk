@@ -61,9 +61,12 @@ init([]) ->
     {ok, Monitors}.
 
 handle_call({watch, Pid}, _From, Monitors) ->
-    case Monitors of
-        #{Pid := _} -> {reply, ok, Monitors};
-        _ -> {reply, ok, Monitors#{Pid => monitor(process, Pid)}}
+    %% The table is the source of truth: a concurrent disable may already have
+    %% deleted the row (and its unwatch may have been handled before this call).
+    case {Monitors, ets:member(beamtalk_debug_targets, Pid)} of
+        {#{Pid := _}, _} -> {reply, ok, Monitors};
+        {_, false} -> {reply, ok, Monitors};
+        {_, true} -> {reply, ok, Monitors#{Pid => monitor(process, Pid)}}
     end;
 handle_call(_Request, _From, Monitors) ->
     {reply, {error, unknown_request}, Monitors}.
