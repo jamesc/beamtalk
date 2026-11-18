@@ -50,7 +50,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0021](0021-streams-and-io-design.md) | Stream — Lazy Pipeline for Value-Side Data | Implemented (Revised) | 2026-02-15 |
 | [0022](0022-embedded-compiler-via-otp-port.md) | Embedded Compiler via OTP Port (with NIF option) | Implemented | 2026-02-15 |
 | [0023](0023-string-interpolation-and-binaries.md) | String Interpolation Syntax and Compilation | Implemented | 2026-02-17 |
-| [0024](0024-static-first-live-augmented-ide-tooling.md) | Static-First, Live-Augmented IDE Tooling | Implemented (Phase 1; Phase 3 largely done, Phase 2 not started) | 2026-02-17 |
+| [0024](0024-static-first-live-augmented-ide-tooling.md) | Static-First, Live-Augmented IDE Tooling | Implemented (Phase 1; Phase 3 largely done, LSP rename is BT-5007; Phase 2 dropped 2026-11-18) | 2026-02-17 |
 | [0025](0025-gradual-typing-and-protocols.md) | Gradual Typing and Protocols | Implemented (Phases 1–2); Phase 3 shipped via ADR 0068 (amended 2026-10-29: guarded static dispatch) | 2026-02-15 |
 | [0026](0026-package-definition-and-project-manifest.md) | Package Definition and Project Manifest | Implemented | 2026-02-17 |
 | [0027](0027-cross-platform-support.md) | Cross-Platform Support | Implemented | 2026-02-17 |
@@ -75,7 +75,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0046](0046-vscode-live-workspace-sidebar.md) | VSCode Live Workspace Sidebar | Implemented | 2026-03-02 |
 | [0047](0047-return-type-arrow-token-disambiguation.md) | Return Type Arrow Token Disambiguation | Implemented | 2026-03-02 |
 | [0048](0048-class-side-method-syntax.md) | Class-Side Method Syntax Redesign | Rejected (2026-11-18) | 2026-03-02 |
-| [0049](0049-remove-method-level-sealed.md) | Remove Method-Level `sealed` — Infer Protection from `@primitive`/`@intrinsic` | Deferred | 2026-03-02 |
+| [0049](0049-remove-method-level-sealed.md) | Remove Method-Level `sealed` — Infer Protection from `@primitive`/`@intrinsic` | Rejected (2026-11-18) | 2026-03-02 |
 | [0050](0050-incremental-compiler-class-hierarchy.md) | Incremental Compiler ClassHierarchy via BEAM Metadata Streaming | Implemented | 2026-03-04 |
 | [0051](0051-subprocess-execution.md) | Subprocess Execution — System Commands and Interactive Subprocess Actor | Accepted \| Implemented | 2026-03-05 |
 | [0052](0052-recursive-descent-pratt-parsing.md) | Recursive Descent Parser with Pratt Parsing for Binary Operators | Accepted \| Implemented | 2026-03-05 |
@@ -122,8 +122,8 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0093](0093-announcements-event-substrate.md) | Announcements — Typed Event Substrate (Runtime Bus + stdlib Veneer) | Implemented | 2026-06-07 |
 | [0094](0094-object-string-representation-protocols.md) | Object String Representation Protocols (printString / displayString / inspect) | Implemented | 2026-06-07 |
 | [0095](0095-rich-navigable-inspector.md) | Rich Navigable Inspector — Drillable, Live-Refreshing Object Views | Implemented | 2026-06-11 |
-| [0096](0096-system-browser-data-source.md) | System Browser Data Source — Class/Method Browse API for the LiveView IDE | Implemented (live-mode; cold-mode Phase 2 pending) | 2026-06-10 |
-| [0097](0097-desktop-attach-client-node-per-workspace.md) | Desktop Attach Client — One Front Node per Workspace | Implemented (2026-09-24; Linux/Windows hands-on verification pending) | 2026-06-13 |
+| [0096](0096-system-browser-data-source.md) | System Browser Data Source — Class/Method Browse API for the LiveView IDE | Implemented (live-mode; cold-mode Phase 2 dropped 2026-11-18) | 2026-06-10 |
+| [0097](0097-desktop-attach-client-node-per-workspace.md) | Desktop Attach Client — One Front Node per Workspace | Implemented (2026-09-24; release wiring is BT-5006; Linux/Windows hands-on verification pending) | 2026-06-13 |
 | [0098](0098-build-artifact-provenance.md) | Build Artifact Provenance and Version-Based Staleness Invalidation | Implemented | 2026-06-23 |
 | [0099](0099-cli-application-story.md) | CLI Application Story — Console, Arguments, Exit, and Packaging | Implemented | 2026-06-26 |
 | [0100](0100-open-world-diagnostic-policy.md) | Open-World Diagnostic Policy for Unresolved Selectors and Classes | Implemented (2026-11-10) | 2026-06-27 |

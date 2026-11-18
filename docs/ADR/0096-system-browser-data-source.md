@@ -1,7 +1,7 @@
 # ADR 0096: System Browser Data Source — Class/Method Browse API for the LiveView IDE
 
 ## Status
-Implemented (2026-06-10) — four read-only browse ops in `beamtalk_repl_ops_browse` with origin/divergence metadata (BT-2482, BT-2488)
+Implemented (2026-06-10) — four read-only browse ops in `beamtalk_repl_ops_browse` with origin/divergence metadata (BT-2482, BT-2488). Phase 2 (cold mode: static answers with no workspace running) is dropped (2026-11-18): it was never started, and with no workspace running the LSP's static symbols are the browse surface.
 
 ## Context
 
@@ -602,7 +602,7 @@ The next issue (**BT-2488**) implements the four op shapes. High-level approach:
 |---|---|---|
 | 0 — wire-check | `browse-classes` end-to-end (term → JSON → one LiveView pane) against a live workspace; validate `origin` tagging | BT-2399 (done), ADR 0087 (done) |
 | 1 — live browse | All four ops, live mode (registry + xref + patch-aware source); `origin`/`source_status`/`disk_differs` | Phase 0 |
-| 2 — cold mode | Static answers from `ProjectIndex` (ADR 0024 Tier 1/2), so the browser works with no workspace; `origin = "static"` | Phase 1 |
+| 2 — cold mode (dropped 2026-11-18) | Static answers from `ProjectIndex` (ADR 0024 Tier 1/2), so the browser works with no workspace; `origin = "static"` | Phase 1 |
 | 3 — RBAC sign-off | Assert the no-user-code guarantee (ADR 0091 Decision 4 acceptance criterion); grant Observer | Phase 1 |
 
 Phase 0 is the napkin wire-check (one pane, one op) before broad build, mirroring

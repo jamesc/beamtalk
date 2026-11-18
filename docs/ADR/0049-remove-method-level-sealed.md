@@ -2,7 +2,17 @@
 
 ## Status
 
-Deferred (2026-03-15) — revisit post-0.1.0. Originally proposed 2026-03-02.
+Rejected (2026-11-18). Method-level `sealed` stays. Deferred 2026-03-15; originally proposed 2026-03-02.
+
+Why it was rejected, reviewed at 0.5.0:
+
+- **The inference rule no longer fits.** This ADR surveyed about 54 sealed methods, about 39 of them `@primitive` or `@intrinsic`. `stdlib/src` now has about 485, and about 440 have ordinary Beamtalk bodies. Inferring protection from a primitive body would make those overridable.
+- **Open classes still need the keyword.** About 120 sealed methods are in classes that can be subclassed (about 80 instance-side, about 45 class-side). `sealed` is how such a class says "subclass me, but not this method": for example `isAlive` and `stop` on `Supervisor`, which the runtime answers without a method lookup. On actors, an instance-side sealed method also compiles to a standalone function that self-sends call directly.
+- **Its companion is rejected.** [ADR 0048](0048-class-side-method-syntax.md) kept the `class` modifier, and `internal` is a method modifier too, so removing `sealed` would not leave the grammar free of method modifiers.
+
+What [ADR 0142](0142-class-process-owns-only-class-state.md) changed: `class sealed` no longer affects dispatch, so about 360 annotations (about 330 class-side, about 30 instance-side) sit on methods of classes that are themselves sealed and add no override protection. That is redundancy, not a reason to remove the keyword. A lint for `sealed` on a method of a sealed class, followed by a mechanical sweep, is tracked as BT-5008. That issue first makes every method of a sealed class count as sealed wherever the per-method flag is read (class metadata, the doc generator, actor codegen), so removing the keyword changes nothing observable.
+
+The counts are from a pattern search of `stdlib/src` on 2026-11-18 and are approximate.
 
 ## Context
 
@@ -76,6 +86,8 @@ None of the Case 2 methods are in user-subclassable classes in the current stdli
 subclassable but the error guards can be protected by sealing `Actor` if needed.
 
 ## Decision
+
+> **Not adopted.** The decision below is the 2026-03 proposal, kept as the record. See Status.
 
 1. **Remove the `sealed` method modifier keyword** from the grammar entirely. No
    Beamtalk source file may use `sealed` as a method prefix after migration.

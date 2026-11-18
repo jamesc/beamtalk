@@ -1,7 +1,7 @@
 # ADR 0119: Class-Name↔Module-Name Resolution Registry
 
 ## Status
-Implemented (2026-09-06) — Epic BT-3434 (BT-3435/BT-3436/BT-3437) and follow-up BT-3441 Done (accepted 2026-09-05); the ADR 0114 live-rename invalidation open question remains unresolved
+Implemented (2026-09-06) — Epic BT-3434 (BT-3435/BT-3436/BT-3437) and follow-up BT-3441 Done (accepted 2026-09-05); the ADR 0114 live-rename invalidation open question is closed by BT-3443 (2026-09-07): the registry is built fresh on every request and never cached, so a live rename is seen by the next request, and a test and a doc comment pin that invariant
 
 ## Context
 
