@@ -825,7 +825,7 @@ impl CoreErlangGenerator {
         auto: Option<&AutoSlotMethods>,
         include_standalone: bool,
     ) -> Vec<MethodInfoEntry> {
-        let sealed = class.is_sealed;
+        let sealed = class.seals_its_methods();
         let type_params = &class.type_params;
         let mut entries: Vec<MethodInfoEntry> = class
             .methods
@@ -895,7 +895,7 @@ impl CoreErlangGenerator {
         include_standalone: bool,
         synthesize_supervision_spec: bool,
     ) -> Vec<MethodInfoEntry> {
-        let sealed = class.is_sealed;
+        let sealed = class.seals_its_methods();
         let type_params = &class.type_params;
         let mut entries: Vec<MethodInfoEntry> = class
             .class_methods
@@ -993,7 +993,7 @@ impl CoreErlangGenerator {
     /// class_hierarchy/class_info.rs`) uses for a fresh-AST compile, so the
     /// BEAM-metadata path (the one the REPL uses to see an already-loaded
     /// project class) and the fresh-AST path agree. Every method of a `sealed`
-    /// class is sealed whether or not it carries the keyword (BT-5008).
+    /// (non-`abstract`) class is sealed whether or not it carries the keyword (BT-5008).
     fn meta_method_entry(
         m: &MethodDefinition,
         class: &ClassDefinition,

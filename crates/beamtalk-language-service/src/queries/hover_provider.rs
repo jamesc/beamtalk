@@ -206,11 +206,11 @@ pub fn compute_hover(
     for smd in &module.method_definitions {
         if let Some(hover) = find_hover_on_method_signature(
             &smd.method,
-            smd.method.is_sealed
-                || module
-                    .classes
-                    .iter()
-                    .any(|c| c.name.name == smd.class_name.name && c.seals_its_methods()),
+            module
+                .classes
+                .iter()
+                .find(|c| c.name.name == smd.class_name.name)
+                .map_or(smd.method.is_sealed, |c| c.is_method_sealed(&smd.method)),
             source,
             offset_val,
             smd.is_class_method,
