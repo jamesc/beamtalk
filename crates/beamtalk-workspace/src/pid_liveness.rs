@@ -149,12 +149,49 @@ pub fn proc_start_time(pid: u32) -> Option<u64> {
     }
 }
 
+/// Pure comparison shared by the desktop broker's orphan sweep and every kill path's
+/// pre-kill identity re-check: is `actual` consistent with `expected`?
+///
+/// - `(None, _)` — no recorded start time (old record predating this field,
+///   or a platform `proc_start_time` never returns a real value on) —
+///   treated as a match, the same best-effort stance `beamtalk-cli`'s own
+///   `NodeInfo.start_time` handling takes when start time isn't available.
+/// - `(Some(_), None)` — a start time *was* recorded, but this observation
+///   came back empty. Unlike the case above, this is **not**
+///   ambiguous: `expected` can only be `Some(_)` if this exact platform's
+///   `proc_start_time` already produced a real value once, for this same
+///   PID, when the record was saved — so a platform that genuinely can't
+///   read start time would have recorded `None` to begin with, never
+///   `Some(_)`. The only way to reach `Some(_)` here paired with an observed
+///   `None` is `proc_start_time` racing the process actually exiting between
+///   `sweep`'s `is_process_alive` check and its own call (see this module's
+///   doc comment) — treated as a **mismatch**, so the caller skips signaling
+///   rather than trusting a liveness snapshot that may already be stale.
+/// - `(Some(e), Some(a))` — compared directly.
+pub fn start_time_matches(expected: Option<u64>, actual: Option<u64>) -> bool {
+    match (expected, actual) {
+        (Some(e), Some(a)) => e == a,
+        (Some(_), None) => false,
+        (None, _) => true,
+    }
+}
+
+/// Re-read `pid`'s *current* start time and check it against
+/// `expected_start_time` — the same [`start_time_matches`] comparison
+/// the broker's `classify_record` uses, applied again immediately before killing to
+/// close the PID-reuse window between `classify_record`'s check and the
+/// actual kill call (see the broker's `terminate_process`). Available
+/// wherever `proc_start_time` returns a real value (Linux, Windows).
+pub fn still_same_process(pid: u32, expected_start_time: Option<u64>) -> bool {
+    start_time_matches(expected_start_time, proc_start_time(pid))
+}
+
 /// Terminate a process by PID. The one implementation behind
 /// `beamtalk workspace stop --force` and the desktop broker's orphan reaper.
 ///
-/// - **Unix:** with `grace = None`, `SIGKILL` at once. With `Some(grace)`,
-///   `SIGTERM`, sleep `grace`, then `SIGKILL` if the process is still alive
-///   and `is_target()` still holds (the `SIGTERM` result is ignored; a failure
+/// - **Unix:** with `grace = None`, `SIGKILL` at once (if `is_target()` holds).
+///   With `Some(grace)`, `SIGTERM`, sleep `grace`, then `SIGKILL` if the
+///   process is still alive and `is_target()` still holds (the `SIGTERM` result is ignored; a failure
 ///   of the final kill is what is reported).
 /// - **Windows:** a single `TerminateProcess` (there is no graceful signal for
 ///   an arbitrary external process, so `grace` is ignored). `is_target()` is
@@ -197,9 +234,14 @@ pub fn kill_process(
             // SAFETY: kill(2) with a valid pid and standard signal number.
             unsafe { libc::kill(pid_i, libc::SIGTERM) };
             std::thread::sleep(grace);
-            if !(is_process_alive(pid) && is_target()) {
+            if !is_process_alive(pid) {
                 return Ok(());
             }
+        }
+        // Last-moment identity check, with or without a grace period: a
+        // recycled PID must never receive the SIGKILL.
+        if !is_target() {
+            return Ok(());
         }
         // SAFETY: kill(2) with a valid pid and standard signal number.
         let ret = unsafe { libc::kill(pid_i, libc::SIGKILL) };

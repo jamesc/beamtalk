@@ -965,7 +965,7 @@ mod tests {
 
     impl Drop for NodeGuard {
         fn drop(&mut self) {
-            if let Err(e) = force_kill_process(self.info.pid) {
+            if let Err(e) = force_kill_process(self.info.pid, self.info.start_time) {
                 if std::thread::panicking() {
                     eprintln!("NodeGuard: failed to force-kill pid {}: {e}", self.info.pid);
                 } else {
@@ -1019,7 +1019,7 @@ mod tests {
             info.pid != 0,
             "kill_node_raw called with sentinel PID 0 — node PID unknown"
         );
-        force_kill_process(info.pid)
+        force_kill_process(info.pid, info.start_time)
             .unwrap_or_else(|e| panic!("failed to kill BEAM process with pid {}: {e}", info.pid));
         wait_for_workspace_exit(info.connect_host(), info.port, 15).unwrap_or_else(|e| {
             panic!(
@@ -1142,7 +1142,7 @@ mod tests {
                     if let Ok(contents) = fs::read_to_string(&pid_path)
                         && let Ok(pid) = contents.trim().parse::<u32>()
                     {
-                        let _ = force_kill_process(pid);
+                        let _ = force_kill_process(pid, None);
                     }
                     last_err = Some(e);
                     // tw drops here: cleans up workspace dir and lockfile.
@@ -1192,7 +1192,7 @@ mod tests {
                         && let Ok(contents) = fs::read_to_string(ws_dir.join("pid"))
                         && let Ok(pid) = contents.trim().parse::<u32>()
                     {
-                        let _ = force_kill_process(pid);
+                        let _ = force_kill_process(pid, None);
                     }
                     // Clean all stale runtime files (port, pid, node.info, starting
                     // tombstone) so the next attempt starts from a clean slate.
