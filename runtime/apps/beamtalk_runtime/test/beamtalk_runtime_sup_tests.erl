@@ -34,11 +34,11 @@ supervisor_intensity_test() ->
 children_count_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    %% Should have exactly 13 children: ets_heir, xref, class_sup, class_monitor,
-    %% bootstrap, announcements, stdlib, subprocess_sup,
+    %% Should have exactly 14 children: ets_heir, xref, class_sup, class_monitor,
+    %% bootstrap, announcements, debug_actor_watcher, stdlib, subprocess_sup,
     %% reactive_subprocess_sup, trace_store, object_watch, file_handle_registry,
     %% node_monitor
-    ?assertEqual(13, length(ChildSpecs)).
+    ?assertEqual(14, length(ChildSpecs)).
 
 children_ids_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
@@ -52,6 +52,7 @@ children_ids_test() ->
     ?assert(lists:member(beamtalk_class_monitor, Ids)),
     ?assert(lists:member(beamtalk_bootstrap, Ids)),
     ?assert(lists:member(beamtalk_announcements, Ids)),
+    ?assert(lists:member(beamtalk_debug_actor_watcher, Ids)),
     ?assert(lists:member(beamtalk_stdlib, Ids)),
     ?assertNot(lists:member(beamtalk_object_instances, Ids)),
     ?assertNot(lists:member(beamtalk_actor_registry, Ids)),
@@ -80,6 +81,7 @@ children_are_workers_test() ->
             worker,
             worker,
             worker,
+            worker,
             supervisor,
             supervisor,
             worker,
@@ -96,7 +98,7 @@ children_are_permanent_test() ->
     %% All children should have permanent restart
     RestartTypes = [maps:get(restart, Spec) || Spec <- ChildSpecs],
     ?assertEqual(
-        lists:duplicate(13, permanent),
+        lists:duplicate(14, permanent),
         RestartTypes
     ).
 
@@ -108,7 +110,7 @@ children_are_permanent_test() ->
 children_ordered_correctly_test() ->
     {ok, {_SupFlags, ChildSpecs}} = beamtalk_runtime_sup:init([]),
 
-    %% Verify ordering: ets_heir -> xref -> bootstrap -> announcements -> stdlib
+    %% Verify ordering: ets_heir -> xref -> bootstrap -> announcements -> debug_actor_watcher -> stdlib
     %% -> subprocess_sup -> reactive_subprocess_sup -> trace_store -> object_watch
     %% -> file_handle_registry -> node_monitor
     Ids = [maps:get(id, Spec) || Spec <- ChildSpecs],
@@ -120,6 +122,7 @@ children_ordered_correctly_test() ->
             beamtalk_class_monitor,
             beamtalk_bootstrap,
             beamtalk_announcements,
+            beamtalk_debug_actor_watcher,
             beamtalk_stdlib,
             beamtalk_subprocess_sup,
             beamtalk_reactive_subprocess_sup,
@@ -214,7 +217,7 @@ reactive_subprocess_sup_child_spec_test() ->
 init_returns_proper_format_test() ->
     Result = beamtalk_runtime_sup:init([]),
     ?assertMatch(
-        {ok, {#{strategy := one_for_one}, [_, _, _, _, _, _, _, _, _, _, _, _, _]}}, Result
+        {ok, {#{strategy := one_for_one}, [_, _, _, _, _, _, _, _, _, _, _, _, _, _]}}, Result
     ).
 
 %%% Behavioral tests
@@ -254,6 +257,7 @@ all_children_alive_test() ->
             beamtalk_class_monitor,
             beamtalk_bootstrap,
             beamtalk_announcements,
+            beamtalk_debug_actor_watcher,
             beamtalk_stdlib,
             beamtalk_subprocess_sup,
             beamtalk_reactive_subprocess_sup,

@@ -21,7 +21,15 @@ Debug targets are tracked in an ETS table so that
 - **Class reference** (`#beamtalk_object{}` with class tag) —
   installs a primary logger filter for `beamtalk_class` metadata
 - **Actor instance** (`#beamtalk_object{}` with PID) —
-  sets per-process debug level (transient, lost on restart)
+  adds the actor's pid to a single shared primary filter. The setting is
+  tied to that pid: it is dropped when the actor process exits (so it is
+  also gone after an actor restart, which gets a new pid), and the shared
+  filter is removed with the last actor.
+
+The debug-target table is created at runtime app start and names the
+runtime's ETS heir, so it outlives whichever process first enabled debug.
+Every filter fun registered with `logger` is an external fun
+(`fun ?MODULE:name/2`) so it survives code reloads of this module.
 """.
 
 -include("beamtalk.hrl").
@@ -46,12 +54,19 @@ Debug targets are tracked in an ETS table so that
 ]).
 
 %% Internal
--export([ensure_table/0]).
+-export([ensure_table/0, actor_down/1]).
+
+%% Logger filter callbacks (external funs, so they survive code reloads).
+-export([class_filter/2, domain_filter/2, actor_filter/2]).
 
 %% Exported for testing
 -export([mcp_signal_path/0]).
 
 -define(DEBUG_TABLE, beamtalk_debug_targets).
+
+%% The one primary filter shared by every actor debug target (BT-5022): a
+%% per-pid filter id would mint one atom per actor and grow the filter list.
+-define(ACTOR_FILTER, beamtalk_debug_actors).
 
 %% ADR 0129 §5: the `Transcript` Logger route.
 -define(TRANSCRIPT_HANDLER, beamtalk_transcript_log).
@@ -333,8 +348,8 @@ Accepts three argument types:
 - Class reference (#beamtalk_object with class tag): installs a primary
   logger filter matching #{beamtalk_class => ClassName} metadata and sets
   module level on the compiled class module
-- Actor instance (#beamtalk_object with PID): sets per-process debug level
-  (transient — lost on actor restart)
+- Actor instance (#beamtalk_object with PID): enables debug for that pid via
+  the shared actor filter (dropped when the actor process exits)
 """.
 -spec enableDebug(term()) -> nil | #beamtalk_error{}.
 enableDebug(Target) when is_atom(Target) ->
@@ -370,23 +385,12 @@ enableDebug(Target) when is_atom(Target) ->
             ensure_table(),
             % elp:fixme W0023 intentional atom creation
             FilterId = list_to_atom("beamtalk_debug_domain_" ++ atom_to_list(Target)),
-            FilterFun = fun(LogEvent, _Extra) ->
-                case LogEvent of
-                    #{meta := #{domain := D}} ->
-                        case lists:prefix(Domain, D) of
-                            true -> LogEvent;
-                            false -> ignore
-                        end;
-                    _ ->
-                        ignore
-                end
-            end,
             %% Add a handler with a domain filter so debug-level messages
             %% from this domain reach the default handler.
             logger:add_handler(FilterId, logger_std_h, #{
                 level => debug,
                 filter_default => stop,
-                filters => [{FilterId, {FilterFun, []}}],
+                filters => [{FilterId, {fun ?MODULE:domain_filter/2, Domain}}],
                 config => #{type => standard_io}
             }),
             ets:insert(?DEBUG_TABLE, {Target, subsystem, [FilterId]}),
@@ -494,7 +498,7 @@ activeDebugTargets() ->
                 Name;
             ({ClassName, user_class, _Ids}) ->
                 {class, ClassName};
-            ({Pid, actor_instance, {ClassName, _FilterIds}}) ->
+            ({Pid, actor_instance, ClassName}) ->
                 {actor, Pid, ClassName}
         end,
         ets:tab2list(?DEBUG_TABLE)
@@ -528,12 +532,13 @@ disableAllDebug() ->
                     {ok, Module} -> logger:unset_module_level(Module);
                     not_found -> ok
                 end;
-            ({_Pid, actor_instance, {_ClassName, FilterIds}}) ->
-                lists:foreach(fun logger:remove_primary_filter/1, FilterIds)
+            ({Pid, actor_instance, _ClassName}) ->
+                beamtalk_debug_actor_watcher:unwatch(Pid)
         end,
         Targets
     ),
     ets:delete_all_objects(?DEBUG_TABLE),
+    sync_actor_filter(),
     nil.
 
 -doc "Return a formatted string describing the current logger state.".
@@ -617,15 +622,7 @@ enable_class_debug(ClassName) ->
     ensure_table(),
     % elp:fixme W0023 intentional atom creation
     FilterId = list_to_atom("beamtalk_debug_class_" ++ atom_to_list(ClassName)),
-    FilterFun = fun(LogEvent, _Extra) ->
-        case LogEvent of
-            #{meta := #{beamtalk_class := C}} when C =:= ClassName ->
-                LogEvent;
-            _ ->
-                ignore
-        end
-    end,
-    logger:add_primary_filter(FilterId, {FilterFun, []}),
+    logger:add_primary_filter(FilterId, {fun ?MODULE:class_filter/2, ClassName}),
     %% Also set module level on the compiled class module
     case beamtalk_class_metadata:lookup_module(ClassName) of
         {ok, Module} ->
@@ -660,26 +657,18 @@ disable_class_debug(ClassName) ->
 -doc """
 Enable debug logging for a specific actor process.
 
-Installs a primary logger filter that allows debug events from
-the actor's PID. This is transient — lost when the actor restarts.
+Records the pid in the debug table and makes sure the one shared primary
+filter (`actor_filter/2`) is installed; the filter passes events whose `pid`
+metadata has a row in the table. The pid is monitored by
+`beamtalk_debug_actor_watcher`, which calls `actor_down/1` when the actor
+exits, so the setting does not outlive the process.
 """.
 -spec enable_actor_debug(pid(), atom()) -> nil.
 enable_actor_debug(Pid, ClassName) ->
     ensure_table(),
-    % elp:fixme W0023 intentional atom creation
-    FilterId = list_to_atom(
-        "beamtalk_debug_actor_" ++ pid_to_list(Pid)
-    ),
-    FilterFun = fun(LogEvent, _Extra) ->
-        case LogEvent of
-            #{meta := #{pid := P}} when P =:= Pid ->
-                LogEvent;
-            _ ->
-                ignore
-        end
-    end,
-    logger:add_primary_filter(FilterId, {FilterFun, []}),
-    ets:insert(?DEBUG_TABLE, {Pid, actor_instance, {ClassName, [FilterId]}}),
+    ets:insert(?DEBUG_TABLE, {Pid, actor_instance, ClassName}),
+    ok = beamtalk_debug_actor_watcher:watch(Pid),
+    sync_actor_filter(),
     nil.
 
 -doc "Disable debug logging for a specific actor process.".
@@ -687,13 +676,82 @@ enable_actor_debug(Pid, ClassName) ->
 disable_actor_debug(Pid) ->
     ensure_table(),
     case ets:lookup(?DEBUG_TABLE, Pid) of
-        [{Pid, actor_instance, {_ClassName, FilterIds}}] ->
-            lists:foreach(fun logger:remove_primary_filter/1, FilterIds),
+        [{Pid, actor_instance, _ClassName}] ->
             ets:delete(?DEBUG_TABLE, Pid),
+            beamtalk_debug_actor_watcher:unwatch(Pid),
+            sync_actor_filter(),
             nil;
         [] ->
             nil
     end.
+
+-doc """
+Drop the debug state of an actor that has exited.
+
+Called by `beamtalk_debug_actor_watcher` on the actor's `'DOWN'`.
+""".
+-spec actor_down(pid()) -> ok.
+actor_down(Pid) ->
+    ensure_table(),
+    ets:delete(?DEBUG_TABLE, Pid),
+    sync_actor_filter().
+
+-doc """
+Make the shared actor filter present exactly while some actor row exists.
+
+Idempotent, and re-checks after acting so a concurrent enable/disable that
+changed the table in between cannot leave the filter missing or orphaned.
+""".
+-spec sync_actor_filter() -> ok.
+sync_actor_filter() ->
+    Want = has_actor_rows(),
+    _ =
+        case Want of
+            true -> logger:add_primary_filter(?ACTOR_FILTER, {fun ?MODULE:actor_filter/2, []});
+            false -> logger:remove_primary_filter(?ACTOR_FILTER)
+        end,
+    case has_actor_rows() =:= Want of
+        true -> ok;
+        false -> sync_actor_filter()
+    end.
+
+-spec has_actor_rows() -> boolean().
+has_actor_rows() ->
+    ets:select_count(?DEBUG_TABLE, [{{'_', actor_instance, '_'}, [], [true]}]) > 0.
+
+%%====================================================================
+%% Logger filter callbacks
+%%====================================================================
+
+-doc "Primary filter for a class target: pass events tagged with `ClassName`.".
+-spec class_filter(logger:log_event(), atom()) -> logger:filter_return().
+class_filter(#{meta := #{beamtalk_class := C}} = LogEvent, ClassName) when C =:= ClassName ->
+    LogEvent;
+class_filter(_LogEvent, _ClassName) ->
+    ignore.
+
+-doc "Handler filter for a domain target: pass events whose domain starts with `Domain`.".
+-spec domain_filter(logger:log_event(), [atom()]) -> logger:filter_return().
+domain_filter(#{meta := #{domain := D}} = LogEvent, Domain) when is_list(D) ->
+    case lists:prefix(Domain, D) of
+        true -> LogEvent;
+        false -> ignore
+    end;
+domain_filter(_LogEvent, _Domain) ->
+    ignore.
+
+-doc "Primary filter for actor targets: pass events from a pid with a debug row.".
+-spec actor_filter(logger:log_event(), term()) -> logger:filter_return().
+actor_filter(#{meta := #{pid := P}} = LogEvent, _Extra) when is_pid(P) ->
+    try ets:member(?DEBUG_TABLE, P) of
+        true -> LogEvent;
+        false -> ignore
+    catch
+        %% Table gone (runtime stopping): behave as if nothing is enabled.
+        error:badarg -> ignore
+    end;
+actor_filter(_LogEvent, _Extra) ->
+    ignore.
 
 %%====================================================================
 %% Internal helpers — formatting
@@ -737,22 +795,17 @@ format_debug_target(T) when is_atom(T) ->
 %% Internal helpers — ETS and logger
 %%====================================================================
 
--doc "Ensure the debug-targets ETS table exists. Creates it on first access.".
+-doc """
+Ensure the debug-targets ETS table exists.
+
+`beamtalk_runtime_app` creates it at start; this is the fallback for a caller
+that runs without the app. Either way it names the runtime's ETS heir, so the
+table (and with it the record of every installed filter) outlives the process
+that created it.
+""".
 -spec ensure_table() -> ok.
 ensure_table() ->
-    case ets:whereis(?DEBUG_TABLE) of
-        undefined ->
-            try
-                ets:new(?DEBUG_TABLE, [set, named_table, public]),
-                ok
-            catch
-                error:badarg ->
-                    %% Another process created it between our check and the new call.
-                    ok
-            end;
-        _Tid ->
-            ok
-    end.
+    beamtalk_ets_heir:ensure_shared_table(?DEBUG_TABLE, [set, named_table, public]).
 
 -doc """
 Enable OTP progress reports for the supervisor subsystem by removing

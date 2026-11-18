@@ -722,45 +722,45 @@ enableDebug_stdlib_succeeds() ->
 domain_filter_allows_matching_events() ->
     beamtalk_logging_config:disableAllDebug(),
     beamtalk_logging_config:enableDebug(runtime),
-    {FilterFun, _} = get_handler_filter(beamtalk_debug_domain_runtime),
+    {FilterFun, Extra} = get_handler_filter(beamtalk_debug_domain_runtime),
     Event = #{level => debug, msg => {string, "hi"}, meta => #{domain => [beamtalk, runtime]}},
-    ?assertEqual(Event, FilterFun(Event, [])),
+    ?assertEqual(Event, FilterFun(Event, Extra)),
     beamtalk_logging_config:disableAllDebug().
 
 domain_filter_ignores_non_matching_events() ->
     beamtalk_logging_config:disableAllDebug(),
     beamtalk_logging_config:enableDebug(runtime),
-    {FilterFun, _} = get_handler_filter(beamtalk_debug_domain_runtime),
+    {FilterFun, Extra} = get_handler_filter(beamtalk_debug_domain_runtime),
     Event = #{level => debug, msg => {string, "hi"}, meta => #{domain => [unrelated, something]}},
-    ?assertEqual(ignore, FilterFun(Event, [])),
+    ?assertEqual(ignore, FilterFun(Event, Extra)),
     beamtalk_logging_config:disableAllDebug().
 
 domain_filter_ignores_events_without_domain() ->
     beamtalk_logging_config:disableAllDebug(),
     beamtalk_logging_config:enableDebug(runtime),
-    {FilterFun, _} = get_handler_filter(beamtalk_debug_domain_runtime),
+    {FilterFun, Extra} = get_handler_filter(beamtalk_debug_domain_runtime),
     Event = #{level => debug, msg => {string, "hi"}, meta => #{}},
-    ?assertEqual(ignore, FilterFun(Event, [])),
+    ?assertEqual(ignore, FilterFun(Event, Extra)),
     beamtalk_logging_config:disableAllDebug().
 
 class_filter_allows_matching_class() ->
     beamtalk_logging_config:disableAllDebug(),
     ClassRef = #beamtalk_object{class = 'TestClass class', class_mod = test_class, pid = self()},
     beamtalk_logging_config:enableDebug(ClassRef),
-    {FilterFun, _} = get_primary_filter(beamtalk_debug_class_TestClass),
+    {FilterFun, Extra} = get_primary_filter(beamtalk_debug_class_TestClass),
     Event = #{level => debug, msg => {string, "hi"}, meta => #{beamtalk_class => 'TestClass'}},
-    ?assertEqual(Event, FilterFun(Event, [])),
+    ?assertEqual(Event, FilterFun(Event, Extra)),
     beamtalk_logging_config:disableAllDebug().
 
 class_filter_ignores_other_class() ->
     beamtalk_logging_config:disableAllDebug(),
     ClassRef = #beamtalk_object{class = 'TestClass class', class_mod = test_class, pid = self()},
     beamtalk_logging_config:enableDebug(ClassRef),
-    {FilterFun, _} = get_primary_filter(beamtalk_debug_class_TestClass),
+    {FilterFun, Extra} = get_primary_filter(beamtalk_debug_class_TestClass),
     Event = #{level => debug, msg => {string, "hi"}, meta => #{beamtalk_class => 'OtherClass'}},
-    ?assertEqual(ignore, FilterFun(Event, [])),
+    ?assertEqual(ignore, FilterFun(Event, Extra)),
     EventNoMeta = #{level => debug, msg => {string, "hi"}, meta => #{}},
-    ?assertEqual(ignore, FilterFun(EventNoMeta, [])),
+    ?assertEqual(ignore, FilterFun(EventNoMeta, Extra)),
     beamtalk_logging_config:disableAllDebug().
 
 actor_filter_allows_matching_pid() ->
@@ -772,10 +772,9 @@ actor_filter_allows_matching_pid() ->
     end),
     ActorRef = #beamtalk_object{class = 'Counter', class_mod = counter, pid = Pid},
     beamtalk_logging_config:enableDebug(ActorRef),
-    FilterId = list_to_atom("beamtalk_debug_actor_" ++ pid_to_list(Pid)),
-    {FilterFun, _} = get_primary_filter(FilterId),
+    {FilterFun, Extra} = get_primary_filter(beamtalk_debug_actors),
     Event = #{level => debug, msg => {string, "hi"}, meta => #{pid => Pid}},
-    ?assertEqual(Event, FilterFun(Event, [])),
+    ?assertEqual(Event, FilterFun(Event, Extra)),
     Pid ! stop,
     beamtalk_logging_config:disableAllDebug().
 
@@ -788,14 +787,13 @@ actor_filter_ignores_other_pid() ->
     end),
     ActorRef = #beamtalk_object{class = 'Counter', class_mod = counter, pid = Pid},
     beamtalk_logging_config:enableDebug(ActorRef),
-    FilterId = list_to_atom("beamtalk_debug_actor_" ++ pid_to_list(Pid)),
-    {FilterFun, _} = get_primary_filter(FilterId),
+    {FilterFun, Extra} = get_primary_filter(beamtalk_debug_actors),
     %% Use a different pid in the event meta
     OtherPid = self(),
     Event = #{level => debug, msg => {string, "hi"}, meta => #{pid => OtherPid}},
-    ?assertEqual(ignore, FilterFun(Event, [])),
+    ?assertEqual(ignore, FilterFun(Event, Extra)),
     EventNoMeta = #{level => debug, msg => {string, "hi"}, meta => #{}},
-    ?assertEqual(ignore, FilterFun(EventNoMeta, [])),
+    ?assertEqual(ignore, FilterFun(EventNoMeta, Extra)),
     Pid ! stop,
     beamtalk_logging_config:disableAllDebug().
 

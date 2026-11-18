@@ -97,6 +97,17 @@ init([]) ->
             type => worker,
             modules => [beamtalk_announcements]
         },
+        %% Drops `Logger enableDebug:` state for actors that exit (BT-5022).
+        %% It re-monitors from the debug-target table on restart, so it holds
+        %% no state of its own.
+        #{
+            id => beamtalk_debug_actor_watcher,
+            start => {beamtalk_debug_actor_watcher, start_link, []},
+            restart => permanent,
+            shutdown => 5000,
+            type => worker,
+            modules => [beamtalk_debug_actor_watcher]
+        },
         %% Then register stdlib primitive classes (Integer, String, etc.)
         #{
             id => beamtalk_stdlib,

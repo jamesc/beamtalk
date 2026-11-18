@@ -77,6 +77,10 @@ start(_StartType, _StartArgs) ->
     %% ADR 0068 Phase 2c: Initialize protocol registry ETS table.
     beamtalk_protocol_registry:init(),
 
+    %% BT-5022: the `Logger enableDebug:` target table, owned here (and re-heired
+    %% below) rather than by whichever short-lived process enables debug first.
+    ok = beamtalk_logging_config:ensure_table(),
+
     %% ADR 0129 §5: plain-format handler for `Transcript` output outside an
     %% interactive workspace. Installed before any user code can run.
     ok = beamtalk_logging_config:install_transcript_handler(),
