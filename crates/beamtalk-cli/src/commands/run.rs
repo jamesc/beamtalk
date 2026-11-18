@@ -349,21 +349,47 @@ fn run_script(
         .wait()
         .map_err(|e| miette!("Failed to wait for BEAM node: {e}"))?;
 
-    if !status.success()
-        && let Some(code) = status.code()
-    {
+    if let Some(code) = forwarded_exit_code(status) {
         // ADR 0099 §3: the program owns its exit status. `Program exit: N`,
         // `System halt: N`, and the implicit "uncaught error → 1" all surface
         // as the BEAM node's exit code; propagate it verbatim as the CLI's own
         // exit code (POSIX-correct for shells / CI `set -e`). The program has
         // already written any diagnostics to its stderr, so we add no message.
+        // A signal kill (SIGKILL, OOM, SIGSEGV) has no exit code and is
+        // reported as 128 + signal, the shell convention, so CI sees a failure.
         info!(exit_code = code, "Forwarding script exit code");
         std::process::exit(code);
     }
-    // Signal-terminated (e.g. Ctrl+C) — exit silently
+    // Clean exit, or Ctrl+C (SIGINT) — exit silently.
 
     info!("Script run completed");
     Ok(())
+}
+
+/// The exit code `beamtalk run` must exit with for the BEAM node's `status`,
+/// or `None` when it should return normally (success, or an interrupt).
+///
+/// Ctrl+C (SIGINT) is a deliberate user stop and stays silent success; any other
+/// signal kill maps to `128 + signal` as `beamtalk-exec` does.
+fn forwarded_exit_code(status: std::process::ExitStatus) -> Option<i32> {
+    if status.success() {
+        return None;
+    }
+    if let Some(code) = status.code() {
+        return Some(code);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status
+            .signal()
+            .filter(|&sig| sig != libc::SIGINT)
+            .map(|sig| 128 + sig)
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
 }
 
 /// Run a class entry method inside a live shared workspace (ADR 0099 §3).
@@ -837,6 +863,24 @@ fn ensure_otp_app_in_workspace(
 
 #[cfg(test)]
 mod tests {
+
+    #[cfg(unix)]
+    #[test]
+    fn forwarded_exit_code_maps_signals_and_codes() {
+        let status = |script: &str| {
+            std::process::Command::new("sh")
+                .args(["-c", script])
+                .status()
+                .unwrap()
+        };
+        assert_eq!(forwarded_exit_code(status("exit 0")), None);
+        assert_eq!(forwarded_exit_code(status("exit 3")), Some(3));
+        // BEAM killed by SIGKILL (e.g. the OOM killer): must not look like success.
+        assert_eq!(forwarded_exit_code(status("kill -9 $$")), Some(137));
+        assert_eq!(forwarded_exit_code(status("kill -11 $$")), Some(139));
+        // Ctrl+C is unchanged: silent success.
+        assert_eq!(forwarded_exit_code(status("kill -INT $$")), None);
+    }
     use super::*;
     use serial_test::serial;
     use std::fs;
