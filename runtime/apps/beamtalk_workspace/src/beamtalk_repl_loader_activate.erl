@@ -39,6 +39,14 @@ activate_module(ModuleName, Classes) ->
 
 -doc """
 Activate a loaded module with an optional source path for workspace metadata.
+
+BT-5015: returns `{error, #beamtalk_error{kind = registration_error}}` when
+`register_class/0` fails, before hot reload, workspace bookkeeping and rechecks.
+The module is already loaded by then and is deliberately **not** purged here: on
+a reload the previous code is already replaced, so deleting the module would
+take down a live class. Callers report the error and skip their own
+bookkeeping (source tracking, ChangeLog); `beamtalk_repl_eval` purges a freshly
+defined protocol module itself.
 Passing SourcePath ensures the source file is recorded in workspace_meta so that
 new VS Code sessions (which have an empty session tracker) can still navigate to source.
 
