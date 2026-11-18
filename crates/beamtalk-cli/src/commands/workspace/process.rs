@@ -353,10 +353,9 @@ pub fn start_detached_node(
         ));
     };
 
-    #[cfg(target_os = "linux")]
+    // Recorded on every platform `proc_start_time` supports (Linux, Windows);
+    // `None` elsewhere. Kill paths use it as the PID-identity check.
     let start_time = read_proc_start_time(pid);
-    #[cfg(not(target_os = "linux"))]
-    let start_time = None;
 
     // Read actual port from port file (written by beamtalk_repl_server after binding).
     // This is essential when port=0 is used (OS assigns ephemeral port).
