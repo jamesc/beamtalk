@@ -17,6 +17,7 @@ no-op reverse).
 
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% A bare `self` expression evaluates to the bound value, with no runtime
 %% primitives required (only the compiler, which this suite starts itself
@@ -92,3 +93,61 @@ eval_with_self_reuses_module_and_unloads() ->
     ?assertEqual({ok, 2}, beamtalk_repl_eval:eval_with_self(2, <<"self">>)),
     ?assertEqual(Module, get('$beamtalk_inspector_eval_module')),
     ?assertEqual(false, code:is_loaded(Module)).
+
+%% BT-5019: a block returned from `evaluate:` is a value the caller may call
+%% later. The transient eval module must therefore stay loaded while the block
+%% can still be called, instead of being hard-purged out from under it.
+eval_with_self_returned_block_survives_test_() ->
+    {setup, fun compiler_setup/0, fun(_) -> ok end,
+        {spawn, ?_test(eval_with_self_returned_block_survives())}}.
+
+eval_with_self_returned_block_survives() ->
+    {ok, Block} = beamtalk_repl_eval:eval_with_self(nil, <<"[:x | x + 1]">>),
+    ?assert(is_function(Block, 1)),
+    ?assertEqual(8, Block(7)),
+    %% A later `evaluate:` in the same process must not disturb the earlier block.
+    ?assertEqual({ok, 5}, beamtalk_repl_eval:eval_with_self(5, <<"self">>)),
+    ?assertEqual(8, Block(7)),
+    %% ...including another block-returning call.
+    {ok, Block2} = beamtalk_repl_eval:eval_with_self(nil, <<"[:x | x * 2]">>),
+    ?assertEqual(8, Block(7)),
+    ?assertEqual(14, Block2(7)).
+
+%% A block nested inside a returned collection is held just the same.
+eval_with_self_nested_block_survives_test_() ->
+    {setup, fun compiler_setup/0, fun(_) -> ok end,
+        {spawn, ?_test(eval_with_self_nested_block_survives())}}.
+
+eval_with_self_nested_block_survives() ->
+    {ok, {Block}} = beamtalk_repl_eval:eval_with_self(nil, <<"{[:x | x + 1]}">>),
+    ?assertEqual({ok, 1}, beamtalk_repl_eval:eval_with_self(1, <<"self">>)),
+    ?assertEqual(3, Block(2)).
+
+%% A process still running eval-module code when `evaluate:` returns must not be
+%% killed by the cleanup.
+eval_with_self_running_process_survives_test_() ->
+    {setup, fun compiler_setup/0, fun(_) -> ok end,
+        {spawn, ?_test(eval_with_self_running_process_survives())}}.
+
+eval_with_self_running_process_survives() ->
+    %% The block calls the block it is given, so the holder is parked inside
+    %% eval-module code until it is told to go.
+    {ok, Block} = beamtalk_repl_eval:eval_with_self(nil, <<"[:f | f value. 42]">>),
+    Parent = self(),
+    Holder = spawn(fun() ->
+        Parent !
+            {done,
+                Block(fun() ->
+                    receive
+                        go -> ok
+                    end
+                end)}
+    end),
+    Ref = erlang:monitor(process, Holder),
+    %% sleep: let the holder enter the block before the next evaluate: runs
+    timer:sleep(100),
+    ?assertEqual({ok, 3}, beamtalk_repl_eval:eval_with_self(3, <<"self">>)),
+    ?assert(erlang:is_process_alive(Holder)),
+    Holder ! go,
+    ?awaitMessage({done, 42}, 2000),
+    ?awaitMessage({'DOWN', Ref, process, Holder, normal}, 1000).
