@@ -236,6 +236,7 @@ jobs:
         env:
           SECRET_KEY_BASE: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
         run: |
+          ls -la dist-liveview/bin
           test -f dist-liveview/bin/bt_attach.bat
           # Git Bash cannot exec a .bat by path (exits 1, no output) — go
           # through cmd.exe (`//c`, so MSYS doesn't rewrite it to `C:/`).
