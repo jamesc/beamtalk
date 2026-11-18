@@ -2988,6 +2988,7 @@ async_send_future_rejected_when_busy_actor_killed_test() ->
     Future = beamtalk_future:new(),
     beamtalk_future:when_rejected(Future, fun(E) -> Parent ! {rejected, E} end),
     beamtalk_actor:async_send(Counter, 'slowGet:', [60000], beamtalk_future:pid(Future)),
+    unlink(Counter),
     exit(Counter, kill),
     ?awaitMessage({rejected, #beamtalk_error{kind = actor_dead}}).
 

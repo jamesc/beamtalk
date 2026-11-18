@@ -1017,8 +1017,8 @@ await_on_exited_future_fails_immediately_test() ->
     ?awaitMessage({'DOWN', Mon, process, Pid, _}),
     %% Both finite and infinite awaits must fail at once, not wait out the timeout.
     {Micros, _} = timer:tc(fun() ->
-        ?assertBtError(future_expired, beamtalk_future:await(Future, 5000)),
-        ?assertBtError(future_expired, beamtalk_future:await_forever(Future))
+        ?assertThrow(#beamtalk_error{kind = future_expired}, beamtalk_future:await(Future, 5000)),
+        ?assertThrow(#beamtalk_error{kind = future_expired}, beamtalk_future:await_forever(Future))
     end),
     ?assert(Micros < 1000000).
 
@@ -1027,4 +1027,6 @@ orphaned_pending_future_is_rejected_after_cap_test() ->
     Parent = self(),
     beamtalk_future:when_rejected(Future, fun(E) -> Parent ! {rejected, E} end),
     ?awaitMessage({rejected, #beamtalk_error{kind = future_expired}}),
-    ?assertBtError(future_expired, beamtalk_future:await_forever(Future)).
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{kind = future_expired}}, beamtalk_future:await_forever(Future)
+    ).
