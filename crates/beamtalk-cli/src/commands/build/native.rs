@@ -344,7 +344,6 @@ pub(crate) struct Rebar3Result {
     /// Ebin directories produced by rebar3 (one per compiled hex dep,
     /// plus the package's own native modules if `native/` exists).
     /// Used by `run.rs` and `repl/mod.rs` via `collect_rebar3_ebin_paths`.
-    #[allow(dead_code)] // Informational; code paths are collected from filesystem
     pub ebin_paths: Vec<Utf8PathBuf>,
     /// Erlang module names compiled from native sources.
     /// Used for `.app.src` module list generation.
