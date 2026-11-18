@@ -938,7 +938,8 @@ fn boolean_only_case_with_failing_branch_needs_catch_all() {
     // Assert it there so a CI OTP bump notices a fix; on any other release
     // only the catch-all variant is checked, so a developer on a fixed OTP
     // is not failed by a change that did not cause it.
-    let otp = beamtalk_core::test_helpers::test_support::installed_otp_release().unwrap_or_default();
+    let otp =
+        beamtalk_core::test_helpers::test_support::installed_otp_release().unwrap_or_default();
     if otp.is_empty() {
         println!("Skipping the OTP-28 crash assertion: `erl` not available to read otp_release");
     }

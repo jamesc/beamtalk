@@ -203,20 +203,20 @@ fn generate_core_erlang(case_name: &str) -> (String, String) {
         .unwrap_or_else(|e| panic!("{e}"))
 }
 
+/// Case name -> `(module_name, core_erlang)` or the generation failure message.
+type GeneratedCases = std::collections::HashMap<String, Result<(String, String), String>>;
+
 /// Every case's `(module_name, core_erlang)`, generated once per test run and
 /// shared by the codegen snapshot and `erlc` tests. A failed generation is
 /// stored as its panic message so the one test for that case reports it.
-fn generated_cases() -> &'static std::collections::HashMap<String, Result<(String, String), String>>
-{
-    static CACHE: std::sync::OnceLock<
-        std::collections::HashMap<String, Result<(String, String), String>>,
-    > = std::sync::OnceLock::new();
+fn generated_cases() -> &'static GeneratedCases {
+    static CACHE: std::sync::OnceLock<GeneratedCases> = std::sync::OnceLock::new();
     CACHE.get_or_init(|| {
         ALL_CASES
             .iter()
             .map(|case| {
-                let generated =
-                    std::panic::catch_unwind(|| generate_core_erlang_uncached(case)).map_err(|p| {
+                let generated = std::panic::catch_unwind(|| generate_core_erlang_uncached(case))
+                    .map_err(|p| {
                         p.downcast_ref::<String>()
                             .cloned()
                             .or_else(|| p.downcast_ref::<&str>().map(ToString::to_string))
@@ -309,7 +309,11 @@ fn test_codegen_compiles(case_name: &str) {
             mine.is_empty() && !unattributed,
             "erlc compilation failed for '{}':\n{}\n\nGenerated Core Erlang:\n{}",
             case_name,
-            if unattributed { output.as_str().to_string() } else { mine.join("\n") },
+            if unattributed {
+                output.as_str().to_string()
+            } else {
+                mine.join("\n")
+            },
             core_erlang
         );
     }
