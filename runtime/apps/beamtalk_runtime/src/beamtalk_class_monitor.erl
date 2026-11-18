@@ -170,13 +170,21 @@ init(Opts) ->
 
 handle_call({watch, ClassName, Pid}, _From, State) ->
     {reply, ok, do_watch(ClassName, Pid, State)};
-handle_call({unwatch, ClassName}, _From, #state{watched = Watched, refs = Refs} = State) ->
+handle_call(
+    {unwatch, ClassName},
+    _From,
+    #state{watched = Watched, refs = Refs, history = History} = State
+) ->
     ClassRefs = [R || R := N <- Refs, N =:= ClassName],
     lists:foreach(fun(R) -> erlang:demonitor(R, [flush]) end, ClassRefs),
     RefSet = sets:from_list(ClassRefs, [{version, 2}]),
     {reply, ok, State#state{
         watched = maps:filter(fun(_P, R) -> not sets:is_element(R, RefSet) end, Watched),
-        refs = maps:without(ClassRefs, Refs)
+        refs = maps:without(ClassRefs, Refs),
+        %% BT-5046: the class is being removed, so its crash history can
+        %% never be consulted again; drop it so history is bounded by the
+        %% classes that exist, not every class that ever crashed.
+        history = maps:remove(ClassName, History)
     }};
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_call}, State}.

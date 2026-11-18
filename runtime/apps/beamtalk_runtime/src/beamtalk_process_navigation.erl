@@ -89,7 +89,6 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
     guarded_state/1,
     guarded_state/2,
     infra_deny_list/0,
-    is_infra/1,
     %% Node / tree accessors consumed by the SupervisionNode & SupervisionTree
     %% stdlib classes.
     enrich/1,
@@ -175,7 +174,7 @@ timeout-guarded `sys:get_status/1` fetch — never called during snapshotting.
 -export_type([scope/0, node_map/0]).
 
 -ifdef(TEST).
--export([supervisor_config/2]).
+-export([supervisor_config/2, is_infra/1]).
 -endif.
 
 %%% ============================================================================

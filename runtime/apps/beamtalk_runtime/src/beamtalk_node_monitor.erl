@@ -82,7 +82,10 @@ resolved again", not a re-derivation of `NodeShapeSkew`'s own criteria.
 -include_lib("kernel/include/logger.hrl").
 
 %% API
--export([start_link/0, normalize_reason/1, skew_count/1]).
+-export([start_link/0, skew_count/1]).
+-ifdef(TEST).
+-export([normalize_reason/1]).
+-endif.
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
@@ -234,7 +237,10 @@ announce(EventClass, Fields) ->
     catch
         Class:Reason ->
             ?LOG_WARNING("Failed to announce cluster event", #{
-                event => EventClass, class => Class, reason => Reason
+                domain => [beamtalk, runtime],
+                event => EventClass,
+                class => Class,
+                reason => Reason
             })
     end,
     ok.
@@ -301,13 +307,19 @@ check_shape_skew_on_connect(PeerNode) ->
                 );
             {error, FetchReason} ->
                 ?LOG_WARNING("Could not fetch peer shape manifest on connect", #{
-                    node => PeerNode, reason => FetchReason
+                    domain => [beamtalk, runtime],
+                    node => PeerNode,
+                    reason => FetchReason
                 })
         end
     catch
         Class:Reason:Stacktrace ->
             ?LOG_WARNING("Shape-skew check failed on connect", #{
-                node => PeerNode, class => Class, reason => Reason, stacktrace => Stacktrace
+                domain => [beamtalk, runtime],
+                node => PeerNode,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
             })
     end,
     ok.
@@ -338,7 +350,11 @@ check_shape_skew_on_reload(ClassName, Peers) ->
     catch
         Class:Reason:Stacktrace ->
             ?LOG_WARNING("Shape-skew check failed on reload", #{
-                className => ClassName, class => Class, reason => Reason, stacktrace => Stacktrace
+                domain => [beamtalk, runtime],
+                className => ClassName,
+                class => Class,
+                reason => Reason,
+                stacktrace => Stacktrace
             })
     end,
     ok.
@@ -356,8 +372,8 @@ so a peer that goes unreachable mid-reload-check doesn't look identical to
 """.
 -spec check_one_peer_class(node(), atom(), beamtalk_release_shapes:shape_entry()) -> ok.
 check_one_peer_class(PeerNode, ClassName, LocalEntry) ->
-    try
-        erpc:call(
+    case
+        beamtalk_call_failure:erpc(
             PeerNode,
             beamtalk_release_shapes,
             class_shape_entry,
@@ -365,22 +381,16 @@ check_one_peer_class(PeerNode, ClassName, LocalEntry) ->
             ?BT_REMOTE_CALL_TIMEOUT
         )
     of
-        undefined ->
+        {ok, undefined} ->
             ok;
-        RemoteEntry when is_map(RemoteEntry) ->
-            announce_if_skewed(PeerNode, ClassName, LocalEntry, RemoteEntry)
-    catch
-        error:{erpc, Reason} ->
+        {ok, RemoteEntry} when is_map(RemoteEntry) ->
+            announce_if_skewed(PeerNode, ClassName, LocalEntry, RemoteEntry);
+        {error, Reason} ->
             ?LOG_WARNING("Could not fetch peer class shape entry on reload", #{
-                node => PeerNode, className => ClassName, reason => Reason
-            });
-        error:{exception, Reason, _Stack} ->
-            ?LOG_WARNING("Could not fetch peer class shape entry on reload", #{
-                node => PeerNode, className => ClassName, reason => Reason
-            });
-        exit:{exception, Reason} ->
-            ?LOG_WARNING("Could not fetch peer class shape entry on reload", #{
-                node => PeerNode, className => ClassName, reason => Reason
+                domain => [beamtalk, runtime],
+                node => PeerNode,
+                className => ClassName,
+                reason => Reason
             })
     end,
     ok.

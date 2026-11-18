@@ -44,11 +44,8 @@ to avoid temp files on disk.
     compile_core_erlang/1,
     parse_core_erlang/1,
     register_class/2,
-    remove_class/1,
     get_classes/0,
     register_protocol/2,
-    remove_protocol/1,
-    get_protocols/0,
     register_aliases/1,
     get_aliases/0,
     resolve_completion_type/1,
@@ -77,6 +74,9 @@ to avoid temp files on disk.
 
 -ifdef(TEST).
 -export([
+    remove_class/1,
+    remove_protocol/1,
+    get_protocols/0,
     handle_compile_response/1,
     handle_diagnostics_response/1,
     handle_version_response/1,
@@ -91,11 +91,10 @@ to avoid temp files on disk.
     %% ADR 0050 Phase 3: Accumulated class metadata cache.
     %% Maps class name atom → __beamtalk_meta/0 map.
     %% Populated via register_class/2 casts and crash recovery on init.
-    %% Accumulates entries from every session that has ever called
-    %% register_class/2, with no removal on session disconnect — the
-    %% `aliases` field below (ADR 0108) was modeled on this same
-    %% cache and shares this exact limitation; see its doc for the
-    %% full rationale, which applies here unchanged.
+    %% Entries are removed when a class is removed: the runtime casts
+    %% `{remove_class, Name}` from `beamtalk_class_lifecycle:purge_compiler_cache/1`.
+    %% Sessions that disconnect without removing their classes leave entries
+    %% behind; the `aliases` field below (ADR 0108) shares that limitation.
     classes = #{} :: #{atom() => map()},
     %% Accumulated protocol metadata cache, mirroring `classes`
     %% above but populated via `register_protocol/2`/`remove_protocol/1`
@@ -459,7 +458,10 @@ found; returns `{error, Diagnostics}' if the compiler port is unavailable.
     {ok, [pos_integer()]} | {error, [map()]}.
 find_senders_in_source(Source, Selector) ->
     safe_call(
-        {find_senders_in_source, Source, Selector}, ?CALL_TIMEOUT_MS, ?DIAG_DOWN, ?DIAG_TIMEOUT
+        {port_call, find_senders_in_source, [Source, Selector]},
+        ?CALL_TIMEOUT_MS,
+        ?DIAG_DOWN,
+        ?DIAG_TIMEOUT
     ).
 
 -doc """
@@ -473,7 +475,9 @@ returns `{error, Diagnostics}' if the compiler port is unavailable.
 -spec find_all_sends_in_source(binary()) ->
     {ok, [map()]} | {error, [map()]}.
 find_all_sends_in_source(Source) ->
-    safe_call({find_all_sends_in_source, Source}, ?CALL_TIMEOUT_MS, ?DIAG_DOWN, ?DIAG_TIMEOUT).
+    safe_call(
+        {port_call, find_all_sends_in_source, [Source]}, ?CALL_TIMEOUT_MS, ?DIAG_DOWN, ?DIAG_TIMEOUT
+    ).
 
 -doc """
 Find every `announce:' emission in a single method's source.
@@ -488,7 +492,12 @@ emissions; returns `{error, Diagnostics}' if the compiler port is unavailable.
 -spec find_announce_sites_in_source(binary()) ->
     {ok, [map()]} | {error, [map()]}.
 find_announce_sites_in_source(Source) ->
-    safe_call({find_announce_sites_in_source, Source}, ?CALL_TIMEOUT_MS, ?DIAG_DOWN, ?DIAG_TIMEOUT).
+    safe_call(
+        {port_call, find_announce_sites_in_source, [Source]},
+        ?CALL_TIMEOUT_MS,
+        ?DIAG_DOWN,
+        ?DIAG_TIMEOUT
+    ).
 
 -doc """
 Find references to a class in a single method's source.
@@ -503,7 +512,7 @@ is unavailable.
     {ok, [pos_integer()]} | {error, [map()]}.
 find_references_to_in_source(Source, ClassName) ->
     safe_call(
-        {find_references_to_in_source, Source, ClassName},
+        {port_call, find_references_to_in_source, [Source, ClassName]},
         ?CALL_TIMEOUT_MS,
         ?DIAG_DOWN,
         ?DIAG_TIMEOUT
@@ -522,7 +531,10 @@ unavailable.
     {ok, [pos_integer()]} | {error, [map()]}.
 find_field_readers_in_source(Source, Field) ->
     safe_call(
-        {find_field_readers_in_source, Source, Field}, ?CALL_TIMEOUT_MS, ?DIAG_DOWN, ?DIAG_TIMEOUT
+        {port_call, find_field_readers_in_source, [Source, Field]},
+        ?CALL_TIMEOUT_MS,
+        ?DIAG_DOWN,
+        ?DIAG_TIMEOUT
     ).
 
 -doc """
@@ -538,7 +550,10 @@ unavailable.
     {ok, [pos_integer()]} | {error, [map()]}.
 find_field_writers_in_source(Source, Field) ->
     safe_call(
-        {find_field_writers_in_source, Source, Field}, ?CALL_TIMEOUT_MS, ?DIAG_DOWN, ?DIAG_TIMEOUT
+        {port_call, find_field_writers_in_source, [Source, Field]},
+        ?CALL_TIMEOUT_MS,
+        ?DIAG_DOWN,
+        ?DIAG_TIMEOUT
     ).
 
 -doc """
@@ -557,7 +572,7 @@ are found; returns `{error, Diagnostics}' if the compiler port is unavailable.
     {ok, [pos_integer()]} | {error, [map()]}.
 find_ffi_sites_in_source(Source, Module, Function, Arity) ->
     safe_call(
-        {find_ffi_sites_in_source, Source, Module, Function, Arity},
+        {port_call, find_ffi_sites_in_source, [Source, Module, Function, Arity]},
         ?CALL_TIMEOUT_MS,
         ?DIAG_DOWN,
         ?DIAG_TIMEOUT
@@ -578,7 +593,7 @@ return `{error, Reason, Message}'; transport failures return
     | {error, atom(), binary()}.
 resolve_method_span(Source, ClassName, Selector, Side) ->
     safe_call(
-        {resolve_method_span, Source, ClassName, Selector, Side},
+        {port_call, resolve_method_span, [Source, ClassName, Selector, Side]},
         ?CALL_TIMEOUT_MS,
         ?SPAN_DOWN,
         ?SPAN_TIMEOUT
@@ -601,7 +616,12 @@ the bytes currently occupying it. Resolution failures return
     {ok, #{start := non_neg_integer(), 'end' := non_neg_integer()}, binary()}
     | {error, atom(), binary()}.
 resolve_class_span(Source, ClassName) ->
-    safe_call({resolve_class_span, Source, ClassName}, ?CALL_TIMEOUT_MS, ?SPAN_DOWN, ?SPAN_TIMEOUT).
+    safe_call(
+        {port_call, resolve_class_span, [Source, ClassName]},
+        ?CALL_TIMEOUT_MS,
+        ?SPAN_DOWN,
+        ?SPAN_TIMEOUT
+    ).
 
 -doc """
 Resolve the exact byte span(s) of every self/super-directed send of
@@ -618,7 +638,7 @@ match's keyword arity mismatched); transport failures return
     | {error, atom(), binary()}.
 find_selector_send_spans(MethodSource, OldSelector, NewSelector) ->
     safe_call(
-        {find_selector_send_spans, MethodSource, OldSelector, NewSelector},
+        {port_call, find_selector_send_spans, [MethodSource, OldSelector, NewSelector]},
         ?CALL_TIMEOUT_MS,
         ?SPAN_DOWN,
         ?SPAN_TIMEOUT
@@ -641,7 +661,9 @@ ambiguous) return `{error, Reason, Message}'; transport failures return
     | {error, atom(), binary()}.
 find_definition_selector_spans(Source, ClassName, OldSelector, NewSelector, Side) ->
     safe_call(
-        {find_definition_selector_spans, Source, ClassName, OldSelector, NewSelector, Side},
+        {port_call, find_definition_selector_spans, [
+            Source, ClassName, OldSelector, NewSelector, Side
+        ]},
         ?CALL_TIMEOUT_MS,
         ?SPAN_DOWN,
         ?SPAN_TIMEOUT
@@ -659,7 +681,12 @@ failure.
 -spec categorize_methods(binary(), atom() | binary()) ->
     {ok, [map()]} | {error, atom(), binary()}.
 categorize_methods(Source, ClassName) ->
-    safe_call({categorize_methods, Source, ClassName}, ?CALL_TIMEOUT_MS, ?SPAN_DOWN, ?SPAN_TIMEOUT).
+    safe_call(
+        {port_call, categorize_methods, [Source, ClassName]},
+        ?CALL_TIMEOUT_MS,
+        ?SPAN_DOWN,
+        ?SPAN_TIMEOUT
+    ).
 
 -doc """
 Build the class→module-name index for a single `src/**/*.bt` file
@@ -675,7 +702,7 @@ full wire shape. Backs the REPL/workspace cold-load fallback for
     {ok, binary(), [binary()]} | {error, atom(), binary()}.
 build_class_module_index_in_source(Source, RelativePath, PackageName) ->
     safe_call(
-        {build_class_module_index_in_source, Source, RelativePath, PackageName},
+        {port_call, build_class_module_index_in_source, [Source, RelativePath, PackageName]},
         ?CALL_TIMEOUT_MS,
         ?SPAN_DOWN,
         ?SPAN_TIMEOUT
@@ -693,7 +720,7 @@ rule. Returns `{ok, ModuleName}'; a segment outside `[A-Za-z0-9_]' returns
     {ok, binary()} | {error, atom(), binary()}.
 module_name_for_path(Path, PackageName, RootKind) ->
     safe_call(
-        {module_name_for_path, Path, PackageName, RootKind},
+        {port_call, module_name_for_path, [Path, PackageName, RootKind]},
         ?CALL_TIMEOUT_MS,
         ?SPAN_DOWN,
         ?SPAN_TIMEOUT
@@ -707,7 +734,7 @@ real grammar (BT-4861) — see `beamtalk_compiler_port:scan_source_dependencies/
     {ok, #{classes := [map()], native_refs := [binary()]}} | {error, atom(), binary()}.
 scan_source_dependencies(Source) ->
     safe_call(
-        {scan_source_dependencies, Source}, ?CALL_TIMEOUT_MS, ?SPAN_DOWN, ?SPAN_TIMEOUT
+        {port_call, scan_source_dependencies, [Source]}, ?CALL_TIMEOUT_MS, ?SPAN_DOWN, ?SPAN_TIMEOUT
     ).
 
 -doc """
@@ -725,7 +752,10 @@ return `{error, port_error | noproc | timeout, Message}'.
     {ok, #{binary() => boolean()}} | {error, atom(), binary()}.
 class_state_field_defaults(Source, ClassName) ->
     safe_call(
-        {class_state_field_defaults, Source, ClassName}, ?CALL_TIMEOUT_MS, ?SPAN_DOWN, ?SPAN_TIMEOUT
+        {port_call, class_state_field_defaults, [Source, ClassName]},
+        ?CALL_TIMEOUT_MS,
+        ?SPAN_DOWN,
+        ?SPAN_TIMEOUT
     ).
 
 -doc """
@@ -740,7 +770,10 @@ Produces the on-disk byte-span shape from the compiler's canonical
     {ok, binary()} | {error, atom(), binary()}.
 reindent_method_source(Source, BaseIndent) ->
     safe_call(
-        {reindent_method_source, Source, BaseIndent}, ?CALL_TIMEOUT_MS, ?SPAN_DOWN, ?SPAN_TIMEOUT
+        {port_call, reindent_method_source, [Source, BaseIndent]},
+        ?CALL_TIMEOUT_MS,
+        ?SPAN_DOWN,
+        ?SPAN_TIMEOUT
     ).
 
 -doc """
@@ -752,7 +785,10 @@ or `{error, Reason, Message}' on transport failure.
     {ok, binary()} | {error, atom(), binary()}.
 complete_method_source(Source, Selector) ->
     safe_call(
-        {complete_method_source, Source, Selector}, ?CALL_TIMEOUT_MS, ?SPAN_DOWN, ?SPAN_TIMEOUT
+        {port_call, complete_method_source, [Source, Selector]},
+        ?CALL_TIMEOUT_MS,
+        ?SPAN_DOWN,
+        ?SPAN_TIMEOUT
     ).
 
 -doc """
@@ -770,6 +806,7 @@ register_class(ClassName, MetaMap) ->
     end,
     ok.
 
+-ifdef(TEST).
 -doc """
 Remove a class from the compiler server's ambient class cache.
 
@@ -796,6 +833,7 @@ remove_class(ClassName) ->
         _:_ -> ok
     end,
     ok.
+-endif.
 
 -doc """
 Return the current ambient class cache map (`register_class/2`'s
@@ -828,6 +866,7 @@ register_protocol(ProtocolName, Info) ->
     end,
     ok.
 
+-ifdef(TEST).
 -doc """
 Remove a protocol from the compiler server's ambient protocol cache,
 mirroring `remove_class/1`.
@@ -847,7 +886,9 @@ remove_protocol(ProtocolName) ->
         _:_ -> ok
     end,
     ok.
+-endif.
 
+-ifdef(TEST).
 -doc """
 Return the current ambient protocol cache map (`register_protocol/2`'s
 accumulator), mirroring `get_classes/0`.
@@ -858,6 +899,7 @@ not running, mirroring `register_class/2`'s degrade-silently contract.
 -spec get_protocols() -> #{atom() => map()}.
 get_protocols() ->
     safe_call(get_protocols, ?QUICK_CALL_TIMEOUT_MS, #{}, #{}).
+-endif.
 
 -doc """
 Merge `AliasSources` — one reparseable `type Name = <expansion>` line per
@@ -1133,97 +1175,10 @@ handle_call({diagnostics, Source, Mode, Options}, _From, State) ->
         maps:get(source_path, Options, undefined)
     ),
     {reply, Result, State};
-handle_call({find_senders_in_source, Source, Selector}, _From, State) ->
-    Result = beamtalk_compiler_port:find_senders_in_source(
-        State#state.port, Source, Selector
-    ),
-    {reply, Result, State};
-handle_call({find_all_sends_in_source, Source}, _From, State) ->
-    Result = beamtalk_compiler_port:find_all_sends_in_source(
-        State#state.port, Source
-    ),
-    {reply, Result, State};
-handle_call({find_references_to_in_source, Source, ClassName}, _From, State) ->
-    Result = beamtalk_compiler_port:find_references_to_in_source(
-        State#state.port, Source, ClassName
-    ),
-    {reply, Result, State};
-handle_call({find_field_readers_in_source, Source, Field}, _From, State) ->
-    Result = beamtalk_compiler_port:find_field_readers_in_source(
-        State#state.port, Source, Field
-    ),
-    {reply, Result, State};
-handle_call({find_field_writers_in_source, Source, Field}, _From, State) ->
-    Result = beamtalk_compiler_port:find_field_writers_in_source(
-        State#state.port, Source, Field
-    ),
-    {reply, Result, State};
-handle_call({find_ffi_sites_in_source, Source, Module, Function, Arity}, _From, State) ->
-    Result = beamtalk_compiler_port:find_ffi_sites_in_source(
-        State#state.port, Source, Module, Function, Arity
-    ),
-    {reply, Result, State};
-handle_call({find_announce_sites_in_source, Source}, _From, State) ->
-    Result = beamtalk_compiler_port:find_announce_sites_in_source(
-        State#state.port, Source
-    ),
-    {reply, Result, State};
-handle_call({resolve_method_span, Source, ClassName, Selector, Side}, _From, State) ->
-    Result = beamtalk_compiler_port:resolve_method_span(
-        State#state.port, Source, ClassName, Selector, Side
-    ),
-    {reply, Result, State};
-handle_call({resolve_class_span, Source, ClassName}, _From, State) ->
-    Result = beamtalk_compiler_port:resolve_class_span(
-        State#state.port, Source, ClassName
-    ),
-    {reply, Result, State};
-handle_call({find_selector_send_spans, MethodSource, OldSelector, NewSelector}, _From, State) ->
-    Result = beamtalk_compiler_port:find_selector_send_spans(
-        State#state.port, MethodSource, OldSelector, NewSelector
-    ),
-    {reply, Result, State};
-handle_call(
-    {find_definition_selector_spans, Source, ClassName, OldSelector, NewSelector, Side},
-    _From,
-    State
-) ->
-    Result = beamtalk_compiler_port:find_definition_selector_spans(
-        State#state.port, Source, ClassName, OldSelector, NewSelector, Side
-    ),
-    {reply, Result, State};
-handle_call({categorize_methods, Source, ClassName}, _From, State) ->
-    Result = beamtalk_compiler_port:categorize_methods(
-        State#state.port, Source, ClassName
-    ),
-    {reply, Result, State};
-handle_call({class_state_field_defaults, Source, ClassName}, _From, State) ->
-    Result = beamtalk_compiler_port:class_state_field_defaults(
-        State#state.port, Source, ClassName
-    ),
-    {reply, Result, State};
-handle_call(
-    {build_class_module_index_in_source, Source, RelativePath, PackageName}, _From, State
-) ->
-    Result = beamtalk_compiler_port:build_class_module_index_in_source(
-        State#state.port, Source, RelativePath, PackageName
-    ),
-    {reply, Result, State};
-handle_call({module_name_for_path, Path, PackageName, RootKind}, _From, State) ->
-    Result = beamtalk_compiler_port:module_name_for_path(
-        State#state.port, Path, PackageName, RootKind
-    ),
-    {reply, Result, State};
-handle_call({scan_source_dependencies, Source}, _From, State) ->
-    Result = beamtalk_compiler_port:scan_source_dependencies(State#state.port, Source),
-    {reply, Result, State};
-handle_call({reindent_method_source, Source, BaseIndent}, _From, State) ->
-    Result = beamtalk_compiler_port:reindent_method_source(
-        State#state.port, Source, BaseIndent
-    ),
-    {reply, Result, State};
-handle_call({complete_method_source, Source, Selector}, _From, State) ->
-    Result = beamtalk_compiler_port:complete_method_source(State#state.port, Source, Selector),
+handle_call({port_call, Fun, Args}, _From, #state{port = Port} = State) ->
+    %% The pure forwards (BT-5046): every request that is just
+    %% `beamtalk_compiler_port:Fun(Port, Args...)` shares this one clause.
+    Result = erlang:apply(beamtalk_compiler_port, Fun, [Port | Args]),
     {reply, Result, State};
 handle_call(version, _From, State) ->
     Result = do_version(State#state.port),
@@ -1617,8 +1572,7 @@ handle_compile_response(
 handle_compile_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, Diagnostics};
 handle_compile_response(Other) ->
-    ?LOG_ERROR("Unexpected compile response", #{domain => [beamtalk, runtime], response => Other}),
-    {error, [#{message => <<"Unexpected compiler response">>}]}.
+    beamtalk_compiler_port:unexpected_diag_response("Unexpected compile response", Other).
 
 %% Decode the `compile_method` response: the compiled class module plus the
 %% recovered method metadata (canonical source, selector, side).
@@ -1661,8 +1615,7 @@ handle_compile_method_response(
 handle_compile_method_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, Diagnostics};
 handle_compile_method_response(Other) ->
-    ?LOG_ERROR("Unexpected compile response", #{domain => [beamtalk, runtime], response => Other}),
-    {error, [#{message => <<"Unexpected compiler response">>}]}.
+    beamtalk_compiler_port:unexpected_diag_response("Unexpected compile response", Other).
 
 %% Normalise the port's `is_class_method` (an atom `true'/`false', or a binary
 %% defensively) into an Erlang boolean.
@@ -1677,14 +1630,11 @@ handle_diagnostics_response(#{status := ok, diagnostics := Diagnostics}) ->
 handle_diagnostics_response(#{status := error, diagnostics := Diagnostics}) ->
     {error, Diagnostics};
 handle_diagnostics_response(Other) ->
-    ?LOG_ERROR("Unexpected diagnostics response", #{
-        domain => [beamtalk, runtime], response => Other
-    }),
-    {error, [#{message => <<"Unexpected compiler response">>}]}.
+    beamtalk_compiler_port:unexpected_diag_response("Unexpected diagnostics response", Other).
 
 %% Handle response from version command.
 handle_version_response(#{status := ok, version := Version}) ->
     {ok, Version};
 handle_version_response(Other) ->
-    ?LOG_ERROR("Unexpected version response", #{domain => [beamtalk, runtime], response => Other}),
+    _ = beamtalk_compiler_port:unexpected_port_response("Unexpected version response", Other),
     {error, unexpected_response}.
