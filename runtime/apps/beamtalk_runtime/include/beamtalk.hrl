@@ -79,6 +79,7 @@
 %%     class_not_found | no_superclass | class_already_exists |
 %%     selector_not_found | dispatch_error | callback_failed | actor_dead |
 %%     invalid_continuation | invalid_defer | future_not_awaited |
+%%     future_expired |
 %%     internal_error | key_error | pattern_mismatch | unknown_field |
 %%     argument_error | resource_error | process_not_found | timeout_error |
 %%     type_error | instantiation_error | erlang_exit | erlang_throw | signal |

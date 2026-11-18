@@ -1075,3 +1075,19 @@ producer_death_restores_orphan_cap_test() ->
         {future_rejected, #beamtalk_error{kind = future_expired}},
         beamtalk_future:await_forever(Future)
     ).
+
+polled_orphan_still_expires_at_absolute_deadline_test() ->
+    Future = beamtalk_future:new_with_cap(150),
+    %% Keep polling the orphan with short awaits; each poll must not extend its life.
+    Result = poll_until_expired(Future, 40),
+    ?assertMatch({future_rejected, #beamtalk_error{kind = future_expired}}, Result).
+
+poll_until_expired(_Future, 0) ->
+    still_pending;
+poll_until_expired(Future, N) ->
+    try beamtalk_future:await(Future, 20) of
+        V -> {resolved, V}
+    catch
+        throw:#beamtalk_error{kind = timeout} -> poll_until_expired(Future, N - 1);
+        throw:{future_rejected, _} = R -> R
+    end.
