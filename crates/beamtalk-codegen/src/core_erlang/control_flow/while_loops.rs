@@ -868,9 +868,9 @@ impl CoreErlangGenerator {
                     pair,
                     " in {",
                     form::element(1, leaf::var(pair_var.clone())),
-                    ", call 'erlang':'element'(2, ",
-                    leaf::var(pair_var),
-                    "), ",
+                    ", ",
+                    form::element(2, leaf::var(pair_var)),
+                    ", ",
                     leaf::var(self_var),
                     "}"
                 ],

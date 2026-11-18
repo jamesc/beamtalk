@@ -155,16 +155,7 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let [(first, first_body), (second, second_body)] = arms;
         let var = self.fresh_temp_var("_PredBad");
-        let fallback = form::clause(
-            [leaf::var(var.clone())],
-            None,
-            form::call(
-                "erlang",
-                "error",
-                [form::tuple([leaf::atom("case_clause"), leaf::var(var)])],
-            ),
-            Layout::Flat,
-        );
+        let fallback = Self::case_clause_fallback_clause(var);
         form::case_of(
             scrutinee,
             [
@@ -185,7 +176,7 @@ impl CoreErlangGenerator {
         stmts: &mut Vec<ThreadedStmt>,
     ) {
         let condition_doc: Document<'static> = if negate {
-            docvec!["call 'erlang':'not'(", leaf::var(cx.pv.to_string()), ")",]
+            form::call("erlang", "not", [leaf::var(cx.pv.to_string())])
         } else {
             leaf::var(cx.pv.to_string())
         };
