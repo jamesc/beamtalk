@@ -54,38 +54,18 @@
 # (Env var names match what `cargo tauri build` reads automatically —
 # https://v2.tauri.app/distribute/sign/macos/.)
 #
-# Verification status (read before relying on this lane): the app itself
-# has not been compiled end-to-end in any sandbox available to this project,
-# on ANY platform including Windows — see desktop/README.md's "What was and
-# wasn't verified". This workflow's job logic (matrix, caching, artifact/
-# version plumbing, signing conditionals) follows the same structure already
-# proven by liveview-release.yml, but the `cargo tauri build` step is
-# expected to need fixes on its first real run on every platform. The
-# Windows leg carries extra unverified surface on top of that shared risk —
-# flagged rather than silently assumed away (BT-2988 acceptance criteria):
-#   - Tauri's WiX (`.msi`)/NSIS (`.exe`) bundlers are expected to
-#     self-download on first use (no explicit choco/winget prerequisite step
-#     here, unlike Linux's apt-get step below) — not confirmed against a
-#     real `cargo tauri build` on Windows.
-#   - WebView2 Runtime is assumed preinstalled on GitHub's windows-2022
-#     image (Microsoft ships it by default there) — not independently
-#     verified by this workflow.
-#   - `scripts/ci/package-desktop-release.sh`'s `windows-x86_64` case
-#     (Tauri bundle subpaths, `sha256sum` via Git Bash) is unverified against
-#     a real bundle output.
-#   - epmd/dist and orphan-process behavior differences are documented in
-#     `beamtalk-desktop-broker/src/spawn.rs`'s module doc comment, not here —
-#     that's a runtime concern, not a build-lane one.
-# For that reason this lane is NOT yet wired into release.yml's `on: release`
-# path (unlike liveview-release.yml/release-vscode.yml) — run it via
-# workflow_dispatch until a real run confirms every leg's build succeeds,
-# then add a `desktop-app: uses: ./.github/workflows/desktop-release.yml` job
-# to release.yml the same way those two are wired in.
+# Verification status: every leg (Linux x86_64, macOS arm64, macOS x86_64,
+# Windows x86_64) has been run end to end via workflow_dispatch and builds,
+# packages and uploads its artifact (BT-5006); the macOS legs were run
+# WITHOUT the Apple secrets, i.e. unsigned. Still unverified: the macOS
+# signing/notarization path against real Apple secrets, and the installed
+# app on Linux and Windows (needs a person at those machines — see
+# desktop/README.md). Windows installers are never code-signed. Wired into
+# release.yml's `desktop-app` job.
 #
 # Trigger modes (mirrors liveview-release.yml):
 #   - workflow_dispatch: manual build (artifacts only unless `publish` is set).
-#   - workflow_call: available for release.yml to invoke once verified (see
-#     above); also usable standalone by another workflow in the meantime.
+#   - workflow_call: invoked by release.yml's `desktop-app` job.
 #
 # Related: liveview-release.yml (the bt_attach release this lane bundles),
 #          desktop/README.md, docs/ADR/0097-desktop-attach-client-node-per-workspace.md
@@ -404,7 +384,7 @@ jobs:
           retention-days: 7
 
       # On a full release (release.yml calls this workflow with publish=true,
-      # once wired in per the header note above), attach each archive to the
+      # via its `desktop-app` job), attach each archive to the
       # GitHub Release.
       - name: Upload to GitHub Release
         if: github.event_name == 'release' && inputs.publish
