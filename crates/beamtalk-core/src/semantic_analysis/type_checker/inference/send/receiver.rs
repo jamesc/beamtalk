@@ -12,8 +12,7 @@
 //! receiver's instance-side method lookup, and a `Union`-typed receiver's
 //! per-member resolution.
 
-use crate::ast::MethodKind;
-use crate::ast::{Expression, MessageSelector, WellKnownSelector};
+use crate::ast::{ConstructorSelectors, Expression, MessageSelector, WellKnownSelector};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType, MethodInfo};
 use crate::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
 use crate::semantic_analysis::receiver_knowledge;
@@ -1182,20 +1181,14 @@ impl TypeChecker {
         let requirement = info.find_class_requirement(registry, selector)?;
         let type_params = info.all_type_params(registry);
         Some(MethodInfo {
-            selector: requirement.selector.clone(),
             arity: requirement.arity,
-            kind: MethodKind::Primary,
-            defined_in: protocol_name.clone(),
-            is_sealed: false,
-            is_internal: false,
-            spawns_block: false,
-            return_type: requirement.judged_return_type(&type_params),
-            param_types: Self::class_requirement_param_types(requirement, &type_params),
-            doc: None,
-            origin: None,
-            primitive: None,
-            constant_value: None,
-            answers_receiver: false,
+            ..MethodInfo::synthesized(
+                requirement.selector.clone(),
+                protocol_name.clone(),
+                requirement.judged_return_type(&type_params),
+                Self::class_requirement_param_types(requirement, &type_params),
+                None,
+            )
         })
     }
 
@@ -1280,7 +1273,7 @@ impl TypeChecker {
             };
         }
 
-        if matches!(selector, "new" | "basicNew") {
+        if ConstructorSelectors::PlainNew.contains(selector) {
             return instance_ty;
         }
 

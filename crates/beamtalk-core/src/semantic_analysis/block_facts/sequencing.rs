@@ -13,7 +13,8 @@ use super::{
     LocalThreadingFamily, conditional_arm_blocks, exception_arm_blocks, local_threading_construct,
     match_arms, producer_body_block,
 };
-use crate::ast::{BinarySegment, Block, Expression, ExpressionStatement, MessageSelector};
+use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector};
+use crate::ast_walker::for_each_child;
 use crate::source_analysis::Span;
 
 /// ADR 0131 Phase 2 (BT-3749): the sub-expressions of the method-body
@@ -84,10 +85,6 @@ pub fn operand_loop_constructs(stmt: &Expression) -> Vec<&Expression> {
 /// ([`unsequenced_operand_holder`]; empty for a construct at a sequenced
 /// site), outermost first.
 #[must_use]
-#[expect(
-    clippy::too_many_lines,
-    reason = "one walk over every operand-holding expression kind, mirroring the site walk"
-)]
 pub fn operand_loop_constructs_with_holders(
     stmt: &Expression,
 ) -> Vec<(&Expression, Vec<UnsequencedOperand>)> {
@@ -122,16 +119,6 @@ pub fn operand_loop_constructs_with_holders(
             holders.push(kind);
         }
         match expr {
-            Expression::MessageSend {
-                receiver,
-                arguments,
-                ..
-            } => {
-                walk(receiver, holders, out);
-                for arg in arguments {
-                    walk(arg, holders, out);
-                }
-            }
             Expression::Cascade {
                 receiver, messages, ..
             } => {
@@ -152,45 +139,14 @@ pub fn operand_loop_constructs_with_holders(
                     }
                 }
             }
-            Expression::ArrayLiteral { elements, .. }
-            | Expression::TupleLiteral { elements, .. } => {
-                for e in elements {
-                    walk(e, holders, out);
-                }
+            // An assignment's target and a match's arms are not operands here.
+            Expression::Assignment { value, .. } | Expression::Match { value, .. } => {
+                walk(value, holders, out);
             }
-            Expression::ListLiteral { elements, tail, .. } => {
-                for e in elements {
-                    walk(e, holders, out);
-                }
-                if let Some(t) = tail {
-                    walk(t, holders, out);
-                }
-            }
-            Expression::MapLiteral { pairs, .. } => {
-                for pair in pairs {
-                    walk(&pair.key, holders, out);
-                    walk(&pair.value, holders, out);
-                }
-            }
-            Expression::StringInterpolation { segments, .. } => {
-                for segment in segments {
-                    if let crate::ast::StringSegment::Interpolation(e) = segment {
-                        walk(e, holders, out);
-                    }
-                }
-            }
-            Expression::BinaryConstruction { segments, .. } => {
-                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                    walk(e, holders, out);
-                }
-            }
-            Expression::FieldAccess { receiver, .. } => walk(receiver, holders, out),
-            Expression::Assignment { value, .. }
-            | Expression::DestructureAssignment { value, .. }
-            | Expression::Return { value, .. }
-            | Expression::Match { value, .. } => walk(value, holders, out),
-            Expression::Parenthesized { expression, .. } => walk(expression, holders, out),
-            _ => {}
+            // A block literal is a closure: creating it runs nothing.
+            Expression::Block(_) => {}
+            // Every other variant only fans out to its child expressions.
+            _ => for_each_child(expr, &mut |child| walk(child, holders, out)),
         }
         if holder.is_some() {
             holders.pop();

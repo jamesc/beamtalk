@@ -55,7 +55,7 @@
 //!   `unnecessary_parens` the normalised module (so `check_effect_free_statements`,
 //!   `block_facts` and the span joins of `dead_block_assignment` /
 //!   `dead_returned_assignment` read one tree);
-//! - `class_var_census::parse_corpus_source`, `ffi_sites_query` and
+//! - `ffi_sites_query` and
 //!   `method_source_walker` (peeled at parse).
 //!
 //! **Raw-tree readers that remain**, none of which reaches a peel this guard

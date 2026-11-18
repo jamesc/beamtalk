@@ -6,7 +6,8 @@
 //!
 //! **DDD Context:** Semantic Analysis
 
-use crate::ast::{BinarySegment, Block, Expression, ExpressionStatement};
+use crate::ast::{Block, Expression, ExpressionStatement};
+use crate::ast_walker::for_each_child;
 use crate::semantic_analysis::block_facts::{
     LocalThreadingConstruct, LocalThreadingFamily, analyze_block, classify_in_place_returns,
     local_threading_construct,
@@ -227,12 +228,8 @@ impl StaleReturnScan<'_> {
         })
     }
 
-    #[allow(clippy::too_many_lines)] // one arm per expression kind
     fn expr(&mut self, expr: &Expression) {
         match expr {
-            Expression::Return { value, .. } => {
-                self.expr(value);
-            }
             Expression::MessageSend {
                 receiver,
                 arguments,
@@ -263,69 +260,8 @@ impl StaleReturnScan<'_> {
                 }
             }
             Expression::Block(b) => self.closure(b),
-            Expression::Parenthesized { expression, .. } => self.expr(expression),
-            Expression::Assignment { target, value, .. } => {
-                self.expr(target);
-                self.expr(value);
-            }
-            Expression::DestructureAssignment { value, .. } => self.expr(value),
-            Expression::Cascade {
-                receiver, messages, ..
-            } => {
-                self.expr(receiver);
-                for msg in messages {
-                    for arg in &msg.arguments {
-                        self.expr(arg);
-                    }
-                }
-            }
-            Expression::Match { value, arms, .. } => {
-                self.expr(value);
-                for arm in arms {
-                    if let Some(guard) = &arm.guard {
-                        self.expr(guard);
-                    }
-                    self.expr(&arm.body);
-                }
-            }
-            Expression::FieldAccess { receiver, .. } => self.expr(receiver),
-            Expression::MapLiteral { pairs, .. } => {
-                for pair in pairs {
-                    self.expr(&pair.key);
-                    self.expr(&pair.value);
-                }
-            }
-            Expression::ListLiteral { elements, tail, .. } => {
-                for e in elements.iter().chain(tail.as_deref()) {
-                    self.expr(e);
-                }
-            }
-            Expression::ArrayLiteral { elements, .. }
-            | Expression::TupleLiteral { elements, .. } => {
-                for e in elements {
-                    self.expr(e);
-                }
-            }
-            Expression::StringInterpolation { segments, .. } => {
-                for segment in segments {
-                    if let crate::ast::StringSegment::Interpolation(e) = segment {
-                        self.expr(e);
-                    }
-                }
-            }
-            Expression::BinaryConstruction { segments, .. } => {
-                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                    self.expr(e);
-                }
-            }
-            Expression::Identifier(_)
-            | Expression::Literal(..)
-            | Expression::ClassReference { .. }
-            | Expression::Super(_)
-            | Expression::Primitive { .. }
-            | Expression::ExpectDirective { .. }
-            | Expression::Spread { .. }
-            | Expression::Error { .. } => {}
+            // Every other variant only fans out to its child expressions.
+            _ => for_each_child(expr, &mut |child| self.expr(child)),
         }
     }
 }

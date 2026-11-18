@@ -20,8 +20,7 @@
 #     compile as their corpus (e.g. match_fallthrough_goto's
 #     `goto_labels_are_applied_in_tail_position_over_the_corpus`,
 #     escape_corpus_conformance, paren_transparency's stdlib/test corpus);
-#   - the other Beamtalk test corpora class_var_census's
-#     `census_over_repository_corpus` scans (test-package-compiler/cases,
+#   - the other Beamtalk test corpora (test-package-compiler/cases,
 #     tests/repl-protocol/cases and tests/repl-protocol/fixtures);
 #   - the runtime's shared cross-language conformance fixtures
 #     (runtime/apps/*/test/fixtures/), which the `*_matches_shared_corpus`

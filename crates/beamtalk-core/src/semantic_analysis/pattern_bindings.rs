@@ -153,7 +153,7 @@ fn extract_pattern_bindings_impl(
                 extract_pattern_bindings_impl(element, bindings, seen, diagnostics, true);
             }
             if let Some(rest_pat) = rest {
-                // TODO: validate rest name doesn't shadow an element binding
+                // A rest name that repeats an element name is not diagnosed (BT-5050).
                 extract_pattern_bindings_impl(rest_pat, bindings, seen, diagnostics, true);
             }
         }

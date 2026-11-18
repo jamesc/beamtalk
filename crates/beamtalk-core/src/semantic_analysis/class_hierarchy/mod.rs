@@ -230,43 +230,25 @@ impl ClassHierarchy {
                 continue;
             }
             let class_methods = vec![
-                MethodInfo {
-                    selector: "requiredMethods".into(),
-                    arity: 0,
-                    kind: MethodKind::Primary,
-                    defined_in: name.clone(),
-                    is_sealed: true,
-                    is_internal: false,
-                    spawns_block: false,
-                    return_type: Some(DeclaredType::simple("List")),
-                    param_types: vec![],
-                    doc: Some(
+                MethodInfo::synthesized(
+                    "requiredMethods",
+                    name.clone(),
+                    Some(DeclaredType::simple("List")),
+                    vec![],
+                    Some(
                         format!("Return the required method selectors for the `{name}` protocol.")
                             .into(),
                     ),
-                    origin: None,
-                    primitive: None,
-                    constant_value: None,
-                    answers_receiver: false,
-                },
-                MethodInfo {
-                    selector: "conformingClasses".into(),
-                    arity: 0,
-                    kind: MethodKind::Primary,
-                    defined_in: name.clone(),
-                    is_sealed: true,
-                    is_internal: false,
-                    spawns_block: false,
-                    return_type: Some(DeclaredType::simple("List")),
-                    param_types: vec![],
-                    doc: Some(
-                        format!("Return the classes conforming to the `{name}` protocol.").into(),
-                    ),
-                    origin: None,
-                    primitive: None,
-                    constant_value: None,
-                    answers_receiver: false,
-                },
+                )
+                .sealed(),
+                MethodInfo::synthesized(
+                    "conformingClasses",
+                    name.clone(),
+                    Some(DeclaredType::simple("List")),
+                    vec![],
+                    Some(format!("Return the classes conforming to the `{name}` protocol.").into()),
+                )
+                .sealed(),
             ];
             self.classes.insert(
                 name.clone(),
@@ -866,33 +848,28 @@ impl ClassHierarchy {
                 continue;
             };
             let method_info = MethodInfo {
-                selector: key.selector.clone(),
                 arity: first.type_info.arity,
-                kind: MethodKind::Primary,
-                defined_in: key.class_name.clone(),
-                is_sealed: false,
-                is_internal: false,
-                spawns_block: false,
+                answers_receiver: first.type_info.answers_receiver,
                 // `ExtensionTypeInfo` stores flattened strings (compilation-layer
                 // metadata, outside `DeclaredType`'s scope) — parse back into
                 // structure rather than carrying the string through as an
                 // opaque `Simple`.
-                return_type: first
-                    .type_info
-                    .return_type
-                    .as_deref()
-                    .map(DeclaredType::parse),
-                param_types: first
-                    .type_info
-                    .param_types
-                    .iter()
-                    .map(|p| p.as_deref().map(DeclaredType::parse))
-                    .collect(),
-                doc: None,
-                origin: None,
-                primitive: None,
-                constant_value: None,
-                answers_receiver: first.type_info.answers_receiver,
+                ..MethodInfo::synthesized(
+                    key.selector.clone(),
+                    key.class_name.clone(),
+                    first
+                        .type_info
+                        .return_type
+                        .as_deref()
+                        .map(DeclaredType::parse),
+                    first
+                        .type_info
+                        .param_types
+                        .iter()
+                        .map(|p| p.as_deref().map(DeclaredType::parse))
+                        .collect(),
+                    None,
+                )
             };
             if key.side == MethodSide::Instance && !first.type_info.answers_receiver {
                 self.updating_extensions
@@ -1056,7 +1033,6 @@ impl ClassHierarchy {
     /// Uses a two-pass approach to avoid definition-order sensitivity:
     /// Pass 1 registers all classes so ancestor lookups are complete;
     /// Pass 2 runs sealed-override and superclass checks.
-    #[allow(clippy::too_many_lines)]
     fn add_module_classes(&mut self, module: &Module, stdlib_mode: bool) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         for standalone in &module.method_definitions {

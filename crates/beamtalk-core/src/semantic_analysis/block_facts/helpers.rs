@@ -7,7 +7,8 @@
 //! **DDD Context:** Compilation — Semantic Analysis
 
 use super::BlockMutationAnalysis;
-use crate::ast::{BinarySegment, Expression, MessageSelector};
+use crate::ast::{Expression, MessageSelector};
+use crate::ast_walker::for_each_child;
 
 // ---------------------------------------------------------------------------
 // Tier 2 stored-block promotion facts (ADR 0041). Moved from beamtalk-codegen's
@@ -99,22 +100,11 @@ pub fn is_safe_value_family_selector(selector: &MessageSelector) -> bool {
 /// interpolation is never silently missed. A shadowing block parameter
 /// with the same name is *not* special-cased — that only makes this
 /// over-conservative (a missed promotion), never unsafe.
-#[expect(
-    clippy::too_many_lines,
-    reason = "exhaustive match over every Expression variant, kept as one function for locality with its single caller"
-)]
 #[must_use]
 pub fn stored_block_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) {
     match expr {
         Expression::Identifier(id) => (id.name == var_name, false),
-        Expression::Literal(..)
-        | Expression::ClassReference { .. }
-        | Expression::Super(_)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Error { .. } => (false, false),
         Expression::Spread { name, .. } => (name.name == var_name, false),
-        Expression::FieldAccess { receiver, .. } => stored_block_var_uses(receiver, var_name),
         Expression::MessageSend {
             receiver,
             selector,
@@ -149,14 +139,6 @@ pub fn stored_block_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) 
                 .map(|stmt| stored_block_var_uses(&stmt.expression, var_name))
                 .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
             (any_unsafe || any_safe, false)
-        }
-        Expression::Assignment { target, value, .. } => {
-            let (u1, s1) = stored_block_var_uses(target, var_name);
-            let (u2, s2) = stored_block_var_uses(value, var_name);
-            (u1 || u2, s1 || s2)
-        }
-        Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
-            stored_block_var_uses(value, var_name)
         }
         Expression::Cascade {
             receiver, messages, ..
@@ -194,59 +176,16 @@ pub fn stored_block_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) 
             }
             (unsafe_, safe)
         }
-        Expression::Parenthesized { expression, .. } => stored_block_var_uses(expression, var_name),
-        Expression::Match { value, arms, .. } => {
-            let (mut unsafe_, mut safe) = stored_block_var_uses(value, var_name);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    let (u, s) = stored_block_var_uses(guard, var_name);
-                    unsafe_ |= u;
-                    safe |= s;
-                }
-                let (u, s) = stored_block_var_uses(&arm.body, var_name);
+        // Every other variant only fans out to its child expressions.
+        _ => {
+            let (mut unsafe_, mut safe) = (false, false);
+            for_each_child(expr, &mut |child| {
+                let (u, s) = stored_block_var_uses(child, var_name);
                 unsafe_ |= u;
                 safe |= s;
-            }
+            });
             (unsafe_, safe)
         }
-        Expression::MapLiteral { pairs, .. } => pairs
-            .iter()
-            .map(|pair| {
-                let (u1, s1) = stored_block_var_uses(&pair.key, var_name);
-                let (u2, s2) = stored_block_var_uses(&pair.value, var_name);
-                (u1 || u2, s1 || s2)
-            })
-            .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
-        Expression::ListLiteral { elements, tail, .. } => {
-            let (mut unsafe_, mut safe) = elements
-                .iter()
-                .map(|e| stored_block_var_uses(e, var_name))
-                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2));
-            if let Some(t) = tail {
-                let (u, s) = stored_block_var_uses(t, var_name);
-                unsafe_ |= u;
-                safe |= s;
-            }
-            (unsafe_, safe)
-        }
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            elements
-                .iter()
-                .map(|e| stored_block_var_uses(e, var_name))
-                .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2))
-        }
-        Expression::StringInterpolation { segments, .. } => segments
-            .iter()
-            .map(|seg| match seg {
-                crate::ast::StringSegment::Interpolation(e) => stored_block_var_uses(e, var_name),
-                crate::ast::StringSegment::Literal(_) => (false, false),
-            })
-            .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
-        Expression::BinaryConstruction { segments, .. } => segments
-            .iter()
-            .flat_map(BinarySegment::sub_expressions)
-            .map(|e| stored_block_var_uses(e, var_name))
-            .fold((false, false), |(u, s), (u2, s2)| (u || u2, s || s2)),
     }
 }
 

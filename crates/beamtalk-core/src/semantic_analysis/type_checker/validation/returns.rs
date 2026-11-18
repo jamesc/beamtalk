@@ -5,9 +5,6 @@
 //!
 //! **DDD Context:** Semantic Analysis
 
-//! `TypeChecker::state_default_types` (BT-3481), keeping the direction
-//! one-way instead of calling back into `inference/`.
-
 use crate::ast::{Expression, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};

@@ -5,12 +5,9 @@
 //!
 //! **DDD Context:** Semantic Analysis
 
-//! `TypeChecker::state_default_types` (BT-3481), keeping the direction
-//! one-way instead of calling back into `inference/`.
-
 use std::collections::HashMap;
 
-use crate::ast::Expression;
+use crate::ast::{ConstructorSelectors, Expression};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::string_utils::is_symbol_singleton_name;
@@ -108,7 +105,7 @@ impl TypeChecker {
             // ADR 0083: `basicNew` joins the constructor family so a metatype
             // receiver `Meta{C} basicNew` infers an instance of `C` (with the
             // abstract-class guard inside `infer_constructor_type`).
-            "spawn" | "spawnWith:" | "new" | "new:" | "basicNew" => {
+            _ if ConstructorSelectors::Constructing.contains(selector) => {
                 Self::infer_constructor_type(class_name, hierarchy, selector, arg_types)
             }
             _ => {
@@ -275,7 +272,7 @@ impl TypeChecker {
         selector: &str,
         hierarchy: &ClassHierarchy,
     ) -> bool {
-        let is_factory_selector = matches!(selector, "spawn" | "spawnWith:");
+        let is_factory_selector = ConstructorSelectors::ActorSpawn.contains(selector);
         let is_implicit_constructor = matches!(selector, "new" | "new:" | "basicNew")
             && !hierarchy.is_abstract(class_name)
             && !hierarchy.is_actor_subclass(class_name);

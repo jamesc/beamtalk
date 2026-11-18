@@ -1097,6 +1097,7 @@ impl ProtocolRegistry {
         }
     }
 
+    #[cfg(test)]
     /// Check conformance for a generic protocol with concrete type arguments.
     ///
     /// For `Collection(Integer)`, substitutes `E → Integer` in the required
@@ -1120,6 +1121,7 @@ impl ProtocolRegistry {
         self.check_conformance(class_name, protocol_name, hierarchy)
     }
 
+    #[cfg(test)]
     /// Returns the list of protocols a class conforms to.
     #[must_use]
     pub fn conforming_protocols(
@@ -1776,22 +1778,7 @@ Value subclass: Version
             is_value: true,
             class_methods: selectors
                 .into_iter()
-                .map(|sel| MethodInfo {
-                    selector: sel.into(),
-                    arity: 0,
-                    kind: MethodKind::Primary,
-                    defined_in: "Gadget".into(),
-                    is_sealed: false,
-                    is_internal: false,
-                    spawns_block: false,
-                    return_type: None,
-                    param_types: vec![],
-                    doc: None,
-                    origin: None,
-                    primitive: None,
-                    constant_value: None,
-                    answers_receiver: false,
-                })
+                .map(|sel| MethodInfo::synthesized(sel, "Gadget", None, vec![], None))
                 .collect(),
             ..ClassInfo::test("Gadget", Some("Object"))
         };

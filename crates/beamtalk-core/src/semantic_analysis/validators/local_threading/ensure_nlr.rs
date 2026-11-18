@@ -8,7 +8,8 @@
 
 use std::collections::BTreeSet;
 
-use crate::ast::{BinarySegment, Block, Expression, ExpressionStatement, MessageSelector};
+use crate::ast::{Block, Expression, ExpressionStatement, MessageSelector};
+use crate::ast_walker::for_each_child;
 use crate::semantic_analysis::block_facts::{
     LocalThreadingConstruct, LocalThreadingFamily, analyze_block, local_threading_construct,
     outer_local_writes,
@@ -424,10 +425,8 @@ impl RaiseScan<'_> {
         self.written = after;
     }
 
-    #[allow(clippy::too_many_lines)] // one arm per expression kind
     fn expr(&mut self, expr: &Expression) {
         match expr {
-            Expression::Parenthesized { expression, .. } => self.expr(expression),
             Expression::Assignment { target, value, .. } => {
                 self.expr(value);
                 match target.as_ref() {
@@ -444,7 +443,6 @@ impl RaiseScan<'_> {
                     self.write(&id.name);
                 }
             }
-            Expression::Return { value, .. } => self.expr(value),
             Expression::MessageSend {
                 receiver,
                 arguments,
@@ -512,50 +510,18 @@ impl RaiseScan<'_> {
                     s.shadowed.pop();
                 });
             }
-            Expression::FieldAccess { receiver, .. } => self.expr(receiver),
-            Expression::MapLiteral { pairs, .. } => {
-                for pair in pairs {
-                    self.expr(&pair.key);
-                    self.expr(&pair.value);
-                }
-            }
-            Expression::ListLiteral { elements, tail, .. } => {
-                for e in elements.iter().chain(tail.as_deref()) {
-                    self.expr(e);
-                }
-            }
-            Expression::ArrayLiteral { elements, .. }
-            | Expression::TupleLiteral { elements, .. } => {
-                for e in elements {
-                    self.expr(e);
-                }
-            }
-            Expression::StringInterpolation { segments, .. } => {
-                for segment in segments {
-                    if let crate::ast::StringSegment::Interpolation(e) = segment {
-                        self.expr(e);
-                    }
-                }
-                self.may_raise();
-            }
+            // Interpolating renders through `printString`, which may raise.
             // Construction raises `badarg` on a mistyped or mis-sized value
             // (ADR 0143 § Runtime failures).
-            Expression::BinaryConstruction { segments, .. } => {
-                for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                    self.expr(e);
-                }
+            Expression::StringInterpolation { .. } | Expression::BinaryConstruction { .. } => {
+                for_each_child(expr, &mut |child| self.expr(child));
                 self.may_raise();
             }
             Expression::Primitive { .. } => self.may_raise(),
             // A block literal here is a closure: creating it runs nothing.
-            Expression::Block(_)
-            | Expression::Identifier(_)
-            | Expression::Literal(..)
-            | Expression::ClassReference { .. }
-            | Expression::Super(_)
-            | Expression::ExpectDirective { .. }
-            | Expression::Spread { .. }
-            | Expression::Error { .. } => {}
+            Expression::Block(_) => {}
+            // Every other variant only fans out to its child expressions.
+            _ => for_each_child(expr, &mut |child| self.expr(child)),
         }
     }
 }

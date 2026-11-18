@@ -89,19 +89,7 @@ impl MethodValidatorRegistry {
             .insert("classNamed:", Box::new(ReflectionMethodValidator));
 
         // Block arity validators (1-parameter block)
-        for selector in &[
-            "do:",
-            "collect:",
-            "select:",
-            "reject:",
-            "detect:",
-            "anySatisfy:",
-            "allSatisfy:",
-            "groupBy:",
-            "partition:",
-            "takeWhile:",
-            "dropWhile:",
-        ] {
+        for selector in ONE_PARAM_BLOCK_ITERATORS {
             self.validators
                 .insert(selector, Box::new(BlockArityValidator::new(1, 0)));
         }
@@ -465,13 +453,26 @@ impl MethodValidator for BlockArityValidator {
     }
 }
 
+/// Iterator selectors whose block argument takes one parameter. The single
+/// table behind both the validator registration and [`block_arity_hint`], so a
+/// selector added here gets its validator and its hint together.
+const ONE_PARAM_BLOCK_ITERATORS: &[&str] = &[
+    "do:",
+    "collect:",
+    "select:",
+    "reject:",
+    "detect:",
+    "anySatisfy:",
+    "allSatisfy:",
+    "groupBy:",
+    "partition:",
+    "takeWhile:",
+    "dropWhile:",
+];
+
 fn block_arity_hint(selector: &str, expected: usize) -> String {
     match (selector, expected) {
-        (
-            "do:" | "collect:" | "select:" | "reject:" | "detect:" | "anySatisfy:" | "allSatisfy:"
-            | "groupBy:" | "partition:" | "takeWhile:" | "dropWhile:",
-            1,
-        ) => {
+        (_, 1) if ONE_PARAM_BLOCK_ITERATORS.contains(&selector) => {
             format!("Use a 1-parameter block: list {selector} [:item | ...]")
         }
         ("eachWithIndex:", 2) => {

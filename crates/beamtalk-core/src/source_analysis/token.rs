@@ -187,6 +187,7 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
+    #[cfg(test)]
     /// Returns `true` if this token is a literal value.
     ///
     /// Note: identifiers are not considered literals as they are names
@@ -204,12 +205,14 @@ impl TokenKind {
         )
     }
 
+    #[cfg(test)]
     /// Returns `true` if this token is an identifier.
     #[must_use]
     pub const fn is_identifier(&self) -> bool {
         matches!(self, Self::Identifier(_))
     }
 
+    #[cfg(test)]
     /// Returns `true` if this token is a message selector component.
     #[must_use]
     pub const fn is_selector(&self) -> bool {
@@ -219,6 +222,7 @@ impl TokenKind {
         )
     }
 
+    #[cfg(test)]
     /// Returns `true` if this token is a delimiter.
     #[must_use]
     pub const fn is_delimiter(&self) -> bool {
@@ -529,22 +533,26 @@ impl Token {
         &self.trailing_trivia
     }
 
+    #[cfg(test)]
     /// Sets the leading trivia for this token.
     pub fn set_leading_trivia(&mut self, trivia: Vec<Trivia>) {
         self.leading_trivia = trivia;
     }
 
+    #[cfg(test)]
     /// Sets the trailing trivia for this token.
     pub fn set_trailing_trivia(&mut self, trivia: Vec<Trivia>) {
         self.trailing_trivia = trivia;
     }
 
+    #[cfg(test)]
     /// Returns `true` if this token has any leading comments.
     #[must_use]
     pub fn has_leading_comment(&self) -> bool {
         self.leading_trivia.iter().any(Trivia::is_comment)
     }
 
+    #[cfg(test)]
     /// Returns `true` if this token has any trailing comments.
     #[must_use]
     pub fn has_trailing_comment(&self) -> bool {

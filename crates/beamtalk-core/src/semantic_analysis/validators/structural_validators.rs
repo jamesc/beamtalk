@@ -20,7 +20,7 @@ use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::string_utils::edit_distance;
 use crate::semantic_analysis::type_checker::is_generic_type_param;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 
 // ── Unresolved class references ──────────────────────────────────────────────
@@ -126,18 +126,20 @@ fn visit_unresolved_class(
             return;
         }
 
-        diagnostics.push(
-            Diagnostic::warning(
-                format!("Unresolved class `{class_name}`"),
-                *span,
-            )
-            .with_hint(
-                "This class is not defined in the current compilation unit or standard library. \
-                 Suppress with @expect unresolved_class if it exists at runtime.",
-            )
-            .with_category(DiagnosticCategory::UnresolvedClass),
-        );
+        diagnostics.push(unresolved_class_diagnostic(class_name, *span));
     }
+}
+
+/// The "Unresolved class" warning (ADR 0100) for a class name that is neither
+/// in the hierarchy nor a protocol. The one place its message and hint are
+/// spelled; every unresolved-class check builds it here.
+pub(super) fn unresolved_class_diagnostic(class_name: &str, span: Span) -> Diagnostic {
+    Diagnostic::warning(format!("Unresolved class `{class_name}`"), span)
+        .with_hint(
+            "This class is not defined in the current compilation unit or standard library. \
+             Suppress with @expect unresolved_class if it exists at runtime.",
+        )
+        .with_category(DiagnosticCategory::UnresolvedClass)
 }
 
 // ── Unresolved type-alias references (ADR 0108) ────────────────────────────

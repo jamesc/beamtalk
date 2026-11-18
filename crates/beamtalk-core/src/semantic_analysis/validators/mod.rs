@@ -22,13 +22,23 @@
 //!   channel, and the Phase 0 allow-set for outer-local threading (BT-3745)
 //! - `supervision_validators` — OTP supervision policy checks
 //! - `match_validators` — pattern match exhaustiveness
+//! - `match_arm_block_validators` — a `match:` arm body that is a bare block
+//!   literal (BT-4028)
 //! - `native_validators` — native actor validation
 //! - `operator_validators` — non-dispatchable operator declaration checks
+//! - `package_validators` — package qualifiers name a known package
+//!   (ADR 0070)
 //! - `reserved_name_validators` — reserved internal-namespace name checks,
 //!   and class-side methods shadowed by the class process's class-variable
 //!   reflection selectors (BT-4422)
+//! - `sendability_validators` — sendability checks that need data the type
+//!   checker does not carry (ADR 0103)
+//! - `structural_validators` — unresolved classes and FFI modules, Erlang
+//!   arity mismatches
 //! - `unguarded_late_read_validators` — unguarded `late`-slot read reachable
 //!   from `terminate:`/`handleInfo:` (ADR 0124 §4d)
+//! - `visibility_validators` — internal-class and internal-method visibility
+//!   (ADR 0071)
 
 mod class_process_ffi_validators;
 mod class_state_abroad;

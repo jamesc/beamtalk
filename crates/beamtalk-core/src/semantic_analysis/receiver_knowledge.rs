@@ -165,32 +165,16 @@ pub fn classify_receiver(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::MethodKind;
     use crate::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
-    use ecow::EcoString;
-
-    fn eco(s: &str) -> EcoString {
-        EcoString::from(s)
-    }
 
     fn dnu_method(class_name: &str) -> MethodInfo {
-        MethodInfo {
-            selector: eco("doesNotUnderstand:args:"),
-            arity: 2,
-            kind: MethodKind::Primary,
-            defined_in: eco(class_name),
-            is_sealed: false,
-            is_internal: false,
-            spawns_block: false,
-            return_type: None,
-            param_types: vec![None, None],
-            doc: None,
-
-            origin: None,
-            primitive: None,
-            constant_value: None,
-            answers_receiver: false,
-        }
+        MethodInfo::synthesized(
+            "doesNotUnderstand:args:",
+            class_name,
+            None,
+            vec![None, None],
+            None,
+        )
     }
 
     fn base_class_info(name: &str, superclass: &str) -> ClassInfo {

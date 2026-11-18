@@ -5,9 +5,6 @@
 //!
 //! **DDD Context:** Semantic Analysis
 
-//! `TypeChecker::state_default_types` (BT-3481), keeping the direction
-//! one-way instead of calling back into `inference/`.
-
 use std::collections::HashMap;
 
 use crate::announce_selectors::is_announce_selector;

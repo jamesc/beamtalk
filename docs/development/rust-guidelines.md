@@ -230,6 +230,8 @@ pub(crate) enum ParseErrorKind {
 
 Use `thiserror` for error definitions, `miette` for user-facing diagnostics with source spans.
 
+**Diagnostic message wording:** interpolated names (classes, selectors, variables) are wrapped in backticks: ``format!("Unresolved class `{name}`")``, not single quotes. Backticks are the majority style in the semantic-analysis messages; new messages use them, and an older single-quoted message is converted when you touch it (tests and the language service match on message text, so convert a message together with its assertions). A message that several checks emit is built by one helper (for example `unresolved_class_diagnostic`) rather than retyped at each site.
+
 ## Type Safety
 
 **Use newtypes** to prevent type confusion:

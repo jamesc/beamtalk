@@ -395,7 +395,7 @@ impl TypeChecker {
         else {
             return None;
         };
-        if class_name.as_str() != "Block" {
+        if !WellKnownClass::Block.is(class_name) {
             return None;
         }
         if let Expression::Block(block) = arg
@@ -815,12 +815,14 @@ impl TypeChecker {
         dt: &DeclaredType,
     ) -> Option<&[DeclaredType]> {
         match dt {
-            DeclaredType::Generic { base, parameters } if base == "Block" => Some(parameters),
+            DeclaredType::Generic { base, parameters } if WellKnownClass::Block.is(base) => {
+                Some(parameters)
+            }
             DeclaredType::Union(members) => {
                 let mut found: Option<&[DeclaredType]> = None;
                 for member in members {
                     if let DeclaredType::Generic { base, parameters } = member
-                        && base == "Block"
+                        && WellKnownClass::Block.is(base)
                     {
                         if found.is_some() {
                             return None;
