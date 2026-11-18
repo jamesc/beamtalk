@@ -1028,5 +1028,6 @@ orphaned_pending_future_is_rejected_after_cap_test() ->
     beamtalk_future:when_rejected(Future, fun(E) -> Parent ! {rejected, E} end),
     ?awaitMessage({rejected, #beamtalk_error{kind = future_expired}}),
     ?assertThrow(
-        {future_rejected, #beamtalk_error{kind = future_expired}}, beamtalk_future:await_forever(Future)
+        {future_rejected, #beamtalk_error{kind = future_expired}},
+        beamtalk_future:await_forever(Future)
     ).
