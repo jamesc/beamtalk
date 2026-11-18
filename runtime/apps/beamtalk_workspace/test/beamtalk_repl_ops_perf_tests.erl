@@ -351,7 +351,7 @@ get_traces_class_filter_test_() ->
             %% parse_class with unknown atom: badarg error path (lines 228-232)
             {"get-traces with unknown class returns structured error", fun() ->
                 ?assertMatch(
-                    {error, #beamtalk_error{kind = invalid_argument, class = 'Tracing'}},
+                    {error, #beamtalk_error{kind = class_not_found, class = 'Tracing'}},
                     beamtalk_repl_ops_perf:handle_term(
                         <<"get-traces">>,
                         #{<<"class">> => <<"NonExistentClassXYZ99999NightlyTest">>},

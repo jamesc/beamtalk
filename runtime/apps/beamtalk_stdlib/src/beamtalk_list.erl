@@ -28,9 +28,13 @@ beyond simple BIF calls (bounds checking, error formatting, iteration).
     from_to/3,
     reverse_group_values/1,
     unique/1,
-    sorted_strict_unique/1,
     strict_member_sorted/2
 ]).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
+-export([sorted_strict_unique/1]).
+-endif.
 
 -doc """
 Access element at 1-based index with bounds checking.

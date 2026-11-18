@@ -28,20 +28,25 @@ other while keeping both DRY.
 """.
 
 -export([
-    split_lines/1,
     flush_and_collect/2,
     bt_array_to_list/3,
-    ensure_binary_args/3,
-    ensure_binary_env/3,
     normalize_args/3,
     normalize_env/3,
     open/0,
-    spawn_child/4,
-    spawn_child/5,
+    spawn_child/4, spawn_child/5,
     kill_child/2,
     write_stdin/3,
     close/1
 ]).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
+-export([
+    ensure_binary_args/3,
+    ensure_binary_env/3,
+    split_lines/1
+]).
+-endif.
 
 %%% ============================================================================
 %%% Line splitting

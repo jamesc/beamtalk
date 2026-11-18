@@ -3095,23 +3095,13 @@ normalize_crash_reason(_Reason) -> child_start_failed.
 -doc """
 Emit a supervision-lifecycle system event on the `SystemAnnouncer` bus.
 
-Guarded by a `whereis` check (the announcements worker starts after bootstrap)
-and wrapped in try/catch: announcing is a best-effort observability side effect
-and must never fail or delay the supervision operation.
+Goes through `beamtalk_announcements:system_announce_safe/2` (the announcements
+worker starts after bootstrap): announcing is a best-effort observability side
+effect and must never fail or delay the supervision operation.
 """.
 -spec announce_supervision(atom(), map()) -> ok.
 announce_supervision(EventClass, Fields) ->
-    case erlang:whereis(beamtalk_announcements) of
-        undefined ->
-            ok;
-        _Pid ->
-            try
-                beamtalk_announcements:system_announce_running(EventClass, Fields)
-            catch
-                _:_ -> ok
-            end
-    end,
-    ok.
+    beamtalk_announcements:system_announce_safe(EventClass, Fields).
 
 -doc """
 Execute Fun(), translating a raw failure to reach the supervisor into a

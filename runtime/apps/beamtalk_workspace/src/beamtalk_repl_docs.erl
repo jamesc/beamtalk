@@ -17,7 +17,6 @@ Method docs are retrieved via `>> #selector` (CompiledMethod maps).
 
 -export([
     format_class_docs/1,
-    format_class_docs_class_side/1,
     format_method_doc/2,
     format_method_doc_class_side/2,
     method_doc_signature_resolved/3
@@ -45,7 +44,8 @@ Method docs are retrieved via `>> #selector` (CompiledMethod maps).
     alternative_classes/1,
     format_see_also/1,
     build_see_also/3,
-    format_package_provenance/1
+    format_package_provenance/1,
+    format_class_docs_class_side/1
 ]).
 -endif.
 
@@ -213,6 +213,8 @@ format_method_doc_class_side(ClassName, SelectorBin) ->
             end
     end.
 
+%% Only the tests call this (BT-5048).
+-ifdef(TEST).
 -doc """
 Format documentation for the class-object side of a class (`:h ClassName class`).
 Shows class methods and class-protocol methods separately.
@@ -272,6 +274,7 @@ format_class_docs_class_side(ClassName) ->
                 exit:{noproc, _} -> {error, {class_not_found, ClassName}}
             end
     end.
+-endif.
 
 %%% Internal functions
 
@@ -893,6 +896,8 @@ format_selector_summary(Count, Selectors) ->
             ]
     end.
 
+%% Only the tests call this (BT-5048).
+-ifdef(TEST).
 -doc "Format the class-object side documentation output.".
 -spec format_class_side_output(atom(), map(), [atom()], [{atom(), [atom()]}], [{atom(), [atom()]}]) ->
     binary().
@@ -958,7 +963,10 @@ format_class_side_output(ClassName, Modifiers, OwnCM, InhCMGrouped, ProtoGrouped
             lists:flatten(Parts)
         )
     ).
+-endif.
 
+%% Only the tests call this (BT-5048).
+-ifdef(TEST).
 -doc """
 Walk the class hierarchy collecting class-side methods.
 Returns #{Selector => DefiningClass} — local methods shadow inherited ones.
@@ -970,3 +978,4 @@ mirrors the instance-side `collect_flattened_methods/2` delegate below.
 -spec collect_flattened_class_methods(atom(), pid()) -> #{atom() => atom()}.
 collect_flattened_class_methods(ClassName, ClassPid) ->
     beamtalk_hierarchy_docs:collect_flattened_class_methods(ClassName, ClassPid).
+-endif.

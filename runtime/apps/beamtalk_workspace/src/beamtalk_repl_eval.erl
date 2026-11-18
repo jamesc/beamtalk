@@ -350,7 +350,7 @@ resolve_entry(ClassNameBin, SelectorBin) ->
                     {error, dispatch_dnu_error(ClassNameBin, SelectorBin)}
             end;
         error ->
-            {error, dispatch_class_not_found_error(ClassNameBin)}
+            {error, beamtalk_repl_errors:class_not_found(ClassNameBin, connect)}
     end.
 
 -spec resolve_entry_receiver(binary()) -> {ok, entry_receiver()} | error.
@@ -497,22 +497,6 @@ is_valid_run_entry_selector(SelectorBin) ->
 run_entry_args([], Acc) -> {ok, lists:reverse(Acc)};
 run_entry_args([Arg | Rest], Acc) when is_binary(Arg) -> run_entry_args(Rest, [Arg | Acc]);
 run_entry_args(_, _Acc) -> error.
-
--spec dispatch_class_not_found_error(binary()) -> #beamtalk_error{}.
-dispatch_class_not_found_error(ClassNameBin) ->
-    Err0 = beamtalk_error:new(class_not_found, 'Program'),
-    Err1 = beamtalk_error:with_message(
-        Err0,
-        <<"Class '", ClassNameBin/binary,
-            "' is not loaded in this workspace, so it cannot be run connected.">>
-    ),
-    beamtalk_error:with_hint(
-        Err1,
-        <<
-            "Load the project into the running workspace first (open it with `beamtalk repl` "
-            "or start it with `beamtalk run .`), or omit `--connect` to run it in a fresh node."
-        >>
-    ).
 
 -spec dispatch_dnu_error(binary(), binary()) -> #beamtalk_error{}.
 dispatch_dnu_error(ClassNameBin, SelectorBin) ->
@@ -1068,16 +1052,8 @@ remove_class(ClassNameBin) ->
         {ok, ClassName} ->
             beamtalk_runtime_api:remove_class_from_system(ClassName);
         {error, _} ->
-            {error, remove_class_unknown_error(ClassNameBin)}
+            {error, beamtalk_repl_errors:class_not_found(ClassNameBin, repl)}
     end.
-
--spec remove_class_unknown_error(binary()) -> #beamtalk_error{}.
-remove_class_unknown_error(ClassNameBin) ->
-    Err0 = beamtalk_error:new(class_not_found, 'Workspace'),
-    beamtalk_error:with_message(
-        Err0,
-        <<"Cannot remove class '", ClassNameBin/binary, "': no such class is loaded">>
-    ).
 
 -spec do_compile_method(
     binary(), binary(), binary(), durable | ephemeral, binary(), human | agent, instance | class
@@ -1457,19 +1433,9 @@ channel provided — now as a typed, session-scoped `BindingChanged`.
 """.
 -spec announce_binding_changed(atom(), term(), binary() | nil) -> ok.
 announce_binding_changed(VarName, Value, SessionId) ->
-    case erlang:whereis(beamtalk_announcements) of
-        undefined ->
-            ok;
-        _Pid ->
-            try
-                beamtalk_announcements:system_announce('BindingChanged', #{
-                    name => VarName, value => Value, sessionId => SessionId
-                })
-            catch
-                _:_ -> ok
-            end
-    end,
-    ok.
+    beamtalk_announcements:system_announce_safe('BindingChanged', #{
+        name => VarName, value => Value, sessionId => SessionId
+    }).
 
 -doc """
 Release an eval module's old code if nothing runs it (BT-4945, ADR 0150).

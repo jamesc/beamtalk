@@ -18,15 +18,12 @@ slicing, splicing and the "does the recorded span still hold the recorded
 text" check live here and nowhere else.
 """.
 
--export([
-    valid_span/3,
-    in_range/3,
-    slice/2,
-    splice/3,
-    matches_at/3,
-    matches_span/3,
-    check_span/3
-]).
+-export([valid_span/3, slice/2, splice/3, matches_at/3, matches_span/3, check_span/3]).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
+-export([in_range/3]).
+-endif.
 
 -export_type([span/0, conflict_reason/0]).
 

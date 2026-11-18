@@ -18,16 +18,12 @@ rename partitioning) both read this table; adding a kind means adding one row.
 a member of the domain but is never persisted, never named by `flushKinds:`.
 """.
 
--export([
-    all/0,
-    persisted/0,
-    decode/1,
-    wire_name/1,
-    tier/1,
-    rename/1,
-    is_rename/1,
-    filter_symbol/1
-]).
+-export([all/0, persisted/0, decode/1, wire_name/1, tier/1, rename/1, filter_symbol/1]).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
+-export([is_rename/1]).
+-endif.
 
 -export_type([kind/0, tier/0, descriptor/0]).
 
@@ -104,9 +100,12 @@ rename(Kind) ->
         false -> none
     end.
 
+%% Only the tests call this (BT-5048).
+-ifdef(TEST).
 -spec is_rename(term()) -> boolean().
 is_rename(Kind) ->
     rename(Kind) =/= none.
+-endif.
 
 -doc "How a persisted kind is written as a Beamtalk symbol literal: `#instance`, `#'new-class'`.".
 -spec filter_symbol(kind()) -> binary().

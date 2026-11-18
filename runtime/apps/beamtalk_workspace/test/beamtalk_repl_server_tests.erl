@@ -1866,8 +1866,6 @@ ensure_structured_error_beamtalk_object_test() ->
     Err = beamtalk_repl_errors:ensure_structured_error(Obj),
     ?assertEqual(does_not_understand, Err#beamtalk_error.kind).
 
-%%% make_class_not_found_error/1 tests
-
 %%% format_name/1 tests
 
 format_name_other_test() ->

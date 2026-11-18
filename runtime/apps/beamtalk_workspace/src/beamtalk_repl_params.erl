@@ -22,16 +22,16 @@ Request-parameter validation shared by the REPL op modules.
   actor-pid param used by `inspect`, `kill` and `pid-stats`.
 """.
 
+-export([nonempty_binary/2, nonempty_or_undefined/1, existing_atom_param/2, actor_pid/1]).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
 -export([
-    nonempty_binary/2,
-    nonempty_or_undefined/1,
-    existing_atom_param/2,
     unknown_name/0,
-    actor_pid/1,
     validate_actor_pid/1,
-    is_known_actor/1,
-    invalid_pid_error/2
+    is_known_actor/1
 ]).
+-endif.
 
 -export_type([unknown_policy/0]).
 

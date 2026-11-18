@@ -245,19 +245,7 @@ parse_class(ClassBin) ->
         {ok, Class} ->
             Class;
         error ->
-            error(#beamtalk_error{
-                kind = invalid_argument,
-                class = 'Tracing',
-                message = beamtalk_primitive:string_from_binary(
-                    iolist_to_binary(
-                        [<<"Unknown class: ">>, ClassBin]
-                    )
-                ),
-                hint = beamtalk_primitive:string_from_binary(
-                    <<"The class must match an existing actor class name.">>
-                ),
-                details = #{}
-            })
+            error(beamtalk_repl_errors:class_not_found(ClassBin, tracing))
     end.
 
 -doc """

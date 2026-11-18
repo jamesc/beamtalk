@@ -50,9 +50,8 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
 
 %% Instance methods (ADR 0086 Phase 1)
 -export([do/2, at/2, byte_at/2, part/3, concat/2]).
--export([to_bytes/1, from_bytes/1]).
+-export([to_bytes/1]).
 -export([as_string/1, as_string_unchecked/1, print_string/1]).
--export([deserialize_with_used/1]).
 
 %% Shared UTF-8 validator for native text boundaries (BT-4171)
 -export([check_utf8/1]).
@@ -74,6 +73,14 @@ iteration, slicing, and conversion (ADR 0086 Phase 1).
 
 %% Instance methods — bit size, shared with Bitstring (ADR 0141, BT-4139)
 -export([bitSize/1]).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
+-export([
+    from_bytes/1,
+    deserialize_with_used/1
+]).
+-endif.
 
 %%% ============================================================================
 %%% Public API

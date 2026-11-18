@@ -3655,25 +3655,15 @@ normalize_stop_reason(_Other) -> crashed.
 -doc """
 Publish an actor-lifecycle system event on the `SystemAnnouncer` bus.
 
-Guarded by a `whereis` check so a spawn/stop never *starts* the bus (it is a
-supervised worker brought up at boot, ADR 0093 §1; only when it is already
-running is there any subscriber to deliver to), and wrapped in try/catch:
+Goes through `beamtalk_announcements:system_announce_safe/2`, so a spawn/stop
+never *starts* the bus (it is a supervised worker brought up at boot, ADR 0093
+§1; only when it is already running is there any subscriber to deliver to):
 announcing is a best-effort observability side effect that must never fail or
 delay actor start/teardown.
 """.
 -spec do_announce_actor_lifecycle(atom(), map()) -> ok.
 do_announce_actor_lifecycle(EventClass, Fields) ->
-    case erlang:whereis(beamtalk_announcements) of
-        undefined ->
-            ok;
-        _Pid ->
-            try
-                beamtalk_announcements:system_announce_running(EventClass, Fields)
-            catch
-                _:_ -> ok
-            end
-    end,
-    ok.
+    beamtalk_announcements:system_announce_safe(EventClass, Fields).
 
 -doc """
 Publish a committed state change to the per-object change subscription substrate

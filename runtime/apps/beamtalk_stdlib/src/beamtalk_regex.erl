@@ -26,7 +26,7 @@ Regex objects are represented as tagged maps:
 -export([from/1, from/2]).
 
 -export([source/1, 'printString'/1]).
--export([valid_options/0]).
+
 -export([
     matches_regex/2,
     matches_regex_options/3,
@@ -36,6 +36,11 @@ Regex objects are represented as tagged maps:
     replace_all_regex/3,
     split_regex/2
 ]).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
+-export([valid_options/0]).
+-endif.
 
 -type regex_option() :: caseless | multiline | dotall | extended | ungreedy.
 -type t() :: #{

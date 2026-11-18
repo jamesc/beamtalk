@@ -13,14 +13,7 @@ Extracted from beamtalk_repl_server.
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
--export([
-    handle/4,
-    handle_term/4,
-    make_class_not_found_error/1,
-    base_protocol_response/1,
-    list_class_methods_for_ws/1,
-    list_inherited_methods_for_ws/1
-]).
+-export([handle/4, handle_term/4]).
 
 -include_lib("kernel/include/logger.hrl").
 
@@ -34,7 +27,10 @@ Extracted from beamtalk_repl_server.
     %% mirrors the Elixir facade at the Erlang op boundary.
     normalize_diagnostics_mode/1,
     %% White-box test of the diagnostics side-effect-free compile path.
-    diagnostics_for/3
+    diagnostics_for/3,
+    base_protocol_response/1,
+    list_class_methods_for_ws/1,
+    list_inherited_methods_for_ws/1
 ]).
 -endif.
 
@@ -398,10 +394,7 @@ handle_show_codegen(Params, SessionPid) ->
                     case Code of
                         [] ->
                             {error,
-                                beamtalk_repl_errors:make(
-                                    empty_expression,
-                                    'REPL',
-                                    <<"Empty expression">>,
+                                beamtalk_repl_errors:empty_expression(
                                     <<"Enter an expression to compile.">>
                                 )};
                         _ ->
@@ -648,11 +641,11 @@ show_codegen_class_method(ClassBin, SelectorBin) ->
     %% Support package-qualified class names (e.g. "json@Parser")
     case beamtalk_repl_errors:resolve_qualified_class_name(ClassBin) of
         {error, badarg} ->
-            {error, make_class_not_found_error(ClassBin)};
+            {error, beamtalk_repl_errors:class_not_found(ClassBin, repl)};
         {ok, ClassAtom} ->
             case beamtalk_runtime_api:whereis_class(ClassAtom) of
                 undefined ->
-                    {error, make_class_not_found_error(ClassBin)};
+                    {error, beamtalk_repl_errors:class_not_found(ClassBin, repl)};
                 ClassPid ->
                     %% Guard all ClassPid gen_server calls against unload/reload races.
                     try
@@ -668,7 +661,7 @@ show_codegen_class_method(ClassBin, SelectorBin) ->
                         end
                     catch
                         exit:{noproc, _} ->
-                            {error, make_class_not_found_error(ClassBin)};
+                            {error, beamtalk_repl_errors:class_not_found(ClassBin, repl)};
                         exit:{timeout, _} ->
                             {error,
                                 beamtalk_repl_errors:make(
@@ -807,7 +800,7 @@ run_test_op(undefined) ->
 run_test_op(ClassName) when is_binary(ClassName) ->
     case beamtalk_repl_errors:safe_to_existing_atom(ClassName) of
         {error, badarg} ->
-            {error, make_class_not_found_error(ClassName)};
+            {error, beamtalk_repl_errors:class_not_found(ClassName, repl)};
         {ok, ClassAtom} ->
             try
                 TestResult = beamtalk_test_runner:run_class_by_name(ClassAtom),
@@ -860,6 +853,8 @@ run_test_op_file(FilePath) ->
 
 %%% Internal helpers
 
+%% Only the tests call this (BT-5048).
+-ifdef(TEST).
 -spec base_protocol_response(term()) -> map().
 base_protocol_response(Msg) ->
     Id = beamtalk_repl_protocol:get_id(Msg),
@@ -874,6 +869,7 @@ base_protocol_response(Msg) ->
         undefined -> M1;
         _ -> M1#{<<"session">> => Session}
     end.
+-endif.
 
 -doc """
 Compute parse-only diagnostics for an editor buffer, optionally under the
@@ -1203,16 +1199,6 @@ list_state_vars_for_ws(ClassBin) when is_binary(ClassBin) ->
                     ]
             end
     end.
-
--spec make_class_not_found_error(atom() | binary()) -> #beamtalk_error{}.
-make_class_not_found_error(ClassName) ->
-    NameBin = beamtalk_repl_protocol:to_binary(ClassName),
-    beamtalk_repl_errors:make(
-        class_not_found,
-        'REPL',
-        iolist_to_binary([<<"Unknown class: ">>, NameBin]),
-        <<"Use Workspace classes to see loaded classes.">>
-    ).
 
 -doc """
 Resolve the per-class source file path for list-classes.

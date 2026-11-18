@@ -55,8 +55,10 @@ Erlang BIFs without dispatching (ADR 0002).
 -export([add/2, subtract/2, multiply/2]).
 -export([lt/2, gt/2, lte/2, gte/2]).
 
-%% Cross-module helper (beamtalk_timer, beamtalk_datetime)
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
 -export([is_duration/1]).
+-endif.
 
 -type t() :: #{'$beamtalk_class' := 'Duration', millis := integer()}.
 -export_type([t/0]).
@@ -321,10 +323,13 @@ gte(Self, Other) -> '>='(Self, Other).
 %%% Cross-module Helpers
 %%% ============================================================================
 
+%% Only the tests call this (BT-5048).
+-ifdef(TEST).
 -doc "True if the value is a Duration tagged map.".
 -spec is_duration(term()) -> boolean().
 is_duration(#{'$beamtalk_class' := 'Duration', millis := Ms}) -> is_integer(Ms);
 is_duration(_) -> false.
+-endif.
 
 %%% ============================================================================
 %%% Internal Functions

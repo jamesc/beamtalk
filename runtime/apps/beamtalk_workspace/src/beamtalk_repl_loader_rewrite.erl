@@ -998,8 +998,7 @@ Returns `{ok, RevertedClassNameBin}` (the class's name AFTER revert —
 rewrite failure — never a partial revert: a `rewrite_sites/2` validation
 failure (the shared mechanism's own all-or-nothing guarantee) or a single
 site whose owning class can no longer be resolved, or whose recorded body can
-no longer be read, aborts before anything is spliced. The caller (`beamtalk_
-workspace_interface_primitives:revert_rename_entry/2`) wraps any `{error, _}`
+no longer be read, aborts before anything is spliced. The caller (`beamtalk_workspace_revert:revert_rename_entry/2`) wraps any `{error, _}`
 into a structured `#beamtalk_error{}` and retires the original entry
 (`mark_flushed/1`, mirroring `'remove-class'` revert's own "undo emits no
 fresh entry" convention) on success.

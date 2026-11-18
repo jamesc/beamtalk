@@ -57,9 +57,13 @@ requests, "type"-keyed responses) has been removed.
     get_id/1,
     get_session/1,
     get_params/1,
-    base_response/1,
     to_binary/1
 ]).
+
+%% Exported for white-box tests only (no production caller).
+-ifdef(TEST).
+-export([base_response/1]).
+-endif.
 
 %% Protocol request record
 -record(protocol_msg, {

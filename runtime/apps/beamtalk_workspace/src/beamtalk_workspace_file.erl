@@ -34,13 +34,10 @@ A leaf module: it calls only OTP.
 -export([
     path_inside/2,
     relative_parts/2,
-    temp_path/1,
     write_temp/2,
     atomic_write/3,
-    sweep_stale_temps/1,
-    sweep_stale_temps/2,
-    sweep_stale_temps_in/1,
-    sweep_stale_temps_in/2
+    sweep_stale_temps/1, sweep_stale_temps/2,
+    sweep_stale_temps_in/1, sweep_stale_temps_in/2
 ]).
 
 %% How old a `temp_path/1` leftover must be before a sweep deletes it. A live

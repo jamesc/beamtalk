@@ -1088,12 +1088,12 @@ validate_selector(Params) ->
 resolve_class(Cls) ->
     case
         beamtalk_repl_params:existing_atom_param(
-            Cls, {error, fun beamtalk_repl_ops_browse_support:class_not_found_message/1}
+            Cls, {error, fun beamtalk_repl_errors:class_not_found_message/1}
         )
     of
         {ok, Name} ->
             case beamtalk_runtime_api:whereis_class(Name) of
-                undefined -> {error, beamtalk_repl_ops_browse_support:class_not_found_message(Cls)};
+                undefined -> {error, beamtalk_repl_errors:class_not_found_message(Cls)};
                 _Pid -> {ok, Name}
             end;
         {error, _} = Err ->

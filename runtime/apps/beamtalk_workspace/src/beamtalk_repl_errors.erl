@@ -60,6 +60,9 @@ Used by protocol handlers and op modules.
 -export([
     make/3,
     make/4,
+    class_not_found/2,
+    class_not_found_message/1,
+    empty_expression/1,
     ensure_structured_error/1,
     ensure_structured_error/2,
     format_name/1,
@@ -67,6 +70,9 @@ Used by protocol handlers and op modules.
     safe_to_existing_atom/1,
     resolve_qualified_class_name/1
 ]).
+
+-type class_not_found_context() :: repl | tracing | connect.
+-export_type([class_not_found_context/0]).
 
 %%% Public API
 
@@ -89,6 +95,59 @@ the REPL op modules. A hint of `undefined` is dropped by `beamtalk_error:with_hi
 -spec make(atom(), atom(), term(), term()) -> #beamtalk_error{}.
 make(Kind, Source, Message, Hint) ->
     beamtalk_error:with_hint(make(Kind, Source, Message), Hint).
+
+-doc """
+The one `empty_expression` error: `Empty expression` plus an op-specific hint.
+""".
+-spec empty_expression(binary()) -> #beamtalk_error{}.
+empty_expression(Hint) ->
+    make(empty_expression, 'REPL', <<"Empty expression">>, Hint).
+
+-doc """
+The one wording for "no such class": `Unknown class: Name`.
+
+Shared by `class_not_found/2` and by the browse ops, which report a plain
+binary reason rather than a structured error.
+""".
+-spec class_not_found_message(term()) -> binary().
+class_not_found_message(Name) ->
+    iolist_to_binary([<<"Unknown class: ">>, format_name(Name)]).
+
+-doc """
+The one constructor for a `class_not_found` error, used by every op.
+
+The message is always `Unknown class: Name` and `details` carries the class
+name. The hint depends on where the lookup failed (`Context`):
+
+- `repl`: point at `Workspace classes`
+- `tracing`: the filter must name an existing actor class
+- `connect`: the class must be loaded into the running workspace first
+""".
+-spec class_not_found(term(), class_not_found_context()) -> #beamtalk_error{}.
+class_not_found(Name, Context) ->
+    Err = make(
+        class_not_found,
+        class_not_found_source(Context),
+        class_not_found_message(Name),
+        class_not_found_hint(Context)
+    ),
+    beamtalk_error:with_details(Err, #{class => format_name(Name)}).
+
+-spec class_not_found_source(class_not_found_context()) -> atom().
+class_not_found_source(tracing) -> 'Tracing';
+class_not_found_source(connect) -> 'Program';
+class_not_found_source(_) -> 'REPL'.
+
+-spec class_not_found_hint(class_not_found_context()) -> binary().
+class_not_found_hint(tracing) ->
+    <<"The class must match an existing actor class name.">>;
+class_not_found_hint(connect) ->
+    <<
+        "Load the project into the running workspace first (open it with `beamtalk repl` "
+        "or start it with `beamtalk run .`), or omit `--connect` to run it in a fresh node."
+    >>;
+class_not_found_hint(_) ->
+    <<"Use Workspace classes to see loaded classes.">>.
 
 -doc """
 Safely convert a binary to an existing atom, returning error instead of creating new atoms.
@@ -240,15 +299,7 @@ ensure_structured_error({actors_exist, ModuleName, Count}) ->
         ])
     );
 ensure_structured_error({class_not_found, ClassName}) ->
-    make(
-        class_not_found,
-        'REPL',
-        iolist_to_binary([
-            <<"Unknown class: ">>,
-            format_name(ClassName),
-            <<". Use Workspace classes to see loaded classes.">>
-        ])
-    );
+    class_not_found(ClassName, repl);
 ensure_structured_error({method_not_found, ClassName, Selector}) ->
     %% canonical DNU message — call beamtalk_error:generate_message/3
     %% (via with_selector/2 when Selector is an atom) instead of hand-rolling

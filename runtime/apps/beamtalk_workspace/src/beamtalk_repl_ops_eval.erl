@@ -44,13 +44,7 @@ handle_term(<<"eval">>, Params, _Msg, SessionPid) ->
     Trace = maps:get(<<"trace">>, Params, false) =:= true,
     case Code of
         [] ->
-            {error,
-                beamtalk_repl_errors:make(
-                    empty_expression,
-                    'REPL',
-                    <<"Empty expression">>,
-                    <<"Enter an expression to evaluate.">>
-                )};
+            {error, beamtalk_repl_errors:empty_expression(<<"Enter an expression to evaluate.">>)};
         _ when Trace ->
             case beamtalk_repl_shell:eval_trace(SessionPid, Code) of
                 {ok, Steps, Output, Warnings} ->

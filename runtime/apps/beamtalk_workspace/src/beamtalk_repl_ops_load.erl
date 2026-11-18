@@ -22,14 +22,16 @@ respectively.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("kernel/include/logger.hrl").
 
--export([handle/4, handle_term/4, resolve_class_to_module/1, resolve_module_atoms/2]).
+-export([handle/4, handle_term/4]).
 
 %% Export internals for white-box testing of the authoring helpers.
 -ifdef(TEST).
 -export([
     finish_section_write/4,
     atomic_write_file/2,
-    atomic_write_file/3
+    atomic_write_file/3,
+    resolve_class_to_module/1,
+    resolve_module_atoms/2
 ]).
 -endif.
 
@@ -77,12 +79,7 @@ handle_term(<<"load-source">>, Params, _Msg, SessionPid) ->
     case Source of
         <<>> ->
             {error,
-                beamtalk_repl_errors:make(
-                    empty_expression,
-                    'REPL',
-                    <<"Empty source">>,
-                    <<"Enter Beamtalk source code to compile.">>
-                )};
+                beamtalk_repl_errors:empty_expression(<<"Enter Beamtalk source code to compile.">>)};
         _ ->
             case beamtalk_repl_shell:load_source(SessionPid, Source) of
                 {ok, Classes} ->
@@ -98,12 +95,7 @@ handle_term(<<"unload">>, Params, _Msg, SessionPid) ->
     ClassNameBin = maps:get(<<"module">>, Params, <<>>),
     case beamtalk_repl_errors:safe_to_existing_atom(ClassNameBin) of
         {error, badarg} ->
-            {error,
-                beamtalk_repl_errors:make(
-                    class_not_found,
-                    'REPL',
-                    iolist_to_binary([<<"Class not found: '">>, ClassNameBin, <<"'">>])
-                )};
+            {error, beamtalk_repl_errors:class_not_found(ClassNameBin, repl)};
         {ok, ClassName} ->
             case beamtalk_runtime_api:remove_class_from_system(ClassName) of
                 {ok, ModuleName} ->
@@ -229,7 +221,7 @@ the compile-mtime. The project root for the erlc include path is derived from th
 -spec compile_and_write_native(atom(), binary(), string(), binary()) -> {value, map()}.
 compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
     SourceFileBin = list_to_binary(ErlPath),
-    ProjectRoot = beamtalk_workspace_project_sync:find_project_root(ErlPath),
+    ProjectRoot = beamtalk_workspace_native_build:find_project_root(ErlPath),
     %% Refresh the generated beamtalk_classes.hrl before compiling so a
     %% module that `-include("beamtalk_classes.hrl")` resolves against a fresh
     %% header (the same invariant the incremental native build relies on). A
@@ -240,7 +232,7 @@ compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
             undefined ->
                 ok;
             Root ->
-                beamtalk_workspace_project_sync:regenerate_native_class_header(
+                beamtalk_workspace_native_build:regenerate_native_class_header(
                     Root, beamtalk_workspace_project_sync:resolve_package_name(Root, undefined)
                 )
         end,
@@ -270,7 +262,7 @@ compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
                 ]
             }};
         ok ->
-            {Errors, _Count} = beamtalk_workspace_project_sync:compile_native_erl_files(
+            {Errors, _Count} = beamtalk_workspace_native_build:compile_native_erl_files(
                 [TempPath], CompileRoot
             ),
             _ = file:delete(TempPath),
@@ -323,7 +315,7 @@ finish_native_write(_Module, ModuleBin, ErlPath, SourceFileBin, Source, CompileR
             %% Recompile + reload from the REAL `.erl` (not the validation temp)
             %% so compile-info `source` = ErlPath and the compile-mtime is
             %% stamped against the real file (image == disk).
-            {ReErrors, _Count} = beamtalk_workspace_project_sync:compile_native_erl_files(
+            {ReErrors, _Count} = beamtalk_workspace_native_build:compile_native_erl_files(
                 [ErlPath], CompileRoot
             ),
             case ReErrors of
@@ -909,6 +901,8 @@ section_io_error(ClassBin, Verb, Reason) ->
         <<"Check file permissions and try again.">>
     ).
 
+%% Only the tests call this (BT-5048).
+-ifdef(TEST).
 -spec resolve_module_atoms(atom() | undefined, [map()]) -> [atom()].
 resolve_module_atoms(ModuleAtom, _Classes) when is_atom(ModuleAtom), ModuleAtom =/= undefined ->
     [ModuleAtom];
@@ -934,7 +928,10 @@ resolve_module_atoms(undefined, Classes) ->
         end,
         Classes
     ).
+-endif.
 
+%% Only the tests call this (BT-5048).
+-ifdef(TEST).
 -spec resolve_class_to_module(atom()) -> atom().
 resolve_class_to_module(ClassName) ->
     ClassPids =
@@ -959,3 +956,4 @@ resolve_class_to_module(ClassName, [Pid | Rest]) ->
         _:_ ->
             resolve_class_to_module(ClassName, Rest)
     end.
+-endif.

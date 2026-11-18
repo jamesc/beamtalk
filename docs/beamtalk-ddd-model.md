@@ -911,11 +911,11 @@ code_change(_OldVsn, State, #{module := Module}) when is_map(State) ->
 **Invariants:**
 - Workspace ID is immutable once assigned (SHA256 of project path or explicit name)
 - `last_activity` must be updated on every user interaction (session connect, actor spawn, code reload)
-- `supervised_actors` tracks only live PIDs (dead PIDs are unregistered via process monitors)
+- The live actor set is not tracked here: it comes from the actor scan (`beamtalk_workspace_actors:list/0`); `ActorSpawned` only bumps `last_activity`
 - `loaded_modules` tracks only modules loaded through the workspace bootstrap or REPL load ops
 
 **Entities:**
-- `WorkspaceMeta`: gen_server holding workspace identity, timestamps, actor PIDs, loaded module list
+- `WorkspaceMeta`: gen_server holding workspace identity, timestamps, loaded module list
 
 **Value Objects:**
 - `WorkspaceId`: binary identifier (e.g. `<<"my-feature">>` or SHA256 hex digest of project path)
@@ -966,14 +966,8 @@ handle_info(check_idle, #state{enabled = true, max_idle_seconds = Max} = State) 
     {noreply, State#state{timer_ref = TRef}}.
 
 %% Aggregate root: beamtalk_workspace_meta
-%% Tracks supervised actors via process monitors for automatic cleanup
-register_actor(Pid) ->
-    MonRef = erlang:monitor(process, Pid),
-    gen_server:call(?MODULE, {register_actor, Pid, MonRef}).
-
-handle_info({'DOWN', _MonRef, process, Pid, _Reason}, State) ->
-    NewActors = lists:delete(Pid, State#state.supervised_actors),
-    {noreply, State#state{supervised_actors = NewActors}}.
+%% Holds identity, timestamps and loaded modules. Live actors are read from the
+%% actor scan (beamtalk_workspace_actors:list/0), not tracked here.
 ```
 
 ### REPL Session Context

@@ -113,11 +113,7 @@ websocket_info(
         Warnings,
         fun beamtalk_repl_json:value_type/1
     ),
-    {[{text, Response}], State#ws_state{
-        pending_eval = undefined,
-        io_capture_pid = undefined,
-        stdin_ref = undefined
-    }};
+    finish_eval(Response, State);
 %% BindingChanged system announcement (SystemAnnouncer bus), re-encoded
 %% to the byte-identical `bindings`/`changed` push frame the legacy
 %% `beamtalk_bindings_events` broadcast produced. The frame carries only the
@@ -127,15 +123,15 @@ websocket_info(
     {beamtalk_announcement, _SubRef, 'BindingChanged', _Handler, Event},
     State = #ws_state{authenticated = true}
 ) ->
-    Push = iolist_to_binary(
-        json:encode(#{
-            <<"type">> => <<"push">>,
-            <<"channel">> => <<"bindings">>,
-            <<"event">> => <<"changed">>,
-            <<"data">> => #{<<"session">> => nullable(maps:get(sessionId, Event, nil))}
-        })
-    ),
-    {[{text, Push}], State};
+    {
+        [
+            {text,
+                push_frame(<<"bindings">>, <<"changed">>, #{
+                    <<"session">> => nullable(maps:get(sessionId, Event, nil))
+                })}
+        ],
+        State
+    };
 %% Eval completed with error
 websocket_info(
     {eval_error, Reason, Output, Warnings},
@@ -154,11 +150,7 @@ websocket_info(
         Warnings,
         Metadata
     ),
-    {[{text, Response}], State#ws_state{
-        pending_eval = undefined,
-        io_capture_pid = undefined,
-        stdin_ref = undefined
-    }};
+    finish_eval(Response, State);
 %% Connected-session `Program exit:` under a streaming eval. Surface the
 %% exit-status reply (parity with the synchronous op path) so the subscriber gets
 %% a terminal message rather than waiting forever; the session shell has already
@@ -171,11 +163,7 @@ websocket_info(
     Msg =/= undefined
 ->
     Response = beamtalk_repl_protocol:encode_script_exit(Code, Msg, Output, Warnings),
-    {[{text, Response}], State#ws_state{
-        pending_eval = undefined,
-        io_capture_pid = undefined,
-        stdin_ref = undefined
-    }};
+    finish_eval(Response, State);
 %% Late streaming messages after eval completed — drop silently
 websocket_info({eval_out, _Chunk}, State = #ws_state{pending_eval = undefined}) ->
     {ok, State};
@@ -212,7 +200,7 @@ websocket_info(
         {drop, Feed1} ->
             {[], State#ws_state{actor_feed = Feed1}};
         {emit, Feed1} ->
-            Frame = actor_push_frame(<<"spawned">>, encode_actor_spawned_event(Event)),
+            Frame = push_frame(<<"actors">>, <<"spawned">>, encode_actor_spawned_event(Event)),
             {[{text, Frame}], State#ws_state{actor_feed = Feed1}}
     end;
 websocket_info(
@@ -223,7 +211,7 @@ websocket_info(
         {drop, Feed1} ->
             {[], State#ws_state{actor_feed = Feed1}};
         {emit, Feed1} ->
-            Frame = actor_push_frame(<<"stopped">>, encode_actor_stopped_event(Event)),
+            Frame = push_frame(<<"actors">>, <<"stopped">>, encode_actor_stopped_event(Event)),
             {[{text, Frame}], State#ws_state{actor_feed = Feed1}}
     end;
 %% Class-loaded push — broadcast when any session loads or reloads a class.
@@ -231,30 +219,14 @@ websocket_info(
     {beamtalk_announcement, _SubRef, 'ClassLoaded', _Handler, Event},
     State = #ws_state{authenticated = true}
 ) ->
-    Push = iolist_to_binary(
-        json:encode(#{
-            <<"type">> => <<"push">>,
-            <<"channel">> => <<"classes">>,
-            <<"event">> => <<"loaded">>,
-            <<"data">> => encode_class_event(Event)
-        })
-    ),
-    {[{text, Push}], State};
+    {[{text, push_frame(<<"classes">>, <<"loaded">>, encode_class_event(Event))}], State};
 %% Class-removed push — newly visible to push consumers now that the
 %% `classes` stream rides the bus (ADR 0093). Symmetric with the `loaded` frame.
 websocket_info(
     {beamtalk_announcement, _SubRef, 'ClassRemoved', _Handler, Event},
     State = #ws_state{authenticated = true}
 ) ->
-    Push = iolist_to_binary(
-        json:encode(#{
-            <<"type">> => <<"push">>,
-            <<"channel">> => <<"classes">>,
-            <<"event">> => <<"removed">>,
-            <<"data">> => encode_class_event(Event)
-        })
-    ),
-    {[{text, Push}], State};
+    {[{text, push_frame(<<"classes">>, <<"removed">>, encode_class_event(Event))}], State};
 %% ADR 0082 Phase 3; ADR 0113 LSP follow-up; ADR 0114 LSP
 %% follow-up: Flush-completion push — broadcast after a `Workspace
 %% flush` writes one or more `.bt` source files. LSP clients use this to emit
@@ -276,18 +248,11 @@ websocket_info(
     {beamtalk_announcement, _SubRef, 'FlushCompleted', _Handler, Event},
     State = #ws_state{authenticated = true}
 ) ->
-    Push = iolist_to_binary(
-        json:encode(#{
-            <<"type">> => <<"push">>,
-            <<"channel">> => <<"workspace">>,
-            <<"event">> => <<"flush_completed">>,
-            <<"data">> => #{
-                <<"files">> => normalise_files_for_push(maps:get(files, Event, [])),
-                <<"fileKinds">> => normalise_file_kinds_for_push(maps:get(fileKinds, Event, []))
-            }
-        })
-    ),
-    {[{text, Push}], State};
+    Data = #{
+        <<"files">> => normalise_files_for_push(maps:get(files, Event, [])),
+        <<"fileKinds">> => normalise_file_kinds_for_push(maps:get(fileKinds, Event, []))
+    },
+    {[{text, push_frame(<<"workspace">>, <<"flush_completed">>, Data)}], State};
 %% ADR 0105 Phase 1: reload-induced re-check outcome — broadcast
 %% whenever `beamtalk_repl_loader_recheck:maybe_trigger_recheck/4` has something for a
 %% live surface to act on (a dependent re-check ran, or a caller's stale
@@ -300,15 +265,10 @@ websocket_info(
     {beamtalk_announcement, _SubRef, 'ReloadCheckCompleted', _Handler, Event},
     State = #ws_state{authenticated = true}
 ) ->
-    Push = iolist_to_binary(
-        json:encode(#{
-            <<"type">> => <<"push">>,
-            <<"channel">> => <<"reload_check">>,
-            <<"event">> => <<"completed">>,
-            <<"data">> => encode_reload_check_event(Event)
-        })
-    ),
-    {[{text, Push}], State};
+    {
+        [{text, push_frame(<<"reload_check">>, <<"completed">>, encode_reload_check_event(Event))}],
+        State
+    };
 %% ADR 0123 §4 (BT-3538): shape-reload findings (dropped-without-bump,
 %% version bumped/decreased, migration outcome) — a **distinct** event
 %% (`shape_findings`, not `completed`) on the *same* `reload_check` channel
@@ -324,28 +284,22 @@ websocket_info(
     {beamtalk_announcement, _SubRef, 'ShapeReloadFindingsCompleted', _Handler, Event},
     State = #ws_state{authenticated = true}
 ) ->
-    Push = iolist_to_binary(
-        json:encode(#{
-            <<"type">> => <<"push">>,
-            <<"channel">> => <<"reload_check">>,
-            <<"event">> => <<"shape_findings">>,
-            <<"data">> => encode_shape_reload_findings_event(Event)
-        })
-    ),
-    {[{text, Push}], State};
+    {
+        [
+            {text,
+                push_frame(
+                    <<"reload_check">>,
+                    <<"shape_findings">>,
+                    encode_shape_reload_findings_event(Event)
+                )}
+        ],
+        State
+    };
 %% Log event push from beamtalk_ws_log_handler
 websocket_info(
     {log_event, EventData}, State = #ws_state{authenticated = true, log_subscribed = true}
 ) ->
-    Push = iolist_to_binary(
-        json:encode(#{
-            <<"type">> => <<"push">>,
-            <<"channel">> => <<"logs">>,
-            <<"event">> => <<"entry">>,
-            <<"data">> => encode_log_event(EventData)
-        })
-    ),
-    {[{text, Push}], State};
+    {[{text, push_frame(<<"logs">>, <<"entry">>, encode_log_event(EventData))}], State};
 websocket_info({log_event, _EventData}, State) ->
     %% Not subscribed or not authenticated — drop silently
     {ok, State};
@@ -865,17 +819,8 @@ handle_eval_async(Msg, SessionPid, State = #ws_state{pending_eval = undefined}) 
                             beamtalk_repl_shell:eval_async(SessionPid, Code, self()),
                             {ok, State#ws_state{pending_eval = Msg}};
                         false ->
-                            Err = beamtalk_error:new(session_down, 'REPL'),
-                            Err1 = beamtalk_error:with_message(
-                                Err,
-                                <<"REPL session is not running">>
-                            ),
-                            Err2 = beamtalk_error:with_hint(
-                                Err1,
-                                <<"Reconnect and retry the evaluation.">>
-                            ),
-                            Response = beamtalk_repl_json:encode_error(
-                                Err2, Msg
+                            Response = session_down_reply(
+                                <<"Reconnect and retry the evaluation.">>, Msg
                             ),
                             {[{text, Response}], State}
                     end
@@ -924,10 +869,7 @@ handle_run_entry_async(Msg, SessionPid, State = #ws_state{pending_eval = undefin
                     ),
                     {ok, State#ws_state{pending_eval = Msg}};
                 false ->
-                    Err = beamtalk_error:new(session_down, 'REPL'),
-                    Err1 = beamtalk_error:with_message(Err, <<"REPL session is not running">>),
-                    Err2 = beamtalk_error:with_hint(Err1, <<"Reconnect and retry.">>),
-                    {[{text, beamtalk_repl_json:encode_error(Err2, Msg)}], State}
+                    {[{text, session_down_reply(<<"Reconnect and retry.">>, Msg)}], State}
             end;
         {error, Err} ->
             {[{text, beamtalk_repl_json:encode_error(Err, Msg)}], State}
@@ -1042,7 +984,7 @@ actor_snapshot_frames() ->
     try beamtalk_workspace_actors:list() of
         Actors ->
             Frames = [
-                {text, actor_push_frame(<<"spawned">>, encode_actor_metadata(M))}
+                {text, push_frame(<<"actors">>, <<"spawned">>, encode_actor_metadata(M))}
              || M <- Actors
             ],
             {Frames, beamtalk_workspace_actors:feed_new(Actors)}
@@ -1056,17 +998,34 @@ actor_snapshot_frames() ->
             {[], beamtalk_workspace_actors:feed_new([])}
     end.
 
--doc "One `actors` channel push frame (`spawned` / `stopped`) as JSON text.".
--spec actor_push_frame(binary(), map()) -> binary().
-actor_push_frame(Event, Data) ->
+-doc "Reply to the pending eval and clear its per-eval state (capture pid, stdin ref).".
+-spec finish_eval(binary(), #ws_state{}) -> {[{text, binary()}], #ws_state{}}.
+finish_eval(Response, State) ->
+    {[{text, Response}], State#ws_state{
+        pending_eval = undefined,
+        io_capture_pid = undefined,
+        stdin_ref = undefined
+    }}.
+
+-doc "One push frame (`#{type => push, channel, event, data}`) as JSON text.".
+-spec push_frame(binary(), binary(), term()) -> binary().
+push_frame(Channel, Event, Data) ->
     iolist_to_binary(
         json:encode(#{
             <<"type">> => <<"push">>,
-            <<"channel">> => <<"actors">>,
+            <<"channel">> => Channel,
             <<"event">> => Event,
             <<"data">> => Data
         })
     ).
+
+-doc "The `session_down` error reply for a request whose session process has died.".
+-spec session_down_reply(binary(), term()) -> binary().
+session_down_reply(Hint, Msg) ->
+    Err = beamtalk_error:new(session_down, 'REPL'),
+    Err1 = beamtalk_error:with_message(Err, <<"REPL session is not running">>),
+    Err2 = beamtalk_error:with_hint(Err1, Hint),
+    beamtalk_repl_json:encode_error(Err2, Msg).
 
 -doc "Encode actor metadata for push message JSON.".
 encode_actor_metadata(#{pid := Pid, class := Class} = Meta) ->

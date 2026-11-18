@@ -171,28 +171,7 @@ writeAll(Path, Contents) ->
 
 -spec write_all(binary(), binary()) -> beamtalk_result:t().
 write_all(Path, Contents) ->
-    PathStr = unicode:characters_to_list(Path),
-    %% Ensure directory exists
-    Dir = filename:dirname(PathStr),
-    case filelib:ensure_dir(filename:join(Dir, "dummy")) of
-        ok ->
-            case file:write_file(PathStr, Contents) of
-                ok ->
-                    beamtalk_result:from_tagged_tuple({ok, nil});
-                {error, Reason} ->
-                    file_error_result(
-                        'writeAll:contents:', path_detail(Path), Reason, write_failures(), undefined
-                    )
-            end;
-        {error, Reason} ->
-            file_error_result(
-                'writeAll:contents:',
-                path_detail(Path),
-                Reason,
-                [],
-                <<"Could not create directory">>
-            )
-    end.
+    write_with_mode('writeAll:contents:', Path, Contents, []).
 
 %%% ============================================================================
 %%% Binary I/O
@@ -254,31 +233,7 @@ writeBinary(Path, Contents) ->
 do_writeBinary(Path, Contents) ->
     %% BT-4170: contents admit a String (subclass) or a Binary; the path is text.
     RawContents = binary_contents('writeBinary:contents:', Contents),
-    PathStr = unicode:characters_to_list(Path),
-    Dir = filename:dirname(PathStr),
-    case filelib:ensure_dir(filename:join(Dir, "dummy")) of
-        ok ->
-            case file:write_file(PathStr, RawContents, [raw]) of
-                ok ->
-                    beamtalk_result:from_tagged_tuple({ok, nil});
-                {error, Reason} ->
-                    file_error_result(
-                        'writeBinary:contents:',
-                        path_detail(Path),
-                        Reason,
-                        write_failures(),
-                        undefined
-                    )
-            end;
-        {error, Reason} ->
-            file_error_result(
-                'writeBinary:contents:',
-                path_detail(Path),
-                Reason,
-                [],
-                <<"Could not create directory">>
-            )
-    end.
+    write_with_mode('writeBinary:contents:', Path, RawContents, [raw]).
 
 -doc """
 Append binary data to a file, creating it if it doesn't exist.
@@ -298,29 +253,30 @@ appendBinary(Path, Contents) ->
 do_appendBinary(Path, Contents) ->
     %% BT-4170: contents admit a String (subclass) or a Binary; the path is text.
     RawContents = binary_contents('appendBinary:contents:', Contents),
+    write_with_mode('appendBinary:contents:', Path, RawContents, [append, raw]).
+
+-doc """
+The shared write skeleton: ensure the parent directory exists, write
+`Contents` with the given `file:write_file/3` modes, and map either failure to
+a File error result for `Selector`.
+""".
+-spec write_with_mode(atom(), binary(), iodata(), [file:mode()]) -> beamtalk_result:t().
+write_with_mode(Selector, Path, Contents, Modes) ->
     PathStr = unicode:characters_to_list(Path),
     Dir = filename:dirname(PathStr),
     case filelib:ensure_dir(filename:join(Dir, "dummy")) of
         ok ->
-            case file:write_file(PathStr, RawContents, [append, raw]) of
+            case file:write_file(PathStr, Contents, Modes) of
                 ok ->
                     beamtalk_result:from_tagged_tuple({ok, nil});
                 {error, Reason} ->
                     file_error_result(
-                        'appendBinary:contents:',
-                        path_detail(Path),
-                        Reason,
-                        write_failures(),
-                        undefined
+                        Selector, path_detail(Path), Reason, write_failures(), undefined
                     )
             end;
         {error, Reason} ->
             file_error_result(
-                'appendBinary:contents:',
-                path_detail(Path),
-                Reason,
-                [],
-                <<"Could not create directory">>
+                Selector, path_detail(Path), Reason, [], <<"Could not create directory">>
             )
     end.
 
