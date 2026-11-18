@@ -20,9 +20,10 @@ use tower_lsp::lsp_types::{
     CompletionOptions, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DidSaveTextDocumentParams, ExecuteCommandOptions,
     FoldingRangeProviderCapability, HoverProviderCapability, ImplementationProviderCapability,
-    InitializeParams, InitializeResult, InitializedParams, OneOf, ServerCapabilities, ServerInfo,
-    SignatureHelpOptions, TextDocumentSyncCapability, TextDocumentSyncKind,
-    TextDocumentSyncOptions, TextDocumentSyncSaveOptions, WorkDoneProgressOptions,
+    InitializeParams, InitializeResult, InitializedParams, OneOf, RenameOptions,
+    ServerCapabilities, ServerInfo, SignatureHelpOptions, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions,
+    WorkDoneProgressOptions,
 };
 use tracing::debug;
 
@@ -38,6 +39,8 @@ impl Backend {
         &self,
         params: InitializeParams,
     ) -> Result<InitializeResult> {
+        *self.rename_caps.lock().expect("rename_caps lock poisoned") =
+            super::rename::RenameClientCaps::from_params(&params);
         let roots = workspace_roots(&params);
         let configured_stdlib = configured_stdlib_source_dir(&params);
         let stdlib_dirs = configured_stdlib_source_dirs(configured_stdlib.as_deref(), &roots);
@@ -84,6 +87,12 @@ impl Backend {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                // `textDocument/rename` + `prepareRename` (BT-5007): static
+                // rename following ADR 0114's confirmed/candidate tiers.
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions::default(),
+                })),
                 // `textDocument/implementation` — selector under
                 // the cursor → `SystemNavigation implementorsOf:` via the
                 // runtime-delegate seam (cold-file fallback walks

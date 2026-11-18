@@ -47,6 +47,7 @@ impl Backend {
             diagnostic_generation: Mutex::new(HashMap::new()),
             preload_config: Mutex::new(None),
             stdlib_paths: Mutex::new(HashSet::new()),
+            rename_caps: Mutex::new(super::handlers::RenameClientCaps::default()),
             workspace_roots: Mutex::new(Vec::new()),
             root_load_lock: tokio::sync::Mutex::new(()),
             type_cache: Mutex::new(LoadedTypeCache::default()),

@@ -8,4 +8,9 @@
 mod hierarchy;
 mod lifecycle;
 mod navigation;
+mod rename;
 mod symbols;
+
+pub(super) use rename::RenameClientCaps;
+#[cfg(test)]
+pub(super) use rename::build_rename_edit;

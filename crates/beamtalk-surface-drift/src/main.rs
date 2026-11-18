@@ -961,6 +961,11 @@ fn capability_to_doc_names(field: &str) -> Vec<String> {
         "definition_provider" => vec!["textDocument/definition".into()],
         "references_provider" => vec!["textDocument/references".into()],
         "implementation_provider" => vec!["textDocument/implementation".into()],
+        // One capability advertises both RPCs (`prepare_provider: true`).
+        "rename_provider" => vec![
+            "textDocument/rename".into(),
+            "textDocument/prepareRename".into(),
+        ],
         "document_symbol_provider" => vec!["textDocument/documentSymbol".into()],
         // AST-only, no REPL-op binding — documented as an
         // `LSP-Only Capabilities` row instead of an `Operations` table cell.
