@@ -230,15 +230,16 @@ jobs:
       # Windows counterpart (BT-2988): no `bin/server`, so this checks the
       # release's own `bin\bt_attach.bat` directly — the same entry point
       # `beamtalk-desktop-broker`'s Windows spawn path invokes at runtime.
-      # Git Bash (this job's default shell — see the job-level `defaults:`
-      # above) can invoke a `.bat` file directly by path.
+      # Invoked via `cmd //c` (Git Bash can't exec a `.bat` directly).
       - name: Smoke test bt_attach release boots (Windows)
         if: runner.os == 'Windows'
         env:
           SECRET_KEY_BASE: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
         run: |
           test -f dist-liveview/bin/bt_attach.bat
-          dist-liveview/bin/bt_attach.bat version
+          # Git Bash cannot exec a .bat by path (exits 1, no output) — go
+          # through cmd.exe (`//c`, so MSYS doesn't rewrite it to `C:/`).
+          cmd //c dist-liveview\\bin\\bt_attach.bat version
 
       # ─── Build the Tauri shell ────────────────────────────────────────────
       - name: Install Rust toolchain
