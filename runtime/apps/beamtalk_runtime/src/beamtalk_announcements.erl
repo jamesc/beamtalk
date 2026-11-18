@@ -899,7 +899,7 @@ find_by_reply_ref(ReplyRef, Pending) ->
         Pending
     ).
 
--doc "Log an isolated handler crash on the synchronous path (never re-raised).".
+-doc "Log an isolated handler crash, from either the synchronous or the async path (never re-raised).".
 -spec log_handler_crash(announcement_class(), pid(), term()) -> ok.
 log_handler_crash(EventClass, SubscriberPid, Reason) ->
     %% Caller-side process, not the bus — set `domain` explicitly (ADR 0093 §1).
@@ -1574,7 +1574,8 @@ dispatch_one_veneer(SubRef, EventClass, Event, SubscriberPid, Handler) ->
                 catch
                     %% Same visibility as the sync path (`gather_replies/4`):
                     %% log the crash, never re-raise.
-                    Class:Reason -> log_handler_crash(EventClass, SubscriberPid, {Class, Reason})
+                    Class:Reason:Stack ->
+                        log_handler_crash(EventClass, SubscriberPid, {Class, Reason, Stack})
                 end
             end),
             ok;

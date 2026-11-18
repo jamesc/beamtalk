@@ -408,8 +408,8 @@ Deterministic and safe to use per-test: `beamtalk_compiler_sup` supervises
 this server with `one_for_one`/`permanent`, so it is restarted immediately
 after the stop, and the very next `diagnostics/3` call (in this test or any
 other) reaches a fresh, healthy process — no explicit re-clear needed, unlike
-`inject_diagnostics_failure/1`'s flag (a fresh `init/1` always starts with
-`diagnostics_exit_fault = false`). Never touches the port itself, and
+`inject_diagnostics_failure/1`'s flag (the fault flags live in the server's
+process dictionary, so a restarted process starts with none set). Never touches the port itself, and
 unrelated requests (`compile_expression`, `compile`, ...) are unaffected.
 
 **Shared crash budget:** each use spends one of `beamtalk_compiler_sup`'s

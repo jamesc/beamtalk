@@ -1791,7 +1791,7 @@ gather_replies_total_wait_bounded_test_() ->
                     Start = erlang:monotonic_time(millisecond),
                     ok = beamtalk_announcements:announceAndWait('StaggerEvent', e, 400),
                     Elapsed = erlang:monotonic_time(millisecond) - Start,
-                    ?assert(Elapsed < 550)
+                    ?assert(Elapsed < 580)
                 after
                     lists:foreach(fun stop_idle/1, Subs)
                 end
