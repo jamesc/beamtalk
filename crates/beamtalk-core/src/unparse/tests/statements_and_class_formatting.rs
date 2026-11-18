@@ -481,3 +481,39 @@ fn map_literal_long_breaks() {
         "long map should break to multi-line: {output}"
     );
 }
+
+// --- BT-5024: package-qualified superclass keeps its `package@` prefix ---
+
+#[test]
+fn package_qualified_superclass_round_trips() {
+    for source in [
+        "json@Parser subclass: LenientParser\n",
+        "json@Parser subclass: LenientParser\n\n  parse => 1\n",
+        "abstract json@Parser subclass: LenientParser\n",
+        "json@Collection(Integer) subclass: IntBag\n",
+    ] {
+        let formatted = format_source(source).expect("source must parse");
+        assert!(
+            formatted.contains("json@"),
+            "formatter dropped the package qualifier:\n{formatted}"
+        );
+        assert_identity(source);
+    }
+}
+
+#[test]
+fn package_qualified_superclass_survives_reparse() {
+    let module = parse_source("json@Parser subclass: LenientParser\n");
+    let reparsed = parse_source(&unparse_module(&module));
+    assert_eq!(
+        module.classes[0]
+            .superclass_package
+            .as_ref()
+            .map(|p| p.name.clone()),
+        reparsed.classes[0]
+            .superclass_package
+            .as_ref()
+            .map(|p| p.name.clone()),
+    );
+    assert!(reparsed.classes[0].superclass_package.is_some());
+}
