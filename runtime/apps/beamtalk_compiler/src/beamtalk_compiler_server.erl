@@ -74,6 +74,7 @@ to avoid temp files on disk.
 
 -ifdef(TEST).
 -export([
+    port_forwards/0,
     remove_class/1,
     remove_protocol/1,
     get_protocols/0,
@@ -87,27 +88,33 @@ to avoid temp files on disk.
 -endif.
 
 %% The `beamtalk_compiler_port` functions the `{port_call, F, Args}` request may
-%% forward to: each takes the port first, then the request's arguments.
+%% forward to, as `{Function, Arity}` (arity counts the leading port argument).
 -define(PORT_FORWARDS, [
-    find_senders_in_source,
-    find_all_sends_in_source,
-    find_references_to_in_source,
-    find_field_readers_in_source,
-    find_field_writers_in_source,
-    find_ffi_sites_in_source,
-    find_announce_sites_in_source,
-    resolve_method_span,
-    resolve_class_span,
-    find_selector_send_spans,
-    find_definition_selector_spans,
-    categorize_methods,
-    class_state_field_defaults,
-    build_class_module_index_in_source,
-    module_name_for_path,
-    scan_source_dependencies,
-    reindent_method_source,
-    complete_method_source
+    {find_senders_in_source, 3},
+    {find_all_sends_in_source, 2},
+    {find_references_to_in_source, 3},
+    {find_field_readers_in_source, 3},
+    {find_field_writers_in_source, 3},
+    {find_ffi_sites_in_source, 5},
+    {find_announce_sites_in_source, 2},
+    {resolve_method_span, 5},
+    {resolve_class_span, 3},
+    {find_selector_send_spans, 4},
+    {find_definition_selector_spans, 6},
+    {categorize_methods, 3},
+    {class_state_field_defaults, 3},
+    {build_class_module_index_in_source, 4},
+    {module_name_for_path, 4},
+    {scan_source_dependencies, 2},
+    {reindent_method_source, 3},
+    {complete_method_source, 3}
 ]).
+
+-ifdef(TEST).
+-doc "The `{Function, Arity}` set `{port_call, _, _}` may forward to (test use).".
+-spec port_forwards() -> [{atom(), arity()}].
+port_forwards() -> ?PORT_FORWARDS.
+-endif.
 
 -record(state, {
     port :: port() | undefined,
@@ -1203,12 +1210,12 @@ handle_call({port_call, Fun, Args}, _From, #state{port = Port} = State) ->
     %% `beamtalk_compiler_port:Fun(Port, Args...)` shares this one clause. The
     %% set is closed (`?PORT_FORWARDS`): anything else is an unknown call, so a
     %% stray request cannot run an arbitrary port function in the server.
-    case lists:member(Fun, ?PORT_FORWARDS) andalso is_list(Args) of
+    case is_list(Args) andalso lists:member({Fun, length(Args) + 1}, ?PORT_FORWARDS) of
         true ->
             Result = erlang:apply(beamtalk_compiler_port, Fun, [Port | Args]),
             {reply, Result, State};
         false ->
-            {reply, {error, unknown_call}, State}
+            {reply, {error, unknown_request}, State}
     end;
 handle_call(version, _From, State) ->
     Result = do_version(State#state.port),

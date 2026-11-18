@@ -37,7 +37,7 @@ undomained_calls(File) ->
         false ->
             [
                 {filename:basename(File), Line}
-             || {Line, Call} <- log_calls(Src), string:find(Call, "domain") =:= nomatch
+             || {Line, Call} <- log_calls(Src), re:run(Call, "\\bdomain\\s*=>", []) =:= nomatch
             ]
     end.
 
@@ -75,7 +75,7 @@ sets_default_in_init(Src) ->
         {match, [{Start, _}]} ->
             Rest = lists:nthtail(Start, Src),
             Body =
-                case re:run(Rest, "\\n\\.|\\n\\n[a-z_]+\\(", [{capture, first, index}]) of
+                case re:run(Rest, "\\.[ \\t]*\\n(?=\\S)", [{capture, first, index}]) of
                     {match, [{End, _}]} -> lists:sublist(Rest, End);
                     nomatch -> Rest
                 end,

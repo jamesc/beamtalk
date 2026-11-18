@@ -389,7 +389,7 @@ Notify the compiler server that `Name` is no longer a registered protocol,
 mirroring `notify_compiler_server/2`'s degrade-silently contract.
 
 Unlike `notify_compiler_server/2` above, this bypasses
-`beamtalk_compiler_server:remove_protocol/1`'s own exported wrapper in favour
+`beamtalk_compiler_server:remove_protocol/1` (a test-only wrapper) in favour
 of a raw `gen_server:cast` naming the process — the same choice
 `beamtalk_class_lifecycle:purge_compiler_cache/1` makes for `remove_class/1`,
 and for the identical reason documented on that function: avoid a
