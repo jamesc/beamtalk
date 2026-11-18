@@ -3394,7 +3394,8 @@ connected — verified empirically, see erlang:monitor/2 docs) rejects with
 `node_down` instead of `actor_dead`, matching the sync/timeout paths'
 exit mapping. The watcher also monitors the future process so it can
 clean up promptly when the future completes normally. There is no time
-cutoff (BT-5020): the watcher ends when either process dies, and a pending
+cutoff (BT-5020): the watcher ends when either process dies or the future tells it
+it settled, and a pending
 future with no producer is itself capped by beamtalk_future (?PENDING_CAP_MS),
 unless a watcher registers as its producer (done here).
 """.
@@ -3418,7 +3419,11 @@ spawn_future_watcher(ActorPid, FuturePid, Selector) ->
                 erlang:demonitor(FutureRef, [flush]);
             {'DOWN', FutureRef, process, FuturePid, _Reason} ->
                 %% Future completed and its process ended — clean up
-                erlang:demonitor(ActorRef, [flush])
+                erlang:demonitor(ActorRef, [flush]);
+            {future_settled, FuturePid} ->
+                %% Future settled (resolved/rejected): nothing left to watch
+                erlang:demonitor(ActorRef, [flush]),
+                erlang:demonitor(FutureRef, [flush])
         end
     end).
 

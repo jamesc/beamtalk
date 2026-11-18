@@ -115,7 +115,7 @@ otherwise live forever. `new/0` uses ?PENDING_CAP_MS (1 hour, far above the
 """.
 -spec new_with_cap(pos_integer()) -> future().
 new_with_cap(CapMs) ->
-    {beamtalk_future, spawn(fun() -> pending([], CapMs) end)}.
+    {beamtalk_future, spawn(fun() -> pending([], CapMs, undefined) end)}.
 
 -doc "Check if a value is a future.".
 -spec is_future(term()) -> boolean().
@@ -277,10 +277,32 @@ await_pid(Pid, Timeout) ->
 
 %%% Internal state machine
 
--doc "Pending state: waiting for resolve or reject".
-pending(Waiters, Cap) ->
+producer_mon(undefined) -> none;
+producer_mon({_Watcher, Mon}) -> Mon.
+
+producer_cap(undefined, Cap) -> Cap;
+producer_cap(_Prod, _Cap) -> infinity.
+
+release_producer(undefined) ->
+    ok;
+release_producer({Watcher, Mon}) ->
+    erlang:demonitor(Mon, [flush]),
+    Watcher ! {future_settled, self()},
+    ok.
+
+-doc """
+Pending state: waiting for resolve or reject.
+
+`Prod` is `undefined` or `{Watcher, MonRef}` once a producer registered; while
+one is alive the orphan `Cap` is lifted. On settle the producer is told
+(`{future_settled, self()}`) so the watcher exits at once instead of
+lingering until this process idles out.
+""".
+pending(Waiters, Cap, Prod) ->
+    ProdMon = producer_mon(Prod),
     receive
         {resolve, Value} ->
+            release_producer(Prod),
             %% ADR 0126 §5.1: a cross-node resolve arrives wire-encoded and
             %% tagged (`beamtalk_actor:maybe_resolve_future/2`) — decode it
             %% here, on the future's own (the original caller's) node, before
@@ -297,6 +319,7 @@ pending(Waiters, Cap) ->
                     rejected(Err)
             end;
         {reject, Reason} ->
+            release_producer(Prod),
             %% See the {resolve, Value} clause above for the decode note.
             case decode_wire_reply(Reason) of
                 {ok, Decoded} ->
@@ -308,7 +331,7 @@ pending(Waiters, Cap) ->
             end;
         {await, Pid} ->
             %% Add to waiters list (no timeout)
-            pending([{await, Pid, infinity} | Waiters], Cap);
+            pending([{await, Pid, infinity} | Waiters], Cap, Prod);
         {await, Pid, Timeout} ->
             %% Add to waiters list with timeout
             TRef =
@@ -316,7 +339,7 @@ pending(Waiters, Cap) ->
                     infinity -> infinity;
                     _ -> erlang:send_after(Timeout, self(), {timeout, Pid})
                 end,
-            pending([{await, Pid, TRef} | Waiters], Cap);
+            pending([{await, Pid, TRef} | Waiters], Cap, Prod);
         {timeout, Pid} ->
             %% Send timeout message to the waiter
             Pid ! {future_timeout, self()},
@@ -328,18 +351,22 @@ pending(Waiters, Cap) ->
                 end,
                 Waiters
             ),
-            pending(NewWaiters, Cap);
+            pending(NewWaiters, Cap, Prod);
         {add_callback, resolved, Callback} ->
-            pending([{callback, resolved, Callback} | Waiters], Cap);
+            pending([{callback, resolved, Callback} | Waiters], Cap, Prod);
         {add_callback, rejected, Callback} ->
-            pending([{callback, rejected, Callback} | Waiters], Cap);
-        {producer, _Watcher} ->
+            pending([{callback, rejected, Callback} | Waiters], Cap, Prod);
+        {producer, Watcher} when Prod =:= undefined ->
             %% A live producer (the actor's watcher) guarantees settlement:
             %% it rejects this future if the actor dies. The orphan cap only
             %% guards futures nobody is working on, so a slow producer is
-            %% never cut off.
-            pending(Waiters, infinity)
-    after Cap ->
+            %% never cut off. If the watcher itself dies the cap resumes.
+            pending(Waiters, Cap, {Watcher, erlang:monitor(process, Watcher)});
+        {producer, _Other} ->
+            pending(Waiters, Cap, Prod);
+        {'DOWN', ProdMon, process, _, _} ->
+            pending(Waiters, Cap, undefined)
+    after producer_cap(Prod, Cap) ->
         %% Orphaned: nothing settled this future within the cap.
         Err = make_orphaned_error(),
         notify_waiters(Waiters, rejected, Err),
@@ -368,6 +395,10 @@ resolved(Value) ->
             resolved(Value);
         {timeout, _Pid} ->
             %% Ignore timeouts in resolved state
+            resolved(Value);
+        {producer, Watcher} ->
+            %% Registered after settling: let the watcher exit.
+            Watcher ! {future_settled, self()},
             resolved(Value);
         {add_callback, resolved, Callback} ->
             %% Execute callback immediately
@@ -403,6 +434,10 @@ rejected(Reason) ->
             rejected(Reason);
         {timeout, _Pid} ->
             %% Ignore timeouts in rejected state
+            rejected(Reason);
+        {producer, Watcher} ->
+            %% Registered after settling: let the watcher exit.
+            Watcher ! {future_settled, self()},
             rejected(Reason);
         {add_callback, rejected, Callback} ->
             %% Execute callback immediately

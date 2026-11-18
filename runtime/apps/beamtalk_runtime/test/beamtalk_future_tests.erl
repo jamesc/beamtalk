@@ -1047,3 +1047,31 @@ future_with_producer_is_not_capped_test() ->
     ?assert(is_process_alive(Pid)),
     beamtalk_future:resolve(Future, 7),
     ?assertEqual(7, beamtalk_future:await(Future, 1000)).
+
+producer_is_told_when_future_settles_test() ->
+    Future = beamtalk_future:new(),
+    Pid = beamtalk_future:pid(Future),
+    Pid ! {producer, self()},
+    beamtalk_future:resolve(Future, 1),
+    ?awaitMessage({future_settled, Pid}).
+
+producer_registering_after_settle_is_told_test() ->
+    Future = beamtalk_future:new(),
+    Pid = beamtalk_future:pid(Future),
+    beamtalk_future:resolve(Future, 1),
+    Pid ! {producer, self()},
+    ?awaitMessage({future_settled, Pid}).
+
+producer_death_restores_orphan_cap_test() ->
+    Future = beamtalk_future:new_with_cap(100),
+    Producer = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    beamtalk_future:pid(Future) ! {producer, Producer},
+    Producer ! stop,
+    ?assertThrow(
+        {future_rejected, #beamtalk_error{kind = future_expired}},
+        beamtalk_future:await_forever(Future)
+    ).
