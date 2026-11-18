@@ -10,9 +10,9 @@ use miette::{Context, IntoDiagnostic, Result};
 use std::fs;
 use tracing::debug;
 
-use crate::beam_compiler::escape_erlang_string;
 use super::extractor::ClassInfo;
 use super::renderer::method_anchor;
+use crate::beam_compiler::escape_erlang_string;
 
 /// CSS stylesheet content for generated documentation.
 const CSS_STYLESHEET: &str = r":root {
